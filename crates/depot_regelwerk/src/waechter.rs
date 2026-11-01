@@ -38,9 +38,9 @@ pub fn waechter(
     let (Some(rueckgang_bp), Some(verlust_bp)) = (rueckgang, verlust) else {
         return WaechterBefund::Unplausibel;
     };
-    if rueckgang_bp >= grenzen.notbremse_bp {
+    if rueckgang_bp >= grenzen.notbremse_bp() {
         WaechterBefund::Notbremse { rueckgang_bp }
-    } else if verlust_bp >= grenzen.tagesverlust_bp {
+    } else if verlust_bp >= grenzen.tagesverlust_bp() {
         WaechterBefund::Tagesverlust { verlust_bp }
     } else {
         WaechterBefund::InOrdnung
@@ -58,18 +58,18 @@ pub fn notbremse_auftraege(
     let abdruck = grenzen.fingerabdruck();
     let mut auftraege = Vec::new();
     let mut nr: u8 = 0;
-    for (isin, stueck) in &topf.positionen {
+    for (isin, stueck) in topf.positionen() {
         if *stueck == 0 {
             continue;
         }
         let kurs = kurse.kurs(isin)?;
-        let limit = kurs.checked_sub(kurs.anteil_bp_ab(grenzen.limit_abstand_bp)?)?;
+        let limit = kurs.checked_sub(kurs.anteil_bp_ab(grenzen.limit_abstand_bp())?)?;
         nr = nr.checked_add(1)?;
         auftraege.push(GenehmigterAuftrag::neu(
             Auftrag {
                 kennung: AuftragsKennung {
                     zyklus,
-                    topf: topf.id,
+                    topf: topf.id(),
                     nr,
                 },
                 isin: isin.clone(),
@@ -97,12 +97,7 @@ mod tests {
     #[test]
     fn ruhiger_tag() {
         assert_eq!(
-            waechter(
-                &g(),
-                Cent::euro(9_900),
-                Cent::euro(10_000),
-                Cent::euro(10_200)
-            ),
+            waechter(&g(), Cent(990_000), Cent(1_000_000), Cent(1_020_000)),
             WaechterBefund::InOrdnung
         );
     }
@@ -110,12 +105,7 @@ mod tests {
     #[test]
     fn tagesverlust_ab_5_prozent() {
         assert_eq!(
-            waechter(
-                &g(),
-                Cent::euro(9_500),
-                Cent::euro(10_000),
-                Cent::euro(10_000)
-            ),
+            waechter(&g(), Cent(950_000), Cent(1_000_000), Cent(1_000_000)),
             WaechterBefund::Tagesverlust { verlust_bp: 500 }
         );
     }
@@ -123,12 +113,7 @@ mod tests {
     #[test]
     fn notbremse_ab_20_prozent_vom_hoch() {
         assert_eq!(
-            waechter(
-                &g(),
-                Cent::euro(8_000),
-                Cent::euro(8_100),
-                Cent::euro(10_000)
-            ),
+            waechter(&g(), Cent(800_000), Cent(810_000), Cent(1_000_000)),
             WaechterBefund::Notbremse {
                 rueckgang_bp: 2_000
             }
@@ -138,12 +123,7 @@ mod tests {
     #[test]
     fn notbremse_vor_tagesverlust() {
         assert!(matches!(
-            waechter(
-                &g(),
-                Cent::euro(7_000),
-                Cent::euro(10_000),
-                Cent::euro(10_000)
-            ),
+            waechter(&g(), Cent(700_000), Cent(1_000_000), Cent(1_000_000)),
             WaechterBefund::Notbremse { .. }
         ));
     }
@@ -151,7 +131,7 @@ mod tests {
     #[test]
     fn unsinnige_werte() {
         assert_eq!(
-            waechter(&g(), Cent::euro(1), Cent::NULL, Cent::euro(1)),
+            waechter(&g(), Cent(100), Cent::NULL, Cent(100)),
             WaechterBefund::Unplausibel
         );
     }

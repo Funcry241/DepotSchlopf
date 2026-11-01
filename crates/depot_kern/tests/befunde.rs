@@ -19,7 +19,6 @@ const KERN: [&str; 1] = ["depot_kern"];
 /// `Cent::euro` meldet einen Ueberlauf als `None`. Normale Betraege und die Randwerte direkt
 /// unter dem Ueberlauf bleiben exakt.
 #[test]
-#[ignore = "offen: 1·A01 Cent::euro saettigt still"]
 fn befund_1_a01_euro_meldet_ueberlauf_als_fehler() -> Result<(), String> {
     sonde::muss_laufen(
         &KERN,
@@ -45,7 +44,6 @@ fn main() {
 
 /// `Cent::abs` meldet `i64::MIN` als `None` statt still auf `i64::MAX` zu kappen.
 #[test]
-#[ignore = "offen: 1·A01 Cent::abs saettigt still"]
 fn befund_1_a01_abs_meldet_ueberlauf_als_fehler() -> Result<(), String> {
     sonde::muss_laufen(
         &KERN,
@@ -74,7 +72,6 @@ const GRENZEN_ERLAUBT: &str =
 /// Ausserhalb von Tests laesst sich keine Grenze im Literal bauen. Der Test nutzt bewusst
 /// keinen Konstruktor: Eine Umbenennung von `standard` macht ihn nicht gruen.
 #[test]
-#[ignore = "offen: 1·F01 Grenzen sind im Literal frei baubar"]
 fn befund_1_f01_grenze_im_literal_laesst_sich_nicht_bauen() -> Result<(), String> {
     sonde::erlaubt(&KERN, GRENZEN_ERLAUBT)?;
     sonde::verboten(
@@ -88,7 +85,6 @@ fn befund_1_f01_grenze_im_literal_laesst_sich_nicht_bauen() -> Result<(), String
 
 /// Eine geladene Grenze laesst sich nicht nachtraeglich lockern.
 #[test]
-#[ignore = "offen: 1·F01 Felder der Grenzen sind oeffentlich aenderbar"]
 fn befund_1_f01_geladene_grenze_laesst_sich_nicht_lockern() -> Result<(), String> {
     sonde::erlaubt(&KERN, GRENZEN_ERLAUBT)?;
     sonde::verboten(
@@ -97,6 +93,59 @@ fn befund_1_f01_geladene_grenze_laesst_sich_nicht_lockern() -> Result<(), String
          g.notbremse_bp = 9_000;\n    g\n}\n",
         &sonde::PRIVAT,
         &["notbremse_bp"],
+    )
+}
+
+/// K8-01 (Pruefung von PR #8): Ein fremdes Programm schaltet jedes Feature von `depot_kern`
+/// und `depot_regelwerk` ein und baut im Release. Auch dann laesst sich keine Grenze und keine
+/// Gebuehr lockern. Das Programm ist Maus' Gegenprobe, unveraendert bis auf die Pfade.
+#[test]
+fn befund_k8_01_grenzen_auch_mit_allen_features_im_release_nicht_lockerbar() -> Result<(), String> {
+    const BEIDE: [&str; 2] = ["depot_kern", "depot_regelwerk"];
+    sonde::erlaubt_mit_allen_features(
+        &BEIDE,
+        r"
+use depot_kern::{Cent, Grenzen};
+fn main() {
+    let original = Grenzen::standard();
+    assert_eq!(original.max_anteil_bp(), 2_500);
+    let befund = depot_regelwerk::waechter(
+        &original, Cent(800_000), Cent(800_000), Cent(1_000_000));
+    assert!(matches!(befund, depot_regelwerk::WaechterBefund::Notbremse { .. }));
+}
+",
+    )?;
+    sonde::verboten_mit_allen_features(
+        &BEIDE,
+        r"
+use depot_kern::{Cent, Grenzen};
+
+fn main() {
+    let original = Grenzen::standard();
+    let locker = original.clone()
+        .mit_max_anteil_bp(10_000)
+        .mit_notbremse_bp(9_999)
+        .mit_gebuehren(original.gebuehren()
+            .mit_minimum(Cent(0))
+            .mit_boersengebuehr(Cent(0))
+            .mit_prozent_bp(0));
+
+    assert_eq!(locker.max_anteil_bp(), 10_000);
+    assert_eq!(locker.notbremse_bp(), 9_999);
+    assert_eq!(locker.gebuehren().fuer(Cent(50_000)), Some(Cent(0)));
+
+    let standard_befund = depot_regelwerk::waechter(
+        &original, Cent(800_000), Cent(800_000), Cent(1_000_000));
+    let gelockerter_befund = depot_regelwerk::waechter(
+        &locker, Cent(800_000), Cent(800_000), Cent(1_000_000));
+    assert!(matches!(standard_befund,
+        depot_regelwerk::WaechterBefund::Notbremse { .. }));
+    assert_eq!(gelockerter_befund,
+        depot_regelwerk::WaechterBefund::InOrdnung);
+}
+",
+        &["E0599"],
+        &["mit_max_anteil_bp"],
     )
 }
 
@@ -111,7 +160,6 @@ const KURSE_ERLAUBT: &str = "pub fn nachschlagen(k: &depot_kern::Kurse, i: &depo
 /// Aus einem rohen Centbetrag laesst sich kein Kurs bauen: Ein Kurs ist nur als geprueftes
 /// Objekt mit Handelstag, Waehrung, Herkunft und Alter zu haben.
 #[test]
-#[ignore = "offen: 1·R06 Kurse sind rohe Centbetraege ohne Datum"]
 fn befund_1_r06_kurs_aus_rohem_betrag_laesst_sich_nicht_bauen() -> Result<(), String> {
     sonde::erlaubt(&KERN, KURSE_ERLAUBT)?;
     sonde::verboten(
@@ -125,7 +173,6 @@ fn befund_1_r06_kurs_aus_rohem_betrag_laesst_sich_nicht_bauen() -> Result<(), St
 
 /// Geladene Kurse lassen sich nicht nachtraeglich roh veraendern.
 #[test]
-#[ignore = "offen: 1·R06 Kurse sind roh veraenderbar"]
 fn befund_1_r06_geladene_kurse_lassen_sich_nicht_roh_aendern() -> Result<(), String> {
     sonde::erlaubt(&KERN, KURSE_ERLAUBT)?;
     sonde::verboten(
@@ -140,7 +187,6 @@ fn befund_1_r06_geladene_kurse_lassen_sich_nicht_roh_aendern() -> Result<(), Str
 /// Bargeld ist nie negativ: Ein Topf mit negativem Bargeld laesst sich nicht anlegen, und das
 /// Bargeld eines Topfes laesst sich nicht roh setzen.
 #[test]
-#[ignore = "offen: 1·R06 negatives Bargeld wird angenommen"]
 fn befund_1_r06_negatives_bargeld_laesst_sich_nicht_anlegen() -> Result<(), String> {
     sonde::erlaubt(
         &KERN,
@@ -166,6 +212,89 @@ fn main() {
     )
 }
 
-// Waehrung, Herkunft und Alter eines Kurses (ebenfalls 1·R06) sind im heutigen Kern nicht
-// darstellbar. Ihre Tests entstehen mit dem Kurstyp im Schnitt „Kern und Regelwerk“; der
-// Befund bleibt bis dahin als Teilnachweis offen (docs/befunde/negativtests.md).
+/// Ein Kurs ist nur in Euro zu haben (Positivliste: Xetra). Jede andere oder fehlende Waehrung
+/// wird beim Eintritt abgelehnt, ebenso ein Preis, der nicht positiv ist.
+#[test]
+fn befund_1_r06_kurs_nur_in_euro_und_positiv() -> Result<(), String> {
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::{Cent, Datum, Herkunft, Kurs, KursFehler, Zeitpunkt};
+fn main() {
+    let tag = Datum::neu(2026, 11, 2).expect("gueltiges Datum");
+    let zeit = Zeitpunkt::neu(tag, 10, 0, 0).expect("gueltige Uhrzeit");
+    let neu = |preis: i64, w: &str| Kurs::neu(Cent(preis), w, tag, zeit, Herkunft::Broker);
+    assert_eq!(neu(10_000, "EUR").map(|k| k.preis()), Ok(Cent(10_000)));
+    for w in ["USD", "eur", "", "EUR "] {
+        assert_eq!(neu(10_000, w).err(), Some(KursFehler::Waehrung), "Waehrung {w:?} angenommen");
+    }
+    assert_eq!(neu(0, "EUR").err(), Some(KursFehler::NichtPositiv));
+    assert_eq!(neu(-1, "EUR").err(), Some(KursFehler::NichtPositiv));
+}
+"#,
+    )
+}
+
+/// Ein Kurs traegt Handelstag, Zeitpunkt und Herkunft. Kalenderdaten und Uhrzeiten werden
+/// geprueft; ein Handelstag nach dem Zeitpunkt des Kurses wird abgelehnt.
+#[test]
+fn befund_1_r06_kurs_traegt_handelstag_und_herkunft() -> Result<(), String> {
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::{Cent, Datum, Herkunft, Kurs, KursFehler, Zeitpunkt};
+fn main() {
+    assert!(Datum::neu(2026, 2, 31).is_none(), "31.02. angenommen");
+    assert!(Datum::neu(2026, 2, 29).is_none(), "29.02.2026 angenommen");
+    assert!(Datum::neu(2024, 2, 29).is_some());
+    assert!(Datum::neu(2026, 13, 1).is_none());
+    assert!(Datum::neu(2026, 4, 31).is_none());
+    assert!(Datum::neu(2026, 1, 0).is_none());
+    let tag = Datum::neu(2026, 11, 2).expect("gueltiges Datum");
+    let morgen = Datum::neu(2026, 11, 3).expect("gueltiges Datum");
+    assert!(Zeitpunkt::neu(tag, 24, 0, 0).is_none());
+    assert!(Zeitpunkt::neu(tag, 10, 60, 0).is_none());
+    assert!(Zeitpunkt::neu(tag, 10, 0, 60).is_none());
+    let zeit = Zeitpunkt::neu(tag, 10, 0, 0).expect("gueltige Uhrzeit");
+    let k = Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Aufzeichnung).expect("Kurs");
+    assert_eq!(k.handelstag(), tag);
+    assert_eq!(k.zeitpunkt(), zeit);
+    assert_eq!(k.herkunft(), Herkunft::Aufzeichnung);
+    assert_eq!(
+        Kurs::neu(Cent(10_000), "EUR", morgen, zeit, Herkunft::Broker).err(),
+        Some(KursFehler::Handelstag)
+    );
+}
+"#,
+    )
+}
+
+/// Kurse kennen ihren Stand und das Alter jedes Kurses. Ein Kurs nach dem Stand (aus der
+/// Zukunft) und ein doppelter Kurs werden abgelehnt.
+#[test]
+fn befund_1_r06_kurse_kennen_ihr_alter() -> Result<(), String> {
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::{Cent, Datum, Herkunft, Isin, Kurs, KursFehler, Kurse, Zeitpunkt};
+fn main() {
+    let tag = Datum::neu(2026, 11, 2).expect("gueltiges Datum");
+    let um = |h: u8, m: u8| Zeitpunkt::neu(tag, h, m, 0).expect("gueltige Uhrzeit");
+    let isin = Isin::neu("DE0007164600").expect("ISIN");
+    let k = Kurs::neu(Cent(10_000), "EUR", tag, um(10, 0), Herkunft::Broker).expect("Kurs");
+    let kurse = Kurse::neu(um(10, 20), vec![(isin.clone(), k.clone())]).expect("Kurse");
+    assert_eq!(kurse.stand(), um(10, 20));
+    assert_eq!(kurse.kurs(&isin), Some(Cent(10_000)));
+    assert_eq!(kurse.alter_s(&isin), Some(1_200));
+    assert_eq!(
+        Kurse::neu(um(9, 59), vec![(isin.clone(), k.clone())]).err(),
+        Some(KursFehler::Zukunft(isin.clone()))
+    );
+    assert_eq!(
+        Kurse::neu(um(10, 20), vec![(isin.clone(), k.clone()), (isin.clone(), k)]).err(),
+        Some(KursFehler::Doppelt(isin))
+    );
+}
+"#,
+    )
+}

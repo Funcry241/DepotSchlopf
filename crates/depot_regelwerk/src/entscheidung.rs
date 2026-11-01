@@ -132,25 +132,25 @@ fn pruefe_vorschlag(
         summe = summe.saturating_add(*gewicht);
         ziele.insert(isin.clone(), *gewicht);
     }
-    if ziele.len() > e.grenzen.max_werte {
+    if ziele.len() > e.grenzen.max_werte() {
         return Err(VerwerfGrund::ZuVieleWerte(ziele.len()));
     }
     if summe > BP_GANZ {
         return Err(VerwerfGrund::SummeUeber100(summe));
     }
-    for isin in e.topf.positionen.keys() {
+    for isin in e.topf.positionen().keys() {
         if e.kurse.kurs(isin).is_none() {
             return Err(VerwerfGrund::KursFehlt(isin.clone()));
         }
     }
     for (isin, gewicht) in &mut ziele {
-        if *gewicht > e.grenzen.max_anteil_bp {
+        if *gewicht > e.grenzen.max_anteil_bp() {
             befunde.push(Befund::GewichtGekuerzt {
                 isin: isin.clone(),
                 von_bp: *gewicht,
-                auf_bp: e.grenzen.max_anteil_bp,
+                auf_bp: e.grenzen.max_anteil_bp(),
             });
-            *gewicht = e.grenzen.max_anteil_bp;
+            *gewicht = e.grenzen.max_anteil_bp();
         }
     }
     Ok(ziele)
@@ -178,7 +178,7 @@ fn plane(
     });
     let mut behalten = Vec::new();
     for k in kandidaten {
-        if behalten.len() < g.max_orders_je_topf {
+        if behalten.len() < g.max_orders_je_topf() {
             behalten.push(k);
         } else {
             befunde.push(Befund::OrderLimitErreicht(k.isin));
@@ -194,21 +194,21 @@ fn plane(
     let mut ent = Entscheidung::default();
 
     // Verkaeufe: garantierter Erloes zum Limit, abzueglich Gebuehr.
-    let mut budget = e.topf.bargeld;
+    let mut budget = e.topf.bargeld();
     for k in behalten.iter().filter(|k| k.richtung == Richtung::Verkauf) {
         let limit = k
             .kurs
-            .checked_sub(k.kurs.anteil_bp_ab(g.limit_abstand_bp)?)?;
+            .checked_sub(k.kurs.anteil_bp_ab(g.limit_abstand_bp())?)?;
         let erloes = limit.mal_stueck(k.stueck)?;
         budget = budget
             .checked_add(erloes)?
-            .checked_sub(g.gebuehren.fuer(erloes)?)?;
+            .checked_sub(g.gebuehren().fuer(erloes)?)?;
         nr = nr.checked_add(1)?;
         ent.verkaeufe.push(GenehmigterAuftrag::neu(
             Auftrag {
                 kennung: AuftragsKennung {
                     zyklus: e.zyklus,
-                    topf: e.topf.id,
+                    topf: e.topf.id(),
                     nr,
                 },
                 isin: k.isin.clone(),
@@ -224,20 +224,20 @@ fn plane(
     for k in behalten.iter().filter(|k| k.richtung == Richtung::Kauf) {
         let limit = k
             .kurs
-            .checked_add(k.kurs.anteil_bp_auf(g.limit_abstand_bp)?)?;
+            .checked_add(k.kurs.anteil_bp_auf(g.limit_abstand_bp())?)?;
         let stueck = leistbare_stueck(g, limit, k.stueck, budget)?;
         let volumen = limit.mal_stueck(stueck)?;
-        if stueck == 0 || volumen < g.min_order {
+        if stueck == 0 || volumen < g.min_order() {
             befunde.push(Befund::BargeldReichtNicht(k.isin.clone()));
             continue;
         }
-        budget = budget.checked_sub(volumen.checked_add(g.gebuehren.fuer(volumen)?)?)?;
+        budget = budget.checked_sub(volumen.checked_add(g.gebuehren().fuer(volumen)?)?)?;
         nr = nr.checked_add(1)?;
         ent.kaeufe.push(GenehmigterAuftrag::neu(
             Auftrag {
                 kennung: AuftragsKennung {
                     zyklus: e.zyklus,
-                    topf: e.topf.id,
+                    topf: e.topf.id(),
                     nr,
                 },
                 isin: k.isin.clone(),
@@ -258,7 +258,7 @@ fn sammle_kandidaten(
     befunde: &mut Vec<Befund>,
 ) -> Option<Vec<Kandidat>> {
     let g = e.grenzen;
-    let alle: BTreeSet<&Isin> = e.topf.positionen.keys().chain(ziele.keys()).collect();
+    let alle: BTreeSet<&Isin> = e.topf.positionen().keys().chain(ziele.keys()).collect();
     let mut kandidaten = Vec::new();
     for isin in alle {
         let kurs = e.kurse.kurs(isin)?;
@@ -284,7 +284,7 @@ fn sammle_kandidaten(
         let ziel_wert = topfwert.anteil_bp_ab(ziel_bp)?;
         let ist_bp = ist_wert.in_bp_von(topfwert)?;
         let abweichung = ziel_bp.checked_sub(ist_bp)?;
-        if abweichung.checked_abs()? < g.min_aenderung_bp {
+        if abweichung.checked_abs()? < g.min_aenderung_bp() {
             if abweichung != 0 {
                 befunde.push(Befund::UnterSchwelle(isin.clone()));
             }
@@ -314,7 +314,7 @@ fn sammle_kandidaten(
                 komplett: false,
             }
         };
-        if k.stueck == 0 || (k.volumen()? < g.min_order && !k.komplett) {
+        if k.stueck == 0 || (k.volumen()? < g.min_order() && !k.komplett) {
             befunde.push(Befund::UnterMindestorder(isin.clone()));
             continue;
         }
@@ -334,7 +334,7 @@ fn begrenze_umschlag(
     for k in kandidaten.iter() {
         geplant = geplant.checked_add(k.volumen()?)?;
     }
-    let erlaubt = topfwert.anteil_bp_ab(g.max_umschlag_bp)?;
+    let erlaubt = topfwert.anteil_bp_ab(g.max_umschlag_bp())?;
     if geplant <= erlaubt || geplant.0 <= 0 {
         return Some(());
     }
@@ -346,7 +346,7 @@ fn begrenze_umschlag(
             .checked_div(u128::try_from(geplant.0).ok()?)?;
         k.stueck = u64::try_from(s).ok()?;
         k.komplett = false;
-        if k.stueck == 0 || k.volumen()? < g.min_order {
+        if k.stueck == 0 || k.volumen()? < g.min_order() {
             befunde.push(Befund::UnterMindestorder(k.isin.clone()));
         } else {
             neu.push(k);
@@ -368,17 +368,17 @@ fn stueck_fuer(betrag: Cent, kurs: Cent) -> Option<u64> {
 fn leistbare_stueck(g: &Grenzen, limit: Cent, gewuenscht: u64, budget: Cent) -> Option<u64> {
     let kosten = |s: u64| -> Option<Cent> {
         let v = limit.mal_stueck(s)?;
-        v.checked_add(g.gebuehren.fuer(v)?)
+        v.checked_add(g.gebuehren().fuer(v)?)
     };
     if kosten(gewuenscht)? <= budget {
         return Some(gewuenscht);
     }
     // Startwert grob ueber Prozentgebuehr und Fixanteil, dann schrittweise nach unten.
-    let je_stueck = limit.checked_add(limit.anteil_bp_auf(g.gebuehren.prozent_bp)?)?;
+    let je_stueck = limit.checked_add(limit.anteil_bp_auf(g.gebuehren().prozent_bp())?)?;
     let fix = g
-        .gebuehren
-        .minimum
-        .checked_add(g.gebuehren.boersengebuehr)?;
+        .gebuehren()
+        .minimum()
+        .checked_add(g.gebuehren().boersengebuehr())?;
     let frei = budget.checked_sub(fix)?;
     let mut s = stueck_fuer(frei, je_stueck)?.min(gewuenscht);
     while s > 0 && kosten(s)? > budget {

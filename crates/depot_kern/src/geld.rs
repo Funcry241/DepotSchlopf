@@ -12,8 +12,12 @@ pub const BP_GANZ: i64 = 10_000;
 impl Cent {
     pub const NULL: Cent = Cent(0);
 
-    pub const fn euro(euro: i64) -> Cent {
-        Cent(euro.saturating_mul(100))
+    /// Ganze Euro in Cent. `None` bei Ueberlauf; nie ein gekappter Wert (R13, 1·A01).
+    pub const fn euro(euro: i64) -> Option<Cent> {
+        match euro.checked_mul(100) {
+            Some(c) => Some(Cent(c)),
+            None => None,
+        }
     }
 
     pub fn checked_add(self, other: Cent) -> Option<Cent> {
@@ -55,9 +59,9 @@ impl Cent {
         self.0.checked_mul(BP_GANZ)?.checked_div(basis.0)
     }
 
-    #[must_use]
-    pub fn abs(self) -> Cent {
-        Cent(self.0.saturating_abs())
+    /// Betrag ohne Vorzeichen. `None` fuer `i64::MIN`; nie ein gekappter Wert (R13, 1·A01).
+    pub fn abs(self) -> Option<Cent> {
+        self.0.checked_abs().map(Cent)
     }
 }
 
@@ -88,7 +92,7 @@ mod tests {
     fn anzeige_deutsch() {
         assert_eq!(Cent(123_456_789).to_string(), "1.234.567,89 €");
         assert_eq!(Cent(-5).to_string(), "-0,05 €");
-        assert_eq!(Cent::euro(10_000).to_string(), "10.000,00 €");
+        assert_eq!(Cent(1_000_000).to_string(), "10.000,00 €");
     }
 
     #[test]
@@ -102,5 +106,7 @@ mod tests {
     fn ueberlauf_wird_erkannt() {
         assert_eq!(Cent(i64::MAX).checked_add(Cent(1)), None);
         assert_eq!(Cent(i64::MAX).mal_stueck(2), None);
+        assert_eq!(Cent::euro(i64::MAX), None);
+        assert_eq!(Cent(i64::MIN).abs(), None);
     }
 }

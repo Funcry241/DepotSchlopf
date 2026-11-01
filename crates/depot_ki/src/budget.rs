@@ -91,8 +91,8 @@ impl KiGrenzen {
             aufrufe_je_zyklus: 2,
             zyklen_je_tag: 1,
             aufrufe_je_monat: 4,
-            kosten_je_monat: Cent::euro(4),
-            kosten_je_jahr: Cent::euro(50),
+            kosten_je_monat: Cent(400),
+            kosten_je_jahr: Cent(5_000),
         }
     }
 }

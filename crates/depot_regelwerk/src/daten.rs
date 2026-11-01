@@ -29,9 +29,9 @@ pub fn pruefe_kurse(
         let Some(alt) = vortag.kurs(&isin) else {
             continue;
         };
-        let sprung_bp = kurs.checked_sub(alt).and_then(|d| d.abs().in_bp_von(alt));
+        let sprung_bp = kurs.checked_sub(alt).and_then(|d| d.abs()?.in_bp_von(alt));
         match sprung_bp {
-            Some(bp) if bp <= grenzen.max_kurssprung_bp => {}
+            Some(bp) if bp <= grenzen.max_kurssprung_bp() => {}
             Some(bp) => fehler.push(DatenFehler::Kurssprung {
                 isin,
                 sprung_bp: bp,

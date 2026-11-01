@@ -1,12 +1,10 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: KodexAenderung
-zweck: Stufe 2, Kodex-Schritt Teil 2 - Negativtests und Umbau des Kodex fuer 1·G01 bis 1·G06 (Kodex-Teil), 1·R03, 1·R08 und 2·A11 entlang R24, R26, R29 und R30
+klasse: Funktion
+zweck: Stufe 2, Schnitt Kern - gepruefte Typen fuer 1·A01, 1·F01 und 1·R06 entlang R13, R19 und R20; ohne Setzer fuer Grenzen, auch nicht hinter einem Feature (K8-01)
 pfade:
-crates/depot_kodex/
-kodex/essenz_register.txt
-kodex/festschreibung.txt
-kodex/freigabe.txt
+crates/depot_kern/
+crates/depot_regelwerk/
+crates/depot_ki/
 docs/BEFUNDE.md
 docs/befunde/
-docs/kaltstart.md
 CHANGELOG.md

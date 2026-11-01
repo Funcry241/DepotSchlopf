@@ -49,7 +49,60 @@ fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// Wie die Sonde ihre Abhaengigkeiten einbindet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Bau {
+    /// Wie ein gewoehnliches Crate: Standard-Features, Entwicklungsprofil.
+    Normal,
+    /// Jedes Feature jeder Abhaengigkeit eingeschaltet, Release-Profil. So baut ein Aufrufer,
+    /// der jeden Schalter ausnutzt, den die Crates anbieten (K8-01).
+    AlleFeaturesRelease,
+}
+
+/// Alle Features, die `paket` in seinem Manifest anbietet, laut `cargo metadata`.
+fn features(paket: &str) -> Result<Vec<String>, String> {
+    let aus = Command::new(option_env!("CARGO").unwrap_or("cargo"))
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--offline",
+        ])
+        .current_dir(workspace())
+        .output()
+        .map_err(|e| format!("cargo metadata nicht startbar: {e}"))?;
+    if !aus.status.success() {
+        return Err(format!(
+            "cargo metadata: {}",
+            String::from_utf8_lossy(&aus.stderr)
+        ));
+    }
+    let text = String::from_utf8_lossy(&aus.stdout);
+    let wert = json::lies(text.trim()).ok_or("cargo metadata: kein JSON")?;
+    let Some(json::Wert::Liste(pakete)) = wert.feld("packages") else {
+        return Err("cargo metadata: keine Pakete".into());
+    };
+    let p = pakete
+        .iter()
+        .find(|p| p.feld("name").and_then(json::Wert::text) == Some(paket))
+        .ok_or_else(|| format!("cargo metadata: Paket {paket} fehlt"))?;
+    match p.feld("features") {
+        Some(json::Wert::Objekt(f)) => Ok(f.iter().map(|(k, _)| k.clone()).collect()),
+        _ => Err(format!("cargo metadata: Features von {paket} fehlen")),
+    }
+}
+
 fn crate_anlegen(abhaengigkeiten: &[&str], datei: &str, code: &str) -> Result<PathBuf, String> {
+    crate_anlegen_mit(abhaengigkeiten, datei, code, Bau::Normal)
+}
+
+fn crate_anlegen_mit(
+    abhaengigkeiten: &[&str],
+    datei: &str,
+    code: &str,
+    bau: Bau,
+) -> Result<PathBuf, String> {
     let ws = workspace();
     let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!(
@@ -65,9 +118,13 @@ fn crate_anlegen(abhaengigkeiten: &[&str], datei: &str, code: &str) -> Result<Pa
     );
     for a in abhaengigkeiten {
         let pfad = ws.join("crates").join(a);
+        let schalter = match bau {
+            Bau::Normal => String::new(),
+            Bau::AlleFeaturesRelease => format!(", features = {:?}", features(a)?),
+        };
         let _ = writeln!(
             toml,
-            "{a} = {{ path = {:?} }}",
+            "{a} = {{ path = {:?}{schalter} }}",
             pfad.to_string_lossy().replace('\\', "/")
         );
     }
@@ -79,9 +136,13 @@ fn crate_anlegen(abhaengigkeiten: &[&str], datei: &str, code: &str) -> Result<Pa
     Ok(dir)
 }
 
-fn cargo(dir: &Path, befehl: &str) -> Result<std::process::Output, String> {
+fn cargo(dir: &Path, befehl: &str, bau: Bau) -> Result<std::process::Output, String> {
+    let mut args = vec![befehl, "--quiet", "--offline", "--message-format=json"];
+    if bau == Bau::AlleFeaturesRelease {
+        args.push("--release");
+    }
     Command::new(option_env!("CARGO").unwrap_or("cargo"))
-        .args([befehl, "--quiet", "--offline", "--message-format=json"])
+        .args(args)
         .current_dir(dir)
         .env("CARGO_TARGET_DIR", workspace().join("target/sonde"))
         .output()
@@ -124,7 +185,11 @@ fn diagnosen(stdout: &str) -> Vec<Diagnose> {
 }
 
 fn urteil(dir: &Path, befehl: &str) -> Ergebnis {
-    let aus = match cargo(dir, befehl) {
+    urteil_mit(dir, befehl, Bau::Normal)
+}
+
+fn urteil_mit(dir: &Path, befehl: &str, bau: Bau) -> Ergebnis {
+    let aus = match cargo(dir, befehl, bau) {
         Ok(a) => a,
         Err(e) => return Ergebnis::Umgebung(e),
     };
@@ -208,6 +273,44 @@ pub fn programm(abhaengigkeiten: &[&str], code: &str) -> Result<PathBuf, String>
     Ok(ziel)
 }
 
+/// Baut `code` als Programm im Release-Profil, mit jedem Feature jeder Abhaengigkeit.
+pub fn release_mit_allen_features(abhaengigkeiten: &[&str], code: &str) -> Ergebnis {
+    match crate_anlegen_mit(abhaengigkeiten, "main.rs", code, Bau::AlleFeaturesRelease) {
+        Ok(dir) => {
+            let e = urteil_mit(&dir, "build", Bau::AlleFeaturesRelease);
+            let _ = fs::remove_dir_all(&dir);
+            e
+        }
+        Err(e) => Ergebnis::Umgebung(e),
+    }
+}
+
+/// Wie `verboten`, aber gebaut wie von einem Aufrufer, der jedes Feature einschaltet und im
+/// Release baut. Ein Schutz, der nur ohne Feature gilt, faellt hier auf.
+pub fn verboten_mit_allen_features(
+    abhaengigkeiten: &[&str],
+    code: &str,
+    codes: &[&str],
+    nennt: &[&str],
+) -> Result<(), String> {
+    pruefe_verbot(
+        release_mit_allen_features(abhaengigkeiten, code),
+        code,
+        codes,
+        nennt,
+    )
+}
+
+/// Das erlaubte Gegenstueck baut auch mit allen Features im Release.
+pub fn erlaubt_mit_allen_features(abhaengigkeiten: &[&str], code: &str) -> Result<(), String> {
+    match release_mit_allen_features(abhaengigkeiten, code) {
+        Ergebnis::Baut { .. } => Ok(()),
+        anders => Err(format!(
+            "erlaubtes Gegenstueck baut nicht: {anders:?}\n{code}"
+        )),
+    }
+}
+
 /// Das erlaubte Gegenstueck muss bauen.
 pub fn erlaubt(abhaengigkeiten: &[&str], code: &str) -> Result<(), String> {
     match uebersetze(abhaengigkeiten, code) {
@@ -226,7 +329,16 @@ pub fn verboten(
     codes: &[&str],
     nennt: &[&str],
 ) -> Result<(), String> {
-    match uebersetze(abhaengigkeiten, code) {
+    pruefe_verbot(uebersetze(abhaengigkeiten, code), code, codes, nennt)
+}
+
+fn pruefe_verbot(
+    ergebnis: Ergebnis,
+    code: &str,
+    codes: &[&str],
+    nennt: &[&str],
+) -> Result<(), String> {
+    match ergebnis {
         Ergebnis::Baut { .. } => Err(format!("laesst sich bauen:\n{code}")),
         Ergebnis::Umgebung(e) => Err(format!("Umgebungsfehler, kein Urteil: {e}")),
         Ergebnis::Fehler(d) => {
