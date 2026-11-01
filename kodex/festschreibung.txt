@@ -1,0 +1,13 @@
+# DepotSchlopf – Festschreibung. Aendern nur mit Klasse FestschreibungAenderung
+# und ausdruecklicher Freigabe des Eigentuemers. Neu erzeugen: run.cmd festschreibung
+abhaengigkeiten.depot_kern: sha2
+abhaengigkeiten.depot_ki: depot_kern
+abhaengigkeiten.depot_kodex: depot_kern,depot_ki,sha2
+abhaengigkeiten.depot_lauf: depot_kodex,sha2
+abhaengigkeiten.depot_regelwerk: depot_kern
+abhaengigkeiten.workspace: depot_kern,depot_ki,depot_kodex,sha2
+crates: depot_kern,depot_ki,depot_kodex,depot_lauf,depot_regelwerk
+grenzen: c2c568a9e87d127990276bc55099eec4fc68479e0ce8de706fc4badf071beca6
+ki_budget: cf5279025ff7094044bbe70c988011e0e0c1175f8c2d818cb36f80fde49f0785
+lints: 87cef518361dc3cdc47464013acbd35f829cbda5a0f8f8a268c0b100f88f48e6
+produktarten: Aktie,EtfPhysischUcits

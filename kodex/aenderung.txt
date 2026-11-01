@@ -1,0 +1,17 @@
+# Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
+klasse: Gruendung
+zweck: Kern, Regelwerk, KI-Budgetwaechter, Kodex, Essenz, Ein-Befehl-Einstieg mit Assistenten-Export, Lizenz und Community-Dateien von Anfang an anlegen
+pfade:
+.github/
+.gitignore
+CHANGELOG.md
+LICENSE
+Cargo.lock
+Cargo.toml
+README.md
+crates/
+docs/
+kodex/festschreibung.txt
+run.cmd
+rust-toolchain.toml
+rustfmt.toml
