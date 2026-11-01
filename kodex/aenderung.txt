@@ -1,10 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: TestOnly
-zweck: Stufe 2, Schritt 1 - jeder Befund aus Kern, Regelwerk und KI-Budget wird ein Negativtest, der am heutigen Stand rot ist (ignore bis zum Umbau)
+klasse: DokuOnly
+zweck: Architektur Fassung 4.7 mit Beobachten statt raten (R40) und Bestandsgrenze vor Terminen
 pfade:
-crates/depot_kern/tests/
-crates/depot_ki/tests/
-crates/depot_regelwerk/tests/
+docs/ARCHITEKTUR.md
 docs/BEFUNDE.md
-docs/befunde/
-CHANGELOG.md
