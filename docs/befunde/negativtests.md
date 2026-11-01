@@ -18,6 +18,8 @@ cargo test --locked -p depot_regelwerk --test befunde -- --ignored
 
 Jeder markierte Test muss am alten Stand fehlschlagen: Kern 7, KI 13, Regelwerk 15, zusammen 35. Im normalen Lauf (`run.cmd`, `cargo test`) tragen sie `#[ignore = "offen: …"]`, damit das Gate grün bleibt. Der Umbau entfernt das `ignore`. Ab dann laufen sie im Kodex und müssen bestehen. Ein Befund ist erst technisch geschlossen, wenn sein Test ohne `ignore` grün ist und eine unabhängige Prüfung das bestätigt.
 
+Stand nach dem Schnitt Regelwerk: Die Kern- und Regelwerkstests laufen ohne `ignore` (`docs/befunde/kern.md`, `docs/befunde/regelwerk.md`). Offen markiert sind nur noch die 13 KI-Tests.
+
 Tests mit dem Präfix `grenzfall_` sind gezielte Grenzfälle (1·T01). Wo sie schon heute halten, laufen sie ohne `ignore`.
 
 ## Wie die Tests falsche Grünmeldungen verhindern
@@ -96,7 +98,7 @@ Ein Befund mit „Test rot“ ist nur so weit abgedeckt, wie diese Liste es zul�
 | --- | --- | --- | --- |
 | 1·R02 | Fehler beim Synchronisieren (`sync_all`) | Ohne Speicher-Schnittstelle gibt es am alten Stand keinen Einspeisepunkt. Teilschreibfehler ist über `ulimit -f` abgedeckt, nur unter Unix | Persistenzbasis |
 | 1·R06 | Währung, Herkunft und Alter eines Kurses | Der alte Kern kennt diese Angaben nicht | erledigt im Schnitt Kern: drei Tests, `docs/befunde/kern.md` |
-| 1·F04 | Kaufgrenze und Bestandsgrenze je Bereich mit festgeschriebener Toleranz | Toleranz und Bereiche fehlen im alten Kern; die Tests nehmen 2 Punkte laut Kapitel 18 | Kern und Regelwerk |
+| 1·F04 | Kaufgrenze und Bestandsgrenze je Bereich | Bereiche fehlen; die Toleranz (2 Punkte) steht seit dem Schnitt Regelwerk in den Grenzen | Bereiche statt Töpfe |
 | 2·A04 | Ausgabenbudget, Ausstiegsreserve, Gebührenquote als eigene Prüfung | Budget und Gebührenquote gibt es im alten Regelwerk nicht | Kostenbuch (Stufe 3, 2·A05) |
 | 1·F03 | Kursprüfung in allen späteren Auftragsarten (Schutzstopp, Nachziehen) | Diese Auftragsarten fehlen | Stufe 3 und 6 |
 

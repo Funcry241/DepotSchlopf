@@ -11,8 +11,8 @@ use depot_kern::{
     Kurse, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
 };
 use depot_regelwerk::{
-    Anlass, Befund, DatenFehler, Eingabe, Entscheidung, GenehmigterAuftrag, Richtung, VerwerfGrund,
-    entscheide, notbremse_auftraege, pruefe_kurse,
+    Anlass, Befund, DatenFehler, Eingabe, Entscheidung, GenehmigterAuftrag, Kennungsvergabe,
+    Richtung, VerwerfGrund, entscheide, notbremse_auftraege, pruefe_kurse,
 };
 
 const ISINS: [&str; 11] = [
@@ -102,15 +102,17 @@ fn lauf(
     v: Option<&Vorschlag>,
     halt: bool,
 ) -> Entscheidung {
-    entscheide(&Eingabe {
-        grenzen,
-        universum: &universum(),
-        topf,
-        kurse,
-        vorschlag: v,
-        zyklus: 7,
-        halt,
-    })
+    entscheide(
+        &Eingabe {
+            grenzen,
+            universum: &universum(),
+            topf,
+            kurse,
+            vorschlag: v,
+            halt,
+        },
+        &mut Kennungsvergabe::nach(0),
+    )
 }
 
 fn volumen(a: &GenehmigterAuftrag) -> Cent {
@@ -219,10 +221,12 @@ fn zu_grosses_gewicht_wird_auf_25_prozent_gekuerzt() {
         auf_bp: 2_500
     }));
     let kauf = ent.kaeufe.first().map(GenehmigterAuftrag::auftrag);
+    // 25 % von 5.000 € waeren 125 Stueck zu 10 €. Am Limit (10,10 €) mit Gebuehr bleiben
+    // 123 Stueck unter 25 % des Topfwerts nach dem Kauf (1·T01).
     assert_eq!(
         kauf.map(|a| a.stueck),
-        Some(125),
-        "25 % von 5.000 € bei 10 € je Stueck"
+        Some(123),
+        "25 % von 5.000 € am Limit von 10,10 € je Stueck"
     );
 }
 
@@ -313,7 +317,7 @@ fn verkaeufe_finanzieren_kaeufe_nur_mit_garantiertem_erloes() {
         "Kauf {kosten} ueber Erloes {garantiert}"
     );
     assert!(
-        ent.kaeufe.iter().all(|a| a.auftrag().kennung.nr > 1),
+        ent.kaeufe.iter().all(|a| a.auftrag().kennung.nr() > 1),
         "Kaeufe nach den Verkaeufen nummeriert"
     );
 }
@@ -356,7 +360,13 @@ fn notbremse_verkauft_alles_mit_limit() {
     let mut topf = topf_neu(TopfId::A, Cent(10_000));
     topf.setze_bestand(isin(0), 3);
     topf.setze_bestand(isin(5), 40);
-    let auftraege = notbremse_auftraege(&g, &topf, &kurse_alle(10_000), 9).unwrap_or_default();
+    let auftraege = notbremse_auftraege(
+        &g,
+        &topf,
+        &kurse_alle(10_000),
+        &mut Kennungsvergabe::nach(0),
+    )
+    .unwrap_or_default();
     assert_eq!(auftraege.len(), 2);
     for a in &auftraege {
         assert_eq!(a.auftrag().richtung, Richtung::Verkauf);
@@ -384,6 +394,8 @@ impl Lcg {
 
 /// 5.000 zufaellige Lagen, geprueft am Schlusskurs: Keine Entscheidung verletzt dort eine Grenze.
 /// Am Limit, also im ungünstigsten Fall (R21), pruefen die gezielten Grenzfaelle in `befunde.rs`.
+/// Zwingende Ausstiege (R36) sind von Orderzahl, Umschlag und Mindestorder ausgenommen. Gibt es
+/// daneben freiwillige Auftraege, halten alle zusammen Orderzahl und Umschlag ein.
 #[test]
 #[allow(
     clippy::too_many_lines,
@@ -411,20 +423,23 @@ fn zufallstest_grenzen_am_schlusskurs() {
             gewichte.push((usize::try_from(r.naechste(10)).unwrap_or(0), r.i(3_500)));
         }
         let v = vorschlag(&gewichte);
-        let ent = entscheide(&Eingabe {
-            grenzen: &g,
-            universum: &u,
-            topf: &topf,
-            kurse: &kurse,
-            vorschlag: Some(&v),
-            zyklus: 1,
-            halt: false,
-        });
+        let ent = entscheide(
+            &Eingabe {
+                grenzen: &g,
+                universum: &u,
+                topf: &topf,
+                kurse: &kurse,
+                vorschlag: Some(&v),
+                halt: false,
+            },
+            &mut Kennungsvergabe::nach(0),
+        );
 
         let topfwert = topf.wert(&kurse).unwrap_or(Cent::NULL);
         let alle: Vec<&GenehmigterAuftrag> = ent.verkaeufe.iter().chain(&ent.kaeufe).collect();
+        let freiwillig = alle.iter().any(|a| !a.beleg().anlass.zwingend());
         assert!(
-            alle.len() <= g.max_orders_je_topf(),
+            !freiwillig || alle.len() <= g.max_orders_je_topf(),
             "Runde {runde}: zu viele Orders"
         );
 
@@ -445,7 +460,7 @@ fn zufallstest_grenzen_am_schlusskurs() {
             let v = volumen(a);
             let zum_kurs = kurs.mal_stueck(x.stueck).unwrap_or(Cent::NULL);
             assert!(
-                zum_kurs >= g.min_order() || x.stueck == gehalten,
+                zum_kurs >= g.min_order() || x.stueck == gehalten || a.beleg().anlass.zwingend(),
                 "Runde {runde}: Mindestorder Verkauf"
             );
             budget = Cent(
@@ -509,6 +524,9 @@ fn zufallstest_grenzen_am_schlusskurs() {
         let erlaubt = topfwert
             .anteil_bp_ab(g.max_umschlag_bp())
             .unwrap_or(Cent::NULL);
-        assert!(umschlag <= erlaubt, "Runde {runde}: Umschlag");
+        assert!(
+            !freiwillig || umschlag <= erlaubt,
+            "Runde {runde}: Umschlag"
+        );
     }
 }

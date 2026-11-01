@@ -2,7 +2,7 @@
 
 use depot_kern::{Cent, Grenzen, Kurse, Topf};
 
-use crate::auftrag::{Anlass, Auftrag, AuftragsKennung, GenehmigterAuftrag, RegelBeleg, Richtung};
+use crate::auftrag::{Anlass, Auftrag, GenehmigterAuftrag, Kennungsvergabe, RegelBeleg, Richtung};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaechterBefund {
@@ -47,34 +47,39 @@ pub fn waechter(
     }
 }
 
-/// Verkauft alle Positionen eines Topfes mit Limit. Mindestorder gilt hier nicht.
-/// `None`, wenn ein Kurs fehlt oder eine Rechnung ueberlaeuft (dann bleibt es beim Halt).
+/// Verkauft alle Positionen eines Topfes mit Limit. Mindestorder, Orderzahl und Umschlag gelten
+/// hier nicht (R36). Die Kennungen kommen aus der gemeinsamen Vergabe (R24).
+/// `None`, wenn ein Kurs fehlt, aelter als das Hoechstalter ist oder eine Rechnung ueberlaeuft:
+/// Dann bleibt es beim Halt, ohne Verkauf.
 pub fn notbremse_auftraege(
     grenzen: &Grenzen,
     topf: &Topf,
     kurse: &Kurse,
-    zyklus: u32,
+    vergabe: &mut Kennungsvergabe,
 ) -> Option<Vec<GenehmigterAuftrag>> {
     let abdruck = grenzen.fingerabdruck();
-    let mut auftraege = Vec::new();
-    let mut nr: u8 = 0;
+    // Erst alle Kurse pruefen, dann Kennungen vergeben: Ein Abbruch verbraucht keine Nummer.
+    let mut geplant = Vec::new();
     for (isin, stueck) in topf.positionen() {
         if *stueck == 0 {
             continue;
         }
+        let alter = kurse.alter_s(isin)?;
+        if alter > grenzen.kurs_hoechstalter_s() {
+            return None;
+        }
         let kurs = kurse.kurs(isin)?;
         let limit = kurs.checked_sub(kurs.anteil_bp_ab(grenzen.limit_abstand_bp())?)?;
-        nr = nr.checked_add(1)?;
+        geplant.push((isin.clone(), *stueck, limit));
+    }
+    let mut auftraege = Vec::new();
+    for (isin, stueck, limit) in geplant {
         auftraege.push(GenehmigterAuftrag::neu(
             Auftrag {
-                kennung: AuftragsKennung {
-                    zyklus,
-                    topf: topf.id(),
-                    nr,
-                },
-                isin: isin.clone(),
+                kennung: vergabe.vergib()?,
+                isin,
                 richtung: Richtung::Verkauf,
-                stueck: *stueck,
+                stueck,
                 limit,
             },
             RegelBeleg {
