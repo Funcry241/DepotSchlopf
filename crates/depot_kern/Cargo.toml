@@ -13,6 +13,11 @@ categories.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+# Nur fuer Tests: Setzer fuer Grenzen und Gebuehren (R19). Wird allein als
+# Entwicklungsabhaengigkeit eingeschaltet; Abhaengigkeiten stehen in der Festschreibung.
+pruefstand = []
+
 [dependencies]
 sha2 = { workspace = true }
 

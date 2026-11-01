@@ -19,7 +19,6 @@ const KERN: [&str; 1] = ["depot_kern"];
 /// `Cent::euro` meldet einen Ueberlauf als `None`. Normale Betraege und die Randwerte direkt
 /// unter dem Ueberlauf bleiben exakt.
 #[test]
-#[ignore = "offen: 1·A01 Cent::euro saettigt still"]
 fn befund_1_a01_euro_meldet_ueberlauf_als_fehler() -> Result<(), String> {
     sonde::muss_laufen(
         &KERN,
@@ -45,7 +44,6 @@ fn main() {
 
 /// `Cent::abs` meldet `i64::MIN` als `None` statt still auf `i64::MAX` zu kappen.
 #[test]
-#[ignore = "offen: 1·A01 Cent::abs saettigt still"]
 fn befund_1_a01_abs_meldet_ueberlauf_als_fehler() -> Result<(), String> {
     sonde::muss_laufen(
         &KERN,
@@ -74,7 +72,6 @@ const GRENZEN_ERLAUBT: &str =
 /// Ausserhalb von Tests laesst sich keine Grenze im Literal bauen. Der Test nutzt bewusst
 /// keinen Konstruktor: Eine Umbenennung von `standard` macht ihn nicht gruen.
 #[test]
-#[ignore = "offen: 1·F01 Grenzen sind im Literal frei baubar"]
 fn befund_1_f01_grenze_im_literal_laesst_sich_nicht_bauen() -> Result<(), String> {
     sonde::erlaubt(&KERN, GRENZEN_ERLAUBT)?;
     sonde::verboten(
@@ -88,7 +85,6 @@ fn befund_1_f01_grenze_im_literal_laesst_sich_nicht_bauen() -> Result<(), String
 
 /// Eine geladene Grenze laesst sich nicht nachtraeglich lockern.
 #[test]
-#[ignore = "offen: 1·F01 Felder der Grenzen sind oeffentlich aenderbar"]
 fn befund_1_f01_geladene_grenze_laesst_sich_nicht_lockern() -> Result<(), String> {
     sonde::erlaubt(&KERN, GRENZEN_ERLAUBT)?;
     sonde::verboten(
@@ -97,6 +93,28 @@ fn befund_1_f01_geladene_grenze_laesst_sich_nicht_lockern() -> Result<(), String
          g.notbremse_bp = 9_000;\n    g\n}\n",
         &sonde::PRIVAT,
         &["notbremse_bp"],
+    )
+}
+
+/// Waechter fuer den Pruefstand: Ohne das Feature `pruefstand` gibt es keinen Setzer. Die Sonde
+/// bindet `depot_kern` wie ein Produktiv-Crate ein, also mit den Standard-Features. Waere der
+/// Pruefstand dort eingeschaltet, liesse sich jede Grenze lockern.
+#[test]
+fn befund_1_f01_pruefstand_ist_ohne_feature_nicht_erreichbar() -> Result<(), String> {
+    sonde::erlaubt(&KERN, GRENZEN_ERLAUBT)?;
+    sonde::verboten(
+        &KERN,
+        "pub fn locker(g: depot_kern::Grenzen) -> depot_kern::Grenzen {\n    \
+         g.mit_max_anteil_bp(10_000)\n}\n",
+        &["E0599"],
+        &["mit_max_anteil_bp"],
+    )?;
+    sonde::verboten(
+        &KERN,
+        "pub fn locker(g: depot_kern::Gebuehren) -> depot_kern::Gebuehren {\n    \
+         g.mit_minimum(depot_kern::Cent(0))\n}\n",
+        &["E0599"],
+        &["mit_minimum"],
     )
 }
 
@@ -111,7 +129,6 @@ const KURSE_ERLAUBT: &str = "pub fn nachschlagen(k: &depot_kern::Kurse, i: &depo
 /// Aus einem rohen Centbetrag laesst sich kein Kurs bauen: Ein Kurs ist nur als geprueftes
 /// Objekt mit Handelstag, Waehrung, Herkunft und Alter zu haben.
 #[test]
-#[ignore = "offen: 1·R06 Kurse sind rohe Centbetraege ohne Datum"]
 fn befund_1_r06_kurs_aus_rohem_betrag_laesst_sich_nicht_bauen() -> Result<(), String> {
     sonde::erlaubt(&KERN, KURSE_ERLAUBT)?;
     sonde::verboten(
@@ -125,7 +142,6 @@ fn befund_1_r06_kurs_aus_rohem_betrag_laesst_sich_nicht_bauen() -> Result<(), St
 
 /// Geladene Kurse lassen sich nicht nachtraeglich roh veraendern.
 #[test]
-#[ignore = "offen: 1·R06 Kurse sind roh veraenderbar"]
 fn befund_1_r06_geladene_kurse_lassen_sich_nicht_roh_aendern() -> Result<(), String> {
     sonde::erlaubt(&KERN, KURSE_ERLAUBT)?;
     sonde::verboten(
@@ -140,7 +156,6 @@ fn befund_1_r06_geladene_kurse_lassen_sich_nicht_roh_aendern() -> Result<(), Str
 /// Bargeld ist nie negativ: Ein Topf mit negativem Bargeld laesst sich nicht anlegen, und das
 /// Bargeld eines Topfes laesst sich nicht roh setzen.
 #[test]
-#[ignore = "offen: 1·R06 negatives Bargeld wird angenommen"]
 fn befund_1_r06_negatives_bargeld_laesst_sich_nicht_anlegen() -> Result<(), String> {
     sonde::erlaubt(
         &KERN,
@@ -169,7 +184,6 @@ fn main() {
 /// Ein Kurs ist nur in Euro zu haben (Positivliste: Xetra). Jede andere oder fehlende Waehrung
 /// wird beim Eintritt abgelehnt, ebenso ein Preis, der nicht positiv ist.
 #[test]
-#[ignore = "offen: 1·R06 Kurs ohne gepruefte Waehrung"]
 fn befund_1_r06_kurs_nur_in_euro_und_positiv() -> Result<(), String> {
     sonde::muss_laufen(
         &KERN,
@@ -193,7 +207,6 @@ fn main() {
 /// Ein Kurs traegt Handelstag, Zeitpunkt und Herkunft. Kalenderdaten und Uhrzeiten werden
 /// geprueft; ein Handelstag nach dem Zeitpunkt des Kurses wird abgelehnt.
 #[test]
-#[ignore = "offen: 1·R06 Kurs ohne Handelstag und Herkunft"]
 fn befund_1_r06_kurs_traegt_handelstag_und_herkunft() -> Result<(), String> {
     sonde::muss_laufen(
         &KERN,
@@ -228,7 +241,6 @@ fn main() {
 /// Kurse kennen ihren Stand und das Alter jedes Kurses. Ein Kurs nach dem Stand (aus der
 /// Zukunft) und ein doppelter Kurs werden abgelehnt.
 #[test]
-#[ignore = "offen: 1·R06 Kurse ohne Alter"]
 fn befund_1_r06_kurse_kennen_ihr_alter() -> Result<(), String> {
     sonde::muss_laufen(
         &KERN,

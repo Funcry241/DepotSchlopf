@@ -1,9 +1,10 @@
-//! Toepfe, Positionen, Kurse und KI-Vorschlaege.
+//! Toepfe, Positionen und KI-Vorschlaege.
 
 use std::collections::BTreeMap;
 
 use crate::geld::Cent;
 use crate::instrument::Isin;
+use crate::kurs::Kurse;
 
 /// Die beiden KIs. Dachs = Claude, Maus = GPT.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -28,22 +29,55 @@ impl TopfId {
     }
 }
 
-/// Ein virtueller Topf auf dem gemeinsamen Cash-Konto.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TopfFehler {
+    /// Bargeld ist nie negativ (R20, 1·R06).
+    NegativesBargeld,
+}
+
+/// Ein virtueller Topf auf dem gemeinsamen Cash-Konto. Bargeld ist nie negativ; die Felder
+/// sind nur ueber gepruefte Methoden zu erreichen.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Topf {
-    pub id: TopfId,
-    pub bargeld: Cent,
-    /// Stueckzahlen je Wert; nur ganze Stuecke, nie negativ.
-    pub positionen: BTreeMap<Isin, u64>,
+    id: TopfId,
+    bargeld: Cent,
+    /// Stueckzahlen je Wert; nur ganze Stuecke, nie negativ, nie null.
+    positionen: BTreeMap<Isin, u64>,
 }
 
 impl Topf {
-    pub fn neu(id: TopfId, bargeld: Cent) -> Topf {
-        Topf {
+    /// # Errors
+    /// Negatives Bargeld.
+    pub fn neu(id: TopfId, bargeld: Cent) -> Result<Topf, TopfFehler> {
+        if bargeld.0 < 0 {
+            return Err(TopfFehler::NegativesBargeld);
+        }
+        Ok(Topf {
             id,
             bargeld,
             positionen: BTreeMap::new(),
+        })
+    }
+
+    /// Setzt den Bestand eines Werts, wie ihn das Konto meldet; 0 entfernt ihn.
+    pub fn setze_bestand(&mut self, isin: Isin, stueck: u64) {
+        if stueck == 0 {
+            self.positionen.remove(&isin);
+        } else {
+            self.positionen.insert(isin, stueck);
         }
+    }
+
+    pub fn id(&self) -> TopfId {
+        self.id
+    }
+
+    pub fn bargeld(&self) -> Cent {
+        self.bargeld
+    }
+
+    pub fn positionen(&self) -> &BTreeMap<Isin, u64> {
+        &self.positionen
     }
 
     /// Gesamtwert zu den gegebenen Kursen. `None`, wenn ein Kurs fehlt oder ein Ueberlauf droht.
@@ -58,16 +92,6 @@ impl Topf {
 
     pub fn stueck(&self, isin: &Isin) -> u64 {
         self.positionen.get(isin).copied().unwrap_or(0)
-    }
-}
-
-/// Schlusskurse eines Handelstags, je Stueck.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Kurse(pub BTreeMap<Isin, Cent>);
-
-impl Kurse {
-    pub fn kurs(&self, isin: &Isin) -> Option<Cent> {
-        self.0.get(isin).copied()
     }
 }
 

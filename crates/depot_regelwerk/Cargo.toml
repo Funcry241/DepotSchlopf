@@ -16,5 +16,9 @@ publish.workspace = true
 [dependencies]
 depot_kern = { workspace = true }
 
+[dev-dependencies]
+# Pruefstand: Tests duerfen Grenzen setzen; der Produktivcode nie (R19).
+depot_kern = { workspace = true, features = ["pruefstand"] }
+
 [lints]
 workspace = true

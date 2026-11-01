@@ -9,9 +9,9 @@ Diese Liste führt jeden Befund aus den Prüfungen durch Maus vom Befund bis zur
 
 Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher Stufe der Test entsteht und dass eine unabhängige Prüfung ihn bestätigt.
 
-**Zwischenstände von „offen“:** „Test grün“ heißt, dass der Umbau den roten Test grün gemacht hat und der Test ohne `ignore` im Kodex läuft; geschlossen ist der Befund erst nach der unabhängigen Prüfung. Nachweis für den Kodex in `docs/befunde/kodex.md`. „Test rot“ heißt, dass der Negativtest im Repository steht und am alten Stand fehlschlägt; er ist mit `#[ignore = "offen: …"]` markiert, bis der Umbau ihn grün macht. Nachweis und Befehle stehen in `docs/befunde/negativtests.md`. „Teilnachweis fehlt“ heißt, dass ein Teil des Befunds noch keinen Test hat; die Liste dort sagt, welcher und mit welchem Schnitt er entsteht. Ein grüner Test allein schließt nichts: „geschlossen“ setzt erst die unabhängige Prüfung.
+**Zwischenstände von „offen“:** „Test grün“ heißt, dass der Umbau den roten Test grün gemacht hat und der Test ohne `ignore` im Kodex läuft; geschlossen ist der Befund erst nach der unabhängigen Prüfung. Nachweis für den Kodex in `docs/befunde/kodex.md`, für den Kern in `docs/befunde/kern.md`. „Test rot“ heißt, dass der Negativtest im Repository steht und am alten Stand fehlschlägt; er ist mit `#[ignore = "offen: …"]` markiert, bis der Umbau ihn grün macht. Nachweis und Befehle stehen in `docs/befunde/negativtests.md`. „Teilnachweis fehlt“ heißt, dass ein Teil des Befunds noch keinen Test hat; die Liste dort sagt, welcher und mit welchem Schnitt er entsteht. Ein grüner Test allein schließt nichts: „geschlossen“ setzt erst die unabhängige Prüfung.
 
-Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget) abgenommen; Kodex-Schritt umgebaut; die Gegenbeispiele K7-01 bis K7-03 aus Maus' Prüfung von PR #7 sind als Negativtests übernommen und allgemein behoben, erneute Prüfung durch Maus ausstehend. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget) abgenommen; Kodex-Schritt umgebaut; Kodex-Schritt von Maus abgenommen (PR #7); Schnitt Kern umgebaut (1·A01, 1·F01, 1·R06, Preisteil von 1·F03), Prüfung durch Maus ausstehend. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -23,9 +23,9 @@ Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Rege
 | 1·G04 | Abhängigkeiten nur nach Alias festgeschrieben | R26, Name, Version, Quelle, Features, Lock-Hash | umbenannte oder andere Quelle derselben Abhängigkeit rot | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·G05 | Essenz D01–D17 kann verschwinden | R26, festes Register | gelöschte oder umbenannte Regel rot | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·G06 | Unicode-Dateinamen falsch, fehlen im Export | R24, NUL-getrennte Pfadlisten | Datei mit Umlaut und Leerzeichen wird geprüft und exportiert | Stufe 2 | berücksichtigt | offen, Kodex-Test grün, Teilnachweis Export fehlt |
-| 1·F01 | freie Laufzeitgrenzen umgehen die Festschreibung | R19, `FreigegebeneKonfiguration` | gelockerte Grenze außerhalb von Tests lässt sich nicht bauen | Stufe 2 | berücksichtigt | offen, Test rot |
+| 1·F01 | freie Laufzeitgrenzen umgehen die Festschreibung | R19, `FreigegebeneKonfiguration` | gelockerte Grenze außerhalb von Tests lässt sich nicht bauen | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·F02 | Vorschlag des falschen Beraters angenommen | R20, Vorschlag trägt Bereich und Berater | Vorschlag für fremden Bereich wird abgelehnt | Stufe 2 | berücksichtigt | offen, Test rot |
-| 1·F03 | Notaufträge mit Nullkurs möglich | R20, geprüfte Kurstypen; R36 Kursprüfung auch bei Zwang | Nullkurs erzeugt keinen Auftrag, sondern Halt | Stufe 2 | berücksichtigt | offen, Test rot, Teilnachweis fehlt |
+| 1·F03 | Notaufträge mit Nullkurs möglich | R20, geprüfte Kurstypen; R36 Kursprüfung auch bei Zwang | Nullkurs erzeugt keinen Auftrag, sondern Halt | Stufe 2 | berücksichtigt | offen, Test grün, Teilnachweis fehlt |
 | 1·F04 | Anteils- und Anzahlgrenze gilt nicht für den Bestand | R22, Ziel-, Kauf- und Bestandsgrenze | Marktbewegung über Toleranz sperrt Zukauf und erzeugt Abbaupflicht | Stufe 2 | berücksichtigt | offen, Test rot, Teilnachweis fehlt |
 | 1·F05 | Umschlaggrenze mit Schlusskurs statt Volumen | R21, Prüfbasis am Limit | Umschlag am Limit über der Grenze wird gekürzt | Stufe 2 | berücksichtigt | offen, Test rot |
 | 1·F06 | Teilverkauf unter Mindestorder am Limit | R21, R36 Matrix (Mindestorder, Gesamtbestand) | Teilverkauf unter Mindestorder am Limit abgelehnt, Gesamtverkauf erlaubt | Stufe 2 | berücksichtigt | offen, Test rot |
@@ -41,7 +41,7 @@ Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Rege
 | 1·E01 | Konto- und Zugangsdaten im Export | R28 Positivliste und Inhaltsprüfung | Datei mit Geheimnismuster bricht den Export ab | Stufe 2 | berücksichtigt | offen |
 | 1·E02 | Link exportiert fremde Inhalte | R24, R28 | Link im Projekt wird nicht gelesen | Stufe 2 | berücksichtigt | offen |
 | 1·E03 | Festschreibungslauf meldet nie ausgeführte Prüfung | R27 | schreibender Befehl meldet nie „Gate offen“ | Stufe 2 | berücksichtigt | offen |
-| 1·A01 | Geldoperationen sättigen still | R13, geprüfte Rechnung, Überlauf führt zu Halt | Überlauf ergibt Fehler, keinen gekappten Wert | Stufe 2 | berücksichtigt | offen, Test rot |
+| 1·A01 | Geldoperationen sättigen still | R13, geprüfte Rechnung, Überlauf führt zu Halt | Überlauf ergibt Fehler, keinen gekappten Wert | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·T01 | Zufallstest beweist die Grenzen nicht | R17, R27 Testnamen versprechen nur, was sie prüfen | gezielte Grenzfälle je harter Grenze | Stufe 2 | berücksichtigt | offen, Test rot |
 
 **Gesonderte Risiken aus Prüfung 1:**
@@ -53,7 +53,7 @@ Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Rege
 | 1·R03 | Lesefehler beim Scan übersprungen | R29 | unlesbares Verzeichnis macht den Kodex rot | Stufe 2 | berücksichtigt | offen, Kodex-Test grün, Teilnachweis Export fehlt |
 | 1·R04 | Export kein konsistenter Snapshot | R28, byte-gleich mit geprüftem Stand | Änderung zwischen Prüfung und Export wird erkannt | Stufe 2 | berücksichtigt | offen |
 | 1·R05 | offenes Gate trotz Laufzeitsperre | R27, Build-Freigabe und Betriebsbereitschaft getrennt | Sperre erscheint als nicht betriebsbereit | Stufe 2 | berücksichtigt | offen |
-| 1·R06 | Kurse ohne Datum, rohe Zustände | R20 | Kurs ohne Handelstag, Währung oder Alter wird abgelehnt | Stufe 2 | berücksichtigt | offen, Test rot, Teilnachweis fehlt |
+| 1·R06 | Kurse ohne Datum, rohe Zustände | R20 | Kurs ohne Handelstag, Währung oder Alter wird abgelehnt | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·R07 | Genehmigung ist keine Ausführungssicherheit | R33, R34, R35, R37 | Teilausführung, Kurslücke und unbekannter Sendestatus am Papierkonto | Stufe 6 | berücksichtigt | offen |
 | 1·R08 | Eigentümerfreigabe nur prozedural | R30, Freigabetypen | Freigabe ohne passenden Hash wird abgelehnt | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·R09 | Preis- und Tokenannahmen keine Anbieterrechnung | R8, Kap. 12, Zählung der ganzen Anfrage | Abgleich mit der Anbieterrechnung im Papierbetrieb | Stufe 5 und 7 | berücksichtigt | offen |
