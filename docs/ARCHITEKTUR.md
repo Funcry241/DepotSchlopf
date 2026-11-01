@@ -168,7 +168,7 @@ Eine Beobachtung ist **bestätigt**, wenn das Ergebnis aus bestätigter Quelle v
 
 **Lagebild:** Die KI bekommt keinen Datenberg, sondern ein kurzes Lagebild in festem Aufbau: was sich seit ihrer letzten Sicht geändert hat, welche Signale ausgelöst haben, welche Termine im Horizont liegen (mit Kennung, Verlässlichkeit und betroffenen Positionen und Stopps), Konto, Positionen und Stopps, die Kosten möglicher Aufträge, ihre eigene letzte Begründung und höchstens eine festgelegte Zahl gekürzter Schlagzeilen, jede mit Kennung. Der feste Teil (Regeln, Grenzen, Universum, Antwortschema) steht immer gleich am Anfang. Das senkt die Kosten über die Zwischenspeicherung der Anbieter.
 
-**Lernen:** Das Journal zählt, wie oft eine Anfrage zu einem Handel führte. Führen viele Anfragen zu nichts, schlägt der Monatsbericht eine andere Schwelle vor. Der Monatsbericht vergleicht außerdem Erwartung und Beobachtung und zeigt, ob Reaktionen auf beobachtete Zusammenhänge nach allen Kosten etwas gebracht haben (R16). Ändern darf sie nur Wolfgang (R14, R15).
+**Lernen:** Das Journal zählt, wie oft eine Anfrage zu einem Handel führte. Führen viele Anfragen zu nichts, schlägt der Monatsbericht eine andere Schwelle vor. Ändern darf sie nur Wolfgang (R14, R15). Der Monatsbericht vergleicht außerdem Erwartung und Beobachtung und zeigt, ob Reaktionen auf beobachtete Zusammenhänge nach allen Kosten etwas gebracht haben (R16).
 
 **Ausfall:** Fällt der Rechner aus, schützen die Stopps beim Broker weiter, und es entstehen keine neuen Aufträge. Nach dem Start wird zuerst abgeglichen (Kapitel 11). Veraltete Signale werden nie nachträglich zu Aufträgen.
 
