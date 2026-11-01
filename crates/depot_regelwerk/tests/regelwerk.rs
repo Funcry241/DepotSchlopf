@@ -341,13 +341,14 @@ impl Lcg {
     }
 }
 
-/// 5.000 zufaellige Lagen: Keine Entscheidung darf je eine harte Grenze verletzen.
+/// 5.000 zufaellige Lagen, geprueft am Schlusskurs: Keine Entscheidung verletzt dort eine Grenze.
+/// Am Limit, also im ungünstigsten Fall (R21), pruefen die gezielten Grenzfaelle in `befunde.rs`.
 #[test]
 #[allow(
     clippy::too_many_lines,
     reason = "alle Invarianten an einer Stelle pruefen ist hier uebersichtlicher"
 )]
-fn zufallstest_harte_grenzen() {
+fn zufallstest_grenzen_am_schlusskurs() {
     let g = Grenzen::standard();
     let u = universum();
     let mut r = Lcg(2026);
