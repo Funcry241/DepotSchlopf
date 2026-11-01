@@ -11,7 +11,7 @@ Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher St
 
 **Zwischenstände von „offen“:** „Test grün“ heißt, dass der Umbau den roten Test grün gemacht hat und der Test ohne `ignore` im Kodex läuft; geschlossen ist der Befund erst nach der unabhängigen Prüfung. Nachweis für den Kodex in `docs/befunde/kodex.md`. „Test rot“ heißt, dass der Negativtest im Repository steht und am alten Stand fehlschlägt; er ist mit `#[ignore = "offen: …"]` markiert, bis der Umbau ihn grün macht. Nachweis und Befehle stehen in `docs/befunde/negativtests.md`. „Teilnachweis fehlt“ heißt, dass ein Teil des Befunds noch keinen Test hat; die Liste dort sagt, welcher und mit welchem Schnitt er entsteht. Ein grüner Test allein schließt nichts: „geschlossen“ setzt erst die unabhängige Prüfung.
 
-Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget) abgenommen; Kodex-Schritt umgebaut, Prüfung durch Maus ausstehend. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget) abgenommen; Kodex-Schritt umgebaut; die Gegenbeispiele K7-01 bis K7-03 aus Maus' Prüfung von PR #7 sind als Negativtests übernommen und allgemein behoben, erneute Prüfung durch Maus ausstehend. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 

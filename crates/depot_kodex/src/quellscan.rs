@@ -10,8 +10,17 @@
 //!   `extern crate`. Reine Crates haengen nur von reinen Crates und ruhigen Bibliotheken ab.
 //! - Netzzugang nur in den Crates aus `NETZ_ERLAUBT`.
 //!
+//! - Geprueft wird, was kompiliert werden kann: Im Crate liegen nur `Cargo.toml`, `src/` und
+//!   `tests/`; darin nur `.rs`-Dateien, und jede wird vollstaendig geprueft. `#[path]` und
+//!   `include!` sind verboten, Target-Pfade enden auf `.rs`. Damit liegt jede kompilierte Datei
+//!   im geprueften Quellbaum (K7-03).
+//! - In reinen Crates zaehlt jede Bedeutung eines Alias; mehrdeutige Aliasse und das Einbinden
+//!   von `std` als Ganzes (Weiterreichung) sind verboten, verbotene Module zaehlen an jeder
+//!   Stelle eines Pfads (K7-01, K7-02).
+//!
 //! Grenze: Makros werden nicht expandiert und Reexporte fremder Crates nicht verfolgt. Dafuer
-//! stehen die Crate-Grenzen und das Verbot von `include!` im Produktivcode.
+//! stehen die Crate-Grenzen (reine Crates haengen nur von reinen ab) und das Verbot von
+//! `include!` und `#[path]`.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -19,7 +28,7 @@ use std::path::Path;
 
 use crate::lexer::{self, Token};
 use crate::manifest::{self, HARTE_LINTS};
-use crate::rust::{self, beginnt_mit};
+use crate::rust;
 
 /// Reine Crates: keine Dateien, kein Netz, keine Uhr, keine Umgebung.
 const REIN: [&str; 2] = ["depot_kern", "depot_regelwerk"];
@@ -77,6 +86,13 @@ fn rs_dateien(dir: &Path, aus: &mut Vec<std::path::PathBuf>, fehler: &mut Vec<St
             Ok(m) if m.is_file() => {
                 if p.extension().is_some_and(|x| x == "rs") {
                     aus.push(p);
+                } else {
+                    // Cargo baut auch Dateien mit anderer Endung (Targetpfad, `#[path]`). Im
+                    // Quellbaum liegt deshalb nur Rust-Code, und der wird vollstaendig geprueft.
+                    fehler.push(format!(
+                        "{}: keine .rs-Datei im Quellbaum (geprueft wird, was kompiliert werden kann)",
+                        p.display()
+                    ));
                 }
             }
             Ok(_) => fehler.push(format!("{}: weder Datei noch Ordner", p.display())),
@@ -160,6 +176,33 @@ pub fn pruefe_kopf(anzeige: &str, text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Importe in reinen Crates: kein `std` als Ganzes, keine mehrdeutigen Aliasse, kein Glob aus
+/// `std`.
+fn rein_importe(krate: &str, anzeige: &str, importe: &[rust::Import]) -> Vec<String> {
+    let mut fehler = Vec::new();
+    for imp in importe.iter().filter(|i| !i.glob && i.pfad == ["std"]) {
+        fehler.push(format!(
+            "{anzeige}: std als Ganzes eingebunden als {} im reinen Crate {krate} \
+             (Weiterreichung von std, K7-02)",
+            imp.alias.as_deref().unwrap_or("_")
+        ));
+    }
+    for a in rust::mehrdeutige_aliasse(importe) {
+        fehler.push(format!(
+            "{anzeige}: mehrdeutiger Alias {a} im reinen Crate {krate} (K7-01)"
+        ));
+    }
+    for imp in importe.iter().filter(|i| i.glob) {
+        if imp.pfad.first().is_some_and(|s| s == "std") && imp.pfad.len() == 1 {
+            fehler.push(format!(
+                "{anzeige}: Glob-Import aus std im reinen Crate {krate}"
+            ));
+        }
+    }
+
+    fehler
+}
+
 /// Prueft eine Quelldatei. `produktiv` heisst: liegt unter `src/`.
 pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> Vec<String> {
     let mut fehler = Vec::new();
@@ -187,15 +230,23 @@ pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> 
             }
         }
     }
-    if !produktiv {
-        return fehler;
-    }
+    // Beide Wege binden Code ein, der nicht im Quellbaum unter seinem eigenen Namen liegt.
+    // Ohne sie kompiliert Cargo nur die Target-Wurzeln und Module in Standardlage, und die
+    // liegen alle als .rs-Dateien im Quellbaum (K7-03).
     for (i, tok) in t.iter().enumerate() {
         if tok.ist_wort("include") && t.get(i.saturating_add(1)).is_some_and(|x| x.ist("!")) {
             fehler.push(format!(
-                "{anzeige}: include! im Produktivcode umgeht den Quellscan"
+                "{anzeige}: include! bindet Code ausserhalb des Quellscans ein"
             ));
         }
+    }
+    if rust::attributnamen(&t).iter().any(|n| n == "path") {
+        fehler.push(format!(
+            "{anzeige}: #[path] bindet Module ausserhalb der Standardlage ein und ist verboten"
+        ));
+    }
+    if !produktiv {
+        return fehler;
     }
     let importe = match rust::importe(&t) {
         Ok(i) => i,
@@ -208,19 +259,13 @@ pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> 
     pfade.extend(rust::pfade(&t, &importe));
     let rein = REIN.contains(&krate);
     if rein {
-        for imp in importe.iter().filter(|i| i.glob) {
-            if imp.pfad.first().is_some_and(|s| s == "std") && imp.pfad.len() == 1 {
-                fehler.push(format!(
-                    "{anzeige}: Glob-Import aus std im reinen Crate {krate}"
-                ));
-            }
-        }
+        fehler.extend(rein_importe(krate, anzeige, &importe));
     }
     let mut gemeldet = BTreeSet::new();
     for p in &pfade {
         if rein {
             for u in UNREIN {
-                if beginnt_mit(p, u) && gemeldet.insert(u.join("::")) {
+                if rust::enthaelt(p, u) && gemeldet.insert(u.join("::")) {
                     fehler.push(format!(
                         "{anzeige}: {} im reinen Crate {krate} ({})",
                         u.join("::"),
@@ -230,7 +275,7 @@ pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> 
             }
         }
         if !NETZ_ERLAUBT.contains(&krate) {
-            let netz = beginnt_mit(p, &["std", "net"])
+            let netz = rust::enthaelt(p, &["std", "net"])
                 || p.first().is_some_and(|s| NETZ_CRATES.contains(&s.as_str()));
             if netz && gemeldet.insert(format!("netz {}", p.join("::"))) {
                 fehler.push(format!(
@@ -263,6 +308,18 @@ fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
         }
     };
     fehler.extend(manifest::pruefe_crate(krate, &dir, &m));
+    for p in eintraege(&dir, fehler) {
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !matches!(name.as_str(), "Cargo.toml" | "src" | "tests") {
+            fehler.push(format!(
+                "crates/{krate}/{name}: unbekannter Eintrag im Crate (nur Cargo.toml, src/, tests/; \
+                 Cargo baut sonst z. B. examples/ und benches/ ungeprueft)"
+            ));
+        }
+    }
     if REIN.contains(&krate) {
         for name in manifest::abhaengigkeits_namen(&m) {
             if !REIN.contains(&name.as_str()) && !RUHIG.contains(&name.as_str()) {
@@ -401,6 +458,42 @@ mod tests {
                 false,
                 p,
                 "#[allow(clippy::panic, reason = \"Test\")] fn f() {}"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn reexport_und_mehrdeutigkeit() {
+        let p = "x.rs";
+        assert!(
+            !pruefe_datei(
+                "depot_kern",
+                true,
+                p,
+                "pub mod b { pub use std as platform; }"
+            )
+            .is_empty()
+        );
+        assert!(
+            !pruefe_datei("depot_kern", true, p, "fn f() { crate::m::std::fs::x(); }").is_empty()
+        );
+        assert!(
+            !pruefe_datei(
+                "depot_kern",
+                true,
+                p,
+                "fn a() { use core as b; } fn c() { use alloc as b; }"
+            )
+            .is_empty()
+        );
+        assert!(!pruefe_datei("depot_ki", false, p, "#[path = \"x.md\"] mod m;").is_empty());
+        assert!(
+            pruefe_datei(
+                "depot_kern",
+                true,
+                p,
+                "use core::mem; fn f() { mem::size_of::<u8>(); }"
             )
             .is_empty()
         );

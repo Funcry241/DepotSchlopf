@@ -24,6 +24,11 @@ pub const HARTE_LINTS: [&str; 9] = [
     "clippy::cast_sign_loss",
 ];
 
+/// Endet der Pfad genau auf `.rs`?
+fn ist_rs(p: &str) -> bool {
+    Path::new(p).extension().is_some_and(|x| x == "rs")
+}
+
 /// Liest ein Manifest.
 ///
 /// # Errors
@@ -63,8 +68,10 @@ pub fn pruefe_workspace(wurzel: &Wert) -> Vec<String> {
 pub fn produktiv_wurzeln(crate_dir: &Path, m: &Wert) -> Result<Vec<String>, String> {
     let mut aus: Vec<String> = Vec::new();
     let nimm = |p: String, aus: &mut Vec<String>| -> Result<(), String> {
-        if !p.starts_with("src/") || p.contains("..") {
-            return Err(format!("Target {p} liegt nicht unter src/"));
+        if !p.starts_with("src/") || p.contains("..") || !ist_rs(&p) {
+            return Err(format!(
+                "Target {p} muss eine .rs-Datei unter src/ sein (K7-03)"
+            ));
         }
         if !aus.contains(&p) {
             aus.push(p);
@@ -136,6 +143,24 @@ pub fn pruefe_crate(krate: &str, crate_dir: &Path, m: &Wert) -> Vec<String> {
     }
     if let Err(e) = produktiv_wurzeln(crate_dir, m) {
         fehler.push(format!("crates/{krate}: {e}"));
+    }
+    // Test-, Bench- und Beispiel-Targets: ebenfalls nur .rs-Dateien unter tests/.
+    for art in ["test", "bench", "example"] {
+        if let Some(Wert::Liste(ziele)) = m.feld(art) {
+            for z in ziele {
+                match z.feld("path") {
+                    None => {}
+                    Some(Wert::Text(p))
+                        if p.starts_with("tests/") && ist_rs(p) && !p.contains("..") => {}
+                    Some(p) => fehler.push(format!(
+                        "crates/{krate}: [[{art}]] mit Pfad {} muss eine .rs-Datei unter tests/ sein",
+                        p.kanonisch()
+                    )),
+                }
+            }
+        } else if m.feld(art).is_some() {
+            fehler.push(format!("crates/{krate}: {art} ist keine Tabellen-Liste"));
+        }
     }
     fehler
 }

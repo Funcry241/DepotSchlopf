@@ -304,15 +304,85 @@ pub fn importe(t: &[Token]) -> Result<Vec<Import>, String> {
     Ok(aus)
 }
 
+/// Jeder Alias mit allen Bedeutungen, die er irgendwo in der Datei hat.
+pub fn aliasse(importe: &[Import]) -> BTreeMap<&str, Vec<&[String]>> {
+    let mut alias: BTreeMap<&str, Vec<&[String]>> = BTreeMap::new();
+    for imp in importe {
+        if let Some(a) = &imp.alias {
+            let bedeutungen = alias.entry(a.as_str()).or_default();
+            if !bedeutungen.contains(&imp.pfad.as_slice()) {
+                bedeutungen.push(imp.pfad.as_slice());
+            }
+        }
+    }
+    alias
+}
+
+/// Aliasse mit mehr als einer Bedeutung in derselben Datei.
+pub fn mehrdeutige_aliasse(importe: &[Import]) -> Vec<String> {
+    aliasse(importe)
+        .into_iter()
+        .filter(|(_, b)| b.len() > 1)
+        .map(|(a, b)| {
+            let b: Vec<String> = b.iter().map(|p| p.join("::")).collect();
+            format!("{a} ({})", b.join(" | "))
+        })
+        .collect()
+}
+
+/// Namen aller Attribute der Datei, auch hinter `cfg_attr` (z. B. `path`).
+pub fn attributnamen(t: &[Token]) -> Vec<String> {
+    fn sammle(inhalt: &[Token], aus: &mut Vec<String>) {
+        let Some(Token::Wort(name)) = inhalt.first() else {
+            return;
+        };
+        aus.push(name.clone());
+        if name == "cfg_attr"
+            && let Some(gruppe) = inhalt
+                .get(1..)
+                .filter(|r| r.first().is_some_and(|x| x.ist("(")))
+                .and_then(|r| r.get(1..r.len().saturating_sub(1)))
+        {
+            for teil in teile(gruppe).into_iter().skip(1) {
+                sammle(teil, aus);
+            }
+        }
+    }
+    let mut aus = Vec::new();
+    for (i, tok) in t.iter().enumerate() {
+        if !tok.ist("#") {
+            continue;
+        }
+        let innen = t.get(i.saturating_add(1)).is_some_and(|x| x.ist("!"));
+        let auf = if innen {
+            i.saturating_add(2)
+        } else {
+            i.saturating_add(1)
+        };
+        if !t.get(auf).is_some_and(|x| x.ist("[")) {
+            continue;
+        }
+        if let (Some(zu), Some(start)) = (schliessend(t, auf), auf.checked_add(1))
+            && let Some(inhalt) = t.get(start..zu)
+        {
+            sammle(inhalt, &mut aus);
+        }
+    }
+    aus
+}
+
+/// Kommt die Segmentfolge `muster` irgendwo im Pfad vor (nicht nur am Anfang)?
+pub fn enthaelt(pfad: &[String], muster: &[&str]) -> bool {
+    !muster.is_empty()
+        && pfad
+            .windows(muster.len())
+            .any(|w| w.iter().zip(muster).all(|(a, b)| a == b))
+}
+
 /// Alle Pfade im Code (`a::b::c`, auch mit fuehrendem `::`), aufgeloest ueber die Importe.
 /// Einzelne Woerter ohne `::` zaehlen nur, wenn sie ein Import-Alias sind.
 pub fn pfade(t: &[Token], importe: &[Import]) -> Vec<Vec<String>> {
-    let mut alias: BTreeMap<&str, &[String]> = BTreeMap::new();
-    for imp in importe {
-        if let Some(a) = &imp.alias {
-            alias.insert(a.as_str(), imp.pfad.as_slice());
-        }
-    }
+    let alias = aliasse(importe);
     let mut aus = Vec::new();
     let mut i = 0_usize;
     while i < t.len() {
@@ -350,10 +420,14 @@ pub fn pfade(t: &[Token], importe: &[Import]) -> Vec<Vec<String>> {
             continue;
         };
         match alias.get(erstes.as_str()) {
-            Some(voll) if !start_trenner => {
-                let mut p = voll.to_vec();
-                p.extend(segmente.into_iter().skip(1));
-                aus.push(p);
+            // Jede Bedeutung des Alias zaehlt: Importe gelten je Gueltigkeitsbereich, der
+            // Kodex kennt diese nicht und nimmt deshalb alle an (K7-01).
+            Some(bedeutungen) if !start_trenner => {
+                for voll in bedeutungen {
+                    let mut p = voll.to_vec();
+                    p.extend(segmente.iter().skip(1).cloned());
+                    aus.push(p);
+                }
             }
             _ if segmente.len() > 1 => aus.push(segmente),
             _ => {}
@@ -427,6 +501,25 @@ mod tests {
         }
         let g = aufgeloest("use std::*; use a::b as _;");
         assert!(g.iter().any(|x| x == "std::*"), "{g:?}");
+    }
+
+    #[test]
+    fn alias_mit_mehreren_bedeutungen() {
+        let p = aufgeloest(
+            "fn a() { use std as b; b::fs::x(); }\nfn c() { use core as b; b::mem::y(); }",
+        );
+        assert!(p.iter().any(|x| x == "std::fs::x"), "{p:?}");
+        let t = zerlege("fn a() { use std as b; } fn c() { use core as b; }").unwrap_or_default();
+        assert_eq!(
+            mehrdeutige_aliasse(&importe(&t).unwrap_or_default()).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn attribute_hinter_cfg_attr() {
+        let t = zerlege("#[cfg_attr(all(), path = \"x.md\")] mod m;").unwrap_or_default();
+        assert!(attributnamen(&t).iter().any(|n| n == "path"));
     }
 
     #[test]
