@@ -118,6 +118,60 @@ fn befund_1_f01_pruefstand_ist_ohne_feature_nicht_erreichbar() -> Result<(), Str
     )
 }
 
+/// K8-01 (Pruefung von PR #8): Ein fremdes Programm schaltet jedes Feature von `depot_kern`
+/// und `depot_regelwerk` ein und baut im Release. Auch dann laesst sich keine Grenze und keine
+/// Gebuehr lockern. Das Programm ist Maus' Gegenprobe, unveraendert bis auf die Pfade.
+#[test]
+#[ignore = "offen: K8-01 Pruefstand im Release per Feature erreichbar"]
+fn befund_k8_01_grenzen_auch_mit_allen_features_im_release_nicht_lockerbar() -> Result<(), String> {
+    const BEIDE: [&str; 2] = ["depot_kern", "depot_regelwerk"];
+    sonde::erlaubt_mit_allen_features(
+        &BEIDE,
+        r"
+use depot_kern::{Cent, Grenzen};
+fn main() {
+    let original = Grenzen::standard();
+    assert_eq!(original.max_anteil_bp(), 2_500);
+    let befund = depot_regelwerk::waechter(
+        &original, Cent(800_000), Cent(800_000), Cent(1_000_000));
+    assert!(matches!(befund, depot_regelwerk::WaechterBefund::Notbremse { .. }));
+}
+",
+    )?;
+    sonde::verboten_mit_allen_features(
+        &BEIDE,
+        r"
+use depot_kern::{Cent, Grenzen};
+
+fn main() {
+    let original = Grenzen::standard();
+    let locker = original.clone()
+        .mit_max_anteil_bp(10_000)
+        .mit_notbremse_bp(9_999)
+        .mit_gebuehren(original.gebuehren()
+            .mit_minimum(Cent(0))
+            .mit_boersengebuehr(Cent(0))
+            .mit_prozent_bp(0));
+
+    assert_eq!(locker.max_anteil_bp(), 10_000);
+    assert_eq!(locker.notbremse_bp(), 9_999);
+    assert_eq!(locker.gebuehren().fuer(Cent(50_000)), Some(Cent(0)));
+
+    let standard_befund = depot_regelwerk::waechter(
+        &original, Cent(800_000), Cent(800_000), Cent(1_000_000));
+    let gelockerter_befund = depot_regelwerk::waechter(
+        &locker, Cent(800_000), Cent(800_000), Cent(1_000_000));
+    assert!(matches!(standard_befund,
+        depot_regelwerk::WaechterBefund::Notbremse { .. }));
+    assert_eq!(gelockerter_befund,
+        depot_regelwerk::WaechterBefund::InOrdnung);
+}
+",
+        &["E0599"],
+        &["mit_max_anteil_bp"],
+    )
+}
+
 // ---------------------------------------------------------------------------------------------
 // 1·R06 – Kurse ohne Datum, rohe Zustaende (R20)
 // ---------------------------------------------------------------------------------------------
