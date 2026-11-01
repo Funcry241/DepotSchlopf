@@ -4,6 +4,10 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- Kodex: Ein unveränderter Stand (frischer Klon von main) wird nicht mehr wegen fehlender Deklaration abgelehnt.
+
 ### Hinzugefügt
 
 - `depot_kern`: Geld in Cent mit geprüfter Rechnung, ISIN mit Prüfziffer, Töpfe A (Dachs = Claude) und B (Maus = GPT), Grenzen mit Fingerabdruck, Positivliste.
