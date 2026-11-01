@@ -1,6 +1,9 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: DokuOnly
-zweck: Architektur Fassung 4.9 mit Weltbild (R42), allgemeinem Ereignisregister (R39), Beobachten statt raten (R40), Wirkungsketten (R41) und Bestandsgrenze vor Terminen
+klasse: RefactorOnly
+zweck: Stufe 2, Kodex-Schritt Teil 1 - die harten Lints stehen im Kopf jedes Produkt-Crates auf forbid, damit der Compiler jede lokale Ausnahme ablehnt (1·G01, R26); ohne Verhaltensaenderung
 pfade:
-docs/ARCHITEKTUR.md
-docs/BEFUNDE.md
+crates/depot_kern/src/lib.rs
+crates/depot_regelwerk/src/lib.rs
+crates/depot_ki/src/lib.rs
+crates/depot_lauf/src/main.rs
+CHANGELOG.md
