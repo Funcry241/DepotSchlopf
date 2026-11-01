@@ -1,10 +1,11 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Funktion
-zweck: Stufe 2, Schnitt Kern - gepruefte Typen fuer 1·A01, 1·F01 und 1·R06 entlang R13, R19 und R20; ohne Setzer fuer Grenzen, auch nicht hinter einem Feature (K8-01)
+klasse: FestschreibungAenderung
+zweck: Stufe 2, Schnitt Regelwerk - Matrix R36, drei Stufen der Anteilsgrenzen, Pruefbasis am Limit, zentrale Auftragskennungen und Hoechstalter der Kurse fuer 1·F02, 1·F04 bis 1·F09, 2·A04, 1·T01 und 1·R06 entlang R20 bis R24 und R36
 pfade:
 crates/depot_kern/
 crates/depot_regelwerk/
-crates/depot_ki/
+kodex/festschreibung.txt
+kodex/freigabe.txt
 docs/BEFUNDE.md
 docs/befunde/
 CHANGELOG.md

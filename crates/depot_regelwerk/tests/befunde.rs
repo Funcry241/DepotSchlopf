@@ -74,6 +74,14 @@ fn preise_alle(cent: i64) -> Preise {
 }
 
 fn kurse(preise: &Preise) -> Kurse {
+    kurse_mit_alter(preise, 0)
+}
+
+/// Kurse von 10:00 Uhr, abgerufen `minuten` spaeter: Jeder Kurs ist so alt.
+fn kurse_mit_alter(preise: &Preise, minuten: u8) -> Kurse {
+    let abruf = Datum::neu(2026, 11, 2)
+        .and_then(|d| Zeitpunkt::neu(d, 10, minuten, 0))
+        .unwrap_or_else(|| unreachable!("Abrufzeit ungueltig"));
     let eintraege = preise
         .iter()
         .map(|(i, c)| {
@@ -81,7 +89,7 @@ fn kurse(preise: &Preise) -> Kurse {
             (i.clone(), k)
         })
         .collect();
-    Kurse::neu(stand(), eintraege).unwrap_or_else(|e| unreachable!("Testkurse: {e:?}"))
+    Kurse::neu(abruf, eintraege).unwrap_or_else(|e| unreachable!("Testkurse: {e:?}"))
 }
 
 fn kurse_alle(cent: i64) -> Kurse {
@@ -298,6 +306,52 @@ fn befund_1_f03_nullkurs_erzeugt_im_regelwerk_keinen_auftrag() {
         }
     }
     assert!(fehler.is_empty(), "{fehler:#?}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// 1·R06 – Hoechstalter der Kurse (20 Minuten, Kapitel 18)
+// ---------------------------------------------------------------------------------------------
+
+/// Ein Kurs ueber dem Hoechstalter ist nicht frisch genug: Die Datenpruefung meldet ihn, das
+/// Regelwerk erzeugt keinen Auftrag, auch keinen zwingenden (Matrix R36: sonst nur Halt), und
+/// die Notbremse haelt an. Mit 20 Minuten alten Kursen entstehen dieselben Auftraege.
+#[test]
+#[ignore = "offen: 1·R06 veralteter Kurs wird verwendet"]
+fn befund_1_r06_veralteter_kurs_erzeugt_keinen_auftrag() {
+    let g = Grenzen::standard();
+    let mut topf = topf_neu(TopfId::A, Cent(800_000));
+    topf.setze_bestand(isin(10), 20); // ausserhalb der Positivliste: zwingender Ausstieg
+    topf.setze_bestand(isin(0), 10);
+    let v = vorschlag(BeraterId::Dachs, &[(1, 2_000)]);
+    let vortag = kurse_alle(10_000);
+    let frisch = kurse_mit_alter(&preise_alle(10_000), 20);
+    let alt = kurse_mit_alter(&preise_alle(10_000), 21);
+
+    let ent = lauf(&g, &topf, &frisch, Some(&v), false);
+    assert!(alle(&ent).count() > 1, "Vorbedingung: {:?}", ent.befunde);
+    assert!(
+        notbremse_auftraege(&g, &topf, &frisch, 1).is_some(),
+        "Vorbedingung"
+    );
+    assert!(
+        pruefe_kurse(&g, &universum(), &frisch, &vortag).is_empty(),
+        "Vorbedingung"
+    );
+
+    let ent = lauf(&g, &topf, &alt, Some(&v), false);
+    assert_eq!(
+        alle(&ent).count(),
+        0,
+        "Auftraege mit 21 Minuten alten Kursen"
+    );
+    assert!(
+        notbremse_auftraege(&g, &topf, &alt, 1).is_none(),
+        "Notbremse mit veralteten Kursen"
+    );
+    assert!(
+        !pruefe_kurse(&g, &universum(), &alt, &vortag).is_empty(),
+        "veraltete Kurse nicht gemeldet"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -769,6 +823,34 @@ fn grenzfall_deckung_mit_gebuehr_am_limit() {
                 "Bargeld {bargeld}: {ent:?}"
             );
         }
+    }
+}
+
+/// Deckung kauft, was passt: Das Ziel (20 % = 2.100 €) liegt weit ueber dem Bargeld. Gekauft
+/// wird die groesste Stueckzahl, die samt Gebuehr ins Bargeld passt: bei 506,50 € und bei
+/// 600 € je 5 Stueck zu 101 € (506,50 €), bei 1.011,50 € 10 Stueck. Beobachtung aus dem
+/// Umbau von PR #8: Die Schaetzung lag eine Stueckzahl zu niedrig und zaehlte nur abwaerts.
+#[test]
+#[ignore = "offen: 1·T01 Deckung kauft weniger, als samt Gebuehr passt"]
+fn grenzfall_deckung_kauft_was_passt() {
+    let g = Grenzen::standard();
+    for (bargeld, erwartet) in [(50_650_i64, 5_u64), (60_000, 5), (101_150, 10)] {
+        let mut topf = topf_neu(TopfId::A, Cent(bargeld));
+        for i in 1..5 {
+            topf.setze_bestand(isin(i), 25);
+        }
+        let v = vorschlag(
+            BeraterId::Dachs,
+            &[(0, 2_000), (1, 2_000), (2, 2_000), (3, 2_000), (4, 2_000)],
+        );
+        let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&v), false);
+        let gekauft = ent.kaeufe.first().map(|a| a.auftrag().stueck);
+        assert_eq!(
+            gekauft,
+            Some(erwartet),
+            "Bargeld {bargeld}: {:?}",
+            ent.befunde
+        );
     }
 }
 
