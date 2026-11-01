@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: DokuOnly
-zweck: Architektur Fassung 4.2 mit Spreadgrenze, Bestaetigungsgrenze und ehrlichem Kostenrahmen aus der vierten Pruefung durch Maus
+zweck: Architektur Fassung 4.3 mit Anhangsvermerk fuer die Bestaetigungsgrenze aus der fuenften Pruefung durch Maus
 pfade:
 docs/ARCHITEKTUR.md
 docs/BEFUNDE.md

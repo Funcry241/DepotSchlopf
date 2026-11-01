@@ -9,7 +9,7 @@ Diese Liste führt jeden Befund aus den Prüfungen durch Maus vom Befund bis zur
 
 Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher Stufe der Test entsteht und dass eine unabhängige Prüfung ihn bestätigt.
 
-Stand: 01.11.2026, Fassung 4.2. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.3. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -100,3 +100,9 @@ Stand: 01.11.2026, Fassung 4.2. Kein Befund ist technisch geschlossen.
 | 4·E01 | „Gesamtdeckel“ umfasst nur KI und Gebühren | Kap. 5, 13, 18: umbenannt in „Jahresbudget für KI und Gebühren“; Spread und Fondskosten werden gemessen und berichtet, aber nicht vorab gedeckelt; Kap. 21 Punkt 5 als bewusste Kostenentscheidung für Wolfgang | Bericht weist KI, Gebühren und Spread getrennt aus; Spread wird nie gegen das Jahresbudget gebucht | Stufe 3 | berücksichtigt; Entscheidung bei Wolfgang | offen |
 | 4·T1 | Meldeweg zum Handy kann ausfallen | Kap. 11: zugestellt erst nach Annahmebestätigung, sonst Protokoll, Wiederholung, Nennung im nächsten Bericht; Halt hängt nie an der Nachricht | Nachrichtendienst nicht erreichbar: Zustellung wird nicht als erfolgt gemeldet, Halt greift trotzdem | Stufe 6 | berücksichtigt | offen |
 | 4·T2 | Storno nach Teilfüllung | Kap. 10 Reservierungen: frei wird nur der nicht gefüllte Rest | Kauf über 10 Stück, 4 gefüllt, Rest storniert: frei werden nur die Mittel für 6 Stück, die Ausstiegsreserve bleibt | Stufe 3 | berücksichtigt | offen |
+
+## Prüfung 5 – Stand b5f50ce (1 Restpunkt)
+
+| Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
+| --- | --- | --- | --- | --- | --- | --- |
+| 5·B02 | „Unvollständig“ heißt nicht „unbestätigt“; ein abgebrochenes Schreiben und eine später gekürzte, bestätigte Zeile hinterlassen dieselben Bytes | Kap. 9: Anhangsvermerk mit bestätigtem Stand und geplantem Anhang; gekürzt wird nur, was der Vermerk als unbestätigten Anhang ausweist; sonst Halt und Reparaturverfahren, nichts wird still zurückgesetzt; mehrdeutige Fälle bleiben gesperrt | Pflicht vor Schließen von 4·B02: (1) nach bestätigtem Vorgang Abschlusszeichen der letzten Zeile entfernen: Halt, Budget und Vorgänge unverändert; (2) letzte bestätigte Zeile teilweise kürzen: ebenso; (3) echter Schreibabbruch mit passendem Vermerk wird gekürzt; (4) erneuter Absturz in der Wiederherstellung ändert nichts Bestätigtes | Stufe 2 | berücksichtigt | offen |
