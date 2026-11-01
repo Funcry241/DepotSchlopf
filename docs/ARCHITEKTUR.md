@@ -611,7 +611,6 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Export | Umfang | nur von Git verfolgte Dateien erlaubter Pfadrollen, keine Links |
 | Kassenbuch | Anker | bestätigter Stand (Zeilenzahl und Hash) im Journal und im Abendbericht aufs Handy; höchstens ein unbestätigter Eintrag beim Start |
 | Aufträge | Schutzfrist Kurzfrist | 60 Sekunden bis zum bestätigten Stopp; sonst bei erreichbarem Broker Rest stornieren, ungeschützte Menge zwingend verkaufen, Halt; ohne Verbindung Zustand „Schutz ungewiss“: Halt, Nachricht, Neuversuch alle 30 Sekunden |
-| Kosten | Höchstgebühr je Order | 2,00 € bis 2.500 € Volumen, vor dem Start an der Gebührentabelle des tatsächlichen Kontos bestätigen |
 | Aufträge | zwingender Ausstieg | Limit um den Limit-Abstand unter dem letzten Kurs, höchstens 3 Nachzieh-Schritte zu je diesem Abstand |
 | Kurse | Höchstalter | 20 Minuten für Entscheidungen, freiwillige Aufträge, Tagesverlust und Notbremse; älter: Halt |
 | Freigaben | Handelszustimmung von Maus | gültig 15 Minuten und nur bis zum nächsten Lagebild |
@@ -627,7 +626,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Freigabe | Disziplin Kurzfrist | höchstens ein ausgelöster Monats-Stopp; keine Regelverletzung; gesonderte Freigabe durch Wolfgang |
 | Freigabe | Echtgeld Langfrist | mindestens 3 Monate auf Papier; keine Regelverletzung; Kosten höchstens 20 % über der Rechnung; jeder Abgleich stimmig |
 | Freigabe | Kurzfrist vor Freigabe | Geld bleibt uninvestiert als Bargeld |
-| Kosten | Handelsbudget Kurzfrist | Gebühren höchstens 0,6 % des Bereichswerts im Monat (6 € bei 1.000 €); ein Einstieg belastet Kauf- und Verkaufsgebühr (4 €) |
+| Kosten | Handelsbudget Kurzfrist | Gebühren höchstens 0,6 % des Bereichswerts im Monat (6 € bei 1.000 €); ein Einstieg belastet Kauf- und Verkaufsgebühr (4 €); Höchstgebühr je Order 2,00 € bis 2.500 € Volumen, vor dem Start an der Gebührentabelle des tatsächlichen Kontos bestätigen |
 | Kosten | Handelsbudget Langfrist | Gebühren höchstens 1,2 % des Bereichswerts im Jahr (12 € bei 1.000 €), Erstkauf ausgenommen |
 | Kosten | Handelsbudget Sicher | Gebühren höchstens 0,5 % des Bereichswerts im Jahr |
 | Kosten | Gesamtdeckel aller Kosten | 5 % des Startkapitals im Jahr (150 €), KI und Gebühren zusammen; der Spread wird daneben gemessen und berichtet |
