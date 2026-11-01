@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: DokuOnly
-zweck: Architektur Fassung 4.7 mit Beobachten statt raten (R40) und Bestandsgrenze vor Terminen
+zweck: Architektur Fassung 4.8 mit Beobachten statt raten (R40), Wirkungsketten (R41) und Bestandsgrenze vor Terminen
 pfade:
 docs/ARCHITEKTUR.md
 docs/BEFUNDE.md

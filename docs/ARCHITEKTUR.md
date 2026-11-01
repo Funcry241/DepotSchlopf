@@ -2,7 +2,7 @@
 
 Stand 01.11.2026 · Wolfgang Mair
 
-*Fassung 4.7. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
+*Fassung 4.8. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
 
 ## 1 Zweck und Leitsatz
 
@@ -69,6 +69,7 @@ Diese Regeln gelten für jeden Baustein und jede spätere Änderung. Die Regeln 
 | R38 | Anker zeigen nur auf Bestätigtes | Zwei Dateien lassen sich nicht gleichzeitig schreiben. | Änderungen über mehrere Dateien folgen einem Commitprotokoll mit Wiederherstellung. Ein Anker zeigt nur auf einen schon bestätigten Stand, nie auf einen gerade entstehenden. Gegen das gemeinsame Zurückrollen aller Dateien hilft nur ein Anker außerhalb des Rechners. |
 | R39 | Was kommt, zählt schon heute | Märkte reagieren auf angekündigte Ereignisse oft vor und an ihrem Termin, nicht erst danach. | Ein Ereigniskalender führt künftige Termine mit Zeitpunkt, Betroffenen, Quelle und Verlässlichkeit. Termine im Horizont stehen im Lagebild, lösen gebündelte Anfragen aus und müssen in jeder Begründung berücksichtigt sein. Ein Termin ändert keine Grenze und hebt kein Veto auf; es gibt keine Sonderregeln für einzelne Ereignisse. |
 | R40 | Beobachten statt raten | Den Ausgang eines Ereignisses vorherzusagen ist unsicher; die Reaktion des Markts danach lässt sich messen. | Zu jedem Termin hält ein Beobachtungsjournal Ereignis, vorherige Erwartung, tatsächliches Ergebnis und gemessene Marktreaktion fest. Ein Kauf, der sich auf ein Ereignis stützt, braucht eine bestätigte Beobachtung als Beleg, keine Vorhersage. Wiederkehrende Zusammenhänge zählen erst ab einer Mindestzahl gleichartiger Fälle und nur als Hinweis (R33). |
+| R41 | Wirkungen folgen Ketten | Ein Ereignis trifft selten direkt den gehaltenen Wert, sondern über Größen wie Rohstoffe, Zinsen, Währungen oder Branchen. | Jede Begründung mit Ereignisbezug nennt ihre Wirkungskette: Ereignis, betroffene Größe, handelbarer Wert im Universum, Richtung und Ordnung. Jedes Glied stützt sich auf die festgeschriebene Wirkungskarte oder eine bestätigte Beobachtung. Wirkungen erster Ordnung sind meist eingepreist, bevor der Rahmen handeln kann; das gilt als bekannte Grenze, nicht als Chance. |
 
 ## 3 Rollen und Rechte
 
@@ -160,6 +161,16 @@ Kalenderquellen stehen wie die Nachrichtenquellen auf einer festgeschriebenen Li
 
 Eine Beobachtung ist **bestätigt**, wenn das Ergebnis aus bestätigter Quelle vorliegt und das Beobachtungsfenster im fortlaufenden Handel abgelaufen ist. Erst dann darf ein Vorschlag sich auf das Ereignis stützen. Aus vielen Einträgen rechnet Rust Zusammenhänge, etwa wie ein Bereich auf eine bestimmte Art von Ergebnis reagiert hat, und zeigt sie im Lagebild mit der Zahl der Fälle. Unterhalb der Mindestfallzahl gibt es keinen Zusammenhang. Ein Zusammenhang ist ein Hinweis, keine Zusage.
 
+Nicht jedes Ereignis steht vorher im Kalender. Ein unangekündigtes Ereignis, etwa ein militärischer Angriff, ein Anschlag oder eine plötzliche Sanktion, kommt über die Schlagzeilen und die Stichwortliste. Sobald eine freigegebene Quelle es meldet, legt die Sammelstelle dafür einen Beobachtungseintrag an, ohne Erwartung vorher, aber mit Ergebnis und gemessener Reaktion wie bei jedem Termin.
+
+**Wirkungsketten (R41):** Ein Ereignis wirkt selten direkt auf einen gehaltenen Wert. Es wirkt über **Größen**: Rohstoffpreise wie Öl und Gas, Zinsen, Währungen, Frachtraten oder ganze Branchen. Erst von dort führt der Weg zu einem handelbaren Wert im Universum des Bereichs, etwa einem Branchen-ETF oder einer Aktie. Eine festgeschriebene, versionierte **Wirkungskarte** ordnet jede Größe den Werten im Universum zu, mit erwarteter Richtung, zum Beispiel „Ölpreis steigt: Energiewerte eher auf, Fluglinien und Chemie eher ab“. Sie enthält keine Sonderregel für ein bestimmtes Land oder einen bestimmten Rohstoff, sondern nur Zuordnungen, die für jedes Ereignis gleich gelten.
+
+- **Erste Ordnung:** die unmittelbare Wirkung auf die Größe und die direkt abhängigen Werte. Sie ist an liquiden Märkten oft binnen Minuten eingepreist.
+- **Zweite Ordnung:** Folgewirkungen, etwa höhere Energiekosten in den Margen einer Branche, Zinserwartungen oder Währungsbewegungen. Sie wirken oft über Tage und Wochen.
+- **Reaktionszeit als Grenze:** Verzögerte Kurse, Bündelung, Mindestabstand zwischen Anfragen, KI-Laufzeit, Prüfung durch Maus und das Beobachtungsfenster summieren sich auf mindestens eine halbe Stunde, oft mehr. Der Rahmen ist damit für Wirkungen erster Ordnung fast immer zu spät. Seine Stärke liegt in beobachteten Wirkungen zweiter Ordnung und in der Risikominderung bestehender Positionen.
+- **Prüfung:** Jede Kette wird im Beobachtungsjournal geprüft: Hat sich die Größe tatsächlich bewegt, und folgten die Werte der Karte? Wo die Beobachtung der Karte widerspricht, zeigt der Monatsbericht das. Die Karte ändert sich nur per Festschreibung (R14).
+- **Was nicht handelbar ist:** Eine Größe wie der Ölpreis selbst ist im Universum nicht handelbar, weil Rohstoff-Zertifikate und Termingeschäfte ausgeschlossen sind (R5). Der Rahmen handelt nur die zugeordneten Werte im Universum.
+
 **Rechnen:** Bewegung seit der letzten KI-Sicht, Abstand zum Stopp, Volumen im Vergleich zum Durchschnitt, Abstand zum Höchststand, Rendite über 1, 3 und 12 Monate, Schwankung. Schlagzeilen werden entdoppelt, einem Wert zugeordnet und über feste Stichwortlisten eingestuft (z. B. Gewinnwarnung, Prognose, Übernahme, Klage, Rücktritt, Betrugsverdacht, Kapitalerhöhung). Alles ist deterministisch und damit wiederholbar.
 
 **Punkte und Korb:** Jedes Signal bekommt Punkte aus einer festgeschriebenen Tabelle und landet im Eingangskorb seines Bereichs. Signale ohne Bezug zum Bereich bekommen keine Punkte.
@@ -199,6 +210,7 @@ Eine Beobachtung ist **bestätigt**, wenn das Ergebnis aus bestätigter Quelle v
 | risiken | je geändertem Wert: was dagegen spricht | bei jeder Änderung |
 | belege | je geändertem Wert: Kennungen aus dem Lagebild (Kennzahl, Schlagzeile, Termin oder Beobachtung) | bei jeder Änderung |
 | termine | je betroffenem Wert: Kennungen der Termine im Horizont und wie sie berücksichtigt sind (halten, verkleinern, abwarten, bewusst eingehen) | wenn Termine im Horizont liegen |
+| kette | je Wert mit Ereignisbezug: Ereignis, Größe, Wert, Richtung, Ordnung (erste oder zweite) und Kennung des Kartenglieds oder der Beobachtung | wenn ein Ereignis die Begründung trägt |
 | stopp | Stopp-Abstand je Kurzfrist-Kauf | im Kurzfrist-Bereich |
 | erwartung | erwartete Kursbewegung je Kurzfrist-Kauf (für die Kostenregel) | im Kurzfrist-Bereich |
 | verzicht | warum nichts geändert wird | wenn keine Änderung |
@@ -211,6 +223,7 @@ Eine Beobachtung ist **bestätigt**, wenn das Ergebnis aus bestätigter Quelle v
 - Passt eine Antwort nicht zum Schema, wird die Anfrage genau einmal wiederholt. Danach gilt „kein Vorschlag“, und nichts ändert sich.
 - **Positionen über einen Termin hinweg:** Ein Termin kann eine Kurslücke über den Stopp hinaus auslösen (R33). Deshalb muss ein Vorschlag, der einen betroffenen Wert kauft oder hält, den Termin im Feld „termine“ abwägen; fehlt das, wird der Eintrag verworfen. Der Höchstanteil vor Terminen ist eine Anteilsgrenze mit allen drei Stufen (R22). Als Kaufgrenze kürzt er Käufe im Terminhorizont eines betroffenen Werts. Als Bestandsgrenze gilt er für den gehaltenen Bestand, sobald ein Termin in dessen Horizont tritt: Liegt der Bestand mehr als die Toleranz darüber, sind Zukäufe gesperrt, und der Überhang wird vor Beginn des Termins abgebaut, als zwingender Ausstieg mit dem Verfahren aus Kapitel 10. Gelingt der Abbau nicht rechtzeitig, bleibt der Rest stehen, Wolfgang bekommt eine Nachricht, und die kleinere Position gilt nicht als erreicht. Diese Grenze gilt für jedes Ereignis gleich. Zwingende Ausstiege bleiben von der Kaufgrenze unberührt (R36).
 - **Käufe mit Ereignisbezug (R40):** Stützt sich ein Kauf auf ein Ereignis, muss unter den Belegen eine bestätigte Beobachtung stehen. Eine Vorhersage des Ausgangs genügt nicht; ein solcher Eintrag wird verworfen. Verkäufe zur Risikominderung vor einem Termin brauchen keine Beobachtung.
+- **Wirkungsketten (R41):** Trägt ein Ereignis die Begründung, muss das Feld „kette“ vollständig sein, und jedes Glied muss auf die Wirkungskarte oder eine bestätigte Beobachtung verweisen. Eine Kette, deren Größe sich laut Beobachtung nicht bewegt hat, trägt keinen Kauf. Ein Kauf auf eine Wirkung erster Ordnung braucht zusätzlich eine bestätigte Beobachtung, dass der Wert ihr noch nicht gefolgt ist; sonst wird der Eintrag verworfen.
 - Das Regelwerk bewertet nicht, ob eine Begründung klug ist. Es prüft, dass sie vollständig ist, dass die Belege stimmen und dass alle Grenzen eingehalten sind.
 
 **Nachrichten als Daten (R9):** Schlagzeilen stehen in einem eigenen, als nicht vertrauenswürdig markierten Block. Rust lässt nur Titel, Datum, Quelle, Link und einen kurzen Auszug durch, entfernt Steuerzeichen und eingebettete Links und ruft nur freigegebene Domains ab. Die KI hat kein Werkzeug, das etwas auslöst. Selbst eine vollständig manipulierte Antwort bleibt in den harten Grenzen. Der schlimmste Fall ist ein schlechtes, aber erlaubtes Depot in einem Bereich. Stützt sich eine große Änderung nur auf eine einzige Schlagzeile, wird sie im Journal zur Durchsicht markiert.
@@ -487,6 +500,8 @@ Gegen einen Verlust über den Einsatz stehen konkrete Schutzmaßnahmen: ein rein
 | Kurslücke an einem angekündigten Termin | Ereigniskalender, Pflichtabwägung im Feld „termine“, Höchstanteil vor Terminen als Kauf- und Bestandsgrenze mit Abbau vor dem Termin | Verlust kann über dem Stopp-Abstand liegen; er trifft eine kleinere Position, sofern der Abbau rechtzeitig gelang |
 | Auf einen Ausgang wetten, der nicht eintritt | Käufe mit Ereignisbezug nur nach bestätigter Beobachtung (R40) | kein Kauf auf Vorhersage |
 | Ein scheinbarer Zusammenhang ist Zufall | Mindestfallzahl, Zusammenhang nur als Hinweis, Auswertung nach allen Kosten im Monatsbericht | schlimmstenfalls ein erlaubter, aber erfolgloser Handel |
+| Wirkung ist schon eingepreist, wenn der Rahmen handelt | Reaktionszeit als bekannte Grenze, Kauf auf erste Ordnung nur mit Beobachtung, dass der Wert noch nicht gefolgt ist | kein Hinterherkaufen einer fertigen Bewegung |
+| Eine Wirkungskette stimmt nicht | jedes Glied mit Kartenverweis oder Beobachtung, Prüfung im Beobachtungsjournal, Karte nur per Festschreibung | Kette trägt keinen Kauf; Monatsbericht zeigt den Widerspruch |
 | KI erfindet oder verwechselt Termine | nur Kalendereinträge mit Kennung als Beleg, Verlässlichkeit sichtbar, Gerüchte sind kein Termin | Eintrag verworfen |
 | Kauf wird nur teilweise ausgeführt oder die Verbindung reißt ab | Schutz erst nach Bestätigung, Schutzfrist, Zwangsverkauf der ungeschützten Menge (R35) | keine Menge bleibt über die Frist hinaus unbemerkt ungeschützt |
 | Stopp löst während eines freiwilligen Verkaufs aus | Gruppe aus Stopp und Verkauf mit Mengenreduktion, Freigabe erst nach Bestätigung | höchstens der Bestand wird verkauft |
@@ -628,6 +643,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Aufträge | Höchstanteil vor Terminen | Vorschlag im Paket, unter dem normalen Höchstanteil je Wert; Kauf- und Bestandsgrenze mit der Toleranz der Bestandsgrenze, Abbau vor Beginn des Termins |
 | Beobachtung | Beobachtungsfenster | 30 Minuten fortlaufender Handel nach Veröffentlichung des Ergebnisses; für Langfrist der folgende Handelstag |
 | Beobachtung | Mindestfallzahl für Zusammenhänge | 10 gleichartige Ereignisse |
+| Beobachtung | Wirkungskarte | feste, versionierte Liste von Größen (Rohstoffe, Zinsen, Währungen, Branchen) mit zugeordneten Werten im Universum und Richtung; Vorschlag kommt mit Stufe 4 |
 | Nachrichten | Lagebild | höchstens 30 Schlagzeilen, je höchstens 300 Zeichen |
 | Nachrichten | Anbindung | aus, bis Wolfgang eine Quellenliste freigibt |
 | Nachrichten | KI-Websuche | aus |
