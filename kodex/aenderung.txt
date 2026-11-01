@@ -1,10 +1,9 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: TestOnly
-zweck: Stufe 2, Schritt 1 - jeder Befund aus Kern, Regelwerk und KI-Budget wird ein Negativtest, der am heutigen Stand rot ist (ignore bis zum Umbau)
+klasse: RefactorOnly
+zweck: Stufe 2, Kodex-Schritt Teil 1 - die harten Lints stehen im Kopf jedes Produkt-Crates auf forbid, damit der Compiler jede lokale Ausnahme ablehnt (1·G01, R26); ohne Verhaltensaenderung
 pfade:
-crates/depot_kern/tests/
-crates/depot_ki/tests/
-crates/depot_regelwerk/tests/
-docs/BEFUNDE.md
-docs/befunde/
+crates/depot_kern/src/lib.rs
+crates/depot_regelwerk/src/lib.rs
+crates/depot_ki/src/lib.rs
+crates/depot_lauf/src/main.rs
 CHANGELOG.md

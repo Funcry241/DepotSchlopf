@@ -4,6 +4,10 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- Die harten Lints stehen im Kopf von `depot_kern`, `depot_regelwerk`, `depot_ki` und `depot_lauf` auf `forbid`. Der Compiler lehnt damit jede lokale Ausnahme ab, auch hinter `cfg_attr` (1·G01). Der Kopf von `depot_kodex` und die Prüfung durch den Kodex folgen mit dem Kodex-Umbau.
+
 ### Tests
 
 - Stufe 2, Schritt 1: 35 Negativtests für 19 Befunde aus Kern, Regelwerk und KI-Budget (`tests/befunde.rs` je Crate). Sie sind am alten Stand rot und bis zum Umbau mit `ignore` markiert; Nachweis, Gegenproben und fehlende Teilnachweise in `docs/befunde/negativtests.md`.

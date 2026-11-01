@@ -4,6 +4,20 @@
 //! Festschreibung, Quellscan, Essenz, Format, Clippy, Tests) und am Ende immer den
 //! Assistenten-Export `assistant_export_latest.zip`, auch wenn ein Schritt scheitert.
 
+// Die harten Lints stehen auf `forbid`: Der Compiler lehnt jede lokale Ausnahme ab, auch eine
+// hinter `cfg_attr` (R26, Befund 1·G01). Die Liste haelt der Kodex fest.
+#![forbid(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::float_arithmetic,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+
 mod export;
 mod zip;
 
