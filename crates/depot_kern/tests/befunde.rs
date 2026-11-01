@@ -166,6 +166,92 @@ fn main() {
     )
 }
 
-// Waehrung, Herkunft und Alter eines Kurses (ebenfalls 1·R06) sind im heutigen Kern nicht
-// darstellbar. Ihre Tests entstehen mit dem Kurstyp im Schnitt „Kern und Regelwerk“; der
-// Befund bleibt bis dahin als Teilnachweis offen (docs/befunde/negativtests.md).
+/// Ein Kurs ist nur in Euro zu haben (Positivliste: Xetra). Jede andere oder fehlende Waehrung
+/// wird beim Eintritt abgelehnt, ebenso ein Preis, der nicht positiv ist.
+#[test]
+#[ignore = "offen: 1·R06 Kurs ohne gepruefte Waehrung"]
+fn befund_1_r06_kurs_nur_in_euro_und_positiv() -> Result<(), String> {
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::{Cent, Datum, Herkunft, Kurs, KursFehler, Zeitpunkt};
+fn main() {
+    let tag = Datum::neu(2026, 11, 2).expect("gueltiges Datum");
+    let zeit = Zeitpunkt::neu(tag, 10, 0, 0).expect("gueltige Uhrzeit");
+    let neu = |preis: i64, w: &str| Kurs::neu(Cent(preis), w, tag, zeit, Herkunft::Broker);
+    assert_eq!(neu(10_000, "EUR").map(|k| k.preis()), Ok(Cent(10_000)));
+    for w in ["USD", "eur", "", "EUR "] {
+        assert_eq!(neu(10_000, w).err(), Some(KursFehler::Waehrung), "Waehrung {w:?} angenommen");
+    }
+    assert_eq!(neu(0, "EUR").err(), Some(KursFehler::NichtPositiv));
+    assert_eq!(neu(-1, "EUR").err(), Some(KursFehler::NichtPositiv));
+}
+"#,
+    )
+}
+
+/// Ein Kurs traegt Handelstag, Zeitpunkt und Herkunft. Kalenderdaten und Uhrzeiten werden
+/// geprueft; ein Handelstag nach dem Zeitpunkt des Kurses wird abgelehnt.
+#[test]
+#[ignore = "offen: 1·R06 Kurs ohne Handelstag und Herkunft"]
+fn befund_1_r06_kurs_traegt_handelstag_und_herkunft() -> Result<(), String> {
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::{Cent, Datum, Herkunft, Kurs, KursFehler, Zeitpunkt};
+fn main() {
+    assert!(Datum::neu(2026, 2, 31).is_none(), "31.02. angenommen");
+    assert!(Datum::neu(2026, 2, 29).is_none(), "29.02.2026 angenommen");
+    assert!(Datum::neu(2024, 2, 29).is_some());
+    assert!(Datum::neu(2026, 13, 1).is_none());
+    assert!(Datum::neu(2026, 4, 31).is_none());
+    assert!(Datum::neu(2026, 1, 0).is_none());
+    let tag = Datum::neu(2026, 11, 2).expect("gueltiges Datum");
+    let morgen = Datum::neu(2026, 11, 3).expect("gueltiges Datum");
+    assert!(Zeitpunkt::neu(tag, 24, 0, 0).is_none());
+    assert!(Zeitpunkt::neu(tag, 10, 60, 0).is_none());
+    assert!(Zeitpunkt::neu(tag, 10, 0, 60).is_none());
+    let zeit = Zeitpunkt::neu(tag, 10, 0, 0).expect("gueltige Uhrzeit");
+    let k = Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Aufzeichnung).expect("Kurs");
+    assert_eq!(k.handelstag(), tag);
+    assert_eq!(k.zeitpunkt(), zeit);
+    assert_eq!(k.herkunft(), Herkunft::Aufzeichnung);
+    assert_eq!(
+        Kurs::neu(Cent(10_000), "EUR", morgen, zeit, Herkunft::Broker).err(),
+        Some(KursFehler::Handelstag)
+    );
+}
+"#,
+    )
+}
+
+/// Kurse kennen ihren Stand und das Alter jedes Kurses. Ein Kurs nach dem Stand (aus der
+/// Zukunft) und ein doppelter Kurs werden abgelehnt.
+#[test]
+#[ignore = "offen: 1·R06 Kurse ohne Alter"]
+fn befund_1_r06_kurse_kennen_ihr_alter() -> Result<(), String> {
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::{Cent, Datum, Herkunft, Isin, Kurs, KursFehler, Kurse, Zeitpunkt};
+fn main() {
+    let tag = Datum::neu(2026, 11, 2).expect("gueltiges Datum");
+    let um = |h: u8, m: u8| Zeitpunkt::neu(tag, h, m, 0).expect("gueltige Uhrzeit");
+    let isin = Isin::neu("DE0007164600").expect("ISIN");
+    let k = Kurs::neu(Cent(10_000), "EUR", tag, um(10, 0), Herkunft::Broker).expect("Kurs");
+    let kurse = Kurse::neu(um(10, 20), vec![(isin.clone(), k.clone())]).expect("Kurse");
+    assert_eq!(kurse.stand(), um(10, 20));
+    assert_eq!(kurse.kurs(&isin), Some(Cent(10_000)));
+    assert_eq!(kurse.alter_s(&isin), Some(1_200));
+    assert_eq!(
+        Kurse::neu(um(9, 59), vec![(isin.clone(), k.clone())]).err(),
+        Some(KursFehler::Zukunft(isin.clone()))
+    );
+    assert_eq!(
+        Kurse::neu(um(10, 20), vec![(isin.clone(), k.clone()), (isin.clone(), k)]).err(),
+        Some(KursFehler::Doppelt(isin))
+    );
+}
+"#,
+    )
+}
