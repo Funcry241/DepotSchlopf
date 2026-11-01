@@ -5,6 +5,7 @@ members = [
     "crates/depot_regelwerk",
     "crates/depot_ki",
     "crates/depot_kodex",
+    "crates/depot_lauf",
 ]
 
 [workspace.package]
@@ -24,6 +25,7 @@ publish = false
 sha2 = "0.10"
 depot_kern = { path = "crates/depot_kern" }
 depot_ki = { path = "crates/depot_ki" }
+depot_kodex = { path = "crates/depot_kodex" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

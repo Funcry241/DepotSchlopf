@@ -61,3 +61,13 @@ pub fn pruefe(wurzel: &Path, basis: &str) -> Vec<String> {
     fehler.extend(essenz::pruefe(wurzel));
     fehler
 }
+
+/// Fuer einen entpackten Stand ohne Git: Deklaration und Pfadrollen sind nicht pruefbar,
+/// Festschreibung, Quellscan und Essenz schon. Ersetzt nie das Gate auf GitHub.
+pub fn pruefe_ohne_diff(wurzel: &Path) -> Vec<String> {
+    let mut fehler =
+        festschreibung::pruefe(wurzel, Klasse::Funktion, &std::collections::BTreeSet::new());
+    fehler.extend(quellscan::pruefe(wurzel));
+    fehler.extend(essenz::pruefe(wurzel));
+    fehler
+}

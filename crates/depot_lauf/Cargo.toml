@@ -1,0 +1,25 @@
+[package]
+name = "depot_lauf"
+description = "DepotSchlopf: der Ein-Befehl-Einstieg (run.cmd) mit Assistenten-Export nach jedem Lauf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "depotschlopf"
+path = "src/main.rs"
+
+[dependencies]
+depot_kodex = { workspace = true }
+sha2 = { workspace = true }
+
+[lints]
+workspace = true

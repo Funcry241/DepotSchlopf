@@ -17,11 +17,19 @@ jobs:
           fetch-depth: 0
       - name: Rust-Werkzeugkette aus rust-toolchain.toml
         run: rustup toolchain install
-      - name: Gate
+      - name: Gate und Assistenten-Export (wie run.cmd)
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASIS="origin/${{ github.base_ref }}"
           else
             BASIS="${{ github.event.before }}"
           fi
-          cargo run --locked -p depot_kodex -- --basis "$BASIS" --voll
+          cargo run --locked -p depot_lauf -- alles --basis "$BASIS"
+      - name: Assistenten-Export bereitstellen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assistant_export_latest
+          path: assistant_export_latest.zip
+          if-no-files-found: warn
+          retention-days: 30

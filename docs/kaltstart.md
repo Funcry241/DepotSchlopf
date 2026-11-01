@@ -2,6 +2,10 @@
 
 Diese Datei zuerst lesen, wenn ein neuer Bearbeiter (Mensch oder KI) ohne Vorgeschichte an DepotSchlopf arbeitet.
 
+## Ein Befehl
+
+`run.cmd` (ohne Argument) prüft alles und schreibt danach `assistant_export_latest.zip` in den Projektordner, auch wenn etwas scheitert. Für eine neue KI-Sitzung genügt diese eine Datei: hochladen und `assistant_handoff_latest.txt` darin lesen lassen. Laufzeitdaten und Zugangsdaten sind nie enthalten.
+
 ## Reihenfolge
 
 1. `README.md` – Zweck, Crates, Leitsatz.
@@ -15,7 +19,7 @@ Diese Datei zuerst lesen, wenn ein neuer Bearbeiter (Mensch oder KI) ohne Vorges
 1. Vorher: passende Essenz-Regeln lesen („Vor der Änderung prüfen“).
 2. `kodex/aenderung.txt` neu schreiben: Klasse, Zweck, Pfade.
 3. Ändern.
-4. `run.cmd kodex` ausführen. Nur ein offenes Gate darf zusammengeführt werden.
+4. `run.cmd` ausführen. Nur ein offenes Gate darf zusammengeführt werden.
 5. Ist eine Festschreibung betroffen: `run.cmd festschreibung`, Klasse `FestschreibungAenderung`, Freigabe durch Wolfgang Mair.
 
 ## Klassen

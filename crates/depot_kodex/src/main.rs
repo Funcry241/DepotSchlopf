@@ -44,8 +44,16 @@ fn main() -> ExitCode {
         .map_or("origin/main", String::as_str);
     let voll = args.iter().any(|a| a == "--voll");
 
-    println!("[Kodex] Basis: {basis}");
-    let fehler = depot_kodex::pruefe(&wurzel, basis);
+    let fehler = if wurzel.join(".git").exists() {
+        println!("[Kodex] Basis: {basis}");
+        depot_kodex::pruefe(&wurzel, basis)
+    } else {
+        println!(
+            "[Kodex] HINWEIS: kein Git-Arbeitsbaum. Deklaration und Pfadrollen nicht pruefbar; \
+             massgeblich bleibt das Gate auf GitHub."
+        );
+        depot_kodex::pruefe_ohne_diff(&wurzel)
+    };
     if !fehler.is_empty() {
         for f in &fehler {
             eprintln!("[Kodex] ABGELEHNT: {f}");

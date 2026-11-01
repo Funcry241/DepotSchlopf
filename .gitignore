@@ -19,3 +19,7 @@ kassenbuch*.txt
 .idea/
 Thumbs.db
 .DS_Store
+
+# Assistenten-Export (entsteht nach jedem Lauf)
+/assistant_export_latest.zip
+/assistant_export_latest.zip.tmp

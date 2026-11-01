@@ -17,7 +17,7 @@ Was wurde tatsächlich ausgeführt, mit welchem Ergebnis? Was steht noch aus?
 
 ## Vor dem Einreichen
 
-- [ ] `run.cmd kodex` meldet „Gate offen“.
+- [ ] `run.cmd` meldet „Gate offen“.
 - [ ] Neue Regeln haben synthetische Tests.
 - [ ] Keine Zugangsdaten, Kontodaten oder echten Depotstände.
 - [ ] Bei `FestschreibungAenderung`: Freigabe des Eigentümers liegt vor.

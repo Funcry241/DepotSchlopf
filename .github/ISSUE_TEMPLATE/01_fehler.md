@@ -16,7 +16,9 @@ Sicherheitslücken bitte **nicht** hier veröffentlichen, sondern privat melden:
 
 ## Wie hast du gestartet?
 
-- [ ] `run.cmd kodex`
+- [ ] `run.cmd`
+
+Falls vorhanden, `assistant_export_latest.zip` anhängen (enthält keine Zugangsdaten).
 - [ ] anderer Aufruf (bitte nennen)
 
 Stand (Commit oder Version), falls bekannt:

@@ -412,7 +412,7 @@ Der Testlauf ist grün, aber die Änderung hat heimlich eine Grenze verschoben.
 
 **Lösungsraum**
 
-`run.cmd kodex` vor jedem Zusammenführen; CI führt dasselbe auf jedem Pull Request aus.
+`run.cmd` vor jedem Zusammenführen; CI führt dasselbe auf jedem Pull Request aus.
 
 **Vor der Änderung prüfen**
 
@@ -524,7 +524,7 @@ Eine Regel lebt nur im Chat.
 
 **Lösungsraum**
 
-`docs/kaltstart.md` als Einstieg, Essenz mit festen Abschnitten, Kodex prüft beides bei jedem Lauf.
+`docs/kaltstart.md` als Einstieg, Essenz mit festen Abschnitten, Kodex prüft beides bei jedem Lauf. Ein Befehl (`run.cmd`) erledigt alles und schreibt am Ende immer `assistant_export_latest.zip`: Laufergebnis, Konsole, Übergabe und Quellstand in einer Datei, die eine neue KI-Sitzung ohne Vorgeschichte versteht.
 
 **Vor der Änderung prüfen**
 
@@ -532,4 +532,4 @@ Würde ein neuer Bearbeiter meine Änderung ohne Rückfrage verstehen?
 
 **Harter Bezug**
 
-Kodex-Schritt Essenz-Kaltstart (`crates/depot_kodex/src/essenz.rs`).
+Kodex-Schritt Essenz-Kaltstart (`crates/depot_kodex/src/essenz.rs`); Assistenten-Export (`crates/depot_lauf/src/export.rs`).
