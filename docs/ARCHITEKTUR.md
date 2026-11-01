@@ -2,7 +2,7 @@
 
 Stand 01.11.2026 · Wolfgang Mair
 
-*Fassung 4. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
+*Fassung 4.1. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
 
 ## 1 Zweck und Leitsatz
 
@@ -59,7 +59,7 @@ Diese Regeln gelten für jeden Baustein und jede spätere Änderung. Die Regeln 
 | R32 | Prüfkriterien setzen keinen Anreiz | Wer weiß, wonach er bewertet wird, optimiert das Kriterium statt des Ziels. | Freigabekriterien belohnen nie Aktivität, etwa eine Mindestzahl an Trades. Die Berater kennen weder die Kriterien noch den Stand der Prüfung. Kosten zählen in jede Bewertung voll hinein. |
 | R33 | Schwellen lösen aus, sie garantieren nicht | Ein Markt kann über jede Grenze springen. | Zugesagt wird nur, was das Cash-Konto erzwingt: Verlust nie über dem eingesetzten Geld. Stopps, Bereichs-Stopps, Tagesverlust und Notbremse lösen bei einer Schwelle aus. Der tatsächliche Verlust kann darüber liegen. Die Architektur schreibt deshalb „löst aus bei“, nie „begrenzt auf“. |
 | R34 | Jede Order hat ein festes Verfahren | Ein Auftrag ohne festgelegten Ablauf wird im Ernstfall improvisiert. | Für jeden Aktionsgrund sind Ordertyp, Auslöser, Limitbildung, Handelszeit, Teilausführung und Restbehandlung festgeschrieben (Kapitel 10). |
-| R35 | Schutz gilt erst nach Bestätigung | Ein gesendeter Schutzauftrag ist noch kein aktiver Schutz. | Bestand ohne vom Broker bestätigten Schutz für genau die gehaltene Menge ist ein eigener Zustand mit Frist. Läuft die Frist ab, wird der Rest storniert und die ungeschützte Menge zwingend verkauft. Ein abgesendeter Stornowunsch ist keine Stornierung. |
+| R35 | Schutz gilt erst nach Bestätigung | Ein gesendeter Schutzauftrag ist noch kein aktiver Schutz. | Bestand ohne vom Broker bestätigten Schutz für genau die gehaltene Menge ist ein eigener Zustand mit Frist. Läuft die Frist ab, wird der Rest storniert und die ungeschützte Menge zwingend verkauft. Ist der Broker nicht erreichbar, gilt der Fehlerzustand „Schutz ungewiss“ mit Halt, Nachricht und Auflösung nach der Wiederverbindung; Schutz in der Zwischenzeit ist nicht garantiert. Ein abgesendeter Stornowunsch ist keine Stornierung. |
 | R36 | Zwang und Wahl sind getrennt | Ein Ausstieg, der an einer Sparregel scheitert, ist keiner. | Eine Matrix legt fest, welche Prüfung für freiwillige Käufe, freiwillige Verkäufe und zwingende Ausstiege gilt (Kapitel 8). Halt sperrt freiwillige Aufträge, nie die eigenen Schutzaktionen. Kein Leerverkauf, eindeutiger Bestand und plausible Kurse gelten immer. |
 | R37 | Jeder Auftrag hat einen Zustand | Wer nicht weiß, ob er gesendet hat, sendet doppelt. | Aufträge durchlaufen eine feste Zustandsmaschine (Kapitel 10). Geld und Stücke reserviert eine einzige Stelle für Bereich und Gesamtkonto zugleich. Ein unbekannter Sendestatus führt nur zum Abgleich, nie zu einem zweiten Versand. |
 | R38 | Anker zeigen nur auf Bestätigtes | Zwei Dateien lassen sich nicht gleichzeitig schreiben. | Änderungen über mehrere Dateien folgen einem Commitprotokoll mit Wiederherstellung. Ein Anker zeigt nur auf einen schon bestätigten Stand, nie auf einen gerade entstehenden. Gegen das gemeinsame Zurückrollen aller Dateien hilft nur ein Anker außerhalb des Rechners. |
@@ -124,12 +124,13 @@ Ein Bereich ist ein virtueller Teil desselben IBKR-Kontos mit eigenem Geld, eige
 
 **Was „Sicher“ halten darf und welche Risiken bleiben:** „Sicher“ ist ein Ziel, keine Garantie. Zum Start hält der Bereich nur Bargeld. Dann bleibt das Ausfallrisiko des Brokers, das die gesetzliche Anlegerentschädigung nur begrenzt deckt. Später darf er höchstens einen physischen UCITS-ETF auf Euro-Staatsanleihen mit Restlaufzeit bis zu einem Jahr halten, und nur einen, den Wolfgang nach Prüfung von Struktur, Basisinformationsblatt und Kosten namentlich in die Positivliste aufnimmt. Kurze Laufzeiten verringern die Zinsabhängigkeit, schließen aber Kursverluste durch Zins-, Kredit-, Liquiditäts- und Fondseffekte nicht aus. Eine feste Verlustgrenze gibt es dafür nicht. Die Schwankungsgrenze der Festschreibung ist eine Melde- und Zukaufsregel: Fällt der ETF darunter, gibt es keine Zukäufe, und Wolfgang bekommt eine Nachricht. Verkauft wird nur auf seinen Befehl. Aktien, Unternehmensanleihen, Fremdwährung und Hebel sind ausgeschlossen. Das Geld des Kurzfrist-Bereichs bleibt bis zu dessen Echtgeld-Freigabe uninvestiert als Bargeld.
 
-**Handelskosten:** Drei Größen sind getrennt. Das **Ausgabenbudget** ist die verbindliche Obergrenze für freiwillige Aufträge je Zeitraum, im Kurzfrist-Bereich je Monat, im Langfrist-Bereich je Jahr, als Anteil am Bereichswert zu Beginn des Zeitraums. Die **Reservierung** sind die vorsichtig gerechneten Kosten eines Auftrags: Höchstgebühr aus der Gebührentabelle des tatsächlichen Kontomodells samt Börsen- und Clearinggebühren, Spread bis höchstens zum Limit-Abstand. Die **tatsächlichen Kosten** werden nach der Ausführung gebucht.
+**Handelskosten:** Drei Größen sind getrennt. Das **Handelsbudget** ist die verbindliche Obergrenze für die Gebühren freiwilliger Aufträge je Zeitraum, im Kurzfrist-Bereich je Monat, im Langfrist-Bereich je Jahr, als Anteil am Bereichswert zu Beginn des Zeitraums. Die **Reservierung** rechnet je Order mit der festgeschriebenen Höchstgebühr aus der Gebührentabelle des tatsächlichen Kontomodells, samt Börsen- und Clearinggebühren. Die **tatsächlichen Kosten** werden nach der Ausführung gebucht. Der Spread ist keine Gebühr: Ihn begrenzt je Order der Limit-Abstand. Er wird gemessen und zählt voll in jede Bewertung (R16), aber nicht gegen das Handelsbudget.
 
-- Ein freiwilliger Kauf wird nur genehmigt, wenn das Budget seine eigene Reservierung und zusätzlich die Kosten für den späteren zwingenden Ausstieg deckt. Diese **Ausstiegsreserve** bleibt reserviert, solange die Position besteht.
-- Zwingende Ausstiege scheitern nie am Budget (R36). Sie werden aus der Ausstiegsreserve bezahlt, und ihre tatsächlichen Kosten zählen voll.
-- Liegen die tatsächlichen Kosten über dem Budget, ruhen freiwillige Aufträge des Bereichs bis zum Ende des Zeitraums, und der Bericht nennt die Überschreitung. Die Überschreitung wird nicht ins nächste Budget verschoben.
-- Alle Bereiche buchen in ein gemeinsames Laufzeit-Kostenbuch. Der Gesamtdeckel für alle Kosten im Jahr (KI und Handel) wird bei jeder Reservierung geprüft, nicht nur beim Laden der Festschreibung. Die Summe der Bereichsbudgets darf ihn nicht übersteigen.
+- **Formel für einen freiwilligen Kauf:** Genehmigt wird nur, wenn der Rest des Handelsbudgets mindestens so groß ist wie die Höchstgebühr des Kaufs plus die Höchstgebühr des späteren Verkaufs. Beide Beträge belasten den Zeitraum des Kaufs. Ein Hin-und-zurück belastet das Budget also einmal, beim Einstieg. Mit 2,00 € Höchstgebühr sind das 4,00 €, die in 6,00 € passen; ein zweiter Einstieg im selben Monat passt nicht mehr.
+- Die Höchstgebühr des Verkaufs wird zur **Ausstiegsreserve** der Position. Sie bezahlt den späteren Verkauf, freiwillig oder zwingend. Ein Rest verfällt und fließt nicht ins Budget zurück.
+- Zwingende Ausstiege scheitern nie am Budget (R36). Kostet ein Ausstieg mehr als seine Ausstiegsreserve, etwa durch mehrere Teilaufträge, wird der Mehrbetrag im laufenden Zeitraum gebucht.
+- Liegen die tatsächlichen Gebühren über dem Budget, ruhen freiwillige Aufträge des Bereichs bis zum Ende des Zeitraums, und der Bericht nennt die Überschreitung. Die Überschreitung wird nicht ins nächste Budget verschoben.
+- Alle Bereiche buchen in ein gemeinsames Laufzeit-Kostenbuch. Der Gesamtdeckel für alle Kosten im Jahr (KI und Gebühren) wird bei jeder Reservierung geprüft, nicht nur beim Laden der Festschreibung. Die Summe der Bereichsbudgets darf ihn nicht übersteigen.
 
 ## 6 Sammelstelle und Ereignislogik
 
@@ -273,7 +274,9 @@ Der Kontowächter ist reiner Rust-Code ohne KI. Er läuft in der Handelszeit in 
 
 - Beide sind Hash-Ketten. Die erste Zeile entsteht nur durch einen ausdrücklichen Einrichtungsbefehl. Fehlt eine Datei später, ist sie leer oder kürzer als der letzte bekannte Stand, gilt Halt und kein Neustart.
 - **Commitprotokoll (R38):** Das Journal ist die führende Datei. Ein Vorgang, der beide Dateien betrifft, schreibt zuerst den Eintrag ins Kassenbuch und synchronisiert ihn. Danach bestätigt ein Journaleintrag den Stand des Kassenbuchs (Zeilenzahl und Hash) und wird synchronisiert. Erst damit gilt der Vorgang. Das Kassenbuch verweist nur auf bereits bestätigte Journalstände, nie auf den gerade entstehenden. So entsteht keine zirkuläre Abhängigkeit.
-- **Wiederherstellung:** Beim Start darf das Kassenbuch höchstens um einen unbestätigten Eintrag über den bestätigten Stand hinausgehen. Das ist ein Absturz zwischen den beiden Schritten. Der Eintrag wird geprüft und dann bestätigt oder als verworfen markiert. Ist das Kassenbuch kürzer als sein bestätigter Stand oder weicht sein Hash ab, ist das keine Absturzfolge, sondern Halt.
+- **Datensatzformat:** Jeder Eintrag ist eine Zeile mit eigener Prüfsumme und Abschlusszeichen. Ein Eintrag ohne Abschluss oder mit falscher Prüfsumme ist unvollständig.
+- **Wiederherstellung:** Beim Start darf jede Datei am Ende höchstens einen unvollständigen Eintrag haben. Das ist ein abgebrochener Schreibvorgang. Er wird in eine Quarantänedatei kopiert, abgeschnitten und im Journal belegt. Danach darf das Kassenbuch höchstens um einen vollständigen, unbestätigten Eintrag über den bestätigten Stand hinausgehen. Er wird geprüft und dann bestätigt oder als verworfen markiert. Ein unvollständiger oder fehlerhafter Eintrag vor dem Ende, ein unvollständiger Eintrag innerhalb des bestätigten Stands, ein Kassenbuch kürzer als sein bestätigter Stand oder ein abweichender Hash ist keine Absturzfolge, sondern Halt.
+- **Absturz während der Wiederherstellung:** Jeder Schritt ist wiederholbar und führt beim zweiten Mal zum selben Ergebnis: Abschneiden auf denselben gültigen Stand, Quarantäne nur, wenn sie noch nicht vorliegt, Bestätigen oder Verwerfen nur, wenn das Journal es noch nicht enthält. Ein Absturz mitten in der Wiederherstellung führt beim nächsten Start zu ihrer Wiederholung, nie zu einem anderen Ergebnis.
 - **Anker außerhalb des Rechners:** Der Abendbericht geht aufs Handy und nennt den bestätigten Stand beider Dateien. Nur dieser Anker zeigt, wenn beide Dateien gemeinsam auf einen alten Stand zurückgesetzt wurden.
 - Beim Öffnen wird die ganze Historie geprüft: Reihenfolge der Daten und Zyklen, gültige Beträge und Summen. Schreiber und Leser akzeptieren genau denselben Zustandsraum.
 - Gesperrt wird die geöffnete Datei selbst über das Betriebssystem, nicht ein abgeleiteter Pfadname. Links im Datenverzeichnis sind verboten.
@@ -309,7 +312,9 @@ Der Kontowächter ist reiner Rust-Code ohne KI. Er läuft in der Handelszeit in 
 
 Der Schutzstopp ist bewusst eine Stopp-Order, die bei Auslösung zur Marktorder wird, und damit die einzige Ausnahme von „nur Limit“. Sie wird ausgeführt, kann aber deutlich unter dem Stopp liegen. Eine Stopp-Limit-Order hält den Preis, kann aber unausgeführt bleiben, und ein nicht ausgeführter Schutz wiegt schwerer als ein schlechter Kurs. Die Wahl liegt bei Wolfgang (Kapitel 21).
 
-**Schutz bei Teilausführung (R35):** Für jede gefüllte Menge muss innerhalb der Schutzfrist ein vom Broker bestätigter Stopp über genau diese Menge bestehen. Ein angehängter Stopp wird erst als Schutz gezählt, wenn der Broker ihn für die tatsächlich gefüllte Menge aktiv meldet. Fehlt die Bestätigung nach Ablauf der Frist, wird der Kaufrest storniert und die ungeschützte Menge zwingend verkauft, und es gilt Halt. Beim Start prüft der Kontowächter, dass jede Kurzfrist-Position einen bestätigten Stopp über ihre ganze Menge hat.
+**Schutz bei Teilausführung (R35):** Für jede gefüllte Menge muss innerhalb der Schutzfrist ein vom Broker bestätigter Stopp über genau diese Menge bestehen. Ein angehängter Stopp wird erst als Schutz gezählt, wenn der Broker ihn für die tatsächlich gefüllte Menge aktiv meldet. Fehlt die Bestätigung nach Ablauf der Frist und ist der Broker erreichbar, wird der Kaufrest storniert und die ungeschützte Menge zwingend verkauft, und es gilt Halt. Beim Start prüft der Kontowächter, dass jede Kurzfrist-Position einen bestätigten Stopp über ihre ganze Menge hat.
+
+**Verbindungsabbruch (R35):** Ohne Verbindung zum Broker kann der Rahmen weder Schutz bestätigen noch verkaufen. Das ist ein eigener Fehlerzustand, **„Schutz ungewiss“**: Halt, keine neuen Aufträge und sofort eine Nachricht an Wolfgang aufs Handy mit Wert und möglicher ungeschützter Menge, damit er über die IBKR-App eingreifen kann. Die Verbindung wird in festen Abständen neu versucht. Nach der Wiederverbindung kommt zuerst der Abgleich. Besteht ein bestätigter Stopp über die ganze Menge, endet der Zustand. Sonst wird sofort ein Stopp für die ungeschützte Menge gesendet; ist er nicht innerhalb der Schutzfrist bestätigt, wird die Menge zwingend verkauft. Der Halt bleibt, bis Wolfgang ihn aufhebt. Zugesagt ist nur, dass der Zustand erkannt, gemeldet und nach der Wiederverbindung aufgelöst wird, nicht, dass in der Zwischenzeit Schutz besteht.
 
 **Zustände eines Auftrags (R37):**
 
@@ -322,9 +327,17 @@ Der Schutzstopp ist bewusst eine Stopp-Order, die bei Auslösung zur Marktorder 
 | angenommen | vom Broker bestätigt | teilgefüllt, gefüllt, storniert, verfallen |
 | teilgefüllt | ein Teil ist ausgeführt | gefüllt, storniert, verfallen |
 | gefüllt, storniert, verfallen, abgelehnt | Endzustand laut Broker | abgeglichen |
-| abgeglichen | Journal, Kassenbuch, Konto und Broker stimmen überein; Reservierung aufgelöst | Ende |
+| abgeglichen | Journal, Kassenbuch, Konto und Broker stimmen überein; Orderreservierung aufgelöst | Ende |
 
-Eine Reservierung wird erst im Endzustand laut Broker aufgelöst. Nach einem Neustart wird jeder offene Zustand aus dem Journal wiederhergestellt und zuerst abgeglichen.
+**Reservierungen:** Es gibt drei Arten, und jede hat ihren eigenen Anfang und ihr eigenes Ende.
+
+| Reservierung | entsteht | ändert sich | endet |
+| --- | --- | --- | --- |
+| Orderreservierung Kauf: Limit × Menge mit Kaufpuffer plus Höchstgebühr | im Zustand „reserviert“ | bei Teilfüllung wird der gefüllte Teil durch die tatsächliche Buchung ersetzt; reserviert bleibt nur der offene Rest | im Endzustand laut Broker; der nicht gefüllte Rest wird frei |
+| Stückreservierung Verkauf | im Zustand „reserviert“ | bei Teilfüllung um die verkaufte Menge kleiner | im Endzustand laut Broker; nicht verkaufte Stücke werden frei |
+| Ausstiegsreserve: Höchstgebühr des Verkaufs, aus dem Handelsbudget | mit der Reservierung des Kaufs | bleibt bestehen, sobald etwas gefüllt ist; wird nichts gefüllt, endet sie mit dem Kauf | wenn die Position vollständig verkauft und abgeglichen ist; ein Rest verfällt |
+
+Nach einem Neustart wird jeder offene Zustand samt seinen Reservierungen aus dem Journal wiederhergestellt und zuerst abgeglichen.
 
 ## 11 Journal, Wiederanlauf und Berichte
 
@@ -381,7 +394,7 @@ Ist das Monatsbudget eines Bereichs oder eines Beraters erreicht, wird in diesem
 | Maus (OpenAI-Spitzenmodell) | 10 $ / 50 $ je Mio. Token | [benchlm.ai](https://benchlm.ai/openai/api-pricing), Drittquelle |
 | ETF-Kosten | etwa 0,1 % im Jahr | Annahme |
 
-Dollar wird vorsichtig 1:1 als Euro gerechnet. Die Gebühr von 1,50 € und der Spread sind Annahmen für die Erwartung. Für Reservierungen zählen die Höchstgebühr aus der Gebührentabelle des tatsächlichen Kontomodells und der Limit-Abstand (Kapitel 5).
+Dollar wird vorsichtig 1:1 als Euro gerechnet. Die Gebühr von 1,50 € und der Spread sind Annahmen für die Erwartung. Für Reservierungen zählt die festgeschriebene Höchstgebühr je Order; den Spread begrenzt der Limit-Abstand (Kapitel 5).
 
 **KI-Aufrufe im Monat (erwartet):**
 
@@ -597,7 +610,8 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Kodex | Essenz-Register | feste Liste der Regelnummern |
 | Export | Umfang | nur von Git verfolgte Dateien erlaubter Pfadrollen, keine Links |
 | Kassenbuch | Anker | bestätigter Stand (Zeilenzahl und Hash) im Journal und im Abendbericht aufs Handy; höchstens ein unbestätigter Eintrag beim Start |
-| Aufträge | Schutzfrist Kurzfrist | 60 Sekunden bis zum bestätigten Stopp, sonst Rest stornieren, ungeschützte Menge zwingend verkaufen, Halt |
+| Aufträge | Schutzfrist Kurzfrist | 60 Sekunden bis zum bestätigten Stopp; sonst bei erreichbarem Broker Rest stornieren, ungeschützte Menge zwingend verkaufen, Halt; ohne Verbindung Zustand „Schutz ungewiss“: Halt, Nachricht, Neuversuch alle 30 Sekunden |
+| Kosten | Höchstgebühr je Order | 2,00 € bis 2.500 € Volumen, vor dem Start an der Gebührentabelle des tatsächlichen Kontos bestätigen |
 | Aufträge | zwingender Ausstieg | Limit um den Limit-Abstand unter dem letzten Kurs, höchstens 3 Nachzieh-Schritte zu je diesem Abstand |
 | Kurse | Höchstalter | 20 Minuten für Entscheidungen, freiwillige Aufträge, Tagesverlust und Notbremse; älter: Halt |
 | Freigaben | Handelszustimmung von Maus | gültig 15 Minuten und nur bis zum nächsten Lagebild |
@@ -613,10 +627,10 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Freigabe | Disziplin Kurzfrist | höchstens ein ausgelöster Monats-Stopp; keine Regelverletzung; gesonderte Freigabe durch Wolfgang |
 | Freigabe | Echtgeld Langfrist | mindestens 3 Monate auf Papier; keine Regelverletzung; Kosten höchstens 20 % über der Rechnung; jeder Abgleich stimmig |
 | Freigabe | Kurzfrist vor Freigabe | Geld bleibt uninvestiert als Bargeld |
-| Kosten | Handelskosten Kurzfrist | höchstens 0,6 % des Bereichswerts im Monat (6 € bei 1.000 €) |
-| Kosten | Handelskosten Langfrist | höchstens 1,2 % des Bereichswerts im Jahr (12 € bei 1.000 €), Erstkauf ausgenommen |
-| Kosten | Handelskosten Sicher | höchstens 0,5 % des Bereichswerts im Jahr |
-| Kosten | Gesamtdeckel aller Kosten | 5 % des Startkapitals im Jahr (150 €), KI und Handel zusammen |
+| Kosten | Handelsbudget Kurzfrist | Gebühren höchstens 0,6 % des Bereichswerts im Monat (6 € bei 1.000 €); ein Einstieg belastet Kauf- und Verkaufsgebühr (4 €) |
+| Kosten | Handelsbudget Langfrist | Gebühren höchstens 1,2 % des Bereichswerts im Jahr (12 € bei 1.000 €), Erstkauf ausgenommen |
+| Kosten | Handelsbudget Sicher | Gebühren höchstens 0,5 % des Bereichswerts im Jahr |
+| Kosten | Gesamtdeckel aller Kosten | 5 % des Startkapitals im Jahr (150 €), KI und Gebühren zusammen; der Spread wird daneben gemessen und berichtet |
 | Nachrichten | Quellenliste | feste Liste von RSS-Adressen, Änderung nur per Festschreibung |
 | Maßstab | Sicher | Euro-Geldmarktzins (€STR) |
 | Maßstab | Langfrist | breiter Welt-ETF (z. B. MSCI World oder FTSE All-World) |

@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: DokuOnly
-zweck: Architektur Fassung 4 nach zweiter Pruefung durch Maus und Befundliste
+zweck: Architektur Fassung 4.1 mit vier Praezisierungen aus der dritten Pruefung durch Maus
 pfade:
 docs/ARCHITEKTUR.md
 docs/BEFUNDE.md

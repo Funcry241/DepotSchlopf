@@ -9,7 +9,7 @@ Diese Liste führt jeden Befund aus den Prüfungen durch Maus vom Befund bis zur
 
 Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher Stufe der Test entsteht und dass eine unabhängige Prüfung ihn bestätigt.
 
-Stand: 01.11.2026. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.1. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -61,7 +61,7 @@ Stand: 01.11.2026. Kein Befund ist technisch geschlossen.
 | Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2·A01 | Verlustgrenzen als Garantie formuliert; Stopptyp und Limitpflicht im Widerspruch | R33, R34; Kap. 5, 8, 10, 14; Schutzstopp als bewusste Ausnahme, offene Wahl in Kap. 21 | Kurslücke durch den Stopp: Bericht nennt Auslöser und tatsächlichen Verlust; zwingender Ausstieg mit Rest nach der Schrittgrenze | Stufe 6 | berücksichtigt | offen |
-| 2·A02 | Schutz ab der ersten Sekunde bei Teilausführung unbelegt | R35; Kap. 10 Schutzfrist | 10 Stück beauftragt, 3 gefüllt, Verbindung weg: nach der Frist ist die ungeschützte Menge verkauft oder bestätigt geschützt | Stufe 6 am Papierkonto | berücksichtigt | offen |
+| 2·A02 | Schutz ab der ersten Sekunde bei Teilausführung unbelegt | R35; Kap. 10 Schutzfrist | 10 Stück beauftragt, 3 gefüllt, Verbindung weg: Zustand „Schutz ungewiss“, Halt und Nachricht; nach Wiederverbindung Abgleich, dann bestätigter Stopp über 3 Stück oder Zwangsverkauf (siehe 3·P2) | Stufe 6 am Papierkonto | berücksichtigt | offen |
 | 2·A03 | Stopps blockieren reguläre Ausstiege | Kap. 9 Gruppe aus Stopp und Verkauf | Stopp löst während des Verkaufs aus: höchstens der Bestand wird verkauft | Stufe 6 | berücksichtigt | offen |
 | 2·A04 | zwingende Ausstiege durch freiwillige Regeln blockierbar | R36; Kap. 8 Matrix | Restbestand unter Mindestorder und über Gebührenquote wird zwingend verkauft; Halt sperrt ihn nicht | Stufe 2 | berücksichtigt | offen |
 | 2·A05 | Kostendeckel gegen Zwangsaufträge und tatsächliche Kosten | Kap. 5 Budget, Reservierung, Ausstiegsreserve, Laufzeit-Kostenbuch | ausgeschöpftes Budget blockiert keinen zwingenden Ausstieg; Überschreitung stoppt freiwillige Aufträge | Stufe 3 | berücksichtigt | offen |
@@ -81,3 +81,12 @@ Stand: 01.11.2026. Kein Befund ist technisch geschlossen.
 | 2·W2 | Papierbefund ist kein Renditebeweis | R16, Kap. 19 Stufe 8 | entfällt | laufend | berücksichtigt | offen |
 | 2·W3 | Geheimnisse in erlaubten Dateien | R28 Inhaltsprüfung | Geheimnismuster in verfolgter Datei bricht den Export ab | Stufe 2 | berücksichtigt | offen |
 | 2·W4 | Kursalter je Schutzfunktion | Kap. 18 Höchstalter | zu alter Kurs führt zu Halt | Stufe 4 | berücksichtigt | offen |
+
+## Prüfung 3 – Stand 254e484 (4 Restpunkte)
+
+| Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3·P1 | Kauf plus Ausstiegsreserve übersteigt das Monatsbudget | Kap. 5 Formel: Budget umfasst nur Gebühren, Höchstgebühr je Order festgeschrieben, Spread über den Limit-Abstand begrenzt und gemessen | Einstieg mit 250 € bei 6 € Budget und 2 € Höchstgebühr wird genehmigt (4 €); ein zweiter im selben Monat wird abgelehnt | Stufe 3 | berücksichtigt | offen |
+| 3·P2 | Schutzfrist ohne Brokerverbindung nicht erfüllbar | R35, Kap. 10 Zustand „Schutz ungewiss“ mit Halt, Nachricht, Neuversuch und Auflösung nach Wiederverbindung | Verbindung während Teilfüllung weg: Halt und Nachricht sofort; nach Wiederverbindung Stopp bestätigt oder Zwangsverkauf; Halt bleibt bis zur Aufhebung | Stufe 6 am Papierkonto | berücksichtigt | offen |
+| 3·P3 | Order- und Ausstiegsreserve vermischt | Kap. 10 Tabelle der drei Reservierungen mit Anfang, Änderung und Ende | gefüllter Kauf: Orderreservierung endet, Ausstiegsreserve bleibt; Kauf ohne Füllung: beide enden | Stufe 3 | berücksichtigt | offen |
+| 3·P4 | Absturzprotokoll ohne Teilschreibvorgänge und Absturz in der Wiederherstellung | R38, Kap. 9 Datensatzformat, Quarantäne, wiederholbare Wiederherstellung | abgeschnittene letzte Zeile wird erkannt und abgeschnitten; fehlerhafte Zeile davor führt zu Halt; Absturz an jedem Schritt der Wiederherstellung ergibt beim nächsten Start dasselbe Ergebnis | Stufe 2 | berücksichtigt | offen |
