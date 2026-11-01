@@ -132,7 +132,8 @@ fn zweiter_lauf_gesperrt() {
     );
 }
 
-/// Eine manipulierte oder abgeschnittene Datei sperrt alles, statt bei null anzufangen.
+/// Eine unlesbare Zeile oder ein abgebrochener letzter Eintrag sperrt alles. Ganze geloeschte
+/// Zeilen erkennt das Kassenbuch heute nicht (Befund 1·K04, `befunde.rs`).
 #[test]
 fn kaputtes_kassenbuch_sperrt() {
     for inhalt in [

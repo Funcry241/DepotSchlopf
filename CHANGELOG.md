@@ -4,6 +4,11 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+### Tests
+
+- Stufe 2, Schritt 1: Negativtests für 19 Befunde aus Kern, Regelwerk und KI-Budget (`tests/befunde.rs` je Crate). Sie sind am alten Stand rot und bis zum Umbau mit `ignore` markiert; Nachweis in `docs/befunde/negativtests.md`.
+- Gezielte Grenzfälle je harter Grenze; der Zufallstest heißt jetzt `zufallstest_grenzen_am_schlusskurs`, weil er nur am Schlusskurs prüft.
+
 ### Behoben
 
 - Kodex: Ein unveränderter Stand (frischer Klon von main) wird nicht mehr wegen fehlender Deklaration abgelehnt.
