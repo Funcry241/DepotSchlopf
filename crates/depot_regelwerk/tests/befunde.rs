@@ -604,9 +604,10 @@ fn befund_2_a04_umschlaggrenze_kuerzt_den_zwingenden_ausstieg_nicht() {
 #[test]
 #[ignore = "offen: 2·A04 Orderzahl sperrt zwingende Ausstiege"]
 fn befund_2_a04_orderzahl_sperrt_zwingende_ausstiege_nicht() {
-    let g = Grenzen::standard().mit_max_umschlag_bp(10_000); // Umschlag hier bewusst offen
+    // Viel Bargeld: Die sechs Ausstiege (6.000 €) bleiben unter der Umschlaggrenze von 50 %.
+    let g = Grenzen::standard();
     let u = universum_bis(5);
-    let mut topf = topf_neu(TopfId::A, Cent(400_000));
+    let mut topf = topf_neu(TopfId::A, Cent(4_000_000));
     for i in 5..11 {
         topf.setze_bestand(isin(i), 10); // je 1.000 €
     }
@@ -722,15 +723,23 @@ fn grenzfall_mindestorder_kauf_am_limit() {
 }
 
 /// Deckung: Kauf am Limit plus Gebuehr uebersteigt nie das Bargeld, auch knapp an der Grenze.
-/// Anteil und Umschlag sind hier bewusst offen, damit allein die Deckung begrenzt.
+/// Der Topf haelt drei Werte, die auf ihrem Ziel von 25 % bleiben, je etwa so viel wie das
+/// Bargeld (5 Stueck bei rund 506 €, 10 Stueck bei rund 1.011 €). Das Ziel von Wert 0 (25 %)
+/// entspricht damit etwa dem Bargeld, wie vorher das Ziel von 100 % im reinen Bargeldtopf.
+/// Hoechstanteil und Umschlaggrenze lassen den Kauf zu; begrenzt wird allein die Deckung.
 #[test]
 fn grenzfall_deckung_mit_gebuehr_am_limit() {
-    let g = Grenzen::standard()
-        .mit_max_anteil_bp(10_000)
-        .mit_max_umschlag_bp(10_000);
+    let g = Grenzen::standard();
     for bargeld in [50_649_i64, 50_650, 50_651, 101_000, 101_150, 101_151] {
-        let topf = topf_neu(TopfId::A, Cent(bargeld));
-        let v = vorschlag(BeraterId::Dachs, &[(0, 10_000)]);
+        let mut topf = topf_neu(TopfId::A, Cent(bargeld));
+        let je_wert = if bargeld < 100_000 { 5 } else { 10 };
+        for i in 1..4 {
+            topf.setze_bestand(isin(i), je_wert);
+        }
+        let v = vorschlag(
+            BeraterId::Dachs,
+            &[(0, 2_500), (1, 2_500), (2, 2_500), (3, 2_500)],
+        );
         let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&v), false);
         let mut kosten = Cent::NULL;
         for a in &ent.kaeufe {
@@ -746,7 +755,20 @@ fn grenzfall_deckung_mit_gebuehr_am_limit() {
             "Bargeld {bargeld}: Kaeufe kosten {kosten}"
         );
         // 5 Stueck zu 101 € plus 1,50 € Gebuehr = 506,50 €: ab dort muss gekauft werden.
-        assert_eq!(ent.kaeufe.is_empty(), bargeld < 50_650, "Bargeld {bargeld}");
+        assert_eq!(
+            ent.kaeufe.is_empty(),
+            bargeld < 50_650,
+            "Bargeld {bargeld}: {ent:?}"
+        );
+        // 10 Stueck zu 101 € plus 1,50 € = 1.011,50 €: ab dort alle 10, darunter weniger.
+        if bargeld > 100_000 {
+            let stueck = ent.kaeufe.first().map(|a| a.auftrag().stueck);
+            assert_eq!(
+                stueck == Some(10),
+                bargeld >= 101_150,
+                "Bargeld {bargeld}: {ent:?}"
+            );
+        }
     }
 }
 

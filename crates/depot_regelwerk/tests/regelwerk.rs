@@ -274,16 +274,11 @@ fn wert_ausserhalb_der_positivliste_wird_verkauft() {
 
 #[test]
 fn hoechstens_vier_orders_je_topf() {
-    let g = Grenzen::standard().mit_max_umschlag_bp(10_000);
-    let topf = topf_neu(TopfId::A, Cent(1_000_000));
-    let v = vorschlag(&[
-        (0, 1_600),
-        (1, 1_600),
-        (2, 1_600),
-        (3, 1_600),
-        (4, 1_600),
-        (5, 1_600),
-    ]);
+    // Sechs Kaeufe zu je 8 % bleiben zusammen unter der Umschlaggrenze von 50 %; begrenzt
+    // wird allein die Orderzahl.
+    let g = Grenzen::standard();
+    let topf = topf_neu(TopfId::A, Cent(10_000_000));
+    let v = vorschlag(&[(0, 800), (1, 800), (2, 800), (3, 800), (4, 800), (5, 800)]);
     let ent = lauf(&g, &topf, &kurse_alle(5_000), Some(&v), false);
     assert_eq!(ent.kaeufe.len(), 4);
     assert_eq!(
@@ -297,15 +292,26 @@ fn hoechstens_vier_orders_je_topf() {
 
 #[test]
 fn verkaeufe_finanzieren_kaeufe_nur_mit_garantiertem_erloes() {
-    let g = Grenzen::standard().mit_max_umschlag_bp(20_000);
+    // Kein Bargeld. Fuenf Werte zu je 1.000 € (20 %). Wert 0 wird verkauft; das Ziel von
+    // Wert 1 (25 % = 1.250 €) liegt ueber dem garantierten Erloes. Zusammen bleibt das unter
+    // der Umschlaggrenze von 50 %; begrenzt wird allein der garantierte Erloes.
+    let g = Grenzen::standard();
     let mut topf = topf_neu(TopfId::A, Cent::NULL);
-    topf.setze_bestand(isin(0), 50); // 2.500 € = 100 %
-    let v = vorschlag(&[(1, 2_500)]);
+    for i in [0, 2, 3, 4, 5] {
+        topf.setze_bestand(isin(i), 20);
+    }
+    let v = vorschlag(&[(1, 2_500), (2, 1_875), (3, 1_875), (4, 1_875), (5, 1_875)]);
     let ent = lauf(&g, &topf, &kurse_alle(5_000), Some(&v), false);
-    assert_eq!(ent.verkaeufe.len(), 1);
+    assert_eq!(ent.verkaeufe.len(), 1, "{ent:?}");
     let erloes = volumen(ent.verkaeufe.first().unwrap_or_else(|| unreachable!()));
     let kauf = volumen(ent.kaeufe.first().unwrap_or_else(|| unreachable!()));
-    assert!(kauf < erloes);
+    let gebuehr = |v: Cent| g.gebuehren().fuer(v).unwrap_or(Cent(i64::MAX));
+    let garantiert = erloes.checked_sub(gebuehr(erloes)).unwrap_or(Cent::NULL);
+    let kosten = kauf.checked_add(gebuehr(kauf)).unwrap_or(Cent(i64::MAX));
+    assert!(
+        kosten <= garantiert,
+        "Kauf {kosten} ueber Erloes {garantiert}"
+    );
     assert!(
         ent.kaeufe.iter().all(|a| a.auftrag().kennung.nr > 1),
         "Kaeufe nach den Verkaeufen nummeriert"

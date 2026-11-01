@@ -1,12 +1,10 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Stufe 2, Schnitt Kern - gepruefte Typen fuer 1·A01, 1·F01 und 1·R06 entlang R13, R19 und R20; Pruefstand-Grenzen nur ueber ein Feature in Tests
+klasse: Funktion
+zweck: Stufe 2, Schnitt Kern - gepruefte Typen fuer 1·A01, 1·F01 und 1·R06 entlang R13, R19 und R20; ohne Setzer fuer Grenzen, auch nicht hinter einem Feature (K8-01)
 pfade:
 crates/depot_kern/
 crates/depot_regelwerk/
 crates/depot_ki/
-kodex/festschreibung.txt
-kodex/freigabe.txt
 docs/BEFUNDE.md
 docs/befunde/
 CHANGELOG.md

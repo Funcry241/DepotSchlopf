@@ -4,7 +4,7 @@ abhaengigkeiten.depot_kern: dependencies.sha2={"workspace"=true}
 abhaengigkeiten.depot_ki: dependencies.depot_kern={"workspace"=true}
 abhaengigkeiten.depot_kodex: dependencies.depot_kern={"workspace"=true};dependencies.depot_ki={"workspace"=true};dependencies.sha2={"workspace"=true}
 abhaengigkeiten.depot_lauf: dependencies.depot_kodex={"workspace"=true};dependencies.sha2={"workspace"=true}
-abhaengigkeiten.depot_regelwerk: dependencies.depot_kern={"workspace"=true};dev-dependencies.depot_kern={"features"=["pruefstand"],"workspace"=true}
+abhaengigkeiten.depot_regelwerk: dependencies.depot_kern={"workspace"=true}
 abhaengigkeiten.workspace: workspace.dependencies.depot_kern={"path"="crates/depot_kern"};workspace.dependencies.depot_ki={"path"="crates/depot_ki"};workspace.dependencies.depot_kodex={"path"="crates/depot_kodex"};workspace.dependencies.sha2="0.10"
 cargo_lock: 6415c76ed11794b872473094c29d69b8fe9a083fdf7a7dcf2e7812b5e53bd43f
 crates: depot_kern,depot_ki,depot_kodex,depot_lauf,depot_regelwerk

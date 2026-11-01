@@ -96,33 +96,10 @@ fn befund_1_f01_geladene_grenze_laesst_sich_nicht_lockern() -> Result<(), String
     )
 }
 
-/// Waechter fuer den Pruefstand: Ohne das Feature `pruefstand` gibt es keinen Setzer. Die Sonde
-/// bindet `depot_kern` wie ein Produktiv-Crate ein, also mit den Standard-Features. Waere der
-/// Pruefstand dort eingeschaltet, liesse sich jede Grenze lockern.
-#[test]
-fn befund_1_f01_pruefstand_ist_ohne_feature_nicht_erreichbar() -> Result<(), String> {
-    sonde::erlaubt(&KERN, GRENZEN_ERLAUBT)?;
-    sonde::verboten(
-        &KERN,
-        "pub fn locker(g: depot_kern::Grenzen) -> depot_kern::Grenzen {\n    \
-         g.mit_max_anteil_bp(10_000)\n}\n",
-        &["E0599"],
-        &["mit_max_anteil_bp"],
-    )?;
-    sonde::verboten(
-        &KERN,
-        "pub fn locker(g: depot_kern::Gebuehren) -> depot_kern::Gebuehren {\n    \
-         g.mit_minimum(depot_kern::Cent(0))\n}\n",
-        &["E0599"],
-        &["mit_minimum"],
-    )
-}
-
 /// K8-01 (Pruefung von PR #8): Ein fremdes Programm schaltet jedes Feature von `depot_kern`
 /// und `depot_regelwerk` ein und baut im Release. Auch dann laesst sich keine Grenze und keine
 /// Gebuehr lockern. Das Programm ist Maus' Gegenprobe, unveraendert bis auf die Pfade.
 #[test]
-#[ignore = "offen: K8-01 Pruefstand im Release per Feature erreichbar"]
 fn befund_k8_01_grenzen_auch_mit_allen_features_im_release_nicht_lockerbar() -> Result<(), String> {
     const BEIDE: [&str; 2] = ["depot_kern", "depot_regelwerk"];
     sonde::erlaubt_mit_allen_features(
