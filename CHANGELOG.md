@@ -6,10 +6,12 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Kodex-Umbau (1·G01–G06 Kodex-Teil, 1·R03, 1·R08, 2·A11): Rust-Code wird in Token zerlegt und syntaktisch geprüft (Lint-Attribute samt `cfg_attr`, aufgelöste Importe), Manifeste mit eigenem TOML-Leser semantisch. Jedes Produktiv-Target verbietet die harten Lints im Kopf mit `forbid`, auch der Kodex selbst. Abhängigkeiten mit voller Identität und `Cargo.lock`-Hash festgeschrieben, Essenz mit festem Register, Pfadlisten NUL-getrennt, Lesefehler und Links sind Fehler. Jede Änderung der Festschreibung braucht eine an Diff und Festschreibung gebundene Grenzfreigabe `kodex/freigabe.txt`. Nachweis in `docs/befunde/kodex.md`.
 - Die harten Lints stehen im Kopf von `depot_kern`, `depot_regelwerk`, `depot_ki` und `depot_lauf` auf `forbid`. Der Compiler lehnt damit jede lokale Ausnahme ab, auch hinter `cfg_attr` (1·G01). Der Kopf von `depot_kodex` und die Prüfung durch den Kodex folgen mit dem Kodex-Umbau.
 
 ### Tests
 
+- Kodex-Schritt: 10 Negativtests in `crates/depot_kodex/tests/befunde.rs`, am alten Kodex rot, nach dem Umbau grün; jeder mit Kontrolle an einer sauberen Kopie und Ablehnung nur mit erwartetem Stichwort.
 - Stufe 2, Schritt 1: 35 Negativtests für 19 Befunde aus Kern, Regelwerk und KI-Budget (`tests/befunde.rs` je Crate). Sie sind am alten Stand rot und bis zum Umbau mit `ignore` markiert; Nachweis, Gegenproben und fehlende Teilnachweise in `docs/befunde/negativtests.md`.
 - Sonde für Bau- und Vertragstests: liest Compilermeldungen strukturiert und verlangt den erwarteten Zugriffsfehler; Verträge werden gebaut und ausgeführt.
 - Gezielte Grenzfälle je harter Grenze; der Zufallstest heißt jetzt `zufallstest_grenzen_am_schlusskurs`, weil er nur am Schlusskurs prüft.

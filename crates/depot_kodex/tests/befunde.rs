@@ -219,7 +219,6 @@ fn funktion_mit(baum: &Baum, code: &str) -> Result<Vec<String>, String> {
 /// Der Kodex wertet Lint-Attribute syntaktisch aus, samt `cfg_attr`, Verschachtelung und
 /// Lintgruppen, die einen harten Lint enthalten.
 #[test]
-#[ignore = "offen: 1·G01 Lint-Ausnahmen hinter cfg_attr und ueber Gruppen werden nicht erkannt"]
 fn befund_1_g01_ausnahme_hinter_cfg_attr_wird_abgelehnt() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
@@ -296,7 +295,6 @@ fn befund_1_g01_ausnahme_hinter_cfg_attr_wird_abgelehnt() -> Result<(), String> 
 /// Jedes Produkt-Crate verbietet die harten Lints im Kopf mit `forbid`, unbedingt und
 /// vollstaendig.
 #[test]
-#[ignore = "offen: 1·G01 forbid im Crate-Kopf wird nicht geprueft"]
 fn befund_1_g01_kopf_ohne_forbid_wird_abgelehnt() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
@@ -378,7 +376,6 @@ fn gegenprobe_g01_b(x: u8) -> u8 {
 /// Der Compiler selbst lehnt in jedem Produktiv-Target die Ausnahme ab (E0453). Gilt nur, wenn
 /// jeder Fehler E0453 ist und beide Lints genannt werden; ein anderer Fehler beweist nichts.
 #[test]
-#[ignore = "offen: 1·G01, 2·A11 der Compiler lehnt die Ausnahme nicht in jedem Target ab"]
 fn befund_1_g01_compiler_lehnt_ausnahme_in_jedem_target_ab() -> Result<(), String> {
     let baum = Baum::neu()?;
     let ziel = workspace().join("target/kodex-sonde");
@@ -436,7 +433,6 @@ fn befund_1_g01_compiler_lehnt_ausnahme_in_jedem_target_ab() -> Result<(), Strin
 /// Gruppierte, umbenannte und ueber `extern crate` oder Glob erreichte Zugriffe auf `std::env`
 /// und `std::fs` im reinen Kern werden erkannt.
 #[test]
-#[ignore = "offen: 1·G02 gruppierte und umbenannte Importe umgehen die Reinheitspruefung"]
 fn befund_1_g02_reinheit_haelt_gegen_gruppierte_importe() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
@@ -515,7 +511,6 @@ fn befund_1_g02_reinheit_haelt_gegen_gruppierte_importe() -> Result<(), String> 
 
 /// Die Zeichenfolge `[lints]\nworkspace = true` in einem Text-Wert ist keine Vererbung.
 #[test]
-#[ignore = "offen: 1·G03 Lint-Vererbung wird per Textsuche geprueft"]
 fn befund_1_g03_vorgetaeuschte_lint_vererbung_wird_abgelehnt() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
@@ -558,7 +553,6 @@ fn befund_1_g03_vorgetaeuschte_lint_vererbung_wird_abgelehnt() -> Result<(), Str
 
 /// Version, Paket, Features und `Cargo.lock` gehoeren zur Festschreibung.
 #[test]
-#[ignore = "offen: 1·G04 Abhaengigkeiten nur nach Alias festgeschrieben"]
 fn befund_1_g04_abhaengigkeit_mit_anderer_identitaet_wird_abgelehnt() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
@@ -625,7 +619,6 @@ fn befund_1_g04_abhaengigkeit_mit_anderer_identitaet_wird_abgelehnt() -> Result<
 
 /// Die Essenz hat ein festes Register. Fehlt oder aendert sich eine Regel, ist der Kodex rot.
 #[test]
-#[ignore = "offen: 1·G05 Essenz ohne festes Register"]
 fn befund_1_g05_geloeschte_oder_umbenannte_regel_wird_abgelehnt() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
@@ -683,7 +676,6 @@ fn befund_1_g05_geloeschte_oder_umbenannte_regel_wird_abgelehnt() -> Result<(), 
 /// Eine deklarierte Datei mit Umlaut und Leerzeichen besteht das Gate; eine undeklarierte wird
 /// mit ihrem echten Namen gemeldet.
 #[test]
-#[ignore = "offen: 1·G06 Pfade werden zeilenweise und quotiert gelesen"]
 fn befund_1_g06_unicode_pfade_werden_richtig_geprueft() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
@@ -712,7 +704,6 @@ fn befund_1_g06_unicode_pfade_werden_richtig_geprueft() -> Result<(), String> {
 /// Dateirechten 000 laeuft deshalb nur, wenn das Lesen auch wirklich scheitert; sonst steht
 /// „nicht ausgefuehrt“ in der Ausgabe. Die beiden anderen Faelle laufen immer.
 #[test]
-#[ignore = "offen: 1·R03 Lesefehler beim Scan werden uebersprungen"]
 fn befund_1_r03_lesefehler_beim_scan_macht_den_kodex_rot() -> Result<(), String> {
     let baum = Baum::neu()?;
     let vorher = depot_kodex::pruefe_ohne_diff(&baum.pfad);
@@ -845,7 +836,6 @@ fn festschreibung_hash(b: &Baum) -> Result<String, String> {
 /// Ohne Freigabe, mit falschem Hash oder nach einer spaeteren Aenderung wird abgelehnt; die
 /// passende Freigabe besteht.
 #[test]
-#[ignore = "offen: 1·R08 Grenzaenderung ohne gebundene Freigabe wird angenommen"]
 fn befund_1_r08_freigabe_ohne_passenden_hash_wird_abgelehnt() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;

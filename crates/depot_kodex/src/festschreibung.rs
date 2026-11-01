@@ -11,6 +11,8 @@ use depot_ki::{KiDeckel, KiGrenzen};
 use sha2::{Digest, Sha256};
 
 use crate::deklaration::Klasse;
+use crate::manifest;
+use crate::toml::Wert;
 
 fn sha(text: &str) -> String {
     Sha256::digest(text.as_bytes())
@@ -47,51 +49,46 @@ fn produktarten(wurzel: &Path) -> Result<String, String> {
     Ok(arten.join(","))
 }
 
-/// Namen aller Abhaengigkeiten einer Cargo.toml (normal, dev, build, target).
-fn abhaengigkeiten(text: &str) -> String {
-    let mut namen = BTreeSet::new();
-    let mut in_abschnitt = false;
-    for zeile in text.lines().map(str::trim) {
-        if zeile.starts_with('[') {
-            let kopf = zeile.trim_matches(|c| c == '[' || c == ']');
-            in_abschnitt = kopf.ends_with("dependencies");
-            if let Some((abschnitt, name)) = kopf.rsplit_once('.')
-                && abschnitt.ends_with("dependencies")
-            {
-                namen.insert(name.to_string());
-            }
+/// Text ohne Windows-Zeilenenden: Ein Checkout mit CRLF aendert die Festschreibung nicht.
+pub fn normalisiert(bytes: &[u8]) -> Vec<u8> {
+    let mut aus = Vec::with_capacity(bytes.len());
+    let mut it = bytes.iter().peekable();
+    while let Some(b) = it.next() {
+        if *b == b'\r' && it.peek() == Some(&&b'\n') {
             continue;
         }
-        if in_abschnitt && !zeile.is_empty() && !zeile.starts_with('#') {
-            let schluessel = zeile.split(['=', '.']).next().unwrap_or("").trim();
-            if !schluessel.is_empty() {
-                namen.insert(schluessel.to_string());
-            }
-        }
+        aus.push(*b);
     }
-    namen.into_iter().collect::<Vec<_>>().join(",")
+    aus
 }
 
-/// Lint- und Profil-Abschnitte der Wurzel-Cargo.toml: wer die harten Lints lockert, faellt auf.
-fn lints(text: &str) -> String {
-    let mut aus = String::new();
-    let mut drin = false;
-    for zeile in text.lines().map(str::trim) {
-        if zeile.starts_with('[') {
-            drin = zeile.starts_with("[workspace.lints") || zeile.starts_with("[profile");
-        }
-        if drin && !zeile.is_empty() {
-            aus.push_str(zeile);
-            aus.push('\n');
-        }
-    }
-    sha(&aus)
+pub fn sha_bytes(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
+/// Lints und Profile der Wurzel-Cargo.toml, semantisch gelesen: wer die harten Lints lockert,
+/// faellt auf, gleich in welcher Schreibweise.
+fn lints(wurzel_toml: &Wert) -> String {
+    let leer = Wert::Tabelle(BTreeMap::new());
+    sha(&format!(
+        "depotschlopf-lints-v2|{}|{}",
+        wurzel_toml
+            .pfad(&["workspace", "lints"])
+            .unwrap_or(&leer)
+            .kanonisch(),
+        wurzel_toml.feld("profile").unwrap_or(&leer).kanonisch()
+    ))
 }
 
 /// Berechnet die Festschreibung des aktuellen Baums.
 ///
 /// # Errors
-/// Wenn Dateien fehlen.
+/// Wenn Dateien fehlen oder sich nicht lesen lassen.
 pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut f = BTreeMap::new();
     f.insert("grenzen".into(), Grenzen::standard().fingerabdruck());
@@ -105,18 +102,26 @@ pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
         )),
     );
     f.insert("produktarten".into(), produktarten(wurzel)?);
-    let wurzel_toml = lies(&wurzel.join("Cargo.toml"))?;
+    let wurzel_toml = manifest::lies(&wurzel.join("Cargo.toml"))?;
     f.insert("lints".into(), lints(&wurzel_toml));
     f.insert(
         "abhaengigkeiten.workspace".into(),
-        abhaengigkeiten(&wurzel_toml),
+        manifest::abhaengigkeiten(&wurzel_toml),
     );
+    let lock = fs::read(wurzel.join("Cargo.lock"))
+        .map_err(|e| format!("Cargo.lock: nicht lesbar: {e}"))?;
+    f.insert("cargo_lock".into(), sha_bytes(&normalisiert(&lock)));
     let mut crates = Vec::new();
-    for eintrag in fs::read_dir(wurzel.join("crates")).map_err(|e| format!("crates/: {e}"))? {
-        let eintrag = eintrag.map_err(|e| format!("crates/: {e}"))?;
+    for eintrag in
+        fs::read_dir(wurzel.join("crates")).map_err(|e| format!("crates/: nicht lesbar: {e}"))?
+    {
+        let eintrag = eintrag.map_err(|e| format!("crates/: nicht lesbar: {e}"))?;
         let name = eintrag.file_name().to_string_lossy().into_owned();
-        let toml = lies(&eintrag.path().join("Cargo.toml"))?;
-        f.insert(format!("abhaengigkeiten.{name}"), abhaengigkeiten(&toml));
+        let toml = manifest::lies(&eintrag.path().join("Cargo.toml"))?;
+        f.insert(
+            format!("abhaengigkeiten.{name}"),
+            manifest::abhaengigkeiten(&toml),
+        );
         crates.push(name);
     }
     crates.sort();
@@ -126,8 +131,8 @@ pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
 
 pub fn als_text(f: &BTreeMap<String, String>) -> String {
     let mut s = String::from(
-        "# DepotSchlopf – Festschreibung. Aendern nur mit Klasse FestschreibungAenderung\n\
-         # und ausdruecklicher Freigabe des Eigentuemers. Neu erzeugen: run.cmd festschreibung\n",
+        "# DepotSchlopf – Festschreibung. Aendern nur mit Grenzfreigabe des Eigentuemers in\n\
+         # kodex/freigabe.txt (R30). Neu erzeugen: run.cmd festschreibung\n",
     );
     for (k, v) in f {
         let _ = writeln!(s, "{k}: {v}");
@@ -174,17 +179,23 @@ pub fn pruefe(wurzel: &Path, klasse: Klasse, diff: &BTreeSet<String>) -> Vec<Str
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn abhaengigkeiten_lesen() {
-        let t = "[package]\nname = \"x\"\n[dependencies]\ndepot_kern.workspace = true\nsha2 = { workspace = true }\n[dev-dependencies.proptest]\nversion = \"1\"\n[lints]\nworkspace = true\n";
-        assert_eq!(abhaengigkeiten(t), "depot_kern,proptest,sha2");
-    }
+    use crate::toml;
 
     #[test]
     fn gelockerte_lints_fallen_auf() {
-        let a = "[workspace.lints.clippy]\nunwrap_used = \"deny\"\n";
-        let b = "[workspace.lints.clippy]\nunwrap_used = \"allow\"\n";
-        assert_ne!(lints(a), lints(b));
+        let a = toml::lies("[workspace.lints.clippy]\nunwrap_used = \"deny\"\n");
+        let b = toml::lies("[workspace.lints.clippy]\nunwrap_used = \"allow\"\n");
+        let c = toml::lies("workspace.lints.clippy.unwrap_used = \"deny\"\n");
+        let (Ok(a), Ok(b), Ok(c)) = (a, b, c) else {
+            return;
+        };
+        assert_ne!(lints(&a), lints(&b));
+        assert_eq!(lints(&a), lints(&c));
+    }
+
+    #[test]
+    fn zeilenenden_aendern_nichts() {
+        assert_eq!(normalisiert(b"a\r\nb\n"), b"a\nb\n".to_vec());
+        assert_eq!(normalisiert(b"a\rb"), b"a\rb".to_vec());
     }
 }

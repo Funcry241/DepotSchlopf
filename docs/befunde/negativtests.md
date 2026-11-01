@@ -106,7 +106,7 @@ Diese Tests lassen sich nicht sinnvoll gegen den alten Stand schreiben, weil das
 
 | Schnitt | Befunde |
 | --- | --- |
-| Kodex | 1·G01–G06, 1·R03, 1·R08, 2·A11 |
+| Kodex | 1·G01–G06, 1·R03, 1·R08, 2·A11 – Tests und Nachweis in `docs/befunde/kodex.md` |
 | Kern und Regelwerk aus der Festschreibung | 2·A07, 2·A12 (Freigabebindung), 6·W1 |
 | Persistenzbasis | 1·R01, 2·A08, 3·P4, 4·B02, 5·B02 |
 | Export | 1·E01, 1·E02, 1·E03, 1·R04, 1·R05, 2·W3 |
