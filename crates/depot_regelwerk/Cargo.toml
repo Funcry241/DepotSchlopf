@@ -1,0 +1,13 @@
+[package]
+name = "depot_regelwerk"
+description = "DepotSchlopf: das Regelwerk – einziger Erzeuger genehmigter Auftraege"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+depot_kern = { workspace = true }
+
+[lints]
+workspace = true
