@@ -12,6 +12,13 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
+repository = "https://github.com/Funcry241/DepotSchlopf"
+homepage = "https://github.com/Funcry241/DepotSchlopf"
+readme = "README.md"
+keywords = ["trading", "depot", "risikomanagement", "ki", "regelwerk"]
+categories = ["finance"]
+authors = ["Funcry241"]
+publish = false
 
 [workspace.dependencies]
 sha2 = "0.10"

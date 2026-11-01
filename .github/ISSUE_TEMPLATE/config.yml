@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Sicherheitslücke privat melden
+    url: https://github.com/Funcry241/DepotSchlopf/security/advisories/new
+    about: Lücken, über die man am Regelwerk oder Budget vorbei handeln könnte, bitte nie öffentlich.

@@ -1,2 +1,21 @@
 /target
 *.jsonl.lock
+
+# Laufzeitdaten: Journal, Kassenbuch, Kurse, Berichte (bleiben auf dem eigenen Rechner)
+/daten/
+*.sperre
+kassenbuch*.txt
+
+# Zugangsdaten nie einchecken
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Editor und System
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

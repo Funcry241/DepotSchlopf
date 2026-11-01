@@ -1,8 +1,11 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Gruendung
-zweck: Kern, Regelwerk, KI-Budgetwaechter, Kodex und Essenz von Anfang an anlegen
+zweck: Kern, Regelwerk, KI-Budgetwaechter, Kodex, Essenz, Lizenz und Community-Dateien von Anfang an anlegen
 pfade:
 .github/
+.gitignore
+CHANGELOG.md
+LICENSE
 Cargo.lock
 Cargo.toml
 README.md
