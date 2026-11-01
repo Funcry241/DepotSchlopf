@@ -889,3 +889,113 @@ fn befund_1_r08_freigabe_ohne_passenden_hash_wird_abgelehnt() -> Result<(), Stri
         Err(format!("passende Freigabe abgelehnt: {fehler:#?}"))
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Pruefung von PR #7 (Maus, Stand ce7b978): K7-01 bis K7-03, Gegenbeispiele unveraendert
+// ---------------------------------------------------------------------------------------------
+
+/// Setzt Code vor das Testmodul von `geld.rs`, wie im Gegenbeispiel.
+fn vor_testmodul(b: &Baum, code: &str) -> Result<(), String> {
+    b.ersetze(GELD, "#[cfg(test)]", &format!("{code}\n#[cfg(test)]"))
+}
+
+/// K7-01 (`scope_alias`): Derselbe Alias in zwei Funktionen hat zwei Bedeutungen. Die spaetere
+/// darf die verbotene nicht verdecken.
+#[test]
+#[ignore = "offen: K7-01 Alias ohne Gueltigkeitsbereich"]
+fn befund_k7_01_alias_in_anderer_funktion_verdeckt_std_nicht() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    baum.deklariere("Funktion", &[GELD])?;
+    vor_testmodul(
+        &baum,
+        "pub fn audit_bad(path: &str) -> bool {
+    use std as basis;
+    basis::fs::metadata(path).is_ok()
+}
+
+pub fn audit_good() -> usize {
+    use core as basis;
+    basis::mem::size_of::<u8>()
+}
+",
+    )?;
+    abgelehnt("scope_alias", &baum.gate(), "std::fs")
+}
+
+/// K7-02 (`local_reexport`): Ein Modul im selben Crate reicht `std` unter anderem Namen weiter.
+#[test]
+#[ignore = "offen: K7-02 interner Reexport von std"]
+fn befund_k7_02_interner_reexport_von_std_wird_abgelehnt() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    baum.deklariere("Funktion", &[GELD])?;
+    vor_testmodul(
+        &baum,
+        "pub mod audit_bridge {
+    pub use std as platform;
+}
+
+pub fn audit_bad(path: &str) -> bool {
+    crate::geld::audit_bridge::platform::fs::metadata(path).is_ok()
+}
+",
+    )?;
+    abgelehnt("local_reexport", &baum.gate(), "platform")
+}
+
+const KERN_TOML: &str = "crates/depot_kern/Cargo.toml";
+const ZIEL: &str = "crates/depot_kern/src/audit_target.md";
+const NUTZLAST: &str = "crates/depot_kern/src/audit_payload.md";
+
+/// K7-03 (`target_md`): Cargo baut ein Programm aus einer `.md`-Datei. Geprueft wird, was
+/// kompiliert wird, nicht was die Endung sagt.
+#[test]
+#[ignore = "offen: K7-03 Target aus .md wird nicht geprueft"]
+fn befund_k7_03_target_aus_md_wird_geprueft() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    baum.deklariere("Funktion", &[KERN_TOML, ZIEL])?;
+    baum.ersetze(
+        KERN_TOML,
+        "[lints]\nworkspace = true",
+        "[[bin]]\nname = \"audit-target\"\npath = \"src/audit_target.md\"\n\n[lints]\nworkspace = true",
+    )?;
+    let kopf = format!(
+        "#![forbid(\n    {}\n)]\n\nfn main() {{\n    let _result = std::fs::metadata(\".\");\n}}\n",
+        [
+            "unsafe_code",
+            "clippy::unwrap_used",
+            "clippy::expect_used",
+            "clippy::panic",
+            "clippy::indexing_slicing",
+            "clippy::arithmetic_side_effects",
+            "clippy::float_arithmetic",
+            "clippy::cast_possible_truncation",
+            "clippy::cast_sign_loss",
+        ]
+        .join(",\n    ")
+    );
+    baum.schreibe(ZIEL, &kopf)?;
+    abgelehnt("target_md", &baum.gate(), "audit_target.md")
+}
+
+/// K7-03 (`module_md`): Ein Modul der Kernbibliothek wird ueber `#[path]` aus einer `.md`-Datei
+/// gebaut.
+#[test]
+#[ignore = "offen: K7-03 Modul aus .md ueber #[path] wird nicht geprueft"]
+fn befund_k7_03_modul_aus_md_wird_geprueft() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    baum.deklariere("Funktion", &[KERN_LIB, NUTZLAST])?;
+    baum.ersetze(
+        KERN_LIB,
+        "pub mod geld;",
+        "pub mod geld;\n#[path = \"audit_payload.md\"]\npub mod audit_payload;",
+    )?;
+    baum.schreibe(
+        NUTZLAST,
+        "pub fn audit_bad(path: &str) -> bool {\n    std::fs::metadata(path).is_ok()\n}\n",
+    )?;
+    abgelehnt("module_md", &baum.gate(), "audit_payload.md")
+}
