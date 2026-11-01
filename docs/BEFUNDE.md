@@ -11,7 +11,7 @@ Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher St
 
 **Zwischenstände von „offen“:** „Test rot“ heißt, dass der Negativtest im Repository steht und am alten Stand fehlschlägt; er ist mit `#[ignore = "offen: …"]` markiert, bis der Umbau ihn grün macht. Nachweis und Befehle stehen in `docs/befunde/negativtests.md`. „Teilnachweis fehlt“ heißt, dass ein Teil des Befunds noch keinen Test hat; die Liste dort sagt, welcher und mit welchem Schnitt er entsteht. Ein grüner Test allein schließt nichts: „geschlossen“ setzt erst die unabhängige Prüfung.
 
-Stand: 01.11.2026, Fassung 4.4, Stufe 2 Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget, nach der Nachprüfung durch Maus geschärft). Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.6, Stufe 2 Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget, nach zwei Nachprüfungen durch Maus geschärft). Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -114,3 +114,15 @@ Stand: 01.11.2026, Fassung 4.4, Stufe 2 Schritt 1 (Negativtests für Kern, Regel
 | Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
 | --- | --- | --- | --- | --- | --- | --- |
 | 6·W1 | Ziel ist ein Plus nach allen Kosten; der Betrag ist offen; keine feste Aufteilung; Dachs und Maus arbeiten die Einzelwerte aus | Kap. 1 Ziel und Budget, R15 Paketfreigabe, Kap. 13 und 18 Beträge als Beispiele, Kap. 19 Stufe 2, Kap. 21 und 22 | Festschreibung mit anderem Betrag (z. B. 2.000 €) lädt ohne Codeänderung; eine Festschreibung ohne Wolfgangs Paketfreigabe wird abgelehnt; Bewertung enthält KI, Gebühren, Spread und Fondskosten | Stufe 2 | berücksichtigt | offen |
+
+## Prüfung 6 – Stand 665ed4b (Architektur-Befund aus der Prüfung von PR #4)
+
+| Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
+| --- | --- | --- | --- | --- | --- | --- |
+| 6·N01 | Die Zusage „Cash-Konto, nie Verlust über den Einsatz“ ist vertraglich nicht belegt; die Kundenvereinbarung regelt Fehlbeträge und kostenpflichtige Währungsumrechnung | R33 und Kap. 14 ohne Garantie, mit konkreten Schutzmaßnahmen; Kap. 9 Restrisiko Forderungen (Abgleich je Währung, Halt bei Saldo unter null, Fremdwährung oder unzugeordneter Belastung, kein automatischer Ausgleich); Kap. 13 Kostenarten Umrechnung und Fehlbetrag | Abgleich mit Saldo −0,01 €, mit Saldo in US-Dollar und mit einer unbekannten Belastung führt jeweils zu Halt und Nachricht, ohne Verkauf | Stufe 3, am Papierkonto in Stufe 6 | berücksichtigt | offen |
+
+## Wunsch Wolfgang – Stand 4b009a0
+
+| Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
+| --- | --- | --- | --- | --- | --- | --- |
+| 6·W2 | Angekündigte künftige Ereignisse (Sitzungen, Treffen, Zahlen) müssen vorab in die Entscheidung | R39, Kap. 6 Ereigniskalender mit Verlässlichkeit, Bündelung im Terminhorizont, Lagebild; Kap. 7 Feld „termine“ und Pflichtabwägung, Höchstanteil vor Terminen; Kap. 13, 14, 18, 19 | Beleg auf eine Terminkennung, die nicht im Kalender steht, wird verworfen; Kauf im Horizont ohne Abwägung wird verworfen; Kauf über dem Höchstanteil vor Terminen wird gekürzt; verschobener Termin ersetzt den alten Eintrag, das Journal behält beide; zwingender Ausstieg im Horizont läuft | Stufe 4 und 5 | berücksichtigt | offen |
