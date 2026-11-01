@@ -9,7 +9,7 @@ Diese Liste führt jeden Befund aus den Prüfungen durch Maus vom Befund bis zur
 
 Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher Stufe der Test entsteht und dass eine unabhängige Prüfung ihn bestätigt.
 
-Stand: 01.11.2026, Fassung 4.1. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.2. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -86,7 +86,17 @@ Stand: 01.11.2026, Fassung 4.1. Kein Befund ist technisch geschlossen.
 
 | Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
 | --- | --- | --- | --- | --- | --- | --- |
-| 3·P1 | Kauf plus Ausstiegsreserve übersteigt das Monatsbudget | Kap. 5 Formel: Budget umfasst nur Gebühren, Höchstgebühr je Order festgeschrieben, Spread über den Limit-Abstand begrenzt und gemessen | Einstieg mit 250 € bei 6 € Budget und 2 € Höchstgebühr wird genehmigt (4 €); ein zweiter im selben Monat wird abgelehnt | Stufe 3 | berücksichtigt | offen |
+| 3·P1 | Kauf plus Ausstiegsreserve übersteigt das Monatsbudget | Kap. 5 Formel: Budget umfasst nur Gebühren, Höchstgebühr je Order festgeschrieben, Spread gemessen; begrenzt seit Fassung 4.2 durch die Spreadgrenze (4·B01) | Einstieg mit 250 € bei 6 € Budget und 2 € Höchstgebühr wird genehmigt (4 €); ein zweiter im selben Monat wird abgelehnt | Stufe 3 | berücksichtigt | offen |
 | 3·P2 | Schutzfrist ohne Brokerverbindung nicht erfüllbar | R35, Kap. 10 Zustand „Schutz ungewiss“ mit Halt, Nachricht, Neuversuch und Auflösung nach Wiederverbindung | Verbindung während Teilfüllung weg: Halt und Nachricht sofort; nach Wiederverbindung Stopp bestätigt oder Zwangsverkauf; Halt bleibt bis zur Aufhebung | Stufe 6 am Papierkonto | berücksichtigt | offen |
 | 3·P3 | Order- und Ausstiegsreserve vermischt | Kap. 10 Tabelle der drei Reservierungen mit Anfang, Änderung und Ende | gefüllter Kauf: Orderreservierung endet, Ausstiegsreserve bleibt; Kauf ohne Füllung: beide enden | Stufe 3 | berücksichtigt | offen |
-| 3·P4 | Absturzprotokoll ohne Teilschreibvorgänge und Absturz in der Wiederherstellung | R38, Kap. 9 Datensatzformat, Quarantäne, wiederholbare Wiederherstellung | abgeschnittene letzte Zeile wird erkannt und abgeschnitten; fehlerhafte Zeile davor führt zu Halt; Absturz an jedem Schritt der Wiederherstellung ergibt beim nächsten Start dasselbe Ergebnis | Stufe 2 | berücksichtigt | offen |
+| 3·P4 | Absturzprotokoll ohne Teilschreibvorgänge und Absturz in der Wiederherstellung | R38, Kap. 9 Datensatzformat, Quarantäne, wiederholbare Wiederherstellung | unvollständige letzte Zeile wird erkannt und abgeschnitten; fehlerhafte Zeile davor führt zu Halt (präzisiert in 4·B02); Absturz an jedem Schritt der Wiederherstellung ergibt beim nächsten Start dasselbe Ergebnis | Stufe 2 | berücksichtigt | offen |
+
+## Prüfung 4 – Stand 0af6db1 (3 Befunde, 2 Testergänzungen)
+
+| Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
+| --- | --- | --- | --- | --- | --- | --- |
+| 4·B01 | Der Limit-Abstand begrenzt den Spread nicht | Kap. 5 und 18: eigene Spreadgrenze (Vorschlag 0,5 % der Mitte zwischen Bid und Ask), Bid und Ask nicht älter als das Kurshöchstalter, ohne Bid oder Ask kein freiwilliger Auftrag; Kap. 8: zwingende Ausstiege prüfen sie nicht; Spread zählt in Kostenregel und Bewertung | Kauf bei Spread 0,6 % wird abgelehnt; Kauf ohne Ask oder mit veraltetem Bid wird abgelehnt; zwingender Ausstieg bei Spread 2 % läuft | Stufe 3 | berücksichtigt | offen |
+| 4·B02 | Falsche Prüfsumme in der letzten Zeile beweist keinen Schreibabbruch | Kap. 9: unvollständig und beschädigt getrennt, Bestätigungsgrenze je Datei, automatisch nur nachweislich Unbestätigtes, sonst Halt und geprüftes Reparaturverfahren mit Wolfgangs Freigabe; Quarantäne synchronisiert und byte-gleich geprüft | (1) beschädigte letzte Zeile nach bestätigtem Vorgang führt zu Halt, nichts wird zurückgerollt; (2) Absturz beim unbestätigten Anhängen behandelt nur diesen Eintrag, ein wiederholter Absturz ändert nichts Bestätigtes; (3) vorhandene, aber abweichende Quarantänedatei verhindert das Abschneiden | Stufe 2 | berücksichtigt | offen |
+| 4·E01 | „Gesamtdeckel“ umfasst nur KI und Gebühren | Kap. 5, 13, 18: umbenannt in „Jahresbudget für KI und Gebühren“; Spread und Fondskosten werden gemessen und berichtet, aber nicht vorab gedeckelt; Kap. 21 Punkt 5 als bewusste Kostenentscheidung für Wolfgang | Bericht weist KI, Gebühren und Spread getrennt aus; Spread wird nie gegen das Jahresbudget gebucht | Stufe 3 | berücksichtigt; Entscheidung bei Wolfgang | offen |
+| 4·T1 | Meldeweg zum Handy kann ausfallen | Kap. 11: zugestellt erst nach Annahmebestätigung, sonst Protokoll, Wiederholung, Nennung im nächsten Bericht; Halt hängt nie an der Nachricht | Nachrichtendienst nicht erreichbar: Zustellung wird nicht als erfolgt gemeldet, Halt greift trotzdem | Stufe 6 | berücksichtigt | offen |
+| 4·T2 | Storno nach Teilfüllung | Kap. 10 Reservierungen: frei wird nur der nicht gefüllte Rest | Kauf über 10 Stück, 4 gefüllt, Rest storniert: frei werden nur die Mittel für 6 Stück, die Ausstiegsreserve bleibt | Stufe 3 | berücksichtigt | offen |

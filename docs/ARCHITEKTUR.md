@@ -2,7 +2,7 @@
 
 Stand 01.11.2026 · Wolfgang Mair
 
-*Fassung 4.1. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
+*Fassung 4.2. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
 
 ## 1 Zweck und Leitsatz
 
@@ -124,13 +124,13 @@ Ein Bereich ist ein virtueller Teil desselben IBKR-Kontos mit eigenem Geld, eige
 
 **Was „Sicher“ halten darf und welche Risiken bleiben:** „Sicher“ ist ein Ziel, keine Garantie. Zum Start hält der Bereich nur Bargeld. Dann bleibt das Ausfallrisiko des Brokers, das die gesetzliche Anlegerentschädigung nur begrenzt deckt. Später darf er höchstens einen physischen UCITS-ETF auf Euro-Staatsanleihen mit Restlaufzeit bis zu einem Jahr halten, und nur einen, den Wolfgang nach Prüfung von Struktur, Basisinformationsblatt und Kosten namentlich in die Positivliste aufnimmt. Kurze Laufzeiten verringern die Zinsabhängigkeit, schließen aber Kursverluste durch Zins-, Kredit-, Liquiditäts- und Fondseffekte nicht aus. Eine feste Verlustgrenze gibt es dafür nicht. Die Schwankungsgrenze der Festschreibung ist eine Melde- und Zukaufsregel: Fällt der ETF darunter, gibt es keine Zukäufe, und Wolfgang bekommt eine Nachricht. Verkauft wird nur auf seinen Befehl. Aktien, Unternehmensanleihen, Fremdwährung und Hebel sind ausgeschlossen. Das Geld des Kurzfrist-Bereichs bleibt bis zu dessen Echtgeld-Freigabe uninvestiert als Bargeld.
 
-**Handelskosten:** Drei Größen sind getrennt. Das **Handelsbudget** ist die verbindliche Obergrenze für die Gebühren freiwilliger Aufträge je Zeitraum, im Kurzfrist-Bereich je Monat, im Langfrist-Bereich je Jahr, als Anteil am Bereichswert zu Beginn des Zeitraums. Die **Reservierung** rechnet je Order mit der festgeschriebenen Höchstgebühr aus der Gebührentabelle des tatsächlichen Kontomodells, samt Börsen- und Clearinggebühren. Die **tatsächlichen Kosten** werden nach der Ausführung gebucht. Der Spread ist keine Gebühr: Ihn begrenzt je Order der Limit-Abstand. Er wird gemessen und zählt voll in jede Bewertung (R16), aber nicht gegen das Handelsbudget.
+**Handelskosten:** Drei Größen sind getrennt. Das **Handelsbudget** ist die verbindliche Obergrenze für die Gebühren freiwilliger Aufträge je Zeitraum, im Kurzfrist-Bereich je Monat, im Langfrist-Bereich je Jahr, als Anteil am Bereichswert zu Beginn des Zeitraums. Die **Reservierung** rechnet je Order mit der festgeschriebenen Höchstgebühr aus der Gebührentabelle des tatsächlichen Kontomodells, samt Börsen- und Clearinggebühren. Die **tatsächlichen Kosten** werden nach der Ausführung gebucht. Der **Spread** ist keine Gebühr und zählt nicht gegen das Handelsbudget. Der Limit-Abstand begrenzt ihn nicht, denn ein Limit am letzten Kurs sagt nichts über den Abstand zwischen Bid und Ask. Deshalb gilt eine eigene **Spreadgrenze**: Ein freiwilliger Auftrag ist nur erlaubt, wenn aktuelle Bid- und Ask-Kurse vorliegen, nicht älter als das Kurshöchstalter, und der Spread höchstens die Spreadgrenze der Festschreibung erreicht, gemessen an der Mitte zwischen Bid und Ask. Fehlen Bid oder Ask, gibt es keinen freiwilligen Auftrag. Zwingende Ausstiege prüfen die Spreadgrenze nicht (R36). Der tatsächliche Spread wird bei jeder Ausführung gemessen, steht in der Kostenregel und zählt voll in jede Bewertung (R16).
 
 - **Formel für einen freiwilligen Kauf:** Genehmigt wird nur, wenn der Rest des Handelsbudgets mindestens so groß ist wie die Höchstgebühr des Kaufs plus die Höchstgebühr des späteren Verkaufs. Beide Beträge belasten den Zeitraum des Kaufs. Ein Hin-und-zurück belastet das Budget also einmal, beim Einstieg. Mit 2,00 € Höchstgebühr sind das 4,00 €, die in 6,00 € passen; ein zweiter Einstieg im selben Monat passt nicht mehr.
 - Die Höchstgebühr des Verkaufs wird zur **Ausstiegsreserve** der Position. Sie bezahlt den späteren Verkauf, freiwillig oder zwingend. Ein Rest verfällt und fließt nicht ins Budget zurück.
 - Zwingende Ausstiege scheitern nie am Budget (R36). Kostet ein Ausstieg mehr als seine Ausstiegsreserve, etwa durch mehrere Teilaufträge, wird der Mehrbetrag im laufenden Zeitraum gebucht.
 - Liegen die tatsächlichen Gebühren über dem Budget, ruhen freiwillige Aufträge des Bereichs bis zum Ende des Zeitraums, und der Bericht nennt die Überschreitung. Die Überschreitung wird nicht ins nächste Budget verschoben.
-- Alle Bereiche buchen in ein gemeinsames Laufzeit-Kostenbuch. Der Gesamtdeckel für alle Kosten im Jahr (KI und Gebühren) wird bei jeder Reservierung geprüft, nicht nur beim Laden der Festschreibung. Die Summe der Bereichsbudgets darf ihn nicht übersteigen.
+- Alle Bereiche buchen in ein gemeinsames Laufzeit-Kostenbuch. Das **Jahresbudget für KI und Gebühren** wird bei jeder Reservierung geprüft, nicht nur beim Laden der Festschreibung. Die Summe der Bereichsbudgets darf es nicht übersteigen. Es ist bewusst keine Obergrenze aller wirtschaftlichen Kosten: Spread und laufende Fondskosten kommen hinzu, werden gemessen und berichtet, aber nicht vorab gedeckelt (Kapitel 21).
 
 ## 6 Sammelstelle und Ereignislogik
 
@@ -211,7 +211,7 @@ Das Regelwerk ist eine reine Funktion. Es bekommt Bereich, Bestand, Kurse, verf�
 - **Aufträge:** Nur Kauf mit gedecktem Geld und Verkauf vorhandener, nicht gebundener Stücke. Nur Limit-Aufträge, im Kurzfrist-Bereich mit angehängtem Stopp.
 - **Konto:** Beim Broker ein reines Cash-Konto ohne Margin und nur mit Handelsrechten für Aktien und ETFs.
 
-**Prüfungen je Auftrag, in dieser Reihenfolge:** Schema und Vollständigkeit, Universum, Kursplausibilität, Limit-Abstand zum letzten Kurs, Höchstanteil je Wert, Höchstzahl der Positionen, Mindestorder, Gebührenquote, Kostenregel (Kurzfrist), Orderzahl und Handelskosten im Monat, Deckung durch den Kontowächter, Bereichs-Stopps, Halt-Zustand. Für freiwillige Aufträge führt jede verletzte Grenze zu Ablehnung oder Kürzung, nie zu einer Ausnahme.
+**Prüfungen je Auftrag, in dieser Reihenfolge:** Schema und Vollständigkeit, Universum, Kursplausibilität, Limit-Abstand zum letzten Kurs, Höchstanteil je Wert, Höchstzahl der Positionen, Mindestorder, Gebührenquote, Kostenregel (Kurzfrist), Orderzahl und Handelskosten im Monat, Deckung durch den Kontowächter, Spreadgrenze, Bereichs-Stopps, Halt-Zustand. Für freiwillige Aufträge führt jede verletzte Grenze zu Ablehnung oder Kürzung, nie zu einer Ausnahme.
 
 **Aktionsgrund und Prüfung (R36):** Zwingende Ausstiege sind der Ausstieg eines Werts aus der Positivliste, der Notbremsen-Verkauf, das Bereichsende, die erreichte Höchst-Haltedauer, die Abbaupflicht über einer Bestandsgrenze und der Verkauf einer ungeschützten Menge nach Ablauf der Schutzfrist. Alles andere ist freiwillig.
 
@@ -224,6 +224,7 @@ Das Regelwerk ist eine reine Funktion. Es bekommt Bereich, Bestand, Kurse, verf�
 | Höchstanteil, Positionen, Deckung | ja | entfällt | entfällt |
 | Mindestorder | ja | ja, außer beim Verkauf des ganzen Bestands | nein |
 | Gebührenquote, Kostenregel | ja | ja | nein |
+| Spreadgrenze, Bid und Ask vorhanden | ja | ja | nein; Spread wird gemessen |
 | Ausgabenbudget, Orderzahl, Umschlag | ja | ja | nein; Kosten aus der Ausstiegsreserve |
 | Bestand frei und eindeutig, kein Leerverkauf | entfällt | ja | ja |
 | Halt | sperrt | sperrt | sperrt nicht |
@@ -274,9 +275,10 @@ Der Kontowächter ist reiner Rust-Code ohne KI. Er läuft in der Handelszeit in 
 
 - Beide sind Hash-Ketten. Die erste Zeile entsteht nur durch einen ausdrücklichen Einrichtungsbefehl. Fehlt eine Datei später, ist sie leer oder kürzer als der letzte bekannte Stand, gilt Halt und kein Neustart.
 - **Commitprotokoll (R38):** Das Journal ist die führende Datei. Ein Vorgang, der beide Dateien betrifft, schreibt zuerst den Eintrag ins Kassenbuch und synchronisiert ihn. Danach bestätigt ein Journaleintrag den Stand des Kassenbuchs (Zeilenzahl und Hash) und wird synchronisiert. Erst damit gilt der Vorgang. Das Kassenbuch verweist nur auf bereits bestätigte Journalstände, nie auf den gerade entstehenden. So entsteht keine zirkuläre Abhängigkeit.
-- **Datensatzformat:** Jeder Eintrag ist eine Zeile mit eigener Prüfsumme und Abschlusszeichen. Ein Eintrag ohne Abschluss oder mit falscher Prüfsumme ist unvollständig.
-- **Wiederherstellung:** Beim Start darf jede Datei am Ende höchstens einen unvollständigen Eintrag haben. Das ist ein abgebrochener Schreibvorgang. Er wird in eine Quarantänedatei kopiert, abgeschnitten und im Journal belegt. Danach darf das Kassenbuch höchstens um einen vollständigen, unbestätigten Eintrag über den bestätigten Stand hinausgehen. Er wird geprüft und dann bestätigt oder als verworfen markiert. Ein unvollständiger oder fehlerhafter Eintrag vor dem Ende, ein unvollständiger Eintrag innerhalb des bestätigten Stands, ein Kassenbuch kürzer als sein bestätigter Stand oder ein abweichender Hash ist keine Absturzfolge, sondern Halt.
-- **Absturz während der Wiederherstellung:** Jeder Schritt ist wiederholbar und führt beim zweiten Mal zum selben Ergebnis: Abschneiden auf denselben gültigen Stand, Quarantäne nur, wenn sie noch nicht vorliegt, Bestätigen oder Verwerfen nur, wenn das Journal es noch nicht enthält. Ein Absturz mitten in der Wiederherstellung führt beim nächsten Start zu ihrer Wiederholung, nie zu einem anderen Ergebnis.
+- **Datensatzformat:** Jeder Eintrag ist eine Zeile mit Längenangabe, Prüfsumme und Abschlusszeichen. **Unvollständig** ist ein Eintrag, der kürzer ist als seine Längenangabe oder kein Abschlusszeichen hat. **Beschädigt** ist ein vollständiger Eintrag mit falscher Prüfsumme. Die beiden Fälle werden nie verwechselt.
+- **Bestätigungsgrenze:** Für das Kassenbuch steht sie im Journal (bestätigter Stand mit Zeilenzahl und Hash). Für das Journal ist jeder vollständige, synchronisierte Eintrag bestätigt, denn gehandelt wird erst nach seiner Synchronisation (R12). Nachweislich unbestätigt ist deshalb nur ein unvollständiger letzter Eintrag des Journals und ein Kassenbuch-Eintrag jenseits des bestätigten Stands.
+- **Wiederherstellung:** Automatisch behandelt wird nur, was nachweislich unbestätigt ist. Ein unvollständiger letzter Eintrag wird in eine Quarantänedatei kopiert; diese wird synchronisiert und byte-gleich mit dem abgeschnittenen Rest geprüft, auch wenn sie schon existiert. Erst dann wird abgeschnitten und im Journal belegt. Danach darf das Kassenbuch höchstens um einen vollständigen, unbestätigten Eintrag über den bestätigten Stand hinausgehen. Er wird geprüft und dann bestätigt oder als verworfen markiert. Jeder beschädigte Eintrag, auch der letzte, jeder unvollständige Eintrag vor dem Ende oder innerhalb des bestätigten Stands, ein Kassenbuch kürzer als sein bestätigter Stand und ein abweichender Hash führen zu Halt. Diese Fälle repariert kein Automatismus, sondern ein geprüftes Reparaturverfahren mit Wolfgangs Freigabe.
+- **Absturz während der Wiederherstellung:** Jeder Schritt ist wiederholbar und führt beim zweiten Mal zum selben Ergebnis: Abschneiden auf denselben gültigen Stand, Quarantäne erst nach Prüfung ihres Inhalts als gesichert, Bestätigen oder Verwerfen nur, wenn das Journal es noch nicht enthält. Ein Absturz mitten in der Wiederherstellung führt beim nächsten Start zu ihrer Wiederholung, nie zu einem anderen Ergebnis.
 - **Anker außerhalb des Rechners:** Der Abendbericht geht aufs Handy und nennt den bestätigten Stand beider Dateien. Nur dieser Anker zeigt, wenn beide Dateien gemeinsam auf einen alten Stand zurückgesetzt wurden.
 - Beim Öffnen wird die ganze Historie geprüft: Reihenfolge der Daten und Zyklen, gültige Beträge und Summen. Schreiber und Leser akzeptieren genau denselben Zustandsraum.
 - Gesperrt wird die geöffnete Datei selbst über das Betriebssystem, nicht ein abgeleiteter Pfadname. Links im Datenverzeichnis sind verboten.
@@ -333,7 +335,7 @@ Der Schutzstopp ist bewusst eine Stopp-Order, die bei Auslösung zur Marktorder 
 
 | Reservierung | entsteht | ändert sich | endet |
 | --- | --- | --- | --- |
-| Orderreservierung Kauf: Limit × Menge mit Kaufpuffer plus Höchstgebühr | im Zustand „reserviert“ | bei Teilfüllung wird der gefüllte Teil durch die tatsächliche Buchung ersetzt; reserviert bleibt nur der offene Rest | im Endzustand laut Broker; der nicht gefüllte Rest wird frei |
+| Orderreservierung Kauf: Limit × Menge mit Kaufpuffer plus Höchstgebühr | im Zustand „reserviert“ | bei Teilfüllung wird der gefüllte Teil durch die tatsächliche Buchung ersetzt; reserviert bleibt nur der offene Rest | im Endzustand laut Broker, auch nach einem Storno; frei wird nur der nicht gefüllte Rest, nie der gefüllte Teil |
 | Stückreservierung Verkauf | im Zustand „reserviert“ | bei Teilfüllung um die verkaufte Menge kleiner | im Endzustand laut Broker; nicht verkaufte Stücke werden frei |
 | Ausstiegsreserve: Höchstgebühr des Verkaufs, aus dem Handelsbudget | mit der Reservierung des Kaufs | bleibt bestehen, sobald etwas gefüllt ist; wird nichts gefüllt, endet sie mit dem Kauf | wenn die Position vollständig verkauft und abgeglichen ist; ein Rest verfällt |
 
@@ -360,7 +362,7 @@ Nach einem Neustart wird jeder offene Zustand samt seinen Reservierungen aus dem
 - Der exportierte Quellstand ist byte-gleich mit dem geprüften. Das Manifest belegt das mit Hashes. Bei rotem Gate enthält der Export nur Prüfergebnis und Konsole, keinen Quellstand mit unbekannten Dateien.
 - Konsolenausgaben werden maskiert, zum Beispiel Benutzerpfade als %USERPROFILE%.
 
-**Nachrichten aufs Handy** (E-Mail oder Push): Halt, Notbremse, Kontoabweichung, Budget bei 80 %, Anmeldung des Gateways nötig.
+**Nachrichten aufs Handy** (E-Mail oder Push): Halt, Notbremse, Kontoabweichung, Budget bei 80 %, Anmeldung des Gateways nötig. Eine Nachricht gilt erst als zugestellt, wenn der Dienst die Annahme bestätigt. Fällt der Meldeweg aus, wird das nie als Zustellung gewertet: Der Versuch steht im Protokoll, wird in festen Abständen wiederholt und im nächsten Bericht genannt. Ein Halt hängt nie davon ab, dass die Nachricht ankommt.
 
 ## 12 KI-Kosten und Budgetwächter
 
@@ -394,7 +396,7 @@ Ist das Monatsbudget eines Bereichs oder eines Beraters erreicht, wird in diesem
 | Maus (OpenAI-Spitzenmodell) | 10 $ / 50 $ je Mio. Token | [benchlm.ai](https://benchlm.ai/openai/api-pricing), Drittquelle |
 | ETF-Kosten | etwa 0,1 % im Jahr | Annahme |
 
-Dollar wird vorsichtig 1:1 als Euro gerechnet. Die Gebühr von 1,50 € und der Spread sind Annahmen für die Erwartung. Für Reservierungen zählt die festgeschriebene Höchstgebühr je Order; den Spread begrenzt der Limit-Abstand (Kapitel 5).
+Dollar wird vorsichtig 1:1 als Euro gerechnet. Die Gebühr von 1,50 € und der Spread sind Annahmen für die Erwartung. Für Reservierungen zählt die festgeschriebene Höchstgebühr je Order. Den Spread begrenzt je freiwilligem Auftrag die Spreadgrenze, nicht der Limit-Abstand (Kapitel 5).
 
 **KI-Aufrufe im Monat (erwartet):**
 
@@ -413,9 +415,9 @@ Dollar wird vorsichtig 1:1 als Euro gerechnet. Die Gebühr von 1,50 € und der 
 | Sicher (1.000 €) | 0 € | 2 € (ein ETF-Kauf) | 2 € | 0,2 % | 5 € | 0,5 % |
 | Langfrist (1.000 €) | 9 € | 12 € (Erstkauf 6 €, etwa 4 Orders) | 21 € | 2,1 % | 36 € (KI 18 €, Handel 12 €, Erstkauf 6 €) | 3,6 % |
 | Kurzfrist (1.000 €), etwa 1 Trade im Monat | 30 € | 42 € | 72 € | 7,2 % | 108 € (KI 36 €, Handel 72 €) | 10,8 % |
-| **Gesamt** | **39 €** | **56 €** | **95 €** | **3,2 % des Startkapitals** | **150 € Gesamtdeckel** | **5,0 % des Startkapitals** |
+| **Gesamt** | **39 €** | **56 €** | **95 €** | **3,2 % des Startkapitals** | **150 € Budget für KI und Gebühren** | **5,0 % des Startkapitals** |
 
-Die erwarteten Werte folgen aus der Aufruftabelle oben und den Gebühren. Die Obergrenzen sind die festgeschriebenen Deckel: KI-Monatsdeckel mal zwölf, Handelskosten als Anteil am Bereichswert. Sie sind die höchstmöglichen Kosten, keine erwarteten. Die laufenden ETF-Kosten von etwa 0,1 % im Jahr stecken im Kurs und sind nicht enthalten. Bezogen auf das Startkapital kostet die KI erwartet etwa 39 € im Jahr (1,3 %) und höchstens 54 € (1,8 %), für Dachs und Maus zusammen.
+Die erwarteten Werte folgen aus der Aufruftabelle oben und den Gebühren. Die Obergrenzen sind die festgeschriebenen Budgets: KI-Monatsdeckel mal zwölf, Gebühren als Anteil am Bereichswert. Sie begrenzen KI und Gebühren, nicht alle wirtschaftlichen Kosten. Spread und laufende ETF-Kosten von etwa 0,1 % im Jahr kommen hinzu; sie werden gemessen und berichtet, aber nicht vorab gedeckelt. Bezogen auf das Startkapital kostet die KI erwartet etwa 39 € im Jahr (1,3 %) und höchstens 54 € (1,8 %), für Dachs und Maus zusammen.
 
 Solange Kurzfrist nur auf Papier läuft, entstehen dort keine Handelskosten, aber echte KI-Kosten von erwartet etwa 30 € im Jahr. Sie sind der Preis des Nachweises.
 
@@ -571,7 +573,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Kurzfrist | Positionen | höchstens 2, je höchstens 50 % des Bereichs |
 | Kurzfrist | Mindestorder | 250 € |
 | Kurzfrist | Stopp-Abstand | Standard 4 %, Spielraum der KI 2 bis 6 % |
-| Kurzfrist | Kostenregel | erwarteter Gewinn mindestens 3 × Kosten für Kauf und Verkauf |
+| Kurzfrist | Kostenregel | erwarteter Gewinn mindestens 3 × (Höchstgebühren für Kauf und Verkauf + gemessener Spread) |
 | Kurzfrist | Haltedauer | höchstens 20 Handelstage |
 | Kurzfrist | Trades | höchstens 2 Hin-und-zurück (4 Orders) im Monat; beim Kostendeckel von 6 € praktisch einer |
 | Kurzfrist | Bereichs-Stopps | Auslöser: 10 % Verlust im Monat: Pause bis Monatsende; 20 % unter Startwert: Ende |
@@ -613,6 +615,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Aufträge | Schutzfrist Kurzfrist | 60 Sekunden bis zum bestätigten Stopp; sonst bei erreichbarem Broker Rest stornieren, ungeschützte Menge zwingend verkaufen, Halt; ohne Verbindung Zustand „Schutz ungewiss“: Halt, Nachricht, Neuversuch alle 30 Sekunden |
 | Aufträge | zwingender Ausstieg | Limit um den Limit-Abstand unter dem letzten Kurs, höchstens 3 Nachzieh-Schritte zu je diesem Abstand |
 | Kurse | Höchstalter | 20 Minuten für Entscheidungen, freiwillige Aufträge, Tagesverlust und Notbremse; älter: Halt |
+| Kurse | Spreadgrenze | höchstens 0,5 % der Mitte zwischen Bid und Ask, Bid und Ask nicht älter als das Höchstalter; ohne Bid oder Ask kein freiwilliger Auftrag |
 | Freigaben | Handelszustimmung von Maus | gültig 15 Minuten und nur bis zum nächsten Lagebild |
 | Rundung | Reservierungen und Kosten | auf ganze Cent aufgerundet; verfügbares Geld abgerundet |
 
@@ -629,7 +632,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Kosten | Handelsbudget Kurzfrist | Gebühren höchstens 0,6 % des Bereichswerts im Monat (6 € bei 1.000 €); ein Einstieg belastet Kauf- und Verkaufsgebühr (4 €); Höchstgebühr je Order 2,00 € bis 2.500 € Volumen, vor dem Start an der Gebührentabelle des tatsächlichen Kontos bestätigen |
 | Kosten | Handelsbudget Langfrist | Gebühren höchstens 1,2 % des Bereichswerts im Jahr (12 € bei 1.000 €), Erstkauf ausgenommen |
 | Kosten | Handelsbudget Sicher | Gebühren höchstens 0,5 % des Bereichswerts im Jahr |
-| Kosten | Gesamtdeckel aller Kosten | 5 % des Startkapitals im Jahr (150 €), KI und Gebühren zusammen; der Spread wird daneben gemessen und berichtet |
+| Kosten | Budget für KI und Gebühren | 5 % des Startkapitals im Jahr (150 €); Spread und Fondskosten kommen hinzu, werden gemessen und berichtet, aber nicht vorab gedeckelt |
 | Nachrichten | Quellenliste | feste Liste von RSS-Adressen, Änderung nur per Festschreibung |
 | Maßstab | Sicher | Euro-Geldmarktzins (€STR) |
 | Maßstab | Langfrist | breiter Welt-ETF (z. B. MSCI World oder FTSE All-World) |
@@ -664,7 +667,7 @@ Gewählt ist IBKR: offizielle Order-Schnittstelle, kostenloses Papierkonto mit d
 2. Prüfkriterien für Echtgeld Kurzfrist wie in Kapitel 18: mindestens 6 Monate Beobachtung, Evidenz aus 12 Trades, höchstens 18 Monate, sonst „nicht nachgewiesen“; nach allen Kosten und Steuern besser als Bargeld zum €STR; Rückgang unter 15 %.
 3. KI-Obergrenze 54 € im Jahr für Dachs und Maus zusammen (1,8 %), 4,50 € im Monat.
 4. **Notbremsen-Modus, eine bewusste Risikowahl.** „Bestätigung“: Nichts wird ohne dich verkauft, aber der Verlust ist nicht automatisch begrenzt; Langfrist-Positionen laufen bis zu deiner Entscheidung ungeschützt weiter. „Automatisch“: Das Risiko weiterer Verluste sinkt, eine Verlusthöhe ist aber nicht garantiert (R33); es wird womöglich am Tiefpunkt verkauft, Verluste werden realisiert, und im hektischen Markt kann die Ausführung schlecht sein. Vorschlag: Bestätigung, weil Kurzfrist durch Stopps geschützt ist und Langfrist auf Jahre angelegt ist.
-5. Handelskosten als Anteil am Bereichswert: Kurzfrist 0,6 % im Monat, Langfrist 1,2 % im Jahr, Gesamtdeckel aller Kosten 5 % im Jahr (150 €).
+5. **Kostenrahmen, eine bewusste Kostenentscheidung.** Vorab gedeckelt werden KI und Gebühren: Kurzfrist 0,6 % im Monat, Langfrist 1,2 % im Jahr, zusammen mit der KI höchstens 150 € im Jahr (5 %). Der Spread wird nicht ins Budget gerechnet, weil er sich vorab nicht verlässlich bestimmen lässt. Stattdessen begrenzt ihn je freiwilligem Auftrag die Spreadgrenze (Vorschlag 0,5 %), und er zählt voll in Kostenregel und Bewertung. Die tatsächliche wirtschaftliche Belastung liegt damit über den 150 €. Die Alternative wäre, einen geschätzten Spread mit ins Budget zu nehmen; dann passt im Kurzfrist-Bereich womöglich kein Trade mehr in den Monat.
 6. RSS-Quellenliste: Der Vorschlag kommt mit Stufe 4 zur Bestätigung.
 7. **Art des Schutzstopps, ebenfalls eine Risikowahl.** Stopp mit Marktorder: wird ausgeführt, aber womöglich deutlich unter dem Stopp. Stopp-Limit: hält den Preis, bleibt aber womöglich unausgeführt, und die Position ist dann ungeschützt. Vorschlag: Stopp mit Marktorder.
 
