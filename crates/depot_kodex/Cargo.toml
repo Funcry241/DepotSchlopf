@@ -1,0 +1,15 @@
+[package]
+name = "depot_kodex"
+description = "DepotSchlopf: der Kodex – ausfuehrbares Gate, das nach jeder Aenderung entscheidet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+depot_kern = { workspace = true }
+depot_ki = { workspace = true }
+sha2 = { workspace = true }
+
+[lints]
+workspace = true

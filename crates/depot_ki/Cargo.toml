@@ -1,0 +1,13 @@
+[package]
+name = "depot_ki"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Harter Budgetwaechter fuer die KI-Aufrufe (Dachs = Claude, Maus = GPT)"
+
+[dependencies]
+depot_kern.workspace = true
+
+[lints]
+workspace = true

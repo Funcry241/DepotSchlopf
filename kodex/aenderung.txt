@@ -1,0 +1,14 @@
+# Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
+klasse: Gruendung
+zweck: Kern, Regelwerk, KI-Budgetwaechter, Kodex und Essenz von Anfang an anlegen
+pfade:
+.github/
+Cargo.lock
+Cargo.toml
+README.md
+crates/
+docs/
+kodex/festschreibung.txt
+run.cmd
+rust-toolchain.toml
+rustfmt.toml

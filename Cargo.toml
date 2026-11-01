@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/depot_kern", "crates/depot_regelwerk"]
+members = [
+    "crates/depot_kern",
+    "crates/depot_regelwerk",
+    "crates/depot_ki",
+    "crates/depot_kodex",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +16,7 @@ license = "MIT"
 [workspace.dependencies]
 sha2 = "0.10"
 depot_kern = { path = "crates/depot_kern" }
+depot_ki = { path = "crates/depot_ki" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

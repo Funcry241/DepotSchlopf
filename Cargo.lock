@@ -44,6 +44,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "depot_ki"
+version = "0.1.0"
+dependencies = [
+ "depot_kern",
+]
+
+[[package]]
+name = "depot_kodex"
+version = "0.1.0"
+dependencies = [
+ "depot_kern",
+ "depot_ki",
+ "sha2",
+]
+
+[[package]]
 name = "depot_regelwerk"
 version = "0.1.0"
 dependencies = [
