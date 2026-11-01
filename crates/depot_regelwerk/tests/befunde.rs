@@ -323,6 +323,37 @@ fn befund_1_f04_zu_viele_positionen_erzeugen_abbaupflicht() {
     assert!(danach.bargeld >= 0, "Bargeld negativ: {danach:?}");
 }
 
+/// Kaufgrenze fuer die Positionszahl: Acht Werte zu je 4 Stueck à 100 € sind gehalten (je 4 %),
+/// dazu 6.800 € Bargeld. Der zulaessige Vorschlag nennt nur ein Ziel: 20 % in einem neunten
+/// Wert. Die acht bleiben wegen der Umschichtungsschwelle stehen. Ein Kauf, der zu neun Werten
+/// fuehrt, verletzt die Kaufgrenze und darf nicht genehmigt werden. Eigener Fall neben der
+/// Abbaupflicht oben: Dort ist der Bestand schon zu gross, hier wuerde ihn erst der Kauf
+/// zu gross machen.
+#[test]
+#[ignore = "offen: 1·F04 Kauf erzeugt eine neunte Position"]
+fn befund_1_f04_kauf_erzeugt_keine_neunte_position() {
+    let g = Grenzen::standard();
+    let kurse = kurse_alle(10_000);
+    let mut topf = Topf::neu(TopfId::A, Cent::euro(6_800));
+    for i in 0..8 {
+        topf.positionen.insert(isin(i), 4);
+    }
+    let v = vorschlag(BeraterId::Dachs, &[(8, 2_000)]);
+    let ent = lauf(&g, &topf, &kurse, Some(&v), false);
+    let danach = Danach::rechne(&topf, &ent);
+    assert!(
+        danach.stueck.len() <= g.max_werte,
+        "nach den Auftraegen {} Werte statt hoechstens {}; Kaeufe {:?}",
+        danach.stueck.len(),
+        g.max_werte,
+        ent.kaeufe
+            .iter()
+            .map(GenehmigterAuftrag::auftrag)
+            .collect::<Vec<_>>()
+    );
+    assert!(danach.bargeld >= 0, "Bargeld negativ: {danach:?}");
+}
+
 // ---------------------------------------------------------------------------------------------
 // 1·F05 – Umschlaggrenze am Limit
 // ---------------------------------------------------------------------------------------------

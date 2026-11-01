@@ -405,6 +405,45 @@ fn befund_1_r02_oeffnungsfehler_sperrt_das_kassenbuch() -> Result<(), String> {
     }
 }
 
+/// Vorgeschichte von Maus aus 2025, die jede Regel einhaelt: je Monat zwei Tage mit je einem
+/// Zyklus und zwei Aufrufen (vier je Monat), Daten und Zyklen steigend, Reservierung gleich den
+/// Hoechstkosten. Jede Buchung wird gegen die Regeln von `pruefe` mit der Historie davor
+/// geprueft. Die Zeilen entstehen ueber `huelle`, also im jeweils aktuellen Format.
+fn zulaessige_vorgeschichte() -> Result<Vec<Buchung>, String> {
+    let grenzen = KiGrenzen::standard();
+    let deckel = KiDeckel::standard(BeraterId::Maus);
+    let mut buchungen: Vec<Buchung> = Vec::new();
+    let mut zyklus = 0_u32;
+    'monate: for monat in 1..=12_u8 {
+        for tag in [3_u8, 17] {
+            zyklus = zyklus.saturating_add(1);
+            let datum = Datum::neu(2025, monat, tag)
+                .ok_or_else(|| format!("Vorbedingung: Datum {tag}.{monat}.2025"))?;
+            for _ in 0..2 {
+                let reserviert = pruefe(
+                    &grenzen,
+                    &deckel,
+                    &buchungen,
+                    BeraterId::Maus,
+                    datum,
+                    zyklus,
+                )
+                .map_err(|e| format!("Vorbedingung: Vorgeschichte unzulaessig: {e:?}"))?;
+                buchungen.push(Buchung {
+                    berater: BeraterId::Maus,
+                    datum,
+                    zyklus,
+                    reserviert,
+                });
+                if huelle(&buchungen).len() > 487 {
+                    break 'monate;
+                }
+            }
+        }
+    }
+    Ok(buchungen)
+}
+
 /// Schreibfehler mitten in der Zeile: Eine Groessengrenze fuer Dateien (`ulimit -f`, SIGXFSZ
 /// ignoriert) laesst `write_all` nach einem Teil der Zeile scheitern. Danach entfernt der Test
 /// den Rest und die letzte Zeile der Vorgeschichte, sodass die Grenze fuer einen zweiten
@@ -416,17 +455,19 @@ fn befund_1_r02_oeffnungsfehler_sperrt_das_kassenbuch() -> Result<(), String> {
 #[ignore = "offen: 1·R02 nach einem Teilschreibfehler wird weitergeschrieben"]
 fn befund_1_r02_teilschreibfehler_sperrt_das_kassenbuch() -> Result<(), String> {
     let p = neuer_pfad()?;
-    // Gueltige Vorgeschichte aus 2025, knapp unter 512 Byte (ein ulimit-Block).
-    let mut vor = String::new();
-    let mut tag_2025 = 1_u8;
-    while vor.len() < 490 {
-        let _ = writeln!(vor, "v1;Maus;2025-01-{tag_2025:02};{tag_2025};90");
-        tag_2025 = tag_2025.saturating_add(1);
-    }
-    if vor.len() >= 512 {
+    let vor_buchungen = zulaessige_vorgeschichte()?;
+    let vor = huelle(&vor_buchungen);
+    if !(488..512).contains(&vor.len()) {
         return Err(format!("Vorbedingung: Vorgeschichte {} Byte", vor.len()));
     }
     vorbedingung(fs::write(&p, &vor), "Vorgeschichte")?;
+    // Die Vorgeschichte ist vollstaendig zulaessig: Das Kassenbuch oeffnet sie und liest jede
+    // Buchung (die Regeln selbst prueft `zulaessige_vorgeschichte`).
+    let gelesen = oeffnen(&p)?;
+    if gelesen.buchungen() != vor_buchungen.as_slice() {
+        return Err("Vorbedingung: Vorgeschichte falsch gelesen".into());
+    }
+    drop(gelesen);
     let kurz = vor
         .trim_end_matches('\n')
         .rfind('\n')
@@ -444,6 +485,7 @@ fn main() {{
     let d = KiDeckel::standard(BeraterId::Dachs);
     let tag = Datum::neu(2026, 11, 2).expect("Vorbedingung: Datum");
     let mut k = Kassenbuch::oeffnen(p).expect("Vorbedingung: Kassenbuch");
+    let vorher = k.buchungen().len();
     let erster = k.reserviere(&g, &d, BeraterId::Dachs, tag, 1);
     let groesse = std::fs::metadata(p).expect("Vorbedingung: Groesse").len();
     assert!(erster.is_err(), "Vorbedingung: Schreibfehler tritt nicht ein");
@@ -454,13 +496,16 @@ fn main() {{
     let danach = std::fs::metadata(p).expect("Vorbedingung: Groesse").len();
     assert!(zweiter.is_err(), "nach dem Teilschreibfehler Erlaubnis erteilt");
     assert_eq!(danach, kurz, "nach dem Teilschreibfehler weitergeschrieben");
-    assert!(k.buchungen().iter().all(|b| b.datum < tag), "Buchung im Speicher");
+    assert_eq!(k.buchungen().len(), vorher, "Buchung im Speicher");
+    assert_eq!(k.buchungen().len(), {anzahl}, "Vorbedingung: Vorgeschichte gelesen");
 }}
 "#,
-        laenge = vor.len()
+        laenge = vor.len(),
+        anzahl = vor_buchungen.len()
     );
-    if 512_usize.saturating_sub(kurz) < 40 {
-        return Err("Vorbedingung: zu wenig Platz fuer den zweiten Versuch".into());
+    // Eine neue Zeile von Dachs ist 25 Byte lang ("v1;Dachs;2026-11-02;1;48\n").
+    if 512_usize.saturating_sub(kurz) <= 25 || 512_usize.saturating_sub(vor.len()) >= 25 {
+        return Err("Vorbedingung: Platz bis zur Grenze passt nicht zum Teilschreiben".into());
     }
     let exe = sonde::programm(&KI, &programm)?;
     let aus = vorbedingung(

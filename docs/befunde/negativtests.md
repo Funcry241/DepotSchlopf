@@ -4,7 +4,7 @@ Stufe 2 beginnt damit, dass jeder Befund aus `docs/BEFUNDE.md` ein Negativtest w
 
 **Geprüfter Code:** Produktivcode von Stand `383ee05`. Bis `665ed4b` (Architektur 4.4) hat sich unter `crates/`, `Cargo.toml` und `Cargo.lock` nichts geändert.
 
-**Fassung 2** nach der Nachprüfung durch Maus (Stand `d887591`, Feststellungen N02 bis N08). Die Tests wurden geschärft; kein früheres Gegenbeispiel wurde entfernt oder abgeschwächt.
+**Fassung 3** nach zwei Nachprüfungen durch Maus (Stand `d887591`: N02 bis N08; Stand `e7e7a7b`: R01 bis R03). Die Tests wurden geschärft; kein früheres Gegenbeispiel wurde entfernt oder abgeschwächt.
 
 ## So prüfst du es nach
 
@@ -16,7 +16,7 @@ cargo test --locked -p depot_ki        --test befunde -- --ignored
 cargo test --locked -p depot_regelwerk --test befunde -- --ignored
 ```
 
-Jeder markierte Test muss am alten Stand fehlschlagen: Kern 7, KI 13, Regelwerk 14, zusammen 34. Im normalen Lauf (`run.cmd`, `cargo test`) tragen sie `#[ignore = "offen: …"]`, damit das Gate grün bleibt. Der Umbau entfernt das `ignore`. Ab dann laufen sie im Kodex und müssen bestehen. Ein Befund ist erst technisch geschlossen, wenn sein Test ohne `ignore` grün ist und eine unabhängige Prüfung das bestätigt.
+Jeder markierte Test muss am alten Stand fehlschlagen: Kern 7, KI 13, Regelwerk 15, zusammen 35. Im normalen Lauf (`run.cmd`, `cargo test`) tragen sie `#[ignore = "offen: …"]`, damit das Gate grün bleibt. Der Umbau entfernt das `ignore`. Ab dann laufen sie im Kodex und müssen bestehen. Ein Befund ist erst technisch geschlossen, wenn sein Test ohne `ignore` grün ist und eine unabhängige Prüfung das bestätigt.
 
 Tests mit dem Präfix `grenzfall_` sind gezielte Grenzfälle (1·T01). Wo sie schon heute halten, laufen sie ohne `ignore`.
 
@@ -37,6 +37,7 @@ Wie bei Maus in einer Wegwerfkopie ausgeführt, nicht im Repository:
 | `Cent::euro` liefert bei Überlauf 0 statt eines Fehlers | A01 bleibt rot |
 | `Grenzen::standard` nur umbenannt, Felder weiter öffentlich | beide F01-Tests bleiben rot („lässt sich bauen“) |
 | Sperre nur nach Öffnungsfehler, nicht nach Schreibfehler | R02-Teilschreibtest bleibt rot |
+| nur ein schon überzähliger Bestand wird behandelt, der Kauf einer neunten Position nicht | neuer Test `befund_1_f04_kauf_erzeugt_keine_neunte_position` rot |
 | richtiger Umbau: `euro` und `abs` liefern `Option`, Felder von `Grenzen` und `Kurse` privat, `Topf::neu` lehnt negatives Bargeld ab | alle 7 Kerntests grün |
 | richtiger Umbau: Sperre nach jedem Schreibfehler, Datumsfelder privat | beide R02-Tests und der K03-Feldtest grün |
 
@@ -65,13 +66,14 @@ Die Gegenproben belegen einzelne Tests, keinen vollständigen Mutantenlauf.
 | 1·K06 | `depot_ki` `befund_1_k06_zweiter_pfad_auf_dieselbe_datei_wird_gesperrt` | rot: dieselbe Datei über harten Link zweimal offen |
 | 1·K06 | `depot_ki` `befund_1_k06_symbolischer_link_wird_abgelehnt` (nur Unix) | rot: Kassenbuch über Link geöffnet |
 | 1·R02 | `depot_ki` `befund_1_r02_oeffnungsfehler_sperrt_das_kassenbuch` | rot: nach dem Öffnungsfehler weitergeschrieben |
-| 1·R02 | `depot_ki` `befund_1_r02_teilschreibfehler_sperrt_das_kassenbuch` (nur Unix) | rot: nach dem Teilschreibfehler Erlaubnis erteilt |
+| 1·R02 | `depot_ki` `befund_1_r02_teilschreibfehler_sperrt_das_kassenbuch` (nur Unix) | rot: nach dem Teilschreibfehler Erlaubnis erteilt. Die Vorgeschichte hält jede Regel ein (vier Aufrufe je Monat, steigende Daten und Zyklen, Reservierung gleich Höchstkosten), wird Buchung für Buchung gegen `pruefe` geprüft und vor dem Fehler vollständig gelesen |
 | 2·A12 | `depot_ki` `grenzfall_2_a12_hoechstpreis_wird_auf_ganze_cent_aufgerundet` | grün: nur der Rundungsteil |
 | 1·F02 | `depot_regelwerk` `befund_1_f02_vorschlag_fuer_fremden_bereich_wird_abgelehnt` | rot: Vorschlag von Maus für den Topf von Dachs genehmigt |
 | 1·F03 | `depot_regelwerk` `befund_1_f03_nullkurs_erzeugt_keinen_notauftrag_sondern_halt` | rot: Notbremse verkauft mit Limit 0,00 € |
 | 1·F03 | `depot_regelwerk` `befund_1_f03_nullkurs_erzeugt_im_regelwerk_keinen_auftrag` | rot: zwingender Ausstieg zum Kurs 0,00 € und −1,00 € |
 | 1·F04 | `depot_regelwerk` `befund_1_f04_marktbewegung_ueber_toleranz_erzeugt_abbaupflicht` | rot: nach den Aufträgen 28 % statt höchstens 25 % |
 | 1·F04 | `depot_regelwerk` `befund_1_f04_zu_viele_positionen_erzeugen_abbaupflicht` | rot: 9 Werte statt höchstens 8, Vorschlag nur verworfen |
+| 1·F04 | `depot_regelwerk` `befund_1_f04_kauf_erzeugt_keine_neunte_position` | rot: aus acht zulässigen Werten wird durch einen Kauf von 20 Stück ein neunter |
 | 1·F05 | `depot_regelwerk` `befund_1_f05_umschlag_am_limit_ueber_der_grenze_wird_gekuerzt` | rot: 5.050 € über erlaubten 5.000 € |
 | 1·F06 | `depot_regelwerk` `befund_1_f06_teilverkauf_unter_mindestorder_am_limit_abgelehnt` | rot: 5 × 99 € = 495 € unter Mindestorder |
 | 1·F08 | `depot_regelwerk` `befund_1_f08_fehlender_vortag_ist_kein_bestandener_sprungtest` | rot: fehlender Vortagskurs still akzeptiert |

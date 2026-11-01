@@ -6,7 +6,7 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Tests
 
-- Stufe 2, Schritt 1: 34 Negativtests für 19 Befunde aus Kern, Regelwerk und KI-Budget (`tests/befunde.rs` je Crate). Sie sind am alten Stand rot und bis zum Umbau mit `ignore` markiert; Nachweis, Gegenproben und fehlende Teilnachweise in `docs/befunde/negativtests.md`.
+- Stufe 2, Schritt 1: 35 Negativtests für 19 Befunde aus Kern, Regelwerk und KI-Budget (`tests/befunde.rs` je Crate). Sie sind am alten Stand rot und bis zum Umbau mit `ignore` markiert; Nachweis, Gegenproben und fehlende Teilnachweise in `docs/befunde/negativtests.md`.
 - Sonde für Bau- und Vertragstests: liest Compilermeldungen strukturiert und verlangt den erwarteten Zugriffsfehler; Verträge werden gebaut und ausgeführt.
 - Gezielte Grenzfälle je harter Grenze; der Zufallstest heißt jetzt `zufallstest_grenzen_am_schlusskurs`, weil er nur am Schlusskurs prüft.
 
