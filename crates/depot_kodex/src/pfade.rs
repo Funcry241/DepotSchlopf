@@ -8,6 +8,8 @@ use crate::deklaration::Klasse;
 pub enum Rolle {
     Deklaration,
     Festschreibung,
+    /// `kodex/freigabe.txt`: die Grenzfreigabe zur Festschreibung (R30).
+    Freigabe,
     Kodex,
     Doku,
     Test,
@@ -32,6 +34,9 @@ pub fn rolle(pfad: &str) -> Rolle {
     }
     if pfad == crate::FESTSCHREIBUNG {
         return Rolle::Festschreibung;
+    }
+    if pfad == crate::freigabe::FREIGABE {
+        return Rolle::Freigabe;
     }
     if pfad.starts_with("kodex/")
         || pfad.starts_with("crates/depot_kodex/")
@@ -67,6 +72,14 @@ pub fn erlaubt(klasse: Klasse, rolle: Rolle) -> bool {
     match rolle {
         R::Deklaration => true,
         R::Unbekannt => false,
+        // Die Festschreibung und ihre Freigabe aendern nur diese beiden Klassen; jede Aenderung
+        // der Festschreibung braucht die gebundene Grenzfreigabe (freigabe.rs). Eine
+        // KodexAenderung darf nur die Berechnung aendern, denn Grenzen, Budgets und Produktarten
+        // liegen im Produktivcode, den sie nicht beruehren darf.
+        R::Festschreibung | R::Freigabe => matches!(
+            klasse,
+            Klasse::Gruendung | Klasse::FestschreibungAenderung | Klasse::KodexAenderung
+        ),
         _ => match klasse {
             Klasse::Gruendung => true,
             Klasse::DokuOnly => rolle == R::Doku,
@@ -74,10 +87,9 @@ pub fn erlaubt(klasse: Klasse, rolle: Rolle) -> bool {
             Klasse::RefactorOnly => matches!(rolle, R::Doku | R::Test | R::Produktiv),
             Klasse::Funktion => matches!(rolle, R::Doku | R::Test | R::Produktiv | R::Werkzeug),
             Klasse::KodexAenderung => matches!(rolle, R::Kodex | R::Doku),
-            Klasse::FestschreibungAenderung => matches!(
-                rolle,
-                R::Festschreibung | R::Doku | R::Test | R::Produktiv | R::Werkzeug
-            ),
+            Klasse::FestschreibungAenderung => {
+                matches!(rolle, R::Doku | R::Test | R::Produktiv | R::Werkzeug)
+            }
         },
     }
 }
@@ -108,6 +120,8 @@ mod tests {
     fn rollen() {
         assert_eq!(rolle("kodex/aenderung.txt"), Rolle::Deklaration);
         assert_eq!(rolle("kodex/festschreibung.txt"), Rolle::Festschreibung);
+        assert_eq!(rolle("kodex/freigabe.txt"), Rolle::Freigabe);
+        assert_eq!(rolle("kodex/essenz_register.txt"), Rolle::Kodex);
         assert_eq!(rolle("crates/depot_kodex/src/lib.rs"), Rolle::Kodex);
         assert_eq!(rolle(".github/workflows/kodex.yml"), Rolle::Kodex);
         assert_eq!(rolle("docs/essenz.md"), Rolle::Doku);
@@ -124,5 +138,7 @@ mod tests {
         assert!(!erlaubt(Klasse::Funktion, Rolle::Festschreibung));
         assert!(!erlaubt(Klasse::FestschreibungAenderung, Rolle::Kodex));
         assert!(!erlaubt(Klasse::Gruendung, Rolle::Unbekannt));
+        assert!(!erlaubt(Klasse::Funktion, Rolle::Freigabe));
+        assert!(erlaubt(Klasse::FestschreibungAenderung, Rolle::Freigabe));
     }
 }

@@ -10,17 +10,37 @@
 //! 2. Pfadrollen: Jede Klasse darf nur bestimmte Rollen beruehren.
 //! 3. Festschreibung: Harte Grenzen, KI-Budget, Produktarten, Abhaengigkeiten und Netzzugang
 //!    sind in `kodex/festschreibung.txt` festgeschrieben. Abweichung = Ablehnung.
-//! 4. Quellscan: Kern und Regelwerk bleiben rein; kein Netz ohne Festschreibung;
-//!    keine Lint-Ausnahme ohne Grund und nie fuer die harten Lints.
-//! 5. Essenz-Kaltstart: Die Essenz bleibt vollstaendig und aufloesbar.
+//!    Jede Aenderung der Festschreibung braucht eine an sie gebundene Grenzfreigabe.
+//! 4. Quellscan: Code syntaktisch, Manifeste semantisch. Harte Lints im Kopf jedes
+//!    Produktiv-Targets auf `forbid`; keine Ausnahme dafuer, auch nicht hinter `cfg_attr`;
+//!    Kern und Regelwerk rein; kein Netz ohne Erlaubnis; Lesefehler und Links sind Fehler.
+//! 5. Essenz-Kaltstart: Die Essenz entspricht ihrem festen Register und bleibt aufloesbar.
 //! 6. (mit `--voll`) Format, Clippy mit `-D warnings`, alle Tests.
+
+// Die harten Lints stehen auch im Kodex selbst auf `forbid` (R26, Befund 1·G01).
+#![forbid(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::float_arithmetic,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 
 pub mod deklaration;
 pub mod essenz;
 pub mod festschreibung;
+pub mod freigabe;
 pub mod git;
+pub mod lexer;
+pub mod manifest;
 pub mod pfade;
 pub mod quellscan;
+pub mod rust;
+pub mod toml;
 
 use std::path::Path;
 
@@ -73,6 +93,7 @@ pub fn pruefe(wurzel: &Path, basis: &str) -> Vec<String> {
         deklaration.klasse,
         &diff.pfade,
     ));
+    fehler.extend(freigabe::pruefe(wurzel, &diff.pfade));
     fehler.extend(quellscan::pruefe(wurzel));
     fehler.extend(essenz::pruefe(wurzel));
     fehler

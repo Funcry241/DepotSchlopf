@@ -1,4 +1,17 @@
-//! `kodex` – das Gate. Aufruf: `kodex [--basis <ref>] [--voll]` oder `kodex festschreibung`.
+//! `kodex` – das Gate. Aufruf: `kodex [--basis <ref>] [--voll]`, `kodex festschreibung` oder
+//! `kodex freigabe [--basis <ref>]` (Vorlage der Grenzfreigabe fuer den aktuellen Diff).
+
+#![forbid(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::float_arithmetic,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 
 use std::process::{Command, ExitCode};
 
@@ -8,6 +21,13 @@ fn cargo(args: &[&str]) -> bool {
         .args(args)
         .status()
         .is_ok_and(|s| s.success())
+}
+
+fn basis_aus(args: &[String]) -> &str {
+    args.iter()
+        .position(|a| a == "--basis")
+        .and_then(|i| args.get(i.saturating_add(1)))
+        .map_or("origin/main", String::as_str)
 }
 
 fn main() -> ExitCode {
@@ -41,11 +61,25 @@ fn main() -> ExitCode {
         };
     }
 
-    let basis = args
-        .iter()
-        .position(|a| a == "--basis")
-        .and_then(|i| args.get(i.saturating_add(1)))
-        .map_or("origin/main", String::as_str);
+    let basis = basis_aus(&args);
+
+    if args.first().map(String::as_str) == Some("freigabe") {
+        // Schreibt nichts und meldet nie ein offenes Gate (R27): nur die Vorlage.
+        let vorlage = depot_kodex::git::aenderungen(&wurzel, basis)
+            .and_then(|d| depot_kodex::freigabe::vorlage(&wurzel, &d.pfade));
+        return match vorlage {
+            Ok(v) => {
+                println!("[Kodex] Vorlage fuer {}:", depot_kodex::freigabe::FREIGABE);
+                print!("{v}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("[Kodex] FEHLER: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     let voll = args.iter().any(|a| a == "--voll");
 
     let fehler = if wurzel.join(".git").exists() {

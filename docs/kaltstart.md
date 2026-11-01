@@ -20,7 +20,7 @@ Diese Datei zuerst lesen, wenn ein neuer Bearbeiter (Mensch oder KI) ohne Vorges
 2. `kodex/aenderung.txt` neu schreiben: Klasse, Zweck, Pfade.
 3. Ändern.
 4. `run.cmd` ausführen. Nur ein offenes Gate darf zusammengeführt werden.
-5. Ist eine Festschreibung betroffen: `run.cmd festschreibung`, Klasse `FestschreibungAenderung`, Freigabe durch Wolfgang Mair.
+5. Ist eine Festschreibung betroffen: `run.cmd festschreibung`, Klasse `FestschreibungAenderung`. Zuletzt erteilt Wolfgang Mair die Grenzfreigabe `kodex/freigabe.txt`, gebunden an Diff und neue Festschreibung; die Vorlage zeigt `cargo run -p depot_kodex -- freigabe --basis origin/main`. Jede spätere Änderung macht die Freigabe ungültig.
 
 ## Klassen
 
@@ -31,7 +31,7 @@ Diese Datei zuerst lesen, wenn ein neuer Bearbeiter (Mensch oder KI) ohne Vorges
 | `TestOnly` | Dokumentation, Tests |
 | `RefactorOnly` | Dokumentation, Tests, Produktivcode (ohne Verhaltensänderung) |
 | `Funktion` | Dokumentation, Tests, Produktivcode, Werkzeug-Dateien |
-| `KodexAenderung` | Gate (`crates/depot_kodex/`, `kodex/`, `.github/`), Dokumentation – nie Produktivcode |
-| `FestschreibungAenderung` | Festschreibung, Produktivcode, Tests, Werkzeug, Dokumentation – nie das Gate |
+| `KodexAenderung` | Gate (`crates/depot_kodex/`, `kodex/`, `.github/`), Dokumentation, die Berechnung der Festschreibung mit Grenzfreigabe – nie Produktivcode |
+| `FestschreibungAenderung` | Festschreibung mit Grenzfreigabe, Produktivcode, Tests, Werkzeug, Dokumentation – nie das Gate |
 
-Die Festschreibung gilt in jeder Klasse: Weicht der Baum davon ab, ist das Gate geschlossen.
+Die Festschreibung gilt in jeder Klasse: Weicht der Baum davon ab, ist das Gate geschlossen. Die Essenz-Regeln D00 bis D17 stehen im festen Register `kodex/essenz_register.txt`.

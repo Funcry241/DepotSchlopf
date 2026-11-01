@@ -1,0 +1,19 @@
+# Festes Register der Essenz-Regeln (R26, Befund 1·G05). Aendern nur mit KodexAenderung.
+D00 – Repository vor Erinnerung
+D01 – KI schlägt vor, Regelwerk entscheidet
+D02 – Erkennen, Entscheiden und Ausführen sind getrennt
+D03 – Im Zweifel nichts tun
+D04 – Kein Produkt, dessen Verlust den Einsatz übersteigen kann
+D05 – Grenzen ändern sich nie nebenbei
+D06 – Erst buchen, dann fragen
+D07 – Geld ist ganzzahlig
+D08 – Gespeicherte Bytes sind die Wahrheit
+D09 – Abgleich mit dem Broker schlägt eigenes Gedächtnis
+D10 – Kosten vor Rendite
+D11 – Ein Backtest beweist nichts über die Zukunft
+D12 – Normative Tests sind synthetisch
+D13 – Billige Strukturprüfungen vor teuren Beweisen
+D14 – Der Kodex ändert sich allein
+D15 – Kleinster korrekter Abschluss vor zusätzlicher Architektur
+D16 – Die Essenz hat keine zweite Wahrheit
+D17 – Kaltstart ist eine Projektanforderung

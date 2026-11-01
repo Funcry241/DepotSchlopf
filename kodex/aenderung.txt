@@ -1,9 +1,12 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: RefactorOnly
-zweck: Stufe 2, Kodex-Schritt Teil 1 - die harten Lints stehen im Kopf jedes Produkt-Crates auf forbid, damit der Compiler jede lokale Ausnahme ablehnt (1·G01, R26); ohne Verhaltensaenderung
+klasse: KodexAenderung
+zweck: Stufe 2, Kodex-Schritt Teil 2 - Negativtests und Umbau des Kodex fuer 1·G01 bis 1·G06 (Kodex-Teil), 1·R03, 1·R08 und 2·A11 entlang R24, R26, R29 und R30
 pfade:
-crates/depot_kern/src/lib.rs
-crates/depot_regelwerk/src/lib.rs
-crates/depot_ki/src/lib.rs
-crates/depot_lauf/src/main.rs
+crates/depot_kodex/
+kodex/essenz_register.txt
+kodex/festschreibung.txt
+kodex/freigabe.txt
+docs/BEFUNDE.md
+docs/befunde/
+docs/kaltstart.md
 CHANGELOG.md
