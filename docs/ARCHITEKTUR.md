@@ -550,7 +550,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 Jede Stufe endet mit grünem Kodex und einem Assistenten-Export (R18).
 
 1. **Grundlagen** (fertig): Kern, Regelwerk, Budgetwächter mit Kassenbuch, Kodex mit Essenz, `run.cmd` mit Assistenten-Export.
-2. **Vertrauensgrenzen schließen und Festschreibung umstellen:** Der vorhandene Code wird entlang R19 bis R30 neu geschnitten, nicht Stück für Stück repariert. Zuerst wird jedes Gegenbeispiel aus der Prüfung durch Maus ein Negativtest. Dann folgt der Kodex (als eigene Änderung), danach Kern, Regelwerk, Kassenbuch und Export. Bereiche und Startwerte aus Kapitel 18 kommen in einer `FestschreibungAenderung` mit Wolfgangs Freigabe. Die Essenz wird um die neuen Regeln ergänzt. Die Architektur liegt als `docs/ARCHITEKTUR.md` im Repository und wird dort gepflegt. Bis dahin verspricht die README nur, was der Code tatsächlich durchsetzt.
+2. **Vertrauensgrenzen schließen und Festschreibung umstellen:** Der vorhandene Code wird entlang R19 bis R32 neu geschnitten, nicht Stück für Stück repariert. Zuerst wird jedes Gegenbeispiel aus der Prüfung durch Maus ein Negativtest. Dann folgt der Kodex (als eigene Änderung), danach Kern, Regelwerk, Kassenbuch und Export. Bereiche und Startwerte aus Kapitel 18 kommen in einer `FestschreibungAenderung` mit Wolfgangs Freigabe. Die Essenz wird um die neuen Regeln ergänzt. Die Architektur liegt als `docs/ARCHITEKTUR.md` im Repository und wird dort gepflegt. Bis dahin verspricht die README nur, was der Code tatsächlich durchsetzt.
 3. **Journal, Kontowächter, Wiederanlauf**, geprüft mit erfundenen Lagen.
 4. **Sammelstelle und Lagebild** ohne KI, mit aufgezeichneten und erfundenen Ereignissen.
 5. **Berater Dachs und Maus** mit allen Kostensperren.
