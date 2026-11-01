@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: DokuOnly
-zweck: Architektur Fassung 4.3 mit Anhangsvermerk fuer die Bestaetigungsgrenze aus der fuenften Pruefung durch Maus
+zweck: Architektur Fassung 4.4 mit Wolfgangs Klarstellung zu Ziel, Betrag und Paketfreigabe
 pfade:
 docs/ARCHITEKTUR.md
 docs/BEFUNDE.md

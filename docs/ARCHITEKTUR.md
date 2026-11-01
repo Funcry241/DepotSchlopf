@@ -2,13 +2,17 @@
 
 Stand 01.11.2026 · Wolfgang Mair
 
-*Fassung 4.3. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
+*Fassung 4.4. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
 
 ## 1 Zweck und Leitsatz
 
 DepotSchlopf ist ein Rust-Programm, das auf Wolfgangs dauerhaft laufendem Rechner ein kleines Depot bei Interactive Brokers (IBKR) verwaltet. Es beobachtet Kurse, Konto und Nachrichten ständig und ohne Kosten. Nur wenn etwas Wesentliches passiert, fragt es zwei KIs um Rat: Dachs (Claude) und Maus (GPT). Die KIs schlagen vor und begründen. Ein festes Regelwerk entscheidet, ein Kontowächter prüft die Deckung, und nur eine einzige Stelle darf Aufträge an den Broker senden. Jeder Schritt hinterlässt einen Beleg.
 
-Das Geld liegt in drei Bereichen: **Sicher** (geringstes Risiko, ohne KI), **Langfrist** (Vermögensaufbau über Jahre) und **Kurzfrist** (Chancen über Stunden bis Wochen, mit begrenztem Risiko).
+**Ziel:** ein Plus des Gesamtvermögens gegenüber dem tatsächlich eingesetzten Geld, nach allen Kosten. Dazu zählen KI-Kosten, Gebühren, Spread und laufende Fondskosten, auch wenn sie außerhalb des Brokerkontos anfallen. Das Ziel ist der Maßstab jeder Bewertung, keine Gewinngarantie und keine Forderung nach einem Plus an jedem Tag. Ist der Ansatz nach allen Kosten nicht tragfähig, wird er angepasst oder gestoppt.
+
+**Budget:** Der Rahmen arbeitet mit genau dem Betrag, den Wolfgang bereitstellt und freigibt, und setzt keine weiteren Mittel voraus. Er funktioniert mit jedem freigegebenen Betrag ab der Mindestgröße, die sich aus Mindestorder und Gebühren ergibt. Alle Euro-Beträge in diesem Dokument, die auf 3.000 € beruhen, sind Beispiele.
+
+Das freigegebene Geld liegt in drei Bereichen: **Sicher** (geringstes Risiko, ohne KI), **Langfrist** (Vermögensaufbau über Jahre) und **Kurzfrist** (Chancen über Stunden bis Wochen, mit begrenztem Risiko). Die Aufteilung ist keine feste Voraussetzung, sondern Teil der Startwerte.
 
 > Essenz lenkt. Sammelstelle beobachtet. KI schlägt vor. Regelwerk entscheidet. Kontowächter deckt. Auftragsstelle schreibt. Journal belegt. Abgleich prüft. Kodex wacht.
 
@@ -34,7 +38,7 @@ Diese Regeln gelten für jeden Baustein und jede spätere Änderung. Die Regeln 
 | R12 | Gespeicherte Bytes sind die Wahrheit | Was nicht auf der Platte steht, ist nicht geschehen. Der Broker schlägt das eigene Gedächtnis. | Erst Journal schreiben, dann handeln. Vor jedem Auftrag wird mit dem Broker abgeglichen. |
 | R13 | Geld ist ganzzahlig | Rundungsfehler dürfen kein Geld erzeugen oder vernichten. | Cent als Ganzzahl, Anteile in Basispunkten, keine Gleitkommazahlen. |
 | R14 | Grenzen ändern sich nie nebenbei | Eine Grenze ist nur so gut wie der Weg, sie zu ändern. | Grenzen stehen in der Festschreibung und ändern sich nur mit der Klasse `FestschreibungAenderung` und Wolfgangs Freigabe. Das Gate ändert sich nie zusammen mit Produktivcode. |
-| R15 | Wolfgang hält die Schlüssel | Über Geld und Grenzen entscheidet der Eigentümer. | Nur Wolfgang verschiebt Geld zwischen Bereichen, ändert Grenzen, gibt Echtgeld frei, hebt einen Halt auf, wählt den Notbremsen-Modus und bestätigt im Modus „Bestätigung“ den Notbremsen-Verkauf. |
+| R15 | Wolfgang hält die Schlüssel | Über Geld und Grenzen entscheidet der Eigentümer. | Dachs und Maus arbeiten Aufteilung, Strategie, Ordergrößen, Kostenansatz und Startwerte aus, begründen und prüfen sie. Wirksam werden sie nur als ganzes Paket mit Wolfgangs Freigabe; Einzelwerte muss er nicht festlegen. Keine KI setzt sich ihre Grenzen selbst. Nur Wolfgang stellt den Betrag bereit, verschiebt Geld zwischen Bereichen, ändert Grenzen, gibt Echtgeld frei, hebt einen Halt auf, wählt den Notbremsen-Modus und bestätigt im Modus „Bestätigung“ den Notbremsen-Verkauf. |
 | R16 | Ehrlicher Maßstab | Ein Ergebnis zählt erst nach allen Kosten und Steuern und im Vergleich mit dem einfachsten Weg. | Jeder Bereich wird mit einem zu seinem Ziel passenden einfachen Maßstab verglichen: Sicher mit dem Euro-Geldmarktzins, Langfrist mit einem breiten Welt-ETF, Kurzfrist mit Bargeld und dem Welt-ETF. Regeln werden nie nachträglich an gespeicherte Ergebnisse angepasst. |
 | R17 | Billige Prüfungen zuerst, Beweise synthetisch | Struktur vor Verhalten, erfundene Lagen vor echten Kursen. | Der Kodex prüft erst Deklaration, Pfade, Festschreibung und Quellen, dann Format, Clippy und Tests. Grenzen werden mit erfundenen Zahlen bewiesen. |
 | R18 | Kleinster korrekter Abschluss, Kaltstart | Eine Stufe wird fertig, bevor die nächste beginnt. Jeder neue Bearbeiter muss allein weiterarbeiten können. | Ausbau in Stufen (Kapitel 19). Jede Stufe endet mit grünem Kodex und Assistenten-Export. |
@@ -408,7 +412,7 @@ Dollar wird vorsichtig 1:1 als Euro gerechnet. Die Gebühr von 1,50 € und der 
 | Langfrist, monatlich gründlich (Dachs und Maus) | 28.000 / 8.000 und 8.000 / 1.000 | 0,40 € | 1 | 0,40 € |
 | **Summe** |  |  |  | **etwa 3,25 €** |
 
-**Jahreskosten bei 3.000 € (alle Bereiche mit echtem Geld):**
+**Beispiel: Jahreskosten bei 3.000 € und gleicher Aufteilung (alle Bereiche mit echtem Geld):**
 
 | Bereich | KI erwartet | Handel erwartet | Summe erwartet | Anteil am Bereich | Obergrenze | Anteil am Bereich |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -417,7 +421,7 @@ Dollar wird vorsichtig 1:1 als Euro gerechnet. Die Gebühr von 1,50 € und der 
 | Kurzfrist (1.000 €), etwa 1 Trade im Monat | 30 € | 42 € | 72 € | 7,2 % | 108 € (KI 36 €, Handel 72 €) | 10,8 % |
 | **Gesamt** | **39 €** | **56 €** | **95 €** | **3,2 % des Startkapitals** | **150 € Budget für KI und Gebühren** | **5,0 % des Startkapitals** |
 
-Die erwarteten Werte folgen aus der Aufruftabelle oben und den Gebühren. Die Obergrenzen sind die festgeschriebenen Budgets: KI-Monatsdeckel mal zwölf, Gebühren als Anteil am Bereichswert. Sie begrenzen KI und Gebühren, nicht alle wirtschaftlichen Kosten. Spread und laufende ETF-Kosten von etwa 0,1 % im Jahr kommen hinzu; sie werden gemessen und berichtet, aber nicht vorab gedeckelt. Bezogen auf das Startkapital kostet die KI erwartet etwa 39 € im Jahr (1,3 %) und höchstens 54 € (1,8 %), für Dachs und Maus zusammen.
+Die erwarteten Werte folgen aus der Aufruftabelle oben und den Gebühren. Die Obergrenzen sind die festgeschriebenen Budgets: KI-Monatsdeckel mal zwölf, Gebühren als Anteil am Bereichswert. Sie begrenzen KI und Gebühren, nicht alle wirtschaftlichen Kosten. Spread und laufende ETF-Kosten von etwa 0,1 % im Jahr kommen hinzu; sie werden gemessen und berichtet, aber nicht vorab gedeckelt. Bezogen auf das Startkapital kostet die KI im Beispiel erwartet etwa 39 € im Jahr (1,3 %) und höchstens 54 € (1,8 %), für Dachs und Maus zusammen. Bei einem kleineren Betrag steigen diese Anteile, weil KI-Kosten und Gebühr je Order fast gleich bleiben. Die Tragfähigkeit wird deshalb für den tatsächlich freigegebenen Betrag gerechnet und mit dem Paket vorgelegt.
 
 Solange Kurzfrist nur auf Papier läuft, entstehen dort keine Handelskosten, aber echte KI-Kosten von erwartet etwa 30 € im Jahr. Sie sind der Preis des Nachweises.
 
@@ -434,7 +438,7 @@ Solange Kurzfrist nur auf Papier läuft, entstehen dort keine Handelskosten, abe
 | Fehlgeschlagene KI-Aufrufe | im Budget | eine Wiederholung, zählt gegen alle Grenzen |
 | Steuern | 26,375 % plus ggf. Kirchensteuer auf Gewinne | Steuerrücklage, Anlage KAP |
 
-**Ehrliche Folgerung:** Die Mindestgebühr je Order macht kleine Kurzfrist-Trades teuer. Mit 1.000 € muss der Kurzfrist-Bereich erwartet gut 7 % im Jahr verdienen, bei ausgeschöpften Deckeln knapp 11 %, nur um seine Kosten zu decken. Dazu kommt der Geldmarktzins, den das Geld als Bargeld ohnehin bekäme. Das gelingt den meisten Kurzfrist-Händlern nicht. Deshalb bekommt er echtes Geld erst nach einem Nachweis auf dem Papierkonto (Kapitel 19). Mit mehr Geld sinkt der Anteil deutlich, weil die Gebühr je Order fast gleich bleibt. Zum Vergleich: Alles in einen Welt-ETF zu legen kostet etwa 5 € im Jahr. Daran misst sich DepotSchlopf (R16).
+**Ehrliche Folgerung:** Die Mindestgebühr je Order macht kleine Kurzfrist-Trades teuer. Im Beispiel mit 1.000 € muss der Kurzfrist-Bereich erwartet gut 7 % im Jahr verdienen, bei ausgeschöpften Deckeln knapp 11 %, nur um seine Kosten zu decken. Dazu kommt der Geldmarktzins, den das Geld als Bargeld ohnehin bekäme. Das gelingt den meisten Kurzfrist-Händlern nicht. Deshalb bekommt er echtes Geld erst nach einem Nachweis auf dem Papierkonto (Kapitel 19). Mit mehr Geld sinkt der Anteil deutlich, weil die Gebühr je Order fast gleich bleibt. Zum Vergleich: Alles in einen Welt-ETF zu legen kostet etwa 5 € im Jahr. Daran misst sich DepotSchlopf (R16).
 
 ## 14 Sicherheit
 
@@ -548,12 +552,12 @@ Die Abhängigkeiten zeigen nur nach innen: Der Kern kennt nur sich selbst, das R
 
 ## 18 Festschreibung: Startwerte
 
-Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreibung.txt` (R1, R14). Die Kapitel oben verweisen auf diese Namen.
+Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreibung.txt` (R1, R14). Die Kapitel oben verweisen auf diese Namen. Die Werte sind Vorschläge von Dachs und Maus; Euro-Beträge in Klammern beziehen sich auf das Beispiel mit 3.000 €. Festgeschrieben werden sie für den tatsächlich freigegebenen Betrag, als ein begründetes Paket mit Wolfgangs Freigabe (R15).
 
 | Bereich | Wert | Startwert |
 | --- | --- | --- |
-| Geld | Startbetrag gesamt | 3.000 € |
-| Geld | Sicher / Langfrist / Kurzfrist | 1.000 / 1.000 / 1.000 € |
+| Geld | Startbetrag gesamt | der von Wolfgang freigegebene Betrag, noch offen; Beispiel 3.000 € |
+| Geld | Sicher / Langfrist / Kurzfrist | Anteile am freigegebenen Betrag, Vorschlag von Dachs und Maus; Beispiel 1.000 / 1.000 / 1.000 € |
 | Geld | Gebührenpuffer | 30 € |
 | Geld | Kaufpuffer auf das Limit | 1 % |
 | Instrumente | Produktarten | Aktie, ETF physisch UCITS |
@@ -579,7 +583,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Kurzfrist | Bereichs-Stopps | Auslöser: 10 % Verlust im Monat: Pause bis Monatsende; 20 % unter Startwert: Ende |
 | Gesamt | Tagesverlust der KI-Bereiche | 5 %: Halt |
 | Gesamt | Notbremse | 20 % unter dem Höchststand der KI-Bereiche: Halt sofort; offene Kauforders storniert, Stopps und Verkaufsorders bleiben |
-| Gesamt | Notbremsen-Modus | Bestätigung (Vorschlag) oder automatisch, Wolfgangs Wahl |
+| Gesamt | Notbremsen-Modus | Bestätigung (Vorschlag) oder automatisch, mit dem Paket freigegeben |
 | Sammelstelle | Abstand Kurse und Konto | 1 Minute in der Handelszeit |
 | Sammelstelle | Abstand Schlagzeilen | 15 Minuten |
 | Sammelstelle | Punkte | Gewinnwarnung oder anderes Stichwort zu einem Depotwert 3; Position ±2 % seit letzter KI-Sicht 2; DAX ±1,5 % am Tag 2; Volumen dreifach 1; Schlagzeile ohne Stichwort 1 |
@@ -632,7 +636,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Kosten | Handelsbudget Kurzfrist | Gebühren höchstens 0,6 % des Bereichswerts im Monat (6 € bei 1.000 €); ein Einstieg belastet Kauf- und Verkaufsgebühr (4 €); Höchstgebühr je Order 2,00 € bis 2.500 € Volumen, vor dem Start an der Gebührentabelle des tatsächlichen Kontos bestätigen |
 | Kosten | Handelsbudget Langfrist | Gebühren höchstens 1,2 % des Bereichswerts im Jahr (12 € bei 1.000 €), Erstkauf ausgenommen |
 | Kosten | Handelsbudget Sicher | Gebühren höchstens 0,5 % des Bereichswerts im Jahr |
-| Kosten | Budget für KI und Gebühren | 5 % des Startkapitals im Jahr (150 €); Spread und Fondskosten kommen hinzu, werden gemessen und berichtet, aber nicht vorab gedeckelt |
+| Kosten | Budget für KI und Gebühren | 5 % des Startkapitals im Jahr (im Beispiel 150 €); Spread und Fondskosten kommen hinzu, werden gemessen und berichtet, aber nicht vorab gedeckelt |
 | Nachrichten | Quellenliste | feste Liste von RSS-Adressen, Änderung nur per Festschreibung |
 | Maßstab | Sicher | Euro-Geldmarktzins (€STR) |
 | Maßstab | Langfrist | breiter Welt-ETF (z. B. MSCI World oder FTSE All-World) |
@@ -643,7 +647,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 Jede Stufe endet mit grünem Kodex und einem Assistenten-Export (R18).
 
 1. **Grundlagen** (fertig): Kern, Regelwerk, Budgetwächter mit Kassenbuch, Kodex mit Essenz, `run.cmd` mit Assistenten-Export.
-2. **Vertrauensgrenzen schließen, Persistenzbasis legen, Festschreibung umstellen:** Der vorhandene Code wird entlang R19 bis R38 neu geschnitten, in einzeln prüfbaren Abschlüssen. Zuerst wird jedes Gegenbeispiel aus den Prüfungen durch Maus ein Negativtest (`docs/BEFUNDE.md`). Dann folgt der Kodex (als eigene Änderung), danach Kern und Regelwerk, dann die Persistenzbasis: Journal als Hash-Kette mit zentraler Vergabe der Auftragskennungen und das Kassenbuch mit Commitprotokoll und Wiederherstellung (R38), zuletzt der Export. Bereiche und Startwerte aus Kapitel 18 kommen in einer `FestschreibungAenderung` mit Wolfgangs Freigabe. Die Essenz wird um die neuen Regeln ergänzt. Die Architektur liegt als `docs/ARCHITEKTUR.md` im Repository und wird dort gepflegt. Bis dahin verspricht die README nur, was der Code tatsächlich durchsetzt.
+2. **Vertrauensgrenzen schließen, Persistenzbasis legen, Festschreibung umstellen:** Der vorhandene Code wird entlang R19 bis R38 neu geschnitten, in einzeln prüfbaren Abschlüssen. Zuerst wird jedes Gegenbeispiel aus den Prüfungen durch Maus ein Negativtest (`docs/BEFUNDE.md`). Dann folgt der Kodex (als eigene Änderung), danach Kern und Regelwerk, dann die Persistenzbasis: Journal als Hash-Kette mit zentraler Vergabe der Auftragskennungen und das Kassenbuch mit Commitprotokoll und Wiederherstellung (R38), zuletzt der Export. Dachs und Maus arbeiten Aufteilung und Startwerte für den freigegebenen Betrag aus, rechnen die Tragfähigkeit nach allen Kosten und legen alles als ein begründetes Paket vor. Es wird als `FestschreibungAenderung` mit Wolfgangs Freigabe wirksam. Die Planung setzt keinen festen Betrag voraus; der endgültige Betrag muss vor dem ersten Echtgeld feststehen. Die Essenz wird um die neuen Regeln ergänzt. Die Architektur liegt als `docs/ARCHITEKTUR.md` im Repository und wird dort gepflegt. Bis dahin verspricht die README nur, was der Code tatsächlich durchsetzt.
 3. **Kontowächter, Auftragszustände, Wiederanlauf:** Reservierung über Bereiche und Gesamtkonto, Zustandsmaschine der Aufträge (R37), Wiederanlauf aus dem Journal, geprüft mit erfundenen Lagen samt Teilausführung und Neustart.
 4. **Sammelstelle und Lagebild** ohne KI, mit aufgezeichneten und erfundenen Ereignissen.
 5. **Berater Dachs und Maus** mit allen Kostensperren.
@@ -659,15 +663,17 @@ Gewählt ist IBKR: offizielle Order-Schnittstelle, kostenloses Papierkonto mit d
 
 ## 21 Offene Entscheidungen
 
-**Entschieden am 01.11.2026:** Innerhalb der Grenzen handelt der Rahmen automatisch, aber erst nach der technischen Abnahme. Halt braucht nie eine Bestätigung, Echtgeld und Wiederanlauf bleiben bei Wolfgang. Ein Auftrag entsteht nur nach ausdrücklicher Zustimmung von Maus und Genehmigung durch das Regelwerk. Nachrichten kommen nur aus einer festen RSS-Quellenliste, ohne KI-Websuche, und bleiben bis zur Freigabe dieser Liste abgeschaltet. Die Gebühr je Order beträgt höchstens 1 %, und jeder Bereich hat seinen eigenen Maßstab. Kurzfrist läuft zuerst auf Papier.
+**Entschieden am 01.11.2026:** Ziel ist ein Plus nach allen Kosten (Kapitel 1). Der Rahmen richtet sich nach dem freigegebenen Betrag, ohne feste Aufteilung und ohne weitere Mittel. Dachs und Maus arbeiten die Einzelwerte aus, Wolfgang gibt sie als Paket frei. Innerhalb der Grenzen handelt der Rahmen automatisch, aber erst nach der technischen Abnahme. Halt braucht nie eine Bestätigung, Echtgeld und Wiederanlauf bleiben bei Wolfgang. Ein Auftrag entsteht nur nach ausdrücklicher Zustimmung von Maus und Genehmigung durch das Regelwerk. Nachrichten kommen nur aus einer festen RSS-Quellenliste, ohne KI-Websuche, und bleiben bis zur Freigabe dieser Liste abgeschaltet. Die Gebühr je Order beträgt höchstens 1 %, und jeder Bereich hat seinen eigenen Maßstab. Kurzfrist läuft zuerst auf Papier.
 
-**Noch offen:**
+**Noch offen bei Wolfgang:** der Betrag (genannt wurden 2.000, 2.500 oder 3.000 €; er muss vor dem ersten Echtgeld feststehen) und die Freigabe des Pakets.
 
-1. Startbetrag 3.000 € mit je 1.000 € für Sicher, Langfrist und Kurzfrist. Sicher bleibt zum Start Bargeld, Kurzfrist bis zur Freigabe uninvestiert.
+**Inhalt des Pakets** (Vorschläge von Dachs und Maus, gemeinsam freigegeben, nicht einzeln):
+
+1. Aufteilung auf Sicher, Langfrist und Kurzfrist als Anteile am Betrag; im Beispiel je 1.000 €. Sicher bleibt zum Start Bargeld, Kurzfrist bis zur Freigabe uninvestiert.
 2. Prüfkriterien für Echtgeld Kurzfrist wie in Kapitel 18: mindestens 6 Monate Beobachtung, Evidenz aus 12 Trades, höchstens 18 Monate, sonst „nicht nachgewiesen“; nach allen Kosten und Steuern besser als Bargeld zum €STR; Rückgang unter 15 %.
-3. KI-Obergrenze 54 € im Jahr für Dachs und Maus zusammen (1,8 %), 4,50 € im Monat.
+3. KI-Obergrenze 54 € im Jahr für Dachs und Maus zusammen (im Beispiel 1,8 %), 4,50 € im Monat.
 4. **Notbremsen-Modus, eine bewusste Risikowahl.** „Bestätigung“: Nichts wird ohne dich verkauft, aber der Verlust ist nicht automatisch begrenzt; Langfrist-Positionen laufen bis zu deiner Entscheidung ungeschützt weiter. „Automatisch“: Das Risiko weiterer Verluste sinkt, eine Verlusthöhe ist aber nicht garantiert (R33); es wird womöglich am Tiefpunkt verkauft, Verluste werden realisiert, und im hektischen Markt kann die Ausführung schlecht sein. Vorschlag: Bestätigung, weil Kurzfrist durch Stopps geschützt ist und Langfrist auf Jahre angelegt ist.
-5. **Kostenrahmen, eine bewusste Kostenentscheidung.** Vorab gedeckelt werden KI und Gebühren: Kurzfrist 0,6 % im Monat, Langfrist 1,2 % im Jahr, zusammen mit der KI höchstens 150 € im Jahr (5 %). Der Spread wird nicht ins Budget gerechnet, weil er sich vorab nicht verlässlich bestimmen lässt. Stattdessen begrenzt ihn je freiwilligem Auftrag die Spreadgrenze (Vorschlag 0,5 %), und er zählt voll in Kostenregel und Bewertung. Die tatsächliche wirtschaftliche Belastung liegt damit über den 150 €. Die Alternative wäre, einen geschätzten Spread mit ins Budget zu nehmen; dann passt im Kurzfrist-Bereich womöglich kein Trade mehr in den Monat.
+5. **Kostenrahmen, eine bewusste Kostenentscheidung.** Vorab gedeckelt werden KI und Gebühren: Kurzfrist 0,6 % im Monat, Langfrist 1,2 % im Jahr, zusammen mit der KI höchstens 5 % des Betrags im Jahr (im Beispiel 150 €). Der Spread wird nicht ins Budget gerechnet, weil er sich vorab nicht verlässlich bestimmen lässt. Stattdessen begrenzt ihn je freiwilligem Auftrag die Spreadgrenze (Vorschlag 0,5 %), und er zählt voll in Kostenregel und Bewertung. Die tatsächliche wirtschaftliche Belastung liegt damit über diesem Budget, und das Ziel nach allen Kosten bleibt der Maßstab. Die Alternative wäre, einen geschätzten Spread mit ins Budget zu nehmen; dann passt im Kurzfrist-Bereich womöglich kein Trade mehr in den Monat.
 6. RSS-Quellenliste: Der Vorschlag kommt mit Stufe 4 zur Bestätigung.
 7. **Art des Schutzstopps, ebenfalls eine Risikowahl.** Stopp mit Marktorder: wird ausgeführt, aber womöglich deutlich unter dem Stopp. Stopp-Limit: hält den Preis, bleibt aber womöglich unausgeführt, und die Position ist dann ungeschützt. Vorschlag: Stopp mit Marktorder.
 
@@ -675,5 +681,5 @@ Gewählt ist IBKR: offizielle Order-Schnittstelle, kostenloses Papierkonto mit d
 
 - [ ] IBKR-Konto eröffnen: Cash-Konto ohne Margin, Basiswährung Euro, Handelsrechte nur für Aktien und ETFs, Kostenbasis FIFO, Papierkonto freischalten.
 - [ ] API-Schlüssel für Anthropic und OpenAI anlegen, je höchstens 25 € Prepaid-Guthaben, automatisches Aufladen aus.
-- [ ] Die offenen Entscheidungen in Kapitel 21 beantworten.
-- [ ] Die Startwerte in Kapitel 18 durchsehen. Mit Stufe 2 werden sie festgeschrieben.
+- [ ] Den Betrag nennen, spätestens vor dem ersten Echtgeld.
+- [ ] Das Paket aus Kapitel 21 freigeben, wenn Dachs und Maus es begründet vorlegen.

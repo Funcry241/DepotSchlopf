@@ -9,7 +9,7 @@ Diese Liste führt jeden Befund aus den Prüfungen durch Maus vom Befund bis zur
 
 Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher Stufe der Test entsteht und dass eine unabhängige Prüfung ihn bestätigt.
 
-Stand: 01.11.2026, Fassung 4.3. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.4. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -106,3 +106,9 @@ Stand: 01.11.2026, Fassung 4.3. Kein Befund ist technisch geschlossen.
 | Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
 | --- | --- | --- | --- | --- | --- | --- |
 | 5·B02 | „Unvollständig“ heißt nicht „unbestätigt“; ein abgebrochenes Schreiben und eine später gekürzte, bestätigte Zeile hinterlassen dieselben Bytes | Kap. 9: Anhangsvermerk mit bestätigtem Stand und geplantem Anhang; gekürzt wird nur, was der Vermerk als unbestätigten Anhang ausweist; sonst Halt und Reparaturverfahren, nichts wird still zurückgesetzt; mehrdeutige Fälle bleiben gesperrt | Pflicht vor Schließen von 4·B02: (1) nach bestätigtem Vorgang Abschlusszeichen der letzten Zeile entfernen: Halt, Budget und Vorgänge unverändert; (2) letzte bestätigte Zeile teilweise kürzen: ebenso; (3) echter Schreibabbruch mit passendem Vermerk wird gekürzt; (4) erneuter Absturz in der Wiederherstellung ändert nichts Bestätigtes | Stufe 2 | berücksichtigt | offen |
+
+## Klarstellung Wolfgang – Stand fb66237
+
+| Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
+| --- | --- | --- | --- | --- | --- | --- |
+| 6·W1 | Ziel ist ein Plus nach allen Kosten; der Betrag ist offen; keine feste Aufteilung; Dachs und Maus arbeiten die Einzelwerte aus | Kap. 1 Ziel und Budget, R15 Paketfreigabe, Kap. 13 und 18 Beträge als Beispiele, Kap. 19 Stufe 2, Kap. 21 und 22 | Festschreibung mit anderem Betrag (z. B. 2.000 €) lädt ohne Codeänderung; eine Festschreibung ohne Wolfgangs Paketfreigabe wird abgelehnt; Bewertung enthält KI, Gebühren, Spread und Fondskosten | Stufe 2 | berücksichtigt | offen |
