@@ -2,13 +2,13 @@
 
 Stand 01.11.2026 · Wolfgang Mair
 
-*Fassung 3. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
+*Fassung 4. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
 
 ## 1 Zweck und Leitsatz
 
 DepotSchlopf ist ein Rust-Programm, das auf Wolfgangs dauerhaft laufendem Rechner ein kleines Depot bei Interactive Brokers (IBKR) verwaltet. Es beobachtet Kurse, Konto und Nachrichten ständig und ohne Kosten. Nur wenn etwas Wesentliches passiert, fragt es zwei KIs um Rat: Dachs (Claude) und Maus (GPT). Die KIs schlagen vor und begründen. Ein festes Regelwerk entscheidet, ein Kontowächter prüft die Deckung, und nur eine einzige Stelle darf Aufträge an den Broker senden. Jeder Schritt hinterlässt einen Beleg.
 
-Das Geld liegt in drei Bereichen: **Sicher** (ohne Risiko, ohne KI), **Langfrist** (Vermögensaufbau über Jahre) und **Kurzfrist** (Chancen über Stunden bis Wochen, mit begrenztem Risiko).
+Das Geld liegt in drei Bereichen: **Sicher** (geringstes Risiko, ohne KI), **Langfrist** (Vermögensaufbau über Jahre) und **Kurzfrist** (Chancen über Stunden bis Wochen, mit begrenztem Risiko).
 
 > Essenz lenkt. Sammelstelle beobachtet. KI schlägt vor. Regelwerk entscheidet. Kontowächter deckt. Auftragsstelle schreibt. Journal belegt. Abgleich prüft. Kodex wacht.
 
@@ -45,18 +45,24 @@ Diese Regeln gelten für jeden Baustein und jede spätere Änderung. Die Regeln 
 | --- | --- | --- | --- |
 | R19 | Autorität aus der Festschreibung | Wer eine Grenze als Parameter übergeben kann, kann sie lockern. | Grenzen, KI-Deckel, Preise und Beraterzuordnung entstehen nur beim Laden der hash-geprüften Festschreibung, als Typ, den sonst niemand bauen kann. Frei einstellbare Werte gibt es nur in Tests. |
 | R20 | Geprüfte Typen an jeder Grenze | Rohe Werte tragen keine Zusage. | Kurse (positiv, mit Handelstag, Währung, Herkunft und Alter), Kalenderdaten, Preise, Beträge und Zuordnungen werden beim Eintritt geprüft. Schreiber und Leser akzeptieren denselben Zustandsraum. Fehlende Daten sind ein eigener Zustand, nie ein bestandener Test. |
-| R21 | Ungünstigster Fall als Prüfbasis | Eine Grenze, die am Schlusskurs hält, kann am Limit brechen. | Alle Geld- und Mengengrenzen werden am Limit mit der höchstmöglichen Gebühr gerechnet. |
+| R21 | Ungünstigster Fall als Prüfbasis | Eine Grenze, die am Schlusskurs hält, kann am Limit brechen. | Alle Geld- und Mengengrenzen werden am Limit mit der höchstmöglichen Gebühr gerechnet. Gerundet wird immer zugunsten der Sicherheit: Reservierungen und Kosten auf, verfügbares Geld ab. |
 | R22 | Ziel, Kauf und Bestand unterscheiden | Eine Zusage über Zielgewichte ist keine Zusage über den Bestand. | Jede Anteils- und Anzahlgrenze gibt es als Zielgrenze, Kaufgrenze und Bestandsgrenze mit Toleranz und Abbaupflicht. Garantien werden genau so formuliert. |
 | R23 | Zwang vor Sparsamkeit, Ergebnis vor Plan | Ein Ausstieg darf nicht an einer Umschlaggrenze scheitern, und ein Beleg darf nichts Erledigtes behaupten. | Ausstieg aus der Positivliste, Notbremse und Bereichs-Stopp gehen vor Umschlag- und Orderzahlgrenzen. Das Journal beschreibt das endgültig Genehmigte. |
 | R24 | Identität ist eindeutig | Gleiche Namen für verschiedene Dinge machen Abgleich und Sperren wertlos. | Auftragskennungen vergibt eine zentrale Stelle. Dateien werden über ihre Identität gesperrt, Links sind verboten, Pfadlisten werden NUL-getrennt gelesen. |
-| R25 | Kein Zähler ohne Anker | Was unbemerkt gelöscht werden kann, ist keine Grenze. | Kassenbuch und Journal sind Hash-Ketten mit ausdrücklicher Einrichtung und gegenseitigem Anker. Fehlt oder schrumpft eine Datei, gilt Halt. Gegen vollen Schreibzugriff auf den Rechner schützen nur Grenzen außerhalb des Rechners. |
-| R26 | Prüfen heißt verstehen | Eine Textsuche beweist weder Reinheit noch Lint-Treue. | Der Kodex wertet Code syntaktisch und Konfiguration über Cargo aus. Wo der Compiler eine Regel durchsetzen kann, tut er es (forbid, Crate-Grenzen). Jede Regel hat einen Negativtest. |
+| R25 | Kein Zähler ohne Anker | Was unbemerkt gelöscht werden kann, ist keine Grenze. | Kassenbuch und Journal sind Hash-Ketten mit ausdrücklicher Einrichtung und bestätigten Ankern nach einem festen Commitprotokoll (R38). Fehlt oder schrumpft eine Datei unter ihren bestätigten Stand, gilt Halt. Gegen vollen Schreibzugriff auf den Rechner schützen nur Grenzen außerhalb des Rechners. |
+| R26 | Prüfen heißt verstehen | Eine Textsuche beweist weder Reinheit noch Lint-Treue. | Der Kodex wertet Code syntaktisch und Manifeste semantisch aus. Wo der Compiler eine Regel durchsetzen kann, tut er es (forbid, Crate-Grenzen), und ein Negativtest zeigt, dass er es tatsächlich tut. Wo eine Prüfung an Grenzen stößt (Makros, Reexporte), steht das ausdrücklich dabei. |
 | R27 | Nachweise sagen die Wahrheit | Ein grüner Status ohne ausgeführte Prüfung ist schlimmer als keiner. | Jede Einzelprüfung meldet bestanden, fehlgeschlagen oder nicht ausgeführt. Build-Freigabe und Betriebsbereitschaft sind getrennt. Testnamen versprechen nur, was sie prüfen. |
-| R28 | Export nach Positivliste | Eine Liste verbotener Namen kennt nie alle Geheimnisse. | Exportiert werden nur von Git verfolgte Dateien erlaubter Pfadrollen, byte-gleich mit dem geprüften Stand, ohne Links und ohne Benutzerpfade. |
+| R28 | Export nach Positivliste | Eine Liste verbotener Namen kennt nie alle Geheimnisse. | Exportiert werden nur von Git verfolgte Dateien erlaubter Pfadrollen, byte-gleich mit dem geprüften Stand, ohne Links und ohne Benutzerpfade. Zusätzlich wird jeder Inhalt auf Geheimnismuster geprüft; ein Treffer bricht den Export ab. Geheimnisse liegen nie in verfolgten Dateien. |
 | R29 | Fehler sperren | Wer nach einem Schreibfehler weiterschreibt, baut auf kaputtem Grund. | Nach Schreib-, Sync- oder Lesefehlern ist das betroffene Objekt bis zum geprüften Wiederanlauf gesperrt. Lesefehler beim Prüfen sind Fehler, nie ein Überspringen. |
-| R30 | Freigabe ist an einen Stand gebunden | Eine Zustimmung ohne Bezug kann für etwas anderes benutzt werden. | Wolfgangs Freigabe nennt den Hash der Festschreibung und den Commit und ist maschinenprüfbar abgelegt. |
+| R30 | Freigabe ist an einen Stand gebunden | Eine Zustimmung ohne Bezug kann für etwas anderes benutzt werden. | Jede Freigabe hat einen Typ, einen Gegenstand und eine Gültigkeit (Kapitel 10) und ist maschinenprüfbar abgelegt. Ändert sich ihr Gegenstand, erlischt sie; keine Freigabe erbt eine andere. |
 | R31 | Schweigen ist nie Zustimmung | Eine Prüfung, die bei Ausfall durchwinkt, ist keine Prüfung. | Ein neuer Auftrag entsteht nur, wenn der Prüfer dem konkreten Vorschlag ausdrücklich zustimmt und das Regelwerk danach genehmigt. Veto, Zeitüberschreitung, ungültige Antwort, Fehler oder fehlendes Budget für die Prüfung bedeuten: kein neuer Auftrag. Zwingende Aktionen (R23) brauchen keine KI-Zustimmung. |
 | R32 | Prüfkriterien setzen keinen Anreiz | Wer weiß, wonach er bewertet wird, optimiert das Kriterium statt des Ziels. | Freigabekriterien belohnen nie Aktivität, etwa eine Mindestzahl an Trades. Die Berater kennen weder die Kriterien noch den Stand der Prüfung. Kosten zählen in jede Bewertung voll hinein. |
+| R33 | Schwellen lösen aus, sie garantieren nicht | Ein Markt kann über jede Grenze springen. | Zugesagt wird nur, was das Cash-Konto erzwingt: Verlust nie über dem eingesetzten Geld. Stopps, Bereichs-Stopps, Tagesverlust und Notbremse lösen bei einer Schwelle aus. Der tatsächliche Verlust kann darüber liegen. Die Architektur schreibt deshalb „löst aus bei“, nie „begrenzt auf“. |
+| R34 | Jede Order hat ein festes Verfahren | Ein Auftrag ohne festgelegten Ablauf wird im Ernstfall improvisiert. | Für jeden Aktionsgrund sind Ordertyp, Auslöser, Limitbildung, Handelszeit, Teilausführung und Restbehandlung festgeschrieben (Kapitel 10). |
+| R35 | Schutz gilt erst nach Bestätigung | Ein gesendeter Schutzauftrag ist noch kein aktiver Schutz. | Bestand ohne vom Broker bestätigten Schutz für genau die gehaltene Menge ist ein eigener Zustand mit Frist. Läuft die Frist ab, wird der Rest storniert und die ungeschützte Menge zwingend verkauft. Ein abgesendeter Stornowunsch ist keine Stornierung. |
+| R36 | Zwang und Wahl sind getrennt | Ein Ausstieg, der an einer Sparregel scheitert, ist keiner. | Eine Matrix legt fest, welche Prüfung für freiwillige Käufe, freiwillige Verkäufe und zwingende Ausstiege gilt (Kapitel 8). Halt sperrt freiwillige Aufträge, nie die eigenen Schutzaktionen. Kein Leerverkauf, eindeutiger Bestand und plausible Kurse gelten immer. |
+| R37 | Jeder Auftrag hat einen Zustand | Wer nicht weiß, ob er gesendet hat, sendet doppelt. | Aufträge durchlaufen eine feste Zustandsmaschine (Kapitel 10). Geld und Stücke reserviert eine einzige Stelle für Bereich und Gesamtkonto zugleich. Ein unbekannter Sendestatus führt nur zum Abgleich, nie zu einem zweiten Versand. |
+| R38 | Anker zeigen nur auf Bestätigtes | Zwei Dateien lassen sich nicht gleichzeitig schreiben. | Änderungen über mehrere Dateien folgen einem Commitprotokoll mit Wiederherstellung. Ein Anker zeigt nur auf einen schon bestätigten Stand, nie auf einen gerade entstehenden. Gegen das gemeinsame Zurückrollen aller Dateien hilft nur ein Anker außerhalb des Rechners. |
 
 ## 3 Rollen und Rechte
 
@@ -86,8 +92,9 @@ Der Code kennt keine Überweisungen, keine Ein- und Auszahlungen und keine Ände
 6. **Vorschlagen:** Dachs bekommt das Lagebild und antwortet mit Zielgewichten, Begründungen, Risiken und Belegen.
 7. **Prüfen:** Schlägt Dachs einen Handel vor, prüft Maus als Zweitmeinung. Nur eine ausdrückliche Zustimmung von Maus lässt den Vorschlag weiter. Veto, Schweigen, Zeitüberschreitung, ungültige Antwort oder fehlendes Prüfbudget beenden ihn (R31).
 8. **Entscheiden:** Das Regelwerk prüft Schema, Universum, Grenzen, Kosten und Deckung und erzeugt genehmigte Aufträge oder begründete Ablehnungen.
-9. **Schreiben:** Die Auftragsstelle sendet die genehmigten Aufträge an IBKR.
-10. **Belegen und Abgleichen:** Jeder Schritt steht im Journal. Nach jeder Ausführung gleicht der Kontowächter mit dem Broker ab.
+9. **Reservieren und Belegen:** Der Kontowächter reserviert Geld und Stücke, und der Auftrag steht dauerhaft im Journal, bevor er den Rechner verlässt (R12, R37).
+10. **Schreiben:** Die Auftragsstelle sendet die genehmigten Aufträge nach dem festen Verfahren an IBKR (R34).
+11. **Abgleichen:** Jede Antwort des Brokers ändert den Zustand des Auftrags im Journal. Nach jeder Ausführung gleicht der Kontowächter mit dem Broker ab.
 
 ## 5 Bereiche
 
@@ -99,8 +106,8 @@ Ein Bereich ist ein virtueller Teil desselben IBKR-Kontos mit eigenem Geld, eige
 | Anlagen | Bargeld, später höchstens ein ETF auf kurz laufende Euro-Staatsanleihen | breite ETFs und große Aktien | liquide Aktien und große ETFs |
 | Entscheidung | Wolfgang, keine KI | Dachs schlägt vor, Maus prüft | Dachs schlägt vor, Maus prüft |
 | Anstoß | nur durch Wolfgang | Ereignisse, wöchentlicher Pflichtblick, monatliche gründliche Prüfung | Ereignisse |
-| Schutz | praktisch kein Kursrisiko | Verlustgrenzen für das Gesamtdepot | Stopp beim Broker ab der Ausführung, eigene Bereichs-Stopps |
-| Schlimmster Fall | Kursschwankung des ETF bis etwa 1 %, Ausfallrisiko des Brokers beim Bargeld | Teilverlust bei einem Marktabsturz | Verlust bis zur Bereichsgrenze, nie mehr als das Geld des Bereichs |
+| Schutz | geringes Kursrisiko, kein Hebel, keine Aktien | Verlustgrenzen für das Gesamtdepot | Stopp beim Broker, sobald bestätigt; eigene Bereichs-Stopps |
+| Schlimmster Fall | Ausfallrisiko des Brokers; mit ETF zusätzlich Zins-, Kredit-, Liquiditäts- und Fondsrisiken | Teilverlust bei einem Marktabsturz | Verlust auch über die Auslöseschwellen hinaus (Kurslücke, Ausführung), nie mehr als das Geld des Bereichs |
 
 **„Kurzfrist“ heißt kurz halten, nicht leer verkaufen.** Auch im Kurzfrist-Bereich wird nur gekauft und später verkauft. Ein Leerverkauf würde R5 verletzen, weil sein Verlust nicht begrenzt ist.
 
@@ -108,16 +115,21 @@ Ein Bereich ist ein virtueller Teil desselben IBKR-Kontos mit eigenem Geld, eige
 
 - Jeder Bereich hat eine Positivliste (Universum), eine Höchstzahl von Positionen, einen Höchstanteil je Wert, eine Mindestorder und eine Höchstzahl an Orders im Monat.
 - Im Langfrist-Bereich wird nur umgeschichtet, wenn die Abweichung vom Zielgewicht die Umschichtungsschwelle und die Mindestorder erreicht oder ein begründetes Risiko vorliegt. Bei kleinen Beträgen ist er damit bewusst fast ein Kaufen-und-Halten.
-- Im Kurzfrist-Bereich geht jeder Kauf als Paket an den Broker: Kauf-Limit mit angehängter Stopp-Order. Der Stopp gilt ab der ersten Sekunde nach der Ausführung, auch wenn der Rechner ausfällt. Die KI wählt den Stopp-Abstand nur innerhalb des festgeschriebenen Spielraums.
-- Ein Kurzfrist-Handel ist nur erlaubt, wenn der erwartete Gewinn ein festes Vielfaches der Kosten für Kauf und Verkauf erreicht (Kostenregel). Positionen haben eine Höchst-Haltedauer.
-- Bereichs-Stopps: Verliert der Kurzfrist-Bereich im Monat mehr als seine Monatsgrenze, pausiert er bis zum Monatsende. Fällt er unter seine Endgrenze, wird er beendet, und sein Geld bleibt Bargeld, bis Wolfgang entscheidet.
+- Im Kurzfrist-Bereich gehört zu jedem Kauf ein Schutzstopp beim Broker für genau die gefüllte Menge. Ob er aktiv ist, belegt allein die Bestätigung des Brokers. Bis dahin gilt die Menge als ungeschützt (R35, Kapitel 10). Ein bestätigter Stopp arbeitet weiter, auch wenn der Rechner ausfällt. Die KI wählt den Stopp-Abstand nur innerhalb des festgeschriebenen Spielraums.
+- Ein Kurzfrist-Handel ist nur erlaubt, wenn der erwartete Gewinn ein festes Vielfaches der Kosten für Kauf und Verkauf erreicht (Kostenregel). Positionen haben eine Höchst-Haltedauer. Ist sie erreicht, ist der Verkauf ein zwingender Ausstieg (R36).
+- Bereichs-Stopps: Erreicht der Verlust des Kurzfrist-Bereichs im Monat die Monatsschwelle, pausiert er bis zum Monatsende. Erreicht er die Endschwelle, wird er beendet: Seine Positionen werden zwingend verkauft, und sein Geld bleibt Bargeld, bis Wolfgang entscheidet.
 - Der Bereich Sicher wird nie von einer KI berührt. Er ist zugleich die Reserve, aus der Wolfgang andere Bereiche auffüllen kann.
 
 **Bereiche und Berater:** Die drei Bereiche ersetzen das frühere Modell zweier Töpfe, in dem Dachs Topf A und Maus Topf B mit je der Hälfte des Geldes verwaltete. Geld, Risikogrenzen und Bereichs-Stopps gehören jetzt zum Bereich, nicht zum Berater. In jedem KI-Bereich schlägt Dachs vor, und Maus muss jedem Handel ausdrücklich zustimmen (R31, Kapitel 7). Das KI-Budget wird je Bereich und je Berater gezählt und zusätzlich für beide zusammen begrenzt. Der Vergleich der beiden KIs läuft über das Schattendepot von Maus, nicht über getrenntes Geld. Der Code aus Stufe 1 kennt noch die zwei Töpfe und wird in Stufe 2 auf Bereiche umgestellt.
 
-**Was „Sicher“ halten darf und welcher Verlust möglich ist:** Bargeld und höchstens einen physischen UCITS-ETF auf Euro-Staatsanleihen mit einer Restlaufzeit bis zu einem Jahr, sonst nichts: keine Aktien, keine Unternehmensanleihen, keine Fremdwährung, kein Hebel. Zum Start bleibt Sicher reines Bargeld. Einen bestimmten ETF nimmt erst Wolfgang namentlich in die Positivliste auf. Möglich sind dann nur zwei Verluste: eine Kursschwankung des ETF, die bei so kurzer Laufzeit erfahrungsgemäß unter 1 % bleibt, und beim Bargeld das Ausfallrisiko des Brokers, das die gesetzliche Anlegerentschädigung nur begrenzt deckt. Fällt der ETF mehr als die festgeschriebene Schwankungsgrenze unter den Einstand, gibt es keine Zukäufe mehr, und Wolfgang bekommt eine Nachricht. Verkauft wird nur auf seinen Befehl. Das Geld des Kurzfrist-Bereichs bleibt bis zu dessen Echtgeld-Freigabe uninvestiert als Bargeld.
+**Was „Sicher“ halten darf und welche Risiken bleiben:** „Sicher“ ist ein Ziel, keine Garantie. Zum Start hält der Bereich nur Bargeld. Dann bleibt das Ausfallrisiko des Brokers, das die gesetzliche Anlegerentschädigung nur begrenzt deckt. Später darf er höchstens einen physischen UCITS-ETF auf Euro-Staatsanleihen mit Restlaufzeit bis zu einem Jahr halten, und nur einen, den Wolfgang nach Prüfung von Struktur, Basisinformationsblatt und Kosten namentlich in die Positivliste aufnimmt. Kurze Laufzeiten verringern die Zinsabhängigkeit, schließen aber Kursverluste durch Zins-, Kredit-, Liquiditäts- und Fondseffekte nicht aus. Eine feste Verlustgrenze gibt es dafür nicht. Die Schwankungsgrenze der Festschreibung ist eine Melde- und Zukaufsregel: Fällt der ETF darunter, gibt es keine Zukäufe, und Wolfgang bekommt eine Nachricht. Verkauft wird nur auf seinen Befehl. Aktien, Unternehmensanleihen, Fremdwährung und Hebel sind ausgeschlossen. Das Geld des Kurzfrist-Bereichs bleibt bis zu dessen Echtgeld-Freigabe uninvestiert als Bargeld.
 
-**Handelskosten:** Jeder Bereich hat zusätzlich zur Gebührenquote je Order eine Obergrenze für alle Handelskosten (Gebühren und Spread) je Zeitraum, im Kurzfrist-Bereich je Monat, im Langfrist-Bereich je Jahr. Die Grenze ist ein Anteil am Bereichswert zu Beginn des Zeitraums. Sie wächst also mit dem Geld und schrumpft mit Verlusten. Ist sie erreicht, gibt es bis zum Ende des Zeitraums nur noch zwingende Aufträge (R23). So bleibt die Summe aus Kauf und Verkauf begrenzt, nicht nur die einzelne Order. Über allen Bereichen steht ein Gesamtdeckel für alle Kosten im Jahr (KI und Handel). Die Summe der Bereichsdeckel darf ihn nicht übersteigen, das prüft der Ladevorgang der Festschreibung.
+**Handelskosten:** Drei Größen sind getrennt. Das **Ausgabenbudget** ist die verbindliche Obergrenze für freiwillige Aufträge je Zeitraum, im Kurzfrist-Bereich je Monat, im Langfrist-Bereich je Jahr, als Anteil am Bereichswert zu Beginn des Zeitraums. Die **Reservierung** sind die vorsichtig gerechneten Kosten eines Auftrags: Höchstgebühr aus der Gebührentabelle des tatsächlichen Kontomodells samt Börsen- und Clearinggebühren, Spread bis höchstens zum Limit-Abstand. Die **tatsächlichen Kosten** werden nach der Ausführung gebucht.
+
+- Ein freiwilliger Kauf wird nur genehmigt, wenn das Budget seine eigene Reservierung und zusätzlich die Kosten für den späteren zwingenden Ausstieg deckt. Diese **Ausstiegsreserve** bleibt reserviert, solange die Position besteht.
+- Zwingende Ausstiege scheitern nie am Budget (R36). Sie werden aus der Ausstiegsreserve bezahlt, und ihre tatsächlichen Kosten zählen voll.
+- Liegen die tatsächlichen Kosten über dem Budget, ruhen freiwillige Aufträge des Bereichs bis zum Ende des Zeitraums, und der Bericht nennt die Überschreitung. Die Überschreitung wird nicht ins nächste Budget verschoben.
+- Alle Bereiche buchen in ein gemeinsames Laufzeit-Kostenbuch. Der Gesamtdeckel für alle Kosten im Jahr (KI und Handel) wird bei jeder Reservierung geprüft, nicht nur beim Laden der Festschreibung. Die Summe der Bereichsbudgets darf ihn nicht übersteigen.
 
 ## 6 Sammelstelle und Ereignislogik
 
@@ -150,7 +162,7 @@ Wolfgangs Rechner läuft dauerhaft und ist die Sammelstelle. Er kanalisiert Welt
 | Was steigt, was fällt? | Lagebild | Kennzahlen aus den Kursen |
 | Was meldet die Presse? | Sammelstelle | Gekürzte Schlagzeilen aus freigegebenen Quellen, als unzuverlässig markiert |
 
-**Dachs und Maus:** Dachs schlägt vor. Maus prüft jeden vorgeschlagenen Handel und gibt dabei immer einen eigenen Gegenvorschlag ab. Ein Handel findet nur statt, wenn Maus ihm ausdrücklich zustimmt und das Regelwerk ihn danach genehmigt (Vier-Augen-Prinzip, R31). Die Zustimmung nennt die Kennung des geprüften Vorschlags und gilt nur für genau diesen. Veto, Schweigen, Zeitüberschreitung, ungültige Antwort, Fehler oder ein erschöpftes Prüfbudget bedeuten: kein neuer Auftrag. Eine Wiederholung der Prüfung zählt gegen dieselben Grenzen wie jeder andere Aufruf. Die Gegenvorschläge laufen ohne Geld in einem Schattendepot mit. So bleibt messbar, welche KI besser liegt, ohne das kleine Geld zwischen zwei KIs aufzuteilen. Beide bekommen dasselbe Lagebild.
+**Dachs und Maus:** Dachs schlägt vor. Maus prüft jeden vorgeschlagenen Handel und gibt dabei immer einen eigenen Gegenvorschlag ab. Ein Handel findet nur statt, wenn Maus ihm ausdrücklich zustimmt und das Regelwerk ihn danach genehmigt (Vier-Augen-Prinzip, R31). Die Zustimmung nennt eine unveränderliche Vorschlagskennung (Hash über Bereich, Lagebild-Stand und Aufträge) und gilt nur für genau diesen Vorschlag und nur für die festgeschriebene Gültigkeitsdauer. Das Regelwerk darf einen zugestimmten Vorschlag danach nur kürzen, nie erweitern, umkehren oder auf andere Werte übertragen. Veto, Schweigen, Zeitüberschreitung, ungültige Antwort, Fehler oder ein erschöpftes Prüfbudget bedeuten: kein neuer Auftrag. Eine Wiederholung der Prüfung zählt gegen dieselben Grenzen wie jeder andere Aufruf. Die Gegenvorschläge laufen ohne Geld in einem Schattendepot mit. So bleibt messbar, welche KI besser liegt, ohne das kleine Geld zwischen zwei KIs aufzuteilen. Beide bekommen dasselbe Lagebild.
 
 **Antwortformat (Schema, strukturierte Ausgabe des Anbieters):**
 
@@ -198,7 +210,23 @@ Das Regelwerk ist eine reine Funktion. Es bekommt Bereich, Bestand, Kurse, verf�
 - **Aufträge:** Nur Kauf mit gedecktem Geld und Verkauf vorhandener, nicht gebundener Stücke. Nur Limit-Aufträge, im Kurzfrist-Bereich mit angehängtem Stopp.
 - **Konto:** Beim Broker ein reines Cash-Konto ohne Margin und nur mit Handelsrechten für Aktien und ETFs.
 
-**Prüfungen je Auftrag, in dieser Reihenfolge:** Schema und Vollständigkeit, Universum, Kursplausibilität, Limit-Abstand zum letzten Kurs, Höchstanteil je Wert, Höchstzahl der Positionen, Mindestorder, Gebührenquote, Kostenregel (Kurzfrist), Orderzahl und Handelskosten im Monat, Deckung durch den Kontowächter, Bereichs-Stopps, Halt-Zustand. Jede verletzte Grenze führt zu Ablehnung oder Kürzung, nie zu einer Ausnahme.
+**Prüfungen je Auftrag, in dieser Reihenfolge:** Schema und Vollständigkeit, Universum, Kursplausibilität, Limit-Abstand zum letzten Kurs, Höchstanteil je Wert, Höchstzahl der Positionen, Mindestorder, Gebührenquote, Kostenregel (Kurzfrist), Orderzahl und Handelskosten im Monat, Deckung durch den Kontowächter, Bereichs-Stopps, Halt-Zustand. Für freiwillige Aufträge führt jede verletzte Grenze zu Ablehnung oder Kürzung, nie zu einer Ausnahme.
+
+**Aktionsgrund und Prüfung (R36):** Zwingende Ausstiege sind der Ausstieg eines Werts aus der Positivliste, der Notbremsen-Verkauf, das Bereichsende, die erreichte Höchst-Haltedauer, die Abbaupflicht über einer Bestandsgrenze und der Verkauf einer ungeschützten Menge nach Ablauf der Schutzfrist. Alles andere ist freiwillig.
+
+| Prüfung | freiwilliger Kauf | freiwilliger Verkauf | zwingender Ausstieg |
+| --- | --- | --- | --- |
+| Zustimmung von Maus | ja | ja | nein |
+| Universum | ja | nein | nein |
+| Kurs plausibel und frisch genug | ja | ja | ja; sonst nur Halt, kein Verkauf |
+| Limit-Abstand | ja | ja | Verfahren aus Kapitel 10 |
+| Höchstanteil, Positionen, Deckung | ja | entfällt | entfällt |
+| Mindestorder | ja | ja, außer beim Verkauf des ganzen Bestands | nein |
+| Gebührenquote, Kostenregel | ja | ja | nein |
+| Ausgabenbudget, Orderzahl, Umschlag | ja | ja | nein; Kosten aus der Ausstiegsreserve |
+| Bestand frei und eindeutig, kein Leerverkauf | entfällt | ja | ja |
+| Halt | sperrt | sperrt | sperrt nicht |
+| Bereichs-Stopp (Pause) | sperrt | erlaubt | sperrt nicht |
 
 **Eingaben und Prüfbasis (R19 bis R23):**
 
@@ -206,14 +234,14 @@ Das Regelwerk ist eine reine Funktion. Es bekommt Bereich, Bestand, Kurse, verf�
 - Alle Eingaben sind geprüfte Typen. Kurse sind positiv und tragen Handelstag, Währung, Herkunft und Alter. Ein fehlender Vergleichskurs ist ein eigener Zustand (erster Handelstag) und kein bestandener Sprungtest. Bargeld ist nie negativ. Ein Vorschlag trägt seinen Bereich und seinen Berater, und das Regelwerk lehnt einen Vorschlag für einen fremden Bereich ab.
 - Jede Geld- und Mengengrenze (Anteil, Mindestorder, Gebührenquote, Umschlag, Deckung) wird am Limit mit der höchstmöglichen Gebühr gerechnet, also im ungünstigsten Fall.
 - **Drei Stufen jeder Anteils- und Anzahlgrenze:** Die Zielgrenze begrenzt, was die KI vorschlagen darf. Die Kaufgrenze prüft den Bestand nach dem Kauf im ungünstigsten Fall; ein Kauf, der sie verletzt, wird gekürzt. Die Bestandsgrenze gilt für den tatsächlichen Bestand, den auch Marktbewegungen verändern. Liegt er mehr als die Toleranz über dem Höchstanteil oder sind es mehr Positionen als erlaubt, sind Zukäufe gesperrt, und beim nächsten Anlass wird abgebaut, unabhängig von der Umschichtungsschwelle.
-- Zwingende Aktionen haben Vorrang vor Umschlag- und Orderzahlgrenzen: Ausstieg eines Werts aus der Positivliste, Notbremse, Bereichs-Stopp. Das Journal beschreibt immer das endgültig genehmigte Ergebnis, nie den Plan.
+- Zwingende Aktionen haben Vorrang vor allen freiwilligen Schranken, wie die Matrix oben zeigt. Das Journal beschreibt immer das endgültig genehmigte Ergebnis, nie den Plan.
 - Auftragskennungen vergibt eine zentrale Stelle fortlaufend aus dem Journal, über alle Planer hinweg. Zwei verschiedene Aufträge tragen nie dieselbe Kennung.
 - Geldrechnungen sind geprüft. Ein Überlauf ist ein Fehler und führt zu Halt, nie zu einem gekappten Wert.
 
 **Halt und Notbremse:**
 
-- **Halt** heißt: keine neuen Aufträge, offene Kauforders werden storniert, bestehende Stopps und offene Verkaufsorders bleiben, Positionen werden nicht zusätzlich verkauft. Halt lösen aus: eine Datei `HALT` im Datenverzeichnis, der Tagesverlust der KI-Bereiche, unplausible Kurse, eine Abweichung zum Broker und Minus-Gefahr.
-- **Notbremse** heißt: Fallen die KI-Bereiche um die Notbremsen-Grenze unter ihren Höchststand, gilt sofort und ohne Bestätigung Halt, mit allem, was dazugehört: Offene Kauforders werden storniert, Stopps und offene Verkaufsorders bleiben, Wolfgang bekommt sofort eine Nachricht. Ob die Positionen danach verkauft werden, regelt der festgeschriebene Notbremsen-Modus. Im Modus „Bestätigung“ verkauft Rust erst nach Wolfgangs Bestätigung mit Limit. Bleibt sie aus, bleibt es beim Halt; Schweigen ist nie Zustimmung (R31). Der Verlust ist dann nicht automatisch begrenzt: Kurzfrist-Positionen schützt weiter ihr Stopp, Langfrist-Positionen haben keinen. Im Modus „automatisch“ sendet Rust sofort Verkaufslimits für alle Positionen der KI-Bereiche. Das begrenzt den Verlust, verkauft aber womöglich am Tiefpunkt, realisiert Verluste und kann in einem hektischen Markt schlecht ausgeführt werden. Unplausible Kurse lösen in beiden Modi nur Halt aus, nie einen Verkauf. Der Bereich Sicher bleibt unberührt.
+- **Halt** heißt: keine neuen Aufträge, offene Kauforders werden storniert, bestehende Stopps und offene Verkaufsorders bleiben, Positionen werden nicht zusätzlich verkauft. Halt sperrt nur freiwillige Aufträge, nie die eigenen Schutzaktionen (R36). Halt lösen aus: eine Datei `HALT` im Datenverzeichnis, der Tagesverlust der KI-Bereiche, unplausible Kurse, eine Abweichung zum Broker und Minus-Gefahr.
+- **Notbremse** heißt: Fallen die KI-Bereiche um die Notbremsen-Grenze unter ihren Höchststand, gilt sofort und ohne Bestätigung Halt, mit allem, was dazugehört: Offene Kauforders werden storniert, Stopps und offene Verkaufsorders bleiben, Wolfgang bekommt sofort eine Nachricht. Ob die Positionen danach verkauft werden, regelt der festgeschriebene Notbremsen-Modus. Im Modus „Bestätigung“ verkauft Rust erst nach Wolfgangs Bestätigung mit Limit. Bleibt sie aus, bleibt es beim Halt; Schweigen ist nie Zustimmung (R31). Der Verlust ist dann nicht automatisch begrenzt: Kurzfrist-Positionen schützt weiter ihr Stopp, Langfrist-Positionen haben keinen. Im Modus „automatisch“ sendet Rust sofort Verkaufslimits für alle Positionen der KI-Bereiche. Das senkt das Risiko weiterer Verluste, garantiert aber weder die Ausführung noch eine Verlusthöhe (R33), verkauft womöglich am Tiefpunkt, realisiert Verluste und kann in einem hektischen Markt schlecht ausgeführt werden. Unplausible Kurse lösen in beiden Modi nur Halt aus, nie einen Verkauf. Der Bereich Sicher bleibt unberührt.
 - Wieder anlaufen geht nur mit dem bewussten Befehl `freigeben`, der im Journal steht (R15).
 
 ## 9 Kontowächter
@@ -234,15 +262,19 @@ Der Kontowächter ist reiner Rust-Code ohne KI. Er läuft in der Handelszeit in 
 **Regeln gegen das Minus:**
 
 - Ein Kauf wird nur genehmigt, wenn Stückzahl × Limit mit Kaufpuffer plus höchstmögliche Gebühr das verfügbare Geld nicht übersteigt. Die Prüfung steckt im versiegelten `GenehmigterAuftrag`.
-- Verkauft wird nur, was im Bestand liegt, abzüglich der Stücke, die schon in offenen Stopp- oder Verkaufsorders gebunden sind. Ein Leerverkauf ist damit auch versehentlich unmöglich.
+- Verkauft wird nur, was im Bestand liegt. Stücke in einem Schutzstopp oder einer offenen Verkaufsorder sind gebunden. Ein Leerverkauf ist damit auch versehentlich unmöglich.
+- Ein Verkauf einer geschützten Position läuft mit ihrem Stopp als eine Gruppe, die zusammen nie mehr als den Bestand verkaufen kann: brokerseitig als OCA-Gruppe mit Mengenreduktion bei Ausführung, sonst durch bestätigtes Verkleinern des Stopps vor dem Verkauf. Erst die Bestätigung des Brokers gibt gebundene Stücke frei. Löst der Stopp während des Verkaufs aus, gilt, was der Broker zuerst ausführt; die Gruppe verhindert den zweiten Verkauf.
 - Sinkt das Bargeld unter den Gebührenpuffer, gibt es keine Käufe mehr, und Wolfgang bekommt eine Nachricht. Nachgeschossen wird nie automatisch.
 - Laufende Kosten außerhalb von Orders, etwa ein Kursdaten-Abo, werden vorab als Monatsbetrag eingeplant. Ohne Deckung wird nichts gebucht.
+- Geld und Stücke reserviert allein der Kontowächter, nacheinander und für Bereich und Gesamtkonto in einem Schritt (R37). Zwei Aufträge können nie dieselbe freie Ressource sehen, auch nicht beim selben Wert in zwei Bereichen. Der Broker kennt die Bereiche nicht. Deshalb wird die Summe der Bereiche laufend gegen Gesamtbestand und abgerechnetes Geld beim Broker abgeglichen.
 - Beim Start prüft der Kontowächter, dass das Konto ein Cash-Konto ohne Margin ist und nur die erlaubten Handelsrechte hat. Sonst startet der Dienst nicht.
 
 **Kassenbuch und Journal (R24, R25, R29):**
 
 - Beide sind Hash-Ketten. Die erste Zeile entsteht nur durch einen ausdrücklichen Einrichtungsbefehl. Fehlt eine Datei später, ist sie leer oder kürzer als der letzte bekannte Stand, gilt Halt und kein Neustart.
-- Den letzten Stand (Zeilenzahl und Hash) hält jeweils die andere Datei als Anker: das Journal für das Kassenbuch und umgekehrt. Der Abendbericht nennt beide Anker.
+- **Commitprotokoll (R38):** Das Journal ist die führende Datei. Ein Vorgang, der beide Dateien betrifft, schreibt zuerst den Eintrag ins Kassenbuch und synchronisiert ihn. Danach bestätigt ein Journaleintrag den Stand des Kassenbuchs (Zeilenzahl und Hash) und wird synchronisiert. Erst damit gilt der Vorgang. Das Kassenbuch verweist nur auf bereits bestätigte Journalstände, nie auf den gerade entstehenden. So entsteht keine zirkuläre Abhängigkeit.
+- **Wiederherstellung:** Beim Start darf das Kassenbuch höchstens um einen unbestätigten Eintrag über den bestätigten Stand hinausgehen. Das ist ein Absturz zwischen den beiden Schritten. Der Eintrag wird geprüft und dann bestätigt oder als verworfen markiert. Ist das Kassenbuch kürzer als sein bestätigter Stand oder weicht sein Hash ab, ist das keine Absturzfolge, sondern Halt.
+- **Anker außerhalb des Rechners:** Der Abendbericht geht aufs Handy und nennt den bestätigten Stand beider Dateien. Nur dieser Anker zeigt, wenn beide Dateien gemeinsam auf einen alten Stand zurückgesetzt wurden.
 - Beim Öffnen wird die ganze Historie geprüft: Reihenfolge der Daten und Zyklen, gültige Beträge und Summen. Schreiber und Leser akzeptieren genau denselben Zustandsraum.
 - Gesperrt wird die geöffnete Datei selbst über das Betriebssystem, nicht ein abgeleiteter Pfadname. Links im Datenverzeichnis sind verboten.
 - Nach einem Schreib- oder Synchronisationsfehler ist das Objekt bis zum geprüften Wiederanlauf gesperrt. Neue Dateien werden samt Verzeichniseintrag synchronisiert.
@@ -256,20 +288,56 @@ Der Kontowächter ist reiner Rust-Code ohne KI. Er läuft in der Handelszeit in 
 
 **Aufträge:** Jeder Auftrag trägt eine eindeutige Kennung aus Bereich, Anfrage und laufender Nummer, damit doppeltes Senden erkennbar ist. Kauf- und Verkaufslimits gelten für den Tag und verfallen danach. Stopps gelten bis zur Aufhebung. Nach jeder Ausführung folgt der Abgleich.
 
-**Was ohne Wolfgang läuft und was nicht:** Innerhalb der Grenzen handelt der Rahmen selbst, sonst wäre der Kurzfrist-Bereich nicht möglich. Diese Automatik gilt erst nach der technischen Abnahme (Kapitel 19). Neue Aufträge zu stoppen braucht nie eine Bestätigung. Wolfgang bestätigt die regelmäßige Anmeldung des Gateways, den Notbremsen-Verkauf (im Modus „Bestätigung“), das Aufheben eines Halts, jede Geldverschiebung zwischen Bereichen, jede Änderung der Festschreibung und die Freigabe von Echtgeld. Die Echtgeld-Freigabe ist eine Datei mit dem Hash der aktuellen Festschreibung. Ändert sich eine Grenze, ist sie ungültig.
+**Was ohne Wolfgang läuft und was nicht:** Innerhalb der Grenzen handelt der Rahmen selbst, sonst wäre der Kurzfrist-Bereich nicht möglich. Diese Automatik gilt erst nach der technischen Abnahme (Kapitel 19). Neue Aufträge zu stoppen braucht nie eine Bestätigung. Wolfgang bestätigt die regelmäßige Anmeldung des Gateways, den Notbremsen-Verkauf (im Modus „Bestätigung“), das Aufheben eines Halts, jede Geldverschiebung zwischen Bereichen, jede Änderung der Festschreibung und die Freigabe von Echtgeld. Jede Freigabe ist eine Datei nach R30:
+
+| Freigabe | gebunden an | erlischt, wenn | erteilt |
+| --- | --- | --- | --- |
+| Technische Abnahme | Commit, Hash des gebauten Programms, Festschreibung | sich eins davon ändert | unabhängige Prüfung, bestätigt von Wolfgang |
+| Grenzfreigabe (`FestschreibungAenderung`) | Diff und neuer Hash der Festschreibung | die Festschreibung erneut geändert wird | Wolfgang |
+| Echtgeld-Freigabe | Bereich, technische Abnahme, Festschreibung | sich eins davon ändert | Wolfgang |
+| Handelszustimmung | Vorschlagskennung (Bereich, Lagebild-Stand, Aufträge) | die Gültigkeitsdauer abläuft oder ein neues Lagebild entsteht | Maus |
+| Notbremsen-Verkauf (Modus „Bestätigung“) | Notbremsen-Ereignis | der Halt aufgehoben wird | Wolfgang |
+
+**Auftragsverfahren (R34):**
+
+| Aktionsgrund | Ordertyp | Auslöser und Limit | Handelszeit | Teilausführung und Rest |
+| --- | --- | --- | --- | --- |
+| freiwilliger Kauf | Limit, gültig für den Tag | Limit höchstens um den Limit-Abstand über dem letzten Kurs | fortlaufender Handel an Xetra | gefüllte Menge bekommt sofort ihren Schutzstopp; der Rest verfällt am Tagesende oder wird storniert, wenn der Schutz nicht fristgerecht bestätigt wird |
+| Schutzstopp Kurzfrist | Stopp-Order, die bei Auslösung zur Marktorder wird, gültig bis zur Aufhebung | Stopp-Abstand aus dem Spielraum der Festschreibung | wie vom Broker unterstützt | immer genau die gehaltene Menge; jede Mengenänderung wird bestätigt |
+| freiwilliger Verkauf | Limit, gültig für den Tag, mit dem Stopp in einer Gruppe | Limit höchstens um den Limit-Abstand unter dem letzten Kurs | fortlaufender Handel | Rest verfällt; der Stopp deckt weiter genau den Restbestand |
+| zwingender Ausstieg | marktnahes Limit | Limit um den Limit-Abstand unter dem letzten Kurs; ein Rest wird in festen Schritten nachgezogen, höchstens bis zur Schrittgrenze | fortlaufender Handel, nur mit plausiblen und frischen Kursen | nach der Schrittgrenze bleibt der Rest stehen, und Wolfgang bekommt eine Nachricht |
+
+Der Schutzstopp ist bewusst eine Stopp-Order, die bei Auslösung zur Marktorder wird, und damit die einzige Ausnahme von „nur Limit“. Sie wird ausgeführt, kann aber deutlich unter dem Stopp liegen. Eine Stopp-Limit-Order hält den Preis, kann aber unausgeführt bleiben, und ein nicht ausgeführter Schutz wiegt schwerer als ein schlechter Kurs. Die Wahl liegt bei Wolfgang (Kapitel 21).
+
+**Schutz bei Teilausführung (R35):** Für jede gefüllte Menge muss innerhalb der Schutzfrist ein vom Broker bestätigter Stopp über genau diese Menge bestehen. Ein angehängter Stopp wird erst als Schutz gezählt, wenn der Broker ihn für die tatsächlich gefüllte Menge aktiv meldet. Fehlt die Bestätigung nach Ablauf der Frist, wird der Kaufrest storniert und die ungeschützte Menge zwingend verkauft, und es gilt Halt. Beim Start prüft der Kontowächter, dass jede Kurzfrist-Position einen bestätigten Stopp über ihre ganze Menge hat.
+
+**Zustände eines Auftrags (R37):**
+
+| Zustand | Bedeutung | weiter nach |
+| --- | --- | --- |
+| geplant | vom Regelwerk genehmigt | reserviert oder verworfen |
+| reserviert | Geld und Stücke reserviert, dauerhaft im Journal | gesendet |
+| gesendet | Versand im Journal begonnen, eindeutige Kundenkennung vergeben | angenommen, abgelehnt oder Sendestatus unbekannt |
+| Sendestatus unbekannt | keine Antwort des Brokers | nur über den Abgleich mit der Kundenkennung, nie durch neuen Versand |
+| angenommen | vom Broker bestätigt | teilgefüllt, gefüllt, storniert, verfallen |
+| teilgefüllt | ein Teil ist ausgeführt | gefüllt, storniert, verfallen |
+| gefüllt, storniert, verfallen, abgelehnt | Endzustand laut Broker | abgeglichen |
+| abgeglichen | Journal, Kassenbuch, Konto und Broker stimmen überein; Reservierung aufgelöst | Ende |
+
+Eine Reservierung wird erst im Endzustand laut Broker aufgelöst. Nach einem Neustart wird jeder offene Zustand aus dem Journal wiederhergestellt und zuerst abgeglichen.
 
 ## 11 Journal, Wiederanlauf und Berichte
 
 **Journal:** Nur anhängen. Jede Zeile ist JSON mit dem SHA-256 der Vorzeile. Belegt werden: Rohdaten-Hash je Lagebild, auslösende Signale, KI-Anfrage (Prompt-Version, Modell, Token, Kosten), Antwort mit allen Begründungen, Prüfung durch Maus, Urteil des Regelwerks je Auftrag samt Ablehnungsgrund, Deckungsrechnung, gesendeter Auftrag mit Broker-Kennung, Ausführung, Abgleich, Halt, Freigabe und Geldverschiebungen. Ein Prüfbefehl rechnet die Kette nach.
 
-**Wiederanlauf:** Der Zustand wird nur aus dem Journal rekonstruiert. Findet der Start einen unvollständigen Vorgang, wird nichts neu gefragt und nichts neu gesendet. Zuerst holt der Kontowächter offene Orders und Ausführungen beim Broker und gleicht ab. Erst wenn alles stimmt, läuft die Sammelstelle weiter (R4, R12).
+**Wiederanlauf:** Der Zustand wird nur aus dem Journal rekonstruiert, einschließlich des Zustands jedes Auftrags (R37) und des Commitprotokolls (R38). Findet der Start einen unvollständigen Vorgang, wird nichts neu gefragt und nichts neu gesendet. Zuerst holt der Kontowächter offene Orders und Ausführungen beim Broker und gleicht ab. Erst wenn alles stimmt, läuft die Sammelstelle weiter (R4, R12).
 
 **Berichte:**
 
 - **Tagesbericht** (abends, eine Seite): Bargeld, investiert, offene Orders, Steuerrücklage, verfügbar je Bereich, Gewinn und Verlust je Bereich, Kosten bisher im Vergleich zum Budget.
 - **Monatsbericht:** Was wurde warum gekauft und verkauft, Kosten je Kostenart, Vergleich mit dem Maßstab des Bereichs und dem Schattendepot von Maus, Statistik der Signale mit Vorschlag zur Schwelle.
 - **Steuer-Export** (Kapitel 15).
-- **Assistenten-Export** wie in EtuSchlopf: `run.cmd` schreibt nach jedem Lauf `assistant_export_latest.zip` mit Prüfergebnis, Übergabetext, Konsole, Manifest und Quellstand. Er enthält nie `daten/`, Schlüssel oder Kontonummern.
+- **Assistenten-Export** wie in EtuSchlopf: `run.cmd` schreibt nach jedem Lauf `assistant_export_latest.zip` mit Prüfergebnis, Übergabetext, Konsole, Manifest und Quellstand. Er enthält nie `daten/`. Schlüssel und Kontonummern liegen nie in verfolgten Dateien, und eine Inhaltsprüfung auf Geheimnismuster bricht den Export bei einem Treffer ab (R28).
 
 **Nachweise und Export (R27, R28):**
 
@@ -313,7 +381,7 @@ Ist das Monatsbudget eines Bereichs oder eines Beraters erreicht, wird in diesem
 | Maus (OpenAI-Spitzenmodell) | 10 $ / 50 $ je Mio. Token | [benchlm.ai](https://benchlm.ai/openai/api-pricing), Drittquelle |
 | ETF-Kosten | etwa 0,1 % im Jahr | Annahme |
 
-Dollar wird vorsichtig 1:1 als Euro gerechnet.
+Dollar wird vorsichtig 1:1 als Euro gerechnet. Die Gebühr von 1,50 € und der Spread sind Annahmen für die Erwartung. Für Reservierungen zählen die Höchstgebühr aus der Gebührentabelle des tatsächlichen Kontomodells und der Limit-Abstand (Kapitel 5).
 
 **KI-Aufrufe im Monat (erwartet):**
 
@@ -355,7 +423,7 @@ Solange Kurzfrist nur auf Papier läuft, entstehen dort keine Handelskosten, abe
 
 ## 14 Sicherheit
 
-Der größte mögliche Verlust ist das Geld auf dem Konto, niemals mehr. Das garantiert das Cash-Konto ohne Kredit, nicht der Code. Der Code begrenzt den praktischen Verlust zusätzlich über Stopps, Bereichs-Stopps, Tagesverlust und Notbremse.
+Der größte mögliche Verlust ist das Geld auf dem Konto, niemals mehr. Das garantiert das Cash-Konto ohne Kredit, nicht der Code. Der Code senkt das praktische Risiko zusätzlich über Stopps, Bereichs-Stopps, Tagesverlust und Notbremse. Diese lösen bei Schwellen aus und garantieren keine Verlusthöhe (R33).
 
 | Was schiefgehen kann | Schutz | Folge |
 | --- | --- | --- |
@@ -367,10 +435,14 @@ Der größte mögliche Verlust ist das Geld auf dem Konto, niemals mehr. Das gar
 | Programmfehler sendet zu viele Orders | Orderzahl je Monat, nur Limit, Deckungsprüfung, zentrale Auftragskennung, Cash-Konto | Broker lehnt ab, Halt |
 | Konto droht ins Minus zu gehen | Kontowächter, Prüfung am Limit, Gebührenpuffer, Steuerrücklage, Cash-Konto | keine Käufe, Nachricht an Wolfgang |
 | Absturz mitten im Vorgang | Wiederanlauf aus dem Journal, Abgleich, eindeutige Auftragskennung | keine doppelten Orders |
-| Kassenbuch oder Journal wird gelöscht, gekürzt oder über einen Link doppelt geöffnet | Hash-Kette, gegenseitiger Anker, Betriebssystem-Sperre, Link-Verbot | Halt statt Neustart der Zähler |
+| Kassenbuch oder Journal wird gelöscht, gekürzt oder über einen Link doppelt geöffnet | Hash-Kette, bestätigte Anker mit Commitprotokoll, Betriebssystem-Sperre, Link-Verbot | Halt statt Neustart der Zähler |
 | Falsche oder fehlende Kurse | Plausibilitätsprüfung, fehlende Vergleichsdaten als eigener Zustand, Limit nahe am letzten Kurs | Halt, kein Handel auf falschen Daten |
 | Markt bricht ein | Stopps beim Broker, Tagesverlust, Notbremse mit sofortigem Halt und Vorrang vor allen Sparregeln | Kurzfrist durch Stopps begrenzt; Langfrist im Modus „Bestätigung“ erst durch Wolfgangs Verkauf; Neustart nur durch Wolfgang |
 | Kurslücke über Nacht | Stopp wird zum nächsten Kurs ausgeführt | Verlust kann über dem Stopp-Abstand liegen, nie über der Position |
+| Kauf wird nur teilweise ausgeführt oder die Verbindung reißt ab | Schutz erst nach Bestätigung, Schutzfrist, Zwangsverkauf der ungeschützten Menge (R35) | keine Menge bleibt über die Frist hinaus unbemerkt ungeschützt |
+| Stopp löst während eines freiwilligen Verkaufs aus | Gruppe aus Stopp und Verkauf mit Mengenreduktion, Freigabe erst nach Bestätigung | höchstens der Bestand wird verkauft |
+| Antwort des Brokers bleibt aus | Zustand „Sendestatus unbekannt“, Abgleich über die Kundenkennung (R37) | keine doppelte Order |
+| Absturz zwischen Kassenbuch und Journal | Commitprotokoll mit Wiederherstellung (R38) | unterscheidbar von einer Kürzung |
 | KI-Kosten laufen weg | sieben Sperren, zuletzt Prepaid-Guthaben ohne Aufladen | höchstens das Guthaben beim Anbieter |
 | API-Schlüssel werden gestohlen | Windows-Anmeldeverwaltung; IBKR-Auszahlungen nur mit Wolfgangs Zwei-Faktor-Freigabe | kein Geldabfluss |
 | Export nimmt fremde oder geheime Dateien mit | Positivliste, keine Links, Quellstand gleich geprüftem Stand, maskierte Konsole | nur verfolgte Projektdateien verlassen den Rechner |
@@ -432,12 +504,12 @@ Bewusst nicht übernommen ist die Menge an Verträgen und textbasierten Gates. W
 
 **Wie der Kodex prüft (R26):**
 
-- Rust-Code wird syntaktisch ausgewertet, nicht als Text durchsucht. Attribute zählen samt `cfg_attr`, Importe werden aufgelöst, auch gruppierte und umbenannte.
-- Die harten Lints stehen auf `forbid`. Damit lehnt schon der Compiler jede lokale Ausnahme ab, auch eine versteckte.
-- Die wirksame Lint- und Abhängigkeitskonfiguration jedes gebauten Targets wird über `cargo metadata` gelesen, nicht aus TOML-Text geraten.
+- Rust-Code wird syntaktisch ausgewertet, nicht als Text durchsucht. Attribute zählen samt `cfg_attr`, Importe werden aufgelöst, auch gruppierte und umbenannte. Eine syntaktische Auswertung löst Makros und Reexporte nicht vollständig auf. Wo das zählt, ersetzt eine Crate-Grenze die Suche.
+- Die harten Lints stehen auf `forbid`, im Kopf jedes Crates. Damit lehnt schon der Compiler jede lokale Ausnahme ab, auch eine versteckte. Ein Negativtest baut je relevantem Target einen bewussten Verstoß und zeigt, dass der Compiler ihn ablehnt.
+- `cargo metadata` dient nur zur Ermittlung von Paketen und Targets; die wirksamen Lints liefert es nicht. Die Manifeste werden deshalb semantisch geprüft, samt Vererbung aus dem Workspace, und Compileraufrufe und Flags werden einbezogen. Den Beweis liefert der Negativtest oben.
 - Abhängigkeiten werden mit Paketname, Version, Quelle, Features und dem Hash von `Cargo.lock` festgeschrieben.
 - Die Essenz hat ein festes Register der Regelnummern. Fehlt eine Regel, ist der Kodex rot.
-- Reinheit und Netzfreiheit werden möglichst durch Crate-Grenzen erzwungen: Reine Crates hängen von keinem Crate mit Netz- oder Dateizugriff ab.
+- Reinheit und Netzfreiheit werden möglichst durch Crate-Grenzen erzwungen: Reine Crates hängen von keinem Crate mit Netz- oder Dateizugriff ab. Weil `std` selbst Datei- und Netzzugriff enthält, prüft der Kodex in reinen Crates zusätzlich die Verwendung von `std::fs`, `std::net`, `std::process` und `std::env`.
 - Lesefehler beim Durchsuchen sind Fehler, kein Überspringen.
 - Jede Kodex-Regel hat einen Negativtest, der den Bruch zeigt. Die Gegenbeispiele aus der Prüfung durch Maus (Stand 383ee05) werden zu solchen Tests.
 
@@ -471,7 +543,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Geld | Kaufpuffer auf das Limit | 1 % |
 | Instrumente | Produktarten | Aktie, ETF physisch UCITS |
 | Instrumente | Universum Sicher | zum Start nur Bargeld; später höchstens ein von Wolfgang namentlich freigegebener physischer UCITS-ETF auf Euro-Staatsanleihen mit Restlaufzeit bis 1 Jahr |
-| Instrumente | Schwankungsgrenze Sicher | 1 % unter Einstand: keine Zukäufe, Nachricht an Wolfgang |
+| Instrumente | Schwankungsgrenze Sicher | Melde- und Zukaufsregel: 1 % unter Einstand: keine Zukäufe, Nachricht an Wolfgang; keine Verlustgrenze |
 | Instrumente | Universum Langfrist | DAX 40 und eine feste ETF-Liste (Welt, Europa) |
 | Instrumente | Universum Kurzfrist | DAX 40, MDAX und große Euro-ETFs an Xetra |
 | Aufträge | Auftragsart | nur Limit; Kurzfrist mit angehängtem Stopp |
@@ -488,8 +560,8 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Kurzfrist | Stopp-Abstand | Standard 4 %, Spielraum der KI 2 bis 6 % |
 | Kurzfrist | Kostenregel | erwarteter Gewinn mindestens 3 × Kosten für Kauf und Verkauf |
 | Kurzfrist | Haltedauer | höchstens 20 Handelstage |
-| Kurzfrist | Trades | höchstens 2 Hin-und-zurück (4 Orders) im Monat; meist begrenzt schon der Kostendeckel |
-| Kurzfrist | Bereichs-Stopps | 10 % Verlust im Monat: Pause bis Monatsende; 20 % unter Startwert: Ende |
+| Kurzfrist | Trades | höchstens 2 Hin-und-zurück (4 Orders) im Monat; beim Kostendeckel von 6 € praktisch einer |
+| Kurzfrist | Bereichs-Stopps | Auslöser: 10 % Verlust im Monat: Pause bis Monatsende; 20 % unter Startwert: Ende |
 | Gesamt | Tagesverlust der KI-Bereiche | 5 %: Halt |
 | Gesamt | Notbremse | 20 % unter dem Höchststand der KI-Bereiche: Halt sofort; offene Kauforders storniert, Stopps und Verkaufsorders bleiben |
 | Gesamt | Notbremsen-Modus | Bestätigung (Vorschlag) oder automatisch, Wolfgangs Wahl |
@@ -504,14 +576,14 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Nachrichten | Lagebild | höchstens 30 Schlagzeilen, je höchstens 300 Zeichen |
 | Nachrichten | Anbindung | aus, bis Wolfgang eine Quellenliste freigibt |
 | Nachrichten | KI-Websuche | aus |
-| KI | je Aufruf Dachs | Ereignis höchstens 16.000 Token Eingabe und 4.000 Ausgabe (0,14 €); gründliche Prüfung höchstens 40.000 und 16.000 (0,48 €) |
+| KI | je Aufruf Dachs | Ereignis höchstens 16.000 Token Eingabe und 4.000 Ausgabe (0,15 €); gründliche Prüfung höchstens 40.000 und 16.000 (0,48 €); Reservierungen auf ganze Cent aufgerundet |
 | KI | je Aufruf Maus | höchstens 16.000 Token Eingabe, 3.000 Ausgabe (0,31 €) |
 | KI | Wiederholung je Anfrage | höchstens 1 |
 | KI | Monat | Kurzfrist 3,00 € (Dachs 1,80 €, Maus 1,20 €), Langfrist 1,50 € (Dachs 0,90 €, Maus 0,60 €); Dachs und Maus zusammen 4,50 € |
 | KI | Jahr | 54 € für Dachs und Maus zusammen (1,8 % des Startkapitals), einschließlich Wiederholungen und Fehlversuchen |
 | KI | Warnung | bei 80 % des Monatsbudgets |
 | KI | Guthaben beim Anbieter | höchstens 25 € je Anbieter, ohne automatisches Aufladen |
-| Stufen | Papierbetrieb | Langfrist mindestens 3 Monate, Kurzfrist mindestens 6 Monate |
+| Stufen | Papierbetrieb | Langfrist mindestens 3 Monate, Kurzfrist mindestens 6 und höchstens 18 Monate |
 | Stufen | Aufstockung | frühestens nach 12 Monaten Echtbetrieb |
 
 **Startwerte der Vertrauensgrenzen:**
@@ -524,13 +596,18 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Kodex | Abhängigkeiten | Name, Version, Quelle, Features, Hash von Cargo.lock |
 | Kodex | Essenz-Register | feste Liste der Regelnummern |
 | Export | Umfang | nur von Git verfolgte Dateien erlaubter Pfadrollen, keine Links |
-| Kassenbuch | Anker | Zeilenzahl und Hash im Journal und im Abendbericht |
+| Kassenbuch | Anker | bestätigter Stand (Zeilenzahl und Hash) im Journal und im Abendbericht aufs Handy; höchstens ein unbestätigter Eintrag beim Start |
+| Aufträge | Schutzfrist Kurzfrist | 60 Sekunden bis zum bestätigten Stopp, sonst Rest stornieren, ungeschützte Menge zwingend verkaufen, Halt |
+| Aufträge | zwingender Ausstieg | Limit um den Limit-Abstand unter dem letzten Kurs, höchstens 3 Nachzieh-Schritte zu je diesem Abstand |
+| Kurse | Höchstalter | 20 Minuten für Entscheidungen, freiwillige Aufträge, Tagesverlust und Notbremse; älter: Halt |
+| Freigaben | Handelszustimmung von Maus | gültig 15 Minuten und nur bis zum nächsten Lagebild |
+| Rundung | Reservierungen und Kosten | auf ganze Cent aufgerundet; verfügbares Geld abgerundet |
 
 **Startwerte für Freigaben, Kosten und Maßstäbe** (stehen vor Beginn des Papierbetriebs fest und ändern sich danach nicht mehr):
 
 | Bereich | Wert | Startwert |
 | --- | --- | --- |
-| Freigabe | Echtgeld Kurzfrist | mindestens 6 Monate auf Papier; ausgewertet wird erst ab 12 abgeschlossenen Trades, sonst verlängert sich der Papierbetrieb bis höchstens 12 Monate, danach entscheidet Wolfgang (Mindestbeobachtung, kein Ziel; R32) |
+| Freigabe | Echtgeld Kurzfrist | drei getrennte Bedingungen: technische Beobachtung mindestens 6 Monate; Evidenz aus mindestens 12 abgeschlossenen Trades; wirtschaftliches Ergebnis nach den Zeilen unten. Kommen bis 18 Monate keine 12 Trades zustande, lautet das Ergebnis „nicht nachgewiesen“, und Kurzfrist bleibt Bargeld. Wolfgang kann den Bereich dann beenden oder eine neue Papierphase mit vorher festgelegten Kriterien beginnen, die nicht lockerer sind (R16, R32) |
 | Freigabe | Vergleich mit Bargeld | Ergebnis nach allen Kosten (Gebühren, Spread, echte KI-Kosten des Bereichs) und nach der Steuer auf Gewinne besser als derselbe Betrag zum €STR im selben Zeitraum, täglich verzinst und gleich versteuert; der Welt-ETF wird daneben berichtet |
 | Freigabe | Rückgang Kurzfrist | höchster Rückgang vom Höchststand unter 15 %, also strenger als Notbremse (20 %) und Bereichsende (20 %) |
 | Freigabe | Disziplin Kurzfrist | höchstens ein ausgelöster Monats-Stopp; keine Regelverletzung; gesonderte Freigabe durch Wolfgang |
@@ -550,12 +627,12 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 Jede Stufe endet mit grünem Kodex und einem Assistenten-Export (R18).
 
 1. **Grundlagen** (fertig): Kern, Regelwerk, Budgetwächter mit Kassenbuch, Kodex mit Essenz, `run.cmd` mit Assistenten-Export.
-2. **Vertrauensgrenzen schließen und Festschreibung umstellen:** Der vorhandene Code wird entlang R19 bis R32 neu geschnitten, nicht Stück für Stück repariert. Zuerst wird jedes Gegenbeispiel aus der Prüfung durch Maus ein Negativtest. Dann folgt der Kodex (als eigene Änderung), danach Kern, Regelwerk, Kassenbuch und Export. Bereiche und Startwerte aus Kapitel 18 kommen in einer `FestschreibungAenderung` mit Wolfgangs Freigabe. Die Essenz wird um die neuen Regeln ergänzt. Die Architektur liegt als `docs/ARCHITEKTUR.md` im Repository und wird dort gepflegt. Bis dahin verspricht die README nur, was der Code tatsächlich durchsetzt.
-3. **Journal, Kontowächter, Wiederanlauf**, geprüft mit erfundenen Lagen.
+2. **Vertrauensgrenzen schließen, Persistenzbasis legen, Festschreibung umstellen:** Der vorhandene Code wird entlang R19 bis R38 neu geschnitten, in einzeln prüfbaren Abschlüssen. Zuerst wird jedes Gegenbeispiel aus den Prüfungen durch Maus ein Negativtest (`docs/BEFUNDE.md`). Dann folgt der Kodex (als eigene Änderung), danach Kern und Regelwerk, dann die Persistenzbasis: Journal als Hash-Kette mit zentraler Vergabe der Auftragskennungen und das Kassenbuch mit Commitprotokoll und Wiederherstellung (R38), zuletzt der Export. Bereiche und Startwerte aus Kapitel 18 kommen in einer `FestschreibungAenderung` mit Wolfgangs Freigabe. Die Essenz wird um die neuen Regeln ergänzt. Die Architektur liegt als `docs/ARCHITEKTUR.md` im Repository und wird dort gepflegt. Bis dahin verspricht die README nur, was der Code tatsächlich durchsetzt.
+3. **Kontowächter, Auftragszustände, Wiederanlauf:** Reservierung über Bereiche und Gesamtkonto, Zustandsmaschine der Aufträge (R37), Wiederanlauf aus dem Journal, geprüft mit erfundenen Lagen samt Teilausführung und Neustart.
 4. **Sammelstelle und Lagebild** ohne KI, mit aufgezeichneten und erfundenen Ereignissen.
 5. **Berater Dachs und Maus** mit allen Kostensperren.
-6. **Broker-Adapter IBKR** am Papierkonto, Berichte, Nachrichten aufs Handy.
-7. **Technische Abnahme, dann Papierbetrieb:** Vor dem Papierbetrieb mit echten Schnittstellen steht die technische Abnahme: Alle Befunde der Prüfung durch Maus sind geschlossen und von einer unabhängigen Prüfung erneut bestätigt, der Kodex ist grün, und die Abnahme liegt als Datei vor, gebunden an Commit und Festschreibung (R30). Fachliche Entscheidungen ersetzen diese Abnahme nicht. Danach läuft der Papierbetrieb für Langfrist mindestens 3 und für Kurzfrist mindestens 6 Monate, mit echten KI-Kosten. Die Prüfkriterien stehen vorher fest (Kapitel 18).
+6. **Broker-Adapter IBKR** am Papierkonto, Berichte, Nachrichten aufs Handy. Auftragsverfahren, Schutz bei Teilausführung, Stopp-Gruppen und unbekannter Sendestatus werden am Papierkonto nachgewiesen, nicht angenommen (R34, R35).
+7. **Technische Abnahme, dann Papierbetrieb:** Vor dem Papierbetrieb mit echten Schnittstellen steht die technische Abnahme: Jeder Befund in `docs/BEFUNDE.md` steht auf „technisch geschlossen“ und ist von einer unabhängigen Prüfung erneut bestätigt, der Kodex ist grün, und die Abnahme liegt als Datei vor, gebunden an Commit und Festschreibung (R30). Fachliche Entscheidungen ersetzen diese Abnahme nicht. Danach läuft der Papierbetrieb für Langfrist mindestens 3 und für Kurzfrist mindestens 6 Monate, mit echten KI-Kosten. Die Prüfkriterien stehen vorher fest (Kapitel 18).
 8. **Echtgeld für Sicher und Langfrist**, wenn die Prüfkriterien für Langfrist aus Kapitel 18 erfüllt sind und Wolfgang freigibt. Drei Monate beweisen nichts über die Rendite, nur dass die Technik stimmt (R16).
 9. **Echtgeld für Kurzfrist** erst, wenn alle Prüfkriterien für Kurzfrist aus Kapitel 18 erfüllt sind und Wolfgang gesondert freigibt. Bis dahin bleibt sein Geld uninvestiert als Bargeld.
 10. **Später, optional:** Backtest mit der Simulation, lokale Statusseite, KI-Websuche mit Domain-Liste, Echtzeit-Kurse.
@@ -571,11 +648,12 @@ Gewählt ist IBKR: offizielle Order-Schnittstelle, kostenloses Papierkonto mit d
 **Noch offen:**
 
 1. Startbetrag 3.000 € mit je 1.000 € für Sicher, Langfrist und Kurzfrist. Sicher bleibt zum Start Bargeld, Kurzfrist bis zur Freigabe uninvestiert.
-2. Prüfkriterien für Echtgeld Kurzfrist wie in Kapitel 18: mindestens 6 Monate, Auswertung ab 12 Trades, nach allen Kosten und Steuern besser als Bargeld zum €STR, Rückgang unter 15 %.
+2. Prüfkriterien für Echtgeld Kurzfrist wie in Kapitel 18: mindestens 6 Monate Beobachtung, Evidenz aus 12 Trades, höchstens 18 Monate, sonst „nicht nachgewiesen“; nach allen Kosten und Steuern besser als Bargeld zum €STR; Rückgang unter 15 %.
 3. KI-Obergrenze 54 € im Jahr für Dachs und Maus zusammen (1,8 %), 4,50 € im Monat.
 4. **Notbremsen-Modus, eine bewusste Risikowahl.** „Bestätigung“: Nichts wird ohne dich verkauft, aber der Verlust ist nicht automatisch begrenzt; Langfrist-Positionen laufen bis zu deiner Entscheidung ungeschützt weiter. „Automatisch“: Der Verlust ist begrenzt, aber es wird womöglich am Tiefpunkt verkauft, Verluste werden realisiert, und im hektischen Markt kann die Ausführung schlecht sein. Vorschlag: Bestätigung, weil Kurzfrist durch Stopps geschützt ist und Langfrist auf Jahre angelegt ist.
 5. Handelskosten als Anteil am Bereichswert: Kurzfrist 0,6 % im Monat, Langfrist 1,2 % im Jahr, Gesamtdeckel aller Kosten 5 % im Jahr (150 €).
 6. RSS-Quellenliste: Der Vorschlag kommt mit Stufe 4 zur Bestätigung.
+7. **Art des Schutzstopps, ebenfalls eine Risikowahl.** Stopp mit Marktorder: wird ausgeführt, aber womöglich deutlich unter dem Stopp. Stopp-Limit: hält den Preis, bleibt aber womöglich unausgeführt, und die Position ist dann ungeschützt. Vorschlag: Stopp mit Marktorder.
 
 ## 22 Was Wolfgang selbst erledigt
 

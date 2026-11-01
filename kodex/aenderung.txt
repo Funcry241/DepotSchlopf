@@ -1,5 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: DokuOnly
-zweck: Architektur (Fassung 3) als docs/ARCHITEKTUR.md ins Repository legen, damit sie direkt pruefbar ist
+zweck: Architektur Fassung 4 nach zweiter Pruefung durch Maus und Befundliste
 pfade:
 docs/ARCHITEKTUR.md
+docs/BEFUNDE.md
