@@ -8,17 +8,12 @@ mod export;
 mod zip;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, ExitCode};
 
 const HILFE: &str = "Aufruf:\n  run.cmd                  alles: Gate pruefen und Assistenten-Export schreiben\n  \
 run.cmd kodex            dasselbe\n  run.cmd festschreibung   Festschreibung neu schreiben (nur fuer FestschreibungAenderung)\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
-
-fn wurzel() -> PathBuf {
-    let roh = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    fs::canonicalize(&roh).unwrap_or(roh)
-}
 
 /// Offene Reste frueherer Laeufe: Eine liegengebliebene Sperrdatei bedeutet einen Absturz
 /// waehrend eines Laufs. Sie wird nicht automatisch geloescht (fail-closed).
@@ -77,7 +72,12 @@ fn main() -> ExitCode {
         .map_or("alles", String::as_str)
         .to_string();
     let optionen: Vec<String> = args.iter().filter(|a| **a != befehl).cloned().collect();
-    let wurzel = wurzel();
+    let Some(wurzel) = depot_kodex::finde_wurzel() else {
+        eprintln!(
+            "[DepotSchlopf] FEHLER: Projektordner nicht gefunden. run.cmd im Projektordner starten."
+        );
+        return ExitCode::FAILURE;
+    };
 
     let mut kodex_args: Vec<String> = match befehl.as_str() {
         "alles" | "kodex" => vec!["--voll".into()],

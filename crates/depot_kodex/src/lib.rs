@@ -30,6 +30,17 @@ pub use pfade::Rolle;
 pub const DEKLARATION: &str = "kodex/aenderung.txt";
 pub const FESTSCHREIBUNG: &str = "kodex/festschreibung.txt";
 
+/// Projektordner zur Laufzeit: vom aktuellen Verzeichnis aufwaerts der erste Ordner mit
+/// `Cargo.toml` und `kodex/festschreibung.txt`. Nie der Pfad zur Uebersetzungszeit,
+/// sonst prueft ein wiederverwendetes Programm den falschen Baum.
+pub fn finde_wurzel() -> Option<std::path::PathBuf> {
+    let start = std::env::current_dir().ok()?;
+    start
+        .ancestors()
+        .find(|p| p.join("Cargo.toml").is_file() && p.join(FESTSCHREIBUNG).is_file())
+        .map(Path::to_path_buf)
+}
+
 /// Prueft Schritte 1 bis 5. Leere Liste = Gate offen.
 pub fn pruefe(wurzel: &Path, basis: &str) -> Vec<String> {
     let mut fehler = Vec::new();

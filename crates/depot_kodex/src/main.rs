@@ -1,6 +1,5 @@
 //! `kodex` – das Gate. Aufruf: `kodex [--basis <ref>] [--voll]` oder `kodex festschreibung`.
 
-use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 fn cargo(args: &[&str]) -> bool {
@@ -13,7 +12,12 @@ fn cargo(args: &[&str]) -> bool {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let wurzel = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let Some(wurzel) = depot_kodex::finde_wurzel() else {
+        eprintln!(
+            "[Kodex] FEHLER: Projektordner nicht gefunden (Cargo.toml mit kodex/festschreibung.txt)"
+        );
+        return ExitCode::FAILURE;
+    };
 
     if args.first().map(String::as_str) == Some("festschreibung") {
         return match depot_kodex::festschreibung::berechne(&wurzel) {
