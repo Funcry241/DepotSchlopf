@@ -2,7 +2,7 @@
 
 Stand 01.11.2026 · Wolfgang Mair
 
-*Fassung 4.4. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
+*Fassung 4.5. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
 
 ## 1 Zweck und Leitsatz
 
@@ -61,7 +61,7 @@ Diese Regeln gelten für jeden Baustein und jede spätere Änderung. Die Regeln 
 | R30 | Freigabe ist an einen Stand gebunden | Eine Zustimmung ohne Bezug kann für etwas anderes benutzt werden. | Jede Freigabe hat einen Typ, einen Gegenstand und eine Gültigkeit (Kapitel 10) und ist maschinenprüfbar abgelegt. Ändert sich ihr Gegenstand, erlischt sie; keine Freigabe erbt eine andere. |
 | R31 | Schweigen ist nie Zustimmung | Eine Prüfung, die bei Ausfall durchwinkt, ist keine Prüfung. | Ein neuer Auftrag entsteht nur, wenn der Prüfer dem konkreten Vorschlag ausdrücklich zustimmt und das Regelwerk danach genehmigt. Veto, Zeitüberschreitung, ungültige Antwort, Fehler oder fehlendes Budget für die Prüfung bedeuten: kein neuer Auftrag. Zwingende Aktionen (R23) brauchen keine KI-Zustimmung. |
 | R32 | Prüfkriterien setzen keinen Anreiz | Wer weiß, wonach er bewertet wird, optimiert das Kriterium statt des Ziels. | Freigabekriterien belohnen nie Aktivität, etwa eine Mindestzahl an Trades. Die Berater kennen weder die Kriterien noch den Stand der Prüfung. Kosten zählen in jede Bewertung voll hinein. |
-| R33 | Schwellen lösen aus, sie garantieren nicht | Ein Markt kann über jede Grenze springen. | Zugesagt wird nur, was das Cash-Konto erzwingt: Verlust nie über dem eingesetzten Geld. Stopps, Bereichs-Stopps, Tagesverlust und Notbremse lösen bei einer Schwelle aus. Der tatsächliche Verlust kann darüber liegen. Die Architektur schreibt deshalb „löst aus bei“, nie „begrenzt auf“. |
+| R33 | Schwellen lösen aus, sie garantieren nicht | Ein Markt kann über jede Grenze springen. | Auch eine absolute Verlustobergrenze sagt die Architektur nicht zu. Cash-Konto ohne Margin, kein Leerverkauf, gedeckte Käufe und Gebührenpuffer machen eine Forderung über den Einsatz unwahrscheinlich, schließen sie vertraglich aber nicht aus (Kapitel 14). Stopps, Bereichs-Stopps, Tagesverlust und Notbremse lösen bei einer Schwelle aus. Der tatsächliche Verlust kann darüber liegen. Die Architektur schreibt deshalb „löst aus bei“, nie „begrenzt auf“. |
 | R34 | Jede Order hat ein festes Verfahren | Ein Auftrag ohne festgelegten Ablauf wird im Ernstfall improvisiert. | Für jeden Aktionsgrund sind Ordertyp, Auslöser, Limitbildung, Handelszeit, Teilausführung und Restbehandlung festgeschrieben (Kapitel 10). |
 | R35 | Schutz gilt erst nach Bestätigung | Ein gesendeter Schutzauftrag ist noch kein aktiver Schutz. | Bestand ohne vom Broker bestätigten Schutz für genau die gehaltene Menge ist ein eigener Zustand mit Frist. Läuft die Frist ab, wird der Rest storniert und die ungeschützte Menge zwingend verkauft. Ist der Broker nicht erreichbar, gilt der Fehlerzustand „Schutz ungewiss“ mit Halt, Nachricht und Auflösung nach der Wiederverbindung; Schutz in der Zwischenzeit ist nicht garantiert. Ein abgesendeter Stornowunsch ist keine Stornierung. |
 | R36 | Zwang und Wahl sind getrennt | Ein Ausstieg, der an einer Sparregel scheitert, ist keiner. | Eine Matrix legt fest, welche Prüfung für freiwillige Käufe, freiwillige Verkäufe und zwingende Ausstiege gilt (Kapitel 8). Halt sperrt freiwillige Aufträge, nie die eigenen Schutzaktionen. Kein Leerverkauf, eindeutiger Bestand und plausible Kurse gelten immer. |
@@ -274,6 +274,7 @@ Der Kontowächter ist reiner Rust-Code ohne KI. Er läuft in der Handelszeit in 
 - Laufende Kosten außerhalb von Orders, etwa ein Kursdaten-Abo, werden vorab als Monatsbetrag eingeplant. Ohne Deckung wird nichts gebucht.
 - Geld und Stücke reserviert allein der Kontowächter, nacheinander und für Bereich und Gesamtkonto in einem Schritt (R37). Zwei Aufträge können nie dieselbe freie Ressource sehen, auch nicht beim selben Wert in zwei Bereichen. Der Broker kennt die Bereiche nicht. Deshalb wird die Summe der Bereiche laufend gegen Gesamtbestand und abgerechnetes Geld beim Broker abgeglichen.
 - Beim Start prüft der Kontowächter, dass das Konto ein Cash-Konto ohne Margin ist und nur die erlaubten Handelsrechte hat. Sonst startet der Dienst nicht.
+- **Restrisiko Forderungen:** Der Kontowächter gleicht Bargeld je Währung mit dem Broker ab. Ein Saldo unter null, ein Saldo in fremder Währung und jede Belastung, die keinem eigenen Auftrag oder eingeplanten Posten zugeordnet ist, führen zu Halt und einer Nachricht. Automatische Währungsumrechnung bleibt ausgeschaltet, soweit der Broker das erlaubt. Einen Fehlbetrag gleicht kein Automatismus aus, weder durch Verkauf noch durch Nachschuss; das entscheidet Wolfgang.
 
 **Kassenbuch und Journal (R24, R25, R29):**
 
@@ -432,7 +433,8 @@ Solange Kurzfrist nur auf Papier läuft, entstehen dort keine Handelskosten, abe
 | Kursdaten | 0 € | kostenlose verzögerte IBKR-Kurse; Echtzeit-Abo nur mit Zustimmung |
 | Nachrichten | 0 € | RSS; KI-Websuche aus |
 | Rechner und Strom | etwa 0 € zusätzlich | Wolfgangs Rechner läuft ohnehin |
-| Währungstausch | 0 € | nur Euro an Xetra |
+| Währungstausch | 0 € geplant | nur Euro an Xetra; eine Umrechnung durch den Broker kostet Gebühr, wird als eigene Kostenart gebucht und gemeldet |
+| Fehlbetrag auf dem Konto | Zinsen und mögliche Beitreibungskosten laut Kundenvereinbarung | darf nicht entstehen; wenn doch: Halt, Nachricht, Ausgleich durch Wolfgang; die Kosten zählen voll in die Bewertung |
 | Kontoführung, Papierkonto | 0 € | bei IBKR derzeit kostenlos |
 | Nicht ausgeführte Limits | 0 € | verfallen am Tagesende |
 | Fehlgeschlagene KI-Aufrufe | im Budget | eine Wiederholung, zählt gegen alle Grenzen |
@@ -442,7 +444,7 @@ Solange Kurzfrist nur auf Papier läuft, entstehen dort keine Handelskosten, abe
 
 ## 14 Sicherheit
 
-Der größte mögliche Verlust ist das Geld auf dem Konto, niemals mehr. Das garantiert das Cash-Konto ohne Kredit, nicht der Code. Der Code senkt das praktische Risiko zusätzlich über Stopps, Bereichs-Stopps, Tagesverlust und Notbremse. Diese lösen bei Schwellen aus und garantieren keine Verlusthöhe (R33).
+Gegen einen Verlust über den Einsatz stehen konkrete Schutzmaßnahmen: ein reines Cash-Konto ohne Margin, kein Leerverkauf, nur gedeckte Käufe, ein Gebührenpuffer und Handel nur in Euro. Eine Garantie ist das nicht. Die Kundenvereinbarung des Brokers regelt auch für Cash-Konten Fehlbeträge samt Zinsen und Beitreibungskosten sowie eine kostenpflichtige automatische Währungsumrechnung. Ein Fehlbetrag kann etwa durch Gebühren, Datenabos, Zinsen, Steuerabzüge in fremder Währung, Kapitalmaßnahmen oder Fehlbuchungen entstehen. Dieses Restrisiko behandeln Kontowächter (Kapitel 9) und Kostenmodell (Kapitel 13). Der Code senkt das praktische Risiko zusätzlich über Stopps, Bereichs-Stopps, Tagesverlust und Notbremse. Diese lösen bei Schwellen aus und garantieren keine Verlusthöhe (R33).
 
 | Was schiefgehen kann | Schutz | Folge |
 | --- | --- | --- |
