@@ -49,6 +49,11 @@ pub fn pruefe(wurzel: &Path, basis: &str) -> Vec<String> {
         Ok(d) => d,
         Err(e) => return vec![format!("Diff nicht bestimmbar: {e}")],
     };
+    // Keine Aenderung gegenueber der Basis (z. B. frischer Klon von main): Es gibt nichts zu
+    // deklarieren. Festschreibung, Quellscan und Essenz gelten trotzdem.
+    if diff.pfade.is_empty() {
+        return pruefe_ohne_diff(wurzel);
+    }
     let deklaration = match std::fs::read_to_string(wurzel.join(DEKLARATION)) {
         Ok(t) => match deklaration::lies(&t) {
             Ok(d) => d,

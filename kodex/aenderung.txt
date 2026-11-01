@@ -1,17 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Gruendung
-zweck: Kern, Regelwerk, KI-Budgetwaechter, Kodex, Essenz, Ein-Befehl-Einstieg mit Assistenten-Export, Lizenz und Community-Dateien von Anfang an anlegen
+klasse: KodexAenderung
+zweck: Unveraenderten Stand (frischer Klon von main) nicht mehr wegen fehlender Deklaration ablehnen
 pfade:
-.github/
-.gitignore
+crates/depot_kodex/src/lib.rs
 CHANGELOG.md
-LICENSE
-Cargo.lock
-Cargo.toml
-README.md
-crates/
-docs/
-kodex/festschreibung.txt
-run.cmd
-rust-toolchain.toml
-rustfmt.toml
