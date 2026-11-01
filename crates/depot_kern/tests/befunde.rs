@@ -3,70 +3,169 @@
 //! Ein Test mit `#[ignore = "offen: …"]` zeigt einen Befund, der im heutigen Code noch besteht:
 //! `cargo test -p depot_kern --test befunde -- --ignored` ist am Stand dieses Commits rot.
 //! Der Umbau entfernt das `ignore`; dann laeuft der Test im Kodex.
+//!
+//! Die Vertraege werden ueber die Sonde (`tests/sonde/mod.rs`) als fremdes Crate gebaut und
+//! ausgefuehrt. Ein Vertrag, der sich nicht bauen laesst, gilt als nicht erfuellt; ein Verbot
+//! gilt nur mit dem erwarteten Fehlercode als bewiesen.
 
 mod sonde;
 
-use depot_kern::Cent;
+const KERN: [&str; 1] = ["depot_kern"];
 
 // ---------------------------------------------------------------------------------------------
-// 1·A01 – Geldoperationen saettigen still
+// 1·A01 – Geldoperationen saettigen still (R13)
 // ---------------------------------------------------------------------------------------------
 
-/// Ein Ueberlauf ergibt einen Fehler, nie einen gekappten Wert.
+/// `Cent::euro` meldet einen Ueberlauf als `None`. Normale Betraege und die Randwerte direkt
+/// unter dem Ueberlauf bleiben exakt.
 #[test]
-#[ignore = "offen: 1·A01 Cent::euro und Cent::abs saettigen still"]
-fn befund_1_a01_ueberlauf_ergibt_keinen_gekappten_wert() {
-    let gross = i64::MAX / 10;
-    assert_ne!(
-        Cent::euro(gross),
-        Cent(i64::MAX),
-        "Cent::euro kappt einen Ueberlauf auf i64::MAX"
-    );
-    assert_ne!(
-        Cent(i64::MIN).abs(),
-        Cent(i64::MAX),
-        "Cent::abs kappt i64::MIN auf i64::MAX"
-    );
+#[ignore = "offen: 1·A01 Cent::euro saettigt still"]
+fn befund_1_a01_euro_meldet_ueberlauf_als_fehler() -> Result<(), String> {
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::Cent;
+fn main() {
+    let gross = i64::MAX / 100;
+    let klein = i64::MIN / 100;
+    let r: Option<Cent> = Cent::euro(gross + 1);
+    assert!(r.is_none(), "Ueberlauf nach oben: {r:?}");
+    assert!(Cent::euro(klein - 1).is_none(), "Ueberlauf nach unten");
+    assert!(Cent::euro(i64::MAX).is_none());
+    assert!(Cent::euro(i64::MIN).is_none());
+    assert_eq!(Cent::euro(gross).map(|c| c.0), Some(gross * 100));
+    assert_eq!(Cent::euro(klein).map(|c| c.0), Some(klein * 100));
+    assert_eq!(Cent::euro(12).map(|c| c.to_string()), Some("12,00 €".to_string()));
+    assert_eq!(Cent::euro(-12).map(|c| c.to_string()), Some("-12,00 €".to_string()));
+    assert_eq!(Cent::euro(0).map(|c| c.0), Some(0));
+}
+"#,
+    )
+}
+
+/// `Cent::abs` meldet `i64::MIN` als `None` statt still auf `i64::MAX` zu kappen.
+#[test]
+#[ignore = "offen: 1·A01 Cent::abs saettigt still"]
+fn befund_1_a01_abs_meldet_ueberlauf_als_fehler() -> Result<(), String> {
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::Cent;
+fn main() {
+    let r: Option<Cent> = Cent(i64::MIN).abs();
+    assert!(r.is_none(), "abs(i64::MIN) ergibt {r:?}");
+    assert_eq!(Cent(i64::MIN + 1).abs(), Some(Cent(i64::MAX)));
+    assert_eq!(Cent(-5).abs(), Some(Cent(5)));
+    assert_eq!(Cent(5).abs(), Some(Cent(5)));
+    assert_eq!(Cent(0).abs(), Some(Cent(0)));
+}
+"#,
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
 // 1·F01 – freie Laufzeitgrenzen umgehen die Festschreibung (R19)
 // ---------------------------------------------------------------------------------------------
 
-/// Ausserhalb von Tests laesst sich keine gelockerte Grenze bauen. Grenzen entstehen nur beim
-/// Laden der hash-geprueften Festschreibung.
+/// Gegenstueck: Eine vorhandene Grenze weitergeben und kopieren ist erlaubt.
+const GRENZEN_ERLAUBT: &str =
+    "pub fn weiter(g: &depot_kern::Grenzen) -> depot_kern::Grenzen { g.clone() }\n";
+
+/// Ausserhalb von Tests laesst sich keine Grenze im Literal bauen. Der Test nutzt bewusst
+/// keinen Konstruktor: Eine Umbenennung von `standard` macht ihn nicht gruen.
 #[test]
-#[ignore = "offen: 1·F01 Grenzen sind frei baubar"]
-fn befund_1_f01_gelockerte_grenze_laesst_sich_nicht_bauen() {
-    assert_eq!(sonde::umgebung_baut(&["depot_kern"]), Ok(()));
-    let locker = "pub fn locker() -> depot_kern::Grenzen {\n    \
-                  depot_kern::Grenzen { max_anteil_bp: 10_000, ..depot_kern::Grenzen::standard() }\n}\n";
-    assert!(
-        sonde::baut(&["depot_kern"], locker).is_err(),
-        "ein fremdes Crate kann Grenzen mit 100 % Hoechstanteil bauen"
-    );
-    let veraendert = "pub fn locker() -> depot_kern::Grenzen {\n    \
-                      let mut g = depot_kern::Grenzen::standard();\n    g.notbremse_bp = 9_000;\n    g\n}\n";
-    assert!(
-        sonde::baut(&["depot_kern"], veraendert).is_err(),
-        "ein fremdes Crate kann eine geladene Grenze nachtraeglich lockern"
-    );
+#[ignore = "offen: 1·F01 Grenzen sind im Literal frei baubar"]
+fn befund_1_f01_grenze_im_literal_laesst_sich_nicht_bauen() -> Result<(), String> {
+    sonde::erlaubt(&KERN, GRENZEN_ERLAUBT)?;
+    sonde::verboten(
+        &KERN,
+        "pub fn locker(g: &depot_kern::Grenzen) -> depot_kern::Grenzen {\n    \
+         depot_kern::Grenzen { max_anteil_bp: 10_000, ..g.clone() }\n}\n",
+        &sonde::PRIVAT,
+        &["max_anteil_bp"],
+    )
+}
+
+/// Eine geladene Grenze laesst sich nicht nachtraeglich lockern.
+#[test]
+#[ignore = "offen: 1·F01 Felder der Grenzen sind oeffentlich aenderbar"]
+fn befund_1_f01_geladene_grenze_laesst_sich_nicht_lockern() -> Result<(), String> {
+    sonde::erlaubt(&KERN, GRENZEN_ERLAUBT)?;
+    sonde::verboten(
+        &KERN,
+        "pub fn locker(mut g: depot_kern::Grenzen) -> depot_kern::Grenzen {\n    \
+         g.notbremse_bp = 9_000;\n    g\n}\n",
+        &sonde::PRIVAT,
+        &["notbremse_bp"],
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
 // 1·R06 – Kurse ohne Datum, rohe Zustaende (R20)
 // ---------------------------------------------------------------------------------------------
 
-/// Ein Kurs ist nur als geprueftes Objekt mit Handelstag, Waehrung, Herkunft und Alter zu haben.
-/// Aus einem rohen Centbetrag laesst sich keiner bauen.
+/// Gegenstueck: Kurse weitergeben und nachschlagen ist erlaubt.
+const KURSE_ERLAUBT: &str = "pub fn nachschlagen(k: &depot_kern::Kurse, i: &depot_kern::Isin) -> bool {\n    \
+                             k.kurs(i).is_some()\n}\n";
+
+/// Aus einem rohen Centbetrag laesst sich kein Kurs bauen: Ein Kurs ist nur als geprueftes
+/// Objekt mit Handelstag, Waehrung, Herkunft und Alter zu haben.
 #[test]
 #[ignore = "offen: 1·R06 Kurse sind rohe Centbetraege ohne Datum"]
-fn befund_1_r06_kurs_ohne_handelstag_laesst_sich_nicht_bauen() {
-    assert_eq!(sonde::umgebung_baut(&["depot_kern"]), Ok(()));
-    let roh = "pub fn roh(i: depot_kern::Isin) -> depot_kern::Kurse {\n    \
-               depot_kern::Kurse([(i, depot_kern::Cent(0))].into_iter().collect())\n}\n";
-    assert!(
-        sonde::baut(&["depot_kern"], roh).is_err(),
-        "Kurse lassen sich aus rohen Centbetraegen ohne Handelstag bauen"
-    );
+fn befund_1_r06_kurs_aus_rohem_betrag_laesst_sich_nicht_bauen() -> Result<(), String> {
+    sonde::erlaubt(&KERN, KURSE_ERLAUBT)?;
+    sonde::verboten(
+        &KERN,
+        "pub fn roh(i: depot_kern::Isin, c: depot_kern::Cent) -> depot_kern::Kurse {\n    \
+         depot_kern::Kurse([(i, c)].into_iter().collect())\n}\n",
+        &sonde::PRIVAT,
+        &["private"],
+    )
 }
+
+/// Geladene Kurse lassen sich nicht nachtraeglich roh veraendern.
+#[test]
+#[ignore = "offen: 1·R06 Kurse sind roh veraenderbar"]
+fn befund_1_r06_geladene_kurse_lassen_sich_nicht_roh_aendern() -> Result<(), String> {
+    sonde::erlaubt(&KERN, KURSE_ERLAUBT)?;
+    sonde::verboten(
+        &KERN,
+        "pub fn roh(mut k: depot_kern::Kurse, i: depot_kern::Isin) -> depot_kern::Kurse {\n    \
+         k.0.insert(i, depot_kern::Cent(0));\n    k\n}\n",
+        &sonde::PRIVAT,
+        &["Kurse"],
+    )
+}
+
+/// Bargeld ist nie negativ: Ein Topf mit negativem Bargeld laesst sich nicht anlegen, und das
+/// Bargeld eines Topfes laesst sich nicht roh setzen.
+#[test]
+#[ignore = "offen: 1·R06 negatives Bargeld wird angenommen"]
+fn befund_1_r06_negatives_bargeld_laesst_sich_nicht_anlegen() -> Result<(), String> {
+    sonde::erlaubt(
+        &KERN,
+        "pub fn wert(t: &depot_kern::Topf, k: &depot_kern::Kurse) -> Option<depot_kern::Cent> {\n    \
+         t.wert(k)\n}\n",
+    )?;
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::{Cent, Topf, TopfId};
+fn main() {
+    let minus: Option<Topf> = Topf::neu(TopfId::A, Cent(-100)).ok();
+    assert!(minus.is_none(), "negatives Bargeld angenommen");
+    assert!(Topf::neu(TopfId::A, Cent(0)).is_ok());
+}
+"#,
+    )?;
+    sonde::verboten(
+        &KERN,
+        "pub fn roh(t: &mut depot_kern::Topf) {\n    t.bargeld = depot_kern::Cent(-1);\n}\n",
+        &sonde::PRIVAT,
+        &["bargeld"],
+    )
+}
+
+// Waehrung, Herkunft und Alter eines Kurses (ebenfalls 1·R06) sind im heutigen Kern nicht
+// darstellbar. Ihre Tests entstehen mit dem Kurstyp im Schnitt „Kern und Regelwerk“; der
+// Befund bleibt bis dahin als Teilnachweis offen (docs/befunde/negativtests.md).

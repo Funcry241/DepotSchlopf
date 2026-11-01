@@ -71,15 +71,100 @@ fn lauf(
     v: Option<&Vorschlag>,
     halt: bool,
 ) -> Entscheidung {
+    lauf_mit(g, &universum(), topf, kurse, v, halt)
+}
+
+fn lauf_mit(
+    g: &Grenzen,
+    u: &Universum,
+    topf: &Topf,
+    kurse: &Kurse,
+    v: Option<&Vorschlag>,
+    halt: bool,
+) -> Entscheidung {
     entscheide(&Eingabe {
         grenzen: g,
-        universum: &universum(),
+        universum: u,
         topf,
         kurse,
         vorschlag: v,
         zyklus: 7,
         halt,
     })
+}
+
+/// Hoechstmoegliche Gebuehr, unabhaengig vom Produktivcode nachgerechnet: 0,05 % aufgerundet,
+/// mindestens 1,25 €, plus 0,25 € Boersengebuehr (Annahme von `Grenzen::standard`).
+/// Der Nachrechner rechnet in `i128` mit saettigenden Operationen; bei Testbetraegen weit unter
+/// 10^20 Cent kann keine Saettigung eintreten.
+fn gebuehr(volumen: i128) -> i128 {
+    let prozent = volumen
+        .saturating_abs()
+        .saturating_mul(5)
+        .saturating_add(9_999)
+        .checked_div(10_000)
+        .unwrap_or(i128::MAX);
+    prozent.max(125).saturating_add(25)
+}
+
+fn mal(kurs: Cent, stueck: u64) -> i128 {
+    i128::from(kurs.0).saturating_mul(i128::from(stueck))
+}
+
+/// Unabhaengiger Nachrechner: der Topf nach allen genehmigten Auftraegen, voll ausgefuehrt
+/// zum Limit, mit hoechstmoeglicher Gebuehr.
+#[derive(Debug)]
+struct Danach {
+    bargeld: i128,
+    stueck: BTreeMap<Isin, u64>,
+}
+
+impl Danach {
+    fn rechne(topf: &Topf, ent: &Entscheidung) -> Danach {
+        let mut d = Danach {
+            bargeld: i128::from(topf.bargeld.0),
+            stueck: topf.positionen.clone(),
+        };
+        for a in &ent.verkaeufe {
+            let x = a.auftrag();
+            let v = mal(x.limit, x.stueck);
+            d.bargeld = d.bargeld.saturating_add(v).saturating_sub(gebuehr(v));
+            let s = d.stueck.entry(x.isin.clone()).or_insert(0);
+            *s = s.saturating_sub(x.stueck);
+        }
+        for a in &ent.kaeufe {
+            let x = a.auftrag();
+            let v = mal(x.limit, x.stueck);
+            d.bargeld = d.bargeld.saturating_sub(v).saturating_sub(gebuehr(v));
+            let s = d.stueck.entry(x.isin.clone()).or_insert(0);
+            *s = s.saturating_add(x.stueck);
+        }
+        d.stueck.retain(|_, s| *s > 0);
+        d
+    }
+
+    /// Wert zu Kursen.
+    fn wert(&self, kurse: &Kurse) -> i128 {
+        self.stueck.iter().fold(self.bargeld, |summe, (i, s)| {
+            summe.saturating_add(mal(kurse.kurs(i).unwrap_or(Cent::NULL), *s))
+        })
+    }
+
+    /// Anteil eines Werts in Basispunkten, aufgerundet.
+    fn anteil_bp(&self, isin: &Isin, kurse: &Kurse) -> i128 {
+        let w = mal(
+            kurse.kurs(isin).unwrap_or(Cent::NULL),
+            self.stueck.get(isin).copied().unwrap_or(0),
+        );
+        let gesamt = self.wert(kurse);
+        if gesamt <= 0 {
+            return i128::MAX;
+        }
+        w.saturating_mul(10_000)
+            .saturating_add(gesamt.saturating_sub(1))
+            .checked_div(gesamt)
+            .unwrap_or(i128::MAX)
+    }
 }
 
 /// Volumen am Limit (ungünstigster Fall, R21). `None` bei Ueberlauf.
@@ -121,15 +206,55 @@ fn befund_1_f03_nullkurs_erzeugt_keinen_notauftrag_sondern_halt() {
     let g = Grenzen::standard();
     let mut topf = Topf::neu(TopfId::A, Cent::NULL);
     topf.positionen.insert(isin(0), 10);
+    let mut angenommen = Vec::new();
     for kurs in [Cent(0), Cent(-100)] {
         let mut kurse = kurse_alle(10_000);
         kurse.0.insert(isin(0), kurs);
         let ergebnis = notbremse_auftraege(&g, &topf, &kurse, 1);
-        assert!(
-            ergebnis.is_none(),
-            "Kurs {kurs}: Notbremse liefert {ergebnis:?} statt Halt"
-        );
+        if ergebnis.is_some() {
+            angenommen.push(format!("Kurs {kurs}: {ergebnis:?}"));
+        }
     }
+    assert!(angenommen.is_empty(), "statt Halt: {angenommen:?}");
+}
+
+/// (Fall, gehaltener Wert, Ziel)
+type Fall = (&'static str, Option<usize>, &'static [(usize, i64)]);
+
+/// Auch das Regelwerk erzeugt bei einem Kurs von 0 oder darunter keinen Auftrag, weder
+/// freiwillig noch zwingend (Matrix R36: unplausibler Kurs heisst nur Halt, kein Verkauf).
+#[test]
+#[ignore = "offen: 1·F03 Regelwerk verkauft zum Nullkurs"]
+fn befund_1_f03_nullkurs_erzeugt_im_regelwerk_keinen_auftrag() {
+    let g = Grenzen::standard();
+    let mut fehler = Vec::new();
+    for kurs in [Cent(0), Cent(-100)] {
+        let faelle: [Fall; 4] = [
+            ("gehaltener Wert ohne Ziel", Some(0), &[]),
+            ("gehaltener Wert mit kleinerem Ziel", Some(0), &[(0, 100)]),
+            (
+                "zwingender Ausstieg ausserhalb der Positivliste",
+                Some(10),
+                &[],
+            ),
+            ("Kaufziel", None, &[(0, 2_000)]),
+        ];
+        for (fall, gehalten, ziel) in faelle {
+            let mut topf = Topf::neu(TopfId::A, Cent::euro(5_000));
+            if let Some(i) = gehalten {
+                topf.positionen.insert(isin(i), 50);
+            }
+            let mut kurse = kurse_alle(10_000);
+            kurse.0.insert(isin(gehalten.unwrap_or(0)), kurs);
+            let v = vorschlag(BeraterId::Dachs, ziel);
+            let ent = lauf(&g, &topf, &kurse, Some(&v), false);
+            let n = alle(&ent).count();
+            if n > 0 {
+                fehler.push(format!("Kurs {kurs}, {fall}: {n} Auftraege"));
+            }
+        }
+    }
+    assert!(fehler.is_empty(), "{fehler:#?}");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -138,24 +263,64 @@ fn befund_1_f03_nullkurs_erzeugt_keinen_notauftrag_sondern_halt() {
 
 /// Durch Kursbewegung liegt ein Wert bei 28 % (Hoechstanteil 25 %, Toleranz 2 Punkte).
 /// Das Ziel 25 % liegt nur 3 Punkte darunter, also unter der Umschichtungsschwelle von
-/// 5 Punkten. Die Abbaupflicht gilt trotzdem: Es muss verkauft und darf nicht zugekauft werden.
+/// 5 Punkten. Die Abbaupflicht gilt trotzdem: Nach den genehmigten Auftraegen (voll zum Limit
+/// ausgefuehrt, hoechste Gebuehr) liegt der Wert hoechstens beim Hoechstanteil, und es wird
+/// nicht zugekauft.
 #[test]
 #[ignore = "offen: 1·F04 Bestandsgrenze ohne Abbaupflicht"]
 fn befund_1_f04_marktbewegung_ueber_toleranz_erzeugt_abbaupflicht() {
     let g = Grenzen::standard();
+    let kurse = kurse_alle(10_000);
     let mut topf = Topf::neu(TopfId::A, Cent::euro(7_200));
     topf.positionen.insert(isin(0), 28); // 28 × 100 € = 2.800 € von 10.000 €
     let v = vorschlag(BeraterId::Dachs, &[(0, 2_500)]);
-    let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&v), false);
+    let ent = lauf(&g, &topf, &kurse, Some(&v), false);
     assert!(
         !ent.kaeufe.iter().any(|a| a.auftrag().isin == isin(0)),
         "Zukauf trotz Bestand ueber der Toleranz"
     );
+    let danach = Danach::rechne(&topf, &ent);
+    let anteil = danach.anteil_bp(&isin(0), &kurse);
     assert!(
-        ent.verkaeufe.iter().any(|a| a.auftrag().isin == isin(0)),
-        "keine Abbaupflicht bei 28 % Bestand: {:?}",
+        anteil <= i128::from(g.max_anteil_bp),
+        "nach Abbau {anteil} bp statt hoechstens {} bp; {:?}",
+        g.max_anteil_bp,
         ent.befunde
     );
+}
+
+/// Neun gehaltene Werte bei hoechstens acht. Der Vorschlag nennt alle neun. Er darf nicht
+/// einfach verworfen werden: Nach den genehmigten Auftraegen sind es hoechstens acht Werte,
+/// und kein neuer Wert kommt hinzu.
+#[test]
+#[ignore = "offen: 1·F04 Positionszahl ueber der Grenze ohne Abbaupflicht"]
+fn befund_1_f04_zu_viele_positionen_erzeugen_abbaupflicht() {
+    let g = Grenzen::standard();
+    let kurse = kurse_alle(10_000);
+    let mut topf = Topf::neu(TopfId::A, Cent::euro(1_000));
+    for i in 0..9 {
+        topf.positionen.insert(isin(i), 10); // je 1.000 € = 10 %
+    }
+    let v = vorschlag(
+        BeraterId::Dachs,
+        &(0..9).map(|i| (i, 1_000)).collect::<Vec<_>>(),
+    );
+    let ent = lauf(&g, &topf, &kurse, Some(&v), false);
+    let danach = Danach::rechne(&topf, &ent);
+    assert!(
+        danach.stueck.len() <= g.max_werte,
+        "nach den Auftraegen {} Werte statt hoechstens {}; {:?}",
+        danach.stueck.len(),
+        g.max_werte,
+        ent.befunde
+    );
+    assert!(
+        ent.kaeufe
+            .iter()
+            .all(|a| topf.stueck(&a.auftrag().isin) > 0),
+        "neuer Wert trotz zu vieler Positionen"
+    );
+    assert!(danach.bargeld >= 0, "Bargeld negativ: {danach:?}");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -267,29 +432,156 @@ fn befund_1_f09_notbremse_und_umschichtung_vergeben_verschiedene_kennungen() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 2·A04 – zwingende Ausstiege durch freiwillige Regeln oder Halt blockiert
+// 2·A04 – zwingende Ausstiege durch freiwillige Regeln oder Halt blockiert (Matrix R36)
 // ---------------------------------------------------------------------------------------------
+//
+// Jede Schranke wird einzeln aktiviert, der uebrige Zustand bleibt zulaessig. Danach folgt die
+// Kombination. Zwingend ist hier der Ausstieg eines Werts aus der Positivliste. Budget und
+// Ausstiegsreserve gibt es im heutigen Code nicht; ihre Faelle entstehen mit dem Kostenbuch
+// (Stufe 3, 2·A05) und sind in docs/befunde/negativtests.md als fehlend gefuehrt.
 
-/// Ein Restbestand ausserhalb der Positivliste (2 Stueck zu 50 €: unter Mindestorder,
-/// Gebuehr ueber der Gebuehrenquote) wird zwingend verkauft. Halt sperrt ihn nicht.
+/// Universum nur aus den Werten `0..bis`; alles darueber ist ausserhalb der Positivliste.
+fn universum_bis(bis: usize) -> Universum {
+    Universum::neu(
+        (0..bis)
+            .map(|i| Instrument {
+                isin: isin(i),
+                name: format!("Wert {i}"),
+                art: InstrumentArt::Aktie,
+            })
+            .collect(),
+    )
+}
+
+/// Jeder Wert ausserhalb der Positivliste ist mit genau seiner ganzen Menge verkauft, und es
+/// wird nie mehr verkauft als gehalten.
+fn ausstiege_vollstaendig(
+    topf: &Topf,
+    u: &Universum,
+    g: &Grenzen,
+    ent: &Entscheidung,
+) -> Vec<String> {
+    let mut fehler = Vec::new();
+    for (i, gehalten) in &topf.positionen {
+        if u.handelbar(i, g) {
+            continue;
+        }
+        let verkauft: u64 = ent
+            .verkaeufe
+            .iter()
+            .filter(|a| &a.auftrag().isin == i)
+            .map(|a| a.auftrag().stueck)
+            .sum();
+        if verkauft != *gehalten {
+            fehler.push(format!("{i}: {verkauft} von {gehalten} verkauft"));
+        }
+    }
+    for a in &ent.verkaeufe {
+        if a.auftrag().stueck > topf.stueck(&a.auftrag().isin) {
+            fehler.push(format!("Verkauf ueber Bestand: {:?}", a.auftrag()));
+        }
+    }
+    fehler
+}
+
+/// Nur Halt: Der zwingende Ausstieg (1.000 €, ueber Mindestorder, unter Umschlaggrenze)
+/// laeuft trotzdem; freiwillige Auftraege bleiben gesperrt.
 #[test]
 #[ignore = "offen: 2·A04 Halt sperrt den zwingenden Ausstieg"]
-fn befund_2_a04_zwingender_ausstieg_trotz_halt_und_mindestorder() {
+fn befund_2_a04_halt_sperrt_den_zwingenden_ausstieg_nicht() {
     let g = Grenzen::standard();
-    let mut topf = Topf::neu(TopfId::A, Cent::euro(1_000));
-    topf.positionen.insert(isin(10), 2);
-    let v = vorschlag(BeraterId::Dachs, &[]);
-    let ent = lauf(&g, &topf, &kurse_alle(5_000), Some(&v), true);
-    assert!(
-        ent.verkaeufe
-            .iter()
-            .any(|a| a.auftrag().isin == isin(10) && a.auftrag().stueck == 2),
-        "zwingender Ausstieg fehlt: {:?}",
-        ent.befunde
-    );
+    let u = universum();
+    let mut topf = Topf::neu(TopfId::A, Cent::euro(8_000));
+    topf.positionen.insert(isin(10), 20); // 1.000 € ausserhalb der Positivliste
+    topf.positionen.insert(isin(0), 10); // 1.000 € im Universum
+    // Freiwillig wuerde der Vorschlag isin(0) abbauen und isin(1) kaufen.
+    let v = vorschlag(BeraterId::Dachs, &[(1, 2_000)]);
+    let ent = lauf_mit(&g, &u, &topf, &kurse_alle(10_000), Some(&v), true);
+    let fehler = ausstiege_vollstaendig(&topf, &u, &g, &ent);
+    assert!(fehler.is_empty(), "{fehler:?}; {:?}", ent.befunde);
     assert!(
         ent.kaeufe.is_empty(),
         "Halt muss freiwillige Kaeufe sperren"
+    );
+    assert!(
+        ent.verkaeufe.iter().all(|a| a.auftrag().isin == isin(10)),
+        "Halt muss freiwillige Verkaeufe sperren"
+    );
+}
+
+/// Nur Umschlaggrenze: Der zwingende Ausstieg betraegt 80 % des Topfes (Grenze 50 %). Er
+/// wird nicht gekuerzt.
+#[test]
+#[ignore = "offen: 2·A04 Umschlaggrenze kuerzt den zwingenden Ausstieg"]
+fn befund_2_a04_umschlaggrenze_kuerzt_den_zwingenden_ausstieg_nicht() {
+    let g = Grenzen::standard();
+    let u = universum();
+    let mut topf = Topf::neu(TopfId::A, Cent::euro(2_000));
+    topf.positionen.insert(isin(10), 80);
+    let v = vorschlag(BeraterId::Dachs, &[]);
+    let ent = lauf_mit(&g, &u, &topf, &kurse_alle(10_000), Some(&v), false);
+    let fehler = ausstiege_vollstaendig(&topf, &u, &g, &ent);
+    assert!(fehler.is_empty(), "{fehler:?}; {:?}", ent.befunde);
+}
+
+/// Nur Orderzahl: Sechs Werte verlassen die Positivliste (hoechstens vier Orders). Alle sechs
+/// werden verkauft.
+#[test]
+#[ignore = "offen: 2·A04 Orderzahl sperrt zwingende Ausstiege"]
+fn befund_2_a04_orderzahl_sperrt_zwingende_ausstiege_nicht() {
+    let mut g = Grenzen::standard();
+    g.max_umschlag_bp = 10_000; // Umschlag hier bewusst offen
+    let u = universum_bis(5);
+    let mut topf = Topf::neu(TopfId::A, Cent::euro(4_000));
+    for i in 5..11 {
+        topf.positionen.insert(isin(i), 10); // je 1.000 €
+    }
+    let v = vorschlag(BeraterId::Dachs, &[]);
+    let ent = lauf_mit(&g, &u, &topf, &kurse_alle(10_000), Some(&v), false);
+    let fehler = ausstiege_vollstaendig(&topf, &u, &g, &ent);
+    assert!(fehler.is_empty(), "{fehler:?}; {:?}", ent.befunde);
+}
+
+/// Nur Mindestorder und Gebuehrenquote: Restbestand 2 Stueck zu 50 € (100 €, Gebuehr 1,50 €
+/// = 1,5 %). Er wird zwingend verkauft. Haelt schon heute.
+#[test]
+fn grenzfall_2_a04_kleiner_rest_wird_zwingend_verkauft() {
+    let g = Grenzen::standard();
+    let u = universum();
+    let mut topf = Topf::neu(TopfId::A, Cent::euro(1_000));
+    topf.positionen.insert(isin(10), 2);
+    let v = vorschlag(BeraterId::Dachs, &[]);
+    let ent = lauf_mit(&g, &u, &topf, &kurse_alle(5_000), Some(&v), false);
+    let fehler = ausstiege_vollstaendig(&topf, &u, &g, &ent);
+    assert!(fehler.is_empty(), "{fehler:?}; {:?}", ent.befunde);
+}
+
+/// Alles zugleich: Halt, Umschlag ueber der Grenze, mehr Ausstiege als Orders, ein Rest unter
+/// Mindestorder. Alle Ausstiege laufen vollstaendig, nichts Freiwilliges.
+#[test]
+#[ignore = "offen: 2·A04 Kombination sperrt zwingende Ausstiege"]
+fn befund_2_a04_kombination_sperrt_zwingende_ausstiege_nicht() {
+    let g = Grenzen::standard();
+    let u = universum_bis(5);
+    let mut topf = Topf::neu(TopfId::A, Cent::euro(500));
+    for i in 5..10 {
+        topf.positionen.insert(isin(i), 20); // je 2.000 €
+    }
+    topf.positionen.insert(isin(10), 2); // 200 €, unter Mindestorder
+    topf.positionen.insert(isin(0), 10); // freiwillig, im Universum
+    let v = vorschlag(BeraterId::Dachs, &[(1, 2_000)]);
+    let ent = lauf_mit(&g, &u, &topf, &kurse_alle(10_000), Some(&v), true);
+    let fehler = ausstiege_vollstaendig(&topf, &u, &g, &ent);
+    assert!(fehler.is_empty(), "{fehler:?}; {:?}", ent.befunde);
+    assert!(
+        ent.kaeufe.is_empty(),
+        "Halt muss freiwillige Kaeufe sperren"
+    );
+    assert!(
+        ent.verkaeufe
+            .iter()
+            .all(|a| !u.handelbar(&a.auftrag().isin, &g)),
+        "Halt muss freiwillige Verkaeufe sperren"
     );
 }
 
@@ -297,38 +589,59 @@ fn befund_2_a04_zwingender_ausstieg_trotz_halt_und_mindestorder() {
 // 1·T01 – gezielte Grenzfaelle je harter Grenze (statt nur Zufall)
 // ---------------------------------------------------------------------------------------------
 
-/// Kaufgrenze am Limit: Ein Kauf auf genau 25 % am Schlusskurs liegt am Limit darueber.
-/// Der Bestand nach dem Kauf muss auch am Limit hoechstens 25 % des Topfes sein (R21, R22).
+/// Kaufgrenze am Limit mit vorhandenem Bestand: 20 Stueck (20 %) sind gehalten, das Ziel ist
+/// 25 %. Nach dem Kauf, voll zum Limit ausgefuehrt und mit hoechster Gebuehr, liegt der Bestand
+/// hoechstens beim Hoechstanteil (R21, R22). Der Wert wird dabei zum Kauflimit angesetzt,
+/// der uebrige Topf zu Kursen.
 #[test]
 #[ignore = "offen: 1·T01 Hoechstanteil am Schlusskurs statt am Limit geprueft"]
 fn grenzfall_hoechstanteil_gilt_am_limit() {
     let g = Grenzen::standard();
-    let topf = Topf::neu(TopfId::A, Cent::euro(10_000));
+    let kurse = kurse_alle(10_000);
+    let mut topf = Topf::neu(TopfId::A, Cent::euro(8_000));
+    topf.positionen.insert(isin(0), 20);
     let v = vorschlag(BeraterId::Dachs, &[(0, 2_500)]);
-    let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&v), false);
-    let grenze = Cent::euro(10_000).anteil_bp_ab(g.max_anteil_bp);
-    for a in &ent.kaeufe {
-        let v = am_limit(a);
-        assert!(
-            matches!((v, grenze), (Some(v), Some(gr)) if v <= gr),
-            "Kauf {:?} am Limit {v:?} ueber Hoechstanteil {grenze:?}",
-            a.auftrag()
-        );
-    }
+    let ent = lauf(&g, &topf, &kurse, Some(&v), false);
+    let danach = Danach::rechne(&topf, &ent);
+    let limit = ent
+        .kaeufe
+        .iter()
+        .find(|a| a.auftrag().isin == isin(0))
+        .map_or(10_000, |a| a.auftrag().limit.0);
+    let stueck = danach.stueck.get(&isin(0)).copied().unwrap_or(0);
+    let wert = mal(Cent(limit), stueck);
+    let gesamt = danach
+        .wert(&kurse)
+        .saturating_sub(mal(Cent(10_000), stueck))
+        .saturating_add(wert);
+    assert!(
+        wert.saturating_mul(10_000) <= gesamt.saturating_mul(i128::from(g.max_anteil_bp)),
+        "nach dem Kauf {stueck} Stueck zu {limit} Cent = {wert} von {gesamt} Cent, \
+         ueber {} bp",
+        g.max_anteil_bp
+    );
 }
 
-/// Mindestorder Kauf am Limit: jeder Kauf hat am Limit mindestens die Mindestorder.
+/// Mindestorder Kauf am Limit, stueckgenau: Kurs 100 €, Limit 101 €, Mindestorder 500 €, Ziel
+/// 10 % des Topfes. 4 Stueck (404 €) sind zu wenig, ab 5 Stueck (505 €) wird gekauft.
 #[test]
 fn grenzfall_mindestorder_kauf_am_limit() {
     let g = Grenzen::standard();
-    for bargeld in [49_900_i64, 50_000, 50_600, 51_000, 100_000] {
-        let topf = Topf::neu(TopfId::A, Cent(bargeld.saturating_mul(10)));
+    for (topf_euro, erwartet) in [
+        (4_999, None),
+        (5_000, Some(5)),
+        (5_999, Some(5)),
+        (6_000, Some(6)),
+    ] {
+        let topf = Topf::neu(TopfId::A, Cent::euro(topf_euro));
         let v = vorschlag(BeraterId::Dachs, &[(0, 1_000)]);
         let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&v), false);
+        let gekauft = ent.kaeufe.first().map(|a| a.auftrag().stueck);
+        assert_eq!(gekauft, erwartet, "Topf {topf_euro} €");
         for a in &ent.kaeufe {
             assert!(
                 am_limit(a).is_some_and(|v| v >= g.min_order),
-                "Bargeld {bargeld}: Kauf unter Mindestorder"
+                "Topf {topf_euro} €: Kauf unter Mindestorder"
             );
         }
     }
