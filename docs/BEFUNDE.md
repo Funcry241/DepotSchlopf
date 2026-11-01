@@ -9,7 +9,7 @@ Diese Liste führt jeden Befund aus den Prüfungen durch Maus vom Befund bis zur
 
 Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher Stufe der Test entsteht und dass eine unabhängige Prüfung ihn bestätigt.
 
-Stand: 01.11.2026, Fassung 4.5. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.6. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -118,3 +118,9 @@ Stand: 01.11.2026, Fassung 4.5. Kein Befund ist technisch geschlossen.
 | Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
 | --- | --- | --- | --- | --- | --- | --- |
 | 6·N01 | Die Zusage „Cash-Konto, nie Verlust über den Einsatz“ ist vertraglich nicht belegt; die Kundenvereinbarung regelt Fehlbeträge und kostenpflichtige Währungsumrechnung | R33 und Kap. 14 ohne Garantie, mit konkreten Schutzmaßnahmen; Kap. 9 Restrisiko Forderungen (Abgleich je Währung, Halt bei Saldo unter null, Fremdwährung oder unzugeordneter Belastung, kein automatischer Ausgleich); Kap. 13 Kostenarten Umrechnung und Fehlbetrag | Abgleich mit Saldo −0,01 €, mit Saldo in US-Dollar und mit einer unbekannten Belastung führt jeweils zu Halt und Nachricht, ohne Verkauf | Stufe 3, am Papierkonto in Stufe 6 | berücksichtigt | offen |
+
+## Wunsch Wolfgang – Stand 4b009a0
+
+| Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
+| --- | --- | --- | --- | --- | --- | --- |
+| 6·W2 | Angekündigte künftige Ereignisse (Sitzungen, Treffen, Zahlen) müssen vorab in die Entscheidung | R39, Kap. 6 Ereigniskalender mit Verlässlichkeit, Bündelung im Terminhorizont, Lagebild; Kap. 7 Feld „termine“ und Pflichtabwägung, Höchstanteil vor Terminen; Kap. 13, 14, 18, 19 | Beleg auf eine Terminkennung, die nicht im Kalender steht, wird verworfen; Kauf im Horizont ohne Abwägung wird verworfen; Kauf über dem Höchstanteil vor Terminen wird gekürzt; verschobener Termin ersetzt den alten Eintrag, das Journal behält beide; zwingender Ausstieg im Horizont läuft | Stufe 4 und 5 | berücksichtigt | offen |

@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: DokuOnly
-zweck: Architektur Fassung 4.5 ohne absolute Verlustgarantie, Restrisiko Forderungen in Kontowaechter und Kostenmodell
+zweck: Architektur Fassung 4.6 mit Ereigniskalender fuer angekuendigte kuenftige Ereignisse (R39)
 pfade:
 docs/ARCHITEKTUR.md
 docs/BEFUNDE.md
