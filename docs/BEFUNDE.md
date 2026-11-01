@@ -9,7 +9,7 @@ Diese Liste führt jeden Befund aus den Prüfungen durch Maus vom Befund bis zur
 
 Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher Stufe der Test entsteht und dass eine unabhängige Prüfung ihn bestätigt.
 
-Stand: 01.11.2026, Fassung 4.6. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.7. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -124,3 +124,10 @@ Stand: 01.11.2026, Fassung 4.6. Kein Befund ist technisch geschlossen.
 | Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
 | --- | --- | --- | --- | --- | --- | --- |
 | 6·W2 | Angekündigte künftige Ereignisse (Sitzungen, Treffen, Zahlen) müssen vorab in die Entscheidung | R39, Kap. 6 Ereigniskalender mit Verlässlichkeit, Bündelung im Terminhorizont, Lagebild; Kap. 7 Feld „termine“ und Pflichtabwägung, Höchstanteil vor Terminen; Kap. 13, 14, 18, 19 | Beleg auf eine Terminkennung, die nicht im Kalender steht, wird verworfen; Kauf im Horizont ohne Abwägung wird verworfen; Kauf über dem Höchstanteil vor Terminen wird gekürzt; verschobener Termin ersetzt den alten Eintrag, das Journal behält beide; zwingender Ausstieg im Horizont läuft | Stufe 4 und 5 | berücksichtigt | offen |
+
+## Stand bf852b7 – Wolfgang und Abnahme des Testschritts
+
+| Befund | Kern | Regel / Änderung | Negativtest | Abnahme | Architektur | Technisch |
+| --- | --- | --- | --- | --- | --- | --- |
+| 7·W3 | Nicht voraus sein, sondern beobachten: nach dem Ereignis die tatsächliche Reaktion messen und auf erkennbare Zusammenhänge reagieren | R40, Kap. 6 Beobachtungsjournal (Erwartung, Ergebnis, Reaktion), bestätigte Beobachtung, Zusammenhänge erst ab Mindestfallzahl; Kap. 7 Käufe mit Ereignisbezug nur mit bestätigter Beobachtung als Beleg | Kauf mit Ereignisbezug vor Ablauf des Beobachtungsfensters wird verworfen; Kauf nur mit Vorhersage als Beleg wird verworfen; Zusammenhang mit 9 Fällen erscheint nicht im Lagebild; Erwartung nach dem Termin nachgetragen wird abgelehnt | Stufe 4 und 5 | berücksichtigt | offen |
+| 7·K01 | Eine Kaufgrenze vor Terminen verkleinert keinen vorhandenen Bestand | Kap. 7: Höchstanteil vor Terminen als Kauf- und Bestandsgrenze (R22), Abbau des Überhangs vor Beginn des Termins als zwingender Ausstieg; misslingt er, Nachricht und keine Zusage einer kleineren Position | gehaltener Wert über der Grenze plus Toleranz beim Eintritt in den Horizont: Zukauf gesperrt, Abbau vor dem Termin; ohne Handelsmöglichkeit bleibt der Rest, Nachricht, Bericht meldet „nicht erreicht“ | Stufe 3 und 4 | berücksichtigt | offen |

@@ -2,7 +2,7 @@
 
 Stand 01.11.2026 · Wolfgang Mair
 
-*Fassung 4.6. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
+*Fassung 4.7. Dieses Dokument beschreibt das Ziel. Verbindlich wird es mit Wolfgangs Zustimmung. Danach gilt allein das Repository: Kodex, Festschreibung, Typen und Tests.*
 
 ## 1 Zweck und Leitsatz
 
@@ -68,6 +68,7 @@ Diese Regeln gelten für jeden Baustein und jede spätere Änderung. Die Regeln 
 | R37 | Jeder Auftrag hat einen Zustand | Wer nicht weiß, ob er gesendet hat, sendet doppelt. | Aufträge durchlaufen eine feste Zustandsmaschine (Kapitel 10). Geld und Stücke reserviert eine einzige Stelle für Bereich und Gesamtkonto zugleich. Ein unbekannter Sendestatus führt nur zum Abgleich, nie zu einem zweiten Versand. |
 | R38 | Anker zeigen nur auf Bestätigtes | Zwei Dateien lassen sich nicht gleichzeitig schreiben. | Änderungen über mehrere Dateien folgen einem Commitprotokoll mit Wiederherstellung. Ein Anker zeigt nur auf einen schon bestätigten Stand, nie auf einen gerade entstehenden. Gegen das gemeinsame Zurückrollen aller Dateien hilft nur ein Anker außerhalb des Rechners. |
 | R39 | Was kommt, zählt schon heute | Märkte reagieren auf angekündigte Ereignisse oft vor und an ihrem Termin, nicht erst danach. | Ein Ereigniskalender führt künftige Termine mit Zeitpunkt, Betroffenen, Quelle und Verlässlichkeit. Termine im Horizont stehen im Lagebild, lösen gebündelte Anfragen aus und müssen in jeder Begründung berücksichtigt sein. Ein Termin ändert keine Grenze und hebt kein Veto auf; es gibt keine Sonderregeln für einzelne Ereignisse. |
+| R40 | Beobachten statt raten | Den Ausgang eines Ereignisses vorherzusagen ist unsicher; die Reaktion des Markts danach lässt sich messen. | Zu jedem Termin hält ein Beobachtungsjournal Ereignis, vorherige Erwartung, tatsächliches Ergebnis und gemessene Marktreaktion fest. Ein Kauf, der sich auf ein Ereignis stützt, braucht eine bestätigte Beobachtung als Beleg, keine Vorhersage. Wiederkehrende Zusammenhänge zählen erst ab einer Mindestzahl gleichartiger Fälle und nur als Hinweis (R33). |
 
 ## 3 Rollen und Rechte
 
@@ -151,6 +152,14 @@ Wolfgangs Rechner läuft dauerhaft und ist die Sammelstelle. Er kanalisiert Welt
 
 Kalenderquellen stehen wie die Nachrichtenquellen auf einer festgeschriebenen Liste und sind Daten, nie Anweisungen (R9). Verschiebt sich ein Termin, wird der Eintrag fortgeschrieben; die alte Fassung bleibt im Journal. Die KI erfindet keine Termine: Sie kann nur Einträge mit Kennung aus dem Kalender als Beleg verwenden.
 
+**Beobachten statt raten (R40):** Der Rahmen muss dem Markt nicht voraus sein. Er verfolgt die Welt und die Termine, misst nach dem Ereignis, wie der Markt tatsächlich reagiert, und reagiert dann auf erkennbare Zusammenhänge. Dafür führt die Sammelstelle ein **Beobachtungsjournal**, einen Eintrag je Termin:
+
+- **vorher:** die Erwartung, soweit eine freigegebene Quelle sie nennt (etwa die Konsensschätzung), und die Einschätzung der KI, beide mit Zeitstempel und vor dem Termin festgehalten;
+- **Ergebnis:** was tatsächlich verkündet wurde, aus einer Quelle der Stufe „bestätigt“;
+- **Reaktion:** Kurs, Volumen und Spread der betroffenen Werte und Märkte in festen Fenstern nach der Veröffentlichung, deterministisch aus den Kursen gerechnet.
+
+Eine Beobachtung ist **bestätigt**, wenn das Ergebnis aus bestätigter Quelle vorliegt und das Beobachtungsfenster im fortlaufenden Handel abgelaufen ist. Erst dann darf ein Vorschlag sich auf das Ereignis stützen. Aus vielen Einträgen rechnet Rust Zusammenhänge, etwa wie ein Bereich auf eine bestimmte Art von Ergebnis reagiert hat, und zeigt sie im Lagebild mit der Zahl der Fälle. Unterhalb der Mindestfallzahl gibt es keinen Zusammenhang. Ein Zusammenhang ist ein Hinweis, keine Zusage.
+
 **Rechnen:** Bewegung seit der letzten KI-Sicht, Abstand zum Stopp, Volumen im Vergleich zum Durchschnitt, Abstand zum Höchststand, Rendite über 1, 3 und 12 Monate, Schwankung. Schlagzeilen werden entdoppelt, einem Wert zugeordnet und über feste Stichwortlisten eingestuft (z. B. Gewinnwarnung, Prognose, Übernahme, Klage, Rücktritt, Betrugsverdacht, Kapitalerhöhung). Alles ist deterministisch und damit wiederholbar.
 
 **Punkte und Korb:** Jedes Signal bekommt Punkte aus einer festgeschriebenen Tabelle und landet im Eingangskorb seines Bereichs. Signale ohne Bezug zum Bereich bekommen keine Punkte.
@@ -159,7 +168,7 @@ Kalenderquellen stehen wie die Nachrichtenquellen auf einer festgeschriebenen Li
 
 **Lagebild:** Die KI bekommt keinen Datenberg, sondern ein kurzes Lagebild in festem Aufbau: was sich seit ihrer letzten Sicht geändert hat, welche Signale ausgelöst haben, welche Termine im Horizont liegen (mit Kennung, Verlässlichkeit und betroffenen Positionen und Stopps), Konto, Positionen und Stopps, die Kosten möglicher Aufträge, ihre eigene letzte Begründung und höchstens eine festgelegte Zahl gekürzter Schlagzeilen, jede mit Kennung. Der feste Teil (Regeln, Grenzen, Universum, Antwortschema) steht immer gleich am Anfang. Das senkt die Kosten über die Zwischenspeicherung der Anbieter.
 
-**Lernen:** Das Journal zählt, wie oft eine Anfrage zu einem Handel führte. Führen viele Anfragen zu nichts, schlägt der Monatsbericht eine andere Schwelle vor. Ändern darf sie nur Wolfgang (R14, R15).
+**Lernen:** Das Journal zählt, wie oft eine Anfrage zu einem Handel führte. Führen viele Anfragen zu nichts, schlägt der Monatsbericht eine andere Schwelle vor. Der Monatsbericht vergleicht außerdem Erwartung und Beobachtung und zeigt, ob Reaktionen auf beobachtete Zusammenhänge nach allen Kosten etwas gebracht haben (R16). Ändern darf sie nur Wolfgang (R14, R15).
 
 **Ausfall:** Fällt der Rechner aus, schützen die Stopps beim Broker weiter, und es entstehen keine neuen Aufträge. Nach dem Start wird zuerst abgeglichen (Kapitel 11). Veraltete Signale werden nie nachträglich zu Aufträgen.
 
@@ -176,6 +185,7 @@ Kalenderquellen stehen wie die Nachrichtenquellen auf einer festgeschriebenen Li
 | Was steigt, was fällt? | Lagebild | Kennzahlen aus den Kursen |
 | Was meldet die Presse? | Sammelstelle | Gekürzte Schlagzeilen aus freigegebenen Quellen, als unzuverlässig markiert |
 | Was steht bevor? | Sammelstelle | Termine aus dem Ereigniskalender mit Verlässlichkeit (R39) |
+| Wie hat der Markt reagiert? | Sammelstelle | Beobachtungsjournal: gemessene Reaktion nach dem Termin und frühere Reaktionen auf gleichartige Ereignisse mit Fallzahl (R40) |
 
 **Dachs und Maus:** Dachs schlägt vor. Maus prüft jeden vorgeschlagenen Handel und gibt dabei immer einen eigenen Gegenvorschlag ab. Ein Handel findet nur statt, wenn Maus ihm ausdrücklich zustimmt und das Regelwerk ihn danach genehmigt (Vier-Augen-Prinzip, R31). Die Zustimmung nennt eine unveränderliche Vorschlagskennung (Hash über Bereich, Lagebild-Stand und Aufträge) und gilt nur für genau diesen Vorschlag und nur für die festgeschriebene Gültigkeitsdauer. Das Regelwerk darf einen zugestimmten Vorschlag danach nur kürzen, nie erweitern, umkehren oder auf andere Werte übertragen. Veto, Schweigen, Zeitüberschreitung, ungültige Antwort, Fehler oder ein erschöpftes Prüfbudget bedeuten: kein neuer Auftrag. Eine Wiederholung der Prüfung zählt gegen dieselben Grenzen wie jeder andere Aufruf. Die Gegenvorschläge laufen ohne Geld in einem Schattendepot mit. So bleibt messbar, welche KI besser liegt, ohne das kleine Geld zwischen zwei KIs aufzuteilen. Beide bekommen dasselbe Lagebild.
 
@@ -187,7 +197,7 @@ Kalenderquellen stehen wie die Nachrichtenquellen auf einer festgeschriebenen Li
 | zielgewichte | je Wert: ISIN, Gewicht in Basispunkten, Aktion (kaufen, halten, verkaufen) | ja |
 | begruendung | je geändertem Wert: warum, in wenigen Sätzen | bei jeder Änderung |
 | risiken | je geändertem Wert: was dagegen spricht | bei jeder Änderung |
-| belege | je geändertem Wert: Kennungen aus dem Lagebild (Kennzahl, Schlagzeile oder Termin) | bei jeder Änderung |
+| belege | je geändertem Wert: Kennungen aus dem Lagebild (Kennzahl, Schlagzeile, Termin oder Beobachtung) | bei jeder Änderung |
 | termine | je betroffenem Wert: Kennungen der Termine im Horizont und wie sie berücksichtigt sind (halten, verkleinern, abwarten, bewusst eingehen) | wenn Termine im Horizont liegen |
 | stopp | Stopp-Abstand je Kurzfrist-Kauf | im Kurzfrist-Bereich |
 | erwartung | erwartete Kursbewegung je Kurzfrist-Kauf (für die Kostenregel) | im Kurzfrist-Bereich |
@@ -199,7 +209,8 @@ Kalenderquellen stehen wie die Nachrichtenquellen auf einer festgeschriebenen Li
 - Kaufen und Verkaufen brauchen gleichermaßen Begründung, Risiko und Beleg (R11). Halten braucht nichts.
 - Verweist ein Beleg auf eine Kennung, die nicht im Lagebild stand, wird der Eintrag verworfen. So fallen erfundene Quellen auf.
 - Passt eine Antwort nicht zum Schema, wird die Anfrage genau einmal wiederholt. Danach gilt „kein Vorschlag“, und nichts ändert sich.
-- **Positionen über einen Termin hinweg:** Ein Termin kann eine Kurslücke über den Stopp hinaus auslösen (R33). Deshalb muss ein Vorschlag, der einen betroffenen Wert kauft oder hält, den Termin im Feld „termine“ abwägen; fehlt das, wird der Eintrag verworfen. Ein Kauf im Terminhorizont eines betroffenen Werts darf höchstens den festgeschriebenen Höchstanteil vor Terminen erreichen. Diese Grenze gilt für jedes Ereignis gleich. Zwingende Ausstiege bleiben davon unberührt (R36).
+- **Positionen über einen Termin hinweg:** Ein Termin kann eine Kurslücke über den Stopp hinaus auslösen (R33). Deshalb muss ein Vorschlag, der einen betroffenen Wert kauft oder hält, den Termin im Feld „termine“ abwägen; fehlt das, wird der Eintrag verworfen. Der Höchstanteil vor Terminen ist eine Anteilsgrenze mit allen drei Stufen (R22). Als Kaufgrenze kürzt er Käufe im Terminhorizont eines betroffenen Werts. Als Bestandsgrenze gilt er für den gehaltenen Bestand, sobald ein Termin in dessen Horizont tritt: Liegt der Bestand mehr als die Toleranz darüber, sind Zukäufe gesperrt, und der Überhang wird vor Beginn des Termins abgebaut, als zwingender Ausstieg mit dem Verfahren aus Kapitel 10. Gelingt der Abbau nicht rechtzeitig, bleibt der Rest stehen, Wolfgang bekommt eine Nachricht, und die kleinere Position gilt nicht als erreicht. Diese Grenze gilt für jedes Ereignis gleich. Zwingende Ausstiege bleiben von der Kaufgrenze unberührt (R36).
+- **Käufe mit Ereignisbezug (R40):** Stützt sich ein Kauf auf ein Ereignis, muss unter den Belegen eine bestätigte Beobachtung stehen. Eine Vorhersage des Ausgangs genügt nicht; ein solcher Eintrag wird verworfen. Verkäufe zur Risikominderung vor einem Termin brauchen keine Beobachtung.
 - Das Regelwerk bewertet nicht, ob eine Begründung klug ist. Es prüft, dass sie vollständig ist, dass die Belege stimmen und dass alle Grenzen eingehalten sind.
 
 **Nachrichten als Daten (R9):** Schlagzeilen stehen in einem eigenen, als nicht vertrauenswürdig markierten Block. Rust lässt nur Titel, Datum, Quelle, Link und einen kurzen Auszug durch, entfernt Steuerzeichen und eingebettete Links und ruft nur freigegebene Domains ab. Die KI hat kein Werkzeug, das etwas auslöst. Selbst eine vollständig manipulierte Antwort bleibt in den harten Grenzen. Der schlimmste Fall ist ein schlechtes, aber erlaubtes Depot in einem Bereich. Stützt sich eine große Änderung nur auf eine einzige Schlagzeile, wird sie im Journal zur Durchsicht markiert.
@@ -473,7 +484,9 @@ Gegen einen Verlust über den Einsatz stehen konkrete Schutzmaßnahmen: ein rein
 | Falsche oder fehlende Kurse | Plausibilitätsprüfung, fehlende Vergleichsdaten als eigener Zustand, Limit nahe am letzten Kurs | Halt, kein Handel auf falschen Daten |
 | Markt bricht ein | Stopps beim Broker, Tagesverlust, Notbremse mit sofortigem Halt und Vorrang vor allen Sparregeln | Kurzfrist durch Stopps begrenzt; Langfrist im Modus „Bestätigung“ erst durch Wolfgangs Verkauf; Neustart nur durch Wolfgang |
 | Kurslücke über Nacht | Stopp wird zum nächsten Kurs ausgeführt | Verlust kann über dem Stopp-Abstand liegen, nie über der Position |
-| Kurslücke an einem angekündigten Termin | Ereigniskalender, Pflichtabwägung im Feld „termine“, Höchstanteil vor Terminen | Verlust kann über dem Stopp-Abstand liegen, bleibt aber auf eine kleinere Position begrenzt |
+| Kurslücke an einem angekündigten Termin | Ereigniskalender, Pflichtabwägung im Feld „termine“, Höchstanteil vor Terminen als Kauf- und Bestandsgrenze mit Abbau vor dem Termin | Verlust kann über dem Stopp-Abstand liegen; er trifft eine kleinere Position, sofern der Abbau rechtzeitig gelang |
+| Auf einen Ausgang wetten, der nicht eintritt | Käufe mit Ereignisbezug nur nach bestätigter Beobachtung (R40) | kein Kauf auf Vorhersage |
+| Ein scheinbarer Zusammenhang ist Zufall | Mindestfallzahl, Zusammenhang nur als Hinweis, Auswertung nach allen Kosten im Monatsbericht | schlimmstenfalls ein erlaubter, aber erfolgloser Handel |
 | KI erfindet oder verwechselt Termine | nur Kalendereinträge mit Kennung als Beleg, Verlässlichkeit sichtbar, Gerüchte sind kein Termin | Eintrag verworfen |
 | Kauf wird nur teilweise ausgeführt oder die Verbindung reißt ab | Schutz erst nach Bestätigung, Schutzfrist, Zwangsverkauf der ungeschützten Menge (R35) | keine Menge bleibt über die Frist hinaus unbemerkt ungeschützt |
 | Stopp löst während eines freiwilligen Verkaufs aus | Gruppe aus Stopp und Verkauf mit Mengenreduktion, Freigabe erst nach Bestätigung | höchstens der Bestand wird verkauft |
@@ -612,7 +625,9 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Sammelstelle | Terminhorizont | Kurzfrist die nächsten 2 Handelstage, Langfrist die nächsten 2 Wochen |
 | Sammelstelle | Punkte für Termine | Termin der Stufe „bestätigt“ oder „angekündigt“ mit Bezug zu einem Depotwert oder dem Bereich tritt in den Horizont: 3; Stufe „vermutet“: 1 |
 | Kalender | Quellenliste | feste Liste öffentlicher Kalender, Änderung nur per Festschreibung |
-| Aufträge | Höchstanteil vor Terminen | Vorschlag im Paket, unter dem normalen Höchstanteil je Wert |
+| Aufträge | Höchstanteil vor Terminen | Vorschlag im Paket, unter dem normalen Höchstanteil je Wert; Kauf- und Bestandsgrenze mit der Toleranz der Bestandsgrenze, Abbau vor Beginn des Termins |
+| Beobachtung | Beobachtungsfenster | 30 Minuten fortlaufender Handel nach Veröffentlichung des Ergebnisses; für Langfrist der folgende Handelstag |
+| Beobachtung | Mindestfallzahl für Zusammenhänge | 10 gleichartige Ereignisse |
 | Nachrichten | Lagebild | höchstens 30 Schlagzeilen, je höchstens 300 Zeichen |
 | Nachrichten | Anbindung | aus, bis Wolfgang eine Quellenliste freigibt |
 | Nachrichten | KI-Websuche | aus |
