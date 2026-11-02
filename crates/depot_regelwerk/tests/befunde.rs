@@ -16,7 +16,7 @@ use depot_kern::{
     Kurse, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
 };
 use depot_regelwerk::{
-    AuftragsKennung, Eingabe, Entscheidung, GenehmigterAuftrag, Kennungsvergabe, Richtung,
+    Anlass, AuftragsKennung, Eingabe, Entscheidung, GenehmigterAuftrag, Kennungsvergabe, Richtung,
     entscheide, notbremse_auftraege, pruefe_kurse,
 };
 
@@ -923,4 +923,181 @@ fn grenzfall_limit_abstand() {
         assert!(a.auftrag().limit >= Cent(9_899));
         assert_eq!(a.auftrag().richtung, Richtung::Verkauf);
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// K9 – Maus' Gegenprogramm zu PR #9
+// ---------------------------------------------------------------------------------------------
+
+/// Die zwingenden Verkaeufe einer Entscheidung, als (ISIN, Stueck).
+fn zwingende(ent: &Entscheidung) -> Vec<(Isin, u64)> {
+    ent.verkaeufe
+        .iter()
+        .filter(|a| a.beleg().anlass.zwingend())
+        .map(|a| (a.auftrag().isin.clone(), a.auftrag().stueck))
+        .collect()
+}
+
+/// K9-01: Neun gleich grosse Werte, erlaubt sind acht. Welcher Wert zwingend verkauft wird,
+/// entscheidet allein das Regelwerk. Kein Vorschlag, ein fremder, ein ungueltiger oder ein
+/// gueltiger Vorschlag, mit oder ohne Halt: Die zwingenden Verkaeufe sind immer dieselben.
+#[test]
+#[ignore = "offen: K9-01 verworfener Vorschlag steuert den Zwangsverkauf"]
+fn befund_k9_01_vorschlag_steuert_keinen_zwangsverkauf() {
+    let g = Grenzen::standard();
+    let kurse = kurse_alle(10_000);
+    let mut topf = topf_neu(TopfId::A, Cent::NULL);
+    for i in 0..9 {
+        topf.setze_bestand(isin(i), 10);
+    }
+    let basis = zwingende(&lauf(&g, &topf, &kurse, None, false));
+    let Some((opfer, _)) = basis.first() else {
+        unreachable!("Vorbedingung: ohne Vorschlag wird ein Wert zwingend verkauft")
+    };
+    let nr = (0..9).find(|i| isin(*i) == *opfer).unwrap_or(0);
+    let andere = if nr == 0 { 1 } else { 0 };
+    let faelle: [(&str, Vorschlag, bool); 5] = [
+        (
+            "fremder Berater",
+            vorschlag(BeraterId::Maus, &[(nr, 1_000)]),
+            false,
+        ),
+        (
+            "negatives Gewicht",
+            vorschlag(BeraterId::Dachs, &[(nr, 1_000), (andere, -1)]),
+            false,
+        ),
+        (
+            "Summe ueber 100 %",
+            vorschlag(BeraterId::Dachs, &[(nr, 1_000), (andere, 9_500)]),
+            false,
+        ),
+        (
+            "gueltig, mit Halt",
+            vorschlag(BeraterId::Dachs, &[(nr, 1_000)]),
+            true,
+        ),
+        (
+            "gueltig, ohne Halt",
+            vorschlag(BeraterId::Dachs, &[(nr, 1_000)]),
+            false,
+        ),
+    ];
+    let mut fehler = Vec::new();
+    for (fall, v, halt) in faelle {
+        let z = zwingende(&lauf(&g, &topf, &kurse, Some(&v), halt));
+        if z != basis {
+            fehler.push(format!("{fall}: {z:?} statt {basis:?}"));
+        }
+    }
+    assert!(fehler.is_empty(), "{fehler:#?}");
+}
+
+/// K9-02: Mehrere gleichzeitige Auftraege mindern denselben Topfwert. Jeder abgebaute Wert liegt
+/// nach allen Auftraegen (voll zum Limit, hoechste Gebuehr) hoechstens beim Hoechstanteil, und
+/// jeder gekaufte Wert, zum Limit angesetzt, ebenso. Lagen: zwei Abbauorders unter Halt (Maus'
+/// Gegenprobe), dazu ein Ausstieg aus der Positivliste, dazu freiwillige Auftraege.
+#[test]
+#[ignore = "offen: K9-02 gemeinsame Abbaukosten fehlen"]
+fn befund_k9_02_gemeinsamer_abbau_haelt_den_hoechstanteil() {
+    let g = Grenzen::standard();
+    let kurse = kurse_alle(100);
+    let faelle: [(&str, i64, u64, Option<Vorschlag>, bool); 3] = [
+        ("zwei Abbauorders, Halt", 440_000, 0, None, true),
+        ("dazu Ausstieg Positivliste, Halt", 390_000, 500, None, true),
+        (
+            "dazu freiwillige Auftraege",
+            390_000,
+            500,
+            Some(vorschlag(
+                BeraterId::Dachs,
+                &[(0, 2_500), (1, 2_500), (2, 2_000), (3, 1_500)],
+            )),
+            false,
+        ),
+    ];
+    let mut fehler = Vec::new();
+    for (fall, bargeld, raus, v, halt) in faelle {
+        let mut topf = topf_neu(TopfId::A, Cent(bargeld));
+        topf.setze_bestand(isin(0), 2_800);
+        topf.setze_bestand(isin(1), 2_800);
+        if raus > 0 {
+            topf.setze_bestand(isin(10), raus);
+        }
+        let ent = lauf(&g, &topf, &kurse, v.as_ref(), halt);
+        let abbau: Vec<&Isin> = ent
+            .verkaeufe
+            .iter()
+            .filter(|a| a.beleg().anlass == Anlass::Abbau)
+            .map(|a| &a.auftrag().isin)
+            .collect();
+        if abbau.len() != 2 {
+            fehler.push(format!("{fall}: Vorbedingung, Abbau {abbau:?}"));
+            continue;
+        }
+        let danach = Danach::rechne(&topf, &ent);
+        let gesamt = danach.wert(&kurse);
+        for i in abbau {
+            let w = mal(Cent(100), danach.stueck.get(i).copied().unwrap_or(0));
+            if w.saturating_mul(10_000) > gesamt.saturating_mul(i128::from(g.max_anteil_bp())) {
+                fehler.push(format!("{fall}: {i} {w} von {gesamt} Cent nach dem Abbau"));
+            }
+        }
+        for a in &ent.kaeufe {
+            let x = a.auftrag();
+            let s = danach.stueck.get(&x.isin).copied().unwrap_or(0);
+            let w = mal(x.limit, s);
+            let basis = gesamt.saturating_sub(mal(Cent(100), s)).saturating_add(w);
+            if w.saturating_mul(10_000) > basis.saturating_mul(i128::from(g.max_anteil_bp())) {
+                fehler.push(format!("{fall}: Kauf {} {w} von {basis} Cent", x.isin));
+            }
+        }
+    }
+    assert!(fehler.is_empty(), "{fehler:#?}");
+}
+
+/// K9-03: Reichen die Nummern nicht fuer alle Auftraege, entsteht keiner, und die Vergabe
+/// verbraucht keine Nummer.
+#[test]
+#[ignore = "offen: K9-03 Kennungsvergabe bei Abbruch nicht atomar"]
+fn befund_k9_03_abbruch_verbraucht_keine_kennung() {
+    let g = Grenzen::standard();
+    let kurse = kurse_alle(10_000);
+    let start = u64::MAX.saturating_sub(1);
+
+    let mut topf = topf_neu(TopfId::A, Cent::NULL);
+    topf.setze_bestand(isin(0), 10);
+    topf.setze_bestand(isin(1), 10);
+    let mut vergabe = Kennungsvergabe::nach(start);
+    let not = notbremse_auftraege(&g, &topf, &kurse, &mut vergabe);
+    assert!(
+        not.is_none(),
+        "Notbremse trotz erschoepfter Nummern: {not:?}"
+    );
+    assert_eq!(vergabe.letzte(), start, "Notbremse hat Nummern verbraucht");
+
+    let topf = topf_neu(TopfId::A, Cent(1_000_000));
+    let v = vorschlag(BeraterId::Dachs, &[(0, 2_000), (1, 2_000)]);
+    let mut vergabe = Kennungsvergabe::nach(start);
+    let ent = entscheide(
+        &Eingabe {
+            grenzen: &g,
+            universum: &universum(),
+            topf: &topf,
+            kurse: &kurse,
+            vorschlag: Some(&v),
+            halt: false,
+        },
+        &mut vergabe,
+    );
+    assert_eq!(
+        alle(&ent).count(),
+        0,
+        "Auftraege trotz erschoepfter Nummern"
+    );
+    assert_eq!(
+        vergabe.letzte(),
+        start,
+        "Entscheidung hat Nummern verbraucht"
+    );
 }
