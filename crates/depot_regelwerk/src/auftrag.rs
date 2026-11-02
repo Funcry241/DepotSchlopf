@@ -42,10 +42,15 @@ impl Kennungsvergabe {
         self.letzte
     }
 
-    /// `None`, wenn die Nummern erschoepft sind; dann entsteht kein Auftrag.
-    pub(crate) fn vergib(&mut self) -> Option<AuftragsKennung> {
-        self.letzte = self.letzte.checked_add(1)?;
-        Some(AuftragsKennung { nr: self.letzte })
+    /// Vergibt `anzahl` fortlaufende Kennungen auf einmal, oder keine: `None`, wenn die Nummern
+    /// nicht fuer alle reichen. Dann bleibt die Vergabe unveraendert (K9-03).
+    pub(crate) fn vergib(&mut self, anzahl: usize) -> Option<Vec<AuftragsKennung>> {
+        let anzahl = u64::try_from(anzahl).ok()?;
+        let letzte = self.letzte.checked_add(anzahl)?;
+        let erste = self.letzte.checked_add(1)?;
+        let kennungen = (erste..=letzte).map(|nr| AuftragsKennung { nr }).collect();
+        self.letzte = letzte;
+        Some(kennungen)
     }
 }
 
@@ -130,12 +135,19 @@ mod tests {
 
     #[test]
     fn vergabe_zaehlt_fortlaufend_und_endet_sauber() {
+        let nummern = |k: Option<Vec<AuftragsKennung>>| {
+            k.map(|k| k.into_iter().map(AuftragsKennung::nr).collect::<Vec<_>>())
+        };
         let mut v = Kennungsvergabe::nach(41);
-        assert_eq!(v.vergib().map(AuftragsKennung::nr), Some(42));
-        assert_eq!(v.vergib().map(AuftragsKennung::nr), Some(43));
-        assert_eq!(v.letzte(), 43);
-        let mut voll = Kennungsvergabe::nach(u64::MAX);
-        assert_eq!(voll.vergib(), None);
-        assert_eq!(voll.letzte(), u64::MAX);
+        assert_eq!(nummern(v.vergib(1)), Some(vec![42]));
+        assert_eq!(nummern(v.vergib(2)), Some(vec![43, 44]));
+        assert_eq!(nummern(v.vergib(0)), Some(vec![]));
+        assert_eq!(v.letzte(), 44);
+        let mut knapp = Kennungsvergabe::nach(u64::MAX - 1);
+        assert_eq!(knapp.vergib(2), None);
+        assert_eq!(knapp.letzte(), u64::MAX - 1);
+        assert_eq!(nummern(knapp.vergib(1)), Some(vec![u64::MAX]));
+        assert_eq!(knapp.vergib(1), None);
+        assert_eq!(knapp.letzte(), u64::MAX);
     }
 }

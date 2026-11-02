@@ -6,6 +6,12 @@ Klasse `FestschreibungAenderung`. Die Grenzen bekommen zwei neue Felder, die Tol
 
 Ein grüner Test schließt keinen Befund. „Technisch geschlossen“ setzt erst die unabhängige Prüfung durch Maus.
 
+**Fassung 2 nach Maus' Prüfung von `231364c` (K9-01 bis K9-03):** Maus' Gegenprogramm steht als drei Tests in `crates/depot_regelwerk/tests/befunde.rs`, am Stand `231364c` rot (eigener Commit `7233417`). Behoben ist allgemein:
+
+- **K9-01 (P1):** Welche Werte zwingend verkauft werden, entscheidet allein eine Regel: bei zu vielen Positionen zuerst der kleinste Wert, bei gleichem Wert nach ISIN. KI-Ziele gehen in keine Zwangsauswahl ein, weder gültige noch verworfene, mit oder ohne Halt. Der Vorschlag wird erst geprüft, nachdem der Zwang feststeht, und wirkt nur auf freiwillige Aufträge.
+- **K9-02 (P2):** Alle Aufträge eines Plans mindern denselben Topfwert. Jeder Abbau wird gegen die Minderung des ganzen Plans gerechnet: andere Abbauorders, Ausstiege aus der Positivliste und freiwillige Aufträge. Das Regelwerk plant so lange neu, bis jeder Abbau gegen den ganzen Plan hält. Abbaumengen wachsen dabei nur, der freiwillige Teil wird jedes Mal ganz neu geplant und hält so alle seine Grenzen (Umschlag, Orderzahl, Deckung, Kaufgrenze) gegen den endgültigen Zwang. Weil die Abbaumengen nur wachsen und durch den Bestand begrenzt sind, endet die Rechnung.
+- **K9-03 (P3):** Kennungen werden erst vergeben, wenn alle Aufträge samt Limit stehen, und dann alle auf einmal. Reichen die Nummern nicht, entsteht kein Auftrag, und die Vergabe bleibt unverändert. Das gilt für Entscheidung und Notbremse.
+
 ## So prüfst du es nach
 
 ```text
@@ -32,14 +38,17 @@ Am ersten Commit des Schnitts (`6dc1fe9`, nur Tests) zeigt `cargo test --locked 
 | 2·A04 | `befund_2_a04_orderzahl_sperrt_zwingende_ausstiege_nicht` | rot: 2 von 6 fehlen | grün |
 | 2·A04 | `befund_2_a04_kombination_sperrt_zwingende_ausstiege_nicht` | rot | grün |
 | 1·T01 | `grenzfall_hoechstanteil_gilt_am_limit` | rot | grün |
+| K9-01 | `befund_k9_01_vorschlag_steuert_keinen_zwangsverkauf`: neun Werte, ohne Vorschlag, fremder Berater, negatives Gewicht, Summe über 100 %, gültig mit und ohne Halt | rot an `231364c`: der Vorschlag ändert den verkauften Wert | grün: immer derselbe Zwangsverkauf |
+| K9-02 | `befund_k9_02_gemeinsamer_abbau_haelt_den_hoechstanteil`: zwei Abbauorders unter Halt (Maus' Fall), dazu ein Ausstieg aus der Positivliste, dazu freiwillige Käufe | rot an `231364c`: je 2.498 € von 9.990,96 € = 25,0026 % | grün: jeder Rest höchstens 25 %, jeder Kauf am Limit höchstens 25 % |
+| K9-03 | `befund_k9_03_abbruch_verbraucht_keine_kennung`: Startwert `u64::MAX − 1`, zwei Aufträge, in Notbremse und Entscheidung | rot an `231364c`: Zähler auf `u64::MAX`, kein Auftrag | grün: kein Auftrag, Zähler unverändert |
 | 1·T01 (neu) | `grenzfall_deckung_kauft_was_passt`: 506,50 €, 600 €, 1.011,50 € Bargeld | rot: eine Stückzahl zu wenig | grün: 5, 5 und 10 Stück |
 
 ## Was der Umbau tut
 
 - **Reihenfolge (R36).** Das Regelwerk plant zuerst die zwingenden Ausstiege: Werte außerhalb der Positivliste, Abbau über der Bestandsgrenze. Halt, Orderzahl, Umschlag und Mindestorder sperren sie nicht. Sie brauchen nur einen frischen, plausiblen Kurs; fehlt der, gibt es für den Wert keinen Auftrag, nur Halt. Erst danach, ohne Halt und mit gültigem Vorschlag, kommen die freiwilligen Aufträge. Für sie gelten Orderzahl und Umschlag mit dem, was die zwingenden übrig lassen.
-- **Drei Stufen der Anteilsgrenzen (R22).** Zielgrenze: zu große Gewichte werden gekürzt. Kaufgrenze: ein Kauf hält den Wert nach dem Kauf, voll zum Limit ausgeführt und mit höchster Gebühr, beim Höchstanteil; ein neuer Wert entsteht nur, solange die Positionszahl reicht. Bestandsgrenze: liegt ein Wert mehr als die Toleranz über dem Höchstanteil, ist Zukauf gesperrt, und er wird so weit verkauft, dass er danach höchstens beim Höchstanteil liegt. Bleiben mehr Werte als erlaubt, werden die überzähligen ganz verkauft: zuerst die mit dem kleinsten Zielgewicht, dann die mit dem kleinsten Wert.
+- **Drei Stufen der Anteilsgrenzen (R22).** Zielgrenze: zu große Gewichte werden gekürzt. Kaufgrenze: ein Kauf hält den Wert nach dem Kauf, voll zum Limit ausgeführt und mit höchster Gebühr, beim Höchstanteil; ein neuer Wert entsteht nur, solange die Positionszahl reicht. Bestandsgrenze: liegt ein Wert mehr als die Toleranz über dem Höchstanteil, ist Zukauf gesperrt, und er wird so weit verkauft, dass er danach höchstens beim Höchstanteil liegt. Gerechnet wird gegen den Topfwert nach allen Aufträgen des Plans (K9-02). Bleiben mehr Werte als erlaubt, werden die überzähligen ganz verkauft: zuerst die mit dem kleinsten Wert, bei gleichem Wert nach ISIN. KI-Ziele gehen in diese Auswahl nicht ein (K9-01).
 - **Prüfbasis am Limit (R21).** Mindestorder, Kaufgrenze und Deckung rechnen am Limit mit der höchsten Gebühr. Die Deckung sucht die größte Stückzahl, die samt Gebühr ins Budget passt, statt sie zu schätzen. Der Umschlag rechnet je Auftrag mit dem höheren Preis aus Kurs und Limit: Ein Kauf führt höchstens zum Limit aus, ein Verkauf mindestens zum Limit, oft zum Kurs oder darüber.
-- **Kennungen (R24).** Eine `AuftragsKennung` entsteht nur in der `Kennungsvergabe`. Alle Planer eines Laufs, Entscheidung und Notbremse, ziehen aus derselben Vergabe. Jede Nummer ist um eins größer als die vorige. Den Startwert liefert später das Journal; bis zur Persistenzbasis reicht ihn der Aufrufer herein. Die Notbremse prüft erst alle Kurse und vergibt dann Nummern, ein Abbruch verbraucht keine.
+- **Kennungen (R24).** Eine `AuftragsKennung` entsteht nur in der `Kennungsvergabe`. Alle Planer eines Laufs, Entscheidung und Notbremse, ziehen aus derselben Vergabe. Jede Nummer ist um eins größer als die vorige. Den Startwert liefert später das Journal; bis zur Persistenzbasis reicht ihn der Aufrufer herein. Vergeben wird erst, wenn alle Aufträge samt Limit stehen, und dann alle Nummern auf einmal oder keine (K9-03).
 - **Vorschlag und Berater (R20).** Ein Vorschlag, der nicht vom Berater des Topfes stammt, wird ganz verworfen.
 - **Kursdaten (R20, R06).** Die Datenprüfung meldet einen fehlenden Vortagskurs als eigenen Fehler `KeinVergleichskurs` und einen zu alten Kurs als `KursZuAlt`. Regelwerk und Notbremse nehmen nur Kurse, die nicht älter als das Höchstalter sind.
 
@@ -77,6 +86,11 @@ Jede Zeile schwächt den Umbau an genau einer Stelle. Jedes Mal wird der zustän
 | Umschlag kürzt zwingende Ausstiege | A04 Umschlag rot |
 | Kaufgrenze am Schlusskurs | T01 Höchstanteil rot |
 | Deckung rechnet eine Gebühr zu viel ab | beide Deckungstests rot |
+| Zielgewicht des Vorschlags geht in die Auswahl der überzähligen Positionen ein | K9-01 rot |
+| Abbau nicht gegen den ganzen Plan nachgezogen | K9-02 rot |
+| Abbau nur gegen die anderen Zwangsaufträge nachgezogen, ohne freiwillige | K9-02 rot |
+| Notbremse vergibt Kennungen einzeln | K9-03 rot |
+| Entscheidung vergibt Kennungen einzeln | K9-03 rot |
 
 ## Grenzen, die ausdrücklich bleiben
 

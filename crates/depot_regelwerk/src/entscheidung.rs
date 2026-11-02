@@ -212,7 +212,9 @@ pub fn entscheide(e: &Eingabe<'_>, vergabe: &mut Kennungsvergabe) -> Entscheidun
     ent
 }
 
-/// Vergibt Kennungen, Verkaeufe zuerst, und siegelt die Auftraege.
+/// Vergibt Kennungen, Verkaeufe zuerst, und siegelt die Auftraege. Erst stehen alle Auftraege
+/// samt Limit, dann werden alle Kennungen auf einmal vergeben: Ein Abbruch verbraucht keine
+/// Nummer (K9-03).
 fn genehmige(
     g: &Grenzen,
     verkaeufe: &[Kandidat],
@@ -220,27 +222,30 @@ fn genehmige(
     vergabe: &mut Kennungsvergabe,
 ) -> Option<Entscheidung> {
     let abdruck = g.fingerabdruck();
-    let mut siegle = |k: &Kandidat| -> Option<GenehmigterAuftrag> {
-        Some(GenehmigterAuftrag::neu(
+    let mut geplant = Vec::new();
+    for k in verkaeufe.iter().chain(kaeufe) {
+        geplant.push((k, k.limit(g)?));
+    }
+    let kennungen = vergabe.vergib(geplant.len())?;
+    let mut ent = Entscheidung::default();
+    for ((k, limit), kennung) in geplant.into_iter().zip(kennungen) {
+        let auftrag = GenehmigterAuftrag::neu(
             Auftrag {
-                kennung: vergabe.vergib()?,
+                kennung,
                 isin: k.isin.clone(),
                 richtung: k.richtung,
                 stueck: k.stueck,
-                limit: k.limit(g)?,
+                limit,
             },
             RegelBeleg {
                 grenzen_abdruck: abdruck.clone(),
                 anlass: k.anlass,
             },
-        ))
-    };
-    let mut ent = Entscheidung::default();
-    for k in verkaeufe {
-        ent.verkaeufe.push(siegle(k)?);
-    }
-    for k in kaeufe {
-        ent.kaeufe.push(siegle(k)?);
+        );
+        match k.richtung {
+            Richtung::Verkauf => ent.verkaeufe.push(auftrag),
+            Richtung::Kauf => ent.kaeufe.push(auftrag),
+        }
     }
     Some(ent)
 }
@@ -267,36 +272,110 @@ fn plane(e: &Eingabe<'_>, befunde: &mut Vec<Befund>) -> Option<(Vec<Kandidat>, V
     } else {
         None
     };
-    let ziele_roh = e.vorschlag.map(|v| &v.zielgewichte_bp);
-    if let Some(tw) = topfwert {
-        abbau_anteil(e, tw, &mut zwang, &mut gesperrt, befunde)?;
-        abbau_positionen(e, ziele_roh, &mut zwang, &mut gesperrt, befunde)?;
-    }
+    // Die Auswahl der zwingenden Verkaeufe folgt allein den Regeln. KI-Ziele, gueltig oder
+    // nicht, steuern sie nie (K9-01).
+    let Some(tw) = topfwert else {
+        if e.halt {
+            befunde.push(Befund::Halt);
+        }
+        return Some((zwang, Vec::new()));
+    };
+    abbau_anteil(e, tw, &mut zwang, &mut gesperrt, befunde)?;
+    abbau_positionen(e, &mut zwang, &mut gesperrt, befunde)?;
 
-    let mut verkaeufe = zwang;
-    let mut kaeufe = Vec::new();
-    if e.halt {
+    let ziele = if e.halt {
         befunde.push(Befund::Halt);
-    } else if let Some(tw) = topfwert {
+        None
+    } else {
         match e.vorschlag {
-            None => befunde.push(Befund::KeinVorschlag),
+            None => {
+                befunde.push(Befund::KeinVorschlag);
+                None
+            }
             Some(v) => match pruefe_vorschlag(e, v, befunde) {
-                Err(grund) => befunde.push(Befund::VorschlagVerworfen(grund)),
-                Ok(ziele) => {
-                    freiwillig(
-                        e,
-                        tw,
-                        &ziele,
-                        &gesperrt,
-                        &mut verkaeufe,
-                        &mut kaeufe,
-                        befunde,
-                    )?;
+                Err(grund) => {
+                    befunde.push(Befund::VorschlagVerworfen(grund));
+                    None
                 }
+                Ok(ziele) => Some(ziele),
             },
         }
+    };
+
+    // Gemeinsame Bewertungsbasis (K9-02): Alle Auftraege eines Plans mindern denselben
+    // Topfwert. Der Plan wird so lange neu gerechnet, bis jeder Abbau gegen die Minderung des
+    // ganzen Plans haelt. Die Abbaumengen wachsen dabei nur; der freiwillige Teil wird jedes Mal
+    // ganz neu geplant und haelt damit alle seine Grenzen gegen den endgueltigen Zwang.
+    loop {
+        let mut verkaeufe = zwang.clone();
+        let mut kaeufe = Vec::new();
+        let mut befunde_frei = Vec::new();
+        if let Some(ziele) = &ziele {
+            freiwillig(
+                e,
+                tw,
+                ziele,
+                &gesperrt,
+                &mut verkaeufe,
+                &mut kaeufe,
+                &mut befunde_frei,
+            )?;
+        }
+        if !abbau_nachziehen(e, tw, &mut zwang, &verkaeufe, &kaeufe)? {
+            befunde.extend(befunde_frei);
+            return Some((verkaeufe, kaeufe));
+        }
     }
-    Some((verkaeufe, kaeufe))
+}
+
+/// Prueft jeden Abbau gegen die Minderung des ganzen Plans (`verkaeufe` und `kaeufe`) und
+/// erhoeht ihn, wo der Rest sonst ueber dem Hoechstanteil laege. `true`, wenn sich ein Abbau
+/// geaendert hat.
+fn abbau_nachziehen(
+    e: &Eingabe<'_>,
+    topfwert: Cent,
+    zwang: &mut [Kandidat],
+    verkaeufe: &[Kandidat],
+    kaeufe: &[Kandidat],
+) -> Option<bool> {
+    let g = e.grenzen;
+    let mut verlust = Cent::NULL;
+    for k in verkaeufe.iter().chain(kaeufe) {
+        verlust = verlust.checked_add(k.verlust(g)?)?;
+    }
+    let mut geaendert = false;
+    for k in zwang.iter_mut() {
+        if k.anlass != Anlass::Abbau || k.komplett {
+            continue;
+        }
+        let basis = topfwert.checked_sub(verlust.checked_sub(k.verlust(g)?)?)?;
+        let stueck = abbau_menge(g, k, e.topf.stueck(&k.isin), basis)?;
+        if stueck > k.stueck {
+            k.komplett = stueck == e.topf.stueck(&k.isin);
+            k.stueck = stueck;
+            geaendert = true;
+        }
+    }
+    Some(geaendert)
+}
+
+/// Kleinste Verkaufsmenge, nach der der Rest (zum Kurs) hoechstens den Hoechstanteil von
+/// `basis` abzueglich der eigenen Minderung hat. `basis` ist der Topfwert nach allen anderen
+/// Auftraegen.
+fn abbau_menge(g: &Grenzen, k: &Kandidat, gehalten: u64, basis: Cent) -> Option<u64> {
+    let behalten = groesste_passende(gehalten, |r| {
+        let probe = Kandidat {
+            stueck: gehalten.checked_sub(r)?,
+            ..k.clone()
+        };
+        let gesamt = basis.checked_sub(probe.verlust(g)?)?;
+        Some(!ueber_anteil(
+            k.kurs.mal_stueck(r)?,
+            gesamt,
+            g.max_anteil_bp(),
+        )?)
+    })?;
+    gehalten.checked_sub(behalten)
 }
 
 /// Zwingend: Jeder gehaltene Wert ausserhalb der Positivliste wird ganz verkauft, sofern sein
@@ -352,24 +431,17 @@ fn abbau_anteil(
             ist_bp: wert.in_bp_von(topfwert)?,
         });
         gesperrt.insert(isin.clone());
-        let limit = limit_fuer(g, kurs, Richtung::Verkauf)?;
-        // Kleinste Verkaufsmenge s, nach der der Rest hoechstens den Hoechstanteil hat:
-        // groesste behaltene Menge r = gehalten - s, fuer die das gilt.
-        let behalten = groesste_passende(*gehalten, |r| {
-            let s = gehalten.checked_sub(r)?;
-            let erloes = limit.mal_stueck(s)?;
-            let minderung = kurs
-                .checked_sub(limit)?
-                .mal_stueck(s)?
-                .checked_add(g.gebuehren().fuer(erloes)?)?;
-            let gesamt = topfwert.checked_sub(minderung)?;
-            Some(!ueber_anteil(
-                kurs.mal_stueck(r)?,
-                gesamt,
-                g.max_anteil_bp(),
-            )?)
-        })?;
-        let stueck = gehalten.checked_sub(behalten)?;
+        let geplant = Kandidat {
+            isin: isin.clone(),
+            richtung: Richtung::Verkauf,
+            stueck: 0,
+            kurs,
+            komplett: false,
+            anlass: Anlass::Abbau,
+        };
+        // Erster Ansatz gegen den Topfwert; `abbau_nachziehen` rechnet ihn gegen den ganzen Plan.
+        let stueck = abbau_menge(g, &geplant, *gehalten, topfwert)?;
+        let behalten = gehalten.checked_sub(stueck)?;
         if stueck > 0 {
             zwang.push(Kandidat {
                 isin: isin.clone(),
@@ -385,11 +457,10 @@ fn abbau_anteil(
 }
 
 /// Zwingend: Bleiben nach den zwingenden Verkaeufen mehr Werte als erlaubt, werden die
-/// ueberzaehligen ganz verkauft: zuerst die mit dem kleinsten Zielgewicht, dann die mit dem
-/// kleinsten Wert.
+/// ueberzaehligen ganz verkauft: zuerst die mit dem kleinsten Wert, bei gleichem Wert nach ISIN.
+/// Die Auswahl ist eine reine Regel; KI-Ziele gehen nicht ein (K9-01).
 fn abbau_positionen(
     e: &Eingabe<'_>,
-    ziele: Option<&BTreeMap<Isin, i64>>,
     zwang: &mut Vec<Kandidat>,
     gesperrt: &mut BTreeSet<Isin>,
     befunde: &mut Vec<Befund>,
@@ -405,9 +476,8 @@ fn abbau_positionen(
         if ganz_verkauft.contains(isin) || !e.universum.handelbar(isin, g) {
             continue;
         }
-        let ziel = ziele.and_then(|z| z.get(isin)).copied().unwrap_or(0);
         let wert = e.kurse.kurs(isin)?.mal_stueck(*gehalten)?;
-        bleiben.push((ziel, wert, isin.clone(), *gehalten));
+        bleiben.push((wert, isin.clone(), *gehalten));
     }
     let zu_viel = bleiben.len().saturating_sub(g.max_werte());
     if zu_viel == 0 {
@@ -418,7 +488,7 @@ fn abbau_positionen(
         erlaubt: g.max_werte(),
     });
     bleiben.sort();
-    for (_, _, isin, gehalten) in bleiben.into_iter().take(zu_viel) {
+    for (_, isin, gehalten) in bleiben.into_iter().take(zu_viel) {
         zwang.retain(|k| k.isin != isin);
         gesperrt.insert(isin.clone());
         zwang.push(Kandidat {

@@ -58,7 +58,8 @@ pub fn notbremse_auftraege(
     vergabe: &mut Kennungsvergabe,
 ) -> Option<Vec<GenehmigterAuftrag>> {
     let abdruck = grenzen.fingerabdruck();
-    // Erst alle Kurse pruefen, dann Kennungen vergeben: Ein Abbruch verbraucht keine Nummer.
+    // Erst alle Kurse und Limits pruefen, dann alle Kennungen auf einmal vergeben: Ein Abbruch
+    // verbraucht keine Nummer (K9-03).
     let mut geplant = Vec::new();
     for (isin, stueck) in topf.positionen() {
         if *stueck == 0 {
@@ -72,11 +73,12 @@ pub fn notbremse_auftraege(
         let limit = kurs.checked_sub(kurs.anteil_bp_ab(grenzen.limit_abstand_bp())?)?;
         geplant.push((isin.clone(), *stueck, limit));
     }
+    let kennungen = vergabe.vergib(geplant.len())?;
     let mut auftraege = Vec::new();
-    for (isin, stueck, limit) in geplant {
+    for ((isin, stueck, limit), kennung) in geplant.into_iter().zip(kennungen) {
         auftraege.push(GenehmigterAuftrag::neu(
             Auftrag {
-                kennung: vergabe.vergib()?,
+                kennung,
                 isin,
                 richtung: Richtung::Verkauf,
                 stueck,

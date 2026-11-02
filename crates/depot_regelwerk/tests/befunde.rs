@@ -942,7 +942,6 @@ fn zwingende(ent: &Entscheidung) -> Vec<(Isin, u64)> {
 /// entscheidet allein das Regelwerk. Kein Vorschlag, ein fremder, ein ungueltiger oder ein
 /// gueltiger Vorschlag, mit oder ohne Halt: Die zwingenden Verkaeufe sind immer dieselben.
 #[test]
-#[ignore = "offen: K9-01 verworfener Vorschlag steuert den Zwangsverkauf"]
 fn befund_k9_01_vorschlag_steuert_keinen_zwangsverkauf() {
     let g = Grenzen::standard();
     let kurse = kurse_alle(10_000);
@@ -955,7 +954,7 @@ fn befund_k9_01_vorschlag_steuert_keinen_zwangsverkauf() {
         unreachable!("Vorbedingung: ohne Vorschlag wird ein Wert zwingend verkauft")
     };
     let nr = (0..9).find(|i| isin(*i) == *opfer).unwrap_or(0);
-    let andere = if nr == 0 { 1 } else { 0 };
+    let andere = usize::from(nr == 0);
     let faelle: [(&str, Vorschlag, bool); 5] = [
         (
             "fremder Berater",
@@ -998,7 +997,6 @@ fn befund_k9_01_vorschlag_steuert_keinen_zwangsverkauf() {
 /// jeder gekaufte Wert, zum Limit angesetzt, ebenso. Lagen: zwei Abbauorders unter Halt (Maus'
 /// Gegenprobe), dazu ein Ausstieg aus der Positivliste, dazu freiwillige Auftraege.
 #[test]
-#[ignore = "offen: K9-02 gemeinsame Abbaukosten fehlen"]
 fn befund_k9_02_gemeinsamer_abbau_haelt_den_hoechstanteil() {
     let g = Grenzen::standard();
     let kurse = kurse_alle(100);
@@ -1031,8 +1029,11 @@ fn befund_k9_02_gemeinsamer_abbau_haelt_den_hoechstanteil() {
             .filter(|a| a.beleg().anlass == Anlass::Abbau)
             .map(|a| &a.auftrag().isin)
             .collect();
-        if abbau.len() != 2 {
-            fehler.push(format!("{fall}: Vorbedingung, Abbau {abbau:?}"));
+        if abbau.len() != 2 || (v.is_some() && ent.kaeufe.is_empty()) {
+            fehler.push(format!(
+                "{fall}: Vorbedingung, Abbau {abbau:?}, {:?}",
+                ent.befunde
+            ));
             continue;
         }
         let danach = Danach::rechne(&topf, &ent);
@@ -1059,7 +1060,6 @@ fn befund_k9_02_gemeinsamer_abbau_haelt_den_hoechstanteil() {
 /// K9-03: Reichen die Nummern nicht fuer alle Auftraege, entsteht keiner, und die Vergabe
 /// verbraucht keine Nummer.
 #[test]
-#[ignore = "offen: K9-03 Kennungsvergabe bei Abbruch nicht atomar"]
 fn befund_k9_03_abbruch_verbraucht_keine_kennung() {
     let g = Grenzen::standard();
     let kurse = kurse_alle(10_000);
