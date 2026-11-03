@@ -378,4 +378,187 @@ mod tests {
         }
         assert!(!geheim_oder_erzeugt("crates/depot_ki/src/budget.rs"));
     }
+
+    // -----------------------------------------------------------------------------------------
+    // 1·E01, 1·E02, 2·W3 (Export-Teil) – nur Git, keine Links, keine Geheimnisse (R28)
+    // -----------------------------------------------------------------------------------------
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static NR: AtomicU32 = AtomicU32::new(0);
+
+    /// Ein frisches Git-Repository unter `target/export-befunde/`.
+    fn repo() -> Result<PathBuf, String> {
+        let n = NR.fetch_add(1, Ordering::SeqCst);
+        let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/export-befunde")
+            .join(format!("repo_{}_{n}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        git_muss(&p, &["init", "-q"])?;
+        Ok(p)
+    }
+
+    fn git_muss(dir: &Path, args: &[&str]) -> Result<(), String> {
+        let aus = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args([
+                "-c",
+                "user.name=Export-Probe",
+                "-c",
+                "user.email=probe@depotschlopf.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .map_err(|e| format!("git: {e}"))?;
+        if aus.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "git {}: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&aus.stderr)
+            ))
+        }
+    }
+
+    fn schreib(dir: &Path, rel: &str, inhalt: &[u8]) -> Result<(), String> {
+        let z = dir.join(rel);
+        if let Some(e) = z.parent() {
+            fs::create_dir_all(e).map_err(|e| format!("{rel}: {e}"))?;
+        }
+        fs::write(z, inhalt).map_err(|e| format!("{rel}: {e}"))
+    }
+
+    fn lauf(konsole: &str) -> Lauf {
+        Lauf {
+            befehl: "alles".into(),
+            schritte: vec![Schritt {
+                name: "kodex".into(),
+                exit: 0,
+            }],
+            konsole: konsole.into(),
+            warnungen: Vec::new(),
+        }
+    }
+
+    /// Erfundene Beispiele, erst zur Laufzeit zusammengesetzt.
+    fn beispiel_iban() -> String {
+        ["DE89", "3704", "0044", "0532", "0130", "00"].concat()
+    }
+
+    fn beispiel_schluessel() -> String {
+        ["sk", "-ant-", "api03-", "q7Rk2LmZx9Tb4VwN8yHc3PdJ6sFg1Ue5"].concat()
+    }
+
+    /// Exportiert wird nur, was Git verfolgt. Eine neue, nicht ignorierte Datei im
+    /// Projektordner bleibt draussen, auch wenn sie harmlos aussieht.
+    #[test]
+    #[ignore = "offen: 1·E01 unverfolgte Dateien werden exportiert"]
+    fn befund_1_e01_nur_verfolgte_dateien_werden_exportiert() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "README.md", b"# Probe\n")?;
+        git_muss(&r, &["add", "README.md"])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        schreib(&r, "zugang.txt", b"Benutzer: wolfgang\n")?;
+        schreib(&r, "notizen/konto.md", b"privat\n")?;
+        let dateien = quelldateien(&r);
+        assert_eq!(dateien, vec!["README.md".to_string()]);
+        Ok(())
+    }
+
+    /// Ein verfolgter Link wird nicht gelesen: Sein Ziel kann ausserhalb des Projekts liegen.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "offen: 1·E02 Link exportiert fremde Inhalte"]
+    fn befund_1_e02_link_wird_nicht_gelesen() -> Result<(), String> {
+        let r = repo()?;
+        let draussen = r.with_extension("draussen");
+        fs::create_dir_all(&draussen).map_err(|e| format!("draussen: {e}"))?;
+        schreib(&draussen, "fremd.txt", b"fremder Inhalt\n")?;
+        schreib(&r, "README.md", b"# Probe\n")?;
+        std::os::unix::fs::symlink(draussen.join("fremd.txt"), r.join("link.md"))
+            .map_err(|e| format!("Link: {e}"))?;
+        git_muss(&r, &["add", "README.md", "link.md"])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        let dateien = quelldateien(&r);
+        assert!(
+            !dateien.contains(&"link.md".to_string()),
+            "Link exportiert: {dateien:?}"
+        );
+        assert!(dateien.contains(&"README.md".to_string()), "{dateien:?}");
+        Ok(())
+    }
+
+    /// Ein Geheimnismuster in einer exportierten Datei oder in der Konsole bricht den Export ab:
+    /// Es entsteht keine ZIP-Datei, und die Meldung nennt das Geheimnis nicht. Ebenso ein
+    /// Inhalt, der sich nicht pruefen laesst.
+    #[test]
+    #[ignore = "offen: 1·E01/2·W3 Geheimnis im Export wird nicht erkannt"]
+    fn befund_1_e01_geheimnis_bricht_den_export_ab() -> Result<(), String> {
+        let faelle: [(&str, Vec<u8>, String, &str); 4] = [
+            (
+                "IBAN in verfolgter Datei",
+                format!("Konto {}\n", beispiel_iban()).into_bytes(),
+                String::new(),
+                "Geheimnismuster",
+            ),
+            (
+                "Schluessel in verfolgter Datei",
+                format!("key {}\n", beispiel_schluessel()).into_bytes(),
+                String::new(),
+                "Geheimnismuster",
+            ),
+            (
+                "Schluessel in der Konsole",
+                b"harmlos\n".to_vec(),
+                format!("Ausgabe {}\n", beispiel_schluessel()),
+                "Geheimnismuster",
+            ),
+            (
+                "nicht pruefbarer Inhalt",
+                vec![b'#', b' ', 0xC3, 0x28, 0xFF, b'\n'],
+                String::new(),
+                "nicht pruefbar",
+            ),
+        ];
+        let mut offen = Vec::new();
+        for (fall, inhalt, konsole, stichwort) in faelle {
+            let r = repo()?;
+            schreib(&r, "docs/notiz.md", &inhalt)?;
+            git_muss(&r, &["add", "docs/notiz.md"])?;
+            git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+            match schreibe(&r, &lauf(&konsole)) {
+                Ok(p) => offen.push(format!("{fall}: Export geschrieben: {}", p.display())),
+                Err(e) => {
+                    if !e.contains(stichwort) {
+                        offen.push(format!("{fall}: falscher Grund: {e}"));
+                    }
+                    if e.contains(&beispiel_iban()) || e.contains(&beispiel_schluessel()) {
+                        offen.push(format!("{fall}: Meldung nennt das Geheimnis"));
+                    }
+                }
+            }
+            if r.join(EXPORT).exists() || r.join(format!("{EXPORT}.tmp")).exists() {
+                offen.push(format!("{fall}: ZIP-Datei liegt im Ordner"));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Kontrolle: Ein sauberes Repository ergibt einen Export.
+    #[test]
+    fn sauberer_export_entsteht() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "README.md", b"# Probe\n")?;
+        git_muss(&r, &["add", "README.md"])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        let p = schreibe(&r, &lauf("alles gut\n"))?;
+        assert!(p.is_file());
+        Ok(())
+    }
 }
