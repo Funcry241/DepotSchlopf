@@ -18,7 +18,8 @@
 //! Zustandsraum.
 //!
 //! **Sperre (R24):** Gesperrt wird die geoeffnete Datei selbst ueber das Betriebssystem, nicht
-//! ein abgeleiteter Pfadname. Ein Link als Kassenbuch oder Anker ist verboten.
+//! ein abgeleiteter Pfadname. Ein Link in irgendeinem Teil des Pfads ist verboten, ebenso als
+//! Anker. Die Zwischendatei des Ankers wird nur exklusiv neu angelegt.
 //!
 //! **Fehler sperren (R29):** Nach einem Schreib- oder Synchronisationsfehler gibt dieses
 //! Kassenbuch keine Erlaubnis mehr und schreibt nichts mehr, bis es neu geoeffnet und dabei
@@ -27,7 +28,7 @@
 use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{ErrorKind, Read, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use depot_kern::{BeraterId, Cent};
 use sha2::{Digest, Sha256};
@@ -134,6 +135,33 @@ fn anker_pfad(pfad: &Path) -> PathBuf {
     pfad.with_extension("anker")
 }
 
+/// Kein Teil des uebergebenen Pfads darf ein Link sein (R24, K12-02). Geprueft wird der Pfad,
+/// wie ihn der Aufrufer nennt; die Anwendung nennt ihr Datenverzeichnis relativ. Unter
+/// Windows meldet `is_symlink` auch Verzeichnisverknuepfungen (Junctions). Ein Teil, den es
+/// noch nicht gibt, beendet die Pruefung. `..` ist verboten.
+fn kein_link_im_pfad(pfad: &Path) -> Result<(), Sperre> {
+    let mut bisher = PathBuf::new();
+    for teil in pfad.components() {
+        bisher.push(teil);
+        match teil {
+            Component::Normal(_) => {}
+            Component::ParentDir => {
+                return Err(halt(format!("{}: `..` im Pfad verboten", pfad.display())));
+            }
+            Component::Prefix(_) | Component::RootDir | Component::CurDir => continue,
+        }
+        match fs::symlink_metadata(&bisher) {
+            Ok(m) if m.file_type().is_symlink() => {
+                return Err(halt(format!("{}: Link im Pfad verboten", bisher.display())));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(halt(format!("{}: nicht lesbar: {e}", bisher.display()))),
+        }
+    }
+    Ok(())
+}
+
 /// Gibt es die Datei? Ein Link oder etwas anderes als eine gewoehnliche Datei ist ein Fehler.
 fn datei_da(pfad: &Path) -> Result<bool, Sperre> {
     match fs::symlink_metadata(pfad) {
@@ -170,18 +198,36 @@ fn verzeichnis_sync(_: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Schreibt den Anker atomar: Zwischendatei, synchronisieren, umbenennen, Verzeichnis
-/// synchronisieren.
+/// Synchronisiert eine Datei. In den Modultests laesst sich hier ein Fehler einspeisen.
+fn sync(datei: &File) -> std::io::Result<()> {
+    #[cfg(test)]
+    if tests::sync_scheitert() {
+        return Err(std::io::Error::other(
+            "eingespeister Synchronisationsfehler",
+        ));
+    }
+    datei.sync_all()
+}
+
+/// Schreibt den Anker atomar: Zwischendatei exklusiv neu anlegen, synchronisieren,
+/// umbenennen, Verzeichnis synchronisieren. Eine liegen gebliebene Zwischendatei wird zuerst
+/// entfernt; das entfernt nur ihren Namen, nie das Ziel eines Links (K12-01). Wird sie
+/// dazwischen neu angelegt, scheitert das exklusive Anlegen. Eine fremde Datei wird nie
+/// geoeffnet, und das Umbenennen ersetzt nur den Namen des Ankers.
 fn schreibe_anker(anker: &Path, text: &str) -> Result<(), String> {
     let tmp = anker.with_extension("anker.tmp");
+    match fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("Anker: alte Zwischendatei: {e}")),
+    }
     let mut f = OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .open(&tmp)
         .map_err(|e| format!("Anker: Zwischendatei: {e}"))?;
     f.write_all(text.as_bytes())
-        .and_then(|()| f.sync_all())
+        .and_then(|()| sync(&f))
         .map_err(|e| format!("Anker: schreiben: {e}"))?;
     drop(f);
     fs::rename(&tmp, anker).map_err(|e| format!("Anker: umbenennen: {e}"))?;
@@ -212,6 +258,7 @@ impl Kassenbuch {
     /// # Errors
     /// `Kassenbuch`, wenn eine der Dateien schon da ist oder nicht geschrieben werden kann.
     pub fn einrichten(pfad: &Path) -> Result<(), Sperre> {
+        kein_link_im_pfad(pfad)?;
         let anker = anker_pfad(pfad);
         if datei_da(pfad)? || datei_da(&anker)? {
             return Err(halt("Einrichtung: Kassenbuch oder Anker gibt es schon"));
@@ -234,6 +281,7 @@ impl Kassenbuch {
     /// Einrichtung, fehlender Datei, Abweichung vom Anker, unstimmiger Historie oder
     /// Lesefehlern.
     pub fn oeffnen(pfad: &Path) -> Result<Kassenbuch, Sperre> {
+        kein_link_im_pfad(pfad)?;
         let anker = anker_pfad(pfad);
         if !datei_da(pfad)? {
             return Err(halt(if datei_da(&anker)? {
@@ -370,7 +418,7 @@ impl Kassenbuch {
     fn anhaengen(&mut self, z: &str) -> Result<(), String> {
         self.datei
             .write_all(z.as_bytes())
-            .and_then(|()| self.datei.sync_all())
+            .and_then(|()| sync(&self.datei))
             .map_err(|e| format!("schreiben: {e}"))?;
         self.pruefsumme.update(z.as_bytes());
         let zeilen = self.buchungen.len().saturating_add(1);
@@ -382,5 +430,69 @@ impl Kassenbuch {
 
     pub fn buchungen(&self) -> &[Buchung] {
         &self.buchungen
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    thread_local! {
+        /// 0: aus. n: die n-te folgende Synchronisation scheitert.
+        static SYNC_FEHLER: Cell<u32> = const { Cell::new(0) };
+    }
+
+    pub(super) fn sync_scheitert() -> bool {
+        SYNC_FEHLER.with(|f| match f.get() {
+            0 => false,
+            1 => {
+                f.set(0);
+                true
+            }
+            n => {
+                f.set(n.saturating_sub(1));
+                false
+            }
+        })
+    }
+
+    static NR: AtomicU32 = AtomicU32::new(0);
+
+    fn eingerichtet() -> Result<PathBuf, String> {
+        let n = NR.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("depot_ki_sync_{}_{n}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let p = dir.join("kassenbuch.txt");
+        Kassenbuch::einrichten(&p).map_err(|e| format!("{e:?}"))?;
+        Ok(p)
+    }
+
+    /// 1·R02, Teilnachweis: Ein eingespeister Synchronisationsfehler, zuerst beim Kassenbuch,
+    /// dann beim Anker, sperrt das Kassenbuch. Danach gibt es keine Erlaubnis und keine
+    /// weitere Zeile.
+    #[test]
+    fn befund_1_r02_synchronisationsfehler_sperrt_das_kassenbuch() -> Result<(), String> {
+        let tag = Datum::neu(2026, 11, 2).ok_or("Datum")?;
+        for (fall, n) in [("Kassenbuch", 1_u32), ("Anker", 2)] {
+            let p = eingerichtet()?;
+            let mut k = Kassenbuch::oeffnen(&p).map_err(|e| format!("{e:?}"))?;
+            SYNC_FEHLER.with(|f| f.set(n));
+            let erster = k.reserviere(BeraterId::Dachs, tag, 1);
+            SYNC_FEHLER.with(|f| f.set(0));
+            assert!(erster.is_err(), "{fall}: Fehler nicht eingetreten");
+            let vorher = fs::read(&p).map_err(|e| e.to_string())?;
+            let zweiter = k.reserviere(BeraterId::Dachs, tag, 1);
+            let nachher = fs::read(&p).map_err(|e| e.to_string())?;
+            assert!(
+                matches!(&zweiter, Err(Sperre::Kassenbuch(m)) if m.contains("gesperrt")),
+                "{fall}: {zweiter:?}"
+            );
+            assert_eq!(vorher, nachher, "{fall}: weitergeschrieben");
+            assert!(k.buchungen().is_empty(), "{fall}: Buchung im Speicher");
+        }
+        Ok(())
     }
 }

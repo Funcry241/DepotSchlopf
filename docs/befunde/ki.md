@@ -4,6 +4,14 @@ Stufe 2. Wolfgang und Maus haben am 03.11.2026 entschieden: zuerst den vorhanden
 
 Der Schnitt schließt technisch 1·K01 bis 1·K06 und 1·R02, entlang R19, R20, R24, R25, R29 und R38. Ein grüner Test schließt keinen Befund. „Technisch geschlossen“ setzt erst die unabhängige Prüfung durch Maus.
 
+## Fassung 2 nach Maus' Prüfung von `7d887ed` (K12-01, K12-02)
+
+Maus' Gegenproben stehen als Tests in `crates/depot_ki/tests/befunde.rs`, am Stand `7d887ed` rot (eigener Commit `a94ae68`). Der K12-01-Test prüft sechs Fälle: symbolischer und harter Link als Zwischendatei, jeweils bei Einrichtung, Reservierung und Bestätigung beim Öffnen. Behoben ist allgemein und ohne neue Prüfschicht:
+
+- **K12-01 (hoch):** Die Zwischendatei des Ankers wird nur noch exklusiv neu angelegt (`create_new`). Eine liegen gebliebene Zwischendatei wird vorher entfernt; das entfernt nur ihren Namen, nie das Ziel eines Links. Eine fremde Datei wird damit nie geöffnet, und das Umbenennen ersetzt nur den Namen des Ankers.
+- **K12-02 (mittel):** Kein Teil des übergebenen Pfads darf ein Link sein, `..` ist verboten. Unter Windows meldet `is_symlink` auch Verzeichnisverknüpfungen (Junctions). Die Prüfung ist statisch vor dem Öffnen; gegen einen Austausch danach schützt die Sperre der geöffneten Datei, nicht der Name.
+- **1·R02, Teilnachweis Synchronisationsfehler:** Jede Synchronisation läuft über eine Stelle, an der die Modultests einen Fehler einspeisen können. Der Test `befund_1_r02_synchronisationsfehler_sperrt_das_kassenbuch` speist ihn einmal beim Kassenbuch und einmal beim Anker ein. Danach gibt es keine Erlaubnis und keine weitere Zeile. Im gebauten Programm gibt es diese Stelle nicht.
+
 ## Rote Tests
 
 Die 13 Negativtests stehen seit Stufe 2, Schritt 1 (Commit `d887591`, geschärft in `e7e7a7b` und `8f14238`) in `crates/depot_ki/tests/befunde.rs`, mit `ignore` markiert. Am Stand `b09dab0` (main vor diesem Schnitt) sind alle 13 mit `--ignored` rot. Der Umbau entfernt das `ignore`.
@@ -45,15 +53,20 @@ cargo test --locked -p depot_ki
 | Link-Verbot entfernt | rot (1·K06) |
 | keine Sperre nach Fehler | rot (1·R02, beide Tests) |
 | negativer Preis erlaubt | rot (`preise_sind_positiv`) |
+| Zwischendatei weder entfernt noch exklusiv angelegt | rot (K12-01) |
+| Pfadteile vor dem letzten nicht geprüft | rot (K12-02) |
+| Synchronisationsfehler sperrt nicht | rot (Sync-Test) |
+| Synchronisationsfehler beim Anker übergangen | rot (Sync-Test) |
 
-Einzelne Schichten sind doppelt gesichert und allein entfernt noch grün: Ohne die Zeilenzahlprüfung fängt die Prüfsumme ein gekürztes Kassenbuch, ohne die Einrichtungsprüfung verweigert `create_new` das Überschreiben. Rot wird es erst, wenn beide fehlen.
+Einzelne Schichten sind doppelt gesichert und allein entfernt noch grün: Ohne die Zeilenzahlprüfung fängt die Prüfsumme ein gekürztes Kassenbuch, ohne die Einrichtungsprüfung verweigert `create_new` das Überschreiben, und bei der Zwischendatei reicht jeder der beiden Schritte, Entfernen oder exklusives Anlegen. Rot wird es erst, wenn beide fehlen.
 
 ## Grenzen
 
 - **Festschreibung.** Die Prüfsumme braucht `sha2` in `depot_ki`. Die Bibliothek ist im Projekt schon in derselben Version vorhanden, ändert aber die festgeschriebenen Abhängigkeiten und `Cargo.lock`. Deshalb ist dies eine `FestschreibungAenderung` und braucht Wolfgangs Grenzfreigabe. Grenzen, Budgets und Preise bleiben unverändert. Die Mindestversion von Rust steigt auf 1.89 wegen `File::try_lock`.
 - **Anker neben dem Kassenbuch.** Bis zur Persistenzbasis liegt der Anker neben dem Kassenbuch, danach im Journal (R38). Wer beide Dateien zusammen löscht oder zurücksetzt, wird so nicht erkannt; dagegen hilft nur der Anker außerhalb des Rechners (Abendbericht) und das Prepaid-Guthaben beim Anbieter.
 - **Abgebrochener Schreibvorgang.** Eine unvollständige letzte Zeile führt zu Halt, auch nach einem echten Absturz. Sie automatisch zu kürzen braucht den Anhangsvermerk aus 4·B02 und 5·B02 und kommt mit der Persistenzbasis. Bis dahin repariert ein Mensch.
+- **Windows-Dateien in der Cloud.** Unter Windows zählen nur Links und Junctions als Link, nicht jeder Analysepunkt. So bleibt ein Projekt in einem OneDrive-Ordner nutzbar.
 - **Grenzen ändern sich.** Die Historie wird mit den heutigen Grenzen nachgerechnet. Senkt das Freigabepaket später eine Grenze, kann eine alte, damals gültige Historie Halt auslösen. Der Übergang braucht dann eine eigene, geprüfte Regel.
-- **Synchronisationsfehler.** Für einen Fehler bei `sync_all` gibt es ohne Speicher-Schnittstelle keinen Einspeisepunkt; die Regel greift für ihn gleich, ist aber nur für Schreib- und Ankerfehler getestet.
-- **Wechsel zwischen Prüfung und Öffnen.** Wer den Namen zwischen Link-Prüfung und Öffnen austauscht, wird nicht erkannt. Das Kassenbuch schützt gegen Fehler und Versehen, nicht gegen jemanden mit vollem Schreibzugriff (Kap. 9).
+- **Wechsel zwischen Prüfung und Öffnen.** Die Link-Prüfung ist statisch. Wer einen Teil des Pfads zwischen Prüfung und Öffnen austauscht, wird nicht erkannt; die Sperre gilt dann der tatsächlich geöffneten Datei. Das Kassenbuch schützt gegen Fehler und Versehen, nicht gegen jemanden mit vollem Schreibzugriff (Kap. 9).
+- **Pfad des Aufrufers.** Geprüft wird der Pfad, wie ihn der Aufrufer nennt. Die Anwendung nennt ihr Datenverzeichnis relativ zum Projekt; ein Link oberhalb des Projektordners liegt außerhalb dieser Prüfung.
 - **Windows.** Der Code ist für Windows gebaut und mit Clippy geprüft, aber nicht dort ausgeführt. Das Verzeichnis wird unter Windows nicht eigens synchronisiert.

@@ -302,10 +302,7 @@ fn buchung(t: u8, zyklus: u32, cent: i64) -> Result<Buchung, String> {
 /// semantischen Fehler fuehrt zu Halt, und die Fehlerursachen sind unterscheidbar.
 #[test]
 fn befund_1_k05_kaputte_historie_fuehrt_zu_halt() -> Result<(), String> {
-    let hoechst = KiDeckel::standard(DACHS)
-        .hoechstkosten()
-        .ok_or("Vorbedingung: Hoechstkosten")?
-        .0;
+    let hoechst = hoechstkosten()?;
     let gueltig = vec![buchung(2, 3, hoechst)?, buchung(5, 4, hoechst)?];
     let p = neuer_pfad()?;
     schreib_huelle(&p, &gueltig, "gueltige Historie schreiben")?;
