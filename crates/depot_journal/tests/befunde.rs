@@ -947,12 +947,21 @@ fn befund_1_r02_vermerkfehler_sperrt_das_journal() -> Result<(), String> {
 // K13-02 – das Journal prueft KI-Buchungen selbst (R20, ein Zustandsraum)
 // ---------------------------------------------------------------------------------------------
 
+/// Name, Vorgeschichte und gepruefter Eintrag eines Falls.
+type KiFall<'a> = (&'a str, Vec<(Art, &'a str)>, (Art, &'a str));
+
 /// Was der Budgetwaechter beim Lesen ablehnt, nimmt schon das Journal nicht an: weder beim
 /// Anhaengen noch als unbestaetigten Anhang beim Wiederanlauf.
 #[test]
 fn befund_k13_02_journal_prueft_ki_buchungen_selbst() -> Result<(), String> {
     let alt = "0".repeat(64);
-    let faelle: [(&str, Vec<(Art, &str)>, (Art, &str)); 5] = [
+    let heute = depot_ki::grenzabdruck();
+    let faelle: [KiFall; 6] = [
+        (
+            "Reservierung unter heutigen Grenzen falsch",
+            vec![(Art::KiGrenzen, heute.as_str())],
+            (Art::Ki, "Dachs;2026-11-02;1;1"),
+        ),
         (
             "unlesbar",
             vec![(Art::KiGrenzen, alt.as_str())],

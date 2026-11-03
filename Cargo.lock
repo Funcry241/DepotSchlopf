@@ -41,6 +41,7 @@ name = "depot_journal"
 version = "0.1.0"
 dependencies = [
  "depot_kern",
+ "depot_ki",
  "depot_regelwerk",
  "sha2",
 ]
@@ -56,7 +57,6 @@ dependencies = [
 name = "depot_ki"
 version = "0.1.0"
 dependencies = [
- "depot_journal",
  "depot_kern",
  "sha2",
 ]

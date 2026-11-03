@@ -21,10 +21,12 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write as _};
 use std::path::{Component, Path, PathBuf};
 
-use depot_kern::{Datum, Topf, TopfId};
+use depot_kern::{BeraterId, Datum, Topf, TopfId};
+use depot_ki::{Sperre, grenzabdruck};
 use depot_regelwerk::{GenehmigterAuftrag, Kennungsvergabe};
 use sha2::{Digest, Sha256};
 
+use crate::kasse::{AufrufErlaubnis, buchung_text, naechste};
 use crate::stand::{Art, Stand, beleg_text, beobachtung_text, topf_text, trenne};
 
 const KOPF: &str = "journal-v1";
@@ -452,10 +454,13 @@ impl Journal {
             sichere(&quarantaene_pfad(pfad, v.laenge, rest), rest)?;
             datei
                 .set_len(v.laenge)
-                .and_then(|()| sync(&datei, "Journal"))
                 .map_err(|e| halt(format!("kuerzen: {e}")))?;
         }
+        // Der Vermerk beschreibt nur, was dauerhaft auf der Platte steht (K13-01): Ein nach
+        // einem Fehler nur im Cache lesbarer Eintrag oder eine Kuerzung wird erst
+        // synchronisiert, dann rueckt der Vermerk vor.
         if neu != v {
+            sync(&datei, "Journal").map_err(|e| halt(format!("synchronisieren: {e}")))?;
             schreibe_atomar(&vermerk, neu.text().as_bytes()).map_err(halt)?;
         }
         Ok(Journal {
@@ -570,5 +575,28 @@ impl Journal {
         auftrag: &GenehmigterAuftrag,
     ) -> Result<(), JournalFehler> {
         self.anhaengen(Art::Auftrag, &beleg_text(topf, auftrag))
+    }
+
+    /// Prueft die KI-Grenzen, bucht die Hoechstkosten dauerhaft und gibt erst dann die
+    /// Erlaubnis (R8). Vor der ersten Buchung unter neuen Grenzen steht deren Abdruck.
+    ///
+    /// # Errors
+    /// Jede verletzte Grenze ergibt ihre `Sperre`; jeder Fehler des Journals
+    /// `Sperre::Kassenbuch`. Dann wird nicht gefragt.
+    pub fn reserviere(
+        &mut self,
+        berater: BeraterId,
+        datum: Datum,
+        zyklus: u32,
+    ) -> Result<AufrufErlaubnis, Sperre> {
+        let (buchung, deckel) = naechste(self.stand.ki(), berater, datum, zyklus)?;
+        let sperre = |e: JournalFehler| Sperre::Kassenbuch(format!("Journal: {e:?}"));
+        if !self.stand.ki().abdruck_aktuell() {
+            self.anhaengen(Art::KiGrenzen, &grenzabdruck())
+                .map_err(sperre)?;
+        }
+        self.anhaengen(Art::Ki, &buchung_text(&buchung))
+            .map_err(sperre)?;
+        Ok(AufrufErlaubnis::neu(buchung, deckel))
     }
 }

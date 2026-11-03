@@ -9,8 +9,8 @@
 //! **Einrichtung (R25):** Das Journal entsteht nur durch `einrichten`, nie beim Oeffnen.
 //!
 //! **Wiederanlauf (Kap. 11):** Der Stand wird nur aus dem Journal nachgerechnet: Toepfe,
-//! Auftraege mit der letzten Kennung, Beobachtungen. Das Kassenbuch rechnet `depot_ki` aus
-//! denselben Eintraegen nach.
+//! Auftraege mit der letzten Kennung, Beobachtungen und das Kassenbuch der KI-Aufrufe nach den
+//! Regeln aus `depot_ki`. Eine `AufrufErlaubnis` entsteht nur durch `Journal::reserviere`.
 //!
 //! **Sperre (R24):** Gesperrt wird die geoeffnete Datei selbst ueber das Betriebssystem. Ein
 //! Link in irgendeinem Teil des Pfads ist verboten. Zwischendateien werden nur exklusiv neu
@@ -38,9 +38,11 @@
 )]
 
 pub mod datei;
+pub mod kasse;
 pub mod stand;
 
 pub use datei::{Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
+pub use kasse::{AufrufErlaubnis, KiStand};
 pub use stand::{Art, AuftragsBeleg, Stand};
 
 #[cfg(test)]

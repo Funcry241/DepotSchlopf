@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use depot_kern::{Cent, Datum, Isin, Topf, TopfId};
 use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 
+use crate::kasse::KiStand;
+
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Art {
@@ -20,10 +22,10 @@ pub enum Art {
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
     /// Rechner verlaesst (R12, R24).
     Auftrag,
-    /// Eine Buchung des KI-Kassenbuchs. Den Inhalt prueft `depot_ki`.
+    /// `berater;datum;zyklus;cent`: eine Buchung des KI-Kassenbuchs, geprueft nach den Regeln
+    /// aus `depot_ki` (K13-02).
     Ki,
-    /// Der Abdruck der KI-Grenzen, unter denen die folgenden Buchungen entstehen. Den Inhalt
-    /// prueft `depot_ki`.
+    /// Der Abdruck der KI-Grenzen, unter denen die folgenden Buchungen entstehen.
     KiGrenzen,
 }
 
@@ -71,6 +73,7 @@ pub struct Stand {
     auftraege: Vec<AuftragsBeleg>,
     beobachtungen: Vec<(Datum, String)>,
     letzte_kennung: u64,
+    ki: KiStand,
 }
 
 impl Stand {
@@ -85,6 +88,11 @@ impl Stand {
 
     pub fn beobachtungen(&self) -> &[(Datum, String)] {
         &self.beobachtungen
+    }
+
+    /// Das KI-Kassenbuch.
+    pub fn ki(&self) -> &KiStand {
+        &self.ki
     }
 
     /// Die groesste belegte Auftragskennung; 0, wenn es noch keine gibt.
@@ -118,8 +126,8 @@ impl Stand {
                 self.letzte_kennung = nr;
                 self.auftraege.push(b);
             }
-            // Gehoert dem KI-Kassenbuch; das Journal prueft nur die Zeichen.
-            Art::Ki | Art::KiGrenzen => {}
+            Art::KiGrenzen => self.ki.abdruck(inhalt)?,
+            Art::Ki => self.ki.buche(inhalt)?,
         }
         Ok(())
     }
@@ -143,7 +151,7 @@ pub(crate) fn datum_text(d: Datum) -> String {
     format!("{:04}-{:02}-{:02}", d.jahr(), d.monat(), d.tag())
 }
 
-fn lies_datum(text: &str) -> Option<Datum> {
+pub(crate) fn lies_datum(text: &str) -> Option<Datum> {
     let mut teile = text.split('-');
     let jahr = teile.next()?.parse().ok()?;
     let monat = teile.next()?.parse().ok()?;

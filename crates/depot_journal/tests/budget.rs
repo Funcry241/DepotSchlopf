@@ -1,4 +1,5 @@
-//! Normative Tests des KI-Budgetwaechters: Was passiert, wenn jemand jede Sekunde fragt?
+//! Normative Tests des KI-Budgetwaechters im Journal: Was passiert, wenn jemand jede Sekunde
+//! fragt? Aus `depot_ki` hierher verlegt, seit das Kassenbuch im Journal steht.
 #![allow(
     clippy::many_single_char_names,
     clippy::panic,
@@ -9,9 +10,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use depot_journal::{Art, Journal, inhalt_fuer, vermerk_fuer};
+use depot_journal::{Art, Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
 use depot_kern::{BeraterId, Cent};
-use depot_ki::{Datum, Kassenbuch, KiDeckel, KiGrenzen, Sperre, grenzabdruck};
+use depot_ki::{Datum, KiDeckel, KiGrenzen, Sperre, grenzabdruck};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 
@@ -44,13 +45,6 @@ fn journal(p: &Path) -> Journal {
     }
 }
 
-fn kasse(j: &mut Journal) -> Kassenbuch<'_> {
-    match Kassenbuch::oeffnen(j) {
-        Ok(k) => k,
-        Err(e) => panic!("Kassenbuch nicht offen: {e:?}"),
-    }
-}
-
 /// Journal mit genau diesen Eintraegen, alle bestaetigt.
 fn schreib(p: &Path, eintraege: &[(Art, &str)]) {
     let inhalt = inhalt_fuer(eintraege);
@@ -78,7 +72,7 @@ fn hoechstkosten_je_aufruf() {
 fn jede_sekunde_fragen_bringt_nur_zwei_aufrufe() {
     let p = neuer_pfad();
     let mut j = journal(&p);
-    let mut k = kasse(&mut j);
+    let k = &mut j;
     let mut erlaubt = 0_u32;
     for _sekunde in 0..86_400 {
         match k.reserviere(DACHS, tag(2), 1) {
@@ -87,7 +81,7 @@ fn jede_sekunde_fragen_bringt_nur_zwei_aufrufe() {
         }
     }
     assert_eq!(erlaubt, 2);
-    assert_eq!(k.buchungen().len(), 2);
+    assert_eq!(k.stand().ki().buchungen().len(), 2);
 }
 
 /// Die Schleife zaehlt den Zyklus hoch, um die Grenze zu umgehen: der Tag ist trotzdem voll.
@@ -95,7 +89,7 @@ fn jede_sekunde_fragen_bringt_nur_zwei_aufrufe() {
 fn neuer_zyklus_am_selben_tag_gesperrt() {
     let p = neuer_pfad();
     let mut j = journal(&p);
-    let mut k = kasse(&mut j);
+    let k = &mut j;
     assert!(k.reserviere(DACHS, tag(2), 1).is_ok());
     for zyklus in 2..1_000 {
         assert_eq!(
@@ -110,7 +104,7 @@ fn neuer_zyklus_am_selben_tag_gesperrt() {
 fn monat_hoechstens_vier_aufrufe() {
     let p = neuer_pfad();
     let mut j = journal(&p);
-    let mut k = kasse(&mut j);
+    let k = &mut j;
     let mut zyklus = 0_u32;
     for t in 1..=30 {
         zyklus = zyklus.saturating_add(1);
@@ -118,8 +112,14 @@ fn monat_hoechstens_vier_aufrufe() {
             let _ = k.reserviere(BeraterId::Maus, tag(t), zyklus);
         }
     }
-    let summe: i64 = k.buchungen().iter().map(|b| b.reserviert.0).sum();
-    assert_eq!(k.buchungen().len(), 4);
+    let summe: i64 = k
+        .stand()
+        .ki()
+        .buchungen()
+        .iter()
+        .map(|b| b.reserviert.0)
+        .sum();
+    assert_eq!(k.stand().ki().buchungen().len(), 4);
     assert!(
         summe <= KiGrenzen::standard().kosten_je_monat().0,
         "{summe}"
@@ -132,13 +132,13 @@ fn neustart_setzt_nichts_zurueck() {
     let p = neuer_pfad();
     {
         let mut j = journal(&p);
-        let mut k = kasse(&mut j);
+        let k = &mut j;
         assert!(k.reserviere(DACHS, tag(3), 5).is_ok());
         assert!(k.reserviere(DACHS, tag(3), 5).is_ok());
     }
     let mut j = journal(&p);
-    let mut k = kasse(&mut j);
-    assert_eq!(k.buchungen().len(), 2);
+    let k = &mut j;
+    assert_eq!(k.stand().ki().buchungen().len(), 2);
     assert_eq!(
         k.reserviere(DACHS, tag(3), 5).err(),
         Some(Sperre::ZyklusVoll)
@@ -185,9 +185,8 @@ fn kaputtes_kassenbuch_sperrt() {
     ] {
         let p = leerer_pfad();
         schreib(&p, &eintraege);
-        let mut j = journal(&p);
         assert!(
-            matches!(Kassenbuch::oeffnen(&mut j), Err(Sperre::Kassenbuch(_))),
+            matches!(Journal::oeffnen(&p), Err(JournalFehler::Halt(_))),
             "{fall}"
         );
     }
@@ -198,7 +197,7 @@ fn kaputtes_kassenbuch_sperrt() {
 fn uhr_rueckwaerts_gesperrt() {
     let p = neuer_pfad();
     let mut j = journal(&p);
-    let mut k = kasse(&mut j);
+    let k = &mut j;
     assert!(k.reserviere(DACHS, tag(10), 3).is_ok());
     assert_eq!(
         k.reserviere(DACHS, tag(9), 4).err(),
@@ -211,7 +210,7 @@ fn uhr_rueckwaerts_gesperrt() {
 fn getrennte_konten() {
     let p = neuer_pfad();
     let mut j = journal(&p);
-    let mut k = kasse(&mut j);
+    let k = &mut j;
     assert!(k.reserviere(DACHS, tag(4), 1).is_ok());
     assert!(k.reserviere(DACHS, tag(4), 1).is_ok());
     assert!(k.reserviere(DACHS, tag(4), 1).is_err());
@@ -223,7 +222,7 @@ fn getrennte_konten() {
 fn eingabe_deckel() {
     let p = neuer_pfad();
     let mut j = journal(&p);
-    let mut k = kasse(&mut j);
+    let k = &mut j;
     let erl = k.reserviere(DACHS, tag(6), 1).ok();
     let Some(erl) = erl else {
         panic!("keine Erlaubnis");
@@ -232,7 +231,7 @@ fn eingabe_deckel() {
     assert!(!erl.eingabe_passt(&"a".repeat(40_001)));
 }
 
-fn reservieren(k: &mut Kassenbuch, t: Datum, zyklus: u32) {
+fn reservieren(k: &mut Journal, t: Datum, zyklus: u32) {
     if let Err(e) = k.reserviere(DACHS, t, zyklus) {
         panic!("Reservierung {t:?}/{zyklus}: {e:?}");
     }
@@ -245,18 +244,18 @@ fn erschoepfter_monat_bleibt_bis_zum_folgemonat_gesperrt() {
     let p = neuer_pfad();
     {
         let mut j = journal(&p);
-        let mut k = kasse(&mut j);
-        reservieren(&mut k, tag(2), 1);
-        reservieren(&mut k, tag(2), 1);
-        reservieren(&mut k, tag(3), 2);
-        reservieren(&mut k, tag(3), 2);
+        let k = &mut j;
+        reservieren(k, tag(2), 1);
+        reservieren(k, tag(2), 1);
+        reservieren(k, tag(3), 2);
+        reservieren(k, tag(3), 2);
         assert_eq!(
             k.reserviere(DACHS, tag(4), 3).err(),
             Some(Sperre::MonatVoll)
         );
     }
     let mut j = journal(&p);
-    let mut k = kasse(&mut j);
+    let k = &mut j;
     assert_eq!(
         k.reserviere(DACHS, tag(30), 4).err(),
         Some(Sperre::MonatVoll)
@@ -285,15 +284,14 @@ fn alte_buchungen_zaehlen_nach_einer_grenzaenderung_weiter() {
         ],
     );
     let mut j = journal(&p);
-    let mut k = kasse(&mut j);
-    assert_eq!(k.buchungen().len(), 4);
+    let k = &mut j;
+    assert_eq!(k.stand().ki().buchungen().len(), 4);
     assert_eq!(
         k.reserviere(DACHS, tag(4), 3).err(),
         Some(Sperre::MonatVoll)
     );
     let dezember = Datum::neu(2026, 12, 1).unwrap_or_else(|| panic!("Datum"));
     assert!(k.reserviere(DACHS, dezember, 4).is_ok());
-    drop(k);
     let arten: Vec<Art> = j.eintraege().iter().map(|(a, _)| *a).collect();
     assert_eq!(arten.get(5..), Some([Art::KiGrenzen, Art::Ki].as_slice()));
     assert_eq!(
@@ -311,10 +309,9 @@ fn alte_buchungen_zaehlen_nach_einer_grenzaenderung_weiter() {
             (Art::Ki, "Dachs;2026-11-02;1;30"),
         ],
     );
-    let mut j = journal(&q);
     assert!(matches!(
-        Kassenbuch::oeffnen(&mut j),
-        Err(Sperre::Kassenbuch(m)) if m.contains("Reservierung")
+        Journal::oeffnen(&q),
+        Err(JournalFehler::Halt(m)) if m.contains("Reservierung")
     ));
 }
 
