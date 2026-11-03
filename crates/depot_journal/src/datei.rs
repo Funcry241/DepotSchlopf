@@ -498,10 +498,24 @@ impl Journal {
 
     /// Haengt einen Eintrag an. Er wird vorher genauso geprueft wie beim Oeffnen.
     ///
+    /// KI-Buchungen und Grenzabdruecke entstehen nur ueber `reserviere`, immer unter den
+    /// heutigen Grenzen (K13-03). Aeltere stehen nur im Journal, das geoeffnet wird.
+    ///
     /// # Errors
-    /// `Abgelehnt` fuer einen unzulaessigen Eintrag; nichts wird geschrieben. `Halt` nach
-    /// einem Schreib- oder Synchronisationsfehler; dann bleibt das Journal gesperrt.
+    /// `Abgelehnt` fuer einen unzulaessigen Eintrag und fuer jeden KI-Eintrag; nichts wird
+    /// geschrieben. `Halt` nach einem Schreib- oder Synchronisationsfehler; dann bleibt das
+    /// Journal gesperrt.
     pub fn anhaengen(&mut self, art: Art, inhalt: &str) -> Result<(), JournalFehler> {
+        match art {
+            Art::Ki | Art::KiGrenzen => Err(JournalFehler::Abgelehnt(
+                "KI-Eintraege entstehen nur ueber reserviere".into(),
+            )),
+            Art::Beobachtung | Art::Topf | Art::Auftrag => self.schreibe_eintrag(art, inhalt),
+        }
+    }
+
+    /// Prueft und schreibt einen Eintrag jeder Art.
+    fn schreibe_eintrag(&mut self, art: Art, inhalt: &str) -> Result<(), JournalFehler> {
         if let Some(grund) = &self.gesperrt {
             return Err(halt(format!("gesperrt nach Fehler: {grund}")));
         }
@@ -592,10 +606,10 @@ impl Journal {
         let (buchung, deckel) = naechste(self.stand.ki(), berater, datum, zyklus)?;
         let sperre = |e: JournalFehler| Sperre::Kassenbuch(format!("Journal: {e:?}"));
         if !self.stand.ki().abdruck_aktuell() {
-            self.anhaengen(Art::KiGrenzen, &grenzabdruck())
+            self.schreibe_eintrag(Art::KiGrenzen, &grenzabdruck())
                 .map_err(sperre)?;
         }
-        self.anhaengen(Art::Ki, &buchung_text(&buchung))
+        self.schreibe_eintrag(Art::Ki, &buchung_text(&buchung))
             .map_err(sperre)?;
         Ok(AufrufErlaubnis::neu(buchung, deckel))
     }

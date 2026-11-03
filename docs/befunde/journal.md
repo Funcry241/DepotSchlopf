@@ -19,6 +19,12 @@ Maus' Gegenproben stehen als Tests im Repository, am Stand `eee64cb` rot (eigene
 
 Die Tests, die das Kassenbuch brauchen, sind aus `crates/depot_ki/tests/` nach `crates/depot_journal/tests/budget.rs` und `crates/depot_journal/tests/ki.rs` verlegt; nur Aufrufe sind nachgeführt.
 
+## Fassung 3 nach Maus' Nachprüfung von `3ce7f11` (K13-03)
+
+K13-01 hat Maus als behoben bestätigt. Maus' Gegenprobe zu K13-03 steht als Test im Repository, am Stand `3ce7f11` rot (eigener Commit `056327c`).
+
+- **K13-03:** Über das öffentliche `anhaengen` ließen sich ein erfundener Grenzabdruck und danach eine Buchung über 0 Cent schreiben. Die Buchung galt als historisch, ihre Reservierung wurde nicht geprüft. Allgemeine Regel jetzt: Neue KI-Einträge (Buchung und Grenzabdruck) entstehen nur über `Journal::reserviere`, also immer unter den heutigen Grenzen. `anhaengen` lehnt beide Arten ab, auch gültige. Ältere Buchungen kann es nur im Journal geben, das geöffnet wird; dort zählen sie weiter. Der Test `befund_k13_03_ki_eintraege_nur_ueber_reserviere` prüft Maus' Gegenprobe, einen heutigen Abdruck, eine sonst gültige Buchung und dass `reserviere` weiter bucht.
+
 ## Was der Umbau tut
 
 Neues Crate `depot_journal`, abhängig von `depot_kern`, `depot_regelwerk` und `sha2`. `depot_ki` hängt jetzt von `depot_journal` ab.
@@ -92,6 +98,9 @@ Jeder Eingriff einzeln in einer Kopie des Umbaus; danach `cargo test -p depot_jo
 | K13-01: Synchronisation erst nach dem Vermerk | rot |
 | K13-01: Synchronisationsfehler übergangen | rot |
 | K13-02: KI-Buchung im Journal nicht geprüft | rot |
+| K13-03: Buchung über `anhaengen` erlaubt | rot |
+| K13-03: Grenzabdruck über `anhaengen` erlaubt | rot |
+| K13-03: `anhaengen` ohne jede Sperre für KI-Einträge | rot |
 
 Einige Schichten sind doppelt gesichert und allein entfernt noch grün: Ohne die Prüfung „Anhang ohne Vermerk“ fängt die Längenprüfung den Rest, ohne die Einrichtungsprüfung verweigert `create_new` das Überschreiben, und ohne die Prüfung auf Bestand null oder doppelte ISIN fängt die kanonische Form den Eintrag. Rot wird es erst, wenn beide fehlen.
 
