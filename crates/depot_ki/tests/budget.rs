@@ -9,24 +9,25 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use depot_journal::{Art, Journal, inhalt_fuer, vermerk_fuer};
 use depot_kern::{BeraterId, Cent};
-use depot_ki::{Datum, Kassenbuch, KiDeckel, KiGrenzen, Sperre, anker_fuer};
+use depot_ki::{Datum, Kassenbuch, KiDeckel, KiGrenzen, Sperre, grenzabdruck};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 
-/// Eigenes, leeres Verzeichnis je Test; liefert den Pfad des Kassenbuchs darin.
+/// Eigenes, leeres Verzeichnis je Test; liefert den Pfad des Journals darin.
 fn leerer_pfad() -> PathBuf {
     let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!("depot_ki_test_{}_{n}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).ok();
-    dir.join("kassenbuch.txt")
+    dir.join("journal.txt")
 }
 
-/// Wie `leerer_pfad`, mit eingerichtetem Kassenbuch.
+/// Wie `leerer_pfad`, mit eingerichtetem Journal.
 fn neuer_pfad() -> PathBuf {
     let p = leerer_pfad();
-    if let Err(e) = Kassenbuch::einrichten(&p) {
+    if let Err(e) = Journal::einrichten(&p) {
         panic!("Einrichtung: {e:?}");
     }
     p
@@ -36,11 +37,25 @@ fn tag(t: u8) -> Datum {
     Datum::neu(2026, 11, t).unwrap_or_else(|| panic!("Datum {t}.11.2026"))
 }
 
-fn oeffnen(p: &Path) -> Kassenbuch {
-    match Kassenbuch::oeffnen(p) {
+fn journal(p: &Path) -> Journal {
+    match Journal::oeffnen(p) {
+        Ok(j) => j,
+        Err(e) => panic!("Journal nicht offen: {e:?}"),
+    }
+}
+
+fn kasse(j: &mut Journal) -> Kassenbuch<'_> {
+    match Kassenbuch::oeffnen(j) {
         Ok(k) => k,
         Err(e) => panic!("Kassenbuch nicht offen: {e:?}"),
     }
+}
+
+/// Journal mit genau diesen Eintraegen, alle bestaetigt.
+fn schreib(p: &Path, eintraege: &[(Art, &str)]) {
+    let inhalt = inhalt_fuer(eintraege);
+    fs::write(p, &inhalt).ok();
+    fs::write(p.with_extension("vermerk"), vermerk_fuer(&inhalt, 0).unwrap_or_default()).ok();
 }
 
 const DACHS: BeraterId = BeraterId::Dachs;
@@ -58,7 +73,8 @@ fn hoechstkosten_je_aufruf() {
 #[test]
 fn jede_sekunde_fragen_bringt_nur_zwei_aufrufe() {
     let p = neuer_pfad();
-    let mut k = oeffnen(&p);
+    let mut j = journal(&p);
+    let mut k = kasse(&mut j);
     let mut erlaubt = 0_u32;
     for _sekunde in 0..86_400 {
         match k.reserviere(DACHS, tag(2), 1) {
@@ -74,7 +90,8 @@ fn jede_sekunde_fragen_bringt_nur_zwei_aufrufe() {
 #[test]
 fn neuer_zyklus_am_selben_tag_gesperrt() {
     let p = neuer_pfad();
-    let mut k = oeffnen(&p);
+    let mut j = journal(&p);
+    let mut k = kasse(&mut j);
     assert!(k.reserviere(DACHS, tag(2), 1).is_ok());
     for zyklus in 2..1_000 {
         assert_eq!(
@@ -88,7 +105,8 @@ fn neuer_zyklus_am_selben_tag_gesperrt() {
 #[test]
 fn monat_hoechstens_vier_aufrufe() {
     let p = neuer_pfad();
-    let mut k = oeffnen(&p);
+    let mut j = journal(&p);
+    let mut k = kasse(&mut j);
     let mut zyklus = 0_u32;
     for t in 1..=30 {
         zyklus = zyklus.saturating_add(1);
@@ -109,11 +127,13 @@ fn monat_hoechstens_vier_aufrufe() {
 fn neustart_setzt_nichts_zurueck() {
     let p = neuer_pfad();
     {
-        let mut k = oeffnen(&p);
+        let mut j = journal(&p);
+    let mut k = kasse(&mut j);
         assert!(k.reserviere(DACHS, tag(3), 5).is_ok());
         assert!(k.reserviere(DACHS, tag(3), 5).is_ok());
     }
-    let mut k = oeffnen(&p);
+    let mut j = journal(&p);
+    let mut k = kasse(&mut j);
     assert_eq!(k.buchungen().len(), 2);
     assert_eq!(
         k.reserviere(DACHS, tag(3), 5).err(),
@@ -121,33 +141,26 @@ fn neustart_setzt_nichts_zurueck() {
     );
 }
 
-/// Zwei Laeufe gleichzeitig: der zweite bekommt das Kassenbuch nicht.
-#[test]
-fn zweiter_lauf_gesperrt() {
-    let p = neuer_pfad();
-    let _erster = oeffnen(&p);
-    assert_eq!(
-        Kassenbuch::oeffnen(&p).err(),
-        Some(Sperre::KassenbuchBelegt)
-    );
-}
-
-/// Eine unlesbare Zeile oder ein abgebrochener letzter Eintrag sperrt alles, auch wenn der
-/// Anker genau zu diesem Inhalt passt. Geloeschte Zeilen prueft `befunde.rs` (1·K04).
+/// Unlesbare oder unzulaessige KI-Eintraege in einem sonst gueltigen Journal sperren alles.
+/// Ebenso eine Buchung ohne vorangehenden Grenzabdruck. Geloeschte Zeilen und Abbrueche prueft
+/// das Journal selbst (`depot_journal`).
 #[test]
 fn kaputtes_kassenbuch_sperrt() {
-    for inhalt in [
-        "v1;Dachs;2026-11-01;1;48\nMuell\n",
-        "v1;Dachs;2026-11-01;1;48\nv1;Dachs;2026-11-0",
-        "v1;Dachs;2026-11-01;1;-500\n",
-        "v1;Fuchs;2026-11-01;1;48\n",
+    let abdruck = grenzabdruck();
+    for (fall, eintraege) in [
+        ("Muell", vec![(Art::KiGrenzen, abdruck.as_str()), (Art::Ki, "Muell")]),
+        ("negativ", vec![(Art::KiGrenzen, abdruck.as_str()), (Art::Ki, "Dachs;2026-11-01;1;-500")]),
+        ("Fuchs", vec![(Art::KiGrenzen, abdruck.as_str()), (Art::Ki, "Fuchs;2026-11-01;1;48")]),
+        ("nicht kanonisch", vec![(Art::KiGrenzen, abdruck.as_str()), (Art::Ki, "Dachs;2026-11-01;01;48")]),
+        ("ohne Grenzabdruck", vec![(Art::Ki, "Dachs;2026-11-01;1;48")]),
+        ("Abdruck unlesbar", vec![(Art::KiGrenzen, "xyz")]),
     ] {
         let p = leerer_pfad();
-        fs::write(&p, inhalt).ok();
-        fs::write(p.with_extension("anker"), anker_fuer(inhalt.as_bytes())).ok();
+        schreib(&p, &eintraege);
+        let mut j = journal(&p);
         assert!(
-            matches!(Kassenbuch::oeffnen(&p), Err(Sperre::Kassenbuch(_))),
-            "{inhalt:?}"
+            matches!(Kassenbuch::oeffnen(&mut j), Err(Sperre::Kassenbuch(_))),
+            "{fall}"
         );
     }
 }
@@ -156,7 +169,8 @@ fn kaputtes_kassenbuch_sperrt() {
 #[test]
 fn uhr_rueckwaerts_gesperrt() {
     let p = neuer_pfad();
-    let mut k = oeffnen(&p);
+    let mut j = journal(&p);
+    let mut k = kasse(&mut j);
     assert!(k.reserviere(DACHS, tag(10), 3).is_ok());
     assert_eq!(
         k.reserviere(DACHS, tag(9), 4).err(),
@@ -168,7 +182,8 @@ fn uhr_rueckwaerts_gesperrt() {
 #[test]
 fn getrennte_konten() {
     let p = neuer_pfad();
-    let mut k = oeffnen(&p);
+    let mut j = journal(&p);
+    let mut k = kasse(&mut j);
     assert!(k.reserviere(DACHS, tag(4), 1).is_ok());
     assert!(k.reserviere(DACHS, tag(4), 1).is_ok());
     assert!(k.reserviere(DACHS, tag(4), 1).is_err());
@@ -179,7 +194,8 @@ fn getrennte_konten() {
 #[test]
 fn eingabe_deckel() {
     let p = neuer_pfad();
-    let mut k = oeffnen(&p);
+    let mut j = journal(&p);
+    let mut k = kasse(&mut j);
     let erl = k.reserviere(DACHS, tag(6), 1).ok();
     let Some(erl) = erl else {
         panic!("keine Erlaubnis");
@@ -200,7 +216,8 @@ fn reservieren(k: &mut Kassenbuch, t: Datum, zyklus: u32) {
 fn erschoepfter_monat_bleibt_bis_zum_folgemonat_gesperrt() {
     let p = neuer_pfad();
     {
-        let mut k = oeffnen(&p);
+        let mut j = journal(&p);
+    let mut k = kasse(&mut j);
         reservieren(&mut k, tag(2), 1);
         reservieren(&mut k, tag(2), 1);
         reservieren(&mut k, tag(3), 2);
@@ -210,7 +227,8 @@ fn erschoepfter_monat_bleibt_bis_zum_folgemonat_gesperrt() {
             Some(Sperre::MonatVoll)
         );
     }
-    let mut k = oeffnen(&p);
+    let mut j = journal(&p);
+    let mut k = kasse(&mut j);
     assert_eq!(
         k.reserviere(DACHS, tag(30), 4).err(),
         Some(Sperre::MonatVoll)
@@ -219,65 +237,52 @@ fn erschoepfter_monat_bleibt_bis_zum_folgemonat_gesperrt() {
     assert!(k.reserviere(DACHS, dezember, 5).is_ok());
 }
 
-/// Eine bestaetigte Zeile wird bei gleicher Zeilenzahl geaendert, und die Historie bleibt
-/// gueltig (die Buchung rutscht in den Vormonat und gibt im November Budget frei): Halt.
+/// Uebergangsregel fuer spaetere Budgetaenderungen: Buchungen unter einem frueheren
+/// Grenzabdruck werden nicht nach den heutigen Grenzen beurteilt, zaehlen aber weiter mit. Ein
+/// voller Monat bleibt also voll, auch wenn sich die Grenzen aendern. Vor der ersten Buchung
+/// unter neuen Grenzen steht deren Abdruck im Journal.
 #[test]
-fn geaenderte_bestaetigte_zeile_fuehrt_zu_halt() {
-    let p = neuer_pfad();
-    {
-        let mut k = oeffnen(&p);
-        reservieren(&mut k, tag(2), 1);
-    }
-    let alt = fs::read_to_string(&p).unwrap_or_default();
-    let neu = alt.replace("2026-11-02", "2026-10-02");
-    assert_ne!(alt, neu, "Vorbedingung: Zeile geaendert");
-    fs::write(&p, neu).ok();
-    assert!(
-        matches!(Kassenbuch::oeffnen(&p), Err(Sperre::Kassenbuch(m)) if m.contains("bestaetigten Stand")),
+fn alte_buchungen_zaehlen_nach_einer_grenzaenderung_weiter() {
+    let alt = "0".repeat(64);
+    let p = leerer_pfad();
+    // Unter den alten Grenzen kostete ein Aufruf 30 Cent; heute waere das unzulaessig.
+    schreib(
+        &p,
+        &[
+            (Art::KiGrenzen, alt.as_str()),
+            (Art::Ki, "Dachs;2026-11-02;1;30"),
+            (Art::Ki, "Dachs;2026-11-02;1;30"),
+            (Art::Ki, "Dachs;2026-11-03;2;30"),
+            (Art::Ki, "Dachs;2026-11-03;2;30"),
+        ],
     );
-}
-
-/// Hoechstens eine Zeile darf ueber den Anker hinausgehen; zwei sind kein Absturz mehr.
-#[test]
-fn zwei_unbestaetigte_zeilen_fuehren_zu_halt() {
-    let p = neuer_pfad();
-    fs::write(&p, "v1;Dachs;2026-11-02;1;48\nv1;Dachs;2026-11-02;1;48\n").ok();
-    assert!(
-        matches!(Kassenbuch::oeffnen(&p), Err(Sperre::Kassenbuch(m)) if m.contains("unbestaetigter")),
-    );
-}
-
-/// Eine unbestaetigte, aber gueltige Zeile (Absturz nach dem Buchen, vor dem Anker) zaehlt und
-/// wird bestaetigt; ist sie ungueltig, gilt Halt.
-#[test]
-fn eine_unbestaetigte_zeile_wird_geprueft_und_bestaetigt() {
-    let p = neuer_pfad();
-    fs::write(&p, "v1;Dachs;2026-11-02;1;48\n").ok();
-    let k = oeffnen(&p);
-    assert_eq!(k.buchungen().len(), 1);
+    let mut j = journal(&p);
+    let mut k = kasse(&mut j);
+    assert_eq!(k.buchungen().len(), 4);
+    assert_eq!(k.reserviere(DACHS, tag(4), 3).err(), Some(Sperre::MonatVoll));
+    let dezember = Datum::neu(2026, 12, 1).unwrap_or_else(|| panic!("Datum"));
+    assert!(k.reserviere(DACHS, dezember, 4).is_ok());
     drop(k);
-    assert_eq!(
-        fs::read_to_string(p.with_extension("anker")).unwrap_or_default(),
-        anker_fuer(b"v1;Dachs;2026-11-02;1;48\n")
-    );
-    let q = neuer_pfad();
-    fs::write(&q, "v1;Dachs;2026-11-02;1;1\n").ok();
+    let arten: Vec<Art> = j.eintraege().iter().map(|(a, _)| *a).collect();
+    assert_eq!(arten.get(5..), Some([Art::KiGrenzen, Art::Ki].as_slice()));
+    assert_eq!(j.eintraege().get(5).map(|(_, t)| t.clone()), Some(grenzabdruck()));
+    drop(j);
+    // Dieselben 30-Cent-Buchungen unter dem heutigen Abdruck: Halt.
+    let q = leerer_pfad();
+    let heute = grenzabdruck();
+    schreib(&q, &[(Art::KiGrenzen, heute.as_str()), (Art::Ki, "Dachs;2026-11-02;1;30")]);
+    let mut j = journal(&q);
     assert!(matches!(
-        Kassenbuch::oeffnen(&q),
+        Kassenbuch::oeffnen(&mut j),
         Err(Sperre::Kassenbuch(m)) if m.contains("Reservierung")
     ));
 }
 
-/// Einrichten legt nur neu an und laesst ein vorhandenes Kassenbuch unberuehrt.
+/// Der Grenzabdruck haengt an den festgeschriebenen Werten und ist stabil.
 #[test]
-fn einrichten_ueberschreibt_nichts() {
-    let p = neuer_pfad();
-    {
-        let mut k = oeffnen(&p);
-        reservieren(&mut k, tag(2), 1);
-    }
-    let vorher = fs::read(&p).unwrap_or_default();
-    assert!(Kassenbuch::einrichten(&p).is_err());
-    assert_eq!(fs::read(&p).unwrap_or_default(), vorher);
-    assert_eq!(oeffnen(&p).buchungen().len(), 1);
+fn grenzabdruck_ist_stabil() {
+    let a = grenzabdruck();
+    assert_eq!(a, grenzabdruck());
+    assert_eq!(a.len(), 64);
+    assert!(a.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
 }

@@ -1,0 +1,22 @@
+[package]
+name = "depot_journal"
+description = "DepotSchlopf: das Journal - einzige dauerhafte Datei, Hash-Kette mit Anhangsvermerk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+depot_kern.workspace = true
+depot_regelwerk.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

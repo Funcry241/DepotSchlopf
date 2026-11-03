@@ -4,6 +4,7 @@ members = [
     "crates/depot_kern",
     "crates/depot_regelwerk",
     "crates/depot_ki",
+    "crates/depot_journal",
     "crates/depot_kodex",
     "crates/depot_lauf",
 ]
@@ -25,6 +26,8 @@ publish = false
 sha2 = "0.10"
 depot_kern = { path = "crates/depot_kern" }
 depot_ki = { path = "crates/depot_ki" }
+depot_journal = { path = "crates/depot_journal" }
+depot_regelwerk = { path = "crates/depot_regelwerk" }
 depot_kodex = { path = "crates/depot_kodex" }
 
 [workspace.lints.rust]
