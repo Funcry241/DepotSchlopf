@@ -3,7 +3,9 @@
 //! Vorgeschichte sicher weiterarbeiten zu lassen (Essenz D17): Laufergebnis, Konsole,
 //! Uebergabetext, Festschreibung und ein vollstaendiger Quellstand.
 //!
-//! Nie enthalten: Laufzeitdaten (`daten/`), Zugangsdaten, Build-Ordner.
+//! Nie enthalten: Laufzeitdaten (`daten/`), Zugangsdaten, Build-Ordner. Der Quellstand nimmt
+//! nur Dateien, die Git verfolgt, und keine Links. Jeder Inhalt wird auf Geheimnismuster
+//! geprueft; ein Treffer bricht den Export ab (R28).
 
 use std::fmt::Write as _;
 use std::fs;
@@ -72,39 +74,19 @@ fn geheim_oder_erzeugt(pfad: &str) -> bool {
             .any(|e| name.ends_with(e))
 }
 
-fn alle_dateien(wurzel: &Path, dir: &Path, aus: &mut Vec<String>) {
-    let Ok(eintraege) = fs::read_dir(dir) else {
-        return;
-    };
-    for e in eintraege.flatten() {
-        let p = e.path();
-        let Ok(rel) = p.strip_prefix(wurzel) else {
-            continue;
-        };
-        let rel = rel.to_string_lossy().replace('\\', "/");
-        if p.is_dir() {
-            if !geheim_oder_erzeugt(&format!("{rel}/")) {
-                alle_dateien(wurzel, &p, aus);
-            }
-        } else {
-            aus.push(rel);
-        }
-    }
-}
-
-/// Quellstand: mit Git die verfolgten und neuen, nicht ignorierten Dateien; sonst der Ordner.
+/// Quellstand (R28): nur gewoehnliche Dateien, die Git verfolgt (Index), und nur, wenn sie
+/// auch im Arbeitsbaum gewoehnliche Dateien sind. Neue, nicht verfolgte Dateien bleiben
+/// draussen (1·E01), Links werden nie gelesen (1·E02). Ohne Git gibt es keinen Quellstand.
 fn quelldateien(wurzel: &Path) -> Vec<String> {
-    let mut liste: Vec<String> = if let (Some(a), Some(b)) = (
-        git(wurzel, &["ls-files"]),
-        git(wurzel, &["ls-files", "--others", "--exclude-standard"]),
-    ) {
-        a.lines().chain(b.lines()).map(str::to_string).collect()
-    } else {
-        let mut v = Vec::new();
-        alle_dateien(wurzel, wurzel, &mut v);
-        v
+    let Ok(index) = depot_kodex::git::index_dateien(wurzel) else {
+        return Vec::new();
     };
-    liste.retain(|p| !geheim_oder_erzeugt(p) && wurzel.join(p).is_file());
+    let mut liste: Vec<String> = index
+        .into_iter()
+        .map(|d| d.pfad)
+        .filter(|p| !geheim_oder_erzeugt(p))
+        .filter(|p| fs::symlink_metadata(wurzel.join(p)).is_ok_and(|m| m.is_file()))
+        .collect();
     liste.sort();
     liste.dedup();
     liste
@@ -213,8 +195,10 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     // Quellstand als eigenes inneres ZIP.
     let mut quelle = Zip::default();
     let dateien = quelldateien(wurzel);
+    let mut geheim = Vec::new();
     for d in &dateien {
         let inhalt = fs::read(wurzel.join(d)).map_err(|e| format!("{d}: {e}"))?;
+        geheim.extend(depot_kodex::geheimnis::pruefe_inhalt(d, &inhalt));
         quelle.datei(d, &inhalt)?;
     }
     let quelle = quelle.fertig()?;
@@ -224,7 +208,8 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     );
     let snapshot_txt = format!(
         "Quellstand DepotSchlopf v{version}\nCommit: {commit}\nZweig: {zweig}\nLokal veraendert: {veraendert}\n\
-         Dateien: {}\nSHA-256: {}\nOhne target/, daten/, Zugangsdaten. Zum Weiterarbeiten entpacken.\n",
+         Dateien: {}\nSHA-256: {}\nNur von Git verfolgte Dateien, ohne Links, auf Geheimnisse geprueft. \
+         Ohne Git kein Quellstand. Zum Weiterarbeiten entpacken.\n",
         dateien.len(),
         sha_hex(&quelle)
     );
@@ -318,6 +303,7 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
         "assistant_export\nDepotSchlopf v{version}\nCommit {commit}\nKein Quellstand zum Einspielen.\n"
     );
 
+    let quelle_pfad = quelle_name.clone();
     let teile: Vec<(String, Vec<u8>)> = vec![
         ("ZIP_KIND.txt".into(), zip_kind.into_bytes()),
         ("assistant_context.json".into(), j.into_bytes()),
@@ -332,6 +318,20 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
         ),
         (quelle_name, quelle),
     ];
+    // Jeder Inhalt wird vor dem Schreiben geprueft; ein Treffer bricht den Export ab, und es
+    // entsteht keine ZIP-Datei (R28). Die Meldung nennt das Geheimnis nie.
+    // Der innere Quellstand ist oben Datei fuer Datei geprueft.
+    for (name, inhalt) in &teile {
+        if *name != quelle_pfad {
+            geheim.extend(depot_kodex::geheimnis::pruefe_inhalt(name, inhalt));
+        }
+    }
+    if !geheim.is_empty() {
+        return Err(format!(
+            "Export abgebrochen, keine ZIP-Datei geschrieben:\n{}",
+            geheim.join("\n")
+        ));
+    }
     let mut manifest = String::from("# Datei\tBytes\tSHA-256\n");
     let mut zip = Zip::default();
     for (name, inhalt) in &teile {
@@ -457,7 +457,6 @@ mod tests {
     /// Exportiert wird nur, was Git verfolgt. Eine neue, nicht ignorierte Datei im
     /// Projektordner bleibt draussen, auch wenn sie harmlos aussieht.
     #[test]
-    #[ignore = "offen: 1·E01 unverfolgte Dateien werden exportiert"]
     fn befund_1_e01_nur_verfolgte_dateien_werden_exportiert() -> Result<(), String> {
         let r = repo()?;
         schreib(&r, "README.md", b"# Probe\n")?;
@@ -470,10 +469,10 @@ mod tests {
         Ok(())
     }
 
-    /// Ein verfolgter Link wird nicht gelesen: Sein Ziel kann ausserhalb des Projekts liegen.
+    /// Ein Link wird nicht gelesen: Sein Ziel kann ausserhalb des Projekts liegen. Das gilt fuer
+    /// einen verfolgten Link und fuer eine verfolgte Datei, die im Arbeitsbaum ein Link ist.
     #[cfg(unix)]
     #[test]
-    #[ignore = "offen: 1·E02 Link exportiert fremde Inhalte"]
     fn befund_1_e02_link_wird_nicht_gelesen() -> Result<(), String> {
         let r = repo()?;
         let draussen = r.with_extension("draussen");
@@ -482,13 +481,20 @@ mod tests {
         schreib(&r, "README.md", b"# Probe\n")?;
         std::os::unix::fs::symlink(draussen.join("fremd.txt"), r.join("link.md"))
             .map_err(|e| format!("Link: {e}"))?;
-        git_muss(&r, &["add", "README.md", "link.md"])?;
+        schreib(&r, "ersetzt.md", b"harmlos\n")?;
+        git_muss(&r, &["add", "README.md", "link.md", "ersetzt.md"])?;
         git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        // Eine verfolgte Datei, im Arbeitsbaum durch einen Link ersetzt.
+        fs::remove_file(r.join("ersetzt.md")).map_err(|e| format!("ersetzt: {e}"))?;
+        std::os::unix::fs::symlink(draussen.join("fremd.txt"), r.join("ersetzt.md"))
+            .map_err(|e| format!("Link: {e}"))?;
         let dateien = quelldateien(&r);
-        assert!(
-            !dateien.contains(&"link.md".to_string()),
-            "Link exportiert: {dateien:?}"
-        );
+        for link in ["link.md", "ersetzt.md"] {
+            assert!(
+                !dateien.contains(&link.to_string()),
+                "Link {link} exportiert: {dateien:?}"
+            );
+        }
         assert!(dateien.contains(&"README.md".to_string()), "{dateien:?}");
         Ok(())
     }
@@ -497,7 +503,6 @@ mod tests {
     /// Es entsteht keine ZIP-Datei, und die Meldung nennt das Geheimnis nicht. Ebenso ein
     /// Inhalt, der sich nicht pruefen laesst.
     #[test]
-    #[ignore = "offen: 1·E01/2·W3 Geheimnis im Export wird nicht erkannt"]
     fn befund_1_e01_geheimnis_bricht_den_export_ab() -> Result<(), String> {
         let faelle: [(&str, Vec<u8>, String, &str); 4] = [
             (

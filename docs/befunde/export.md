@@ -5,7 +5,7 @@ Stufe 2, auf Wolfgangs Wunsch vom 03.11.2026 vorgezogen. Zugangsdaten für Bank,
 Der Kodex verlangt, dass eine Änderung am Gate nie zusammen mit Produktivcode kommt. Der Schnitt hat deshalb zwei Teile in zwei Pull Requests:
 
 1. **Teil Gate** (Klasse `KodexAenderung`): Der Kodex prüft jede Datei auf Geheimnismuster. Dieser Teil.
-2. **Teil Export** (Klasse `Funktion`): Der Export nimmt nur von Git verfolgte Dateien, folgt keinem Link und bricht bei einem Geheimnismuster ab. Folgt nach Teil 1.
+2. **Teil Export** (Klasse `Funktion`): Der Export nimmt nur von Git verfolgte Dateien, folgt keinem Link und bricht bei einem Geheimnismuster ab. Teil 1 ist von Maus abgenommen und gemergt (PR #10).
 
 Auf GitHub sind Secret Protection und Push Protection laut Wolfgang aktiv. Sie ergänzen die Prüfung, ersetzen sie aber nicht: Sie kennen keine IBAN und greifen erst beim Push.
 
@@ -79,4 +79,45 @@ Jede Ablehnung muss das Stichwort „Geheimnismuster“ nennen, die nicht lesbar
 - Bilder oder andere Binärdateien wären heute „nicht prüfbar“ und würden das Gate schließen. Das Projekt hat keine; braucht es später welche, bekommen sie eine eigene, ausdrückliche Regel.
 - Ein Muster erkennt nie jedes Geheimnis. Die Prüfung ist das Netz unter der Regel, nicht die Regel: Zugangsdaten liegen in der Windows-Anmeldeverwaltung, nie im Projektordner.
 - Eine Kontonummer ohne IBAN-Form oder ein Schlüssel ohne bekanntes Präfix und ohne Namen davor wird nicht erkannt.
-- Teil Export (1·E01, 1·E02, Export-Teil von 2·W3) folgt im nächsten Pull Request.
+
+## Teil Export: Ergebnis
+
+Die Negativtests stehen in `crates/depot_lauf/src/export.rs` und sind am alten Stand rot (eigener Commit `3c8899a`). Der Fall „verfolgte Datei im Arbeitsbaum durch einen Link ersetzt“ kam mit dem Umbau-Commit dazu; am alten Stand wäre auch er rot, weil der alte Export jedem Pfad folgte.
+
+```text
+cargo test --locked -p depot_lauf befund_1_e0
+cargo test --locked -p depot_lauf sauberer_export_entsteht
+```
+
+| Fall | am alten Stand | nach dem Umbau |
+| --- | --- | --- |
+| unverfolgte Datei im Projekt | exportiert | nicht exportiert |
+| verfolgter Link | gelesen | nicht exportiert |
+| verfolgte Datei, im Arbeitsbaum durch Link ersetzt | Linkziel gelesen | nicht exportiert |
+| IBAN in einer Datei | exportiert | Abbruch |
+| API-Schlüssel in einer Datei | exportiert | Abbruch |
+| API-Schlüssel in der Konsole | exportiert | Abbruch |
+| nicht lesbarer Inhalt | exportiert | Abbruch als „nicht pruefbar“ |
+| sauberer Stand (Kontrolle) | ZIP entsteht | ZIP entsteht |
+
+Bei jedem Abbruch prüft der Test: die Meldung nennt „Geheimnismuster“ oder „nicht pruefbar“, das Geheimnis steht nicht darin, und es gibt weder ZIP-Datei noch Zwischendatei.
+
+## Was der Export-Umbau tut
+
+- **Quelle.** Die Liste der Dateien kommt aus dem Git-Index (`git ls-files --stage`, nur normale Dateien). Jeder Pfad muss im Arbeitsbaum eine gewöhnliche Datei sein, geprüft ohne einem Link zu folgen. Ohne Git gibt es keinen Quellstand; der Export enthält dann nur Bericht und Konsole.
+- **Prüfung.** Jede Quelldatei wird vor dem Schreiben mit derselben Prüfung wie im Gate gelesen (`depot_kodex::geheimnis::pruefe_inhalt`). Ebenso jeder andere Teil der ZIP-Datei, auch die Konsole und der Bericht. Die innere Quell-ZIP enthält nur bereits geprüfte Dateien.
+- **Abbruch.** Ein Treffer oder ein nicht prüfbarer Inhalt bricht ab, bevor eine Datei geschrieben wird. Die Meldung nennt Teil, Zeile und Art.
+
+## Gegenproben Teil Export
+
+| Gegenprobe | Ergebnis |
+| --- | --- |
+| auch unverfolgte Dateien exportiert | E01 rot |
+| Link im Arbeitsbaum gelesen | E02 rot |
+| Quelldateien nicht geprüft | E01-Geheimnis rot |
+| Konsole nicht geprüft | E01-Geheimnis rot |
+
+## Grenzen Teil Export
+
+- Der Export liest den Arbeitsbaum, nicht den Index. Weicht beides ab, wird der Arbeitsbaum exportiert und geprüft. Dass der Export byte-gleich dem geprüften Stand ist, bleibt 1·R04 (Snapshot) und folgt mit einem eigenen Schnitt.
+- Für die Muster gelten dieselben Grenzen wie im Gate.
