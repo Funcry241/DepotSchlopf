@@ -555,6 +555,86 @@ mod tests {
         Ok(())
     }
 
+    fn enthaelt(heuhaufen: &[u8], nadel: &[u8]) -> bool {
+        heuhaufen.windows(nadel.len()).any(|w| w == nadel)
+    }
+
+    /// K11-01: Ein Link in einem Elternordner wird so wenig gelesen wie ein Link als Datei.
+    /// Das gilt fuer den Quellstand und fuer die gesonderten Lesewege, etwa die Essenz.
+    /// Fremder Inhalt darf in keinem Teil der ZIP-Datei stehen.
+    #[cfg(unix)]
+    #[test]
+    fn befund_k11_01_link_im_elternordner_wird_nicht_gelesen() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "unterordner/notiz.md", b"intern\n")?;
+        schreib(&r, "docs/essenz.md", b"# D01 \xE2\x80\x93 Eigene Regel\n")?;
+        git_muss(&r, &["add", "."])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        let draussen = r.with_extension("fremd");
+        let _ = fs::remove_dir_all(&draussen);
+        schreib(&draussen, "notiz.md", b"FREMDER_INHALT_AUSSERHALB\n")?;
+        schreib(
+            &draussen,
+            "essenz.md",
+            b"# D01 \xE2\x80\x93 FREMDE_REGEL_AUSSERHALB\n",
+        )?;
+        for ordner in ["unterordner", "docs"] {
+            fs::remove_dir_all(r.join(ordner)).map_err(|e| format!("{ordner}: {e}"))?;
+            std::os::unix::fs::symlink(&draussen, r.join(ordner))
+                .map_err(|e| format!("Link {ordner}: {e}"))?;
+        }
+        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let bytes = fs::read(p).map_err(|e| e.to_string())?;
+        let mut offen = Vec::new();
+        for marke in ["FREMDER_INHALT_AUSSERHALB", "FREMDE_REGEL_AUSSERHALB"] {
+            if enthaelt(&bytes, marke.as_bytes()) {
+                offen.push(format!(
+                    "Link im Elternordner gelesen: {marke} steht in der ZIP-Datei"
+                ));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// K11-02: Ein vorhandenes, aber nicht lesbares Repository ist ein Fehler, kein leerer
+    /// Quellstand. Der Export bricht ab, bevor eine Datei entsteht.
+    #[test]
+    fn befund_k11_02_kaputter_index_bricht_den_export_ab() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "README.md", b"sauber\n")?;
+        git_muss(&r, &["add", "."])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        fs::write(r.join(".git/index"), b"kaputt").map_err(|e| e.to_string())?;
+        let mut offen = Vec::new();
+        if let Ok(p) = schreibe(&r, &lauf("sauber\n")) {
+            offen.push(format!(
+                "Defekter Git-Index: Export meldet Erfolg: {}",
+                p.display()
+            ));
+        }
+        if r.join(EXPORT).exists() || r.join(format!("{EXPORT}.tmp")).exists() {
+            offen.push("Defekter Git-Index: ZIP-Datei liegt im Ordner".to_string());
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Kontrolle zu K11-02: Ohne Git entsteht ein Export ohne Quellstand.
+    #[test]
+    fn ohne_git_entsteht_export_ohne_quellstand() -> Result<(), String> {
+        let r = repo()?;
+        fs::remove_dir_all(r.join(".git")).map_err(|e| e.to_string())?;
+        schreib(&r, "README.md", b"MARKE_OHNE_GIT\n")?;
+        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let bytes = fs::read(p).map_err(|e| e.to_string())?;
+        assert!(
+            !enthaelt(&bytes, b"MARKE_OHNE_GIT"),
+            "ohne Git darf kein Quellstand entstehen"
+        );
+        Ok(())
+    }
+
     /// Kontrolle: Ein sauberes Repository ergibt einen Export.
     #[test]
     fn sauberer_export_entsteht() -> Result<(), String> {
