@@ -45,7 +45,7 @@ pub use stand::{Art, AuftragsBeleg, Stand};
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -57,6 +57,19 @@ mod tests {
     thread_local! {
         /// 0: aus. n: die n-te folgende Synchronisation scheitert.
         static SYNC_FEHLER: Cell<u32> = const { Cell::new(0) };
+    }
+
+    thread_local! {
+        /// Jede Synchronisation dieses Threads, in Reihenfolge.
+        static PROTOKOLL: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(crate) fn protokolliere(was: &'static str) {
+        PROTOKOLL.with(|p| p.borrow_mut().push(was));
+    }
+
+    fn protokoll_neu() -> Vec<&'static str> {
+        PROTOKOLL.with(|p| std::mem::take(&mut *p.borrow_mut()))
     }
 
     pub(crate) fn sync_scheitert() -> bool {
@@ -113,6 +126,55 @@ mod tests {
             let neu = Journal::oeffnen(&p).map_err(|e| format!("{fall}: {e:?}"))?;
             assert_eq!(neu.eintraege().len(), zaehlt, "{fall}: nach dem Neustart");
         }
+        Ok(())
+    }
+
+    /// K13-01: Steht nach einem Absturz ein vollstaendiger, aber unbestaetigter Eintrag im
+    /// Journal, ist er vielleicht nur im Cache des Betriebssystems lesbar. Der Wiederanlauf
+    /// synchronisiert deshalb zuerst das Journal und rueckt erst danach den Vermerk vor.
+    /// Scheitert diese Synchronisation, bleibt der Vermerk, wie er war.
+    #[test]
+    fn befund_k13_01_wiederanlauf_synchronisiert_vor_dem_vermerk() -> Result<(), String> {
+        let tag = Datum::neu(2026, 11, 2).ok_or("Datum")?;
+        let p = eingerichtet()?;
+        let mut j = Journal::oeffnen(&p).map_err(|e| format!("{e:?}"))?;
+        // Plan vermerkt, Zeile geschrieben, ihre Synchronisation scheitert.
+        SYNC_FEHLER.with(|f| f.set(2));
+        let erster = j.beobachte(tag, "erste");
+        SYNC_FEHLER.with(|f| f.set(0));
+        if erster.is_ok() {
+            return Err("Vorbedingung: Fehler tritt nicht ein".into());
+        }
+        drop(j);
+        let vermerk = p.with_extension("vermerk");
+        let vorher = fs::read(&vermerk).map_err(|e| e.to_string())?;
+
+        // Scheitert die erste Synchronisation des Wiederanlaufs, rueckt nichts vor.
+        protokoll_neu();
+        SYNC_FEHLER.with(|f| f.set(1));
+        let gescheitert = Journal::oeffnen(&p);
+        SYNC_FEHLER.with(|f| f.set(0));
+        let protokoll = protokoll_neu();
+        let nachher = fs::read(&vermerk).map_err(|e| e.to_string())?;
+        assert_eq!(
+            protokoll.first(),
+            Some(&"Journal"),
+            "zuerst synchronisiert: {protokoll:?}"
+        );
+        assert!(
+            gescheitert.is_err(),
+            "Wiederanlauf trotz Synchronisationsfehler"
+        );
+        assert_eq!(
+            vorher, nachher,
+            "Vermerk trotz Synchronisationsfehler vorgerueckt"
+        );
+
+        // Ohne Fehler: erst das Journal, dann der Vermerk; der Eintrag zaehlt.
+        let j = Journal::oeffnen(&p).map_err(|e| format!("{e:?}"))?;
+        let protokoll = protokoll_neu();
+        assert_eq!(protokoll, vec!["Journal", "Zwischendatei"], "Reihenfolge");
+        assert_eq!(j.eintraege().len(), 1);
         Ok(())
     }
 }

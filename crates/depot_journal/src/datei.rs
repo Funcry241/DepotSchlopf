@@ -227,8 +227,13 @@ fn verzeichnis_sync(_: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Synchronisiert eine Datei. In den Modultests laesst sich hier ein Fehler einspeisen.
-fn sync(datei: &File) -> std::io::Result<()> {
+/// Synchronisiert eine Datei. `was` nennt sie fuer die Modultests: Dort wird jede
+/// Synchronisation mitgeschrieben, und es laesst sich ein Fehler einspeisen.
+fn sync(datei: &File, was: &'static str) -> std::io::Result<()> {
+    #[cfg(test)]
+    crate::tests::protokolliere(was);
+    #[cfg(not(test))]
+    let _ = was;
     #[cfg(test)]
     if crate::tests::sync_scheitert() {
         return Err(std::io::Error::other(
@@ -257,7 +262,7 @@ fn schreibe_atomar(ziel: &Path, inhalt: &[u8]) -> Result<(), String> {
         .open(&tmp)
         .map_err(|e| format!("{}: Zwischendatei: {e}", tmp.display()))?;
     f.write_all(inhalt)
-        .and_then(|()| sync(&f))
+        .and_then(|()| sync(&f, "Zwischendatei"))
         .map_err(|e| format!("{}: schreiben: {e}", tmp.display()))?;
     drop(f);
     fs::rename(&tmp, ziel).map_err(|e| format!("{}: umbenennen: {e}", ziel.display()))?;
@@ -346,7 +351,7 @@ impl Journal {
             .open(pfad)
             .and_then(|mut f| {
                 f.write_all(kopf.as_bytes())?;
-                sync(&f)
+                sync(&f, "Journal")
             })
             .map_err(|e| halt(format!("Einrichtung: {e}")))?;
         verzeichnis_sync(pfad).map_err(halt)?;
@@ -447,7 +452,7 @@ impl Journal {
             sichere(&quarantaene_pfad(pfad, v.laenge, rest), rest)?;
             datei
                 .set_len(v.laenge)
-                .and_then(|()| sync(&datei))
+                .and_then(|()| sync(&datei, "Journal"))
                 .map_err(|e| halt(format!("kuerzen: {e}")))?;
         }
         if neu != v {
@@ -525,7 +530,7 @@ impl Journal {
         self.datei
             .seek(SeekFrom::Start(self.laenge))
             .and_then(|_| self.datei.write_all(z.as_bytes()))
-            .and_then(|()| sync(&self.datei))
+            .and_then(|()| sync(&self.datei, "Journal"))
             .map_err(|e| format!("schreiben: {e}"))?;
         let laenge = self.laenge.checked_add(n).ok_or("Laenge zu gross")?;
         let fertig = Vermerk {

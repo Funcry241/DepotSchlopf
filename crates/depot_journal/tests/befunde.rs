@@ -942,3 +942,78 @@ fn befund_1_r02_vermerkfehler_sperrt_das_journal() -> Result<(), String> {
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------------------------
+// K13-02 – das Journal prueft KI-Buchungen selbst (R20, ein Zustandsraum)
+// ---------------------------------------------------------------------------------------------
+
+/// Was der Budgetwaechter beim Lesen ablehnt, nimmt schon das Journal nicht an: weder beim
+/// Anhaengen noch als unbestaetigten Anhang beim Wiederanlauf.
+#[test]
+fn befund_k13_02_journal_prueft_ki_buchungen_selbst() -> Result<(), String> {
+    let alt = "0".repeat(64);
+    let faelle: [(&str, Vec<(Art, &str)>, (Art, &str)); 5] = [
+        (
+            "unlesbar",
+            vec![(Art::KiGrenzen, alt.as_str())],
+            (Art::Ki, "unlesbar"),
+        ),
+        (
+            "ohne Grenzabdruck",
+            vec![],
+            (Art::Ki, "Dachs;2026-11-02;1;48"),
+        ),
+        ("Abdruck unlesbar", vec![], (Art::KiGrenzen, "xyz")),
+        (
+            "nicht kanonisch",
+            vec![(Art::KiGrenzen, alt.as_str())],
+            (Art::Ki, "Dachs;2026-11-02;01;48"),
+        ),
+        (
+            "negativ",
+            vec![(Art::KiGrenzen, alt.as_str())],
+            (Art::Ki, "Dachs;2026-11-02;1;-5"),
+        ),
+    ];
+    let mut offen = Vec::new();
+    for (fall, vorher, (art, inhalt)) in &faelle {
+        // Beim Anhaengen.
+        let p = eingerichtet()?;
+        let mut j = oeffnen(&p)?;
+        for (a, t) in vorher {
+            vorbedingung(j.anhaengen(*a, t), "Vorgeschichte")?;
+        }
+        let datei = vorbedingung(fs::read(&p), "lesen")?;
+        match j.anhaengen(*art, inhalt) {
+            Err(JournalFehler::Abgelehnt(_)) => {}
+            anders => offen.push(format!("{fall}, anhaengen: {anders:?}")),
+        }
+        if vorbedingung(fs::read(&p), "lesen")? != datei {
+            offen.push(format!("{fall}: geschrieben"));
+        }
+        drop(j);
+        // Als vollstaendiger, unbestaetigter Anhang: Halt, der Vermerk rueckt nicht vor.
+        let q = neuer_pfad()?;
+        let mut mit: Vec<(Art, &str)> = vorher.clone();
+        let bestaetigt = inhalt_fuer(&mit);
+        mit.push((*art, inhalt));
+        let voll = inhalt_fuer(&mit);
+        let zeile = voll
+            .strip_prefix(bestaetigt.as_slice())
+            .ok_or("Vorbedingung: Inhalt waechst hinten")?
+            .to_vec();
+        abgebrochen(&q, &bestaetigt, &zeile, zeile.len())?;
+        let v = vorbedingung(fs::read(vermerk(&q)), "Vermerk lesen")?;
+        if let Err(e) = halt(Journal::oeffnen(&q)) {
+            offen.push(format!("{fall}, Wiederanlauf: {e}"));
+        }
+        if vorbedingung(fs::read(vermerk(&q)), "Vermerk lesen")? != v {
+            offen.push(format!("{fall}: Vermerk vorgerueckt"));
+        }
+    }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
+}
