@@ -770,6 +770,67 @@ mod tests {
         Ok(())
     }
 
+    /// K11-03: Was im Arbeitsbaum geschieht, waehrend oder nachdem geprueft wurde, darf den
+    /// Export nicht erreichen. Der Export nimmt den Inhalt aus dem Git-Index, den auch das Gate
+    /// prueft. Eine gleich lange, andere Datei im Arbeitsbaum steht daher nicht in der ZIP-Datei,
+    /// ebenso wenig eine geaenderte Essenz. Das gilt auf jeder Plattform, ohne Dateiidentitaet.
+    #[test]
+    fn befund_k11_03_export_nimmt_den_index_nicht_den_arbeitsbaum() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "pruef/datei.md", b"INTERN\n")?;
+        schreib(&r, "docs/essenz.md", b"# D01 \xE2\x80\x93 INDEXREGEL\n")?;
+        git_muss(&r, &["add", "."])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        schreib(&r, "pruef/datei.md", b"FREMD!\n")?;
+        schreib(&r, "docs/essenz.md", b"# D01 \xE2\x80\x93 FREMDREGEL\n")?;
+        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let bytes = fs::read(p).map_err(|e| e.to_string())?;
+        let mut offen = Vec::new();
+        for marke in ["FREMD!", "FREMDREGEL"] {
+            if enthaelt(&bytes, marke.as_bytes()) {
+                offen.push(format!("Arbeitsbaum statt Index exportiert: {marke}"));
+            }
+        }
+        for marke in ["INTERN", "INDEXREGEL"] {
+            if !enthaelt(&bytes, marke.as_bytes()) {
+                offen.push(format!("Indexinhalt fehlt: {marke}"));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// K11-03, Lesefehler: Fehlt ein Blob des Index im Repository, bricht der Export ab,
+    /// ohne eine ZIP-Datei zu schreiben.
+    #[test]
+    fn befund_k11_03_fehlender_blob_bricht_den_export_ab() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "README.md", b"blob-probe\n")?;
+        git_muss(&r, &["add", "README.md"])?;
+        let aus = Command::new("git")
+            .arg("-C")
+            .arg(&r)
+            .args(["rev-parse", ":README.md"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        let sha = String::from_utf8_lossy(&aus.stdout).trim().to_string();
+        let (kopf, rest) = sha.split_at_checked(2).ok_or("kein Blob")?;
+        fs::remove_file(r.join(".git/objects").join(kopf).join(rest))
+            .map_err(|e| format!("Blob {sha}: {e}"))?;
+        let mut offen = Vec::new();
+        if let Ok(p) = schreibe(&r, &lauf("sauber\n")) {
+            offen.push(format!(
+                "Fehlender Blob: Export meldet Erfolg: {}",
+                p.display()
+            ));
+        }
+        if r.join(EXPORT).exists() || r.join(format!("{EXPORT}.tmp")).exists() {
+            offen.push("Fehlender Blob: ZIP-Datei liegt im Ordner".to_string());
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
     /// Kontrolle zu K11-02: Ohne Git entsteht ein Export ohne Quellstand.
     #[test]
     fn ohne_git_entsteht_export_ohne_quellstand() -> Result<(), String> {
