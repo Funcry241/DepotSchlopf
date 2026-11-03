@@ -12,9 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_journal::{Art, Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
-use depot_kern::{
-    Cent, Datum, Grenzen, Herkunft, Isin, Kurs, Kurse, Topf, TopfId, Zeitpunkt,
-};
+use depot_kern::{Cent, Datum, Grenzen, Herkunft, Isin, Kurs, Kurse, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::{Kennungsvergabe, notbremse_auftraege};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
@@ -26,8 +24,7 @@ fn vorbedingung<T, E: std::fmt::Debug>(r: Result<T, E>, was: &str) -> Result<T, 
 /// Eigenes, leeres Verzeichnis je Test; liefert den Pfad des Journals darin (nicht eingerichtet).
 fn neuer_pfad() -> Result<PathBuf, String> {
     let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
-    let dir =
-        std::env::temp_dir().join(format!("depot_journal_befund_{}_{n}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("depot_journal_befund_{}_{n}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     vorbedingung(fs::create_dir_all(&dir), "Testverzeichnis")?;
     Ok(dir.join("journal.txt"))
@@ -178,7 +175,10 @@ fn geleertes_oder_gekuerztes_journal_fuehrt_zu_halt() -> Result<(), String> {
         .collect();
     let mut faelle: Vec<(String, Vec<u8>)> = vec![("leer".into(), Vec::new())];
     for ende in zeilen.iter().take(zeilen.len().saturating_sub(1)) {
-        faelle.push((format!("auf {ende} Byte"), voll.iter().take(*ende).copied().collect()));
+        faelle.push((
+            format!("auf {ende} Byte"),
+            voll.iter().take(*ende).copied().collect(),
+        ));
     }
     for (fall, inhalt) in faelle {
         vorbedingung(fs::write(&p, &inhalt), "kuerzen")?;
@@ -189,7 +189,11 @@ fn geleertes_oder_gekuerztes_journal_fuehrt_zu_halt() -> Result<(), String> {
             offen.push(format!("{fall}: beim Oeffnen veraendert"));
         }
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// Jede Zeile der ganzen Kette wird geprueft, nicht nur die letzte.
@@ -203,11 +207,51 @@ fn geaenderte_fruehere_zeile_fuehrt_zu_halt() -> Result<(), String> {
     bestaetigt_geschrieben(&p, &echt)?;
     oeffnen(&p)?;
     // Gleiche Laenge, anderer Inhalt in der ersten Beobachtung; der Vermerk bleibt echt.
-    let falsch: Vec<u8> = String::from_utf8_lossy(&echt).replacen("Kurs 100", "Kurs 900", 1).into_bytes();
+    let falsch: Vec<u8> = String::from_utf8_lossy(&echt)
+        .replacen("Kurs 100", "Kurs 900", 1)
+        .into_bytes();
     if falsch == echt || falsch.len() != echt.len() {
         return Err("Vorbedingung: Aenderung".into());
     }
     vorbedingung(fs::write(&p, &falsch), "Journal aendern")?;
+    halt(Journal::oeffnen(&p))?;
+    Ok(())
+}
+
+/// Die Laengenangabe gehoert zum Datensatz: Eine falsche Laenge bei sonst gueltiger Kette ist
+/// beschaedigt.
+#[test]
+fn falsche_laengenangabe_fuehrt_zu_halt() -> Result<(), String> {
+    let p = neuer_pfad()?;
+    let echt = inhalt_fuer(&[(Art::Beobachtung, "2026-11-02;Kurs 100")]);
+    bestaetigt_geschrieben(&p, &echt)?;
+    oeffnen(&p)?;
+    let text = String::from_utf8_lossy(&echt).into_owned();
+    let zeile = text.lines().nth(1).ok_or("Vorbedingung: zweite Zeile")?;
+    let (laenge, rest) = zeile.split_once(';').ok_or("Vorbedingung: Laenge")?;
+    let falsch = format!("{};{rest}", if laenge == "30" { "31" } else { "30" });
+    if falsch.len() != zeile.len() {
+        return Err(format!("Vorbedingung: Laenge {laenge}"));
+    }
+    vorbedingung(
+        fs::write(&p, text.replacen(zeile, &falsch, 1)),
+        "Laenge aendern",
+    )?;
+    halt(Journal::oeffnen(&p))?;
+    Ok(())
+}
+
+/// Ein anderes, in sich gueltiges Journal gleicher Laenge passt nicht zum Vermerk: Halt.
+#[test]
+fn anderes_gueltiges_journal_passt_nicht_zum_vermerk() -> Result<(), String> {
+    let p = neuer_pfad()?;
+    let echt = inhalt_fuer(&[(Art::Beobachtung, "2026-11-02;Kurs 100")]);
+    let anders = inhalt_fuer(&[(Art::Beobachtung, "2026-11-02;Kurs 900")]);
+    if echt.len() != anders.len() || vermerk_fuer(&anders, 0).is_none() {
+        return Err("Vorbedingung: gleich lange, gueltige Journale".into());
+    }
+    bestaetigt_geschrieben(&p, &echt)?;
+    vorbedingung(fs::write(&p, &anders), "Journal tauschen")?;
     halt(Journal::oeffnen(&p))?;
     Ok(())
 }
@@ -259,7 +303,11 @@ fn befund_3_p4_abgebrochener_anhang_wird_gesichert_und_gekuerzt() -> Result<(), 
             offen.push(format!("{teil} Byte: danach nicht beschreibbar"));
         }
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// 5·B02 (1): Abschlusszeichen der letzten bestaetigten Zeile entfernt: Halt, nichts wird
@@ -275,7 +323,11 @@ fn befund_5_b02_entferntes_abschlusszeichen_fuehrt_zu_halt() -> Result<(), Strin
         } else {
             bestaetigt_geschrieben(&p, &zwei)?;
         }
-        let ohne: Vec<u8> = zwei.iter().take(zwei.len().saturating_sub(1)).copied().collect();
+        let ohne: Vec<u8> = zwei
+            .iter()
+            .take(zwei.len().saturating_sub(1))
+            .copied()
+            .collect();
         vorbedingung(fs::write(&p, &ohne), "Abschlusszeichen entfernen")?;
         if let Err(e) = halt(Journal::oeffnen(&p)) {
             offen.push(format!("angekuendigt {angekuendigt}: {e}"));
@@ -284,7 +336,11 @@ fn befund_5_b02_entferntes_abschlusszeichen_fuehrt_zu_halt() -> Result<(), Strin
             offen.push(format!("angekuendigt {angekuendigt}: veraendert"));
         }
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// 5·B02 (2): Letzte bestaetigte Zeile teilweise gekuerzt: Halt, unveraendert.
@@ -300,17 +356,27 @@ fn befund_5_b02_gekuerzte_bestaetigte_zeile_fuehrt_zu_halt() -> Result<(), Strin
             } else {
                 bestaetigt_geschrieben(&p, &zwei)?;
             }
-            let kurz: Vec<u8> = zwei.iter().take(zwei.len().saturating_sub(weg)).copied().collect();
+            let kurz: Vec<u8> = zwei
+                .iter()
+                .take(zwei.len().saturating_sub(weg))
+                .copied()
+                .collect();
             vorbedingung(fs::write(&p, &kurz), "kuerzen")?;
             if let Err(e) = halt(Journal::oeffnen(&p)) {
                 offen.push(format!("{weg} Byte weg, angekuendigt {angekuendigt}: {e}"));
             }
             if vorbedingung(fs::read(&p), "lesen")? != kurz || !weitere_dateien(&p)?.is_empty() {
-                offen.push(format!("{weg} Byte weg, angekuendigt {angekuendigt}: veraendert"));
+                offen.push(format!(
+                    "{weg} Byte weg, angekuendigt {angekuendigt}: veraendert"
+                ));
             }
         }
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// 3·P4, 5·B02 (4): Absturz an jedem Schritt der Wiederherstellung. Nachgestellt werden die
@@ -332,10 +398,7 @@ fn befund_5_b02_absturz_in_der_wiederherstellung_endet_gleich() -> Result<(), St
     let [qname] = q.iter().collect::<Vec<_>>()[..] else {
         return Err(format!("Vorbedingung: genau eine Quarantaene, nicht {q:?}"));
     };
-    let qinhalt = vorbedingung(
-        fs::read(mass.with_file_name(qname)),
-        "Quarantaene lesen",
-    )?;
+    let qinhalt = vorbedingung(fs::read(mass.with_file_name(qname)), "Quarantaene lesen")?;
 
     let mut offen = Vec::new();
     for fall in ["Quarantaene geschrieben", "Journal gekuerzt"] {
@@ -361,7 +424,11 @@ fn befund_5_b02_absturz_in_der_wiederherstellung_endet_gleich() -> Result<(), St
             offen.push(format!("{fall}: dritter Start anders"));
         }
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// 4·B02 (1): Beschaedigte letzte Zeile nach bestaetigtem Vorgang (falsche Pruefsumme, Laenge
@@ -391,7 +458,11 @@ fn befund_4_b02_beschaedigte_letzte_zeile_fuehrt_zu_halt() -> Result<(), String>
             offen.push(format!("angekuendigt {angekuendigt}: veraendert"));
         }
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// 4·B02 (2): Absturz nach dem Schreiben, vor dem Bestaetigen: Der vollstaendige, unbestaetigte
@@ -406,7 +477,10 @@ fn befund_4_b02_nur_der_vermerkte_anhang_wird_behandelt() -> Result<(), String> 
     abgebrochen(&p, &zwei, &zeile, zeile.len())?;
     match Journal::oeffnen(&p) {
         Ok(j) if j.eintraege().len() == 3 => {}
-        anders => offen.push(format!("vollstaendig: {:?}", anders.map(|j| j.eintraege().len()))),
+        anders => offen.push(format!(
+            "vollstaendig: {:?}",
+            anders.map(|j| j.eintraege().len())
+        )),
     }
     if oeffnen(&p).map(|j| j.eintraege().len()).ok() != Some(3) {
         offen.push("vollstaendig: zweiter Start anders".into());
@@ -433,6 +507,19 @@ fn befund_4_b02_nur_der_vermerkte_anhang_wird_behandelt() -> Result<(), String> 
         offen.push(format!("laenger als vermerkt: {e}"));
     }
 
+    // Kuerzer als vermerkt, aber mit Zeilenende: kein Schreibabbruch, sondern beschaedigt.
+    let p = neuer_pfad()?;
+    abgebrochen(&p, &zwei, &zeile, 0)?;
+    let mut inhalt = zwei.clone();
+    inhalt.extend_from_slice(b"7;x;kurz\n");
+    vorbedingung(fs::write(&p, &inhalt), "kurze Zeile")?;
+    if let Err(e) = halt(Journal::oeffnen(&p)) {
+        offen.push(format!("kuerzer mit Zeilenende: {e}"));
+    }
+    if !weitere_dateien(&p)?.is_empty() {
+        offen.push("kuerzer mit Zeilenende: Quarantaene angelegt".into());
+    }
+
     let p = neuer_pfad()?;
     bestaetigt_geschrieben(&p, &zwei)?;
     let mut inhalt = zwei.clone();
@@ -449,7 +536,11 @@ fn befund_4_b02_nur_der_vermerkte_anhang_wird_behandelt() -> Result<(), String> 
     if !weitere_dateien(&p)?.is_empty() {
         offen.push("ohne Vermerk: Quarantaene angelegt".into());
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// 4·B02 (3): Eine vorhandene, aber abweichende Quarantaenedatei verhindert das Abschneiden.
@@ -467,7 +558,10 @@ fn befund_4_b02_abweichende_quarantaene_verhindert_das_kuerzen() -> Result<(), S
     let p = neuer_pfad()?;
     abgebrochen(&p, &zwei, &zeile, teil)?;
     let vorher = vorbedingung(fs::read(&p), "lesen")?;
-    vorbedingung(fs::write(p.with_file_name(qname), b"anderer Inhalt"), "Quarantaene")?;
+    vorbedingung(
+        fs::write(p.with_file_name(qname), b"anderer Inhalt"),
+        "Quarantaene",
+    )?;
     halt(Journal::oeffnen(&p))?;
     if vorbedingung(fs::read(&p), "lesen")? != vorher {
         return Err("trotz abweichender Quarantaene gekuerzt".into());
@@ -489,12 +583,18 @@ fn papierdepot_und_beobachtungen_ueberstehen_den_neustart() -> Result<(), String
     let mut j = oeffnen(&p)?;
     vorbedingung(j.setze_topf(&topf), "Topf A")?;
     vorbedingung(j.setze_topf(&leer), "Topf B")?;
-    vorbedingung(j.beobachte(tag(3)?, "EZB-Termin am 5.11.; Markt ruhig"), "Beobachtung")?;
+    vorbedingung(
+        j.beobachte(tag(3)?, "EZB-Termin am 5.11.; Markt ruhig"),
+        "Beobachtung",
+    )?;
     let vorher = j.stand().clone();
     drop(j);
     let j = oeffnen(&p)?;
     if *j.stand() != vorher {
-        return Err(format!("nach dem Neustart: {:?} statt {vorher:?}", j.stand()));
+        return Err(format!(
+            "nach dem Neustart: {:?} statt {vorher:?}",
+            j.stand()
+        ));
     }
     if j.stand().toepfe().get(&TopfId::A) != Some(&topf)
         || j.stand().toepfe().get(&TopfId::B) != Some(&leer)
@@ -522,7 +622,10 @@ fn befund_1_f09_kennungen_ueberstehen_den_neustart() -> Result<(), String> {
     drop(j);
     let mut j = oeffnen(&p)?;
     if j.kennungsvergabe().letzte() != 7 || j.stand().auftraege().len() != 1 {
-        return Err(format!("nach dem Neustart: letzte {}", j.kennungsvergabe().letzte()));
+        return Err(format!(
+            "nach dem Neustart: letzte {}",
+            j.kennungsvergabe().letzte()
+        ));
     }
     let vorher = vorbedingung(fs::read(&p), "lesen")?;
     let mut offen = Vec::new();
@@ -540,15 +643,22 @@ fn befund_1_f09_kennungen_ueberstehen_den_neustart() -> Result<(), String> {
     }
     drop(j);
     for (fall, nrn) in [("doppelt", [4, 4]), ("kleiner", [4, 2])] {
-        let q = neuer_pfad()?;
-        let a = auftrag(nrn[0]);
-        let b = auftrag(nrn[1]);
-        bestaetigt_geschrieben(&q, &inhalt_fuer(&[(Art::Auftrag, &a), (Art::Auftrag, &b)]))?;
-        if let Err(e) = halt(Journal::oeffnen(&q)) {
+        let datei = neuer_pfad()?;
+        let erster = auftrag(nrn[0]);
+        let zweiter = auftrag(nrn[1]);
+        bestaetigt_geschrieben(
+            &datei,
+            &inhalt_fuer(&[(Art::Auftrag, &erster), (Art::Auftrag, &zweiter)]),
+        )?;
+        if let Err(e) = halt(Journal::oeffnen(&datei)) {
             offen.push(format!("Datei {fall}: {e}"));
         }
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// Ein Auftrag aus dem Regelwerk wird mit seiner Kennung belegt; die Vergabe danach liegt
@@ -561,8 +671,14 @@ fn genehmigter_auftrag_wird_belegt() -> Result<(), String> {
     topf.setze_bestand(wert.clone(), 10);
     let tag2 = tag(2)?;
     let zeit = Zeitpunkt::neu(tag2, 10, 0, 0).ok_or("Vorbedingung: Zeit")?;
-    let kurs = vorbedingung(Kurs::neu(Cent(10_000), "EUR", tag2, zeit, Herkunft::Simulation), "Kurs")?;
-    let kurse = vorbedingung(Kurse::neu(zeit, [(wert, kurs)].into_iter().collect()), "Kurse")?;
+    let kurs = vorbedingung(
+        Kurs::neu(Cent(10_000), "EUR", tag2, zeit, Herkunft::Simulation),
+        "Kurs",
+    )?;
+    let kurse = vorbedingung(
+        Kurse::neu(zeit, [(wert, kurs)].into_iter().collect()),
+        "Kurse",
+    )?;
     let mut j = oeffnen(&p)?;
     vorbedingung(j.anhaengen(Art::Auftrag, &auftrag(41)), "Auftrag 41")?;
     let mut vergabe = j.kennungsvergabe();
@@ -578,7 +694,14 @@ fn genehmigter_auftrag_wird_belegt() -> Result<(), String> {
     drop(j);
     let j = oeffnen(&p)?;
     match j.stand().auftraege().last() {
-        Some(b) if b.auftrag == *a.auftrag() && b.anlass == a.beleg().anlass && b.topf == TopfId::A => {}
+        Some(b)
+            if b.nr == a.auftrag().kennung.nr()
+                && b.isin == a.auftrag().isin
+                && b.richtung == a.auftrag().richtung
+                && b.stueck == a.auftrag().stueck
+                && b.limit == a.auftrag().limit
+                && b.anlass == a.beleg().anlass
+                && b.topf == TopfId::A => {}
         anders => return Err(format!("belegt: {anders:?}")),
     }
     if j.kennungsvergabe().letzte() != 42 {
@@ -591,7 +714,7 @@ fn genehmigter_auftrag_wird_belegt() -> Result<(), String> {
 /// ablehnt, fuehrt in der Datei zu Halt. Eine Ablehnung schreibt nichts und sperrt nicht.
 #[test]
 fn unzulaessige_eintraege_werden_abgelehnt() -> Result<(), String> {
-    let faelle: [(&str, Art, &str); 11] = [
+    let faelle: [(&str, Art, &str); 12] = [
         ("Zeilenumbruch", Art::Beobachtung, "2026-11-02;eins\nzwei"),
         ("Steuerzeichen", Art::Beobachtung, "2026-11-02;eins\rzwei"),
         ("leere Beobachtung", Art::Beobachtung, "2026-11-02;"),
@@ -601,8 +724,21 @@ fn unzulaessige_eintraege_werden_abgelehnt() -> Result<(), String> {
         ("fuehrende Null", Art::Topf, "A;0100;"),
         ("ungueltige ISIN", Art::Topf, "A;100;DE0007164601:3"),
         ("Bestand null", Art::Topf, "A;100;DE0007164600:0"),
-        ("Stueckzahl null", Art::Auftrag, "1;A;DE0007164600;Kauf;0;9900;Umschichtung"),
-        ("unbekannter Anlass", Art::Auftrag, "1;A;DE0007164600;Kauf;5;9900;Laune"),
+        (
+            "doppelte ISIN",
+            Art::Topf,
+            "A;100;DE0007164600:3,DE0007164600:4",
+        ),
+        (
+            "Stueckzahl null",
+            Art::Auftrag,
+            "1;A;DE0007164600;Kauf;0;9900;Umschichtung",
+        ),
+        (
+            "unbekannter Anlass",
+            Art::Auftrag,
+            "1;A;DE0007164600;Kauf;5;9900;Laune",
+        ),
     ];
     let p = eingerichtet()?;
     let mut j = oeffnen(&p)?;
@@ -627,7 +763,11 @@ fn unzulaessige_eintraege_werden_abgelehnt() -> Result<(), String> {
     if j.beobachte(tag(2)?, "gueltig").is_err() {
         offen.push("nach Ablehnung gesperrt".into());
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// Der bestaetigte Stand (Laenge und Kettenhash) fuer den Anker ausserhalb des Rechners:
@@ -641,7 +781,8 @@ fn bestaetigter_stand_fuer_den_abendbericht() -> Result<(), String> {
     let eins = j.bestaetigt();
     drop(j);
     let groesse = vorbedingung(fs::metadata(&p), "Groesse")?.len();
-    if leer == eins || eins.0 != groesse || eins.1.len() != 64 || oeffnen(&p)?.bestaetigt() != eins {
+    if leer == eins || eins.0 != groesse || eins.1.len() != 64 || oeffnen(&p)?.bestaetigt() != eins
+    {
         return Err(format!("{leer:?} -> {eins:?}, Datei {groesse} Byte"));
     }
     Ok(())
@@ -663,7 +804,10 @@ fn befund_1_k06_zweiter_pfad_auf_dieselbe_datei_wird_gesperrt() -> Result<(), St
     drop(erster);
     match ergebnis {
         Err(JournalFehler::Belegt) => Ok(()),
-        anders => Err(format!("dieselbe Datei ueber einen zweiten Namen: {:?}", anders.map(|j| j.eintraege().len()))),
+        anders => Err(format!(
+            "dieselbe Datei ueber einen zweiten Namen: {:?}",
+            anders.map(|j| j.eintraege().len())
+        )),
     }
 }
 
@@ -688,7 +832,10 @@ fn befund_k12_02_links_im_pfad_werden_abgelehnt() -> Result<(), String> {
     // Elternverzeichnis als Link.
     let echt = dir.join("echt");
     vorbedingung(fs::create_dir(&echt), "Verzeichnis")?;
-    vorbedingung(Journal::einrichten(&echt.join("journal.txt")), "Einrichtung")?;
+    vorbedingung(
+        Journal::einrichten(&echt.join("journal.txt")),
+        "Einrichtung",
+    )?;
     let eltern = dir.join("eltern");
     vorbedingung(symlink(&echt, &eltern), "Link")?;
     let mut offen = Vec::new();
@@ -705,7 +852,11 @@ fn befund_k12_02_links_im_pfad_werden_abgelehnt() -> Result<(), String> {
     if Journal::einrichten(&eltern.join("neu.txt")).is_ok() {
         offen.push("Einrichtung ueber Elternlink".into());
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 /// K12-01: Eine liegen gebliebene Zwischendatei des Vermerks, die ein Link auf eine fremde
@@ -751,7 +902,11 @@ fn befund_k12_01_zwischendatei_veraendert_keine_fremde_datei() -> Result<(), Str
             }
         }
     }
-    if offen.is_empty() { Ok(()) } else { Err(format!("{offen:#?}")) }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -766,7 +921,10 @@ fn befund_1_r02_vermerkfehler_sperrt_das_journal() -> Result<(), String> {
     let p = eingerichtet()?;
     let mut j = oeffnen(&p)?;
     let tmp = p.with_extension("vermerk.tmp");
-    vorbedingung(fs::create_dir(&tmp), "Verzeichnis an Stelle der Zwischendatei")?;
+    vorbedingung(
+        fs::create_dir(&tmp),
+        "Verzeichnis an Stelle der Zwischendatei",
+    )?;
     if j.beobachte(tag(2)?, "erste").is_ok() {
         return Err("Vorbedingung: Fehler tritt nicht ein".into());
     }

@@ -96,7 +96,7 @@ Ein Befund mit „Test rot“ ist nur so weit abgedeckt, wie diese Liste es zul�
 
 | Befund | Fehlender Teil | Grund | entsteht mit |
 | --- | --- | --- | --- |
-| 1·R02 | Fehler beim Synchronisieren (`sync_all`) | Ohne Speicher-Schnittstelle gibt es am alten Stand keinen Einspeisepunkt. Teilschreibfehler ist über `ulimit -f` abgedeckt, nur unter Unix | Persistenzbasis |
+| 1·R02 | Fehler beim Synchronisieren (`sync_all`) | Ohne Speicher-Schnittstelle gibt es am alten Stand keinen Einspeisepunkt. Teilschreibfehler ist über `ulimit -f` abgedeckt, nur unter Unix | erledigt im Schnitt Persistenzbasis: Einspeisepunkt im Journal, `docs/befunde/journal.md` |
 | 1·R06 | Währung, Herkunft und Alter eines Kurses | Der alte Kern kennt diese Angaben nicht | erledigt im Schnitt Kern: drei Tests, `docs/befunde/kern.md` |
 | 1·F04 | Kaufgrenze und Bestandsgrenze je Bereich | Bereiche fehlen; die Toleranz (2 Punkte) steht seit dem Schnitt Regelwerk in den Grenzen | Bereiche statt Töpfe |
 | 2·A04 | Ausgabenbudget, Ausstiegsreserve, Gebührenquote als eigene Prüfung | Budget und Gebührenquote gibt es im alten Regelwerk nicht | Kostenbuch (Stufe 3, 2·A05) |
@@ -110,5 +110,5 @@ Diese Tests lassen sich nicht sinnvoll gegen den alten Stand schreiben, weil das
 | --- | --- |
 | Kodex | 1·G01–G06, 1·R03, 1·R08, 2·A11 – Tests und Nachweis in `docs/befunde/kodex.md` |
 | Kern und Regelwerk aus der Festschreibung | 2·A07, 2·A12 (Freigabebindung), 6·W1 |
-| Persistenzbasis | 1·R01, 2·A08, 3·P4, 4·B02, 5·B02 |
+| Persistenzbasis | 1·R01, 2·A08, 3·P4, 4·B02, 5·B02 – Tests und Nachweis in `docs/befunde/journal.md` |
 | Export | 1·E01, 1·E02, 1·E03, 1·R04, 1·R05, 2·W3 |

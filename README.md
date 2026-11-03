@@ -34,11 +34,12 @@ Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 |---|---|
 | `depot_kern` | Geld in Cent (geprüfte Rechnung), ISIN mit Prüfziffer, Töpfe, Kurse, Vorschläge, Grenzen mit Fingerabdruck, Positivliste |
 | `depot_regelwerk` | Reine Funktion ohne Netz, Dateien oder Uhr: prüft Vorschläge und erzeugt `GenehmigterAuftrag` (nur hier erzeugbar). Dazu Kursprüfung und Wächter |
-| `depot_ki` | Harter KI-Budgetwächter: Kassenbuch auf der Platte, Erlaubnis nur nach Buchung der Höchstkosten |
+| `depot_journal` | Das Journal als einzige dauerhafte Datei: Hash-Kette mit Anhangsvermerk, geprüfte Wiederherstellung; Papierdepot, Aufträge, Beobachtungen und KI-Buchungen |
+| `depot_ki` | Harter KI-Budgetwächter: Kassenbuch im Journal, Erlaubnis nur nach Buchung der Höchstkosten |
 | `depot_lauf` | Der Ein-Befehl-Einstieg `run.cmd` mit Assistenten-Export nach jedem Lauf |
 | `depot_kodex` | Das Gate: Deklaration gegen realen Diff, Pfadrollen, Festschreibung, Quellscan, Essenz, Format, Clippy, Tests |
 
-Geplant: Backtest, Berater-Anbindung (Claude, GPT), Journal mit Steuer-Export, Broker-Adapter (Interactive Brokers, Cash-Konto), Papierhandel.
+Geplant: Backtest, Berater-Anbindung (Claude, GPT), Steuer-Export aus dem Journal, Broker-Adapter (Interactive Brokers, Cash-Konto), Papierhandel.
 
 ## Essenz und Kodex
 

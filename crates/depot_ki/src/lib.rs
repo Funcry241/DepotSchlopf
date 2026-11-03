@@ -1,8 +1,8 @@
 //! DepotSchlopf – harter Budgetwaechter fuer Dachs (Claude) und Maus (GPT).
 //!
 //! Kein KI-Aufruf ohne `AufrufErlaubnis`. Eine Erlaubnis entsteht nur, wenn
-//! 1. das Kassenbuch eingerichtet, vom Betriebssystem exklusiv gesperrt und samt Anker und
-//!    ganzer Historie geprueft ist,
+//! 1. das Journal eingerichtet, vom Betriebssystem exklusiv gesperrt und geprueft ist und das
+//!    Kassenbuch darin samt ganzer Historie,
 //! 2. alle Grenzen fuer Zyklus, Tag, Monat und Jahr eingehalten sind; Grenzen und Deckel
 //!    stammen allein aus der Festschreibung und sind beim Oeffnen gebunden (R19),
 //! 3. die Hoechstkosten des Aufrufs vorab gebucht und auf die Platte geschrieben sind.
@@ -28,4 +28,4 @@ pub mod budget;
 pub mod kassenbuch;
 
 pub use budget::{AufrufErlaubnis, Buchung, Datum, KiDeckel, KiGrenzen, Preise, Sperre, pruefe};
-pub use kassenbuch::{Kassenbuch, anker_fuer};
+pub use kassenbuch::{Kassenbuch, grenzabdruck};

@@ -159,10 +159,8 @@ pub enum Sperre {
     /// Ein frueherer Zyklus soll erneut fragen.
     ZyklusRueckwaerts,
     Rechenfehler,
-    /// Kassenbuch belegt: ein anderer Lauf hat es offen.
-    KassenbuchBelegt,
-    /// Kassenbuch fehlt, ist unstimmig, nicht les- oder schreibbar oder nach einem Fehler
-    /// gesperrt. Halt bis zum geprueften Wiederanlauf (R25, R29).
+    /// Kassenbuch oder Journal unstimmig, nicht schreibbar oder nach einem Fehler gesperrt.
+    /// Halt bis zum geprueften Wiederanlauf (R25, R29).
     Kassenbuch(String),
 }
 

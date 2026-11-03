@@ -4,6 +4,10 @@ Stufe 2. Wolfgang und Maus haben am 03.11.2026 entschieden: zuerst den vorhanden
 
 Der Schnitt schließt technisch 1·K01 bis 1·K06 und 1·R02, entlang R19, R20, R24, R25, R29 und R38. Ein grüner Test schließt keinen Befund. „Technisch geschlossen“ setzt erst die unabhängige Prüfung durch Maus.
 
+## Nachtrag Persistenzbasis
+
+Seit dem Schnitt Persistenzbasis steht das Kassenbuch im Journal (`docs/befunde/journal.md`). Jede Buchung ist ein Eintrag; Anker, eigene Datei, Sperre und Zwischendatei des Kassenbuchs entfallen und leistet das Journal. Die Tests zu 1·K06, K12-01, K12-02 und den Speicherfehlern aus 1·R02 stehen deshalb in `crates/depot_journal`. Die Abschnitte unten beschreiben den Stand von PR #12. Die dort genannten Grenzen „Anker neben dem Kassenbuch“, „Abgebrochener Schreibvorgang“ und „Grenzen ändern sich“ sind mit der Persistenzbasis behandelt.
+
 ## Fassung 2 nach Maus' Prüfung von `7d887ed` (K12-01, K12-02)
 
 Maus' Gegenproben stehen als Tests in `crates/depot_ki/tests/befunde.rs`, am Stand `7d887ed` rot (eigener Commit `a94ae68`). Der K12-01-Test prüft sechs Fälle: symbolischer und harter Link als Zwischendatei, jeweils bei Einrichtung, Reservierung und Bestätigung beim Öffnen. Behoben ist allgemein und ohne neue Prüfschicht:

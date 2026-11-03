@@ -216,7 +216,7 @@ Die Kosten werden nach dem Aufruf aus der Antwort gezählt; stürzt das Programm
 
 **Lösungsraum**
 
-Kassenbuch exklusiv öffnen, Grenzen prüfen, Zeile schreiben und `sync_all`, dann erst die Erlaubnis. Zählen nach Zyklus, Tag, Monat und Jahr, je KI getrennt.
+Journal exklusiv öffnen, Kassenbuch daraus lesen, Grenzen prüfen, Buchung als Eintrag anhängen und synchronisieren, dann erst die Erlaubnis. Zählen nach Zyklus, Tag, Monat und Jahr, je KI getrennt.
 
 **Vor der Änderung prüfen**
 
@@ -260,7 +260,7 @@ Clippy `float_arithmetic` und `arithmetic_side_effects` als harte Lints; `crates
 
 **Aussage**
 
-Was nicht auf der Platte steht, ist nicht geschehen. Erfolg wird erst gemeldet, wenn Journal oder Kassenbuch geschrieben und synchronisiert sind.
+Was nicht auf der Platte steht, ist nicht geschehen. Erfolg wird erst gemeldet, wenn der Eintrag im Journal geschrieben, synchronisiert und im Anhangsvermerk bestätigt ist.
 
 **Warum**
 
@@ -272,7 +272,7 @@ Zähler nur im Speicher; nach dem Neustart beginnt alles bei null.
 
 **Lösungsraum**
 
-Nur anhängen, `sync_all`, beim Öffnen jede Zeile streng lesen. Eine unlesbare Zeile sperrt alles.
+Nur anhängen: Plan vermerken, Zeile synchronisieren, Stand vorrücken. Beim Öffnen die ganze Kette streng lesen. Gekürzt wird nur ein vermerkter, unvollständiger Anhang nach der Quarantäne; alles andere sperrt.
 
 **Vor der Änderung prüfen**
 
@@ -280,7 +280,7 @@ Was passiert, wenn das Programm genau nach meiner Zeile abstürzt?
 
 **Harter Bezug**
 
-Test `neustart_setzt_nichts_zurueck` und `kaputtes_kassenbuch_sperrt`.
+Test `neustart_setzt_nichts_zurueck` und `kaputtes_kassenbuch_sperrt`; `crates/depot_journal/src/datei.rs` mit Tests in `crates/depot_journal/tests/befunde.rs`.
 
 ---
 

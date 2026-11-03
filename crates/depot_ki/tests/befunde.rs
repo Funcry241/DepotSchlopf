@@ -218,7 +218,10 @@ fn befund_1_k04_geloeschtes_kassenbuch_fuehrt_zu_halt() -> Result<(), String> {
         return Err("nach dem Loeschen beginnt das Budget bei null".into());
     }
     // Auch ohne Vermerk richtet das Oeffnen nichts neu ein; das tut nur `einrichten`.
-    vorbedingung(fs::remove_file(p.with_extension("vermerk")), "Vermerk loeschen")?;
+    vorbedingung(
+        fs::remove_file(p.with_extension("vermerk")),
+        "Vermerk loeschen",
+    )?;
     match buchungen_in(&p) {
         Err(_) if !p.exists() => Ok(()),
         anders => Err(format!(
@@ -235,7 +238,9 @@ fn befund_1_k04_geleertes_kassenbuch_fuehrt_zu_halt() -> Result<(), String> {
     vorbedingung(fs::write(&p, ""), "Journal leeren")?;
     match buchungen_in(&p) {
         Err(_) => Ok(()),
-        Ok(n) => Err(format!("nach dem Leeren beginnt das Budget bei {n} Buchungen")),
+        Ok(n) => Err(format!(
+            "nach dem Leeren beginnt das Budget bei {n} Buchungen"
+        )),
     }
 }
 
@@ -252,7 +257,9 @@ fn befund_1_k04_gekuerztes_kassenbuch_fuehrt_zu_halt() -> Result<(), String> {
     vorbedingung(fs::write(&p, erste), "Journal kuerzen")?;
     match buchungen_in(&p) {
         Err(_) => Ok(()),
-        Ok(n) => Err(format!("nach dem Kuerzen auf {n} Buchungen ist wieder Budget frei")),
+        Ok(n) => Err(format!(
+            "nach dem Kuerzen auf {n} Buchungen ist wieder Budget frei"
+        )),
     }
 }
 
@@ -398,8 +405,15 @@ fn zulaessige_vorgeschichte() -> Result<Vec<Buchung>, String> {
         let datum = Datum::neu(2025, monat, tag)
             .ok_or_else(|| format!("Vorbedingung: Datum {tag}.{monat}.2025"))?;
         for _ in 0..2 {
-            let reserviert = pruefe(&grenzen, &deckel, &buchungen, BeraterId::Maus, datum, zyklus)
-                .map_err(|e| format!("Vorbedingung: Vorgeschichte unzulaessig: {e:?}"))?;
+            let reserviert = pruefe(
+                &grenzen,
+                &deckel,
+                &buchungen,
+                BeraterId::Maus,
+                datum,
+                zyklus,
+            )
+            .map_err(|e| format!("Vorbedingung: Vorgeschichte unzulaessig: {e:?}"))?;
             buchungen.push(Buchung {
                 berater: BeraterId::Maus,
                 datum,
@@ -427,7 +441,10 @@ fn befund_1_r02_teilschreibfehler_sperrt_das_kassenbuch() -> Result<(), String> 
     let vor_buchungen = zulaessige_vorgeschichte()?;
     let mut eintraege = huelle(&vor_buchungen);
     let ohne = inhalt_fuer(
-        &eintraege.iter().map(|(a, t)| (*a, t.as_str())).collect::<Vec<_>>(),
+        &eintraege
+            .iter()
+            .map(|(a, t)| (*a, t.as_str()))
+            .collect::<Vec<_>>(),
     )
     .len();
     // Eine neue Zeile von Dachs ist rund 90 Byte lang; die Vorgeschichte endet 10 Byte vor
@@ -436,7 +453,13 @@ fn befund_1_r02_teilschreibfehler_sperrt_das_kassenbuch() -> Result<(), String> 
     for k in 1..GRENZE {
         let mut probe = eintraege.clone();
         probe.push((Art::Beobachtung, format!("2025-03-01;{}", "x".repeat(k))));
-        let n = inhalt_fuer(&probe.iter().map(|(a, t)| (*a, t.as_str())).collect::<Vec<_>>()).len();
+        let n = inhalt_fuer(
+            &probe
+                .iter()
+                .map(|(a, t)| (*a, t.as_str()))
+                .collect::<Vec<_>>(),
+        )
+        .len();
         if (GRENZE - 12..GRENZE - 8).contains(&n) {
             fuellung = Some(probe);
             break;

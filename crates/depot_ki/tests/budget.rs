@@ -55,7 +55,11 @@ fn kasse(j: &mut Journal) -> Kassenbuch<'_> {
 fn schreib(p: &Path, eintraege: &[(Art, &str)]) {
     let inhalt = inhalt_fuer(eintraege);
     fs::write(p, &inhalt).ok();
-    fs::write(p.with_extension("vermerk"), vermerk_fuer(&inhalt, 0).unwrap_or_default()).ok();
+    fs::write(
+        p.with_extension("vermerk"),
+        vermerk_fuer(&inhalt, 0).unwrap_or_default(),
+    )
+    .ok();
 }
 
 const DACHS: BeraterId = BeraterId::Dachs;
@@ -128,7 +132,7 @@ fn neustart_setzt_nichts_zurueck() {
     let p = neuer_pfad();
     {
         let mut j = journal(&p);
-    let mut k = kasse(&mut j);
+        let mut k = kasse(&mut j);
         assert!(k.reserviere(DACHS, tag(3), 5).is_ok());
         assert!(k.reserviere(DACHS, tag(3), 5).is_ok());
     }
@@ -148,11 +152,35 @@ fn neustart_setzt_nichts_zurueck() {
 fn kaputtes_kassenbuch_sperrt() {
     let abdruck = grenzabdruck();
     for (fall, eintraege) in [
-        ("Muell", vec![(Art::KiGrenzen, abdruck.as_str()), (Art::Ki, "Muell")]),
-        ("negativ", vec![(Art::KiGrenzen, abdruck.as_str()), (Art::Ki, "Dachs;2026-11-01;1;-500")]),
-        ("Fuchs", vec![(Art::KiGrenzen, abdruck.as_str()), (Art::Ki, "Fuchs;2026-11-01;1;48")]),
-        ("nicht kanonisch", vec![(Art::KiGrenzen, abdruck.as_str()), (Art::Ki, "Dachs;2026-11-01;01;48")]),
-        ("ohne Grenzabdruck", vec![(Art::Ki, "Dachs;2026-11-01;1;48")]),
+        (
+            "Muell",
+            vec![(Art::KiGrenzen, abdruck.as_str()), (Art::Ki, "Muell")],
+        ),
+        (
+            "negativ",
+            vec![
+                (Art::KiGrenzen, abdruck.as_str()),
+                (Art::Ki, "Dachs;2026-11-01;1;-500"),
+            ],
+        ),
+        (
+            "Fuchs",
+            vec![
+                (Art::KiGrenzen, abdruck.as_str()),
+                (Art::Ki, "Fuchs;2026-11-01;1;48"),
+            ],
+        ),
+        (
+            "nicht kanonisch",
+            vec![
+                (Art::KiGrenzen, abdruck.as_str()),
+                (Art::Ki, "Dachs;2026-11-01;01;48"),
+            ],
+        ),
+        (
+            "ohne Grenzabdruck",
+            vec![(Art::Ki, "Dachs;2026-11-01;1;48")],
+        ),
         ("Abdruck unlesbar", vec![(Art::KiGrenzen, "xyz")]),
     ] {
         let p = leerer_pfad();
@@ -217,7 +245,7 @@ fn erschoepfter_monat_bleibt_bis_zum_folgemonat_gesperrt() {
     let p = neuer_pfad();
     {
         let mut j = journal(&p);
-    let mut k = kasse(&mut j);
+        let mut k = kasse(&mut j);
         reservieren(&mut k, tag(2), 1);
         reservieren(&mut k, tag(2), 1);
         reservieren(&mut k, tag(3), 2);
@@ -259,18 +287,30 @@ fn alte_buchungen_zaehlen_nach_einer_grenzaenderung_weiter() {
     let mut j = journal(&p);
     let mut k = kasse(&mut j);
     assert_eq!(k.buchungen().len(), 4);
-    assert_eq!(k.reserviere(DACHS, tag(4), 3).err(), Some(Sperre::MonatVoll));
+    assert_eq!(
+        k.reserviere(DACHS, tag(4), 3).err(),
+        Some(Sperre::MonatVoll)
+    );
     let dezember = Datum::neu(2026, 12, 1).unwrap_or_else(|| panic!("Datum"));
     assert!(k.reserviere(DACHS, dezember, 4).is_ok());
     drop(k);
     let arten: Vec<Art> = j.eintraege().iter().map(|(a, _)| *a).collect();
     assert_eq!(arten.get(5..), Some([Art::KiGrenzen, Art::Ki].as_slice()));
-    assert_eq!(j.eintraege().get(5).map(|(_, t)| t.clone()), Some(grenzabdruck()));
+    assert_eq!(
+        j.eintraege().get(5).map(|(_, t)| t.clone()),
+        Some(grenzabdruck())
+    );
     drop(j);
     // Dieselben 30-Cent-Buchungen unter dem heutigen Abdruck: Halt.
     let q = leerer_pfad();
     let heute = grenzabdruck();
-    schreib(&q, &[(Art::KiGrenzen, heute.as_str()), (Art::Ki, "Dachs;2026-11-02;1;30")]);
+    schreib(
+        &q,
+        &[
+            (Art::KiGrenzen, heute.as_str()),
+            (Art::Ki, "Dachs;2026-11-02;1;30"),
+        ],
+    );
     let mut j = journal(&q);
     assert!(matches!(
         Kassenbuch::oeffnen(&mut j),
@@ -284,5 +324,8 @@ fn grenzabdruck_ist_stabil() {
     let a = grenzabdruck();
     assert_eq!(a, grenzabdruck());
     assert_eq!(a.len(), 64);
-    assert!(a.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+    assert!(
+        a.bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    );
 }
