@@ -77,6 +77,11 @@ versiegelt! {
         notbremse_bp: i64,
         etf_freigegeben: bool,
         gebuehren: Gebuehren,
+        /// Toleranz der Bestandsgrenze: Liegt ein Wert mehr als so viel ueber dem
+        /// Hoechstanteil, sind Zukaeufe gesperrt, und er wird abgebaut (R22).
+        bestand_toleranz_bp: i64,
+        /// Hoechstalter eines Kurses fuer Entscheidungen, Auftraege und Notbremse, in Sekunden.
+        kurs_hoechstalter_s: i64,
     }
 }
 
@@ -101,6 +106,8 @@ impl Grenzen {
                 minimum: Cent(125),
                 boersengebuehr: Cent(25),
             },
+            bestand_toleranz_bp: 200,
+            kurs_hoechstalter_s: 1_200,
         }
     }
 

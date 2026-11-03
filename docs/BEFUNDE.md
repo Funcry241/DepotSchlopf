@@ -11,7 +11,7 @@ Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher St
 
 **Zwischenstände von „offen“:** „Test grün“ heißt, dass der Umbau den roten Test grün gemacht hat und der Test ohne `ignore` im Kodex läuft; geschlossen ist der Befund erst nach der unabhängigen Prüfung. Nachweis für den Kodex in `docs/befunde/kodex.md`, für den Kern in `docs/befunde/kern.md`. „Test rot“ heißt, dass der Negativtest im Repository steht und am alten Stand fehlschlägt; er ist mit `#[ignore = "offen: …"]` markiert, bis der Umbau ihn grün macht. Nachweis und Befehle stehen in `docs/befunde/negativtests.md`. „Teilnachweis fehlt“ heißt, dass ein Teil des Befunds noch keinen Test hat; die Liste dort sagt, welcher und mit welchem Schnitt er entsteht. Ein grüner Test allein schließt nichts: „geschlossen“ setzt erst die unabhängige Prüfung.
 
-Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget) abgenommen; Kodex-Schritt umgebaut; Kodex-Schritt von Maus abgenommen (PR #7); Schnitt Kern umgebaut (1·A01, 1·F01, 1·R06, Preisteil von 1·F03); Maus' Gegenprobe K8-01 als Test übernommen und behoben, erneute Prüfung durch Maus ausstehend. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.10, Stufe 2: Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget) abgenommen; Kodex-Schritt umgebaut; Kodex-Schritt von Maus abgenommen (PR #7); Schnitt Kern umgebaut (1·A01, 1·F01, 1·R06, Preisteil von 1·F03); Maus' Gegenprobe K8-01 als Test übernommen und behoben, von Maus abgenommen (PR #8); Schnitt Regelwerk umgebaut (1·F02, 1·F04–F06, 1·F08, 1·F09, 2·A04, 1·T01, Höchstalter aus 1·R06); Maus' Gegenprogramm K9-01 bis K9-03 als Tests übernommen und behoben, erneute Prüfung durch Maus und Grenzfreigabe ausstehend. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -24,14 +24,14 @@ Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Rege
 | 1·G05 | Essenz D01–D17 kann verschwinden | R26, festes Register | gelöschte oder umbenannte Regel rot | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·G06 | Unicode-Dateinamen falsch, fehlen im Export | R24, NUL-getrennte Pfadlisten | Datei mit Umlaut und Leerzeichen wird geprüft und exportiert | Stufe 2 | berücksichtigt | offen, Kodex-Test grün, Teilnachweis Export fehlt |
 | 1·F01 | freie Laufzeitgrenzen umgehen die Festschreibung | R19, `FreigegebeneKonfiguration` | gelockerte Grenze außerhalb von Tests lässt sich nicht bauen | Stufe 2 | berücksichtigt | offen, Test grün |
-| 1·F02 | Vorschlag des falschen Beraters angenommen | R20, Vorschlag trägt Bereich und Berater | Vorschlag für fremden Bereich wird abgelehnt | Stufe 2 | berücksichtigt | offen, Test rot |
+| 1·F02 | Vorschlag des falschen Beraters angenommen | R20, Vorschlag trägt Bereich und Berater | Vorschlag für fremden Bereich wird abgelehnt | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·F03 | Notaufträge mit Nullkurs möglich | R20, geprüfte Kurstypen; R36 Kursprüfung auch bei Zwang | Nullkurs erzeugt keinen Auftrag, sondern Halt | Stufe 2 | berücksichtigt | offen, Test grün, Teilnachweis fehlt |
-| 1·F04 | Anteils- und Anzahlgrenze gilt nicht für den Bestand | R22, Ziel-, Kauf- und Bestandsgrenze | Marktbewegung über Toleranz sperrt Zukauf und erzeugt Abbaupflicht | Stufe 2 | berücksichtigt | offen, Test rot, Teilnachweis fehlt |
-| 1·F05 | Umschlaggrenze mit Schlusskurs statt Volumen | R21, Prüfbasis am Limit | Umschlag am Limit über der Grenze wird gekürzt | Stufe 2 | berücksichtigt | offen, Test rot |
-| 1·F06 | Teilverkauf unter Mindestorder am Limit | R21, R36 Matrix (Mindestorder, Gesamtbestand) | Teilverkauf unter Mindestorder am Limit abgelehnt, Gesamtverkauf erlaubt | Stufe 2 | berücksichtigt | offen, Test rot |
+| 1·F04 | Anteils- und Anzahlgrenze gilt nicht für den Bestand | R22, Ziel-, Kauf- und Bestandsgrenze | Marktbewegung über Toleranz sperrt Zukauf und erzeugt Abbaupflicht | Stufe 2 | berücksichtigt | offen, Test grün, Teilnachweis fehlt (Bereiche) |
+| 1·F05 | Umschlaggrenze mit Schlusskurs statt Volumen | R21, Prüfbasis am Limit | Umschlag am Limit über der Grenze wird gekürzt | Stufe 2 | berücksichtigt | offen, Test grün |
+| 1·F06 | Teilverkauf unter Mindestorder am Limit | R21, R36 Matrix (Mindestorder, Gesamtbestand) | Teilverkauf unter Mindestorder am Limit abgelehnt, Gesamtverkauf erlaubt | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·F07 | „verkauft“ heißt nicht vollständig verkauft | R23, R37 Zustände | Journal meldet nur den Endzustand laut Broker | Stufe 3 | berücksichtigt | offen |
-| 1·F08 | fehlender Vortagskurs still akzeptiert | R20, eigener Zustand „kein Vergleichskurs“ | fehlender Vortag ist kein bestandener Sprungtest | Stufe 2 | berücksichtigt | offen, Test rot |
-| 1·F09 | Auftragskennungen kollidieren | R24, zentrale Vergabe aus dem Journal | Notbremse und Umschichtung im selben Lauf vergeben verschiedene Kennungen | Stufe 2 | berücksichtigt | offen, Test rot |
+| 1·F08 | fehlender Vortagskurs still akzeptiert | R20, eigener Zustand „kein Vergleichskurs“ | fehlender Vortag ist kein bestandener Sprungtest | Stufe 2 | berücksichtigt | offen, Test grün |
+| 1·F09 | Auftragskennungen kollidieren | R24, zentrale Vergabe aus dem Journal | Notbremse und Umschichtung im selben Lauf vergeben verschiedene Kennungen | Stufe 2 | berücksichtigt | offen, Test grün |
 | 1·K01 | KI-Grenzen als freie Argumente | R19, gebundene Budgetkonfiguration | gelockerte KI-Grenze lässt sich nicht bauen | Stufe 2 | berücksichtigt | offen, Test rot |
 | 1·K02 | negative Preise, negative Reservierung | R20 | negativer Preis wird beim Laden abgelehnt | Stufe 2 | berücksichtigt | offen, Test rot |
 | 1·K03 | ungültige Kalenderdaten | R20 | 31.02. wird abgelehnt | Stufe 2 | berücksichtigt | offen, Test rot |
@@ -42,7 +42,7 @@ Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Rege
 | 1·E02 | Link exportiert fremde Inhalte | R24, R28 | Link im Projekt wird nicht gelesen | Stufe 2 | berücksichtigt | offen |
 | 1·E03 | Festschreibungslauf meldet nie ausgeführte Prüfung | R27 | schreibender Befehl meldet nie „Gate offen“ | Stufe 2 | berücksichtigt | offen |
 | 1·A01 | Geldoperationen sättigen still | R13, geprüfte Rechnung, Überlauf führt zu Halt | Überlauf ergibt Fehler, keinen gekappten Wert | Stufe 2 | berücksichtigt | offen, Test grün |
-| 1·T01 | Zufallstest beweist die Grenzen nicht | R17, R27 Testnamen versprechen nur, was sie prüfen | gezielte Grenzfälle je harter Grenze | Stufe 2 | berücksichtigt | offen, Test rot |
+| 1·T01 | Zufallstest beweist die Grenzen nicht | R17, R27 Testnamen versprechen nur, was sie prüfen | gezielte Grenzfälle je harter Grenze | Stufe 2 | berücksichtigt | offen, Test grün |
 
 **Gesonderte Risiken aus Prüfung 1:**
 
@@ -65,7 +65,7 @@ Stand: 01.11.2026, Fassung 4.9, Stufe 2: Schritt 1 (Negativtests für Kern, Rege
 | 2·A01 | Verlustgrenzen als Garantie formuliert; Stopptyp und Limitpflicht im Widerspruch | R33, R34; Kap. 5, 8, 10, 14; Schutzstopp als bewusste Ausnahme, offene Wahl in Kap. 21 | Kurslücke durch den Stopp: Bericht nennt Auslöser und tatsächlichen Verlust; zwingender Ausstieg mit Rest nach der Schrittgrenze | Stufe 6 | berücksichtigt | offen |
 | 2·A02 | Schutz ab der ersten Sekunde bei Teilausführung unbelegt | R35; Kap. 10 Schutzfrist | 10 Stück beauftragt, 3 gefüllt, Verbindung weg: Zustand „Schutz ungewiss“, Halt und Nachricht; nach Wiederverbindung Abgleich, dann bestätigter Stopp über 3 Stück oder Zwangsverkauf (siehe 3·P2) | Stufe 6 am Papierkonto | berücksichtigt | offen |
 | 2·A03 | Stopps blockieren reguläre Ausstiege | Kap. 9 Gruppe aus Stopp und Verkauf | Stopp löst während des Verkaufs aus: höchstens der Bestand wird verkauft | Stufe 6 | berücksichtigt | offen |
-| 2·A04 | zwingende Ausstiege durch freiwillige Regeln blockierbar | R36; Kap. 8 Matrix | Restbestand unter Mindestorder und über Gebührenquote wird zwingend verkauft; Halt sperrt ihn nicht | Stufe 2 | berücksichtigt | offen, Test rot, Teilnachweis fehlt |
+| 2·A04 | zwingende Ausstiege durch freiwillige Regeln blockierbar | R36; Kap. 8 Matrix | Restbestand unter Mindestorder und über Gebührenquote wird zwingend verkauft; Halt sperrt ihn nicht | Stufe 2 | berücksichtigt | offen, Test grün, Teilnachweis fehlt (Kostenbuch) |
 | 2·A05 | Kostendeckel gegen Zwangsaufträge und tatsächliche Kosten | Kap. 5 Budget, Reservierung, Ausstiegsreserve, Laufzeit-Kostenbuch | ausgeschöpftes Budget blockiert keinen zwingenden Ausstieg; Überschreitung stoppt freiwillige Aufträge | Stufe 3 | berücksichtigt | offen |
 | 2·A06 | zwölf Papiertrades passen nicht zum Kostenrahmen | Kap. 18: Beobachtung, Evidenz, Ergebnis getrennt; höchstens 18 Monate, sonst „nicht nachgewiesen“ | Auswertung mit 11 Trades nach 18 Monaten ergibt „nicht nachgewiesen“ | Stufe 7 | berücksichtigt | offen |
 | 2·A07 | „Sicher ohne Risiko“ und 1-%-Grenze keine Garantie | Kap. 1, 5, 18: Ziel statt Garantie, Melde- und Zukaufsregel | Unterschreiten der Schwelle sperrt nur Zukäufe und meldet | Stufe 2 | berücksichtigt | offen |
