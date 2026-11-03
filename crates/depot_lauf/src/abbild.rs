@@ -124,10 +124,10 @@ pub fn gepruefter_lauf(
     befehl: String,
     mut konsole: String,
     mut warnungen: Vec<String>,
-    pruefung: impl FnOnce(&mut String) -> i32,
+    pruefung: impl FnOnce(&Path, &mut String) -> i32,
 ) -> Lauf {
     let vorher = aufnehmen(wurzel);
-    let exit = pruefung(&mut konsole);
+    let exit = pruefung(wurzel, &mut konsole);
     let nachher = aufnehmen(wurzel);
     let probleme = match (&vorher, &nachher) {
         (Ok(Some(v)), Ok(Some(n))) => vergleiche(v, n),

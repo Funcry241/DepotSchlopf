@@ -117,7 +117,7 @@ fn main() -> ExitCode {
     }
 
     // Der Stand vor und nach dem Gate wird festgehalten; der Export nimmt den davor (1·R04).
-    let lauf = abbild::gepruefter_lauf(&wurzel, befehl, konsole, warnungen, |k| {
+    let lauf = abbild::gepruefter_lauf(&wurzel, befehl, konsole, warnungen, |_, k| {
         kodex(k, &kodex_args)
     });
     match export::schreibe(&wurzel, &lauf) {

@@ -768,7 +768,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------------------------
-    // 1·R04 – der Export ist byte-gleich mit dem geprueften Stand (R28)
+    // 1·R04, K14-01 – Gate und Export nehmen denselben festgehaltenen Stand (R28)
     // -----------------------------------------------------------------------------------------
 
     fn exportiert(r: &Path, l: &Lauf) -> Result<Vec<u8>, String> {
@@ -784,85 +784,123 @@ mod tests {
         Ok(r)
     }
 
-    /// Wird der Index waehrend der Pruefung geaendert, ist der Lauf gescheitert, und der
-    /// Export enthaelt den Stand vor der Pruefung, nicht den neuen.
-    #[test]
-    fn befund_1_r04_aenderung_waehrend_der_pruefung_wird_erkannt() -> Result<(), String> {
-        let r = sauberes_repo(b"STAND_GEPRUEFT\n")?;
-        let mut fehler = Ok(());
-        let l =
-            crate::abbild::gepruefter_lauf(&r, "alles".into(), String::new(), Vec::new(), |_| {
-                fehler = schreib(&r, "README.md", b"STAND_NACHHER\n")
-                    .and_then(|()| git_muss(&r, &["add", "README.md"]));
-                0
-            });
-        fehler?;
-        let bytes = exportiert(&r, &l)?;
-        let mut offen = Vec::new();
-        if l.erfolgreich() {
-            offen.push("Lauf gilt trotz Aenderung als erfolgreich".to_string());
-        }
-        if !l.warnungen.iter().any(|w| w.contains("README.md")) {
-            offen.push(format!("Warnung nennt die Datei nicht: {:?}", l.warnungen));
-        }
-        if enthaelt(&bytes, b"STAND_NACHHER") || !enthaelt(&bytes, b"STAND_GEPRUEFT") {
-            offen.push("Export enthaelt nicht den Stand vor der Pruefung".to_string());
-        }
-        if !enthaelt(&bytes, b"\"quellstand_geprueft\": false") {
-            offen.push("Export kennzeichnet den Quellstand nicht als ungeprueft".to_string());
-        }
-        assert!(offen.is_empty(), "{offen:#?}");
-        Ok(())
+    /// Was das Gate in einem Fall zu sehen bekam: `README.md` und ob `src/neu.rs` da war.
+    #[derive(Debug, Default)]
+    struct Sicht {
+        readme: Option<Vec<u8>>,
+        neu: bool,
     }
 
-    /// Das Gate prueft den Arbeitsbaum, der Export nimmt den Index. Weichen beide ab, ist
-    /// der exportierte Stand nicht der gepruefte: geaenderte und neue, nicht ignorierte
-    /// Dateien lassen den Lauf scheitern, vor wie nach der Pruefung.
+    /// K14-01: Gate und Export pruefen und exportieren denselben festgehaltenen Stand, Byte fuer
+    /// Byte, auch wenn Git eine Abweichung des Arbeitsbaums nicht meldet (`assume-unchanged`,
+    /// `core.autocrlf`). Was nur im Arbeitsbaum liegt, sieht weder das Gate noch der Export;
+    /// eine Aenderung am Index waehrend des Gates erreicht keinen von beiden.
     #[test]
-    fn befund_1_r04_arbeitsbaum_muss_dem_index_gleichen() -> Result<(), String> {
+    fn befund_k14_01_gate_und_export_sehen_dieselben_bytes() -> Result<(), String> {
+        let index = b"INDEX_STAND\nZEILE_ZWEI\n".to_vec();
         let mut offen = Vec::new();
-        for (fall, vorher) in [
-            ("geaendert", true),
-            ("neu", true),
-            ("geaendert", false),
-            ("neu", false),
+        for fall in [
+            "assume-unchanged",
+            "autocrlf",
+            "nicht vorgemerkt",
+            "neu und unverfolgt",
+            "Index waehrend des Gates",
         ] {
-            let r = sauberes_repo(b"INDEX\n")?;
-            let aendern = |r: &Path| match fall {
-                "geaendert" => schreib(r, "README.md", b"ARBEITSBAUM\n"),
-                _ => schreib(r, "src/neu.rs", b"fn neu() {}\n"),
-            };
-            if vorher {
-                aendern(&r)?;
+            let r = sauberes_repo(&index)?;
+            match fall {
+                "assume-unchanged" => {
+                    git_muss(&r, &["update-index", "--assume-unchanged", "README.md"])?;
+                    schreib(
+                        &r,
+                        "README.md",
+                        b"INDEX_STAND\nZEILE_ZWEI\nNUR_ARBEITSBAUM\n",
+                    )?;
+                }
+                "autocrlf" => {
+                    git_muss(&r, &["config", "core.autocrlf", "true"])?;
+                    schreib(&r, "README.md", b"INDEX_STAND\r\nZEILE_ZWEI\r\n")?;
+                }
+                "nicht vorgemerkt" => {
+                    schreib(
+                        &r,
+                        "README.md",
+                        b"INDEX_STAND\nZEILE_ZWEI\nNUR_ARBEITSBAUM\n",
+                    )?;
+                }
+                "neu und unverfolgt" => schreib(&r, "src/neu.rs", b"// NUR_ARBEITSBAUM\n")?,
+                _ => {}
             }
+            let mut sicht = Sicht::default();
             let mut fehler = Ok(());
             let l = crate::abbild::gepruefter_lauf(
                 &r,
                 "alles".into(),
                 String::new(),
                 Vec::new(),
-                |_| {
-                    if !vorher {
-                        fehler = aendern(&r);
+                |stand, _| {
+                    sicht.readme = fs::read(stand.join("README.md")).ok();
+                    sicht.neu = stand.join("src/neu.rs").exists();
+                    if fall == "Index waehrend des Gates" {
+                        fehler = schreib(&r, "README.md", b"NUR_ARBEITSBAUM\n")
+                            .and_then(|()| git_muss(&r, &["add", "README.md"]));
                     }
                     0
                 },
             );
             fehler?;
-            let wann = if vorher { "vor" } else { "waehrend" };
-            if l.erfolgreich() {
-                offen.push(format!("{fall} {wann} der Pruefung: Lauf erfolgreich"));
-            }
-            let pfad = if fall == "neu" {
-                "src/neu.rs"
-            } else {
-                "README.md"
-            };
-            if !l.warnungen.iter().any(|w| w.contains(pfad)) {
+            let bytes = exportiert(&r, &l)?;
+            if sicht.readme.as_deref() != Some(index.as_slice()) {
                 offen.push(format!(
-                    "{fall} {wann}: Warnung ohne {pfad}: {:?}",
+                    "{fall}: Gate sah {:?}",
+                    sicht
+                        .readme
+                        .map(|b| String::from_utf8_lossy(&b).into_owned())
+                ));
+            }
+            if sicht.neu {
+                offen.push(format!("{fall}: Gate sah die unverfolgte Datei"));
+            }
+            if !enthaelt(&bytes, &index) || enthaelt(&bytes, b"NUR_ARBEITSBAUM") {
+                offen.push(format!(
+                    "{fall}: Export enthaelt nicht genau den Stand des Gates"
+                ));
+            }
+            if !l.erfolgreich() || !enthaelt(&bytes, b"\"quellstand_geprueft\": true") {
+                offen.push(format!(
+                    "{fall}: gleicher Stand gilt nicht als geprueft: {:?}",
                     l.warnungen
                 ));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Wird der festgehaltene Stand selbst waehrend des Gates geaendert oder ergaenzt, ist der
+    /// Lauf gescheitert, und der Export nennt den Quellstand ungeprueft.
+    #[test]
+    fn befund_k14_01_aenderung_am_festgehaltenen_stand_wird_erkannt() -> Result<(), String> {
+        let mut offen = Vec::new();
+        for (fall, pfad) in [("geaendert", "README.md"), ("neu", "neu.txt")] {
+            let r = sauberes_repo(b"FEST\n")?;
+            let mut fehler = Ok(());
+            let l = crate::abbild::gepruefter_lauf(
+                &r,
+                "alles".into(),
+                String::new(),
+                Vec::new(),
+                |stand, _| {
+                    fehler = schreib(stand, pfad, b"FREMD\n");
+                    0
+                },
+            );
+            fehler?;
+            let bytes = exportiert(&r, &l)?;
+            if l.erfolgreich() || !enthaelt(&bytes, b"\"quellstand_geprueft\": false") {
+                offen.push(format!("{fall}: nicht erkannt"));
+            }
+            if !l.warnungen.iter().any(|w| w.contains(pfad)) {
+                offen.push(format!("{fall}: Warnung ohne {pfad}: {:?}", l.warnungen));
             }
         }
         assert!(offen.is_empty(), "{offen:#?}");
@@ -875,7 +913,7 @@ mod tests {
     fn befund_1_r04_unveraenderter_stand_gilt_als_geprueft() -> Result<(), String> {
         let r = sauberes_repo(b"UNVERAENDERT\n")?;
         let l =
-            crate::abbild::gepruefter_lauf(&r, "alles".into(), String::new(), Vec::new(), |_| 0);
+            crate::abbild::gepruefter_lauf(&r, "alles".into(), String::new(), Vec::new(), |_, _| 0);
         let bytes = exportiert(&r, &l)?;
         assert!(l.erfolgreich(), "{:?}", l.warnungen);
         assert!(enthaelt(&bytes, b"UNVERAENDERT"));
