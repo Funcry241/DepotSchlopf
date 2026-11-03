@@ -14,6 +14,7 @@
 //! 4. Quellscan: Code syntaktisch, Manifeste semantisch. Harte Lints im Kopf jedes
 //!    Produktiv-Targets auf `forbid`; keine Ausnahme dafuer, auch nicht hinter `cfg_attr`;
 //!    Kern und Regelwerk rein; kein Netz ohne Erlaubnis; Lesefehler und Links sind Fehler.
+//!    Keine Datei des Projekts enthaelt ein Geheimnismuster (R28).
 //! 5. Essenz-Kaltstart: Die Essenz entspricht ihrem festen Register und bleibt aufloesbar.
 //! 6. (mit `--voll`) Format, Clippy mit `-D warnings`, alle Tests.
 
@@ -34,6 +35,7 @@ pub mod deklaration;
 pub mod essenz;
 pub mod festschreibung;
 pub mod freigabe;
+pub mod geheimnis;
 pub mod git;
 pub mod lexer;
 pub mod manifest;
@@ -95,6 +97,7 @@ pub fn pruefe(wurzel: &Path, basis: &str) -> Vec<String> {
     ));
     fehler.extend(freigabe::pruefe(wurzel, &diff.pfade));
     fehler.extend(quellscan::pruefe(wurzel));
+    fehler.extend(geheimnis::pruefe(wurzel));
     fehler.extend(essenz::pruefe(wurzel));
     fehler
 }
@@ -105,6 +108,7 @@ pub fn pruefe_ohne_diff(wurzel: &Path) -> Vec<String> {
     let mut fehler =
         festschreibung::pruefe(wurzel, Klasse::Funktion, &std::collections::BTreeSet::new());
     fehler.extend(quellscan::pruefe(wurzel));
+    fehler.extend(geheimnis::pruefe(wurzel));
     fehler.extend(essenz::pruefe(wurzel));
     fehler
 }

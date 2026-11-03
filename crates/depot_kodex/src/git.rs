@@ -42,6 +42,72 @@ fn pfadliste(roh: &[u8]) -> Result<Vec<String>, String> {
         .collect()
 }
 
+/// Alle Dateien, die Git verfolgt, und alle neuen, nicht ignorierten: alles, was ein Commit
+/// mitnehmen koennte.
+///
+/// # Errors
+/// Wenn git fehlt oder der Ordner kein Repository ist.
+pub fn projektdateien(wurzel: &Path) -> Result<Vec<String>, String> {
+    pfadliste(&git(
+        wurzel,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+    )?)
+}
+
+/// Eine gewoehnliche Datei im Index: Pfad und Blob. Links und Untermodule fehlen hier.
+#[derive(Debug)]
+pub struct IndexDatei {
+    pub pfad: String,
+    pub blob: String,
+}
+
+/// Die gewoehnlichen Dateien im Index, also das, was ein Commit jetzt aufnehmen wuerde.
+///
+/// # Errors
+/// Wenn git fehlt, der Ordner kein Repository ist oder eine Zeile nicht lesbar ist.
+pub fn index_dateien(wurzel: &Path) -> Result<Vec<IndexDatei>, String> {
+    let mut aus = Vec::new();
+    for zeile in pfadliste(&git(wurzel, &["ls-files", "-z", "--stage"])?)? {
+        // "<modus> <blob> <stufe>\t<pfad>"
+        let (kopf, pfad) = zeile
+            .split_once('\t')
+            .ok_or_else(|| format!("Index-Zeile nicht lesbar: {zeile}"))?;
+        let mut teile = kopf.split(' ');
+        let (Some(modus), Some(blob)) = (teile.next(), teile.next()) else {
+            return Err(format!("Index-Zeile nicht lesbar: {zeile}"));
+        };
+        if modus == "100644" || modus == "100755" {
+            aus.push(IndexDatei {
+                pfad: pfad.to_string(),
+                blob: blob.to_string(),
+            });
+        }
+    }
+    Ok(aus)
+}
+
+/// Inhalt eines Blobs.
+///
+/// # Errors
+/// Wenn git fehlt oder der Blob unbekannt ist.
+pub fn blob(wurzel: &Path, blob: &str) -> Result<Vec<u8>, String> {
+    git(wurzel, &["cat-file", "blob", blob])
+}
+
+/// Nur die Dateien, die Git verfolgt.
+///
+/// # Errors
+/// Wenn git fehlt oder der Ordner kein Repository ist.
+pub fn verfolgte_dateien(wurzel: &Path) -> Result<Vec<String>, String> {
+    pfadliste(&git(wurzel, &["ls-files", "-z", "--cached"])?)
+}
+
 /// Merge-Base von `basis` und `HEAD`.
 ///
 /// # Errors

@@ -145,6 +145,7 @@ impl Baum {
 
     /// Setzt den Arbeitsbaum auf die Basis zurueck (auch neue Dateien).
     fn zuruecksetzen(&self) -> Result<(), String> {
+        git(&self.pfad, &["reset", "-q"])?;
         git(&self.pfad, &["checkout", "-q", "--", "."])?;
         git(&self.pfad, &["clean", "-q", "-f", "-d"])?;
         Ok(())
@@ -1212,4 +1213,197 @@ fn befund_k7_03_modul_aus_md_wird_geprueft() -> Result<(), String> {
         "pub fn audit_bad(path: &str) -> bool {\n    std::fs::metadata(path).is_ok()\n}\n",
     )?;
     abgelehnt("module_md", &baum.gate(), "audit_payload.md")
+}
+
+// ---------------------------------------------------------------------------------------------
+// 2·W3 und 1·E01 (Gate-Teil) – Geheimnisse in Dateien des Projekts (R28)
+// ---------------------------------------------------------------------------------------------
+
+/// Beispielgeheimnisse, erst zur Laufzeit zusammengesetzt: Diese Quelldatei enthaelt selbst
+/// keines und besteht deshalb ihre eigene Pruefung. Die IBAN ist das oeffentliche Lehrbuch-
+/// beispiel mit gueltiger Pruefziffer, die Schluessel sind erfunden.
+fn beispiel_iban() -> String {
+    ["DE89", "3704", "0044", "0532", "0130", "00"].concat()
+}
+
+fn beispiel_iban_mit_leerzeichen() -> String {
+    ["DE89", "3704", "0044", "0532", "0130", "00"].join(" ")
+}
+
+fn beispiel_api_schluessel() -> String {
+    ["sk", "-ant-", "api03-", "q7Rk2LmZx9Tb4VwN8yHc3PdJ6sFg1Ue5"].concat()
+}
+
+fn beispiel_privater_schluessel() -> String {
+    [
+        "-----BEGIN ",
+        "PRIVATE KEY-----\n",
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n",
+        "-----END ",
+        "PRIVATE KEY-----\n",
+    ]
+    .concat()
+}
+
+fn beispiel_zuweisung() -> String {
+    ["broker_", "pass", "word = \"", "Wz7#kP2m-Lq9vT4x", "\"\n"].concat()
+}
+
+/// Das Gate lehnt jede Datei ab, die nach einem Geheimnis aussieht, gleich welche Rolle sie hat
+/// und ob sie deklariert ist. Die Meldung nennt Datei und Zeile, nie das Geheimnis selbst.
+#[test]
+fn befund_2_w3_geheimnis_in_projektdatei_wird_abgelehnt() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    let doku = |inhalt: String| {
+        move |b: &Baum| -> Result<Vec<String>, String> {
+            b.deklariere("DokuOnly", &["docs/notiz.md"])?;
+            b.schreibe("docs/notiz.md", &format!("# Notiz\n\n{inhalt}\n"))?;
+            Ok(b.gate())
+        }
+    };
+    let api = doku(beispiel_api_schluessel());
+    let iban = doku(beispiel_iban_mit_leerzeichen());
+    let schluessel = doku(beispiel_privater_schluessel());
+    let zuweisung = doku(beispiel_zuweisung());
+    let im_code = |b: &Baum| -> Result<Vec<String>, String> {
+        funktion_mit(b, &format!("// Konto: {}\n", beispiel_iban()))
+    };
+    let im_test = |b: &Baum| -> Result<Vec<String>, String> {
+        b.deklariere("TestOnly", &["crates/depot_kern/tests/probe.rs"])?;
+        b.schreibe(
+            "crates/depot_kern/tests/probe.rs",
+            &format!(
+                "#[test]\nfn probe() {{ let _ = \"{}\"; }}\n",
+                beispiel_api_schluessel()
+            ),
+        )?;
+        Ok(b.gate())
+    };
+    let ohne_git = |b: &Baum| -> Result<Vec<String>, String> {
+        b.schreibe("docs/notiz.md", &beispiel_api_schluessel())?;
+        Ok(depot_kodex::pruefe_ohne_diff(&b.pfad))
+    };
+    alle_faelle(
+        &baum,
+        &[
+            ("API-Schluessel in der Doku", &api, "Geheimnismuster"),
+            ("IBAN mit Leerzeichen in der Doku", &iban, "Geheimnismuster"),
+            (
+                "privater Schluessel in der Doku",
+                &schluessel,
+                "Geheimnismuster",
+            ),
+            (
+                "Passwort-Zuweisung in der Doku",
+                &zuweisung,
+                "Geheimnismuster",
+            ),
+            ("IBAN im Produktivcode", &im_code, "Geheimnismuster"),
+            ("API-Schluessel in einem Test", &im_test, "Geheimnismuster"),
+            ("API-Schluessel ohne Git", &ohne_git, "Geheimnismuster"),
+        ],
+    )?;
+    // Die Meldung nennt das Geheimnis nie.
+    api(&baum).and_then(|fehler| {
+        baum.zuruecksetzen()?;
+        let geheim = beispiel_api_schluessel();
+        if fehler.iter().any(|f| f.contains(&geheim)) {
+            Err(format!("Meldung enthaelt das Geheimnis: {fehler:#?}"))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
+// K10 – Maus' Gegenproben zu PR #10
+// ---------------------------------------------------------------------------------------------
+
+/// K10-01: Ein Commit nimmt den Inhalt aus dem Index, nicht aus dem Arbeitsbaum. Das Gate prueft
+/// beide: Schluessel im Index und harmloser Text im Arbeitsbaum wird abgelehnt, ebenso die
+/// umgekehrte Lage.
+#[test]
+fn befund_k10_01_index_inhalt_wird_geprueft() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    let nur_im_index = |b: &Baum| -> Result<Vec<String>, String> {
+        b.deklariere("DokuOnly", &["docs/notiz.md"])?;
+        b.schreibe(
+            "docs/notiz.md",
+            &format!("# Notiz\n{}\n", beispiel_api_schluessel()),
+        )?;
+        git(&b.pfad, &["add", "docs/notiz.md"])?;
+        b.schreibe("docs/notiz.md", "# Notiz\nHarmloser Text\n")?;
+        Ok(b.gate())
+    };
+    let nur_im_arbeitsbaum = |b: &Baum| -> Result<Vec<String>, String> {
+        b.deklariere("DokuOnly", &["docs/notiz.md"])?;
+        b.schreibe("docs/notiz.md", "# Notiz\nHarmloser Text\n")?;
+        git(&b.pfad, &["add", "docs/notiz.md"])?;
+        b.schreibe(
+            "docs/notiz.md",
+            &format!("# Notiz\n{}\n", beispiel_api_schluessel()),
+        )?;
+        Ok(b.gate())
+    };
+    alle_faelle(
+        &baum,
+        &[
+            ("Schluessel nur im Index", &nur_im_index, "Geheimnismuster"),
+            (
+                "Schluessel nur im Arbeitsbaum",
+                &nur_im_arbeitsbaum,
+                "Geheimnismuster",
+            ),
+        ],
+    )
+}
+
+fn utf16(text: &str, gross: bool, bom: bool) -> Vec<u8> {
+    let mut aus = Vec::new();
+    let einheiten = if bom { vec![0xFEFF_u16] } else { Vec::new() };
+    for e in einheiten.into_iter().chain(text.encode_utf16()) {
+        if gross {
+            aus.extend(e.to_be_bytes());
+        } else {
+            aus.extend(e.to_le_bytes());
+        }
+    }
+    aus
+}
+
+/// K10-02: Dieselben Muster werden auch in UTF-16 erkannt, mit und ohne BOM. Was sich in keiner
+/// unterstuetzten Kodierung lesen laesst, gilt nicht still als geheimnisfrei, sondern wird als
+/// nicht pruefbar abgelehnt.
+#[test]
+fn befund_k10_02_utf16_umgeht_die_muster_nicht() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    // Mit BOM enthaelt der Text einen Umlaut: Er laesst sich nur als UTF-16 richtig lesen.
+    // Ohne BOM bleibt er ASCII; dann steht zwischen den Zeichen je ein Nullbyte.
+    let text = format!("# Notiz\n{}\n", beispiel_api_schluessel());
+    let mit_umlaut = format!("# Schl\u{fc}ssel\n{}\n", beispiel_api_schluessel());
+    let mit_bytes = |bytes: Vec<u8>| {
+        move |b: &Baum| -> Result<Vec<String>, String> {
+            b.deklariere("DokuOnly", &["docs/notiz.md"])?;
+            fs::write(b.datei("docs/notiz.md"), &bytes).map_err(|e| format!("notiz: {e}"))?;
+            Ok(b.gate())
+        }
+    };
+    let le_bom = mit_bytes(utf16(&mit_umlaut, false, true));
+    let be_bom = mit_bytes(utf16(&mit_umlaut, true, true));
+    let le_ohne = mit_bytes(utf16(&text, false, false));
+    let be_ohne = mit_bytes(utf16(&text, true, false));
+    let kaputt = mit_bytes(vec![b'#', b' ', 0xC3, 0x28, 0xFF, b'\n']);
+    alle_faelle(
+        &baum,
+        &[
+            ("UTF-16LE mit BOM", &le_bom, "Geheimnismuster"),
+            ("UTF-16BE mit BOM", &be_bom, "Geheimnismuster"),
+            ("UTF-16LE ohne BOM", &le_ohne, "Geheimnismuster"),
+            ("UTF-16BE ohne BOM", &be_ohne, "Geheimnismuster"),
+            ("nicht lesbare Kodierung", &kaputt, "nicht pruefbar"),
+        ],
+    )
 }
