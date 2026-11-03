@@ -10,6 +10,15 @@ Bisher war geplant, dass Kassenbuch und Journal zwei Dateien sind und ein Commit
 
 Dieser Schnitt geht einen Schritt weiter und legt das Kassenbuch selbst ins Journal. Jede Buchung ist ein Eintrag im Journal. Damit gibt es nur noch eine Datei, eine Kette, einen Vermerk und eine Sperre. Jeder Vorgang ist genau ein Eintrag in genau einer Datei, also gibt es keinen Stand zwischen zwei Dateien, den ein Absturz zerreißen könnte. R38 ist damit durch die Bauart erfüllt, nicht durch ein Protokoll. Das ist weniger Code und weniger Fälle, also weniger Raum für Fehler. Kommt später eine zweite Datei hinzu, gilt R38 für sie wie beschrieben.
 
+## Fassung 2 nach Maus' Prüfung von `eee64cb` (K13-01, K13-02)
+
+Maus' Gegenproben stehen als Tests im Repository, am Stand `eee64cb` rot (eigener Commit `4bbd1ef`).
+
+- **K13-01:** Nach einem gescheiterten `sync_all` kann ein vollständiger Eintrag beim Wiederöffnen schon lesbar sein, ohne dauerhaft gespeichert zu sein. Allgemeine Regel jetzt: Der Vermerk beschreibt nur, was dauerhaft auf der Platte steht. Bevor der Wiederanlauf den Vermerk ändert (Bestätigen, Kürzen, Zurücksetzen des Plans), synchronisiert er das Journal. Scheitert das, bleibt der Vermerk, wie er war. Der Modultest `befund_k13_01_wiederanlauf_synchronisiert_vor_dem_vermerk` prüft die Reihenfolge über ein Protokoll aller Synchronisationen (nur in den Modultests) und den eingespeisten Fehler.
+- **K13-02:** Das Journal nahm KI-Buchungen an, die der Budgetwächter ablehnte. Ursache war die Arbeitsteilung: Das Journal prüfte nur die Zeichen, `depot_ki` den Inhalt. Jetzt prüft das Journal jede Buchung selbst nach den Regeln aus `depot_ki`. Dafür hängt `depot_journal` von `depot_ki` ab, nicht mehr umgekehrt. Kassenbuch und `AufrufErlaubnis` stehen in `depot_journal` (`kasse.rs`); `depot_ki` enthält nur noch Regeln ohne Datei. Damit gibt es einen einzigen Zustandsraum: Was das Journal annimmt, nimmt auch der Budgetwächter an, beim Anhängen und als unbestätigten Anhang beim Wiederanlauf. Der Test `befund_k13_02_journal_prueft_ki_buchungen_selbst` prüft sechs Fälle, darunter eine falsche Reservierung unter den heutigen Grenzen.
+
+Die Tests, die das Kassenbuch brauchen, sind aus `crates/depot_ki/tests/` nach `crates/depot_journal/tests/budget.rs` und `crates/depot_journal/tests/ki.rs` verlegt; nur Aufrufe sind nachgeführt.
+
 ## Was der Umbau tut
 
 Neues Crate `depot_journal`, abhängig von `depot_kern`, `depot_regelwerk` und `sha2`. `depot_ki` hängt jetzt von `depot_journal` ab.
@@ -25,7 +34,7 @@ Neues Crate `depot_journal`, abhängig von `depot_kern`, `depot_regelwerk` und `
   Jeder Schritt ist wiederholbar. Ein Absturz nach der Quarantäne oder nach dem Kürzen führt beim nächsten Start zum selben Ergebnis. Geschrieben wird erst, wenn der ganze Stand geprüft ist.
 - **Stand aus dem Journal (Kap. 11):** Beim Öffnen wird der Stand nur aus den Einträgen nachgerechnet: Töpfe des Papierdepots, belegte Aufträge mit der letzten Kennung, Beobachtungen. Jeder Eintrag wird gelesen und wieder geschrieben; nur wenn derselbe Text entsteht, gilt er. Anhängen und Öffnen gehen durch dieselbe Prüfung. Ein unzulässiger Eintrag wird beim Anhängen abgelehnt, ohne zu schreiben und ohne zu sperren; in der Datei führt er zu Halt.
 - **Auftragskennungen (1·F09, R24):** `Journal::kennungsvergabe` setzt hinter der letzten belegten Kennung fort. Belegt wird nur eine größere Kennung. Zwei Vergaben für dieselben Nummern scheitern also spätestens beim Belegen. Aus dem Journal entsteht nie ein sendbarer `GenehmigterAuftrag` und keine `AuftragsKennung`; der Beleg hält die Nummer als Zahl. Am Regelwerk ändert sich nichts.
-- **Kassenbuch im Journal:** `Kassenbuch::oeffnen(&mut journal)` liest die Buchungen und prüft die Historie wie bisher. Solange das Kassenbuch lebt, schreibt niemand sonst ins Journal. Eine Buchung steht synchronisiert im Journal, bevor die Erlaubnis herausgeht.
+- **Kassenbuch im Journal (Fassung 2):** Das Journal prüft jede KI-Buchung selbst nach den Regeln aus `depot_ki`, beim Anhängen wie beim Wiederanlauf. `Journal::reserviere` ist der einzige Weg zu einer `AufrufErlaubnis`; sie entsteht erst, wenn die Buchung synchronisiert und bestätigt im Journal steht. `depot_ki` enthält nur noch die Regeln ohne Datei.
 - **Übergangsregel für Grenzänderungen (Maus' Punkt):** Vor der ersten Buchung unter neuen KI-Grenzen steht deren Abdruck im Journal (`ki-grenzen`). Buchungen unter einem früheren Abdruck werden nicht nach den heutigen Grenzen beurteilt, zählen aber weiter mit. Ein voller Monat bleibt also voll, auch über eine Grenzänderung. Eine Buchung ohne vorangehenden Abdruck ist Halt. Die Grenzen selbst ändert nur eine Grenzfreigabe.
 - **Sperre und Links (1·K06, K12-01, K12-02, R24):** wie beim bisherigen Kassenbuch. Gesperrt wird die geöffnete Datei über das Betriebssystem, vor jedem weiteren Lesen. Kein Teil des Pfads darf ein Link sein. Zwischendateien werden nur exklusiv neu angelegt; eine liegen gebliebene wird vorher entfernt.
 - **Fehler sperren (1·R02, R29):** Nach einem Schreib- oder Synchronisationsfehler schreibt das Journal nichts mehr, bis es neu geöffnet und dabei geprüft wird.
@@ -48,7 +57,7 @@ In `depot_ki` stehen die Tests zu Sperre, Links und Speicherfehlern jetzt beim J
 
 ## Gegenproben
 
-Jeder Eingriff einzeln in einer Kopie des Umbaus; danach `cargo test -p depot_journal` bzw. `-p depot_ki`.
+Jeder Eingriff einzeln in einer Kopie des Umbaus; danach `cargo test -p depot_journal`. Die KI-Eingriffe betreffen seit Fassung 2 `crates/depot_journal/src/kasse.rs`.
 
 | Eingriff | Ergebnis |
 | --- | --- |
@@ -79,12 +88,16 @@ Jeder Eingriff einzeln in einer Kopie des Umbaus; danach `cargo test -p depot_jo
 | KI: Abdruck nicht geprüft | rot |
 | KI: Buchung nicht kanonisch | rot |
 | KI: Reservierung nicht verglichen | rot |
+| K13-01: keine Synchronisation vor dem Vermerk | rot |
+| K13-01: Synchronisation erst nach dem Vermerk | rot |
+| K13-01: Synchronisationsfehler übergangen | rot |
+| K13-02: KI-Buchung im Journal nicht geprüft | rot |
 
 Einige Schichten sind doppelt gesichert und allein entfernt noch grün: Ohne die Prüfung „Anhang ohne Vermerk“ fängt die Längenprüfung den Rest, ohne die Einrichtungsprüfung verweigert `create_new` das Überschreiben, und ohne die Prüfung auf Bestand null oder doppelte ISIN fängt die kanonische Form den Eintrag. Rot wird es erst, wenn beide fehlen.
 
 ## Grenzen
 
-- **Festschreibung.** Ein neues Crate ändert die festgeschriebenen Abhängigkeiten, die Crate-Liste und `Cargo.lock`. Deshalb ist dies eine `FestschreibungAenderung` und braucht Wolfgangs Grenzfreigabe. Grenzen, Budgets und Preise bleiben unverändert (`grenzen` und `ki_budget` gleich).
+- **Festschreibung.** Ein neues Crate ändert die festgeschriebenen Abhängigkeiten, die Crate-Liste und `Cargo.lock`. Seit Fassung 2 hängt `depot_journal` von `depot_ki` ab, nicht mehr `depot_ki` vom Journal. Deshalb ist dies eine `FestschreibungAenderung` und braucht Wolfgangs Grenzfreigabe. Grenzen, Budgets und Preise bleiben unverändert (`grenzen` und `ki_budget` gleich).
 - **Gemeinsames Zurücksetzen.** Wer Journal und Vermerk zusammen auf einen alten Stand zurücksetzt oder beide löscht, wird auf dem Rechner nicht erkannt. Dagegen hilft nur der bestätigte Stand im Abendbericht und das Prepaid-Guthaben beim Anbieter. Der Abendbericht selbst kommt mit Stufe 6.
 - **Reparatur.** Alles, was nicht nachweislich ein unbestätigter Anhang ist, führt zu Halt. Ein geprüftes Reparaturverfahren mit Wolfgangs Freigabe gibt es noch nicht; bis dahin repariert ein Mensch.
 - **Reihenfolge der Wiederherstellung.** Die Tests stellen die Zwischenstände nach, die die Reihenfolge Quarantäne, Kürzen, Vermerk erzeugen kann. Einen Absturz mitten im Systemaufruf stellen sie nicht nach.

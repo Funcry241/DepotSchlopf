@@ -6,7 +6,7 @@ Der Schnitt schließt technisch 1·K01 bis 1·K06 und 1·R02, entlang R19, R20, 
 
 ## Nachtrag Persistenzbasis
 
-Seit dem Schnitt Persistenzbasis steht das Kassenbuch im Journal (`docs/befunde/journal.md`). Jede Buchung ist ein Eintrag; Anker, eigene Datei, Sperre und Zwischendatei des Kassenbuchs entfallen und leistet das Journal. Die Tests zu 1·K06, K12-01, K12-02 und den Speicherfehlern aus 1·R02 stehen deshalb in `crates/depot_journal`. Die Abschnitte unten beschreiben den Stand von PR #12. Die dort genannten Grenzen „Anker neben dem Kassenbuch“, „Abgebrochener Schreibvorgang“ und „Grenzen ändern sich“ sind mit der Persistenzbasis behandelt.
+Seit dem Schnitt Persistenzbasis steht das Kassenbuch im Journal (`docs/befunde/journal.md`), samt `AufrufErlaubnis` in `crates/depot_journal/src/kasse.rs`; `depot_ki` enthält nur noch die Regeln. Die Tests, die das Kassenbuch brauchen, stehen in `crates/depot_journal/tests/`. Jede Buchung ist ein Eintrag; Anker, eigene Datei, Sperre und Zwischendatei des Kassenbuchs entfallen und leistet das Journal. Die Tests zu 1·K06, K12-01, K12-02 und den Speicherfehlern aus 1·R02 stehen deshalb in `crates/depot_journal`. Die Abschnitte unten beschreiben den Stand von PR #12. Die dort genannten Grenzen „Anker neben dem Kassenbuch“, „Abgebrochener Schreibvorgang“ und „Grenzen ändern sich“ sind mit der Persistenzbasis behandelt.
 
 ## Fassung 2 nach Maus' Prüfung von `7d887ed` (K12-01, K12-02)
 

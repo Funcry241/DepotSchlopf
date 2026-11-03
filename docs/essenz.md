@@ -216,7 +216,7 @@ Die Kosten werden nach dem Aufruf aus der Antwort gezählt; stürzt das Programm
 
 **Lösungsraum**
 
-Journal exklusiv öffnen, Kassenbuch daraus lesen, Grenzen prüfen, Buchung als Eintrag anhängen und synchronisieren, dann erst die Erlaubnis. Zählen nach Zyklus, Tag, Monat und Jahr, je KI getrennt.
+Journal exklusiv öffnen, Grenzen prüfen, Buchung als Eintrag anhängen, synchronisieren und bestätigen, dann erst die Erlaubnis (`Journal::reserviere`). Das Journal prüft jede Buchung selbst nach denselben Regeln. Zählen nach Zyklus, Tag, Monat und Jahr, je KI getrennt.
 
 **Vor der Änderung prüfen**
 
@@ -224,7 +224,7 @@ Gibt es nach meiner Änderung einen Weg zu Claude oder GPT ohne `AufrufErlaubnis
 
 **Harter Bezug**
 
-`crates/depot_ki/src/kassenbuch.rs`; Tests in `crates/depot_ki/tests/budget.rs`; Festschreibung `ki_budget`.
+`crates/depot_journal/src/kasse.rs` (einziger Ort einer `AufrufErlaubnis`), Regeln in `crates/depot_ki/src/budget.rs`; Tests in `crates/depot_journal/tests/budget.rs`; Festschreibung `ki_budget`.
 
 ---
 
