@@ -48,7 +48,19 @@ fn wiederherstellung(wurzel: &Path) -> Vec<String> {
     warnungen
 }
 
-fn kodex(konsole: &mut String, args: &[String]) -> i32 {
+/// Build-Ordner fuer das Gate. Die Kopie des geprueften Stands baut in einem eigenen, festen
+/// Ordner: Teilte sie den des Projekts, koennte Cargo veraltete Ergebnisse des einen fuer den
+/// anderen halten. Fest bleibt er, damit die Abhaengigkeiten nicht jedes Mal neu bauen.
+fn bau_ordner(wurzel: &Path, dir: &Path) -> std::path::PathBuf {
+    if dir == wurzel {
+        wurzel.join("target")
+    } else {
+        wurzel.join("target").join("gepruefter-stand-bau")
+    }
+}
+
+/// Startet das Gate im Ordner `dir`.
+fn kodex(wurzel: &Path, dir: &Path, konsole: &mut String, args: &[String]) -> i32 {
     let zeile = format!(
         "[DepotSchlopf] cargo run -p depot_kodex -- {}",
         args.join(" ")
@@ -59,6 +71,8 @@ fn kodex(konsole: &mut String, args: &[String]) -> i32 {
     match Command::new("cargo")
         .args(["run", "--quiet", "-p", "depot_kodex", "--"])
         .args(args)
+        .current_dir(dir)
+        .env("CARGO_TARGET_DIR", bau_ordner(wurzel, dir))
         .output()
     {
         Ok(aus) => {
@@ -116,10 +130,25 @@ fn main() -> ExitCode {
         konsole.push_str(&z);
     }
 
-    // Der Stand vor und nach dem Gate wird festgehalten; der Export nimmt den davor (1·R04).
-    let lauf = abbild::gepruefter_lauf(&wurzel, befehl, konsole, warnungen, |_, k| {
-        kodex(k, &kodex_args)
-    });
+    // Gate und Export nehmen denselben festgehaltenen Stand (1·R04, K14-01). Nur das
+    // Schreiben der Festschreibung arbeitet im Projektordner selbst; es oeffnet nie das Gate.
+    let lauf = if befehl == "festschreibung" {
+        let exit = kodex(&wurzel, &wurzel, &mut konsole, &kodex_args);
+        export::Lauf {
+            befehl,
+            schritte: vec![export::Schritt {
+                name: "kodex".into(),
+                exit,
+            }],
+            konsole,
+            warnungen,
+            abbild: None,
+        }
+    } else {
+        abbild::gepruefter_lauf(&wurzel, befehl, konsole, warnungen, |dir, k| {
+            kodex(&wurzel, dir, k, &kodex_args)
+        })
+    };
     match export::schreibe(&wurzel, &lauf) {
         Ok(p) => println!("[DepotSchlopf] Assistenten-Export: {}", p.display()),
         Err(e) => {

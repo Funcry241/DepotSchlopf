@@ -145,46 +145,56 @@ Bei jedem Abbruch prüft der Test: die Meldung nennt „Geheimnismuster“ oder 
 ## Grenzen Teil Export
 
 - **Vorgemerkt, nicht gespeichert.** Eine Änderung, die nur im Arbeitsbaum liegt und nicht mit `git add` vorgemerkt ist, steht nicht im Export. `SOURCE_SNAPSHOT.txt` sagt das, und „Lokal veraendert“ zeigt, dass es solche Änderungen gibt. Das ist Absicht: Exportiert wird der Stand, den das Gate prüft.
-- **Zeitpunkt.** Seit dem Teil Snapshot (unten) nimmt der Export den Index vor dem Gate. Ändert er sich während des Gates, scheitert der Lauf (1·R04).
+- **Zeitpunkt.** Seit dem Teil Snapshot (unten) prüfen Gate und Export denselben festgehaltenen Stand (1·R04, K14-01).
 - Die Festschreibung im Export berechnet der Kodex aus dem Arbeitsbaum. Aus ihr gehen nur Prüfsummen und abgeleitete Namen in den Export, keine Dateiinhalte, und auch sie werden auf Geheimnismuster geprüft.
 - Kein Test läuft unter Windows. Der Export braucht dort aber keinen eigenen Weg mehr; er ruft nur `git` auf.
 - Für die Muster gelten dieselben Grenzen wie im Gate.
 
-## Teil Snapshot: Ergebnis (1·R04)
+## Teil Snapshot: Ergebnis (1·R04, K14-01)
 
-Wolfgang hat am 03.11.2026 die Reihenfolge freigegeben: nach der Persistenzbasis 1·R04, danach der simulierte Lauf. Ziel nach R28: Der exportierte Quellstand ist byte-gleich mit dem Stand, den das Gate geprüft hat, und eine Änderung zwischen Prüfung und Export wird erkannt.
+Wolfgang hat am 03.11.2026 die Reihenfolge freigegeben: nach der Persistenzbasis 1·R04, danach der simulierte Lauf. Ziel nach R28: Der exportierte Quellstand ist byte-gleich mit dem Stand, den das Gate geprüft hat.
 
-**Problem:** Das Gate prüft den Arbeitsbaum, der Export nimmt den Git-Index. Beide konnten auseinanderliegen: vor dem Lauf (nicht vorgemerkte oder neue Dateien) und während des Laufs (jemand ändert eine Datei oder den Index, während das Gate läuft).
+**Problem:** Das Gate prüfte den Arbeitsbaum, der Export nimmt den Git-Index. Fassung 1 verglich beide vor und nach dem Gate über `git diff`. Maus' Gegenprobe K14-01 zeigt, dass das nicht trägt: Mit `git update-index --assume-unchanged` oder `core.autocrlf=true` meldet Git keine Abweichung, obwohl Arbeitsbaum und Index verschieden sind. Das Gate sah dann den Arbeitsbaum, der Export den Index, und der Quellstand galt trotzdem als geprüft.
 
-**Regel:** Der Lauf hält vor und nach dem Gate ein Abbild fest: jede gewöhnliche Datei des Index mit ihrem Blob und jede Abweichung des Arbeitsbaums (geändert, gelöscht, neu und nicht ignoriert, offener Konflikt). Der Quellstand kommt aus den Blobs des Abbilds vor dem Gate. Ein Blob ändert sich nie. Der neue Schritt `stand` scheitert, wenn eins der Abbilder eine Abweichung zeigt oder sich der Index während des Gates geändert hat. Dann ist das Gate geschlossen, die Warnung nennt jede Datei, und der Export kennzeichnet den Quellstand als ungeprüft (`quellstand_geprueft: false` im Manifest, „Byte-gleich mit dem geprueften Stand: nein“ in `SOURCE_SNAPSHOT.txt`). Der Export entsteht trotzdem, damit der Fehler sichtbar wird.
+**Regel (Fassung 2):** Gate und Export nehmen denselben festgehaltenen Stand.
 
-**Für Wolfgang:** `run.cmd` ist jetzt nur grün, wenn alle Änderungen mit `git add` vorgemerkt sind und keine neue, nicht ignorierte Datei herumliegt.
+- Vor dem Gate hält der Lauf den Index einmal als Baum fest (`git write-tree`).
+- Jede gewöhnliche Datei dieses Baums wird Byte für Byte aus ihrem Blob in eine eigene Arbeitskopie unter `target/gepruefter-stand/` geschrieben. Git filtert dabei nichts: keine Zeilenenden, keine Attribute. Die Kopie ist bei Git als eigener Arbeitsbaum angemeldet, damit das Gate den Diff gegen die Basis wie gewohnt rechnen kann.
+- Das Gate läuft in dieser Kopie, mit eigenem Build-Ordner `target/gepruefter-stand-bau/`. Teilte es den Build-Ordner des Projekts, könnte Cargo veraltete Ergebnisse des einen für den anderen halten; das ist beim Umbau tatsächlich passiert.
+- Der Export nimmt dieselben Blobs. Ein Blob ändert sich nie.
+- Nach dem Gate wird die Kopie Byte für Byte mit den Blobs verglichen. Hat sich eine Datei geändert oder ist eine hinzugekommen (außer im Build-Ordner `target/`), scheitert der Schritt `stand`, die Warnung nennt die Datei, und der Export kennzeichnet den Quellstand als ungeprüft (`quellstand_geprueft: false`).
 
-**Rote Tests** (eigener Commit `886c021`, leere Schnittstelle `abbild.rs`), in `crates/depot_lauf/src/export.rs`:
+Was nur im Arbeitsbaum liegt, sehen weder Gate noch Export, gleich was Git über den Arbeitsbaum meldet. Ein Hinweis nennt solche Dateien nach `git status`; die Zusage hängt nicht an diesem Hinweis.
+
+**Für Wolfgang:** `run.cmd` prüft und exportiert, was mit `git add` vorgemerkt ist. Eine nicht vorgemerkte Änderung lässt den Lauf nicht mehr scheitern, steht aber als Hinweis in der Konsole und im Export. Fehlt eine neue Datei im Index, die der Code braucht, scheitert das Gate in der Kopie, wie es soll.
+
+**Rote Tests** in `crates/depot_lauf/src/export.rs`: Fassung 1 in `886c021` (leere Schnittstelle), Maus' Gegenprobe in `7c2c8c0`.
 
 | Test | prüft |
 | --- | --- |
-| `befund_1_r04_aenderung_waehrend_der_pruefung_wird_erkannt` | Index ändert sich während des Gates: Lauf gescheitert, Datei genannt, Export enthält den Stand davor, Manifest sagt ungeprüft |
-| `befund_1_r04_arbeitsbaum_muss_dem_index_gleichen` | geänderte und neue Datei, jeweils vor und während des Gates: Lauf gescheitert, Datei genannt |
-| `befund_1_r04_unveraenderter_stand_gilt_als_geprueft` | Kontrolle: unveränderter Stand ist geprüft |
+| `befund_k14_01_gate_und_export_sehen_dieselben_bytes` | `assume-unchanged`, `core.autocrlf`, nicht vorgemerkte Änderung, neue unverfolgte Datei, Index ändert sich während des Gates: Gate sieht genau den Index, Export enthält genau das, Quellstand gilt als geprüft; Hinweis auf den Arbeitsbaum |
+| `befund_k14_01_aenderung_am_festgehaltenen_stand_wird_erkannt` | geänderte und neue Datei in der Kopie während des Gates: Lauf gescheitert, Datei genannt, Manifest sagt ungeprüft |
+| `befund_1_r04_unveraenderter_stand_gilt_als_geprueft` | Kontrolle: vorgemerkter Stand ist geprüft, ohne Hinweis |
 
-Die früheren Export-Tests nehmen ihr Abbild jetzt über `lauf_in`; nur der Aufruf ist nachgeführt.
+Die zwei Tests aus Fassung 1 zu Abweichungen des Arbeitsbaums sind durch den ersten Test ersetzt: Ihr Fehlerbild gibt es nicht mehr, weil das Gate den Arbeitsbaum nicht mehr prüft.
 
 ## Gegenproben Teil Snapshot
 
 | Gegenprobe | Ergebnis |
 | --- | --- |
-| Index vor und nach dem Gate nicht verglichen | rot |
-| Arbeitsbaum gegen den Index nicht geprüft | rot |
-| neue, nicht ignorierte Dateien nicht geprüft | rot |
-| Abbild erst nach dem Gate aufgenommen | rot |
-| Export nimmt den Index beim Export statt des Abbilds | rot |
-| „geprüft“ ohne Blick auf das Schrittergebnis | rot |
+| Gate im Projektordner statt in der Kopie | rot |
+| Kopie aus dem Arbeitsbaum statt aus den Blobs | rot |
+| kein Vergleich der Kopie nach dem Gate | rot |
+| neue Datei in der Kopie nicht erkannt | rot |
+| geänderte Datei in der Kopie nicht erkannt | rot |
+| Export hält den Index neu fest, statt das Abbild zu nehmen | rot |
+| Hinweis auch für vorgemerkte Dateien | rot |
 | Schritt `stand` scheitert nie | rot |
 
 ## Grenzen Teil Snapshot
 
-- Eine Änderung, die während des Gates entsteht und vor seinem Ende genau zurückgenommen wird, sieht kein Vergleich zweier Abbilder. Dafür müsste das Gate eine eigene Kopie prüfen; das wäre ein größerer Umbau ohne erkennbaren Gewinn für den Papierbetrieb.
-- Git erkennt Änderungen im Arbeitsbaum über Dateizeit und Größe und vergleicht den Inhalt, wo beides nicht reicht. Dem vertraut die Prüfung.
-- Ignorierte Dateien (etwa `target/`, `daten/`) prüft das Abbild nicht. Eine ignorierte Quelldatei, die der Build trotzdem einbindet, sähe es nicht.
-- Die Festschreibung im Export rechnet der Kodex weiter aus dem Arbeitsbaum. Bei grünem Schritt `stand` gleicht der dem Index vor und nach dem Gate.
+- Eine Änderung an der Kopie, die während des Gates entsteht und vor seinem Ende genau zurückgenommen wird, sieht der Vergleich nicht. Die Kopie gehört nur dem Lauf und liegt im Build-Ordner.
+- Den Build-Ordner `target/` in der Kopie vergleicht der Lauf nicht; dort legen Tests ihre Probe-Repositories an.
+- Verfolgte Links und Untermodule kommen nicht in die Kopie, wie schon nicht in den Export.
+- Unter Windows gibt es kein Ausführungsrecht; die Kopie setzt es nur unter Unix.
+- Jeder Lauf legt einen kleinen Commit ohne Zweig an, damit Git die Kopie als Arbeitsbaum führen kann. Git räumt solche Objekte mit der Zeit selbst ab.

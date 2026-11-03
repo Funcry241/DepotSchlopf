@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Stufe 2, Schnitt Export, 1·R04 entlang R28: Der Export ist byte-gleich mit dem geprueften Stand. Der Lauf haelt den Index vor und nach der Pruefung fest; weicht der Arbeitsbaum vom Index ab oder aendert sich der Index waehrend der Pruefung, ist der Lauf gescheitert. Der Quellstand kommt aus dem Abbild vor der Pruefung.
+zweck: Stufe 2, Schnitt Export, 1·R04 und K14-01 entlang R28: Gate und Export nehmen denselben festgehaltenen Stand. Der Lauf haelt den Index als Baum fest, schreibt ihn Byte fuer Byte in eine eigene Kopie, laesst das Gate dort laufen und exportiert dieselben Blobs; aendert sich die Kopie waehrend des Gates, ist der Lauf gescheitert.
 pfade:
 crates/depot_lauf/
 kodex/aenderung.txt

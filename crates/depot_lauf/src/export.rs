@@ -88,9 +88,9 @@ pub(crate) fn hat_git(wurzel: &Path) -> Result<bool, String> {
     }
 }
 
-/// Quellstand (R28): die gewoehnlichen Dateien aus dem Abbild vor der Pruefung, mit dem
-/// Inhalt ihrer Blobs, nie aus dem Arbeitsbaum. Ein Blob aendert sich nie; der Quellstand ist
-/// also byte-gleich mit dem Index, den der Lauf vor der Pruefung festgehalten hat (1·R04).
+/// Quellstand (R28): die gewoehnlichen Dateien des festgehaltenen Stands, mit dem Inhalt ihrer
+/// Blobs, nie aus dem Arbeitsbaum. Dieselben Blobs liegen in der Kopie, die das Gate prueft;
+/// der Quellstand ist also byte-gleich mit dem geprueften Stand (1·R04, K14-01).
 /// Neue, nicht verfolgte Dateien bleiben draussen (1·E01). Verfolgte Links (Modus 120000)
 /// fehlen im Abbild, und im Arbeitsbaum wird nichts gelesen; ein Link in irgendeinem Pfadteil
 /// kann daher nichts einschleusen (1·E02, K11-01, K11-03). Ohne Git gibt es keinen
@@ -103,6 +103,7 @@ fn quellstand(wurzel: &Path, abbild: Option<&Abbild>) -> Result<Vec<(String, Vec
     abbild
         .dateien
         .iter()
+        .filter(|(pfad, _)| !geheim_oder_erzeugt(pfad))
         .map(|(pfad, blob)| {
             let inhalt = depot_kodex::git::blob(wurzel, blob)
                 .map_err(|e| format!("{pfad} (Index): nicht lesbar: {e}"))?;
@@ -122,7 +123,7 @@ fn im_quellstand<'a>(dateien: &'a [(String, Vec<u8>)], pfad: &str) -> Option<&'a
 /// Nur die Pfade des Quellstands, fuer Tests.
 #[cfg(test)]
 fn quelldateien(wurzel: &Path) -> Result<Vec<String>, String> {
-    let abbild = crate::abbild::aufnehmen(wurzel)?;
+    let abbild = crate::abbild::festhalten(wurzel)?;
     Ok(quellstand(wurzel, abbild.as_ref())?
         .into_iter()
         .map(|(p, _)| p)
@@ -224,7 +225,11 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     } else {
         "geschlossen"
     };
-    let festschreibung = depot_kodex::festschreibung::berechne(wurzel).unwrap_or_default();
+    // Aus der Kopie, die das Gate geprueft hat; ohne Git aus dem Projektordner.
+    let festschreibung = depot_kodex::festschreibung::berechne(
+        lauf.abbild.as_ref().map_or(wurzel, |a| a.kopie.as_path()),
+    )
+    .unwrap_or_default();
     let dateien = quellstand(wurzel, lauf.abbild.as_ref())?;
     let geprueft = lauf.abbild.is_some()
         && lauf.erfolgreich()
@@ -494,7 +499,7 @@ mod tests {
     /// Ein Lauf mit dem Abbild des Repositorys; ist es nicht lesbar, ohne Abbild.
     fn lauf_in(r: &Path, konsole: &str) -> Lauf {
         Lauf {
-            abbild: crate::abbild::aufnehmen(r).ok().flatten(),
+            abbild: crate::abbild::festhalten(r).ok().flatten(),
             ..lauf(konsole)
         }
     }
@@ -857,6 +862,10 @@ mod tests {
                         .map(|b| String::from_utf8_lossy(&b).into_owned())
                 ));
             }
+            let hinweis = matches!(fall, "nicht vorgemerkt" | "neu und unverfolgt");
+            if hinweis && !l.warnungen.iter().any(|w| w.starts_with("Hinweis:")) {
+                offen.push(format!("{fall}: kein Hinweis auf den Arbeitsbaum"));
+            }
             if sicht.neu {
                 offen.push(format!("{fall}: Gate sah die unverfolgte Datei"));
             }
@@ -908,14 +917,18 @@ mod tests {
     }
 
     /// Kontrolle: Bleibt alles gleich, ist der Lauf erfolgreich, und der Quellstand gilt als
-    /// geprueft.
+    /// geprueft. Eine vorgemerkte Aenderung gehoert dazu und gibt keinen Hinweis.
     #[test]
     fn befund_1_r04_unveraenderter_stand_gilt_als_geprueft() -> Result<(), String> {
-        let r = sauberes_repo(b"UNVERAENDERT\n")?;
+        let r = sauberes_repo(b"ALT\n")?;
+        // Vorgemerkt, aber nicht festgeschrieben: gehoert zum geprueften Stand, kein Hinweis.
+        schreib(&r, "README.md", b"UNVERAENDERT\n")?;
+        git_muss(&r, &["add", "README.md"])?;
         let l =
             crate::abbild::gepruefter_lauf(&r, "alles".into(), String::new(), Vec::new(), |_, _| 0);
         let bytes = exportiert(&r, &l)?;
         assert!(l.erfolgreich(), "{:?}", l.warnungen);
+        assert!(l.warnungen.is_empty(), "{:?}", l.warnungen);
         assert!(enthaelt(&bytes, b"UNVERAENDERT"));
         assert!(enthaelt(&bytes, b"\"quellstand_geprueft\": true"));
         Ok(())
