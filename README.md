@@ -58,6 +58,8 @@ run.cmd
 
 Ein Befehl macht alles: Gate prüfen (Struktur, Festschreibung, Quellscan, Essenz, Format, Clippy, Tests) und danach `assistant_export_latest.zip` schreiben. Diese Datei kann man einer neuen KI-Sitzung geben. Unter Linux oder macOS: `cargo run -p depot_lauf`.
 
+Gate und Export nehmen genau denselben Stand: was mit `git add` vorgemerkt ist. Der Lauf prüft ihn in einer eigenen Kopie außerhalb des Projektordners, ohne dessen lokale Cargo-Einstellungen. Nicht vorgemerkte Änderungen werden weder geprüft noch exportiert; die Konsole nennt sie als Hinweis.
+
 ## Mitmachen
 
 [Beitragsregeln](docs/CONTRIBUTING.md) · [Sicherheit](docs/SECURITY.md) · [Umgang miteinander](docs/CODE_OF_CONDUCT.md) · [Änderungen](CHANGELOG.md)

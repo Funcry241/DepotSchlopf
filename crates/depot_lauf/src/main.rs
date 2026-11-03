@@ -18,12 +18,13 @@
     clippy::cast_sign_loss
 )]
 
+mod abbild;
 mod export;
 mod zip;
 
 use std::fs;
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 const HILFE: &str = "Aufruf:\n  run.cmd                  alles: Gate pruefen und Assistenten-Export schreiben\n  \
 run.cmd kodex            dasselbe\n  run.cmd festschreibung   Festschreibung neu schreiben (nur fuer FestschreibungAenderung)\n  \
@@ -47,7 +48,8 @@ fn wiederherstellung(wurzel: &Path) -> Vec<String> {
     warnungen
 }
 
-fn kodex(konsole: &mut String, args: &[String]) -> i32 {
+/// Startet das Gate im Ordner `dir` mit dem Build-Ordner `bau`.
+fn kodex(dir: &Path, bau: &Path, konsole: &mut String, args: &[String]) -> i32 {
     let zeile = format!(
         "[DepotSchlopf] cargo run -p depot_kodex -- {}",
         args.join(" ")
@@ -55,11 +57,7 @@ fn kodex(konsole: &mut String, args: &[String]) -> i32 {
     println!("{zeile}");
     konsole.push_str(&zeile);
     konsole.push('\n');
-    match Command::new("cargo")
-        .args(["run", "--quiet", "-p", "depot_kodex", "--"])
-        .args(args)
-        .output()
-    {
+    match abbild::gate_befehl(dir, bau, args).output() {
         Ok(aus) => {
             let o = String::from_utf8_lossy(&aus.stdout);
             let e = String::from_utf8_lossy(&aus.stderr);
@@ -115,15 +113,24 @@ fn main() -> ExitCode {
         konsole.push_str(&z);
     }
 
-    let exit = kodex(&mut konsole, &kodex_args);
-    let lauf = export::Lauf {
-        befehl,
-        schritte: vec![export::Schritt {
-            name: "kodex".into(),
-            exit,
-        }],
-        konsole,
-        warnungen,
+    // Gate und Export nehmen denselben festgehaltenen Stand (1·R04, K14-01). Nur das
+    // Schreiben der Festschreibung arbeitet im Projektordner selbst; es oeffnet nie das Gate.
+    let lauf = if befehl == "festschreibung" {
+        let exit = kodex(&wurzel, &wurzel.join("target"), &mut konsole, &kodex_args);
+        export::Lauf {
+            befehl,
+            schritte: vec![export::Schritt {
+                name: "kodex".into(),
+                exit,
+            }],
+            konsole,
+            warnungen,
+            abbild: None,
+        }
+    } else {
+        abbild::gepruefter_lauf(&wurzel, befehl, konsole, warnungen, |dir, k| {
+            kodex(dir, &abbild::bau_ordner(&wurzel), k, &kodex_args)
+        })
     };
     match export::schreibe(&wurzel, &lauf) {
         Ok(p) => println!("[DepotSchlopf] Assistenten-Export: {}", p.display()),

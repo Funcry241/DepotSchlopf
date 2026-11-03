@@ -145,7 +145,73 @@ Bei jedem Abbruch prüft der Test: die Meldung nennt „Geheimnismuster“ oder 
 ## Grenzen Teil Export
 
 - **Vorgemerkt, nicht gespeichert.** Eine Änderung, die nur im Arbeitsbaum liegt und nicht mit `git add` vorgemerkt ist, steht nicht im Export. `SOURCE_SNAPSHOT.txt` sagt das, und „Lokal veraendert“ zeigt, dass es solche Änderungen gibt. Das ist Absicht: Exportiert wird der Stand, den das Gate prüft.
-- **Zeitpunkt.** Wird der Index zwischen Gate und Export geändert, exportiert der Export den neuen Index, geprüft auf Geheimnismuster. Dass der Export byte-gleich dem vom Gate geprüften Stand ist, bleibt 1·R04 (Snapshot) und folgt mit einem eigenen Schnitt.
+- **Zeitpunkt.** Seit dem Teil Snapshot (unten) prüfen Gate und Export denselben festgehaltenen Stand (1·R04, K14-01).
 - Die Festschreibung im Export berechnet der Kodex aus dem Arbeitsbaum. Aus ihr gehen nur Prüfsummen und abgeleitete Namen in den Export, keine Dateiinhalte, und auch sie werden auf Geheimnismuster geprüft.
 - Kein Test läuft unter Windows. Der Export braucht dort aber keinen eigenen Weg mehr; er ruft nur `git` auf.
 - Für die Muster gelten dieselben Grenzen wie im Gate.
+
+## Teil Snapshot: Ergebnis (1·R04, K14-01, K14-02)
+
+Wolfgang hat am 03.11.2026 die Reihenfolge freigegeben: nach der Persistenzbasis 1·R04, danach der simulierte Lauf. Ziel nach R28: Der exportierte Quellstand ist byte-gleich mit dem Stand, den das Gate geprüft hat.
+
+**Problem:** Das Gate prüfte den Arbeitsbaum, der Export nimmt den Git-Index. Fassung 1 verglich beide vor und nach dem Gate über `git diff`. Maus' Gegenprobe K14-01 zeigt, dass das nicht trägt: Mit `git update-index --assume-unchanged` oder `core.autocrlf=true` meldet Git keine Abweichung, obwohl Arbeitsbaum und Index verschieden sind. Das Gate sah dann den Arbeitsbaum, der Export den Index, und der Quellstand galt trotzdem als geprüft.
+
+**Regel (Fassung 2):** Gate und Export nehmen denselben festgehaltenen Stand.
+
+- Vor dem Gate hält der Lauf den Index einmal als Baum fest (`git write-tree`).
+- Jede gewöhnliche Datei dieses Baums wird Byte für Byte aus ihrem Blob in eine eigene Arbeitskopie geschrieben. Sie liegt außerhalb des Projektordners im temporären Ordner des Systems, je Projekt in einem fest benannten Ordner `depotschlopf-<Abdruck des Pfads>/stand` (K14-02). Git filtert dabei nichts: keine Zeilenenden, keine Attribute. Die Kopie ist bei Git als eigener Arbeitsbaum angemeldet, damit das Gate den Diff gegen die Basis wie gewohnt rechnen kann.
+- Das Gate läuft in dieser Kopie, mit eigenem Build-Ordner daneben (`…/bau`). Teilte es den Build-Ordner des Projekts, könnte Cargo veraltete Ergebnisse des einen für den anderen halten; das ist beim Umbau tatsächlich passiert.
+- Der Export nimmt dieselben Blobs. Ein Blob ändert sich nie.
+- Nach dem Gate wird die Kopie Byte für Byte mit den Blobs verglichen. Hat sich eine Datei geändert oder ist eine hinzugekommen (außer im Build-Ordner `target/`), scheitert der Schritt `stand`, die Warnung nennt die Datei, und der Export kennzeichnet den Quellstand als ungeprüft (`quellstand_geprueft: false`).
+
+Was nur im Arbeitsbaum liegt, sehen weder Gate noch Export, gleich was Git über den Arbeitsbaum meldet. Ein Hinweis nennt solche Dateien nach `git status`; die Zusage hängt nicht an diesem Hinweis.
+
+**Keine geerbten Bau-Einstellungen (Fassung 3, K14-02):** Maus' Gegenprobe zeigt, dass Cargo eine nicht vorgemerkte `.cargo/config.toml` im Projektordner auch für die Kopie las, weil diese darunter lag. Jetzt gilt:
+
+- Die Kopie liegt außerhalb des Projekts (siehe oben).
+- Liegt trotzdem oberhalb der Kopie eine Cargo-Konfiguration, hält der Lauf keinen Stand fest, und das Gate läuft nicht. Ausgenommen sind die Einstellungen des Nutzers in `CARGO_HOME`; sie gehören zur Werkzeugkette.
+- Das Gate erbt keine Umgebungsvariable für Cargo, Rust oder Git. Es bleiben die Orte der Werkzeuge (`CARGO_HOME`, `RUSTUP_HOME`) und die Netzangaben `CARGO_HTTP_*` und `CARGO_NET_*` zum Laden von Abhängigkeiten, deren Inhalt `Cargo.lock` mit Prüfsummen festlegt.
+
+**Für Wolfgang:** `run.cmd` prüft und exportiert, was mit `git add` vorgemerkt ist. Eine nicht vorgemerkte Änderung lässt den Lauf nicht mehr scheitern, steht aber als Hinweis in der Konsole und im Export. Fehlt eine neue Datei im Index, die der Code braucht, scheitert das Gate in der Kopie, wie es soll.
+
+**Rote Tests** in `crates/depot_lauf/src/export.rs`: Fassung 1 in `886c021` (leere Schnittstelle), Maus' Gegenprobe K14-01 in `7c2c8c0`, K14-02 in `fe54dc0` (leere Schnittstelle). Der Test zur fremden Konfiguration vor dem Gate kam mit dem Umbau, weil er den Ort der Kopie als Eingabe braucht.
+
+| Test | prüft |
+| --- | --- |
+| `befund_k14_01_gate_und_export_sehen_dieselben_bytes` | `assume-unchanged`, `core.autocrlf`, nicht vorgemerkte Änderung, neue unverfolgte Datei, Index ändert sich während des Gates: Gate sieht genau den Index, Export enthält genau das, Quellstand gilt als geprüft; Hinweis auf den Arbeitsbaum |
+| `befund_k14_01_aenderung_am_festgehaltenen_stand_wird_erkannt` | geänderte und neue Datei in der Kopie während des Gates: Lauf gescheitert, Datei genannt, Manifest sagt ungeprüft |
+| `befund_1_r04_unveraenderter_stand_gilt_als_geprueft` | Kontrolle: vorgemerkter Stand ist geprüft, ohne Hinweis |
+| `befund_k14_02_pruefkopie_liegt_ausserhalb_des_projekts` | nicht vorgemerkte `.cargo/config.toml` im Projekt: Kopie liegt außerhalb, keine fremde Konfiguration darüber, Lauf grün |
+| `befund_k14_02_fremde_cargo_konfiguration_wird_gefunden` | `config.toml` und `config` oberhalb der Kopie werden gefunden, `CARGO_HOME` zählt nicht |
+| `befund_k14_02_fremde_konfiguration_verhindert_das_gate` | fremde Konfiguration oberhalb der Kopie: kein Stand, kein Gate |
+| `befund_k14_02_gate_erbt_keine_bau_einstellungen` | jede Variable für Cargo, Rust und Git aus der Umgebung wird für das Gate entfernt |
+
+Die zwei Tests aus Fassung 1 zu Abweichungen des Arbeitsbaums sind durch den ersten Test ersetzt: Ihr Fehlerbild gibt es nicht mehr, weil das Gate den Arbeitsbaum nicht mehr prüft.
+
+## Gegenproben Teil Snapshot
+
+| Gegenprobe | Ergebnis |
+| --- | --- |
+| Gate im Projektordner statt in der Kopie | rot |
+| Kopie aus dem Arbeitsbaum statt aus den Blobs | rot |
+| kein Vergleich der Kopie nach dem Gate | rot |
+| neue Datei in der Kopie nicht erkannt | rot |
+| geänderte Datei in der Kopie nicht erkannt | rot |
+| Export hält den Index neu fest, statt das Abbild zu nehmen | rot |
+| Hinweis auch für vorgemerkte Dateien | rot |
+| Schritt `stand` scheitert nie | rot |
+| Kopie wieder im Projektordner | rot |
+| fremde Cargo-Konfiguration nicht gesucht | rot |
+| `CARGO_HOME` nicht ausgenommen | rot |
+| Umgebung an das Gate vererbt | rot |
+| fremde Konfiguration vor dem Gate übergangen | rot |
+
+## Grenzen Teil Snapshot
+
+- Eine Änderung an der Kopie, die während des Gates entsteht und vor seinem Ende genau zurückgenommen wird, sieht der Vergleich nicht. Die Kopie gehört nur dem Lauf und liegt im Build-Ordner.
+- Den Build-Ordner `target/` in der Kopie vergleicht der Lauf nicht; dort legen Tests ihre Probe-Repositories an.
+- Die Einstellungen in `CARGO_HOME` und die Werkzeugkette selbst gelten für Gate und Projekt gleich. Sie gehören zum Rechner, nicht zum Stand.
+- Wer den temporären Ordner des Systems beschreiben kann, kann die Kopie während des Gates ändern; der Vergleich danach sieht das, außer bei genau zurückgenommenen Änderungen (siehe oben).
+- Verfolgte Links und Untermodule kommen nicht in die Kopie, wie schon nicht in den Export.
+- Unter Windows gibt es kein Ausführungsrecht; die Kopie setzt es nur unter Unix.
+- Jeder Lauf legt einen kleinen Commit ohne Zweig an, damit Git die Kopie als Arbeitsbaum führen kann. Git räumt solche Objekte mit der Zeit selbst ab.

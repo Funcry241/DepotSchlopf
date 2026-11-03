@@ -1,13 +1,9 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Stufe 2, Schnitt Persistenzbasis fuer 3·P4, 4·B02, 5·B02 und die Persistenz von 1·F09 entlang R12, R20, R24, R25, R29 und R38: neues Crate depot_journal als einzige dauerhafte Datei (Hash-Kette, Datensatzformat, Anhangsvermerk, Quarantaene, wiederholbare Wiederherstellung); Papierdepot, Auftraege mit zentraler Kennungsvergabe und Beobachtungen ueberstehen den Neustart; das KI-Kassenbuch zieht ins Journal, mit Uebergangsregel fuer spaetere Grenzaenderungen. Keine neuen Budgetbetraege.
+klasse: Funktion
+zweck: Stufe 2, Schnitt Export, 1·R04 und K14-01 entlang R28: Gate und Export nehmen denselben festgehaltenen Stand. Der Lauf haelt den Index als Baum fest, schreibt ihn Byte fuer Byte in eine eigene Kopie ausserhalb des Projektordners, laesst das Gate dort ohne geerbte Bau-Einstellungen laufen und exportiert dieselben Blobs; aendert sich die Kopie waehrend des Gates, ist der Lauf gescheitert.
 pfade:
-crates/depot_journal/
-crates/depot_ki/
-Cargo.toml
-Cargo.lock
-kodex/festschreibung.txt
-kodex/freigabe.txt
+crates/depot_lauf/
+kodex/aenderung.txt
 docs/
 CHANGELOG.md
 README.md

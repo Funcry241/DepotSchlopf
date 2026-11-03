@@ -16,6 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
+use crate::abbild::Abbild;
 use crate::zip::Zip;
 
 pub const EXPORT: &str = "assistant_export_latest.zip";
@@ -32,6 +33,8 @@ pub struct Lauf {
     pub schritte: Vec<Schritt>,
     pub konsole: String,
     pub warnungen: Vec<String>,
+    /// Der Stand vor der Pruefung; aus ihm kommt der Quellstand (1·R04).
+    pub abbild: Option<crate::abbild::Abbild>,
 }
 
 impl Lauf {
@@ -62,7 +65,7 @@ fn git(wurzel: &Path, args: &[&str]) -> Option<String> {
 }
 
 /// Dateien, die nie in einen Export gehoeren.
-fn geheim_oder_erzeugt(pfad: &str) -> bool {
+pub(crate) fn geheim_oder_erzeugt(pfad: &str) -> bool {
     let name = pfad.rsplit('/').next().unwrap_or(pfad);
     pfad.starts_with("target/")
         || pfad.starts_with(".git/")
@@ -77,7 +80,7 @@ fn geheim_oder_erzeugt(pfad: &str) -> bool {
 
 /// Hat das Projekt ein Git-Repository? Nur ein fehlendes `.git` heisst „ohne Git“; jeder
 /// andere Zustand wird gelesen, und ein Fehler dabei ist ein Fehler (K11-02).
-fn hat_git(wurzel: &Path) -> Result<bool, String> {
+pub(crate) fn hat_git(wurzel: &Path) -> Result<bool, String> {
     match fs::symlink_metadata(wurzel.join(".git")) {
         Ok(_) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -85,53 +88,47 @@ fn hat_git(wurzel: &Path) -> Result<bool, String> {
     }
 }
 
-/// Quellstand (R28): die gewoehnlichen Dateien im Git-Index, mit dem Inhalt aus dem Index,
-/// nie aus dem Arbeitsbaum. Das ist der Stand, den auch das Gate prueft und den ein Commit
-/// aufnimmt. Neue, nicht verfolgte Dateien bleiben draussen (1·E01). Verfolgte Links
-/// (Modus 120000) fehlen im Index-Auszug, und im Arbeitsbaum wird nichts gelesen; ein Link
-/// in irgendeinem Pfadteil kann daher nichts einschleusen, auch nicht waehrend des Lesens
-/// und unabhaengig von der Plattform (1·E02, K11-01, K11-03). Ohne Git gibt es keinen
-/// Quellstand; ein vorhandenes, aber nicht lesbares Repository ist ein Fehler (K11-02).
-fn quellstand(wurzel: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
+/// Quellstand (R28): die gewoehnlichen Dateien des festgehaltenen Stands, mit dem Inhalt ihrer
+/// Blobs, nie aus dem Arbeitsbaum. Dieselben Blobs liegen in der Kopie, die das Gate prueft;
+/// der Quellstand ist also byte-gleich mit dem geprueften Stand (1·R04, K14-01).
+/// Neue, nicht verfolgte Dateien bleiben draussen (1·E01). Verfolgte Links (Modus 120000)
+/// fehlen im Abbild, und im Arbeitsbaum wird nichts gelesen; ein Link in irgendeinem Pfadteil
+/// kann daher nichts einschleusen (1·E02, K11-01, K11-03). Ohne Git gibt es keinen
+/// Quellstand; ein Repository ohne lesbares Abbild ist ein Fehler (K11-02).
+fn quellstand(wurzel: &Path, abbild: Option<&Abbild>) -> Result<Vec<(String, Vec<u8>)>, String> {
     if !hat_git(wurzel)? {
         return Ok(Vec::new());
     }
-    let mut index: Vec<depot_kodex::git::IndexDatei> = depot_kodex::git::index_dateien(wurzel)
-        .map_err(|e| format!("Git-Index nicht lesbar: {e}"))?
-        .into_iter()
-        .filter(|d| !geheim_oder_erzeugt(&d.pfad))
-        .collect();
-    index.sort_by(|a, b| a.pfad.cmp(&b.pfad));
-    index.dedup_by(|a, b| a.pfad == b.pfad);
-    index
-        .into_iter()
-        .map(|d| {
-            let inhalt = depot_kodex::git::blob(wurzel, &d.blob)
-                .map_err(|e| format!("{} (Index): nicht lesbar: {e}", d.pfad))?;
-            Ok((d.pfad, inhalt))
+    let abbild = abbild.ok_or("Git-Index nicht lesbar: kein Abbild vor der Pruefung")?;
+    abbild
+        .dateien
+        .iter()
+        .filter(|(pfad, _)| !geheim_oder_erzeugt(pfad))
+        .map(|(pfad, blob)| {
+            let inhalt = depot_kodex::git::blob(wurzel, blob)
+                .map_err(|e| format!("{pfad} (Index): nicht lesbar: {e}"))?;
+            Ok((pfad.clone(), inhalt))
         })
         .collect()
 }
 
-/// Inhalt einer Datei im Git-Index; ohne Git oder ohne Eintrag `None`.
-fn aus_dem_index(wurzel: &Path, pfad: &str) -> Result<Option<Vec<u8>>, String> {
-    if !hat_git(wurzel)? {
-        return Ok(None);
-    }
-    let index = depot_kodex::git::index_dateien(wurzel)
-        .map_err(|e| format!("Git-Index nicht lesbar: {e}"))?;
-    match index.into_iter().find(|d| d.pfad == pfad) {
-        Some(d) => depot_kodex::git::blob(wurzel, &d.blob)
-            .map(Some)
-            .map_err(|e| format!("{pfad} (Index): nicht lesbar: {e}")),
-        None => Ok(None),
-    }
+/// Eine Datei des Quellstands; `None`, wenn es sie dort nicht gibt.
+fn im_quellstand<'a>(dateien: &'a [(String, Vec<u8>)], pfad: &str) -> Option<&'a [u8]> {
+    dateien
+        .iter()
+        .find(|(p, _)| p == pfad)
+        .map(|(_, i)| i.as_slice())
 }
 
 /// Nur die Pfade des Quellstands, fuer Tests.
 #[cfg(test)]
 fn quelldateien(wurzel: &Path) -> Result<Vec<String>, String> {
-    Ok(quellstand(wurzel)?.into_iter().map(|(p, _)| p).collect())
+    let abbild = crate::abbild::festhalten(wurzel)?;
+    let _ = fs::remove_dir_all(crate::abbild::ablage(wurzel));
+    Ok(quellstand(wurzel, abbild.as_ref())?
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect())
 }
 
 fn json_text(s: &str) -> String {
@@ -229,9 +226,17 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     } else {
         "geschlossen"
     };
-    let festschreibung = depot_kodex::festschreibung::berechne(wurzel).unwrap_or_default();
-    let essenz = match aus_dem_index(wurzel, depot_kodex::essenz::ESSENZ)? {
-        Some(b) => String::from_utf8(b)
+    // Aus der Kopie, die das Gate geprueft hat; ohne Git aus dem Projektordner.
+    let festschreibung = depot_kodex::festschreibung::berechne(
+        lauf.abbild.as_ref().map_or(wurzel, |a| a.kopie.as_path()),
+    )
+    .unwrap_or_default();
+    let dateien = quellstand(wurzel, lauf.abbild.as_ref())?;
+    let geprueft = lauf.abbild.is_some()
+        && lauf.erfolgreich()
+        && lauf.schritte.iter().any(|s| s.name == "stand");
+    let essenz = match im_quellstand(&dateien, depot_kodex::essenz::ESSENZ) {
+        Some(b) => String::from_utf8(b.to_vec())
             .map_err(|e| format!("{}: kein UTF-8: {e}", depot_kodex::essenz::ESSENZ))?,
         None => String::new(),
     };
@@ -240,7 +245,6 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
 
     // Quellstand als eigenes inneres ZIP.
     let mut quelle = Zip::default();
-    let dateien = quellstand(wurzel)?;
     let mut geheim = Vec::new();
     for (d, inhalt) in &dateien {
         geheim.extend(depot_kodex::geheimnis::pruefe_inhalt(d, inhalt));
@@ -253,10 +257,11 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     );
     let snapshot_txt = format!(
         "Quellstand DepotSchlopf v{version}\nCommit: {commit}\nZweig: {zweig}\nLokal veraendert: {veraendert}\n\
-         Dateien: {}\nSHA-256: {}\nInhalt aus dem Git-Index (vorgemerkter Stand), nie aus dem Arbeitsbaum; \
-         auf Geheimnisse geprueft. Ohne Git kein Quellstand. Zum Weiterarbeiten entpacken.\n",
+         Dateien: {}\nSHA-256: {}\nInhalt aus dem Git-Index vor der Pruefung, nie aus dem Arbeitsbaum; \
+         auf Geheimnisse geprueft. Byte-gleich mit dem geprueften Stand: {}. Ohne Git kein Quellstand. Zum Weiterarbeiten entpacken.\n",
         dateien.len(),
-        sha_hex(&quelle)
+        sha_hex(&quelle),
+        if geprueft { "ja" } else { "nein" }
     );
 
     let mut j = String::from("{\n");
@@ -300,6 +305,7 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     );
     feld("essenz_regeln", regeln.len().to_string());
     feld("quelldateien", dateien.len().to_string());
+    feld("quellstand_geprueft", geprueft.to_string());
     let fs_json = festschreibung
         .iter()
         .map(|(k, v)| format!("\"{k}\": {}", json_text(v)))
@@ -487,6 +493,23 @@ mod tests {
             }],
             konsole: konsole.into(),
             warnungen: Vec::new(),
+            abbild: None,
+        }
+    }
+
+    /// Schreibt den Export eines Laufs mit dem Abbild des Repositorys und raeumt danach die
+    /// Ablage im temporaeren Ordner auf.
+    fn schreibe_in(r: &Path, konsole: &str) -> Result<PathBuf, String> {
+        let erg = schreibe(r, &lauf_in(r, konsole));
+        aufraeumen(r);
+        erg
+    }
+
+    /// Ein Lauf mit dem Abbild des Repositorys; ist es nicht lesbar, ohne Abbild.
+    fn lauf_in(r: &Path, konsole: &str) -> Lauf {
+        Lauf {
+            abbild: crate::abbild::festhalten(r).ok().flatten(),
+            ..lauf(konsole)
         }
     }
 
@@ -540,7 +563,7 @@ mod tests {
             "verfolgter Link exportiert: {dateien:?}"
         );
         assert!(dateien.contains(&"README.md".to_string()), "{dateien:?}");
-        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let p = schreibe_in(&r, "sauber\n")?;
         let bytes = fs::read(p).map_err(|e| e.to_string())?;
         assert!(
             !enthaelt(&bytes, b"fremder Inhalt"),
@@ -586,7 +609,7 @@ mod tests {
             schreib(&r, "docs/notiz.md", &inhalt)?;
             git_muss(&r, &["add", "docs/notiz.md"])?;
             git_muss(&r, &["commit", "-q", "-m", "basis"])?;
-            match schreibe(&r, &lauf(&konsole)) {
+            match schreibe_in(&r, &konsole) {
                 Ok(p) => offen.push(format!("{fall}: Export geschrieben: {}", p.display())),
                 Err(e) => {
                     if !e.contains(stichwort) {
@@ -633,7 +656,7 @@ mod tests {
             std::os::unix::fs::symlink(&draussen, r.join(ordner))
                 .map_err(|e| format!("Link {ordner}: {e}"))?;
         }
-        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let p = schreibe_in(&r, "sauber\n")?;
         let bytes = fs::read(p).map_err(|e| e.to_string())?;
         let mut offen = Vec::new();
         for marke in ["FREMDER_INHALT_AUSSERHALB", "FREMDE_REGEL_AUSSERHALB"] {
@@ -657,7 +680,7 @@ mod tests {
         git_muss(&r, &["commit", "-q", "-m", "basis"])?;
         fs::write(r.join(".git/index"), b"kaputt").map_err(|e| e.to_string())?;
         let mut offen = Vec::new();
-        if let Ok(p) = schreibe(&r, &lauf("sauber\n")) {
+        if let Ok(p) = schreibe_in(&r, "sauber\n") {
             offen.push(format!(
                 "Defekter Git-Index: Export meldet Erfolg: {}",
                 p.display()
@@ -683,7 +706,7 @@ mod tests {
         git_muss(&r, &["commit", "-q", "-m", "basis"])?;
         schreib(&r, "pruef/datei.md", b"FREMD!\n")?;
         schreib(&r, "docs/essenz.md", b"# D01 \xE2\x80\x93 FREMDREGEL\n")?;
-        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let p = schreibe_in(&r, "sauber\n")?;
         let bytes = fs::read(p).map_err(|e| e.to_string())?;
         let mut offen = Vec::new();
         for marke in ["FREMD!", "FREMDREGEL"] {
@@ -718,7 +741,7 @@ mod tests {
         fs::remove_file(r.join(".git/objects").join(kopf).join(rest))
             .map_err(|e| format!("Blob {sha}: {e}"))?;
         let mut offen = Vec::new();
-        if let Ok(p) = schreibe(&r, &lauf("sauber\n")) {
+        if let Ok(p) = schreibe_in(&r, "sauber\n") {
             offen.push(format!(
                 "Fehlender Blob: Export meldet Erfolg: {}",
                 p.display()
@@ -737,7 +760,7 @@ mod tests {
         let r = repo()?;
         fs::remove_dir_all(r.join(".git")).map_err(|e| e.to_string())?;
         schreib(&r, "README.md", b"MARKE_OHNE_GIT\n")?;
-        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let p = schreibe_in(&r, "sauber\n")?;
         let bytes = fs::read(p).map_err(|e| e.to_string())?;
         assert!(
             !enthaelt(&bytes, b"MARKE_OHNE_GIT"),
@@ -753,8 +776,299 @@ mod tests {
         schreib(&r, "README.md", b"# Probe\n")?;
         git_muss(&r, &["add", "README.md"])?;
         git_muss(&r, &["commit", "-q", "-m", "basis"])?;
-        let p = schreibe(&r, &lauf("alles gut\n"))?;
+        let p = schreibe_in(&r, "alles gut\n")?;
         assert!(p.is_file());
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // 1·R04, K14-01 – Gate und Export nehmen denselben festgehaltenen Stand (R28)
+    // -----------------------------------------------------------------------------------------
+
+    fn exportiert(r: &Path, l: &Lauf) -> Result<Vec<u8>, String> {
+        let p = schreibe(r, l)?;
+        fs::read(p).map_err(|e| e.to_string())
+    }
+
+    /// Entfernt die Ablage eines Probe-Repositorys im temporaeren Ordner.
+    fn aufraeumen(r: &Path) {
+        let _ = fs::remove_dir_all(crate::abbild::ablage(r));
+    }
+
+    fn sauberes_repo(inhalt: &[u8]) -> Result<PathBuf, String> {
+        let r = repo()?;
+        schreib(&r, "README.md", inhalt)?;
+        git_muss(&r, &["add", "README.md"])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        Ok(r)
+    }
+
+    /// Was das Gate in einem Fall zu sehen bekam: `README.md` und ob `src/neu.rs` da war.
+    #[derive(Debug, Default)]
+    struct Sicht {
+        readme: Option<Vec<u8>>,
+        neu: bool,
+    }
+
+    /// K14-01: Gate und Export pruefen und exportieren denselben festgehaltenen Stand, Byte fuer
+    /// Byte, auch wenn Git eine Abweichung des Arbeitsbaums nicht meldet (`assume-unchanged`,
+    /// `core.autocrlf`). Was nur im Arbeitsbaum liegt, sieht weder das Gate noch der Export;
+    /// eine Aenderung am Index waehrend des Gates erreicht keinen von beiden.
+    #[test]
+    fn befund_k14_01_gate_und_export_sehen_dieselben_bytes() -> Result<(), String> {
+        let index = b"INDEX_STAND\nZEILE_ZWEI\n".to_vec();
+        let mut offen = Vec::new();
+        for fall in [
+            "assume-unchanged",
+            "autocrlf",
+            "nicht vorgemerkt",
+            "neu und unverfolgt",
+            "Index waehrend des Gates",
+        ] {
+            let r = sauberes_repo(&index)?;
+            match fall {
+                "assume-unchanged" => {
+                    git_muss(&r, &["update-index", "--assume-unchanged", "README.md"])?;
+                    schreib(
+                        &r,
+                        "README.md",
+                        b"INDEX_STAND\nZEILE_ZWEI\nNUR_ARBEITSBAUM\n",
+                    )?;
+                }
+                "autocrlf" => {
+                    git_muss(&r, &["config", "core.autocrlf", "true"])?;
+                    schreib(&r, "README.md", b"INDEX_STAND\r\nZEILE_ZWEI\r\n")?;
+                }
+                "nicht vorgemerkt" => {
+                    schreib(
+                        &r,
+                        "README.md",
+                        b"INDEX_STAND\nZEILE_ZWEI\nNUR_ARBEITSBAUM\n",
+                    )?;
+                }
+                "neu und unverfolgt" => schreib(&r, "src/neu.rs", b"// NUR_ARBEITSBAUM\n")?,
+                _ => {}
+            }
+            let mut sicht = Sicht::default();
+            let mut fehler = Ok(());
+            let l = crate::abbild::gepruefter_lauf(
+                &r,
+                "alles".into(),
+                String::new(),
+                Vec::new(),
+                |stand, _| {
+                    sicht.readme = fs::read(stand.join("README.md")).ok();
+                    sicht.neu = stand.join("src/neu.rs").exists();
+                    if fall == "Index waehrend des Gates" {
+                        fehler = schreib(&r, "README.md", b"NUR_ARBEITSBAUM\n")
+                            .and_then(|()| git_muss(&r, &["add", "README.md"]));
+                    }
+                    0
+                },
+            );
+            fehler?;
+            let bytes = exportiert(&r, &l)?;
+            aufraeumen(&r);
+            if sicht.readme.as_deref() != Some(index.as_slice()) {
+                offen.push(format!(
+                    "{fall}: Gate sah {:?}",
+                    sicht
+                        .readme
+                        .map(|b| String::from_utf8_lossy(&b).into_owned())
+                ));
+            }
+            let hinweis = matches!(fall, "nicht vorgemerkt" | "neu und unverfolgt");
+            if hinweis && !l.warnungen.iter().any(|w| w.starts_with("Hinweis:")) {
+                offen.push(format!("{fall}: kein Hinweis auf den Arbeitsbaum"));
+            }
+            if sicht.neu {
+                offen.push(format!("{fall}: Gate sah die unverfolgte Datei"));
+            }
+            if !enthaelt(&bytes, &index) || enthaelt(&bytes, b"NUR_ARBEITSBAUM") {
+                offen.push(format!(
+                    "{fall}: Export enthaelt nicht genau den Stand des Gates"
+                ));
+            }
+            if !l.erfolgreich() || !enthaelt(&bytes, b"\"quellstand_geprueft\": true") {
+                offen.push(format!(
+                    "{fall}: gleicher Stand gilt nicht als geprueft: {:?}",
+                    l.warnungen
+                ));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Wird der festgehaltene Stand selbst waehrend des Gates geaendert oder ergaenzt, ist der
+    /// Lauf gescheitert, und der Export nennt den Quellstand ungeprueft.
+    #[test]
+    fn befund_k14_01_aenderung_am_festgehaltenen_stand_wird_erkannt() -> Result<(), String> {
+        let mut offen = Vec::new();
+        for (fall, pfad) in [("geaendert", "README.md"), ("neu", "neu.txt")] {
+            let r = sauberes_repo(b"FEST\n")?;
+            let mut fehler = Ok(());
+            let l = crate::abbild::gepruefter_lauf(
+                &r,
+                "alles".into(),
+                String::new(),
+                Vec::new(),
+                |stand, _| {
+                    fehler = schreib(stand, pfad, b"FREMD\n");
+                    0
+                },
+            );
+            fehler?;
+            let bytes = exportiert(&r, &l)?;
+            aufraeumen(&r);
+            if l.erfolgreich() || !enthaelt(&bytes, b"\"quellstand_geprueft\": false") {
+                offen.push(format!("{fall}: nicht erkannt"));
+            }
+            if !l.warnungen.iter().any(|w| w.contains(pfad)) {
+                offen.push(format!("{fall}: Warnung ohne {pfad}: {:?}", l.warnungen));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Kontrolle: Bleibt alles gleich, ist der Lauf erfolgreich, und der Quellstand gilt als
+    /// geprueft. Eine vorgemerkte Aenderung gehoert dazu und gibt keinen Hinweis.
+    #[test]
+    fn befund_1_r04_unveraenderter_stand_gilt_als_geprueft() -> Result<(), String> {
+        let r = sauberes_repo(b"ALT\n")?;
+        // Vorgemerkt, aber nicht festgeschrieben: gehoert zum geprueften Stand, kein Hinweis.
+        schreib(&r, "README.md", b"UNVERAENDERT\n")?;
+        git_muss(&r, &["add", "README.md"])?;
+        let l =
+            crate::abbild::gepruefter_lauf(&r, "alles".into(), String::new(), Vec::new(), |_, _| 0);
+        let bytes = exportiert(&r, &l)?;
+        aufraeumen(&r);
+        assert!(l.erfolgreich(), "{:?}", l.warnungen);
+        assert!(l.warnungen.is_empty(), "{:?}", l.warnungen);
+        assert!(enthaelt(&bytes, b"UNVERAENDERT"));
+        assert!(enthaelt(&bytes, b"\"quellstand_geprueft\": true"));
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // K14-02 – das Gate erbt keine Bau-Einstellungen aus dem Projektordner
+    // -----------------------------------------------------------------------------------------
+
+    /// Die Pruefkopie liegt ausserhalb des Projektordners. Eine nicht vorgemerkte
+    /// `.cargo/config.toml` im Projekt erreicht sie nicht, und der Lauf bleibt gruen.
+    #[test]
+    fn befund_k14_02_pruefkopie_liegt_ausserhalb_des_projekts() -> Result<(), String> {
+        let r = sauberes_repo(b"FEST\n")?;
+        schreib(
+            &r,
+            ".cargo/config.toml",
+            b"[build]\nrustc-wrapper = \"gibt-es-nicht\"\n",
+        )?;
+        let mut ort = None;
+        let l = crate::abbild::gepruefter_lauf(
+            &r,
+            "alles".into(),
+            String::new(),
+            Vec::new(),
+            |stand, _| {
+                ort = Some(stand.to_path_buf());
+                0
+            },
+        );
+        let ort = ort.ok_or("Gate nicht ausgefuehrt")?;
+        aufraeumen(&r);
+        let mut offen = Vec::new();
+        if ort.starts_with(&r) {
+            offen.push(format!("Kopie im Projektordner: {}", ort.display()));
+        }
+        let fremd = crate::abbild::fremde_cargo_konfiguration(&ort, None);
+        if !fremd.is_empty() {
+            offen.push(format!("fremde Konfiguration ueber der Kopie: {fremd:?}"));
+        }
+        if !l.erfolgreich() {
+            offen.push(format!("Lauf gescheitert: {:?}", l.warnungen));
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Liegt doch eine Cargo-Konfiguration oberhalb der Kopie, findet der Lauf sie; die des
+    /// Nutzers in `CARGO_HOME` gehoert zur Werkzeugkette und zaehlt nicht.
+    #[test]
+    fn befund_k14_02_fremde_cargo_konfiguration_wird_gefunden() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "a/.cargo/config.toml", b"[build]\n")?;
+        schreib(&r, "a/b/.cargo/config", b"[build]\n")?;
+        schreib(&r, "a/b/c/d/x.txt", b"\n")?;
+        let kopie = r.join("a/b/c/d");
+        let fremd = crate::abbild::fremde_cargo_konfiguration(&kopie, None);
+        assert!(
+            fremd.contains(&r.join("a/.cargo/config.toml"))
+                && fremd.contains(&r.join("a/b/.cargo/config")),
+            "{fremd:?}"
+        );
+        let home = r.join("a/.cargo");
+        let fremd = crate::abbild::fremde_cargo_konfiguration(&kopie, Some(&home));
+        assert_eq!(fremd, vec![r.join("a/b/.cargo/config")]);
+        Ok(())
+    }
+
+    /// Das Gate erbt keine Bau-Einstellungen aus der Umgebung: Jede Variable fuer Cargo,
+    /// Rust oder Git wird entfernt. Es bleiben die Orte der Werkzeuge und die Netzangaben fuer
+    /// das Laden von Abhaengigkeiten, deren Inhalt `Cargo.lock` mit Pruefsummen festlegt.
+    #[test]
+    fn befund_k14_02_gate_erbt_keine_bau_einstellungen() {
+        let bau = Path::new("bau");
+        let c = crate::abbild::gate_befehl(Path::new("stand"), bau, &[]);
+        let gesetzt: std::collections::BTreeMap<String, Option<String>> = c
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        let mut geprueft = 0_u32;
+        let mut offen = Vec::new();
+        for (k, _) in std::env::vars_os() {
+            let k = k.to_string_lossy().into_owned();
+            let bau_var = ["CARGO", "RUST", "GIT_"].iter().any(|p| k.starts_with(p));
+            let erlaubt = ["CARGO_HOME", "RUSTUP_HOME", "CARGO_TARGET_DIR"].contains(&k.as_str())
+                || k.starts_with("CARGO_HTTP_")
+                || k.starts_with("CARGO_NET_");
+            if !bau_var || erlaubt {
+                continue;
+            }
+            geprueft = geprueft.saturating_add(1);
+            if gesetzt.get(&k) != Some(&None) {
+                offen.push(k);
+            }
+        }
+        assert!(
+            geprueft > 0,
+            "Vorbedingung: keine Bau-Variable in der Testumgebung"
+        );
+        assert!(offen.is_empty(), "geerbt: {offen:?}");
+        assert_eq!(
+            gesetzt.get("CARGO_TARGET_DIR"),
+            Some(&Some("bau".to_string()))
+        );
+    }
+
+    /// Liegt oberhalb der Kopie eine fremde Cargo-Konfiguration, haelt der Lauf keinen Stand
+    /// fest, und das Gate laeuft nicht.
+    #[test]
+    fn befund_k14_02_fremde_konfiguration_verhindert_das_gate() -> Result<(), String> {
+        let r = sauberes_repo(b"FEST\n")?;
+        let ort = repo()?;
+        schreib(&ort, ".cargo/config.toml", b"[build]\n")?;
+        let erg = crate::abbild::festhalten_in(&r, &ort.join("ablage"));
+        assert!(
+            matches!(&erg, Err(e) if e.contains("config.toml")),
+            "{erg:?}"
+        );
         Ok(())
     }
 }
