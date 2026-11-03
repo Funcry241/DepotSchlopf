@@ -933,4 +933,109 @@ mod tests {
         assert!(enthaelt(&bytes, b"\"quellstand_geprueft\": true"));
         Ok(())
     }
+
+    // -----------------------------------------------------------------------------------------
+    // K14-02 – das Gate erbt keine Bau-Einstellungen aus dem Projektordner
+    // -----------------------------------------------------------------------------------------
+
+    /// Die Pruefkopie liegt ausserhalb des Projektordners. Eine nicht vorgemerkte
+    /// `.cargo/config.toml` im Projekt erreicht sie nicht, und der Lauf bleibt gruen.
+    #[test]
+    fn befund_k14_02_pruefkopie_liegt_ausserhalb_des_projekts() -> Result<(), String> {
+        let r = sauberes_repo(b"FEST\n")?;
+        schreib(
+            &r,
+            ".cargo/config.toml",
+            b"[build]\nrustc-wrapper = \"gibt-es-nicht\"\n",
+        )?;
+        let mut ort = None;
+        let l = crate::abbild::gepruefter_lauf(
+            &r,
+            "alles".into(),
+            String::new(),
+            Vec::new(),
+            |stand, _| {
+                ort = Some(stand.to_path_buf());
+                0
+            },
+        );
+        let ort = ort.ok_or("Gate nicht ausgefuehrt")?;
+        let mut offen = Vec::new();
+        if ort.starts_with(&r) {
+            offen.push(format!("Kopie im Projektordner: {}", ort.display()));
+        }
+        let fremd = crate::abbild::fremde_cargo_konfiguration(&ort, None);
+        if !fremd.is_empty() {
+            offen.push(format!("fremde Konfiguration ueber der Kopie: {fremd:?}"));
+        }
+        if !l.erfolgreich() {
+            offen.push(format!("Lauf gescheitert: {:?}", l.warnungen));
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Liegt doch eine Cargo-Konfiguration oberhalb der Kopie, findet der Lauf sie; die des
+    /// Nutzers in `CARGO_HOME` gehoert zur Werkzeugkette und zaehlt nicht.
+    #[test]
+    fn befund_k14_02_fremde_cargo_konfiguration_wird_gefunden() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "a/.cargo/config.toml", b"[build]\n")?;
+        schreib(&r, "a/b/.cargo/config", b"[build]\n")?;
+        schreib(&r, "a/b/c/d/x.txt", b"\n")?;
+        let kopie = r.join("a/b/c/d");
+        let fremd = crate::abbild::fremde_cargo_konfiguration(&kopie, None);
+        assert!(
+            fremd.contains(&r.join("a/.cargo/config.toml"))
+                && fremd.contains(&r.join("a/b/.cargo/config")),
+            "{fremd:?}"
+        );
+        let home = r.join("a/.cargo");
+        let fremd = crate::abbild::fremde_cargo_konfiguration(&kopie, Some(&home));
+        assert_eq!(fremd, vec![r.join("a/b/.cargo/config")]);
+        Ok(())
+    }
+
+    /// Das Gate erbt keine Bau-Einstellungen aus der Umgebung: Jede Variable fuer Cargo,
+    /// Rust oder Git wird entfernt. Es bleiben die Orte der Werkzeuge und die Netzangaben fuer
+    /// das Laden von Abhaengigkeiten, deren Inhalt `Cargo.lock` mit Pruefsummen festlegt.
+    #[test]
+    fn befund_k14_02_gate_erbt_keine_bau_einstellungen() {
+        let bau = Path::new("bau");
+        let c = crate::abbild::gate_befehl(Path::new("stand"), bau, &[]);
+        let gesetzt: std::collections::BTreeMap<String, Option<String>> = c
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        let mut geprueft = 0_u32;
+        let mut offen = Vec::new();
+        for (k, _) in std::env::vars_os() {
+            let k = k.to_string_lossy().into_owned();
+            let bau_var = ["CARGO", "RUST", "GIT_"].iter().any(|p| k.starts_with(p));
+            let erlaubt = ["CARGO_HOME", "RUSTUP_HOME", "CARGO_TARGET_DIR"].contains(&k.as_str())
+                || k.starts_with("CARGO_HTTP_")
+                || k.starts_with("CARGO_NET_");
+            if !bau_var || erlaubt {
+                continue;
+            }
+            geprueft = geprueft.saturating_add(1);
+            if gesetzt.get(&k) != Some(&None) {
+                offen.push(k);
+            }
+        }
+        assert!(
+            geprueft > 0,
+            "Vorbedingung: keine Bau-Variable in der Testumgebung"
+        );
+        assert!(offen.is_empty(), "geerbt: {offen:?}");
+        assert_eq!(
+            gesetzt.get("CARGO_TARGET_DIR"),
+            Some(&Some("bau".to_string()))
+        );
+    }
 }

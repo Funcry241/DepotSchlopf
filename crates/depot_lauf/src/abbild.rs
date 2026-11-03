@@ -22,6 +22,26 @@ use crate::export::{Lauf, Schritt, hat_git};
 /// Unterordner der Kopie im Build-Ordner.
 pub const KOPIE: &str = "target/gepruefter-stand";
 
+/// Ordner fuer Kopie und Build-Ordner des Gates. Leere Schnittstelle fuer die roten Tests.
+pub fn ablage(wurzel: &Path) -> PathBuf {
+    wurzel.join("target")
+}
+
+/// Cargo-Konfigurationen oberhalb der Kopie, ausser in `cargo_home`. Leere Schnittstelle.
+pub fn fremde_cargo_konfiguration(_kopie: &Path, _cargo_home: Option<&Path>) -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// Der Aufruf des Gates in `dir` mit dem Build-Ordner `bau`. Leere Schnittstelle.
+pub fn gate_befehl(dir: &Path, bau: &Path, args: &[String]) -> Command {
+    let mut c = Command::new("cargo");
+    c.args(["run", "--quiet", "-p", "depot_kodex", "--"])
+        .args(args)
+        .current_dir(dir)
+        .env("CARGO_TARGET_DIR", bau);
+    c
+}
+
 /// Der festgehaltene Stand.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Abbild {
