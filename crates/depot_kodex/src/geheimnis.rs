@@ -180,7 +180,7 @@ pub fn finde(text: &str) -> Vec<Treffer> {
             treffer.push(Treffer {
                 art,
                 zeile: zeile_nr,
-            })
+            });
         };
         if privater_schluessel(zeile) {
             fund("privater Schluessel");

@@ -11,7 +11,7 @@ Die Spalte „Abnahme“ nennt, wer den Befund schließt und wann: in welcher St
 
 **Zwischenstände von „offen“:** „Test grün“ heißt, dass der Umbau den roten Test grün gemacht hat und der Test ohne `ignore` im Kodex läuft; geschlossen ist der Befund erst nach der unabhängigen Prüfung. Nachweis für den Kodex in `docs/befunde/kodex.md`, für den Kern in `docs/befunde/kern.md`. „Test rot“ heißt, dass der Negativtest im Repository steht und am alten Stand fehlschlägt; er ist mit `#[ignore = "offen: …"]` markiert, bis der Umbau ihn grün macht. Nachweis und Befehle stehen in `docs/befunde/negativtests.md`. „Teilnachweis fehlt“ heißt, dass ein Teil des Befunds noch keinen Test hat; die Liste dort sagt, welcher und mit welchem Schnitt er entsteht. Ein grüner Test allein schließt nichts: „geschlossen“ setzt erst die unabhängige Prüfung.
 
-Stand: 01.11.2026, Fassung 4.10, Stufe 2: Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget) abgenommen; Kodex-Schritt umgebaut; Kodex-Schritt von Maus abgenommen (PR #7); Schnitt Kern umgebaut (1·A01, 1·F01, 1·R06, Preisteil von 1·F03); Maus' Gegenprobe K8-01 als Test übernommen und behoben, von Maus abgenommen (PR #8); Schnitt Regelwerk umgebaut (1·F02, 1·F04–F06, 1·F08, 1·F09, 2·A04, 1·T01, Höchstalter aus 1·R06); Maus' Gegenprogramm K9-01 bis K9-03 als Tests übernommen und behoben, erneute Prüfung durch Maus und Grenzfreigabe ausstehend. Kein Befund ist technisch geschlossen.
+Stand: 01.11.2026, Fassung 4.11, Stufe 2: Schritt 1 (Negativtests für Kern, Regelwerk und KI-Budget) abgenommen; Kodex-Schritt umgebaut; Kodex-Schritt von Maus abgenommen (PR #7); Schnitt Kern umgebaut (1·A01, 1·F01, 1·R06, Preisteil von 1·F03); Maus' Gegenprobe K8-01 als Test übernommen und behoben, von Maus abgenommen (PR #8); Schnitt Regelwerk umgebaut (1·F02, 1·F04–F06, 1·F08, 1·F09, 2·A04, 1·T01, Höchstalter aus 1·R06); Maus' Gegenprogramm K9-01 bis K9-03 als Tests übernommen und behoben, von Maus abgenommen und mit Grenzfreigabe gemergt (PR #9); Schnitt Export-Schutz, Teil Gate (2·W3, Gate-Teil von 1·E01) umgebaut, Prüfung durch Maus ausstehend. Kein Befund ist technisch geschlossen.
 
 ## Prüfung 1 – Stand 383ee05 (26 Befunde)
 
@@ -38,7 +38,7 @@ Stand: 01.11.2026, Fassung 4.10, Stufe 2: Schritt 1 (Negativtests für Kern, Reg
 | 1·K04 | leeres oder fehlendes Kassenbuch setzt Grenzen zurück | R25, R38 Commitprotokoll und Anker | gelöschtes, geleertes oder gekürztes Kassenbuch führt zu Halt | Stufe 2 | berücksichtigt | offen, Test rot |
 | 1·K05 | semantisch kaputte Historie akzeptiert | R20, R25, Prüfung der ganzen Historie | Zyklus- oder Summenfehler führt zu Halt | Stufe 2 | berücksichtigt | offen, Test rot |
 | 1·K06 | zwei Pfade umgehen die Sperre | R24, Sperre über Dateiidentität, Link-Verbot | zweiter Pfad auf dieselbe Datei wird gesperrt | Stufe 2 | berücksichtigt | offen, Test rot |
-| 1·E01 | Konto- und Zugangsdaten im Export | R28 Positivliste und Inhaltsprüfung | Datei mit Geheimnismuster bricht den Export ab | Stufe 2 | berücksichtigt | offen |
+| 1·E01 | Konto- und Zugangsdaten im Export | R28 Positivliste und Inhaltsprüfung | Datei mit Geheimnismuster bricht den Export ab | Stufe 2 | berücksichtigt | offen, Gate-Teil grün, Export-Teil folgt |
 | 1·E02 | Link exportiert fremde Inhalte | R24, R28 | Link im Projekt wird nicht gelesen | Stufe 2 | berücksichtigt | offen |
 | 1·E03 | Festschreibungslauf meldet nie ausgeführte Prüfung | R27 | schreibender Befehl meldet nie „Gate offen“ | Stufe 2 | berücksichtigt | offen |
 | 1·A01 | Geldoperationen sättigen still | R13, geprüfte Rechnung, Überlauf führt zu Halt | Überlauf ergibt Fehler, keinen gekappten Wert | Stufe 2 | berücksichtigt | offen, Test grün |
@@ -81,7 +81,7 @@ Stand: 01.11.2026, Fassung 4.10, Stufe 2: Schritt 1 (Negativtests für Kern, Reg
 | --- | --- | --- | --- | --- | --- | --- |
 | 2·W1 | Steuer-, Preis- und Brokerangaben nicht freigegeben | Kap. 13, 15: vor dem Start mit Primärquellen und tatsächlichem Konto prüfen | entfällt (Prüfung vor Stufe 8) | vor Stufe 8 | berücksichtigt | offen |
 | 2·W2 | Papierbefund ist kein Renditebeweis | R16, Kap. 19 Stufe 8 | entfällt | laufend | berücksichtigt | offen |
-| 2·W3 | Geheimnisse in erlaubten Dateien | R28 Inhaltsprüfung | Geheimnismuster in verfolgter Datei bricht den Export ab | Stufe 2 | berücksichtigt | offen |
+| 2·W3 | Geheimnisse in erlaubten Dateien | R28 Inhaltsprüfung | Geheimnismuster in verfolgter Datei bricht den Export ab | Stufe 2 | berücksichtigt | offen, Gate-Test grün, Export-Teil folgt |
 | 2·W4 | Kursalter je Schutzfunktion | Kap. 18 Höchstalter | zu alter Kurs führt zu Halt | Stufe 4 | berücksichtigt | offen |
 
 ## Prüfung 3 – Stand 254e484 (4 Restpunkte)

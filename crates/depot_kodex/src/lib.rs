@@ -14,6 +14,7 @@
 //! 4. Quellscan: Code syntaktisch, Manifeste semantisch. Harte Lints im Kopf jedes
 //!    Produktiv-Targets auf `forbid`; keine Ausnahme dafuer, auch nicht hinter `cfg_attr`;
 //!    Kern und Regelwerk rein; kein Netz ohne Erlaubnis; Lesefehler und Links sind Fehler.
+//!    Keine Datei des Projekts enthaelt ein Geheimnismuster (R28).
 //! 5. Essenz-Kaltstart: Die Essenz entspricht ihrem festen Register und bleibt aufloesbar.
 //! 6. (mit `--voll`) Format, Clippy mit `-D warnings`, alle Tests.
 
