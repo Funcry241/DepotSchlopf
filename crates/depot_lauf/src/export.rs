@@ -32,6 +32,8 @@ pub struct Lauf {
     pub schritte: Vec<Schritt>,
     pub konsole: String,
     pub warnungen: Vec<String>,
+    /// Der Stand vor der Pruefung; aus ihm kommt der Quellstand (1·R04).
+    pub abbild: Option<crate::abbild::Abbild>,
 }
 
 impl Lauf {
@@ -487,6 +489,7 @@ mod tests {
             }],
             konsole: konsole.into(),
             warnungen: Vec::new(),
+            abbild: None,
         }
     }
 
@@ -755,6 +758,122 @@ mod tests {
         git_muss(&r, &["commit", "-q", "-m", "basis"])?;
         let p = schreibe(&r, &lauf("alles gut\n"))?;
         assert!(p.is_file());
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // 1·R04 – der Export ist byte-gleich mit dem geprueften Stand (R28)
+    // -----------------------------------------------------------------------------------------
+
+    fn exportiert(r: &Path, l: &Lauf) -> Result<Vec<u8>, String> {
+        let p = schreibe(r, l)?;
+        fs::read(p).map_err(|e| e.to_string())
+    }
+
+    fn sauberes_repo(inhalt: &[u8]) -> Result<PathBuf, String> {
+        let r = repo()?;
+        schreib(&r, "README.md", inhalt)?;
+        git_muss(&r, &["add", "README.md"])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        Ok(r)
+    }
+
+    /// Wird der Index waehrend der Pruefung geaendert, ist der Lauf gescheitert, und der
+    /// Export enthaelt den Stand vor der Pruefung, nicht den neuen.
+    #[test]
+    fn befund_1_r04_aenderung_waehrend_der_pruefung_wird_erkannt() -> Result<(), String> {
+        let r = sauberes_repo(b"STAND_GEPRUEFT\n")?;
+        let mut fehler = Ok(());
+        let l =
+            crate::abbild::gepruefter_lauf(&r, "alles".into(), String::new(), Vec::new(), |_| {
+                fehler = schreib(&r, "README.md", b"STAND_NACHHER\n")
+                    .and_then(|()| git_muss(&r, &["add", "README.md"]));
+                0
+            });
+        fehler?;
+        let bytes = exportiert(&r, &l)?;
+        let mut offen = Vec::new();
+        if l.erfolgreich() {
+            offen.push("Lauf gilt trotz Aenderung als erfolgreich".to_string());
+        }
+        if !l.warnungen.iter().any(|w| w.contains("README.md")) {
+            offen.push(format!("Warnung nennt die Datei nicht: {:?}", l.warnungen));
+        }
+        if enthaelt(&bytes, b"STAND_NACHHER") || !enthaelt(&bytes, b"STAND_GEPRUEFT") {
+            offen.push("Export enthaelt nicht den Stand vor der Pruefung".to_string());
+        }
+        if !enthaelt(&bytes, b"\"quellstand_geprueft\": false") {
+            offen.push("Export kennzeichnet den Quellstand nicht als ungeprueft".to_string());
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Das Gate prueft den Arbeitsbaum, der Export nimmt den Index. Weichen beide ab, ist
+    /// der exportierte Stand nicht der gepruefte: geaenderte und neue, nicht ignorierte
+    /// Dateien lassen den Lauf scheitern, vor wie nach der Pruefung.
+    #[test]
+    fn befund_1_r04_arbeitsbaum_muss_dem_index_gleichen() -> Result<(), String> {
+        let mut offen = Vec::new();
+        for (fall, vorher) in [
+            ("geaendert", true),
+            ("neu", true),
+            ("geaendert", false),
+            ("neu", false),
+        ] {
+            let r = sauberes_repo(b"INDEX\n")?;
+            let aendern = |r: &Path| match fall {
+                "geaendert" => schreib(r, "README.md", b"ARBEITSBAUM\n"),
+                _ => schreib(r, "src/neu.rs", b"fn neu() {}\n"),
+            };
+            if vorher {
+                aendern(&r)?;
+            }
+            let mut fehler = Ok(());
+            let l = crate::abbild::gepruefter_lauf(
+                &r,
+                "alles".into(),
+                String::new(),
+                Vec::new(),
+                |_| {
+                    if !vorher {
+                        fehler = aendern(&r);
+                    }
+                    0
+                },
+            );
+            fehler?;
+            let wann = if vorher { "vor" } else { "waehrend" };
+            if l.erfolgreich() {
+                offen.push(format!("{fall} {wann} der Pruefung: Lauf erfolgreich"));
+            }
+            let pfad = if fall == "neu" {
+                "src/neu.rs"
+            } else {
+                "README.md"
+            };
+            if !l.warnungen.iter().any(|w| w.contains(pfad)) {
+                offen.push(format!(
+                    "{fall} {wann}: Warnung ohne {pfad}: {:?}",
+                    l.warnungen
+                ));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Kontrolle: Bleibt alles gleich, ist der Lauf erfolgreich, und der Quellstand gilt als
+    /// geprueft.
+    #[test]
+    fn befund_1_r04_unveraenderter_stand_gilt_als_geprueft() -> Result<(), String> {
+        let r = sauberes_repo(b"UNVERAENDERT\n")?;
+        let l =
+            crate::abbild::gepruefter_lauf(&r, "alles".into(), String::new(), Vec::new(), |_| 0);
+        let bytes = exportiert(&r, &l)?;
+        assert!(l.erfolgreich(), "{:?}", l.warnungen);
+        assert!(enthaelt(&bytes, b"UNVERAENDERT"));
+        assert!(enthaelt(&bytes, b"\"quellstand_geprueft\": true"));
         Ok(())
     }
 }

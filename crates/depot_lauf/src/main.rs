@@ -18,6 +18,7 @@
     clippy::cast_sign_loss
 )]
 
+mod abbild;
 mod export;
 mod zip;
 
@@ -124,6 +125,7 @@ fn main() -> ExitCode {
         }],
         konsole,
         warnungen,
+        abbild: None,
     };
     match export::schreibe(&wurzel, &lauf) {
         Ok(p) => println!("[DepotSchlopf] Assistenten-Export: {}", p.display()),
