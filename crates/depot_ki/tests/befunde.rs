@@ -282,6 +282,13 @@ fn schreib_huelle(p: &Path, buchungen: &[Buchung], was: &str) -> Result<String, 
     Ok(inhalt)
 }
 
+fn hoechstkosten() -> Result<i64, String> {
+    Ok(KiDeckel::standard(DACHS)
+        .hoechstkosten()
+        .ok_or("Vorbedingung: Hoechstkosten")?
+        .0)
+}
+
 fn buchung(t: u8, zyklus: u32, cent: i64) -> Result<Buchung, String> {
     Ok(Buchung {
         berater: DACHS,
@@ -415,6 +422,83 @@ fn befund_1_k06_symbolischer_link_wird_abgelehnt() -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("{offen:?}"))
+    }
+}
+
+/// K12-01: Eine liegen gebliebene Zwischendatei des Ankers, die ein Link auf eine fremde Datei
+/// ist, darf diese Datei nie veraendern. Gilt fuer Einrichtung, Reservierung und Bestaetigung
+/// beim Oeffnen. Ebenso ein harter Link auf eine fremde Datei.
+#[cfg(unix)]
+#[test]
+fn befund_k12_01_zwischendatei_veraendert_keine_fremde_datei() -> Result<(), String> {
+    let vorher = b"FREMDE_DATEI_UNVERAENDERT\n";
+    let mut offen = Vec::new();
+    for (fall, hart) in [("symbolischer Link", false), ("harter Link", true)] {
+        for schritt in ["einrichten", "reservieren", "oeffnen"] {
+            let p = neuer_pfad()?;
+            let fremd = p.with_file_name("fremd.txt");
+            vorbedingung(fs::write(&fremd, vorher), "fremde Datei")?;
+            let tmp = p.with_extension("anker.tmp");
+            let lege = || -> Result<(), String> {
+                if hart {
+                    vorbedingung(fs::hard_link(&fremd, &tmp), "harter Link")
+                } else {
+                    vorbedingung(std::os::unix::fs::symlink(&fremd, &tmp), "Link")
+                }
+            };
+            match schritt {
+                "einrichten" => {
+                    lege()?;
+                    let _ = Kassenbuch::einrichten(&p);
+                }
+                "reservieren" => {
+                    vorbedingung(Kassenbuch::einrichten(&p), "Einrichtung")?;
+                    let mut k = oeffnen(&p)?;
+                    lege()?;
+                    let _ = k.reserviere(DACHS, tag(2)?, 1);
+                }
+                _ => {
+                    // Eine unbestaetigte Zeile laesst das Oeffnen den Anker schreiben.
+                    let b = vec![buchung(2, 1, hoechstkosten()?)?];
+                    vorbedingung(Kassenbuch::einrichten(&p), "Einrichtung")?;
+                    vorbedingung(fs::write(&p, huelle(&b)), "unbestaetigte Zeile")?;
+                    lege()?;
+                    let _ = Kassenbuch::oeffnen(&p);
+                }
+            }
+            let jetzt = vorbedingung(fs::read(&fremd), "fremde Datei lesen")?;
+            if jetzt != vorher {
+                offen.push(format!("{fall}, {schritt}: fremde Datei veraendert"));
+            }
+        }
+    }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
+}
+
+/// K12-02: Ein Link in einem Teil des Pfads, nicht nur im letzten, ist verboten.
+#[cfg(unix)]
+#[test]
+fn befund_k12_02_link_im_elternverzeichnis_wird_abgelehnt() -> Result<(), String> {
+    let p = neuer_pfad()?;
+    let wurzel = p.parent().ok_or("Vorbedingung: Verzeichnis")?;
+    let echt = wurzel.join("echt");
+    vorbedingung(fs::create_dir(&echt), "Verzeichnis")?;
+    vorbedingung(
+        Kassenbuch::einrichten(&echt.join("kasse.txt")),
+        "Einrichtung",
+    )?;
+    let link = wurzel.join("link");
+    vorbedingung(std::os::unix::fs::symlink(&echt, &link), "Link")?;
+    match Kassenbuch::oeffnen(&link.join("kasse.txt")) {
+        Err(Sperre::Kassenbuch(m)) if m.contains("Link") => Ok(()),
+        anders => Err(format!(
+            "Kassenbuch ueber einen Elternlink: {:?}",
+            anders.map(|k| k.buchungen().len())
+        )),
     }
 }
 
