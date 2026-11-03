@@ -27,9 +27,11 @@ pub enum Art {
     Ki,
     /// Der Abdruck der KI-Grenzen, unter denen die folgenden Buchungen entstehen.
     KiGrenzen,
-    /// Leere Schnittstelle fuer die roten Tests.
+    /// `datum;wer;text`: warum etwas geschieht oder nicht geschieht. `wer` ist ein Berater
+    /// oder eine Stelle des Rahmens; die Kaufentscheidung begruenden die Berater selbst.
     Begruendung,
-    /// Leere Schnittstelle fuer die roten Tests.
+    /// `datum;hoechststand`: Der Tag ist vollstaendig belegt. Ein Wiederanlauf setzt nur nach
+    /// einem Abschluss fort; die Daten steigen streng.
     Abschluss,
 }
 
@@ -53,6 +55,8 @@ impl Art {
             Art::Auftrag,
             Art::Ki,
             Art::KiGrenzen,
+            Art::Begruendung,
+            Art::Abschluss,
         ]
         .into_iter()
         .find(|a| a.name() == name)
@@ -80,6 +84,9 @@ pub struct Stand {
     beobachtungen: Vec<(Datum, String)>,
     letzte_kennung: u64,
     ki: KiStand,
+    begruendungen: Vec<(Datum, String, String)>,
+    abschluss: Option<(Datum, Cent)>,
+    seit_abschluss: usize,
 }
 
 impl Stand {
@@ -101,19 +108,20 @@ impl Stand {
         &self.ki
     }
 
-    /// Begruendungen: Datum, wer, Text. Leere Schnittstelle fuer die roten Tests.
+    /// Begruendungen: Datum, wer, Text.
     pub fn begruendungen(&self) -> &[(Datum, String, String)] {
-        &[]
+        &self.begruendungen
     }
 
-    /// Der letzte Tagesabschluss: Datum und Hoechststand. Leere Schnittstelle.
+    /// Der letzte Tagesabschluss: Datum und Hoechststand des Depotwerts.
     pub fn abschluss(&self) -> Option<(Datum, Cent)> {
-        None
+        self.abschluss
     }
 
-    /// Eintraege seit dem letzten Tagesabschluss. Leere Schnittstelle.
+    /// Zahl der Eintraege seit dem letzten Abschluss. Mehr als null heisst: Ein Tag ist
+    /// angefangen und nicht abgeschlossen.
     pub fn seit_abschluss(&self) -> usize {
-        0
+        self.seit_abschluss
     }
 
     /// Die groesste belegte Auftragskennung; 0, wenn es noch keine gibt.
@@ -149,8 +157,29 @@ impl Stand {
             }
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
             Art::Ki => self.ki.buche(inhalt)?,
-            Art::Begruendung | Art::Abschluss => return Err("fehlt".into()),
+            Art::Begruendung => {
+                let b = lies_begruendung(inhalt).ok_or("Begruendung unlesbar")?;
+                kanonisch(&begruendung_text(b.0, &b.1, &b.2), inhalt)?;
+                self.begruendungen.push(b);
+            }
+            Art::Abschluss => {
+                let (datum, hoch) = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
+                kanonisch(&abschluss_text(datum, hoch), inhalt)?;
+                if let Some((vorher, _)) = self.abschluss
+                    && datum <= vorher
+                {
+                    return Err(format!(
+                        "Abschluss {} nicht nach dem letzten ({})",
+                        datum_text(datum),
+                        datum_text(vorher)
+                    ));
+                }
+                self.abschluss = Some((datum, hoch));
+                self.seit_abschluss = 0;
+                return Ok(());
+            }
         }
+        self.seit_abschluss = self.seit_abschluss.saturating_add(1);
         Ok(())
     }
 }
@@ -194,6 +223,30 @@ fn lies_beobachtung(inhalt: &str) -> Option<(Datum, String)> {
         return None;
     }
     Some((lies_datum(datum)?, text.to_string()))
+}
+
+pub(crate) fn begruendung_text(d: Datum, wer: &str, text: &str) -> String {
+    format!("{};{wer};{text}", datum_text(d))
+}
+
+fn lies_begruendung(inhalt: &str) -> Option<(Datum, String, String)> {
+    let mut teile = inhalt.splitn(3, ';');
+    let (datum, wer, text) = (teile.next()?, teile.next()?, teile.next()?);
+    if wer.trim().is_empty() || wer.trim() != wer || text.trim().is_empty() {
+        return None;
+    }
+    Some((lies_datum(datum)?, wer.to_string(), text.to_string()))
+}
+
+pub(crate) fn abschluss_text(d: Datum, hoechststand: Cent) -> String {
+    format!("{};{}", datum_text(d), hoechststand.0)
+}
+
+fn lies_abschluss(inhalt: &str) -> Option<(Datum, Cent)> {
+    let (datum, hoch) = inhalt.split_once(';')?;
+    let hoch = Cent(hoch.parse().ok()?);
+    (hoch.0 > 0).then_some(())?;
+    Some((lies_datum(datum)?, hoch))
 }
 
 fn topf_name(t: TopfId) -> &'static str {

@@ -1,6 +1,10 @@
 //! DepotSchlopf – simulierter Lauf mit erfundenen Daten und Papiergeld.
 //!
-//! Leere Schnittstelle fuer die roten Tests.
+//! Dachs und Maus beobachten ein erfundenes Bild aus Nachrichten, Terminen und Kursen,
+//! schreiben ihre Einschaetzung und Begruendung ins Journal und treffen Papierentscheidungen.
+//! Der Rahmen haelt nur den Schutz: Kostenschutz, Zweitmeinung, Regelwerk, Datenpruefung,
+//! Waechter und Kodex. Echte Schnittstellen, echte Kurse und echtes Geld gibt es hier nicht;
+//! ein Kurs, der nicht als erfunden markiert ist, haelt den Lauf an.
 
 #![forbid(
     unsafe_code,
@@ -14,27 +18,8 @@
     clippy::cast_sign_loss
 )]
 
+pub mod lauf;
 pub mod szenario;
 
-use depot_journal::Journal;
-
+pub use lauf::{LaufFehler, lauf};
 pub use szenario::{Antwort, Berater, Drehbuch, Lage, Szenario, Tag, Urteil};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LaufFehler {
-    /// Der Lauf steht. Was bis dahin abgeschlossen ist, steht im Journal.
-    Halt(String),
-}
-
-/// Leere Schnittstelle.
-///
-/// # Errors
-/// Immer.
-pub fn lauf(
-    _journal: &mut Journal,
-    _szenario: &Szenario,
-    _dachs: &mut dyn Berater,
-    _maus: &mut dyn Berater,
-) -> Result<(), LaufFehler> {
-    Err(LaufFehler::Halt("fehlt".into()))
-}

@@ -142,6 +142,11 @@ impl Kurse {
         self.0.kurse.get(isin)
     }
 
+    /// Alle Kurse, nach ISIN geordnet.
+    pub fn alle(&self) -> impl Iterator<Item = (&Isin, &Kurs)> {
+        self.0.kurse.iter()
+    }
+
     /// Alter des Kurses in Sekunden, gemessen am Stand.
     pub fn alter_s(&self, isin: &Isin) -> Option<i64> {
         self.0

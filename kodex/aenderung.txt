@@ -1,8 +1,13 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Funktion
-zweck: Stufe 2, Schnitt Export, 1·R04 und K14-01 entlang R28: Gate und Export nehmen denselben festgehaltenen Stand. Der Lauf haelt den Index als Baum fest, schreibt ihn Byte fuer Byte in eine eigene Kopie ausserhalb des Projektordners, laesst das Gate dort ohne geerbte Bau-Einstellungen laufen und exportiert dieselben Blobs; aendert sich die Kopie waehrend des Gates, ist der Lauf gescheitert.
+klasse: FestschreibungAenderung
+zweck: Simulierter Lauf mit erfundenen Daten und Papiergeld entlang R8, R31, D01, D03 und Kap. 11: neues Crate depot_sim mit erfundenem Szenario und Beratern nach Drehbuch; Dachs und Maus beobachten und begruenden im Journal, der Lauf haelt nur den Schutzrahmen (Kostenschutz, Zweitmeinung, Regelwerk, Datenpruefung, Waechter) und fuehrt auf Papier aus; nur erfundene Kurse. Das Journal bekommt Begruendung und Tagesabschluss; der Wiederanlauf setzt nach dem letzten Abschluss fort. Keine neuen Grenzen, keine Kaufregeln.
 pfade:
-crates/depot_lauf/
+crates/depot_sim/
+crates/depot_journal/
+crates/depot_kern/
+Cargo.toml
+Cargo.lock
+kodex/festschreibung.txt
 kodex/aenderung.txt
 docs/
 CHANGELOG.md

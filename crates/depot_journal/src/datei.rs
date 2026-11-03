@@ -21,13 +21,15 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write as _};
 use std::path::{Component, Path, PathBuf};
 
-use depot_kern::{BeraterId, Datum, Topf, TopfId};
+use depot_kern::{BeraterId, Cent, Datum, Topf, TopfId};
 use depot_ki::{Sperre, grenzabdruck};
 use depot_regelwerk::{GenehmigterAuftrag, Kennungsvergabe};
 use sha2::{Digest, Sha256};
 
 use crate::kasse::{AufrufErlaubnis, buchung_text, naechste};
-use crate::stand::{Art, Stand, beleg_text, beobachtung_text, topf_text, trenne};
+use crate::stand::{
+    Art, Stand, abschluss_text, begruendung_text, beleg_text, beobachtung_text, topf_text, trenne,
+};
 
 const KOPF: &str = "journal-v1";
 const VERMERK_KOPF: &str = "vermerk-v1";
@@ -573,29 +575,24 @@ impl Journal {
         self.anhaengen(Art::Beobachtung, &beobachtung_text(datum, text))
     }
 
-    /// Belegt eine Begruendung. Leere Schnittstelle fuer die roten Tests.
+    /// Belegt eine Begruendung: wer was warum entschieden oder unterlassen hat.
     ///
     /// # Errors
-    /// Wie `anhaengen`.
-    pub fn begruende(
-        &mut self,
-        _datum: Datum,
-        _wer: &str,
-        _text: &str,
-    ) -> Result<(), JournalFehler> {
-        Err(JournalFehler::Abgelehnt("fehlt".into()))
+    /// Wie `anhaengen`; `Abgelehnt` auch bei leerem `wer` oder Text und bei `;` in `wer`.
+    pub fn begruende(&mut self, datum: Datum, wer: &str, text: &str) -> Result<(), JournalFehler> {
+        if wer.contains(';') {
+            return Err(JournalFehler::Abgelehnt("`;` in wer".into()));
+        }
+        self.anhaengen(Art::Begruendung, &begruendung_text(datum, wer, text))
     }
 
-    /// Schliesst einen Tag ab. Leere Schnittstelle fuer die roten Tests.
+    /// Schliesst einen Tag ab, mit dem Hoechststand des Depotwerts bis dahin.
     ///
     /// # Errors
-    /// Wie `anhaengen`.
-    pub fn schliesse_ab(
-        &mut self,
-        _datum: Datum,
-        _hoechststand: depot_kern::Cent,
-    ) -> Result<(), JournalFehler> {
-        Err(JournalFehler::Abgelehnt("fehlt".into()))
+    /// Wie `anhaengen`; `Abgelehnt` auch, wenn das Datum nicht nach dem letzten Abschluss liegt
+    /// oder der Hoechststand nicht positiv ist.
+    pub fn schliesse_ab(&mut self, datum: Datum, hoechststand: Cent) -> Result<(), JournalFehler> {
+        self.anhaengen(Art::Abschluss, &abschluss_text(datum, hoechststand))
     }
 
     /// Belegt den ganzen Stand eines Topfes im Papierdepot.

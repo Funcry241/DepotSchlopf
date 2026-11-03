@@ -110,7 +110,14 @@ fn beispiel_laeuft_durch_und_steht_im_journal() -> Result<(), String> {
     assert_eq!(st.toepfe().len(), 2);
     assert!(!st.auftraege().is_empty(), "es gibt Papierauftraege");
     let t25 = datum(25, 11)?;
-    assert!(!von(&j, t25, "Dachs").is_empty(), "Dachs begruendet");
+    let dachs = von(&j, t25, "Dachs");
+    let beta = isin("XA0000BETA0")?;
+    assert!(
+        dachs.iter().any(|t| t.starts_with("Topf A: ")
+            && t.contains(beta.als_str())
+            && t.contains("2000 bp: ruhiger Wert")),
+        "Dachs begruendet jedes Ziel: {dachs:?}"
+    );
     assert!(!von(&j, t25, "Maus").is_empty(), "Maus begruendet");
     assert!(!von(&j, t25, "Simulation").is_empty(), "Ausfuehrung belegt");
     // Wiedergeoeffnet steht derselbe Stand da.
@@ -214,7 +221,11 @@ fn wiederanlauf_setzt_nach_dem_letzten_abschluss_fort() -> Result<(), String> {
         lauf(&mut j, &s, &mut dachs2, &mut maus2).map_err(|e| format!("zweiter Teil: {e:?}"))?;
     }
     assert_eq!(geteilt.bytes()?, ganz.bytes()?, "byte-gleiches Journal");
-    assert_eq!(dachs.aufrufe.saturating_add(dachs2.aufrufe), 6);
+    assert_eq!(
+        dachs.aufrufe.saturating_add(dachs2.aufrufe),
+        5,
+        "wie im ganzen Lauf"
+    );
     // Ein dritter Lauf findet nichts mehr zu tun.
     let vorher = geteilt.bytes()?;
     let (_, mut d3, mut m3) = beispiel()?;
@@ -388,5 +399,78 @@ fn journal_eintraege_sind_alle_lesbar() -> Result<(), String> {
     assert!(arten.contains(&Art::Begruendung));
     assert!(arten.contains(&Art::Abschluss));
     assert_eq!(arten.last(), Some(&Art::Abschluss));
+    Ok(())
+}
+
+/// Kurse eines erfundenen Tages fuer die drei Werte zum selben Preis.
+fn gleiche_kurse(d: Datum, isins: &[Isin], preis: i64) -> Result<Kurse, String> {
+    let zeit = depot_kern::Zeitpunkt::neu(d, 17, 30, 0).ok_or("Vorbedingung: Zeit")?;
+    let mut alle = Vec::new();
+    for i in isins {
+        alle.push((
+            i.clone(),
+            vorbedingung(
+                Kurs::neu(Cent(preis), "EUR", d, zeit, Herkunft::Simulation),
+                "Kurs",
+            )?,
+        ));
+    }
+    vorbedingung(Kurse::neu(zeit, alle), "Kurse")
+}
+
+#[test]
+fn notbremse_verkauft_alles_und_haelt() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (mut s, _, _) = beispiel()?;
+    let isins: Vec<Isin> = s.universum.isins().into_iter().collect();
+    // Topf A haelt alle drei Werte; die Kurse fallen taeglich um 4,4 %: kein Tagesverlust,
+    // kein Kurssprung, aber nach einigen Tagen mehr als 20 % unter dem Hoechststand.
+    let mut topf_a = vorbedingung(Topf::neu(TopfId::A, Cent(0)), "Topf A")?;
+    for i in &isins {
+        topf_a.setze_bestand(i.clone(), 100);
+    }
+    s.start = vec![
+        topf_a,
+        vorbedingung(Topf::neu(TopfId::B, Cent(0)), "Topf B")?,
+    ];
+    s.vorlauf = gleiche_kurse(datum(1, 11)?, &isins, 10_000)?;
+    let mut preis: i64 = 10_000;
+    s.tage.clear();
+    for t in 2..=12 {
+        preis = preis
+            .checked_mul(956)
+            .and_then(|p| p.checked_div(1000))
+            .ok_or("Vorbedingung: Preis")?;
+        let d = datum(t, 11)?;
+        s.tage.push(depot_sim::Tag {
+            datum: d,
+            kurse: gleiche_kurse(d, &isins, preis)?,
+            ereignisse: vec!["erfundener Kursrueckgang".into()],
+        });
+    }
+    let (mut dachs, mut maus) = (Drehbuch::default(), Drehbuch::default());
+    let mut j = ort.oeffnen()?;
+    let r = lauf(&mut j, &s, &mut dachs, &mut maus);
+    assert!(matches!(r, Err(LaufFehler::Halt(_))), "{r:?}");
+    let st = j.stand();
+    let waechter: Vec<&str> = st
+        .begruendungen()
+        .iter()
+        .filter(|(_, w, _)| w == "Waechter")
+        .map(|(_, _, t)| t.as_str())
+        .collect();
+    assert!(
+        waechter.iter().any(|t| t.contains("Notbremse")),
+        "{waechter:?}"
+    );
+    let a = st.toepfe().get(&TopfId::A).ok_or("Topf A fehlt")?;
+    assert!(a.positionen().is_empty(), "alles verkauft: {a:?}");
+    assert!(a.bargeld().0 > 0);
+    assert!(
+        st.auftraege()
+            .iter()
+            .any(|b| b.anlass == depot_regelwerk::Anlass::Notbremse)
+    );
+    assert!(st.seit_abschluss() > 0, "der Tag bleibt offen");
     Ok(())
 }
