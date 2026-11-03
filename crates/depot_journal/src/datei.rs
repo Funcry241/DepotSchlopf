@@ -510,7 +510,9 @@ impl Journal {
             Art::Ki | Art::KiGrenzen => Err(JournalFehler::Abgelehnt(
                 "KI-Eintraege entstehen nur ueber reserviere".into(),
             )),
-            Art::Beobachtung | Art::Topf | Art::Auftrag => self.schreibe_eintrag(art, inhalt),
+            Art::Beobachtung | Art::Topf | Art::Auftrag | Art::Begruendung | Art::Abschluss => {
+                self.schreibe_eintrag(art, inhalt)
+            }
         }
     }
 
@@ -569,6 +571,31 @@ impl Journal {
     /// Wie `anhaengen`.
     pub fn beobachte(&mut self, datum: Datum, text: &str) -> Result<(), JournalFehler> {
         self.anhaengen(Art::Beobachtung, &beobachtung_text(datum, text))
+    }
+
+    /// Belegt eine Begruendung. Leere Schnittstelle fuer die roten Tests.
+    ///
+    /// # Errors
+    /// Wie `anhaengen`.
+    pub fn begruende(
+        &mut self,
+        _datum: Datum,
+        _wer: &str,
+        _text: &str,
+    ) -> Result<(), JournalFehler> {
+        Err(JournalFehler::Abgelehnt("fehlt".into()))
+    }
+
+    /// Schliesst einen Tag ab. Leere Schnittstelle fuer die roten Tests.
+    ///
+    /// # Errors
+    /// Wie `anhaengen`.
+    pub fn schliesse_ab(
+        &mut self,
+        _datum: Datum,
+        _hoechststand: depot_kern::Cent,
+    ) -> Result<(), JournalFehler> {
+        Err(JournalFehler::Abgelehnt("fehlt".into()))
     }
 
     /// Belegt den ganzen Stand eines Topfes im Papierdepot.

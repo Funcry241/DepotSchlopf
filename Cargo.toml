@@ -5,6 +5,7 @@ members = [
     "crates/depot_regelwerk",
     "crates/depot_ki",
     "crates/depot_journal",
+    "crates/depot_sim",
     "crates/depot_kodex",
     "crates/depot_lauf",
 ]

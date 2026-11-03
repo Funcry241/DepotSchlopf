@@ -27,6 +27,10 @@ pub enum Art {
     Ki,
     /// Der Abdruck der KI-Grenzen, unter denen die folgenden Buchungen entstehen.
     KiGrenzen,
+    /// Leere Schnittstelle fuer die roten Tests.
+    Begruendung,
+    /// Leere Schnittstelle fuer die roten Tests.
+    Abschluss,
 }
 
 impl Art {
@@ -37,6 +41,8 @@ impl Art {
             Art::Auftrag => "auftrag",
             Art::Ki => "ki",
             Art::KiGrenzen => "ki-grenzen",
+            Art::Begruendung => "begruendung",
+            Art::Abschluss => "abschluss",
         }
     }
 
@@ -95,6 +101,21 @@ impl Stand {
         &self.ki
     }
 
+    /// Begruendungen: Datum, wer, Text. Leere Schnittstelle fuer die roten Tests.
+    pub fn begruendungen(&self) -> &[(Datum, String, String)] {
+        &[]
+    }
+
+    /// Der letzte Tagesabschluss: Datum und Hoechststand. Leere Schnittstelle.
+    pub fn abschluss(&self) -> Option<(Datum, Cent)> {
+        None
+    }
+
+    /// Eintraege seit dem letzten Tagesabschluss. Leere Schnittstelle.
+    pub fn seit_abschluss(&self) -> usize {
+        0
+    }
+
     /// Die groesste belegte Auftragskennung; 0, wenn es noch keine gibt.
     pub fn letzte_kennung(&self) -> u64 {
         self.letzte_kennung
@@ -128,6 +149,7 @@ impl Stand {
             }
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
             Art::Ki => self.ki.buche(inhalt)?,
+            Art::Begruendung | Art::Abschluss => return Err("fehlt".into()),
         }
         Ok(())
     }
