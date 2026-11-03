@@ -82,11 +82,19 @@ Jede Ablehnung muss das Stichwort „Geheimnismuster“ nennen, die nicht lesbar
 
 ## Teil Export: Ergebnis
 
+**Fassung 2 nach Maus' Prüfung von `9d94866` (K11-01, K11-02):** Maus' Gegenproben stehen als Tests in `crates/depot_lauf/src/export.rs`, am Stand `9d94866` rot (eigener Commit `a214d1d`). Behoben ist allgemein:
+
+- **K11-01 (hoch):** Der Export hat genau einen Leseweg für Dateien im Projekt, `lies_im_projekt`. Er prüft jeden Teil des Pfads, nicht nur den letzten. Kein Teil darf ein Link sein, unter Windows auch kein Analysepunkt (Junction). Zusätzlich muss der aufgelöste Pfad genau der erwartete Pfad unter der aufgelösten Projektwurzel sein. Der Weg wird vor und nach dem Lesen geprüft, und die gelesene Datei muss die geprüfte sein; ändert sich etwas dazwischen, bricht der Export ab. Auch die Essenz wird nur so gelesen.
+- **K11-02 (mittel):** „Ohne Git“ heißt nur: Es gibt kein `.git`. Ist eines da, muss der Index lesbar sein, sonst bricht der Export ab, bevor eine Datei entsteht. Ein Fehler beim Lesen der Metadaten ist ein Fehler, keine ausgelassene Datei. Ausgelassen wird nur, was im Arbeitsbaum fehlt, keine gewöhnliche Datei ist oder hinter einem Link liegt; diese Pfade stehen mit Grund in `SOURCE_SNAPSHOT.txt`.
+
 Die Negativtests stehen in `crates/depot_lauf/src/export.rs` und sind am alten Stand rot (eigener Commit `3c8899a`). Der Fall „verfolgte Datei im Arbeitsbaum durch einen Link ersetzt“ kam mit dem Umbau-Commit dazu; am alten Stand wäre auch er rot, weil der alte Export jedem Pfad folgte.
 
 ```text
 cargo test --locked -p depot_lauf befund_1_e0
+cargo test --locked -p depot_lauf befund_k11
+cargo test --locked -p depot_lauf metadatenfehler
 cargo test --locked -p depot_lauf sauberer_export_entsteht
+cargo test --locked -p depot_lauf ohne_git
 ```
 
 | Fall | am alten Stand | nach dem Umbau |
@@ -100,11 +108,19 @@ cargo test --locked -p depot_lauf sauberer_export_entsteht
 | nicht lesbarer Inhalt | exportiert | Abbruch als „nicht pruefbar“ |
 | sauberer Stand (Kontrolle) | ZIP entsteht | ZIP entsteht |
 
+| K11-Fall | an `9d94866` | nach dem Umbau |
+| --- | --- | --- |
+| Elternordner einer verfolgten Datei durch Link ersetzt | fremder Inhalt in der ZIP-Datei | nicht gelesen, ausgelassen |
+| Ordner der Essenz durch Link ersetzt | fremde Regel in der Übergabe | nicht gelesen |
+| `.git/index` beschädigt | leerer Quellstand, ZIP entsteht | Abbruch, keine ZIP-Datei |
+| Metadatenfehler (zu langer Name) und Pfade mit `..`, `.` oder leerem Teil | – | Fehler |
+| ohne `.git` (Kontrolle) | ZIP ohne Quellstand | ZIP ohne Quellstand |
+
 Bei jedem Abbruch prüft der Test: die Meldung nennt „Geheimnismuster“ oder „nicht pruefbar“, das Geheimnis steht nicht darin, und es gibt weder ZIP-Datei noch Zwischendatei.
 
 ## Was der Export-Umbau tut
 
-- **Quelle.** Die Liste der Dateien kommt aus dem Git-Index (`git ls-files --stage`, nur normale Dateien). Jeder Pfad muss im Arbeitsbaum eine gewöhnliche Datei sein, geprüft ohne einem Link zu folgen. Ohne Git gibt es keinen Quellstand; der Export enthält dann nur Bericht und Konsole.
+- **Quelle.** Die Liste der Dateien kommt aus dem Git-Index (`git ls-files --stage`, nur normale Dateien). Gelesen wird jede Datei über `lies_im_projekt` (siehe K11-01). Ohne `.git` gibt es keinen Quellstand; der Export enthält dann nur Bericht und Konsole. Ein vorhandenes, aber nicht lesbares Repository bricht ab.
 - **Prüfung.** Jede Quelldatei wird vor dem Schreiben mit derselben Prüfung wie im Gate gelesen (`depot_kodex::geheimnis::pruefe_inhalt`). Ebenso jeder andere Teil der ZIP-Datei, auch die Konsole und der Bericht. Die innere Quell-ZIP enthält nur bereits geprüfte Dateien.
 - **Abbruch.** Ein Treffer oder ein nicht prüfbarer Inhalt bricht ab, bevor eine Datei geschrieben wird. Die Meldung nennt Teil, Zeile und Art.
 
@@ -116,8 +132,21 @@ Bei jedem Abbruch prüft der Test: die Meldung nennt „Geheimnismuster“ oder 
 | Link im Arbeitsbaum gelesen | E02 rot |
 | Quelldateien nicht geprüft | E01-Geheimnis rot |
 | Konsole nicht geprüft | E01-Geheimnis rot |
+| Essenz direkt gelesen | K11-01 rot |
+| Indexfehler als leere Liste | K11-02 rot |
+| vorhandenes, kaputtes Repository gilt als „ohne Git“ | K11-02 rot |
+| Metadatenfehler als „ausgelassen“ | Metadatentest rot |
+| Pfadteil `..` erlaubt | Metadatentest rot |
+| Link-Prüfung je Pfadteil, Ordnerprüfung und Auflösungsvergleich zusammen entfernt | K11-01 rot |
+
+Jede der drei Link-Schichten allein hält K11-01 grün: die Link-Prüfung je Pfadteil, die Prüfung, dass jeder Teil vor dem letzten ein echter Ordner ist, und der Vergleich mit dem aufgelösten Pfad. Rot wird der Test erst, wenn alle drei fehlen. Der Auflösungsvergleich ist die Schicht, die unter Windows auch Umleitungen fängt, die sich nicht als Link melden.
 
 ## Grenzen Teil Export
+
+- Der Windows-Weg (Analysepunkte, Junctions) ist für Windows gebaut und mit Clippy geprüft, aber nicht unter Windows ausgeführt. Ein Junction-Test fehlt, weil die Prüfumgebung Linux ist. Unter Windows lässt eine abweichende Groß- und Kleinschreibung zwischen Git und Dateisystem eine Datei als „umgeleitet“ aus; sie fehlt dann im Quellstand und steht in `SOURCE_SNAPSHOT.txt`.
+- Zwischen der ersten Prüfung und dem Öffnen bleibt ein sehr kurzes Fenster. Wer den Pfad darin umleitet und vor der zweiten Prüfung zurückstellt, wird nicht erkannt. Die Inhaltsprüfung greift trotzdem. Ganz schließen ließe sich das nur mit Systemaufrufen ohne Linkauflösung, die eine neue Abhängigkeit bräuchten.
+- Die Festschreibung im Export berechnet der Kodex. Aus ihr gehen nur Prüfsummen und abgeleitete Namen in den Export, keine Dateiinhalte, und auch sie werden auf Geheimnismuster geprüft.
+- Ein Fehler beim Lesen der Rechte (etwa „Zugriff verweigert“) lässt sich in der Prüfumgebung nicht herstellen, weil sie als Administrator läuft. Der Test nutzt deshalb einen zu langen Namen; der Leseweg unterscheidet nur „fehlt“ von allen anderen Fehlern.
 
 - Der Export liest den Arbeitsbaum, nicht den Index. Weicht beides ab, wird der Arbeitsbaum exportiert und geprüft. Dass der Export byte-gleich dem geprüften Stand ist, bleibt 1·R04 (Snapshot) und folgt mit einem eigenen Schnitt.
 - Für die Muster gelten dieselben Grenzen wie im Gate.

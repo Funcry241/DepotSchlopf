@@ -74,22 +74,163 @@ fn geheim_oder_erzeugt(pfad: &str) -> bool {
             .any(|e| name.ends_with(e))
 }
 
-/// Quellstand (R28): nur gewoehnliche Dateien, die Git verfolgt (Index), und nur, wenn sie
-/// auch im Arbeitsbaum gewoehnliche Dateien sind. Neue, nicht verfolgte Dateien bleiben
-/// draussen (1·E01), Links werden nie gelesen (1·E02). Ohne Git gibt es keinen Quellstand.
-fn quelldateien(wurzel: &Path) -> Vec<String> {
-    let Ok(index) = depot_kodex::git::index_dateien(wurzel) else {
-        return Vec::new();
-    };
-    let mut liste: Vec<String> = index
+/// Ergebnis des sicheren Lesens einer Projektdatei.
+#[derive(Debug)]
+enum Lesen {
+    /// Eine gewoehnliche Datei, auf ihrem ganzen Weg ohne Link gelesen.
+    Datei(Vec<u8>),
+    /// Nicht gelesen, mit Grund: fehlt im Arbeitsbaum, ist keine Datei oder liegt hinter
+    /// einem Link.
+    Ausgelassen(&'static str),
+}
+
+/// Ist dieser Eintrag ein Link? Unter Windows zaehlt jeder Analysepunkt (Reparse Point)
+/// dazu, also auch eine Verzeichnisverknuepfung (Junction).
+fn ist_link(m: &fs::Metadata) -> bool {
+    m.file_type().is_symlink() || ist_analysepunkt(m)
+}
+
+#[cfg(windows)]
+fn ist_analysepunkt(m: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn ist_analysepunkt(_: &fs::Metadata) -> bool {
+    false
+}
+
+/// Prueft den Weg von der Projektwurzel zur Datei `rel` (mit `/` getrennt). Jeder Teil darf
+/// kein Link sein, die Teile davor muessen Ordner sein, der letzte eine gewoehnliche Datei.
+/// Zusaetzlich muss der aufgeloeste Pfad genau der erwartete Pfad unter der aufgeloesten
+/// Wurzel sein; das faengt jede Umleitung, die sich nicht als Link meldet.
+/// `Ok(None)` heisst: Der Weg ist frei. Fehler beim Lesen der Metadaten sind Fehler (R29).
+fn weg_pruefen(wurzel: &Path, basis: &Path, rel: &str) -> Result<Option<&'static str>, String> {
+    let teile: Vec<&str> = rel.split('/').collect();
+    if teile
+        .iter()
+        .any(|t| t.is_empty() || *t == "." || *t == "..")
+    {
+        return Err(format!("{rel}: ungueltiger Pfad"));
+    }
+    let mut p = wurzel.to_path_buf();
+    let mut erwartet = basis.to_path_buf();
+    let anzahl = teile.len();
+    for (i, t) in teile.iter().enumerate() {
+        p.push(t);
+        erwartet.push(t);
+        let m = match fs::symlink_metadata(&p) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Some("fehlt im Arbeitsbaum"));
+            }
+            Err(e) => return Err(format!("{rel}: nicht lesbar: {e}")),
+        };
+        if ist_link(&m) {
+            return Ok(Some("Link im Pfad"));
+        }
+        let letzter = i.checked_add(1) == Some(anzahl);
+        if letzter && !m.is_file() {
+            return Ok(Some("keine gewoehnliche Datei"));
+        }
+        if !letzter && !m.is_dir() {
+            return Ok(Some("fehlt im Arbeitsbaum"));
+        }
+    }
+    let echt = fs::canonicalize(&p).map_err(|e| format!("{rel}: nicht lesbar: {e}"))?;
+    if echt != erwartet {
+        return Ok(Some("Pfad wird umgeleitet"));
+    }
+    Ok(None)
+}
+
+/// Gleiche Datei? Unter Unix nach Geraet und Knoten, sonst nach Laenge.
+#[cfg(unix)]
+fn gleiche_datei(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+#[cfg(not(unix))]
+fn gleiche_datei(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    a.len() == b.len()
+}
+
+/// Der einzige Leseweg des Exports fuer Dateien im Projekt (R28, 1·E02, K11-01). Der Weg
+/// wird vor und nach dem Lesen geprueft, und die gelesene Datei muss die gepruefte sein.
+/// Aendert sich der Weg dazwischen, ist das ein Fehler.
+fn lies_im_projekt(wurzel: &Path, basis: &Path, rel: &str) -> Result<Lesen, String> {
+    if let Some(grund) = weg_pruefen(wurzel, basis, rel)? {
+        return Ok(Lesen::Ausgelassen(grund));
+    }
+    let pfad = wurzel.join(rel);
+    let mut datei = fs::File::open(&pfad).map_err(|e| format!("{rel}: nicht lesbar: {e}"))?;
+    let mut inhalt = Vec::new();
+    std::io::Read::read_to_end(&mut datei, &mut inhalt)
+        .map_err(|e| format!("{rel}: nicht lesbar: {e}"))?;
+    let gelesen = datei
+        .metadata()
+        .map_err(|e| format!("{rel}: nicht lesbar: {e}"))?;
+    let danach = weg_pruefen(wurzel, basis, rel)?;
+    let jetzt = fs::symlink_metadata(&pfad).map_err(|e| format!("{rel}: nicht lesbar: {e}"))?;
+    if danach.is_some() || !gleiche_datei(&gelesen, &jetzt) {
+        return Err(format!("{rel}: Pfad hat sich beim Lesen geaendert"));
+    }
+    Ok(Lesen::Datei(inhalt))
+}
+
+/// Hat das Projekt ein Git-Repository? Nur ein fehlendes `.git` heisst „ohne Git“; jeder
+/// andere Zustand wird gelesen, und ein Fehler dabei ist ein Fehler (K11-02).
+fn hat_git(wurzel: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(wurzel.join(".git")) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!(".git: nicht lesbar: {e}")),
+    }
+}
+
+/// Quellstand (R28): die gewoehnlichen Dateien, die Git verfolgt (Index), gelesen ueber
+/// `lies_im_projekt`. Neue, nicht verfolgte Dateien bleiben draussen (1·E01), Links in
+/// keinem Teil des Pfads werden gelesen (1·E02, K11-01). Ohne Git gibt es keinen Quellstand;
+/// ein vorhandenes, aber nicht lesbares Repository ist ein Fehler (K11-02).
+/// Liefert die gelesenen Dateien und die ausgelassenen Pfade mit Grund.
+type Quellstand = (Vec<(String, Vec<u8>)>, Vec<(String, &'static str)>);
+
+fn quellstand(wurzel: &Path, basis: &Path) -> Result<Quellstand, String> {
+    if !hat_git(wurzel)? {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let index = depot_kodex::git::index_dateien(wurzel)
+        .map_err(|e| format!("Git-Index nicht lesbar: {e}"))?;
+    let mut pfade: Vec<String> = index
         .into_iter()
         .map(|d| d.pfad)
         .filter(|p| !geheim_oder_erzeugt(p))
-        .filter(|p| fs::symlink_metadata(wurzel.join(p)).is_ok_and(|m| m.is_file()))
         .collect();
-    liste.sort();
-    liste.dedup();
-    liste
+    pfade.sort();
+    pfade.dedup();
+    let mut dateien = Vec::new();
+    let mut ausgelassen = Vec::new();
+    for p in pfade {
+        match lies_im_projekt(wurzel, basis, &p)? {
+            Lesen::Datei(inhalt) => dateien.push((p, inhalt)),
+            Lesen::Ausgelassen(grund) => ausgelassen.push((p, grund)),
+        }
+    }
+    Ok((dateien, ausgelassen))
+}
+
+/// Nur die Pfade des Quellstands, fuer Tests.
+#[cfg(test)]
+fn quelldateien(wurzel: &Path) -> Result<Vec<String>, String> {
+    let basis = fs::canonicalize(wurzel).map_err(|e| e.to_string())?;
+    Ok(quellstand(wurzel, &basis)?
+        .0
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect())
 }
 
 fn json_text(s: &str) -> String {
@@ -188,18 +329,22 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
         "geschlossen"
     };
     let festschreibung = depot_kodex::festschreibung::berechne(wurzel).unwrap_or_default();
-    let essenz = fs::read_to_string(wurzel.join(depot_kodex::essenz::ESSENZ)).unwrap_or_default();
+    let basis = fs::canonicalize(wurzel).map_err(|e| format!("{}: {e}", wurzel.display()))?;
+    let essenz = match lies_im_projekt(wurzel, &basis, depot_kodex::essenz::ESSENZ)? {
+        Lesen::Datei(b) => String::from_utf8(b)
+            .map_err(|e| format!("{}: kein UTF-8: {e}", depot_kodex::essenz::ESSENZ))?,
+        Lesen::Ausgelassen(_) => String::new(),
+    };
     let regeln = depot_kodex::essenz::regeln(&essenz);
     let kurz: String = commit.chars().take(7).collect();
 
     // Quellstand als eigenes inneres ZIP.
     let mut quelle = Zip::default();
-    let dateien = quelldateien(wurzel);
+    let (dateien, ausgelassen) = quellstand(wurzel, &basis)?;
     let mut geheim = Vec::new();
-    for d in &dateien {
-        let inhalt = fs::read(wurzel.join(d)).map_err(|e| format!("{d}: {e}"))?;
-        geheim.extend(depot_kodex::geheimnis::pruefe_inhalt(d, &inhalt));
-        quelle.datei(d, &inhalt)?;
+    for (d, inhalt) in &dateien {
+        geheim.extend(depot_kodex::geheimnis::pruefe_inhalt(d, inhalt));
+        quelle.datei(d, inhalt)?;
     }
     let quelle = quelle.fertig()?;
     let quelle_name = format!(
@@ -209,9 +354,14 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     let snapshot_txt = format!(
         "Quellstand DepotSchlopf v{version}\nCommit: {commit}\nZweig: {zweig}\nLokal veraendert: {veraendert}\n\
          Dateien: {}\nSHA-256: {}\nNur von Git verfolgte Dateien, ohne Links, auf Geheimnisse geprueft. \
-         Ohne Git kein Quellstand. Zum Weiterarbeiten entpacken.\n",
+         Ohne Git kein Quellstand. Zum Weiterarbeiten entpacken.\nAusgelassen: {}\n{}",
         dateien.len(),
-        sha_hex(&quelle)
+        sha_hex(&quelle),
+        ausgelassen.len(),
+        ausgelassen.iter().fold(String::new(), |mut s, (p, g)| {
+            let _ = writeln!(s, "  {p} ({g})");
+            s
+        })
     );
 
     let mut j = String::from("{\n");
@@ -464,7 +614,7 @@ mod tests {
         git_muss(&r, &["commit", "-q", "-m", "basis"])?;
         schreib(&r, "zugang.txt", b"Benutzer: wolfgang\n")?;
         schreib(&r, "notizen/konto.md", b"privat\n")?;
-        let dateien = quelldateien(&r);
+        let dateien = quelldateien(&r)?;
         assert_eq!(dateien, vec!["README.md".to_string()]);
         Ok(())
     }
@@ -488,7 +638,7 @@ mod tests {
         fs::remove_file(r.join("ersetzt.md")).map_err(|e| format!("ersetzt: {e}"))?;
         std::os::unix::fs::symlink(draussen.join("fremd.txt"), r.join("ersetzt.md"))
             .map_err(|e| format!("Link: {e}"))?;
-        let dateien = quelldateien(&r);
+        let dateien = quelldateien(&r)?;
         for link in ["link.md", "ersetzt.md"] {
             assert!(
                 !dateien.contains(&link.to_string()),
@@ -632,6 +782,21 @@ mod tests {
             !enthaelt(&bytes, b"MARKE_OHNE_GIT"),
             "ohne Git darf kein Quellstand entstehen"
         );
+        Ok(())
+    }
+
+    /// K11-02, zweiter Teil: Ein Fehler beim Lesen der Metadaten ist ein Fehler, keine
+    /// ausgelassene Datei. Ein zu langer Name ist ein solcher Fehler, der nicht „fehlt“ heisst.
+    /// Ebenso ein Pfad, der aus dem Projekt hinausfuehrt.
+    #[test]
+    fn metadatenfehler_und_ungueltige_pfade_sind_fehler() -> Result<(), String> {
+        let r = repo()?;
+        let basis = fs::canonicalize(&r).map_err(|e| e.to_string())?;
+        let lang = "x".repeat(300);
+        for rel in [lang.as_str(), "../draussen.md", "a//b.md", "./a.md"] {
+            let erg = lies_im_projekt(&r, &basis, rel);
+            assert!(erg.is_err(), "{rel}: {erg:?}");
+        }
         Ok(())
     }
 
