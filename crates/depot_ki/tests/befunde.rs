@@ -1,8 +1,9 @@
 //! Negativtests zu den Befunden aus `docs/BEFUNDE.md` (Stufe 2, KI-Budget und Kassenbuch).
 //!
-//! Ein Test mit `#[ignore = "offen: …"]` zeigt einen Befund, der im heutigen Code noch besteht:
-//! `cargo test -p depot_ki --test befunde -- --ignored` ist am Stand dieses Commits rot.
-//! Der Umbau entfernt das `ignore`; dann laeuft der Test im Kodex.
+//! Die Tests entstanden in Stufe 2, Schritt 1, mit `#[ignore = "offen: …"]` und waren am alten
+//! Stand rot. Der Schnitt KI-Kostenschutz hat das `ignore` entfernt; seither laufen sie im
+//! Kodex. Wo der Umbau die Schnittstelle geaendert hat (Grenzen beim Oeffnen gebunden,
+//! ausdrueckliche Einrichtung, Anker), sind nur Aufrufe und Vorbereitung nachgefuehrt.
 //!
 //! Jede Vorbereitung prueft ihren Erfolg ausdruecklich. Scheitert sie, endet der Test mit
 //! „Vorbedingung …“ und nie mit einer Meldung, die wie der Produktfehler aussieht.
@@ -15,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_kern::{BeraterId, Cent};
-use depot_ki::{Buchung, Datum, Kassenbuch, KiDeckel, KiGrenzen, Preise, Sperre, pruefe};
+use depot_ki::{Buchung, Datum, Kassenbuch, KiDeckel, KiGrenzen, Sperre, anker_fuer, pruefe};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 
@@ -26,13 +27,21 @@ fn vorbedingung<T, E: std::fmt::Debug>(r: Result<T, E>, was: &str) -> Result<T, 
     r.map_err(|e| format!("Vorbedingung {was}: {e:?}"))
 }
 
-/// Eigenes, leeres Verzeichnis je Test; liefert den Pfad des Kassenbuchs darin.
+/// Eigenes, leeres Verzeichnis je Test; liefert den Pfad des Kassenbuchs darin. Eingerichtet
+/// ist es nicht.
 fn neuer_pfad() -> Result<PathBuf, String> {
     let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!("depot_ki_befund_{}_{n}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     vorbedingung(fs::create_dir_all(&dir), "Testverzeichnis")?;
     Ok(dir.join("kassenbuch.txt"))
+}
+
+/// Wie `neuer_pfad`, mit ausdruecklich eingerichtetem Kassenbuch.
+fn eingerichtet() -> Result<PathBuf, String> {
+    let p = neuer_pfad()?;
+    vorbedingung(Kassenbuch::einrichten(&p), "Einrichtung")?;
+    Ok(p)
 }
 
 fn tag(t: u8) -> Result<Datum, String> {
@@ -45,13 +54,11 @@ fn oeffnen(p: &Path) -> Result<Kassenbuch, String> {
 
 /// Fuellt den Monat von Dachs (zwei Zyklen zu je zwei Aufrufen) und schliesst das Kassenbuch.
 fn monat_voll(p: &Path) -> Result<(), String> {
-    let g = KiGrenzen::standard();
-    let d = KiDeckel::standard(DACHS);
     let mut k = oeffnen(p)?;
     for (t, z) in [(2, 1), (2, 1), (3, 2), (3, 2)] {
-        vorbedingung(k.reserviere(&g, &d, DACHS, tag(t)?, z), "Reservierung")?;
+        vorbedingung(k.reserviere(DACHS, tag(t)?, z), "Reservierung")?;
     }
-    match k.reserviere(&g, &d, DACHS, tag(4)?, 3) {
+    match k.reserviere(DACHS, tag(4)?, 3) {
         Err(Sperre::MonatVoll) => Ok(()),
         anders => Err(format!("Vorbedingung Monat voll: {anders:?}")),
     }
@@ -68,7 +75,6 @@ const KI_ERLAUBT: &str = "pub fn weiter(g: &depot_ki::KiGrenzen, d: &depot_ki::K
 /// Ausserhalb von Tests laesst sich keine KI-Grenze im Literal bauen. Der Test nutzt keinen
 /// Konstruktor; eine Umbenennung von `standard` macht ihn nicht gruen.
 #[test]
-#[ignore = "offen: 1·K01 KI-Grenzen sind im Literal frei baubar"]
 fn befund_1_k01_ki_grenze_im_literal_laesst_sich_nicht_bauen() -> Result<(), String> {
     sonde::erlaubt(&KI, KI_ERLAUBT)?;
     sonde::verboten(
@@ -82,7 +88,6 @@ fn befund_1_k01_ki_grenze_im_literal_laesst_sich_nicht_bauen() -> Result<(), Str
 
 /// Ein geladener Token-Deckel laesst sich nicht nachtraeglich lockern.
 #[test]
-#[ignore = "offen: 1·K01 Felder des KI-Deckels sind oeffentlich aenderbar"]
 fn befund_1_k01_ki_deckel_laesst_sich_nicht_lockern() -> Result<(), String> {
     sonde::erlaubt(&KI, KI_ERLAUBT)?;
     sonde::verboten(
@@ -98,33 +103,37 @@ fn befund_1_k01_ki_deckel_laesst_sich_nicht_lockern() -> Result<(), String> {
 // 1·K02 – negative Preise, negative Reservierung (R20)
 // ---------------------------------------------------------------------------------------------
 
-/// Ein negativer Preis wird abgelehnt und ergibt nie eine negative Reservierung.
+/// Ein negativer Preis entsteht nicht und ergibt nie eine negative Reservierung. Preise lassen
+/// sich ausserhalb von `depot_ki` weder im Literal bauen noch aendern; die Pruefung auf
+/// positive Werte selbst steht im Modultest `preise_sind_positiv`. Jeder gebundene Deckel
+/// reserviert mehr als null.
 #[test]
-#[ignore = "offen: 1·K02 negativer Preis ergibt negative Reservierung"]
 fn befund_1_k02_negativer_preis_wird_abgelehnt() -> Result<(), String> {
-    let mut angenommen = Vec::new();
-    for preise in [
-        Preise {
-            cent_je_mio_ein: -1_000_000,
-            cent_je_mio_aus: 2_000,
-        },
-        Preise {
-            cent_je_mio_ein: 400,
-            cent_je_mio_aus: -1,
-        },
-    ] {
-        let mut d = KiDeckel::standard(DACHS);
-        d.preise = preise;
-        let ergebnis = pruefe(&KiGrenzen::standard(), &d, &[], DACHS, tag(2)?, 1);
-        if ergebnis.is_ok() {
-            angenommen.push(format!("{preise:?} ergibt {ergebnis:?}"));
+    sonde::verboten(
+        &KI,
+        "pub fn negativ() -> depot_ki::Preise {\n    \
+         depot_ki::Preise { cent_je_mio_ein: -1_000_000, cent_je_mio_aus: 2_000 }\n}\n",
+        &sonde::PRIVAT,
+        &["cent_je_mio_ein"],
+    )?;
+    for b in [DACHS, BeraterId::Maus] {
+        let kosten = KiDeckel::standard(b).hoechstkosten();
+        if kosten.is_none_or(|c| c.0 <= 0) {
+            return Err(format!("{b:?}: Reservierung {kosten:?}"));
+        }
+        let r = pruefe(
+            &KiGrenzen::standard(),
+            &KiDeckel::standard(b),
+            &[],
+            b,
+            tag(2)?,
+            1,
+        );
+        if !r.as_ref().is_ok_and(|c| c.0 > 0) {
+            return Err(format!("{b:?}: pruefe ergibt {r:?}"));
         }
     }
-    if angenommen.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("negativer Preis angenommen: {angenommen:?}"))
-    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -132,7 +141,6 @@ fn befund_1_k02_negativer_preis_wird_abgelehnt() -> Result<(), String> {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-#[ignore = "offen: 1·K03 Datum::neu nimmt den 31.02. an"]
 fn befund_1_k03_ungueltiges_kalenderdatum_wird_abgelehnt() -> Result<(), String> {
     let mut angenommen = Vec::new();
     for (j, m, t) in [(2026, 2, 31), (2026, 2, 29), (2026, 4, 31), (2026, 11, 31)] {
@@ -154,18 +162,17 @@ fn befund_1_k03_ungueltiges_kalenderdatum_wird_abgelehnt() -> Result<(), String>
 /// Verlangt ist: Entweder laesst sich ein solches Datum gar nicht bauen (Zugriffsfehler), oder
 /// die Reservierung mit dem 31.02. wird abgelehnt und schreibt nichts.
 #[test]
-#[ignore = "offen: 1·K03 Datum ueber oeffentliche Felder umgeht die Pruefung"]
 fn befund_1_k03_datum_ueber_felder_umgeht_die_pruefung_nicht() -> Result<(), String> {
-    let p = neuer_pfad()?;
+    let p = eingerichtet()?;
     let programm = format!(
         r#"
 use depot_kern::BeraterId;
-use depot_ki::{{Datum, Kassenbuch, KiDeckel, KiGrenzen}};
+use depot_ki::{{Datum, Kassenbuch}};
 fn main() {{
     let p = std::path::Path::new({p:?});
     let falsch = Datum {{ jahr: 2026, monat: 2, tag: 31 }};
     let mut k = Kassenbuch::oeffnen(p).expect("Vorbedingung: Kassenbuch");
-    let r = k.reserviere(&KiGrenzen::standard(), &KiDeckel::standard(BeraterId::Dachs), BeraterId::Dachs, falsch, 1);
+    let r = k.reserviere(BeraterId::Dachs, falsch, 1);
     assert!(r.is_err(), "Reservierung am 31.02. angenommen: {{r:?}}");
     assert!(k.buchungen().is_empty(), "Buchung am 31.02. geschrieben");
 }}
@@ -191,21 +198,28 @@ fn main() {{
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-#[ignore = "offen: 1·K04 geloeschtes Kassenbuch setzt das Budget zurueck"]
 fn befund_1_k04_geloeschtes_kassenbuch_fuehrt_zu_halt() -> Result<(), String> {
-    let p = neuer_pfad()?;
+    let p = eingerichtet()?;
     monat_voll(&p)?;
     vorbedingung(fs::remove_file(&p), "Kassenbuch loeschen")?;
+    if Kassenbuch::oeffnen(&p).is_ok() {
+        return Err("nach dem Loeschen beginnt das Budget bei null".into());
+    }
+    // Auch ohne Anker richtet das Oeffnen nichts neu ein; das tut nur `einrichten`.
+    vorbedingung(fs::remove_file(p.with_extension("anker")), "Anker loeschen")?;
     match Kassenbuch::oeffnen(&p) {
-        Err(_) => Ok(()),
-        Ok(_) => Err("nach dem Loeschen beginnt das Budget bei null".into()),
+        Err(_) if !p.exists() => Ok(()),
+        anders => Err(format!(
+            "nach dem Loeschen von Kassenbuch und Anker: {:?}, Datei da: {}",
+            anders.map(|k| k.buchungen().len()),
+            p.exists()
+        )),
     }
 }
 
 #[test]
-#[ignore = "offen: 1·K04 geleertes Kassenbuch setzt das Budget zurueck"]
 fn befund_1_k04_geleertes_kassenbuch_fuehrt_zu_halt() -> Result<(), String> {
-    let p = neuer_pfad()?;
+    let p = eingerichtet()?;
     monat_voll(&p)?;
     vorbedingung(fs::write(&p, ""), "Kassenbuch leeren")?;
     match Kassenbuch::oeffnen(&p) {
@@ -215,9 +229,8 @@ fn befund_1_k04_geleertes_kassenbuch_fuehrt_zu_halt() -> Result<(), String> {
 }
 
 #[test]
-#[ignore = "offen: 1·K04 um ganze Zeilen gekuerztes Kassenbuch wird angenommen"]
 fn befund_1_k04_gekuerztes_kassenbuch_fuehrt_zu_halt() -> Result<(), String> {
-    let p = neuer_pfad()?;
+    let p = eingerichtet()?;
     monat_voll(&p)?;
     let inhalt = vorbedingung(fs::read_to_string(&p), "Kassenbuch lesen")?;
     let erste: String = inhalt.split_inclusive('\n').take(2).collect();
@@ -236,9 +249,9 @@ fn befund_1_k04_gekuerztes_kassenbuch_fuehrt_zu_halt() -> Result<(), String> {
 // ---------------------------------------------------------------------------------------------
 
 /// Schreibt Buchungen in der **jeweils aktuellen** Huelle des Kassenbuchs. Heute ist das eine
-/// `v1`-Zeile je Buchung. Aendert der Umbau das Format (Pruefsumme, Hash-Kette, Anker), wird
-/// nur diese Funktion nachgefuehrt, damit die Faelle unten weiter in einer strukturell
-/// gueltigen Huelle ankommen und allein ihre Semantik falsch ist.
+/// `v1`-Zeile je Buchung; dazu gehoert ein passender Anker (`schreib_huelle`). Aendert der
+/// Umbau das Format, werden nur diese Funktionen nachgefuehrt, damit die Faelle unten weiter in
+/// einer strukturell gueltigen Huelle ankommen und allein ihre Semantik falsch ist.
 fn huelle(buchungen: &[Buchung]) -> String {
     buchungen.iter().fold(String::new(), |mut aus, b| {
         let berater = match b.berater {
@@ -248,10 +261,25 @@ fn huelle(buchungen: &[Buchung]) -> String {
         let _ = writeln!(
             aus,
             "v1;{berater};{:04}-{:02}-{:02};{};{}",
-            b.datum.jahr, b.datum.monat, b.datum.tag, b.zyklus, b.reserviert.0
+            b.datum.jahr(),
+            b.datum.monat(),
+            b.datum.tag(),
+            b.zyklus,
+            b.reserviert.0
         );
         aus
     })
+}
+
+/// Kassenbuch und passender Anker fuer genau diese Buchungen.
+fn schreib_huelle(p: &Path, buchungen: &[Buchung], was: &str) -> Result<String, String> {
+    let inhalt = huelle(buchungen);
+    vorbedingung(fs::write(p, &inhalt), was)?;
+    vorbedingung(
+        fs::write(p.with_extension("anker"), anker_fuer(inhalt.as_bytes())),
+        was,
+    )?;
+    Ok(inhalt)
 }
 
 fn buchung(t: u8, zyklus: u32, cent: i64) -> Result<Buchung, String> {
@@ -266,7 +294,6 @@ fn buchung(t: u8, zyklus: u32, cent: i64) -> Result<Buchung, String> {
 /// Eine gueltige Historie in derselben Huelle oeffnet. Jede Historie mit genau einem
 /// semantischen Fehler fuehrt zu Halt, und die Fehlerursachen sind unterscheidbar.
 #[test]
-#[ignore = "offen: 1·K05 semantisch kaputte Historie wird angenommen"]
 fn befund_1_k05_kaputte_historie_fuehrt_zu_halt() -> Result<(), String> {
     let hoechst = KiDeckel::standard(DACHS)
         .hoechstkosten()
@@ -274,10 +301,7 @@ fn befund_1_k05_kaputte_historie_fuehrt_zu_halt() -> Result<(), String> {
         .0;
     let gueltig = vec![buchung(2, 3, hoechst)?, buchung(5, 4, hoechst)?];
     let p = neuer_pfad()?;
-    vorbedingung(
-        fs::write(&p, huelle(&gueltig)),
-        "gueltige Historie schreiben",
-    )?;
+    schreib_huelle(&p, &gueltig, "gueltige Historie schreiben")?;
     let k = Kassenbuch::oeffnen(&p).map_err(|e| format!("gueltige Historie abgelehnt: {e:?}"))?;
     if k.buchungen().len() != gueltig.len() {
         return Err(format!(
@@ -313,7 +337,7 @@ fn befund_1_k05_kaputte_historie_fuehrt_zu_halt() -> Result<(), String> {
     let mut gruende: Vec<(&str, String)> = Vec::new();
     for (fall, buchungen) in &faelle {
         let p = neuer_pfad()?;
-        vorbedingung(fs::write(&p, huelle(buchungen)), fall)?;
+        schreib_huelle(&p, buchungen, fall)?;
         match Kassenbuch::oeffnen(&p) {
             Ok(_) => angenommen.push(*fall),
             Err(e) => gruende.push((fall, format!("{e:?}"))),
@@ -338,9 +362,8 @@ fn befund_1_k05_kaputte_historie_fuehrt_zu_halt() -> Result<(), String> {
 
 /// Ein zweiter Name fuer dieselbe Datei (harter Link) bekommt das Kassenbuch nicht.
 #[test]
-#[ignore = "offen: 1·K06 Sperre haengt am Pfadnamen, nicht an der Datei"]
 fn befund_1_k06_zweiter_pfad_auf_dieselbe_datei_wird_gesperrt() -> Result<(), String> {
-    let p = neuer_pfad()?;
+    let p = eingerichtet()?;
     monat_voll(&p)?;
     let zweit = p.with_file_name("zweitname.txt");
     vorbedingung(fs::hard_link(&p, &zweit), "harter Link")?;
@@ -359,15 +382,39 @@ fn befund_1_k06_zweiter_pfad_auf_dieselbe_datei_wird_gesperrt() -> Result<(), St
 /// Ein symbolischer Link im Datenverzeichnis ist verboten.
 #[cfg(unix)]
 #[test]
-#[ignore = "offen: 1·K06 Kassenbuch ueber symbolischen Link wird geoeffnet"]
 fn befund_1_k06_symbolischer_link_wird_abgelehnt() -> Result<(), String> {
-    let p = neuer_pfad()?;
+    let p = eingerichtet()?;
     monat_voll(&p)?;
+    // Kassenbuch als Link, der Anker daneben als echte Kopie: Ohne Link-Verbot oeffnete das.
     let link = p.with_file_name("link.txt");
     vorbedingung(std::os::unix::fs::symlink(&p, &link), "Link")?;
-    match Kassenbuch::oeffnen(&link) {
-        Err(_) => Ok(()),
-        Ok(_) => Err("Kassenbuch ueber einen Link geoeffnet".into()),
+    vorbedingung(
+        fs::copy(p.with_extension("anker"), link.with_extension("anker")),
+        "Anker kopieren",
+    )?;
+    // Anker als Link auf eine echte Kopie, das Kassenbuch daneben echt.
+    let zweit = p.with_file_name("zweit.txt");
+    vorbedingung(fs::copy(&p, &zweit), "Kassenbuch kopieren")?;
+    let kopie = p.with_file_name("anker-kopie");
+    vorbedingung(
+        fs::copy(p.with_extension("anker"), &kopie),
+        "Anker kopieren",
+    )?;
+    vorbedingung(
+        std::os::unix::fs::symlink(&kopie, zweit.with_extension("anker")),
+        "Link",
+    )?;
+    let mut offen = Vec::new();
+    for (fall, pfad) in [("Kassenbuch als Link", &link), ("Anker als Link", &zweit)] {
+        match Kassenbuch::oeffnen(pfad) {
+            Err(Sperre::Kassenbuch(m)) if m.contains("Link") => {}
+            anders => offen.push(format!("{fall}: {:?}", anders.map(|k| k.buchungen().len()))),
+        }
+    }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:?}"))
     }
 }
 
@@ -375,33 +422,45 @@ fn befund_1_k06_symbolischer_link_wird_abgelehnt() -> Result<(), String> {
 // 1·R02 – Weiterschreiben nach Fehlern (R29)
 // ---------------------------------------------------------------------------------------------
 
-/// Oeffnungsfehler: An der Stelle des Kassenbuchs liegt kurz ein Verzeichnis. Danach bleibt
-/// das Kassenbuch gesperrt: keine Erlaubnis, keine Buchung.
+/// Oeffnungsfehler: An der Stelle der Zwischendatei des Ankers liegt kurz ein Verzeichnis, der
+/// Anker laesst sich nicht schreiben. Danach bleibt das Kassenbuch gesperrt: keine Erlaubnis,
+/// keine weitere Zeile. Die schon synchronisierte Zeile des gescheiterten Versuchs zaehlt beim
+/// naechsten Oeffnen: Ein Abbruch gibt kein Budget zurueck.
 #[test]
-#[ignore = "offen: 1·R02 nach einem Oeffnungsfehler wird weitergeschrieben"]
 fn befund_1_r02_oeffnungsfehler_sperrt_das_kassenbuch() -> Result<(), String> {
-    let pfad = neuer_pfad()?;
-    let grenzen = KiGrenzen::standard();
-    let deckel = KiDeckel::standard(DACHS);
+    let pfad = eingerichtet()?;
     let mut buch = oeffnen(&pfad)?;
+    let tmp = pfad.with_extension("anker.tmp");
     vorbedingung(
-        fs::create_dir(&pfad),
-        "Verzeichnis an Stelle des Kassenbuchs",
+        fs::create_dir(&tmp),
+        "Verzeichnis an Stelle der Zwischendatei",
     )?;
-    if buch
-        .reserviere(&grenzen, &deckel, DACHS, tag(2)?, 1)
-        .is_ok()
-    {
+    if buch.reserviere(DACHS, tag(2)?, 1).is_ok() {
         return Err("Vorbedingung: Oeffnungsfehler tritt nicht ein".into());
     }
-    vorbedingung(fs::remove_dir(&pfad), "Verzeichnis entfernen")?;
-    let zweiter = buch.reserviere(&grenzen, &deckel, DACHS, tag(2)?, 1);
-    let datei = fs::read_to_string(&pfad).unwrap_or_default();
-    match (zweiter, buch.buchungen().is_empty(), datei.is_empty()) {
-        (Err(_), true, true) => Ok(()),
-        (r, _, _) => Err(format!(
-            "nach dem Oeffnungsfehler weitergeschrieben: {r:?}, Datei {datei:?}"
-        )),
+    vorbedingung(fs::remove_dir(&tmp), "Verzeichnis entfernen")?;
+    let vorher = vorbedingung(fs::read(&pfad), "Kassenbuch lesen")?;
+    let zweiter = buch.reserviere(DACHS, tag(2)?, 1);
+    let nachher = vorbedingung(fs::read(&pfad), "Kassenbuch lesen")?;
+    match (zweiter, buch.buchungen().is_empty(), vorher == nachher) {
+        (Err(_), true, true) => {}
+        (r, _, _) => {
+            return Err(format!(
+                "nach dem Oeffnungsfehler weitergeschrieben: {r:?}, {} -> {} Byte",
+                vorher.len(),
+                nachher.len()
+            ));
+        }
+    }
+    drop(buch);
+    let neu = oeffnen(&pfad)?;
+    if neu.buchungen().len() == 1 {
+        Ok(())
+    } else {
+        Err(format!(
+            "abgebrochene Buchung zaehlt nach dem Neustart nicht: {:?}",
+            neu.buchungen()
+        ))
     }
 }
 
@@ -409,6 +468,7 @@ fn befund_1_r02_oeffnungsfehler_sperrt_das_kassenbuch() -> Result<(), String> {
 /// Zyklus und zwei Aufrufen (vier je Monat), Daten und Zyklen steigend, Reservierung gleich den
 /// Hoechstkosten. Jede Buchung wird gegen die Regeln von `pruefe` mit der Historie davor
 /// geprueft. Die Zeilen entstehen ueber `huelle`, also im jeweils aktuellen Format.
+#[cfg(unix)]
 fn zulaessige_vorgeschichte() -> Result<Vec<Buchung>, String> {
     let grenzen = KiGrenzen::standard();
     let deckel = KiDeckel::standard(BeraterId::Maus);
@@ -452,7 +512,6 @@ fn zulaessige_vorgeschichte() -> Result<Vec<Buchung>, String> {
 /// ohne Speicher-Schnittstelle keinen Einspeisepunkt (Teilnachweis offen, Persistenzbasis).
 #[cfg(unix)]
 #[test]
-#[ignore = "offen: 1·R02 nach einem Teilschreibfehler wird weitergeschrieben"]
 fn befund_1_r02_teilschreibfehler_sperrt_das_kassenbuch() -> Result<(), String> {
     let p = neuer_pfad()?;
     let vor_buchungen = zulaessige_vorgeschichte()?;
@@ -460,7 +519,7 @@ fn befund_1_r02_teilschreibfehler_sperrt_das_kassenbuch() -> Result<(), String> 
     if !(488..512).contains(&vor.len()) {
         return Err(format!("Vorbedingung: Vorgeschichte {} Byte", vor.len()));
     }
-    vorbedingung(fs::write(&p, &vor), "Vorgeschichte")?;
+    schreib_huelle(&p, &vor_buchungen, "Vorgeschichte")?;
     // Die Vorgeschichte ist vollstaendig zulaessig: Das Kassenbuch oeffnet sie und liest jede
     // Buchung (die Regeln selbst prueft `zulaessige_vorgeschichte`).
     let gelesen = oeffnen(&p)?;
@@ -476,23 +535,21 @@ fn befund_1_r02_teilschreibfehler_sperrt_das_kassenbuch() -> Result<(), String> 
     let programm = format!(
         r#"
 use depot_kern::BeraterId;
-use depot_ki::{{Datum, Kassenbuch, KiDeckel, KiGrenzen}};
+use depot_ki::{{Datum, Kassenbuch}};
 fn main() {{
     let p = std::path::Path::new({p:?});
     let laenge = {laenge}_u64;
     let kurz = {kurz}_u64;
-    let g = KiGrenzen::standard();
-    let d = KiDeckel::standard(BeraterId::Dachs);
     let tag = Datum::neu(2026, 11, 2).expect("Vorbedingung: Datum");
     let mut k = Kassenbuch::oeffnen(p).expect("Vorbedingung: Kassenbuch");
     let vorher = k.buchungen().len();
-    let erster = k.reserviere(&g, &d, BeraterId::Dachs, tag, 1);
+    let erster = k.reserviere(BeraterId::Dachs, tag, 1);
     let groesse = std::fs::metadata(p).expect("Vorbedingung: Groesse").len();
     assert!(erster.is_err(), "Vorbedingung: Schreibfehler tritt nicht ein");
     assert!(groesse > laenge, "Vorbedingung: kein Teilschreiben ({{groesse}} Byte)");
     std::fs::OpenOptions::new().write(true).open(p).and_then(|f| f.set_len(kurz))
         .expect("Vorbedingung: Rest entfernen");
-    let zweiter = k.reserviere(&g, &d, BeraterId::Dachs, tag, 1);
+    let zweiter = k.reserviere(BeraterId::Dachs, tag, 1);
     let danach = std::fs::metadata(p).expect("Vorbedingung: Groesse").len();
     assert!(zweiter.is_err(), "nach dem Teilschreibfehler Erlaubnis erteilt");
     assert_eq!(danach, kurz, "nach dem Teilschreibfehler weitergeschrieben");
@@ -531,13 +588,8 @@ fn main() {{
 /// 0,144 €. Reserviert werden 15 Cent, nie 14.
 #[test]
 fn grenzfall_2_a12_hoechstpreis_wird_auf_ganze_cent_aufgerundet() {
-    let mut d = KiDeckel::standard(DACHS);
-    d.max_token_ein = 16_000;
-    d.max_token_aus = 4_000;
-    assert_eq!(d.hoechstkosten(), Some(Cent(15)));
-    d.max_token_aus = 0;
-    d.max_token_ein = 250_000; // genau 1,00 $
-    assert_eq!(d.hoechstkosten(), Some(Cent(100)));
-    d.max_token_ein = 250_001;
-    assert_eq!(d.hoechstkosten(), Some(Cent(101)));
+    let p = KiDeckel::standard(DACHS).preise();
+    assert_eq!(p.kosten(16_000, 4_000), Some(Cent(15)));
+    assert_eq!(p.kosten(250_000, 0), Some(Cent(100))); // genau 1,00 $
+    assert_eq!(p.kosten(250_001, 0), Some(Cent(101)));
 }
