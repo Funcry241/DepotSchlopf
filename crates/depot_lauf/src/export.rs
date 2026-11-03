@@ -3,7 +3,10 @@
 //! Vorgeschichte sicher weiterarbeiten zu lassen (Essenz D17): Laufergebnis, Konsole,
 //! Uebergabetext, Festschreibung und ein vollstaendiger Quellstand.
 //!
-//! Nie enthalten: Laufzeitdaten (`daten/`), Zugangsdaten, Build-Ordner.
+//! Nie enthalten: Laufzeitdaten (`daten/`), Zugangsdaten, Build-Ordner. Der Quellstand nimmt
+//! nur Dateien, die Git verfolgt, mit ihrem Inhalt aus dem Git-Index; im Arbeitsbaum liest der
+//! Export nichts, also auch keinen Link. Jeder Inhalt wird auf Geheimnismuster geprueft; ein
+//! Treffer bricht den Export ab (R28).
 
 use std::fmt::Write as _;
 use std::fs;
@@ -72,42 +75,63 @@ fn geheim_oder_erzeugt(pfad: &str) -> bool {
             .any(|e| name.ends_with(e))
 }
 
-fn alle_dateien(wurzel: &Path, dir: &Path, aus: &mut Vec<String>) {
-    let Ok(eintraege) = fs::read_dir(dir) else {
-        return;
-    };
-    for e in eintraege.flatten() {
-        let p = e.path();
-        let Ok(rel) = p.strip_prefix(wurzel) else {
-            continue;
-        };
-        let rel = rel.to_string_lossy().replace('\\', "/");
-        if p.is_dir() {
-            if !geheim_oder_erzeugt(&format!("{rel}/")) {
-                alle_dateien(wurzel, &p, aus);
-            }
-        } else {
-            aus.push(rel);
-        }
+/// Hat das Projekt ein Git-Repository? Nur ein fehlendes `.git` heisst „ohne Git“; jeder
+/// andere Zustand wird gelesen, und ein Fehler dabei ist ein Fehler (K11-02).
+fn hat_git(wurzel: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(wurzel.join(".git")) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!(".git: nicht lesbar: {e}")),
     }
 }
 
-/// Quellstand: mit Git die verfolgten und neuen, nicht ignorierten Dateien; sonst der Ordner.
-fn quelldateien(wurzel: &Path) -> Vec<String> {
-    let mut liste: Vec<String> = if let (Some(a), Some(b)) = (
-        git(wurzel, &["ls-files"]),
-        git(wurzel, &["ls-files", "--others", "--exclude-standard"]),
-    ) {
-        a.lines().chain(b.lines()).map(str::to_string).collect()
-    } else {
-        let mut v = Vec::new();
-        alle_dateien(wurzel, wurzel, &mut v);
-        v
-    };
-    liste.retain(|p| !geheim_oder_erzeugt(p) && wurzel.join(p).is_file());
-    liste.sort();
-    liste.dedup();
-    liste
+/// Quellstand (R28): die gewoehnlichen Dateien im Git-Index, mit dem Inhalt aus dem Index,
+/// nie aus dem Arbeitsbaum. Das ist der Stand, den auch das Gate prueft und den ein Commit
+/// aufnimmt. Neue, nicht verfolgte Dateien bleiben draussen (1·E01). Verfolgte Links
+/// (Modus 120000) fehlen im Index-Auszug, und im Arbeitsbaum wird nichts gelesen; ein Link
+/// in irgendeinem Pfadteil kann daher nichts einschleusen, auch nicht waehrend des Lesens
+/// und unabhaengig von der Plattform (1·E02, K11-01, K11-03). Ohne Git gibt es keinen
+/// Quellstand; ein vorhandenes, aber nicht lesbares Repository ist ein Fehler (K11-02).
+fn quellstand(wurzel: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
+    if !hat_git(wurzel)? {
+        return Ok(Vec::new());
+    }
+    let mut index: Vec<depot_kodex::git::IndexDatei> = depot_kodex::git::index_dateien(wurzel)
+        .map_err(|e| format!("Git-Index nicht lesbar: {e}"))?
+        .into_iter()
+        .filter(|d| !geheim_oder_erzeugt(&d.pfad))
+        .collect();
+    index.sort_by(|a, b| a.pfad.cmp(&b.pfad));
+    index.dedup_by(|a, b| a.pfad == b.pfad);
+    index
+        .into_iter()
+        .map(|d| {
+            let inhalt = depot_kodex::git::blob(wurzel, &d.blob)
+                .map_err(|e| format!("{} (Index): nicht lesbar: {e}", d.pfad))?;
+            Ok((d.pfad, inhalt))
+        })
+        .collect()
+}
+
+/// Inhalt einer Datei im Git-Index; ohne Git oder ohne Eintrag `None`.
+fn aus_dem_index(wurzel: &Path, pfad: &str) -> Result<Option<Vec<u8>>, String> {
+    if !hat_git(wurzel)? {
+        return Ok(None);
+    }
+    let index = depot_kodex::git::index_dateien(wurzel)
+        .map_err(|e| format!("Git-Index nicht lesbar: {e}"))?;
+    match index.into_iter().find(|d| d.pfad == pfad) {
+        Some(d) => depot_kodex::git::blob(wurzel, &d.blob)
+            .map(Some)
+            .map_err(|e| format!("{pfad} (Index): nicht lesbar: {e}")),
+        None => Ok(None),
+    }
+}
+
+/// Nur die Pfade des Quellstands, fuer Tests.
+#[cfg(test)]
+fn quelldateien(wurzel: &Path) -> Result<Vec<String>, String> {
+    Ok(quellstand(wurzel)?.into_iter().map(|(p, _)| p).collect())
 }
 
 fn json_text(s: &str) -> String {
@@ -206,16 +230,21 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
         "geschlossen"
     };
     let festschreibung = depot_kodex::festschreibung::berechne(wurzel).unwrap_or_default();
-    let essenz = fs::read_to_string(wurzel.join(depot_kodex::essenz::ESSENZ)).unwrap_or_default();
+    let essenz = match aus_dem_index(wurzel, depot_kodex::essenz::ESSENZ)? {
+        Some(b) => String::from_utf8(b)
+            .map_err(|e| format!("{}: kein UTF-8: {e}", depot_kodex::essenz::ESSENZ))?,
+        None => String::new(),
+    };
     let regeln = depot_kodex::essenz::regeln(&essenz);
     let kurz: String = commit.chars().take(7).collect();
 
     // Quellstand als eigenes inneres ZIP.
     let mut quelle = Zip::default();
-    let dateien = quelldateien(wurzel);
-    for d in &dateien {
-        let inhalt = fs::read(wurzel.join(d)).map_err(|e| format!("{d}: {e}"))?;
-        quelle.datei(d, &inhalt)?;
+    let dateien = quellstand(wurzel)?;
+    let mut geheim = Vec::new();
+    for (d, inhalt) in &dateien {
+        geheim.extend(depot_kodex::geheimnis::pruefe_inhalt(d, inhalt));
+        quelle.datei(d, inhalt)?;
     }
     let quelle = quelle.fertig()?;
     let quelle_name = format!(
@@ -224,7 +253,8 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     );
     let snapshot_txt = format!(
         "Quellstand DepotSchlopf v{version}\nCommit: {commit}\nZweig: {zweig}\nLokal veraendert: {veraendert}\n\
-         Dateien: {}\nSHA-256: {}\nOhne target/, daten/, Zugangsdaten. Zum Weiterarbeiten entpacken.\n",
+         Dateien: {}\nSHA-256: {}\nInhalt aus dem Git-Index (vorgemerkter Stand), nie aus dem Arbeitsbaum; \
+         auf Geheimnisse geprueft. Ohne Git kein Quellstand. Zum Weiterarbeiten entpacken.\n",
         dateien.len(),
         sha_hex(&quelle)
     );
@@ -318,6 +348,7 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
         "assistant_export\nDepotSchlopf v{version}\nCommit {commit}\nKein Quellstand zum Einspielen.\n"
     );
 
+    let quelle_pfad = quelle_name.clone();
     let teile: Vec<(String, Vec<u8>)> = vec![
         ("ZIP_KIND.txt".into(), zip_kind.into_bytes()),
         ("assistant_context.json".into(), j.into_bytes()),
@@ -332,6 +363,20 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
         ),
         (quelle_name, quelle),
     ];
+    // Jeder Inhalt wird vor dem Schreiben geprueft; ein Treffer bricht den Export ab, und es
+    // entsteht keine ZIP-Datei (R28). Die Meldung nennt das Geheimnis nie.
+    // Der innere Quellstand ist oben Datei fuer Datei geprueft.
+    for (name, inhalt) in &teile {
+        if *name != quelle_pfad {
+            geheim.extend(depot_kodex::geheimnis::pruefe_inhalt(name, inhalt));
+        }
+    }
+    if !geheim.is_empty() {
+        return Err(format!(
+            "Export abgebrochen, keine ZIP-Datei geschrieben:\n{}",
+            geheim.join("\n")
+        ));
+    }
     let mut manifest = String::from("# Datei\tBytes\tSHA-256\n");
     let mut zip = Zip::default();
     for (name, inhalt) in &teile {
@@ -377,5 +422,339 @@ mod tests {
             assert!(geheim_oder_erzeugt(p), "{p}");
         }
         assert!(!geheim_oder_erzeugt("crates/depot_ki/src/budget.rs"));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // 1·E01, 1·E02, 2·W3 (Export-Teil) – nur Git, keine Links, keine Geheimnisse (R28)
+    // -----------------------------------------------------------------------------------------
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static NR: AtomicU32 = AtomicU32::new(0);
+
+    /// Ein frisches Git-Repository unter `target/export-befunde/`.
+    fn repo() -> Result<PathBuf, String> {
+        let n = NR.fetch_add(1, Ordering::SeqCst);
+        let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/export-befunde")
+            .join(format!("repo_{}_{n}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        git_muss(&p, &["init", "-q"])?;
+        Ok(p)
+    }
+
+    fn git_muss(dir: &Path, args: &[&str]) -> Result<(), String> {
+        let aus = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args([
+                "-c",
+                "user.name=Export-Probe",
+                "-c",
+                "user.email=probe@depotschlopf.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .map_err(|e| format!("git: {e}"))?;
+        if aus.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "git {}: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&aus.stderr)
+            ))
+        }
+    }
+
+    fn schreib(dir: &Path, rel: &str, inhalt: &[u8]) -> Result<(), String> {
+        let z = dir.join(rel);
+        if let Some(e) = z.parent() {
+            fs::create_dir_all(e).map_err(|e| format!("{rel}: {e}"))?;
+        }
+        fs::write(z, inhalt).map_err(|e| format!("{rel}: {e}"))
+    }
+
+    fn lauf(konsole: &str) -> Lauf {
+        Lauf {
+            befehl: "alles".into(),
+            schritte: vec![Schritt {
+                name: "kodex".into(),
+                exit: 0,
+            }],
+            konsole: konsole.into(),
+            warnungen: Vec::new(),
+        }
+    }
+
+    /// Erfundene Beispiele, erst zur Laufzeit zusammengesetzt.
+    fn beispiel_iban() -> String {
+        ["DE89", "3704", "0044", "0532", "0130", "00"].concat()
+    }
+
+    fn beispiel_schluessel() -> String {
+        ["sk", "-ant-", "api03-", "q7Rk2LmZx9Tb4VwN8yHc3PdJ6sFg1Ue5"].concat()
+    }
+
+    /// Exportiert wird nur, was Git verfolgt. Eine neue, nicht ignorierte Datei im
+    /// Projektordner bleibt draussen, auch wenn sie harmlos aussieht.
+    #[test]
+    fn befund_1_e01_nur_verfolgte_dateien_werden_exportiert() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "README.md", b"# Probe\n")?;
+        git_muss(&r, &["add", "README.md"])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        schreib(&r, "zugang.txt", b"Benutzer: wolfgang\n")?;
+        schreib(&r, "notizen/konto.md", b"privat\n")?;
+        let dateien = quelldateien(&r)?;
+        assert_eq!(dateien, vec!["README.md".to_string()]);
+        Ok(())
+    }
+
+    /// Ein Link wird nicht gelesen: Sein Ziel kann ausserhalb des Projekts liegen. Das gilt fuer
+    /// einen verfolgten Link und fuer eine verfolgte Datei, die im Arbeitsbaum ein Link ist; von
+    /// ihr kommt der Inhalt aus dem Index.
+    #[cfg(unix)]
+    #[test]
+    fn befund_1_e02_link_wird_nicht_gelesen() -> Result<(), String> {
+        let r = repo()?;
+        let draussen = r.with_extension("draussen");
+        fs::create_dir_all(&draussen).map_err(|e| format!("draussen: {e}"))?;
+        schreib(&draussen, "fremd.txt", b"fremder Inhalt\n")?;
+        schreib(&r, "README.md", b"# Probe\n")?;
+        std::os::unix::fs::symlink(draussen.join("fremd.txt"), r.join("link.md"))
+            .map_err(|e| format!("Link: {e}"))?;
+        schreib(&r, "ersetzt.md", b"harmlos\n")?;
+        git_muss(&r, &["add", "README.md", "link.md", "ersetzt.md"])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        // Eine verfolgte Datei, im Arbeitsbaum durch einen Link ersetzt.
+        fs::remove_file(r.join("ersetzt.md")).map_err(|e| format!("ersetzt: {e}"))?;
+        std::os::unix::fs::symlink(draussen.join("fremd.txt"), r.join("ersetzt.md"))
+            .map_err(|e| format!("Link: {e}"))?;
+        let dateien = quelldateien(&r)?;
+        assert!(
+            !dateien.contains(&"link.md".to_string()),
+            "verfolgter Link exportiert: {dateien:?}"
+        );
+        assert!(dateien.contains(&"README.md".to_string()), "{dateien:?}");
+        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let bytes = fs::read(p).map_err(|e| e.to_string())?;
+        assert!(
+            !enthaelt(&bytes, b"fremder Inhalt"),
+            "Linkziel gelesen: fremder Inhalt steht in der ZIP-Datei"
+        );
+        Ok(())
+    }
+
+    /// Ein Geheimnismuster in einer exportierten Datei oder in der Konsole bricht den Export ab:
+    /// Es entsteht keine ZIP-Datei, und die Meldung nennt das Geheimnis nicht. Ebenso ein
+    /// Inhalt, der sich nicht pruefen laesst.
+    #[test]
+    fn befund_1_e01_geheimnis_bricht_den_export_ab() -> Result<(), String> {
+        let faelle: [(&str, Vec<u8>, String, &str); 4] = [
+            (
+                "IBAN in verfolgter Datei",
+                format!("Konto {}\n", beispiel_iban()).into_bytes(),
+                String::new(),
+                "Geheimnismuster",
+            ),
+            (
+                "Schluessel in verfolgter Datei",
+                format!("key {}\n", beispiel_schluessel()).into_bytes(),
+                String::new(),
+                "Geheimnismuster",
+            ),
+            (
+                "Schluessel in der Konsole",
+                b"harmlos\n".to_vec(),
+                format!("Ausgabe {}\n", beispiel_schluessel()),
+                "Geheimnismuster",
+            ),
+            (
+                "nicht pruefbarer Inhalt",
+                vec![b'#', b' ', 0xC3, 0x28, 0xFF, b'\n'],
+                String::new(),
+                "nicht pruefbar",
+            ),
+        ];
+        let mut offen = Vec::new();
+        for (fall, inhalt, konsole, stichwort) in faelle {
+            let r = repo()?;
+            schreib(&r, "docs/notiz.md", &inhalt)?;
+            git_muss(&r, &["add", "docs/notiz.md"])?;
+            git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+            match schreibe(&r, &lauf(&konsole)) {
+                Ok(p) => offen.push(format!("{fall}: Export geschrieben: {}", p.display())),
+                Err(e) => {
+                    if !e.contains(stichwort) {
+                        offen.push(format!("{fall}: falscher Grund: {e}"));
+                    }
+                    if e.contains(&beispiel_iban()) || e.contains(&beispiel_schluessel()) {
+                        offen.push(format!("{fall}: Meldung nennt das Geheimnis"));
+                    }
+                }
+            }
+            if r.join(EXPORT).exists() || r.join(format!("{EXPORT}.tmp")).exists() {
+                offen.push(format!("{fall}: ZIP-Datei liegt im Ordner"));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    fn enthaelt(heuhaufen: &[u8], nadel: &[u8]) -> bool {
+        heuhaufen.windows(nadel.len()).any(|w| w == nadel)
+    }
+
+    /// K11-01: Ein Link in einem Elternordner wird so wenig gelesen wie ein Link als Datei.
+    /// Das gilt fuer den Quellstand und fuer die gesonderten Lesewege, etwa die Essenz.
+    /// Fremder Inhalt darf in keinem Teil der ZIP-Datei stehen.
+    #[cfg(unix)]
+    #[test]
+    fn befund_k11_01_link_im_elternordner_wird_nicht_gelesen() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "unterordner/notiz.md", b"intern\n")?;
+        schreib(&r, "docs/essenz.md", b"# D01 \xE2\x80\x93 Eigene Regel\n")?;
+        git_muss(&r, &["add", "."])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        let draussen = r.with_extension("fremd");
+        let _ = fs::remove_dir_all(&draussen);
+        schreib(&draussen, "notiz.md", b"FREMDER_INHALT_AUSSERHALB\n")?;
+        schreib(
+            &draussen,
+            "essenz.md",
+            b"# D01 \xE2\x80\x93 FREMDE_REGEL_AUSSERHALB\n",
+        )?;
+        for ordner in ["unterordner", "docs"] {
+            fs::remove_dir_all(r.join(ordner)).map_err(|e| format!("{ordner}: {e}"))?;
+            std::os::unix::fs::symlink(&draussen, r.join(ordner))
+                .map_err(|e| format!("Link {ordner}: {e}"))?;
+        }
+        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let bytes = fs::read(p).map_err(|e| e.to_string())?;
+        let mut offen = Vec::new();
+        for marke in ["FREMDER_INHALT_AUSSERHALB", "FREMDE_REGEL_AUSSERHALB"] {
+            if enthaelt(&bytes, marke.as_bytes()) {
+                offen.push(format!(
+                    "Link im Elternordner gelesen: {marke} steht in der ZIP-Datei"
+                ));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// K11-02: Ein vorhandenes, aber nicht lesbares Repository ist ein Fehler, kein leerer
+    /// Quellstand. Der Export bricht ab, bevor eine Datei entsteht.
+    #[test]
+    fn befund_k11_02_kaputter_index_bricht_den_export_ab() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "README.md", b"sauber\n")?;
+        git_muss(&r, &["add", "."])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        fs::write(r.join(".git/index"), b"kaputt").map_err(|e| e.to_string())?;
+        let mut offen = Vec::new();
+        if let Ok(p) = schreibe(&r, &lauf("sauber\n")) {
+            offen.push(format!(
+                "Defekter Git-Index: Export meldet Erfolg: {}",
+                p.display()
+            ));
+        }
+        if r.join(EXPORT).exists() || r.join(format!("{EXPORT}.tmp")).exists() {
+            offen.push("Defekter Git-Index: ZIP-Datei liegt im Ordner".to_string());
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// K11-03: Was im Arbeitsbaum geschieht, waehrend oder nachdem geprueft wurde, darf den
+    /// Export nicht erreichen. Der Export nimmt den Inhalt aus dem Git-Index, den auch das Gate
+    /// prueft. Eine gleich lange, andere Datei im Arbeitsbaum steht daher nicht in der ZIP-Datei,
+    /// ebenso wenig eine geaenderte Essenz. Das gilt auf jeder Plattform, ohne Dateiidentitaet.
+    #[test]
+    fn befund_k11_03_export_nimmt_den_index_nicht_den_arbeitsbaum() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "pruef/datei.md", b"INTERN\n")?;
+        schreib(&r, "docs/essenz.md", b"# D01 \xE2\x80\x93 INDEXREGEL\n")?;
+        git_muss(&r, &["add", "."])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        schreib(&r, "pruef/datei.md", b"FREMD!\n")?;
+        schreib(&r, "docs/essenz.md", b"# D01 \xE2\x80\x93 FREMDREGEL\n")?;
+        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let bytes = fs::read(p).map_err(|e| e.to_string())?;
+        let mut offen = Vec::new();
+        for marke in ["FREMD!", "FREMDREGEL"] {
+            if enthaelt(&bytes, marke.as_bytes()) {
+                offen.push(format!("Arbeitsbaum statt Index exportiert: {marke}"));
+            }
+        }
+        for marke in ["INTERN", "INDEXREGEL"] {
+            if !enthaelt(&bytes, marke.as_bytes()) {
+                offen.push(format!("Indexinhalt fehlt: {marke}"));
+            }
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// K11-03, Lesefehler: Fehlt ein Blob des Index im Repository, bricht der Export ab,
+    /// ohne eine ZIP-Datei zu schreiben.
+    #[test]
+    fn befund_k11_03_fehlender_blob_bricht_den_export_ab() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "README.md", b"blob-probe\n")?;
+        git_muss(&r, &["add", "README.md"])?;
+        let aus = Command::new("git")
+            .arg("-C")
+            .arg(&r)
+            .args(["rev-parse", ":README.md"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        let sha = String::from_utf8_lossy(&aus.stdout).trim().to_string();
+        let (kopf, rest) = sha.split_at_checked(2).ok_or("kein Blob")?;
+        fs::remove_file(r.join(".git/objects").join(kopf).join(rest))
+            .map_err(|e| format!("Blob {sha}: {e}"))?;
+        let mut offen = Vec::new();
+        if let Ok(p) = schreibe(&r, &lauf("sauber\n")) {
+            offen.push(format!(
+                "Fehlender Blob: Export meldet Erfolg: {}",
+                p.display()
+            ));
+        }
+        if r.join(EXPORT).exists() || r.join(format!("{EXPORT}.tmp")).exists() {
+            offen.push("Fehlender Blob: ZIP-Datei liegt im Ordner".to_string());
+        }
+        assert!(offen.is_empty(), "{offen:#?}");
+        Ok(())
+    }
+
+    /// Kontrolle zu K11-02: Ohne Git entsteht ein Export ohne Quellstand.
+    #[test]
+    fn ohne_git_entsteht_export_ohne_quellstand() -> Result<(), String> {
+        let r = repo()?;
+        fs::remove_dir_all(r.join(".git")).map_err(|e| e.to_string())?;
+        schreib(&r, "README.md", b"MARKE_OHNE_GIT\n")?;
+        let p = schreibe(&r, &lauf("sauber\n"))?;
+        let bytes = fs::read(p).map_err(|e| e.to_string())?;
+        assert!(
+            !enthaelt(&bytes, b"MARKE_OHNE_GIT"),
+            "ohne Git darf kein Quellstand entstehen"
+        );
+        Ok(())
+    }
+
+    /// Kontrolle: Ein sauberes Repository ergibt einen Export.
+    #[test]
+    fn sauberer_export_entsteht() -> Result<(), String> {
+        let r = repo()?;
+        schreib(&r, "README.md", b"# Probe\n")?;
+        git_muss(&r, &["add", "README.md"])?;
+        git_muss(&r, &["commit", "-q", "-m", "basis"])?;
+        let p = schreibe(&r, &lauf("alles gut\n"))?;
+        assert!(p.is_file());
+        Ok(())
     }
 }

@@ -1,8 +1,8 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: KodexAenderung
-zweck: Stufe 2, Schnitt Export-Schutz, Teil Gate - Inhaltspruefung auf Geheimnismuster in jeder Datei des Projekts fuer 2·W3 und den Gate-Teil von 1·E01 entlang R28
+klasse: Funktion
+zweck: Stufe 2, Schnitt Export-Schutz, Teil Export - Export liest Liste und Inhalt nur aus dem Git-Index, nie aus dem Arbeitsbaum, Git-Fehler brechen ab (K11-01 bis K11-03), mit Inhaltspruefung auf Geheimnismuster fuer 1·E01, 1·E02 und den Export-Teil von 2·W3 entlang R28
 pfade:
-crates/depot_kodex/
+crates/depot_lauf/
 docs/BEFUNDE.md
 docs/befunde/
 CHANGELOG.md
