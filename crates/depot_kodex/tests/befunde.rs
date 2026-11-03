@@ -1213,3 +1213,105 @@ fn befund_k7_03_modul_aus_md_wird_geprueft() -> Result<(), String> {
     )?;
     abgelehnt("module_md", &baum.gate(), "audit_payload.md")
 }
+
+// ---------------------------------------------------------------------------------------------
+// 2·W3 und 1·E01 (Gate-Teil) – Geheimnisse in Dateien des Projekts (R28)
+// ---------------------------------------------------------------------------------------------
+
+/// Beispielgeheimnisse, erst zur Laufzeit zusammengesetzt: Diese Quelldatei enthaelt selbst
+/// keines und besteht deshalb ihre eigene Pruefung. Die IBAN ist das oeffentliche Lehrbuch-
+/// beispiel mit gueltiger Pruefziffer, die Schluessel sind erfunden.
+fn beispiel_iban() -> String {
+    ["DE89", "3704", "0044", "0532", "0130", "00"].concat()
+}
+
+fn beispiel_iban_mit_leerzeichen() -> String {
+    ["DE89", "3704", "0044", "0532", "0130", "00"].join(" ")
+}
+
+fn beispiel_api_schluessel() -> String {
+    ["sk", "-ant-", "api03-", "q7Rk2LmZx9Tb4VwN8yHc3PdJ6sFg1Ue5"].concat()
+}
+
+fn beispiel_privater_schluessel() -> String {
+    [
+        "-----BEGIN ",
+        "PRIVATE KEY-----\n",
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n",
+        "-----END ",
+        "PRIVATE KEY-----\n",
+    ]
+    .concat()
+}
+
+fn beispiel_zuweisung() -> String {
+    ["broker_", "pass", "word = \"", "Wz7#kP2m-Lq9vT4x", "\"\n"].concat()
+}
+
+/// Das Gate lehnt jede Datei ab, die nach einem Geheimnis aussieht, gleich welche Rolle sie hat
+/// und ob sie deklariert ist. Die Meldung nennt Datei und Zeile, nie das Geheimnis selbst.
+#[test]
+#[ignore = "offen: 2·W3 Geheimnis in verfolgter Datei wird nicht erkannt"]
+fn befund_2_w3_geheimnis_in_projektdatei_wird_abgelehnt() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    let doku = |inhalt: String| {
+        move |b: &Baum| -> Result<Vec<String>, String> {
+            b.deklariere("DokuOnly", &["docs/notiz.md"])?;
+            b.schreibe("docs/notiz.md", &format!("# Notiz\n\n{inhalt}\n"))?;
+            Ok(b.gate())
+        }
+    };
+    let api = doku(beispiel_api_schluessel());
+    let iban = doku(beispiel_iban_mit_leerzeichen());
+    let schluessel = doku(beispiel_privater_schluessel());
+    let zuweisung = doku(beispiel_zuweisung());
+    let im_code = |b: &Baum| -> Result<Vec<String>, String> {
+        funktion_mit(b, &format!("// Konto: {}\n", beispiel_iban()))
+    };
+    let im_test = |b: &Baum| -> Result<Vec<String>, String> {
+        b.deklariere("TestOnly", &["crates/depot_kern/tests/probe.rs"])?;
+        b.schreibe(
+            "crates/depot_kern/tests/probe.rs",
+            &format!(
+                "#[test]\nfn probe() {{ let _ = \"{}\"; }}\n",
+                beispiel_api_schluessel()
+            ),
+        )?;
+        Ok(b.gate())
+    };
+    let ohne_git = |b: &Baum| -> Result<Vec<String>, String> {
+        b.schreibe("docs/notiz.md", &beispiel_api_schluessel())?;
+        Ok(depot_kodex::pruefe_ohne_diff(&b.pfad))
+    };
+    alle_faelle(
+        &baum,
+        &[
+            ("API-Schluessel in der Doku", &api, "Geheimnismuster"),
+            ("IBAN mit Leerzeichen in der Doku", &iban, "Geheimnismuster"),
+            (
+                "privater Schluessel in der Doku",
+                &schluessel,
+                "Geheimnismuster",
+            ),
+            (
+                "Passwort-Zuweisung in der Doku",
+                &zuweisung,
+                "Geheimnismuster",
+            ),
+            ("IBAN im Produktivcode", &im_code, "Geheimnismuster"),
+            ("API-Schluessel in einem Test", &im_test, "Geheimnismuster"),
+            ("API-Schluessel ohne Git", &ohne_git, "Geheimnismuster"),
+        ],
+    )?;
+    // Die Meldung nennt das Geheimnis nie.
+    api(&baum).and_then(|fehler| {
+        baum.zuruecksetzen()?;
+        let geheim = beispiel_api_schluessel();
+        if fehler.iter().any(|f| f.contains(&geheim)) {
+            Err(format!("Meldung enthaelt das Geheimnis: {fehler:#?}"))
+        } else {
+            Ok(())
+        }
+    })
+}

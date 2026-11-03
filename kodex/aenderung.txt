@@ -1,11 +1,8 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Stufe 2, Schnitt Regelwerk - Matrix R36, drei Stufen der Anteilsgrenzen, Pruefbasis am Limit, zentrale Auftragskennungen und Hoechstalter der Kurse fuer 1·F02, 1·F04 bis 1·F09, 2·A04, 1·T01 und 1·R06 entlang R20 bis R24 und R36
+klasse: KodexAenderung
+zweck: Stufe 2, Schnitt Export-Schutz, Teil Gate - Inhaltspruefung auf Geheimnismuster in jeder Datei des Projekts fuer 2·W3 und den Gate-Teil von 1·E01 entlang R28
 pfade:
-crates/depot_kern/
-crates/depot_regelwerk/
-kodex/festschreibung.txt
-kodex/freigabe.txt
+crates/depot_kodex/
 docs/BEFUNDE.md
 docs/befunde/
 CHANGELOG.md
