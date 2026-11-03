@@ -48,6 +48,7 @@ name = "depot_ki"
 version = "0.1.0"
 dependencies = [
  "depot_kern",
+ "sha2",
 ]
 
 [[package]]
