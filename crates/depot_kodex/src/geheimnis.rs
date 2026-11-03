@@ -10,6 +10,10 @@
 //! - Zuweisungen an Namen wie `password`, `secret` oder `api_key` mit einem Wert, der nach
 //!   Schluessel aussieht.
 //!
+//! Geprueft werden Arbeitsbaum und Index, denn ein Commit nimmt den Index (K10-01). Gelesen wird
+//! UTF-8 und UTF-16 mit BOM; was sich so nicht lesen laesst, ist nicht pruefbar und damit ein
+//! Fehler (K10-02).
+//!
 //! Die Meldung nennt Datei, Zeile und Art, nie das Geheimnis selbst. Ein Treffer ist ein
 //! Fehler; eine Ausnahmeliste gibt es nicht. Beispiele in Tests entstehen erst zur Laufzeit.
 
@@ -198,10 +202,55 @@ pub fn finde(text: &str) -> Vec<Treffer> {
     treffer
 }
 
-/// Meldungen fuer einen Inhalt; leer, wenn nichts gefunden wurde. Nicht-UTF-8 wird verlustbehaftet
-/// gelesen, damit auch Binaerdateien geprueft werden.
+/// Liest einen Inhalt als Text (K10-02). Unterstuetzt: UTF-8 (mit oder ohne BOM) und UTF-16
+/// mit BOM (LE oder BE). Alles andere ist `None`: nicht pruefbar. Verlustbehaftetes Lesen gibt
+/// es nicht, denn ein falsch gelesener Inhalt ist nicht geprueft.
+pub fn dekodiere(inhalt: &[u8]) -> Option<String> {
+    let utf16 = |rest: &[u8], gross: bool| -> Option<String> {
+        if rest.len().checked_rem(2)? != 0 {
+            return None;
+        }
+        let (paare, _) = rest.as_chunks::<2>();
+        let einheiten = paare.iter().map(|p| {
+            if gross {
+                u16::from_be_bytes(*p)
+            } else {
+                u16::from_le_bytes(*p)
+            }
+        });
+        char::decode_utf16(einheiten)
+            .collect::<Result<String, _>>()
+            .ok()
+    };
+    if let Some(rest) = inhalt.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        return std::str::from_utf8(rest).ok().map(str::to_string);
+    }
+    if let Some(rest) = inhalt.strip_prefix(&[0xFF, 0xFE]) {
+        return utf16(rest, false);
+    }
+    if let Some(rest) = inhalt.strip_prefix(&[0xFE, 0xFF]) {
+        return utf16(rest, true);
+    }
+    std::str::from_utf8(inhalt).ok().map(str::to_string)
+}
+
+/// Meldungen fuer einen Inhalt; leer, wenn nichts gefunden wurde. Ein Inhalt, der sich nicht
+/// lesen laesst, ist ein Fehler (K10-02). Enthaelt der Text Nullzeichen, etwa UTF-16 ohne BOM,
+/// wird er zusaetzlich ohne sie geprueft.
 pub fn pruefe_inhalt(anzeige: &str, inhalt: &[u8]) -> Vec<String> {
-    finde(&String::from_utf8_lossy(inhalt))
+    let Some(text) = dekodiere(inhalt) else {
+        return vec![format!(
+            "{anzeige}: nicht pruefbar, weder UTF-8 noch UTF-16 mit BOM. Ungepruefte Inhalte \
+             gelten nicht als geheimnisfrei (R28)."
+        )];
+    };
+    let mut treffer = finde(&text);
+    if text.contains('\0') {
+        treffer.extend(finde(&text.replace('\0', "")));
+        treffer.sort_by_key(|t| (t.zeile, t.art));
+        treffer.dedup();
+    }
+    treffer
         .into_iter()
         .map(|t| {
             format!(
@@ -245,12 +294,14 @@ fn alle_dateien(wurzel: &Path, dir: &Path, aus: &mut Vec<String>, fehler: &mut V
     }
 }
 
-/// Prueft jede Datei, die ein Commit mitnehmen koennte (verfolgt oder neu und nicht ignoriert);
-/// ohne Git jede Datei ausser `target/`. Links werden nicht verfolgt, ihr Ziel nicht gelesen.
+/// Prueft jede Datei, die ein Commit mitnehmen koennte, in beiden Staenden: im Arbeitsbaum
+/// (verfolgt oder neu und nicht ignoriert) und im Index, denn den nimmt ein Commit (K10-01).
+/// Ohne Git jede Datei ausser `target/`. Links werden nicht verfolgt, ihr Ziel nicht gelesen.
 /// Lesefehler sind Fehler (R29).
 pub fn pruefe(wurzel: &Path) -> Vec<String> {
     let mut fehler = Vec::new();
-    let dateien = if wurzel.join(".git").exists() {
+    let mit_git = wurzel.join(".git").exists();
+    let dateien = if mit_git {
         match crate::git::projektdateien(wurzel) {
             Ok(d) => d,
             Err(e) => return vec![format!("Geheimnispruefung: Dateiliste fehlt: {e}")],
@@ -271,6 +322,20 @@ pub fn pruefe(wurzel: &Path) -> Vec<String> {
                 Ok(inhalt) => fehler.extend(pruefe_inhalt(&d, &inhalt)),
                 Err(e) => fehler.push(format!("{d}: nicht lesbar: {e}")),
             },
+        }
+    }
+    if mit_git {
+        match crate::git::index_dateien(wurzel) {
+            Ok(index) => {
+                for datei in index {
+                    let anzeige = format!("{} (Index)", datei.pfad);
+                    match crate::git::blob(wurzel, &datei.blob) {
+                        Ok(inhalt) => fehler.extend(pruefe_inhalt(&anzeige, &inhalt)),
+                        Err(e) => fehler.push(format!("{anzeige}: nicht lesbar: {e}")),
+                    }
+                }
+            }
+            Err(e) => fehler.push(format!("Geheimnispruefung: Index nicht lesbar: {e}")),
         }
     }
     fehler
@@ -327,6 +392,31 @@ mod tests {
         ] {
             assert!(finde(text).is_empty(), "{text:?}: {:?}", finde(text));
         }
+    }
+
+    #[test]
+    fn kodierungen() {
+        let text = "a\u{e4}b";
+        assert_eq!(dekodiere(text.as_bytes()).as_deref(), Some(text));
+        let mut bom8 = vec![0xEF, 0xBB, 0xBF];
+        bom8.extend(text.as_bytes());
+        assert_eq!(dekodiere(&bom8).as_deref(), Some(text));
+        let mut le = vec![0xFF, 0xFE];
+        let mut be = vec![0xFE, 0xFF];
+        for e in text.encode_utf16() {
+            le.extend(e.to_le_bytes());
+            be.extend(e.to_be_bytes());
+        }
+        assert_eq!(dekodiere(&le).as_deref(), Some(text));
+        assert_eq!(dekodiere(&be).as_deref(), Some(text));
+        assert_eq!(dekodiere(&[0xC3, 0x28]), None);
+        assert_eq!(dekodiere(&[0xFF, 0xFE, 0x41]), None);
+        assert_eq!(dekodiere(&[0xFF, 0xFE, 0x00, 0xD8]), None);
+        assert!(
+            pruefe_inhalt("x", &[0xC3, 0x28])
+                .iter()
+                .all(|m| m.contains("nicht pruefbar"))
+        );
     }
 
     #[test]

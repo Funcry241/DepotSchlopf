@@ -1324,7 +1324,6 @@ fn befund_2_w3_geheimnis_in_projektdatei_wird_abgelehnt() -> Result<(), String> 
 /// beide: Schluessel im Index und harmloser Text im Arbeitsbaum wird abgelehnt, ebenso die
 /// umgekehrte Lage.
 #[test]
-#[ignore = "offen: K10-01 Index-Inhalt wird nicht geprueft"]
 fn befund_k10_01_index_inhalt_wird_geprueft() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
@@ -1378,11 +1377,13 @@ fn utf16(text: &str, gross: bool, bom: bool) -> Vec<u8> {
 /// unterstuetzten Kodierung lesen laesst, gilt nicht still als geheimnisfrei, sondern wird als
 /// nicht pruefbar abgelehnt.
 #[test]
-#[ignore = "offen: K10-02 UTF-16 umgeht die Muster"]
 fn befund_k10_02_utf16_umgeht_die_muster_nicht() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
+    // Mit BOM enthaelt der Text einen Umlaut: Er laesst sich nur als UTF-16 richtig lesen.
+    // Ohne BOM bleibt er ASCII; dann steht zwischen den Zeichen je ein Nullbyte.
     let text = format!("# Notiz\n{}\n", beispiel_api_schluessel());
+    let mit_umlaut = format!("# Schl\u{fc}ssel\n{}\n", beispiel_api_schluessel());
     let mit_bytes = |bytes: Vec<u8>| {
         move |b: &Baum| -> Result<Vec<String>, String> {
             b.deklariere("DokuOnly", &["docs/notiz.md"])?;
@@ -1390,8 +1391,8 @@ fn befund_k10_02_utf16_umgeht_die_muster_nicht() -> Result<(), String> {
             Ok(b.gate())
         }
     };
-    let le_bom = mit_bytes(utf16(&text, false, true));
-    let be_bom = mit_bytes(utf16(&text, true, true));
+    let le_bom = mit_bytes(utf16(&mit_umlaut, false, true));
+    let be_bom = mit_bytes(utf16(&mit_umlaut, true, true));
     let le_ohne = mit_bytes(utf16(&text, false, false));
     let be_ohne = mit_bytes(utf16(&text, true, false));
     let kaputt = mit_bytes(vec![b'#', b' ', 0xC3, 0x28, 0xFF, b'\n']);
