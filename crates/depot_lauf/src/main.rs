@@ -116,17 +116,10 @@ fn main() -> ExitCode {
         konsole.push_str(&z);
     }
 
-    let exit = kodex(&mut konsole, &kodex_args);
-    let lauf = export::Lauf {
-        befehl,
-        schritte: vec![export::Schritt {
-            name: "kodex".into(),
-            exit,
-        }],
-        konsole,
-        warnungen,
-        abbild: None,
-    };
+    // Der Stand vor und nach dem Gate wird festgehalten; der Export nimmt den davor (1·R04).
+    let lauf = abbild::gepruefter_lauf(&wurzel, befehl, konsole, warnungen, |k| {
+        kodex(k, &kodex_args)
+    });
     match export::schreibe(&wurzel, &lauf) {
         Ok(p) => println!("[DepotSchlopf] Assistenten-Export: {}", p.display()),
         Err(e) => {

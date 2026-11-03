@@ -58,6 +58,8 @@ run.cmd
 
 Ein Befehl macht alles: Gate prüfen (Struktur, Festschreibung, Quellscan, Essenz, Format, Clippy, Tests) und danach `assistant_export_latest.zip` schreiben. Diese Datei kann man einer neuen KI-Sitzung geben. Unter Linux oder macOS: `cargo run -p depot_lauf`.
 
+Der Export enthält genau den geprüften Stand. Deshalb ist der Lauf nur grün, wenn alle Änderungen mit `git add` vorgemerkt sind, keine neue Datei unverfolgt herumliegt und sich während der Prüfung nichts ändert.
+
 ## Mitmachen
 
 [Beitragsregeln](docs/CONTRIBUTING.md) · [Sicherheit](docs/SECURITY.md) · [Umgang miteinander](docs/CODE_OF_CONDUCT.md) · [Änderungen](CHANGELOG.md)
