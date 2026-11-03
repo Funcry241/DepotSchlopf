@@ -82,17 +82,21 @@ Jede Ablehnung muss das Stichwort „Geheimnismuster“ nennen, die nicht lesbar
 
 ## Teil Export: Ergebnis
 
-**Fassung 2 nach Maus' Prüfung von `9d94866` (K11-01, K11-02):** Maus' Gegenproben stehen als Tests in `crates/depot_lauf/src/export.rs`, am Stand `9d94866` rot (eigener Commit `a214d1d`). Behoben ist allgemein:
+**Fassung 3 nach Maus' Nachprüfung von `c592b5b` (K11-03):** Unter Windows hielt der Leseweg zwei gleich lange Dateien für dieselbe. Eine echte Dateiidentität gibt es unter Windows in der stabilen Standardbibliothek nicht, und `unsafe` sowie neue Abhängigkeiten sind gesperrt. Statt den Arbeitsbaum noch genauer zu bewachen, liest der Export ihn jetzt gar nicht mehr. Behoben ist allgemein:
 
-- **K11-01 (hoch):** Der Export hat genau einen Leseweg für Dateien im Projekt, `lies_im_projekt`. Er prüft jeden Teil des Pfads, nicht nur den letzten. Kein Teil darf ein Link sein, unter Windows auch kein Analysepunkt (Junction). Zusätzlich muss der aufgelöste Pfad genau der erwartete Pfad unter der aufgelösten Projektwurzel sein. Der Weg wird vor und nach dem Lesen geprüft, und die gelesene Datei muss die geprüfte sein; ändert sich etwas dazwischen, bricht der Export ab. Auch die Essenz wird nur so gelesen.
-- **K11-02 (mittel):** „Ohne Git“ heißt nur: Es gibt kein `.git`. Ist eines da, muss der Index lesbar sein, sonst bricht der Export ab, bevor eine Datei entsteht. Ein Fehler beim Lesen der Metadaten ist ein Fehler, keine ausgelassene Datei. Ausgelassen wird nur, was im Arbeitsbaum fehlt, keine gewöhnliche Datei ist oder hinter einem Link liegt; diese Pfade stehen mit Grund in `SOURCE_SNAPSHOT.txt`.
+- **K11-03 (mittel):** Jeder Inhalt des Quellstands und die Essenz kommen aus dem Git-Index (`git cat-file blob`), nie aus dem Arbeitsbaum. Ein Blob ist durch seine Prüfsumme bestimmt; es gibt keinen Pfad, der sich beim Lesen ändern könnte, und keine Datei, deren Identität man nachweisen müsste. Das gilt auf jeder Plattform. Ein Blob, der sich nicht lesen lässt, bricht den Export ab. Der Export enthält damit denselben Stand, den das Gate im Index prüft und den ein Commit aufnimmt.
+- **K11-01** ist dadurch ohne eigenen Linkweg erfüllt: Im Arbeitsbaum wird nichts gelesen, also auch kein Link in irgendeinem Pfadteil und keine Junction. Verfolgte Links (Modus 120000) fehlen im Index-Auszug. Der Leseweg `lies_im_projekt` aus Fassung 2 ist entfallen.
+- **K11-02** bleibt: „Ohne Git“ heißt nur, es gibt kein `.git`. Ist eines da, muss der Index lesbar sein, sonst Abbruch ohne ZIP-Datei.
 
-Die Negativtests stehen in `crates/depot_lauf/src/export.rs` und sind am alten Stand rot (eigener Commit `3c8899a`). Der Fall „verfolgte Datei im Arbeitsbaum durch einen Link ersetzt“ kam mit dem Umbau-Commit dazu; am alten Stand wäre auch er rot, weil der alte Export jedem Pfad folgte.
+Maus' Gegenprobe zu K11-03 baute Eingriffspunkte in `lies_im_projekt` ein. Diese Funktion gibt es nicht mehr. Die neuen Tests prüfen die allgemeine Regel und sind an `c592b5b` rot (eigener Commit `ce6e891`): Eine gleich lange, andere Datei im Arbeitsbaum und eine geänderte Essenz dürfen nicht in die ZIP-Datei gelangen, und ein fehlender Blob bricht ab. Ein Austausch während des Lesens ist der Sonderfall „Arbeitsbaum weicht vom Index ab“ und wird damit mit abgedeckt.
+
+**Fassung 2 (K11-01, K11-02),** Tests in Commit `a214d1d`, an `9d94866` rot: Link im Elternordner (auch für die Essenz) und beschädigter Index.
+
+Die ersten Negativtests (1·E01, 1·E02, 2·W3) stehen im Commit `3c8899a` und sind am alten Stand rot. Der Fall „verfolgte Datei im Arbeitsbaum durch einen Link ersetzt“ kam mit dem Umbau-Commit dazu.
 
 ```text
 cargo test --locked -p depot_lauf befund_1_e0
 cargo test --locked -p depot_lauf befund_k11
-cargo test --locked -p depot_lauf metadatenfehler
 cargo test --locked -p depot_lauf sauberer_export_entsteht
 cargo test --locked -p depot_lauf ohne_git
 ```
@@ -101,26 +105,28 @@ cargo test --locked -p depot_lauf ohne_git
 | --- | --- | --- |
 | unverfolgte Datei im Projekt | exportiert | nicht exportiert |
 | verfolgter Link | gelesen | nicht exportiert |
-| verfolgte Datei, im Arbeitsbaum durch Link ersetzt | Linkziel gelesen | nicht exportiert |
+| verfolgte Datei, im Arbeitsbaum durch Link ersetzt | Linkziel gelesen | Inhalt aus dem Index, Linkziel nicht gelesen |
 | IBAN in einer Datei | exportiert | Abbruch |
 | API-Schlüssel in einer Datei | exportiert | Abbruch |
 | API-Schlüssel in der Konsole | exportiert | Abbruch |
 | nicht lesbarer Inhalt | exportiert | Abbruch als „nicht pruefbar“ |
 | sauberer Stand (Kontrolle) | ZIP entsteht | ZIP entsteht |
 
-| K11-Fall | an `9d94866` | nach dem Umbau |
+| K11-Fall | am jeweils geprüften Stand | nach dem Umbau |
 | --- | --- | --- |
-| Elternordner einer verfolgten Datei durch Link ersetzt | fremder Inhalt in der ZIP-Datei | nicht gelesen, ausgelassen |
-| Ordner der Essenz durch Link ersetzt | fremde Regel in der Übergabe | nicht gelesen |
-| `.git/index` beschädigt | leerer Quellstand, ZIP entsteht | Abbruch, keine ZIP-Datei |
-| Metadatenfehler (zu langer Name) und Pfade mit `..`, `.` oder leerem Teil | – | Fehler |
+| Elternordner einer verfolgten Datei durch Link ersetzt (`9d94866`) | fremder Inhalt in der ZIP-Datei | Inhalt aus dem Index |
+| Ordner der Essenz durch Link ersetzt (`9d94866`) | fremde Regel in der Übergabe | Essenz aus dem Index |
+| `.git/index` beschädigt (`9d94866`) | leerer Quellstand, ZIP entsteht | Abbruch, keine ZIP-Datei |
+| gleich lange, andere Datei im Arbeitsbaum (`c592b5b`) | Arbeitsbaum exportiert | Inhalt aus dem Index |
+| geänderte Essenz im Arbeitsbaum (`c592b5b`) | Arbeitsbaum in der Übergabe | Essenz aus dem Index |
+| Blob des Index fehlt (`c592b5b`) | Export meldet Erfolg | Abbruch, keine ZIP-Datei |
 | ohne `.git` (Kontrolle) | ZIP ohne Quellstand | ZIP ohne Quellstand |
 
 Bei jedem Abbruch prüft der Test: die Meldung nennt „Geheimnismuster“ oder „nicht pruefbar“, das Geheimnis steht nicht darin, und es gibt weder ZIP-Datei noch Zwischendatei.
 
 ## Was der Export-Umbau tut
 
-- **Quelle.** Die Liste der Dateien kommt aus dem Git-Index (`git ls-files --stage`, nur normale Dateien). Gelesen wird jede Datei über `lies_im_projekt` (siehe K11-01). Ohne `.git` gibt es keinen Quellstand; der Export enthält dann nur Bericht und Konsole. Ein vorhandenes, aber nicht lesbares Repository bricht ab.
+- **Quelle.** Liste und Inhalt kommen aus dem Git-Index (`git ls-files --stage`, nur normale Dateien, dann `git cat-file blob`). Im Arbeitsbaum liest der Export nichts. Ohne `.git` gibt es keinen Quellstand; der Export enthält dann nur Bericht und Konsole. Ein vorhandenes, aber nicht lesbares Repository oder ein fehlender Blob bricht ab.
 - **Prüfung.** Jede Quelldatei wird vor dem Schreiben mit derselben Prüfung wie im Gate gelesen (`depot_kodex::geheimnis::pruefe_inhalt`). Ebenso jeder andere Teil der ZIP-Datei, auch die Konsole und der Bericht. Die innere Quell-ZIP enthält nur bereits geprüfte Dateien.
 - **Abbruch.** Ein Treffer oder ein nicht prüfbarer Inhalt bricht ab, bevor eine Datei geschrieben wird. Die Meldung nennt Teil, Zeile und Art.
 
@@ -129,24 +135,17 @@ Bei jedem Abbruch prüft der Test: die Meldung nennt „Geheimnismuster“ oder 
 | Gegenprobe | Ergebnis |
 | --- | --- |
 | auch unverfolgte Dateien exportiert | E01 rot |
-| Link im Arbeitsbaum gelesen | E02 rot |
 | Quelldateien nicht geprüft | E01-Geheimnis rot |
 | Konsole nicht geprüft | E01-Geheimnis rot |
-| Essenz direkt gelesen | K11-01 rot |
-| Indexfehler als leere Liste | K11-02 rot |
+| Quellstand aus dem Arbeitsbaum gelesen | E02, K11-01 und K11-03 rot |
+| Essenz aus dem Arbeitsbaum gelesen | K11-01 und K11-03 rot |
+| Blobfehler: Datei still ausgelassen | K11-03 (fehlender Blob) rot |
 | vorhandenes, kaputtes Repository gilt als „ohne Git“ | K11-02 rot |
-| Metadatenfehler als „ausgelassen“ | Metadatentest rot |
-| Pfadteil `..` erlaubt | Metadatentest rot |
-| Link-Prüfung je Pfadteil, Ordnerprüfung und Auflösungsvergleich zusammen entfernt | K11-01 rot |
-
-Jede der drei Link-Schichten allein hält K11-01 grün: die Link-Prüfung je Pfadteil, die Prüfung, dass jeder Teil vor dem letzten ein echter Ordner ist, und der Vergleich mit dem aufgelösten Pfad. Rot wird der Test erst, wenn alle drei fehlen. Der Auflösungsvergleich ist die Schicht, die unter Windows auch Umleitungen fängt, die sich nicht als Link melden.
 
 ## Grenzen Teil Export
 
-- Der Windows-Weg (Analysepunkte, Junctions) ist für Windows gebaut und mit Clippy geprüft, aber nicht unter Windows ausgeführt. Ein Junction-Test fehlt, weil die Prüfumgebung Linux ist. Unter Windows lässt eine abweichende Groß- und Kleinschreibung zwischen Git und Dateisystem eine Datei als „umgeleitet“ aus; sie fehlt dann im Quellstand und steht in `SOURCE_SNAPSHOT.txt`.
-- Zwischen der ersten Prüfung und dem Öffnen bleibt ein sehr kurzes Fenster. Wer den Pfad darin umleitet und vor der zweiten Prüfung zurückstellt, wird nicht erkannt. Die Inhaltsprüfung greift trotzdem. Ganz schließen ließe sich das nur mit Systemaufrufen ohne Linkauflösung, die eine neue Abhängigkeit bräuchten.
-- Die Festschreibung im Export berechnet der Kodex. Aus ihr gehen nur Prüfsummen und abgeleitete Namen in den Export, keine Dateiinhalte, und auch sie werden auf Geheimnismuster geprüft.
-- Ein Fehler beim Lesen der Rechte (etwa „Zugriff verweigert“) lässt sich in der Prüfumgebung nicht herstellen, weil sie als Administrator läuft. Der Test nutzt deshalb einen zu langen Namen; der Leseweg unterscheidet nur „fehlt“ von allen anderen Fehlern.
-
-- Der Export liest den Arbeitsbaum, nicht den Index. Weicht beides ab, wird der Arbeitsbaum exportiert und geprüft. Dass der Export byte-gleich dem geprüften Stand ist, bleibt 1·R04 (Snapshot) und folgt mit einem eigenen Schnitt.
+- **Vorgemerkt, nicht gespeichert.** Eine Änderung, die nur im Arbeitsbaum liegt und nicht mit `git add` vorgemerkt ist, steht nicht im Export. `SOURCE_SNAPSHOT.txt` sagt das, und „Lokal veraendert“ zeigt, dass es solche Änderungen gibt. Das ist Absicht: Exportiert wird der Stand, den das Gate prüft.
+- **Zeitpunkt.** Wird der Index zwischen Gate und Export geändert, exportiert der Export den neuen Index, geprüft auf Geheimnismuster. Dass der Export byte-gleich dem vom Gate geprüften Stand ist, bleibt 1·R04 (Snapshot) und folgt mit einem eigenen Schnitt.
+- Die Festschreibung im Export berechnet der Kodex aus dem Arbeitsbaum. Aus ihr gehen nur Prüfsummen und abgeleitete Namen in den Export, keine Dateiinhalte, und auch sie werden auf Geheimnismuster geprüft.
+- Kein Test läuft unter Windows. Der Export braucht dort aber keinen eigenen Weg mehr; er ruft nur `git` auf.
 - Für die Muster gelten dieselben Grenzen wie im Gate.
