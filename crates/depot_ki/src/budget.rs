@@ -159,10 +159,8 @@ pub enum Sperre {
     /// Ein frueherer Zyklus soll erneut fragen.
     ZyklusRueckwaerts,
     Rechenfehler,
-    /// Kassenbuch belegt: ein anderer Lauf hat es offen.
-    KassenbuchBelegt,
-    /// Kassenbuch fehlt, ist unstimmig, nicht les- oder schreibbar oder nach einem Fehler
-    /// gesperrt. Halt bis zum geprueften Wiederanlauf (R25, R29).
+    /// Kassenbuch oder Journal unstimmig, nicht schreibbar oder nach einem Fehler gesperrt.
+    /// Halt bis zum geprueften Wiederanlauf (R25, R29).
     Kassenbuch(String),
 }
 
@@ -243,49 +241,23 @@ pub fn pruefe(
     Ok(kosten)
 }
 
-mod siegel {
-    /// Nur in `depot_ki` erzeugbar.
-    #[derive(Debug, PartialEq, Eq)]
-    pub struct Siegel(());
-
-    impl Siegel {
-        pub(crate) fn neu() -> Siegel {
-            Siegel(())
-        }
-    }
-}
-
-/// Berechtigt zu genau einem KI-Aufruf. Nicht kopierbar, nur im Kassenbuch erzeugbar.
-/// Der KI-Client nimmt sie beim Aufruf als Wert entgegen und verbraucht sie dabei.
-#[derive(Debug, PartialEq, Eq)]
-pub struct AufrufErlaubnis {
-    buchung: Buchung,
-    deckel: KiDeckel,
-    _siegel: siegel::Siegel,
-}
-
-impl AufrufErlaubnis {
-    pub(crate) fn neu(buchung: Buchung, deckel: KiDeckel) -> AufrufErlaubnis {
-        AufrufErlaubnis {
-            buchung,
-            deckel,
-            _siegel: siegel::Siegel::neu(),
-        }
-    }
-
-    pub fn buchung(&self) -> &Buchung {
-        &self.buchung
-    }
-
-    pub fn deckel(&self) -> &KiDeckel {
-        &self.deckel
-    }
-
-    /// Ein Token umfasst mindestens ein Byte. Wer hoechstens `max_token_ein` Bytes sendet,
-    /// sendet also sicher nicht mehr Token als erlaubt.
-    pub fn eingabe_passt(&self, eingabe: &str) -> bool {
-        u32::try_from(eingabe.len()).is_ok_and(|n| n <= self.deckel.max_token_ein)
-    }
+/// Der Abdruck der festgeschriebenen KI-Grenzen und beider Deckel: SHA-256 ihrer Werte. Vor
+/// der ersten Buchung unter neuen Grenzen steht er im Journal (Uebergangsregel).
+pub fn grenzabdruck() -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let text = format!(
+        "{:?}|{:?}|{:?}",
+        KiGrenzen::standard(),
+        KiDeckel::standard(BeraterId::Dachs),
+        KiDeckel::standard(BeraterId::Maus)
+    );
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 authors.workspace = true
 publish.workspace = true
-description = "Harter Budgetwaechter fuer die KI-Aufrufe (Dachs = Claude, Maus = GPT)"
+description = "Regeln des KI-Budgets fuer Dachs (Claude) und Maus (GPT), ohne Dateizugriff"
 
 [dependencies]
 depot_kern.workspace = true

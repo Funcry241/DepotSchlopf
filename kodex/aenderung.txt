@@ -1,12 +1,13 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: FestschreibungAenderung
-zweck: Stufe 2, Schnitt KI-Kostenschutz - Budgetwaechter und Kassenbuch absichern fuer 1·K01 bis 1·K06 und 1·R02 entlang R19, R20, R24, R25, R29 und R38: Grenzen nur aus der Festschreibung, gepruefte Preise und Daten, ausdrueckliche Einrichtung, Anker mit bestaetigtem Stand, Pruefung der ganzen Historie, Sperre der Datei ueber das Betriebssystem, Sperre nach Fehlern. Keine neuen Budgetbetraege.
+zweck: Stufe 2, Schnitt Persistenzbasis fuer 3·P4, 4·B02, 5·B02 und die Persistenz von 1·F09 entlang R12, R20, R24, R25, R29 und R38: neues Crate depot_journal als einzige dauerhafte Datei (Hash-Kette, Datensatzformat, Anhangsvermerk, Quarantaene, wiederholbare Wiederherstellung); Papierdepot, Auftraege mit zentraler Kennungsvergabe und Beobachtungen ueberstehen den Neustart; das KI-Kassenbuch zieht ins Journal, mit Uebergangsregel fuer spaetere Grenzaenderungen. Keine neuen Budgetbetraege.
 pfade:
+crates/depot_journal/
 crates/depot_ki/
 Cargo.toml
 Cargo.lock
 kodex/festschreibung.txt
 kodex/freigabe.txt
-docs/BEFUNDE.md
-docs/befunde/
+docs/
 CHANGELOG.md
+README.md

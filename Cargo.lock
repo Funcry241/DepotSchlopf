@@ -37,6 +37,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "depot_journal"
+version = "0.1.0"
+dependencies = [
+ "depot_kern",
+ "depot_ki",
+ "depot_regelwerk",
+ "sha2",
+]
+
+[[package]]
 name = "depot_kern"
 version = "0.1.0"
 dependencies = [
