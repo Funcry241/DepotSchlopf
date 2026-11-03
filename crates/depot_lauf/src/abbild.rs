@@ -2,8 +2,8 @@
 //!
 //! Gate und Export nehmen denselben festgehaltenen Stand. Vor dem Gate haelt der Lauf den
 //! Git-Index einmal als Baum fest (`git write-tree`) und schreibt jede gewoehnliche Datei
-//! dieses Baums Byte fuer Byte aus ihrem Blob in eine eigene Arbeitskopie unter
-//! `target/gepruefter-stand/`, ohne Filter von Git (Zeilenenden, Attribute). Das Gate laeuft in
+//! dieses Baums Byte fuer Byte aus ihrem Blob in eine eigene Arbeitskopie ausserhalb des
+//! Projektordners (`ablage`), ohne Filter von Git (Zeilenenden, Attribute). Das Gate laeuft in
 //! dieser Kopie, der Export nimmt dieselben Blobs. Was nur im Arbeitsbaum liegt, sehen also
 //! weder Gate noch Export, gleich was Git ueber den Arbeitsbaum meldet. Nach dem Gate wird die
 //! Kopie Byte fuer Byte mit den Blobs verglichen; weicht sie ab oder kam eine Datei hinzu, ist
@@ -13,32 +13,86 @@
 //! genau zurueckgenommen wird, sieht der Vergleich nicht. Die Kopie gehoert nur dem Lauf.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use sha2::{Digest, Sha256};
+
 use crate::export::{Lauf, Schritt, hat_git};
 
-/// Unterordner der Kopie im Build-Ordner.
-pub const KOPIE: &str = "target/gepruefter-stand";
-
-/// Ordner fuer Kopie und Build-Ordner des Gates. Leere Schnittstelle fuer die roten Tests.
+/// Ordner fuer Kopie und Build-Ordner des Gates: im temporaeren Ordner des Systems, je
+/// Projektordner ein eigener, fest benannter. Ausserhalb des Projekts erbt Cargo dort keine
+/// Konfiguration aus dem Projektordner, auch keine nicht vorgemerkte (K14-02). Fest bleibt er,
+/// damit die Abhaengigkeiten nicht jedes Mal neu bauen.
 pub fn ablage(wurzel: &Path) -> PathBuf {
-    wurzel.join("target")
+    let abdruck = Sha256::digest(wurzel.to_string_lossy().as_bytes());
+    let kurz: String = abdruck.iter().take(8).fold(String::new(), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    });
+    std::env::temp_dir().join(format!("depotschlopf-{kurz}"))
 }
 
-/// Cargo-Konfigurationen oberhalb der Kopie, ausser in `cargo_home`. Leere Schnittstelle.
-pub fn fremde_cargo_konfiguration(_kopie: &Path, _cargo_home: Option<&Path>) -> Vec<PathBuf> {
-    Vec::new()
+/// Build-Ordner des Gates neben der Kopie. Teilte es den des Projekts, koennte Cargo veraltete
+/// Ergebnisse des einen fuer den anderen halten.
+pub fn bau_ordner(wurzel: &Path) -> PathBuf {
+    ablage(wurzel).join("bau")
 }
 
-/// Der Aufruf des Gates in `dir` mit dem Build-Ordner `bau`. Leere Schnittstelle.
+/// Der Ordner der Cargo-Einstellungen des Nutzers: `CARGO_HOME`, sonst `.cargo` im
+/// Benutzerordner.
+fn cargo_home() -> Option<PathBuf> {
+    std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(|h| PathBuf::from(h).join(".cargo"))
+        })
+}
+
+/// Cargo-Konfigurationen in den Ordnern oberhalb der Kopie. Cargo liest sie alle; die Kopie
+/// selbst bringt nur, was im festgehaltenen Stand steht. Die Einstellungen des Nutzers in
+/// `cargo_home` gehoeren zur Werkzeugkette und zaehlen nicht.
+pub fn fremde_cargo_konfiguration(kopie: &Path, cargo_home: Option<&Path>) -> Vec<PathBuf> {
+    kopie
+        .ancestors()
+        .skip(1)
+        .map(|a| a.join(".cargo"))
+        .filter(|d| cargo_home != Some(d.as_path()))
+        .flat_map(|d| [d.join("config.toml"), d.join("config")])
+        .filter(|f| f.exists())
+        .collect()
+}
+
+/// Ist das eine Umgebungsvariable, die beeinflusst, wie Cargo, Rust oder Git arbeiten?
+/// Ausgenommen sind die Orte der Werkzeuge und die Netzangaben fuer das Laden von
+/// Abhaengigkeiten, deren Inhalt `Cargo.lock` mit Pruefsummen festlegt.
+fn bau_variable(name: &str) -> bool {
+    let bau = ["CARGO", "RUST", "GIT_"]
+        .iter()
+        .any(|p| name.starts_with(p));
+    let erlaubt = ["CARGO_HOME", "RUSTUP_HOME"].contains(&name)
+        || name.starts_with("CARGO_HTTP_")
+        || name.starts_with("CARGO_NET_");
+    bau && !erlaubt
+}
+
+/// Der Aufruf des Gates in `dir` mit dem Build-Ordner `bau`. Das Gate erbt keine
+/// Bau-Einstellungen aus der Umgebung (K14-02).
 pub fn gate_befehl(dir: &Path, bau: &Path, args: &[String]) -> Command {
     let mut c = Command::new("cargo");
     c.args(["run", "--quiet", "-p", "depot_kodex", "--"])
         .args(args)
-        .current_dir(dir)
-        .env("CARGO_TARGET_DIR", bau);
+        .current_dir(dir);
+    for (k, _) in std::env::vars_os() {
+        if bau_variable(&k.to_string_lossy()) {
+            c.env_remove(k);
+        }
+    }
+    c.env("CARGO_TARGET_DIR", bau);
     c
 }
 
@@ -135,6 +189,14 @@ fn alte_kopie_weg(wurzel: &Path, kopie: &Path) -> Result<(), String> {
 /// Git fehlt, der Index ist nicht lesbar oder hat offene Konflikte, oder die Kopie laesst sich
 /// nicht anlegen.
 pub fn festhalten(wurzel: &Path) -> Result<Option<Abbild>, String> {
+    festhalten_in(wurzel, &ablage(wurzel))
+}
+
+/// Wie `festhalten`, mit der Kopie unter `ablage/stand`.
+///
+/// # Errors
+/// Wie `festhalten`; dazu, wenn oberhalb der Kopie eine fremde Cargo-Konfiguration liegt.
+pub fn festhalten_in(wurzel: &Path, ablage: &Path) -> Result<Option<Abbild>, String> {
     if !hat_git(wurzel)? {
         return Ok(None);
     }
@@ -147,7 +209,7 @@ pub fn festhalten(wurzel: &Path) -> Result<Option<Abbild>, String> {
     let commit = git_text(wurzel, &commit_args)?;
     let dateien = dateien_im_baum(wurzel, &baum)?;
 
-    let kopie = wurzel.join(KOPIE);
+    let kopie = ablage.join("stand");
     alte_kopie_weg(wurzel, &kopie)?;
     let pfad = kopie.to_string_lossy();
     git_roh(
@@ -176,6 +238,17 @@ pub fn festhalten(wurzel: &Path) -> Result<Option<Abbild>, String> {
     }
     // Index der Kopie auf den festgehaltenen Stand, ohne die Dateien anzufassen.
     git_roh(&kopie, &["reset", "-q"])?;
+    let fremd = fremde_cargo_konfiguration(&kopie, cargo_home().as_deref());
+    if !fremd.is_empty() {
+        return Err(format!(
+            "Cargo-Konfiguration oberhalb der Kopie wuerde das Gate beeinflussen: {}",
+            fremd
+                .iter()
+                .map(|f| f.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     Ok(Some(Abbild {
         baum,
         dateien: dateien.into_iter().map(|(p, b, _)| (p, b)).collect(),
@@ -260,7 +333,7 @@ fn hinweise(wurzel: &Path) -> Vec<String> {
             // "XY pfad": Y ist der Arbeitsbaum gegen den Index; "??" heisst unverfolgt.
             .filter(|z| z.get(1).is_some_and(|y| *y != b' '))
             .filter_map(|z| z.get(3..))
-            .filter(|p| !p.is_empty() && !p.starts_with(KOPIE.as_bytes()))
+            .filter(|p| !p.is_empty())
             .map(|p| {
                 format!(
                     "Hinweis: {} ist nicht vorgemerkt, weder geprueft noch exportiert",

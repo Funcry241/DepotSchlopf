@@ -124,6 +124,7 @@ fn im_quellstand<'a>(dateien: &'a [(String, Vec<u8>)], pfad: &str) -> Option<&'a
 #[cfg(test)]
 fn quelldateien(wurzel: &Path) -> Result<Vec<String>, String> {
     let abbild = crate::abbild::festhalten(wurzel)?;
+    let _ = fs::remove_dir_all(crate::abbild::ablage(wurzel));
     Ok(quellstand(wurzel, abbild.as_ref())?
         .into_iter()
         .map(|(p, _)| p)
@@ -496,6 +497,14 @@ mod tests {
         }
     }
 
+    /// Schreibt den Export eines Laufs mit dem Abbild des Repositorys und raeumt danach die
+    /// Ablage im temporaeren Ordner auf.
+    fn schreibe_in(r: &Path, konsole: &str) -> Result<PathBuf, String> {
+        let erg = schreibe(r, &lauf_in(r, konsole));
+        aufraeumen(r);
+        erg
+    }
+
     /// Ein Lauf mit dem Abbild des Repositorys; ist es nicht lesbar, ohne Abbild.
     fn lauf_in(r: &Path, konsole: &str) -> Lauf {
         Lauf {
@@ -554,7 +563,7 @@ mod tests {
             "verfolgter Link exportiert: {dateien:?}"
         );
         assert!(dateien.contains(&"README.md".to_string()), "{dateien:?}");
-        let p = schreibe(&r, &lauf_in(&r, "sauber\n"))?;
+        let p = schreibe_in(&r, "sauber\n")?;
         let bytes = fs::read(p).map_err(|e| e.to_string())?;
         assert!(
             !enthaelt(&bytes, b"fremder Inhalt"),
@@ -600,7 +609,7 @@ mod tests {
             schreib(&r, "docs/notiz.md", &inhalt)?;
             git_muss(&r, &["add", "docs/notiz.md"])?;
             git_muss(&r, &["commit", "-q", "-m", "basis"])?;
-            match schreibe(&r, &lauf_in(&r, &konsole)) {
+            match schreibe_in(&r, &konsole) {
                 Ok(p) => offen.push(format!("{fall}: Export geschrieben: {}", p.display())),
                 Err(e) => {
                     if !e.contains(stichwort) {
@@ -647,7 +656,7 @@ mod tests {
             std::os::unix::fs::symlink(&draussen, r.join(ordner))
                 .map_err(|e| format!("Link {ordner}: {e}"))?;
         }
-        let p = schreibe(&r, &lauf_in(&r, "sauber\n"))?;
+        let p = schreibe_in(&r, "sauber\n")?;
         let bytes = fs::read(p).map_err(|e| e.to_string())?;
         let mut offen = Vec::new();
         for marke in ["FREMDER_INHALT_AUSSERHALB", "FREMDE_REGEL_AUSSERHALB"] {
@@ -671,7 +680,7 @@ mod tests {
         git_muss(&r, &["commit", "-q", "-m", "basis"])?;
         fs::write(r.join(".git/index"), b"kaputt").map_err(|e| e.to_string())?;
         let mut offen = Vec::new();
-        if let Ok(p) = schreibe(&r, &lauf_in(&r, "sauber\n")) {
+        if let Ok(p) = schreibe_in(&r, "sauber\n") {
             offen.push(format!(
                 "Defekter Git-Index: Export meldet Erfolg: {}",
                 p.display()
@@ -697,7 +706,7 @@ mod tests {
         git_muss(&r, &["commit", "-q", "-m", "basis"])?;
         schreib(&r, "pruef/datei.md", b"FREMD!\n")?;
         schreib(&r, "docs/essenz.md", b"# D01 \xE2\x80\x93 FREMDREGEL\n")?;
-        let p = schreibe(&r, &lauf_in(&r, "sauber\n"))?;
+        let p = schreibe_in(&r, "sauber\n")?;
         let bytes = fs::read(p).map_err(|e| e.to_string())?;
         let mut offen = Vec::new();
         for marke in ["FREMD!", "FREMDREGEL"] {
@@ -732,7 +741,7 @@ mod tests {
         fs::remove_file(r.join(".git/objects").join(kopf).join(rest))
             .map_err(|e| format!("Blob {sha}: {e}"))?;
         let mut offen = Vec::new();
-        if let Ok(p) = schreibe(&r, &lauf_in(&r, "sauber\n")) {
+        if let Ok(p) = schreibe_in(&r, "sauber\n") {
             offen.push(format!(
                 "Fehlender Blob: Export meldet Erfolg: {}",
                 p.display()
@@ -751,7 +760,7 @@ mod tests {
         let r = repo()?;
         fs::remove_dir_all(r.join(".git")).map_err(|e| e.to_string())?;
         schreib(&r, "README.md", b"MARKE_OHNE_GIT\n")?;
-        let p = schreibe(&r, &lauf_in(&r, "sauber\n"))?;
+        let p = schreibe_in(&r, "sauber\n")?;
         let bytes = fs::read(p).map_err(|e| e.to_string())?;
         assert!(
             !enthaelt(&bytes, b"MARKE_OHNE_GIT"),
@@ -767,7 +776,7 @@ mod tests {
         schreib(&r, "README.md", b"# Probe\n")?;
         git_muss(&r, &["add", "README.md"])?;
         git_muss(&r, &["commit", "-q", "-m", "basis"])?;
-        let p = schreibe(&r, &lauf_in(&r, "alles gut\n"))?;
+        let p = schreibe_in(&r, "alles gut\n")?;
         assert!(p.is_file());
         Ok(())
     }
@@ -779,6 +788,11 @@ mod tests {
     fn exportiert(r: &Path, l: &Lauf) -> Result<Vec<u8>, String> {
         let p = schreibe(r, l)?;
         fs::read(p).map_err(|e| e.to_string())
+    }
+
+    /// Entfernt die Ablage eines Probe-Repositorys im temporaeren Ordner.
+    fn aufraeumen(r: &Path) {
+        let _ = fs::remove_dir_all(crate::abbild::ablage(r));
     }
 
     fn sauberes_repo(inhalt: &[u8]) -> Result<PathBuf, String> {
@@ -854,6 +868,7 @@ mod tests {
             );
             fehler?;
             let bytes = exportiert(&r, &l)?;
+            aufraeumen(&r);
             if sicht.readme.as_deref() != Some(index.as_slice()) {
                 offen.push(format!(
                     "{fall}: Gate sah {:?}",
@@ -905,6 +920,7 @@ mod tests {
             );
             fehler?;
             let bytes = exportiert(&r, &l)?;
+            aufraeumen(&r);
             if l.erfolgreich() || !enthaelt(&bytes, b"\"quellstand_geprueft\": false") {
                 offen.push(format!("{fall}: nicht erkannt"));
             }
@@ -927,6 +943,7 @@ mod tests {
         let l =
             crate::abbild::gepruefter_lauf(&r, "alles".into(), String::new(), Vec::new(), |_, _| 0);
         let bytes = exportiert(&r, &l)?;
+        aufraeumen(&r);
         assert!(l.erfolgreich(), "{:?}", l.warnungen);
         assert!(l.warnungen.is_empty(), "{:?}", l.warnungen);
         assert!(enthaelt(&bytes, b"UNVERAENDERT"));
@@ -960,6 +977,7 @@ mod tests {
             },
         );
         let ort = ort.ok_or("Gate nicht ausgefuehrt")?;
+        aufraeumen(&r);
         let mut offen = Vec::new();
         if ort.starts_with(&r) {
             offen.push(format!("Kopie im Projektordner: {}", ort.display()));
@@ -1037,5 +1055,20 @@ mod tests {
             gesetzt.get("CARGO_TARGET_DIR"),
             Some(&Some("bau".to_string()))
         );
+    }
+
+    /// Liegt oberhalb der Kopie eine fremde Cargo-Konfiguration, haelt der Lauf keinen Stand
+    /// fest, und das Gate laeuft nicht.
+    #[test]
+    fn befund_k14_02_fremde_konfiguration_verhindert_das_gate() -> Result<(), String> {
+        let r = sauberes_repo(b"FEST\n")?;
+        let ort = repo()?;
+        schreib(&ort, ".cargo/config.toml", b"[build]\n")?;
+        let erg = crate::abbild::festhalten_in(&r, &ort.join("ablage"));
+        assert!(
+            matches!(&erg, Err(e) if e.contains("config.toml")),
+            "{erg:?}"
+        );
+        Ok(())
     }
 }
