@@ -987,11 +987,9 @@ fn befund_k13_02_journal_prueft_ki_buchungen_selbst() -> Result<(), String> {
     let mut offen = Vec::new();
     for (fall, vorher, (art, inhalt)) in &faelle {
         // Beim Anhaengen.
-        let p = eingerichtet()?;
+        let p = neuer_pfad()?;
+        bestaetigt_geschrieben(&p, &inhalt_fuer(vorher))?;
         let mut j = oeffnen(&p)?;
-        for (a, t) in vorher {
-            vorbedingung(j.anhaengen(*a, t), "Vorgeschichte")?;
-        }
         let datei = vorbedingung(fs::read(&p), "lesen")?;
         match j.anhaengen(*art, inhalt) {
             Err(JournalFehler::Abgelehnt(_)) => {}
@@ -1019,6 +1017,70 @@ fn befund_k13_02_journal_prueft_ki_buchungen_selbst() -> Result<(), String> {
         if vorbedingung(fs::read(vermerk(&q)), "Vermerk lesen")? != v {
             offen.push(format!("{fall}: Vermerk vorgerueckt"));
         }
+    }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// K13-03 – neue KI-Eintraege entstehen nur ueber `reserviere` (D06, R8)
+// ---------------------------------------------------------------------------------------------
+
+/// Ueber den oeffentlichen Aufruf `anhaengen` laesst sich weder ein Grenzabdruck noch eine
+/// KI-Buchung schreiben, auch keine, die das Journal beim Lesen annaehme. Sonst liesse sich mit
+/// einem erfundenen Abdruck eine neue Buchung als historisch ausgeben und die Pruefung der
+/// Reservierung umgehen. Aeltere Buchungen zaehlen beim Wiederanlauf weiter (Test in
+/// `budget.rs`); neue entstehen nur unter den heutigen Grenzen.
+#[test]
+fn befund_k13_03_ki_eintraege_nur_ueber_reserviere() -> Result<(), String> {
+    let erfunden = "0".repeat(64);
+    let heute = depot_ki::grenzabdruck();
+    let mut offen = Vec::new();
+    // Maus' Gegenprobe: erfundener Abdruck, danach eine Buchung ueber 0 Cent.
+    let faelle: [KiFall; 4] = [
+        (
+            "erfundener Abdruck",
+            vec![],
+            (Art::KiGrenzen, erfunden.as_str()),
+        ),
+        ("heutiger Abdruck", vec![], (Art::KiGrenzen, heute.as_str())),
+        (
+            "0 Cent unter erfundenem Abdruck",
+            vec![(Art::KiGrenzen, erfunden.as_str())],
+            (Art::Ki, "Dachs;2026-11-02;1;0"),
+        ),
+        (
+            "gueltige Buchung unter heutigem Abdruck",
+            vec![(Art::KiGrenzen, heute.as_str())],
+            (Art::Ki, "Dachs;2026-11-02;1;48"),
+        ),
+    ];
+    for (fall, vorher, (art, inhalt)) in &faelle {
+        let p = neuer_pfad()?;
+        bestaetigt_geschrieben(&p, &inhalt_fuer(vorher))?;
+        let mut j = oeffnen(&p)?;
+        let datei = vorbedingung(fs::read(&p), "lesen")?;
+        match j.anhaengen(*art, inhalt) {
+            Err(JournalFehler::Abgelehnt(_)) => {}
+            anders => offen.push(format!("{fall}: {anders:?}")),
+        }
+        if vorbedingung(fs::read(&p), "lesen")? != datei {
+            offen.push(format!("{fall}: geschrieben"));
+        }
+    }
+    // Der regulaere Weg bleibt offen und bucht unter den heutigen Grenzen.
+    let p = eingerichtet()?;
+    let mut j = oeffnen(&p)?;
+    let erlaubnis = j.reserviere(depot_kern::BeraterId::Dachs, tag(2)?, 1);
+    let buchungen = j.stand().ki().buchungen().len();
+    let abdruck = j.eintraege().first().map(|(a, t)| (*a, t.clone()));
+    if erlaubnis.is_err() || buchungen != 1 || abdruck != Some((Art::KiGrenzen, heute)) {
+        offen.push(format!(
+            "reserviere: {erlaubnis:?}, {buchungen}, {abdruck:?}"
+        ));
     }
     if offen.is_empty() {
         Ok(())
