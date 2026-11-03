@@ -6,6 +6,7 @@ crates/depot_ki/
 Cargo.toml
 Cargo.lock
 kodex/festschreibung.txt
+kodex/freigabe.txt
 docs/BEFUNDE.md
 docs/befunde/
 CHANGELOG.md
