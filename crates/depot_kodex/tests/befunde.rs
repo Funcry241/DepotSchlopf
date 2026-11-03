@@ -145,6 +145,7 @@ impl Baum {
 
     /// Setzt den Arbeitsbaum auf die Basis zurueck (auch neue Dateien).
     fn zuruecksetzen(&self) -> Result<(), String> {
+        git(&self.pfad, &["reset", "-q"])?;
         git(&self.pfad, &["checkout", "-q", "--", "."])?;
         git(&self.pfad, &["clean", "-q", "-f", "-d"])?;
         Ok(())
@@ -1313,4 +1314,95 @@ fn befund_2_w3_geheimnis_in_projektdatei_wird_abgelehnt() -> Result<(), String> 
             Ok(())
         }
     })
+}
+
+// ---------------------------------------------------------------------------------------------
+// K10 – Maus' Gegenproben zu PR #10
+// ---------------------------------------------------------------------------------------------
+
+/// K10-01: Ein Commit nimmt den Inhalt aus dem Index, nicht aus dem Arbeitsbaum. Das Gate prueft
+/// beide: Schluessel im Index und harmloser Text im Arbeitsbaum wird abgelehnt, ebenso die
+/// umgekehrte Lage.
+#[test]
+#[ignore = "offen: K10-01 Index-Inhalt wird nicht geprueft"]
+fn befund_k10_01_index_inhalt_wird_geprueft() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    let nur_im_index = |b: &Baum| -> Result<Vec<String>, String> {
+        b.deklariere("DokuOnly", &["docs/notiz.md"])?;
+        b.schreibe(
+            "docs/notiz.md",
+            &format!("# Notiz\n{}\n", beispiel_api_schluessel()),
+        )?;
+        git(&b.pfad, &["add", "docs/notiz.md"])?;
+        b.schreibe("docs/notiz.md", "# Notiz\nHarmloser Text\n")?;
+        Ok(b.gate())
+    };
+    let nur_im_arbeitsbaum = |b: &Baum| -> Result<Vec<String>, String> {
+        b.deklariere("DokuOnly", &["docs/notiz.md"])?;
+        b.schreibe("docs/notiz.md", "# Notiz\nHarmloser Text\n")?;
+        git(&b.pfad, &["add", "docs/notiz.md"])?;
+        b.schreibe(
+            "docs/notiz.md",
+            &format!("# Notiz\n{}\n", beispiel_api_schluessel()),
+        )?;
+        Ok(b.gate())
+    };
+    alle_faelle(
+        &baum,
+        &[
+            ("Schluessel nur im Index", &nur_im_index, "Geheimnismuster"),
+            (
+                "Schluessel nur im Arbeitsbaum",
+                &nur_im_arbeitsbaum,
+                "Geheimnismuster",
+            ),
+        ],
+    )
+}
+
+fn utf16(text: &str, gross: bool, bom: bool) -> Vec<u8> {
+    let mut aus = Vec::new();
+    let einheiten = if bom { vec![0xFEFF_u16] } else { Vec::new() };
+    for e in einheiten.into_iter().chain(text.encode_utf16()) {
+        if gross {
+            aus.extend(e.to_be_bytes());
+        } else {
+            aus.extend(e.to_le_bytes());
+        }
+    }
+    aus
+}
+
+/// K10-02: Dieselben Muster werden auch in UTF-16 erkannt, mit und ohne BOM. Was sich in keiner
+/// unterstuetzten Kodierung lesen laesst, gilt nicht still als geheimnisfrei, sondern wird als
+/// nicht pruefbar abgelehnt.
+#[test]
+#[ignore = "offen: K10-02 UTF-16 umgeht die Muster"]
+fn befund_k10_02_utf16_umgeht_die_muster_nicht() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    let text = format!("# Notiz\n{}\n", beispiel_api_schluessel());
+    let mit_bytes = |bytes: Vec<u8>| {
+        move |b: &Baum| -> Result<Vec<String>, String> {
+            b.deklariere("DokuOnly", &["docs/notiz.md"])?;
+            fs::write(b.datei("docs/notiz.md"), &bytes).map_err(|e| format!("notiz: {e}"))?;
+            Ok(b.gate())
+        }
+    };
+    let le_bom = mit_bytes(utf16(&text, false, true));
+    let be_bom = mit_bytes(utf16(&text, true, true));
+    let le_ohne = mit_bytes(utf16(&text, false, false));
+    let be_ohne = mit_bytes(utf16(&text, true, false));
+    let kaputt = mit_bytes(vec![b'#', b' ', 0xC3, 0x28, 0xFF, b'\n']);
+    alle_faelle(
+        &baum,
+        &[
+            ("UTF-16LE mit BOM", &le_bom, "Geheimnismuster"),
+            ("UTF-16BE mit BOM", &be_bom, "Geheimnismuster"),
+            ("UTF-16LE ohne BOM", &le_ohne, "Geheimnismuster"),
+            ("UTF-16BE ohne BOM", &be_ohne, "Geheimnismuster"),
+            ("nicht lesbare Kodierung", &kaputt, "nicht pruefbar"),
+        ],
+    )
 }
