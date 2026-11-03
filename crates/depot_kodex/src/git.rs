@@ -42,6 +42,32 @@ fn pfadliste(roh: &[u8]) -> Result<Vec<String>, String> {
         .collect()
 }
 
+/// Alle Dateien, die Git verfolgt, und alle neuen, nicht ignorierten: alles, was ein Commit
+/// mitnehmen koennte.
+///
+/// # Errors
+/// Wenn git fehlt oder der Ordner kein Repository ist.
+pub fn projektdateien(wurzel: &Path) -> Result<Vec<String>, String> {
+    pfadliste(&git(
+        wurzel,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+    )?)
+}
+
+/// Nur die Dateien, die Git verfolgt.
+///
+/// # Errors
+/// Wenn git fehlt oder der Ordner kein Repository ist.
+pub fn verfolgte_dateien(wurzel: &Path) -> Result<Vec<String>, String> {
+    pfadliste(&git(wurzel, &["ls-files", "-z", "--cached"])?)
+}
+
 /// Merge-Base von `basis` und `HEAD`.
 ///
 /// # Errors

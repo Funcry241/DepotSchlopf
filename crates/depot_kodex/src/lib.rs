@@ -34,6 +34,7 @@ pub mod deklaration;
 pub mod essenz;
 pub mod festschreibung;
 pub mod freigabe;
+pub mod geheimnis;
 pub mod git;
 pub mod lexer;
 pub mod manifest;
@@ -95,6 +96,7 @@ pub fn pruefe(wurzel: &Path, basis: &str) -> Vec<String> {
     ));
     fehler.extend(freigabe::pruefe(wurzel, &diff.pfade));
     fehler.extend(quellscan::pruefe(wurzel));
+    fehler.extend(geheimnis::pruefe(wurzel));
     fehler.extend(essenz::pruefe(wurzel));
     fehler
 }
@@ -105,6 +107,7 @@ pub fn pruefe_ohne_diff(wurzel: &Path) -> Vec<String> {
     let mut fehler =
         festschreibung::pruefe(wurzel, Klasse::Funktion, &std::collections::BTreeSet::new());
     fehler.extend(quellscan::pruefe(wurzel));
+    fehler.extend(geheimnis::pruefe(wurzel));
     fehler.extend(essenz::pruefe(wurzel));
     fehler
 }

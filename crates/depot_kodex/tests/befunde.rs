@@ -1251,7 +1251,6 @@ fn beispiel_zuweisung() -> String {
 /// Das Gate lehnt jede Datei ab, die nach einem Geheimnis aussieht, gleich welche Rolle sie hat
 /// und ob sie deklariert ist. Die Meldung nennt Datei und Zeile, nie das Geheimnis selbst.
 #[test]
-#[ignore = "offen: 2·W3 Geheimnis in verfolgter Datei wird nicht erkannt"]
 fn befund_2_w3_geheimnis_in_projektdatei_wird_abgelehnt() -> Result<(), String> {
     let baum = Baum::neu()?;
     baum.kontrolle()?;
