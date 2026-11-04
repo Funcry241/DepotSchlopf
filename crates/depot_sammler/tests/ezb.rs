@@ -774,14 +774,24 @@ fn ohne_ablage_nichts_belegt() -> Result<(), String> {
     Ok(())
 }
 
-// ---- Zuordnung zu bekannten Terminen (Maus, K22-01) ----
+// ---- Zuordnung zu bekannten Terminen (Maus, K22-01, K22-02) ----
 
-const A: &str = "<dt>01/12/2026</dt><dd>Meeting A<br></dd>";
-const B: &str = "<dt>01/12/2026</dt><dd>Meeting B<br></dd>";
-const C: &str = "<dt>01/12/2026</dt><dd>Meeting C<br></dd>";
-const A2: &str = "<dt>01/12/2026</dt><dd>Meeting A (virtual)<br></dd>";
-const B2: &str = "<dt>01/12/2026</dt><dd>Meeting B (virtual)<br></dd>";
-const ANDERER_TAG: &str = "<dt>02/12/2026</dt><dd>Meeting A<br></dd>";
+// Titel in der echten Form der Seite. A und A2 sind dieselbe Art (EZB-Rat, geldpolitisch),
+// A3 auch; B und B2 sind der Erweiterte Rat; C ist der EZB-Rat, nicht geldpolitisch.
+const T_A: &str = "Governing Council of the ECB: monetary policy meeting in Frankfurt";
+const T_A2: &str = "Governing Council of the ECB: monetary policy meeting (virtual)";
+const T_B: &str = "General Council meeting of the ECB in Frankfurt";
+const T_B2: &str = "General Council meeting of the ECB (virtual)";
+const T_C: &str = "Governing Council of the ECB: non-monetary policy meeting in Frankfurt";
+const A: &str = "<dt>01/12/2026</dt><dd>Governing Council of the ECB: monetary policy meeting in Frankfurt<br></dd>";
+const A2: &str = "<dt>01/12/2026</dt><dd>Governing Council of the ECB: monetary policy meeting (virtual)<br></dd>";
+const A3: &str = "<dt>01/12/2026</dt><dd>Governing Council of the ECB: monetary policy meeting in Vienna<br></dd>";
+const B: &str = "<dt>01/12/2026</dt><dd>General Council meeting of the ECB in Frankfurt<br></dd>";
+const B2: &str = "<dt>01/12/2026</dt><dd>General Council meeting of the ECB (virtual)<br></dd>";
+const C: &str = "<dt>01/12/2026</dt><dd>Governing Council of the ECB: non-monetary policy meeting in Frankfurt<br></dd>";
+const X: &str = "<dt>01/12/2026</dt><dd>Joint meeting<br></dd>";
+const X2: &str = "<dt>01/12/2026</dt><dd>Joint meeting (virtual)<br></dd>";
+const ANDERER_TAG: &str = "<dt>02/12/2026</dt><dd>Governing Council of the ECB: monetary policy meeting in Frankfurt<br></dd>";
 
 /// Kennung und Titel der Termine, die die Seite `neu` nach den bekannten Terminen der Seite
 /// `alt` ergibt.
@@ -805,54 +815,64 @@ fn kennung_bleibt_bei_anderer_reihenfolge() -> Result<(), String> {
     // Maus' Gegenprobe: Die erste von zwei Sitzungen am selben Tag faellt weg.
     assert_eq!(
         zuordnung(&format!("{A}{B}"), B).map_err(f)?,
-        vec![kt("ezb-2026-12-01-2", "Meeting B")]
+        vec![kt("ezb-2026-12-01-2", T_B)]
     );
     // Vertauscht.
     assert_eq!(
         zuordnung(&format!("{A}{B}"), &format!("{B}{A}")).map_err(f)?,
-        vec![
-            kt("ezb-2026-12-01-2", "Meeting B"),
-            kt("ezb-2026-12-01-1", "Meeting A")
-        ]
+        vec![kt("ezb-2026-12-01-2", T_B), kt("ezb-2026-12-01-1", T_A)]
     );
     // Ein neuer Eintrag davor bekommt die naechste freie Nummer.
     assert_eq!(
         zuordnung(A, &format!("{C}{A}")).map_err(f)?,
-        vec![
-            kt("ezb-2026-12-01-2", "Meeting C"),
-            kt("ezb-2026-12-01-1", "Meeting A")
-        ]
+        vec![kt("ezb-2026-12-01-2", T_C), kt("ezb-2026-12-01-1", T_A)]
     );
     // Neue Eintraege bekommen die naechsten Nummern nach allen bekannten des Tags.
     assert_eq!(
         zuordnung(&format!("{A}{B}"), &format!("{C}{B}{A}")).map_err(f)?,
         vec![
-            kt("ezb-2026-12-01-3", "Meeting C"),
-            kt("ezb-2026-12-01-2", "Meeting B"),
-            kt("ezb-2026-12-01-1", "Meeting A")
+            kt("ezb-2026-12-01-3", T_C),
+            kt("ezb-2026-12-01-2", T_B),
+            kt("ezb-2026-12-01-1", T_A)
         ]
     );
-    // Bleibt je genau einer ohne Gegenstueck, ist es derselbe Termin, geaendert: B bleibt,
-    // A wird zu C. Die alte Fassung von A bleibt im Journal.
-    assert_eq!(
-        zuordnung(&format!("{A}{B}"), &format!("{B}{C}")).map_err(f)?,
-        vec![
-            kt("ezb-2026-12-01-2", "Meeting B"),
-            kt("ezb-2026-12-01-1", "Meeting C")
-        ]
-    );
-    // Der einzige Eintrag eines Tags aendert sich: fortgeschrieben unter seiner Kennung.
+    // Ein Termin aendert sich in Ort oder Form: fortgeschrieben unter seiner Kennung.
     assert_eq!(
         zuordnung(&format!("{A}{B}"), &format!("{A2}{B}")).map_err(f)?,
-        vec![
-            kt("ezb-2026-12-01-1", "Meeting A (virtual)"),
-            kt("ezb-2026-12-01-2", "Meeting B")
-        ]
+        vec![kt("ezb-2026-12-01-1", T_A2), kt("ezb-2026-12-01-2", T_B)]
+    );
+    // Beide Termine eines Tags aendern sich, jeder bleibt bei seiner Art: eindeutig.
+    assert_eq!(
+        zuordnung(&format!("{A}{B}"), &format!("{B2}{A2}")).map_err(f)?,
+        vec![kt("ezb-2026-12-01-2", T_B2), kt("ezb-2026-12-01-1", T_A2)]
     );
     // Gleicher Titel an einem anderen Tag ist ein anderer Termin.
     assert_eq!(
         zuordnung(A, ANDERER_TAG).map_err(f)?,
-        vec![kt("ezb-2026-12-02-1", "Meeting A")]
+        vec![kt("ezb-2026-12-02-1", T_A)]
+    );
+    Ok(())
+}
+
+/// Ein anderes Gremium oder ein anderer Gegenstand ist ein anderer Termin, nie eine Aenderung
+/// (K22-02). Ohne erkennbares Gremium wird nichts fortgeschrieben.
+#[test]
+fn anderes_gremium_ist_ein_anderer_termin() -> Result<(), String> {
+    let f = |e: EzbFehler| format!("{e:?}");
+    // Maus' Gegenprobe: Statt des EZB-Rats steht am Tag nur noch der Erweiterte Rat.
+    assert_eq!(
+        zuordnung(A, B).map_err(f)?,
+        vec![kt("ezb-2026-12-01-2", T_B)]
+    );
+    // Geldpolitisch wird nicht geldpolitisch.
+    assert_eq!(
+        zuordnung(&format!("{A}{B}"), &format!("{B}{C}")).map_err(f)?,
+        vec![kt("ezb-2026-12-01-2", T_B), kt("ezb-2026-12-01-3", T_C)]
+    );
+    // Unbekanntes Gremium: neu, der alte Eintrag bleibt.
+    assert_eq!(
+        zuordnung(X, X2).map_err(f)?,
+        vec![kt("ezb-2026-12-01-2", "Joint meeting (virtual)")]
     );
     Ok(())
 }
@@ -871,11 +891,11 @@ fn nummer_nie_neu_vergeben() -> Result<(), String> {
         )
         .map_err(|e| format!("Vorbedingung Termin: {e:?}"))
     };
-    let a = termin("ezb-2026-12-01-1", "Meeting A")?;
-    let b = termin("ezb-2026-12-01-3", "Meeting B")?;
+    let b = termin("ezb-2026-12-01-1", T_B)?;
+    let c = termin("ezb-2026-12-01-3", T_C)?;
     let t = ordne_zu(
-        lies_ezb_seite(&seite(&format!("{A}{B}{C}"))).map_err(|e| format!("{e:?}"))?,
-        &[&a, &b],
+        lies_ezb_seite(&seite(&format!("{B}{C}{A}"))).map_err(|e| format!("{e:?}"))?,
+        &[&b, &c],
     )
     .map_err(|e| format!("{e:?}"))?;
     let k: Vec<&str> = t.iter().map(depot_kern::Termin::kennung).collect();
@@ -891,12 +911,10 @@ fn nummer_nie_neu_vergeben() -> Result<(), String> {
 fn mehrdeutige_zuordnung_wird_gemeldet() -> Result<(), String> {
     let tag = tag(2026, 12, 1)?;
     for (alt, neu) in [
-        // Zwei bekannte Termine aendern sich am selben Tag.
-        (format!("{A}{B}"), format!("{A2}{B2}")),
-        // Einer aendert sich, einer kommt dazu.
-        (A.to_string(), format!("{A2}{C}")),
-        // Einer aendert sich, einer faellt weg.
-        (format!("{A}{B}"), A2.to_string()),
+        // Ein bekannter Termin, zwei neue Eintraege derselben Art.
+        (A.to_string(), format!("{A2}{A3}")),
+        // Zwei bekannte Termine derselben Art, einer davon geaendert, einer weg.
+        (format!("{A}{A3}"), A2.to_string()),
         // Zwei gleiche Eintraege am selben Tag.
         (A.to_string(), format!("{A}{A}")),
     ] {
@@ -931,6 +949,30 @@ fn wegfall_am_selben_tag_im_lauf() -> Result<(), String> {
     Ok(())
 }
 
+/// Maus' zweite Gegenprobe im ganzen Lauf: Wechselt das Gremium, ist der Eintrag neu, und der
+/// alte Termin wird als fehlend gemeldet.
+#[test]
+fn gremiumwechsel_im_lauf() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    lauf(&journal, &roh, Ok(&seite(A)), utc(4, 18, 0)?)?.map_err(|e| format!("{e:?}"))?;
+    let b = lauf(&journal, &roh, Ok(&seite(B)), utc(5, 18, 0)?)?.map_err(|e| format!("{e:?}"))?;
+    assert_eq!(b.fehler, None);
+    assert_eq!((b.neu, b.geaendert, b.unveraendert), (1, 0, 0));
+    assert_eq!(b.fehlen, vec!["ezb-2026-12-01-1".to_string()]);
+    let j = vorbedingung(Journal::oeffnen(&journal), "Journal oeffnen")?;
+    let alt = j
+        .stand()
+        .termin("ezb-2026-12-01-1")
+        .ok_or("alter Termin fehlt")?;
+    assert_eq!(alt.termin().titel(), T_A);
+    let neu = j
+        .stand()
+        .termin("ezb-2026-12-01-2")
+        .ok_or("neuer Termin fehlt")?;
+    assert_eq!(neu.termin().titel(), T_B);
+    Ok(())
+}
+
 /// Eine mehrdeutige Seite im Lauf: gemeldet, nichts belegt, die rohe Seite liegt.
 #[test]
 fn mehrdeutig_im_lauf_nichts_belegt() -> Result<(), String> {
@@ -943,7 +985,7 @@ fn mehrdeutig_im_lauf_nichts_belegt() -> Result<(), String> {
     )?
     .map_err(|e| format!("{e:?}"))?;
     let vorher = eintraege(&journal)?;
-    let neu = seite(&format!("{ANDERER_TAG}{A2}{B2}"));
+    let neu = seite(&format!("{ANDERER_TAG}{A2}{A3}{B}"));
     let b = lauf(&journal, &roh, Ok(&neu), utc(5, 18, 0)?)?.map_err(|e| format!("{e:?}"))?;
     let fehler = b.fehler.ok_or("kein Fehler gemeldet")?;
     assert!(fehler.contains("Mehrdeutig"), "{fehler}");
