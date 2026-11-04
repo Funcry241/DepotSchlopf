@@ -21,6 +21,7 @@
     clippy::cast_sign_loss
 )]
 
+pub mod ezb;
 pub mod liste;
 pub mod netz;
 pub mod sammeln;
