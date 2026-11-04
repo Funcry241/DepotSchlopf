@@ -191,6 +191,9 @@ pub fn lauf(
             st.seit_abschluss()
         )));
     }
+    // Ein abgeschlossenes Journal im Format 1 wird umgestellt, bevor neue Auftraege entstehen
+    // (K16-02). Ein neues Journal hat schon Format 2.
+    j.stelle_um().map_err(journal)?;
     let grenzen = Grenzen::standard();
     let mut hoch = if let Some((_, h)) = fertig {
         h

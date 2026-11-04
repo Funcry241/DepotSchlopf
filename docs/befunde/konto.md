@@ -4,6 +4,19 @@ Stufe 3, erster Schritt, nur mit Papiergeld und einem erfundenen Papierkonto. Wo
 
 Ein grüner Test schließt nichts. „Technisch geschlossen“ setzt erst die Prüfung durch Maus.
 
+## Fassung 2 nach Maus' Prüfung von `47d75b9` (K16-01, K16-02)
+
+Maus' Gegenproben stehen als Tests im Repository, am Stand `47d75b9` rot (eigener Commit).
+
+- **K16-01:** Die Einzelabfrage meldete einen Auftrag als offen, der Kontoauszug führte ihn nicht; der Abgleich meldete nichts und führte ihn als angenommen. Allgemeine Regel jetzt: Die offenen Aufträge werden in beide Richtungen verglichen. Was das Journal offen beim Broker führt, muss der Auszug offen führen (`OrderNichtImAuszug`), und umgekehrt (`OrderNurBeimKonto`). Widerspricht sich das Konto selbst, fällt das immer in eine der beiden Richtungen. Test `befund_k16_01_offene_auftraege_in_beide_richtungen` mit beiden Richtungen. Ein gesendeter Auftrag, den das Konto gar nicht kennt, meldet jetzt `OrderFehlt` und `OrderNichtImAuszug`.
+- **K16-02:** Ein abgeschlossenes Journal aus PR #15 ließ sich nicht mehr öffnen, weil seine Aufträge rückwirkend als reserviert galten. Allgemeine Regel jetzt, der **Formatübergang**:
+  - Der Kopf nennt das Format. Neue Journale bekommen `journal-v2`. Ein Journal mit `journal-v1` (bis PR #15) wird nach seinen Regeln gelesen: Ein Auftrag darin ist belegt, sein Ergebnis steht im nächsten Topf, er bindet nichts und hat den Endzustand `Alt` ohne weiteren Schritt.
+  - Neue Aufträge gibt es in einem solchen Journal erst nach der **Umstellung**: ein eigener Eintrag `format;2`, nur über `Journal::stelle_um`, nur ohne angefangenen Tag und nur einmal. Ab dort gelten Zustandsmaschine und Deckung. Ein Journal, das mitten in einem Tag stehen blieb, wird nicht umgestellt; es bleibt bei Halt.
+  - Der simulierte Lauf stellt ein abgeschlossenes altes Journal um, bevor er fortsetzt. Das Papierkonto für ein altes Journal entsteht aus dessen Töpfen, denn ein Konto gab es damals nicht.
+  - Tests in `crates/depot_sim/tests/format.rs` mit einem echten Journal aus PR #15 (erster Tag des Beispiels, mit dem Code von `dfee95c` erzeugt, in `crates/depot_sim/tests/alt/mod.rs`): `befund_k16_02_altes_journal_laesst_sich_oeffnen`, `befund_k16_02_altes_journal_wird_fortgesetzt` (Lauf bis 01.12., neue Aufträge mit Zuständen, eine Sendung je Auftrag), `befund_k16_02_umstellung_nur_abgeschlossen_und_einmal` (kein neuer Auftrag und kein Zustand vor der Umstellung, keine Umstellung mit angefangenem Tag, über `anhaengen` oder im Format 2, neues Journal gleich im Format 2).
+
+Gegenproben zu Fassung 2, jeweils neu übersetzt: nur eine Richtung verglichen; Format 1 wie Format 2 gelesen; Umstellung mit angefangenem Tag oder ein zweites Mal erlaubt; neuer Auftrag ohne Umstellung erlaubt; Lauf ohne Umstellung. Jede macht mindestens einen der neuen Tests rot.
+
 ## Was gebaut ist
 
 **Auftragszustände (R37, Kap. 10)** in `crates/depot_journal/src/auftrag.rs`. Jeder Schritt ist ein eigener Eintrag `zustand;nr;meldung` im Journal; nach einem Neustart folgt der Zustand allein daraus.

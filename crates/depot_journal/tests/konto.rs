@@ -521,7 +521,7 @@ fn absturz_direkt_nach_dem_senden_wird_nur_abgeglichen() -> Result<(), String> {
     let mut j = oeffnen(&p)?;
     let abw = vorbedingung(j.gleiche_ab(&Skript::start()?), "Abgleich")?;
     drop(j);
-    if abw != vec![Abweichung::OrderFehlt(1)] {
+    if abw != vec![Abweichung::OrderFehlt(1), Abweichung::OrderNichtImAuszug(1)] {
         offen.push(format!("unbekannt beim Konto: {abw:?}"));
     }
     if lesen(&p)? != vorher {

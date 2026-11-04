@@ -10,6 +10,7 @@
 //! | unbekannt: keine Antwort | angenommen, abgelehnt; nur ueber den Abgleich, nie neu gesendet |
 //! | angenommen, teilgefuellt | Ausfuehrung, storniert, verfallen |
 //! | gefuellt, abgelehnt, storniert, verfallen, verworfen | Ende |
+//! | alt: aus einem Journal im Format 1 (K16-02) | Ende |
 //!
 //! `gesendet` gibt es nur nach `reserviert`: Ein zweiter Versand desselben Auftrags laesst sich
 //! nicht belegen. Gefuellt ist ein Auftrag, wenn seine Ausfuehrungen genau die beauftragte Menge
@@ -34,6 +35,9 @@ pub enum AuftragsZustand {
     Verfallen,
     /// Reserviert und nie gesendet; die Reservierung ist frei.
     Verworfen,
+    /// Aus einem Journal im Format 1: belegt und mit dem Ergebnis im naechsten Topf gebucht.
+    /// Endzustand ohne Reservierung; es gibt keinen Schritt danach.
+    Alt,
 }
 
 impl AuftragsZustand {
@@ -101,6 +105,14 @@ pub struct AuftragsLage {
 }
 
 impl AuftragsLage {
+    pub(crate) fn alt(beleg: AuftragsBeleg) -> AuftragsLage {
+        AuftragsLage {
+            beleg,
+            zustand: AuftragsZustand::Alt,
+            ausfuehrungen: Vec::new(),
+        }
+    }
+
     pub(crate) fn reserviert(beleg: AuftragsBeleg) -> AuftragsLage {
         AuftragsLage {
             beleg,

@@ -78,6 +78,8 @@ pub enum Abweichung {
     OrderFehlt(u64),
     /// Das Konto fuehrt eine offene Order, die im Journal nicht offen beim Broker liegt.
     OrderNurBeimKonto(u64),
+    /// Das Journal fuehrt den Auftrag offen beim Broker, der Auszug nicht (K16-01).
+    OrderNichtImAuszug(u64),
     /// Das Konto kennt einen Auftrag, dessen Versand das Journal nie begonnen hat.
     OrderOhneVersand(u64),
     /// Was das Konto meldet, laesst sich im Journal nicht belegen.
@@ -185,8 +187,13 @@ pub fn abweichungen(stand: &Stand, auszug: &Kontoauszug) -> Vec<Abweichung> {
         .filter(|l| l.zustand.beim_broker())
         .map(|l| l.beleg.nr)
         .collect();
+    // In beide Richtungen (K16-01): Was das Journal offen beim Broker fuehrt, muss der Auszug
+    // offen fuehren, und umgekehrt.
     for nr in auszug.offene.difference(&beim_broker) {
         aus.push(Abweichung::OrderNurBeimKonto(*nr));
+    }
+    for nr in beim_broker.difference(&auszug.offene) {
+        aus.push(Abweichung::OrderNichtImAuszug(*nr));
     }
     if rechnung {
         aus.push(Abweichung::Rechnung);
@@ -208,6 +215,11 @@ impl Journal {
         topf: TopfId,
         auftrag: &GenehmigterAuftrag,
     ) -> Result<(), JournalFehler> {
+        if self.stand().format() != crate::stand::FORMAT {
+            return Err(JournalFehler::Abgelehnt(
+                "Journal im Format 1: vor dem ersten neuen Auftrag stelle_um".into(),
+            ));
+        }
         pruefe_deckung(grenzen, self.stand(), topf, auftrag).map_err(JournalFehler::Abgelehnt)?;
         self.schreibe_auftrag(topf, auftrag)
     }

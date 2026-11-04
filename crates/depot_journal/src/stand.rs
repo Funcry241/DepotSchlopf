@@ -35,6 +35,9 @@ pub enum Art {
     /// `datum;wer;text`: warum etwas geschieht oder nicht geschieht. `wer` ist ein Berater
     /// oder eine Stelle des Rahmens; die Kaufentscheidung begruenden die Berater selbst.
     Begruendung,
+    /// `2`: Umstellung eines Journals im Format 1 auf Format 2 (K16-02). Nur einmal, nur ohne
+    /// angefangenen Tag; danach gelten Auftragszustaende und Deckung.
+    Format,
     /// `datum;hoechststand;abdruck`: Der Tag ist vollstaendig belegt. `abdruck` bindet ihn an
     /// seine ganze Vorgeschichte (64 Hex-Zeichen). Ein Wiederanlauf setzt nur nach einem
     /// Abschluss fort; die Daten steigen streng.
@@ -52,6 +55,7 @@ impl Art {
             Art::KiGrenzen => "ki-grenzen",
             Art::Begruendung => "begruendung",
             Art::Abschluss => "abschluss",
+            Art::Format => "format",
         }
     }
 
@@ -65,6 +69,7 @@ impl Art {
             Art::KiGrenzen,
             Art::Begruendung,
             Art::Abschluss,
+            Art::Format,
         ]
         .into_iter()
         .find(|a| a.name() == name)
@@ -95,9 +100,16 @@ pub struct Abschluss {
     pub abdruck: String,
 }
 
+/// Format 1: Journale bis PR #15. Ein Auftrag darin ist mit seinem Ergebnis im naechsten Topf
+/// gebucht und hat keine Zustaende.
+pub const FORMAT_ALT: u8 = 1;
+/// Format 2: Auftraege mit Zustandsmaschine und Deckung (R37).
+pub const FORMAT: u8 = 2;
+
 /// Der Stand, wie er aus dem Journal folgt.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stand {
+    format: u8,
     toepfe: BTreeMap<TopfId, Topf>,
     auftraege: Vec<AuftragsLage>,
     beobachtungen: Vec<(Datum, String)>,
@@ -109,6 +121,18 @@ pub struct Stand {
 }
 
 impl Stand {
+    pub(crate) fn im_format(format: u8) -> Stand {
+        Stand {
+            format,
+            ..Stand::default()
+        }
+    }
+
+    /// Das Format, nach dem die Eintraege gelten: `FORMAT_ALT` oder `FORMAT`.
+    pub fn format(&self) -> u8 {
+        self.format
+    }
+
     /// Der zuletzt belegte Stand je Topf des Papierdepots.
     pub fn toepfe(&self) -> &BTreeMap<TopfId, Topf> {
         &self.toepfe
@@ -183,6 +207,13 @@ impl Stand {
                         self.letzte_kennung
                     ));
                 }
+                if self.format == FORMAT_ALT {
+                    // Format 1: Das Ergebnis steht im naechsten Topf; der Auftrag bindet nichts.
+                    self.letzte_kennung = nr;
+                    self.auftraege.push(AuftragsLage::alt(b));
+                    self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+                    return Ok(());
+                }
                 let topf = self
                     .toepfe
                     .get(&b.topf)
@@ -203,6 +234,19 @@ impl Stand {
                 let b = lies_begruendung(inhalt).ok_or("Begruendung unlesbar")?;
                 kanonisch(&begruendung_text(b.0, &b.1, &b.2), inhalt)?;
                 self.begruendungen.push(b);
+            }
+            Art::Format => {
+                kanonisch(&FORMAT.to_string(), inhalt)?;
+                if self.format != FORMAT_ALT {
+                    return Err(format!("Umstellung im Format {}", self.format));
+                }
+                if self.seit_abschluss > 0 {
+                    return Err("Umstellung nur ohne angefangenen Tag".into());
+                }
+                // Die Umstellung beginnt keinen Tag: Sie aendert nur, nach welchen Regeln die
+                // folgenden Eintraege gelten.
+                self.format = FORMAT;
+                return Ok(());
             }
             Art::Abschluss => {
                 let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;

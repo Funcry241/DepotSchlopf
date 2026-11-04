@@ -3,7 +3,7 @@
 //! Auftrag ist belegt und sein Ergebnis steht im naechsten Topf. Erfundene Daten (D12).
 
 /// Das Journal, Byte fuer Byte.
-pub const JOURNAL: &str = r#"10;f69313c0a5ad6b952cdb06af976e5843664719f6fb02f2460e2961739a9a8965;journal-v1
+pub const JOURNAL: &str = r"10;f69313c0a5ad6b952cdb06af976e5843664719f6fb02f2460e2961739a9a8965;journal-v1
 15;c7fd614811fee9a441f20e541a5399bc5ed7678dd9db6937374b452488798c68;topf;A;1000000;
 15;9d5390013d86e00cb07dc4004691abba68774e3d77c786cb5e6966b4a48159e1;topf;B;1000000;
 77;65015eb38a9d8333f8fc9a0656626b8cbaab79522f396ab6751491a8c9edccd4;beobachtung;2026-11-25;Alpha Werke kuendigt Quartalszahlen fuer den 26.11. an
@@ -29,7 +29,7 @@ pub const JOURNAL: &str = r#"10;f69313c0a5ad6b952cdb06af976e5843664719f6fb02f246
 123;55ad7416f4c7a86d095049ea8852e7e41810a777087ffe1923c0da94d2c7d4b0;begruendung;2026-11-25;Simulation;Topf B: Auftrag 3 ausgefuehrt: Kauf 12 Stueck XA0000BETA05 zu 7980 Cent, Gebuehr 150 Cent
 29;13ccba62c7c1cbaebdf821b6702d819c2ae8ecb2cb2ba9e1d4de80e7706a259c;topf;B;904090;XA0000BETA05:12
 93;8c212fe4fc9171674c7072b133cac63481cd1583905b6f8ba66c437c16bb641e;abschluss;2026-11-25;2000000;4b25d119332e268513a68bfdea96f32e83ce195fe17d37b372056b6a3605a8a6
-"#;
+";
 
 /// Der Anhangsvermerk dazu.
 pub const VERMERK: &str = r"vermerk-v1;3477;8c212fe4fc9171674c7072b133cac63481cd1583905b6f8ba66c437c16bb641e;0
