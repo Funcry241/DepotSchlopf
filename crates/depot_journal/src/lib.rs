@@ -9,8 +9,13 @@
 //! **Einrichtung (R25):** Das Journal entsteht nur durch `einrichten`, nie beim Oeffnen.
 //!
 //! **Wiederanlauf (Kap. 11):** Der Stand wird nur aus dem Journal nachgerechnet: Toepfe,
-//! Auftraege mit der letzten Kennung, Beobachtungen und das Kassenbuch der KI-Aufrufe nach den
-//! Regeln aus `depot_ki`. Eine `AufrufErlaubnis` entsteht nur durch `Journal::reserviere`.
+//! Auftraege mit Zustand und der letzten Kennung, Beobachtungen und das Kassenbuch der
+//! KI-Aufrufe nach den Regeln aus `depot_ki`. Eine `AufrufErlaubnis` entsteht nur durch
+//! `Journal::reserviere`, ein Auftrag im Journal nur durch `Journal::reserviere_auftrag`.
+//!
+//! **Kontowaechter (Kap. 9, R37):** Jeder Auftrag hat einen Zustand nach fester
+//! Zustandsmaschine (`auftrag`). Reserviert wird nur mit Deckung; der Abgleich mit dem Konto
+//! belegt dessen Meldungen und meldet jede Abweichung (`konto`).
 //!
 //! **Sperre (R24):** Gesperrt wird die geoeffnete Datei selbst ueber das Betriebssystem. Ein
 //! Link in irgendeinem Teil des Pfads ist verboten. Zwischendateien werden nur exklusiv neu
@@ -37,12 +42,16 @@
     clippy::cast_sign_loss
 )]
 
+pub mod auftrag;
 pub mod datei;
 pub mod kasse;
+pub mod konto;
 pub mod stand;
 
+pub use auftrag::{AuftragsLage, AuftragsZustand, Ausfuehrung, Meldung};
 pub use datei::{Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
 pub use kasse::{AufrufErlaubnis, KiStand};
+pub use konto::{Abweichung, Konto, KontoOrder, KontoStatus, Kontoauszug, verfuegbar};
 pub use stand::{Abschluss, Art, AuftragsBeleg, Stand};
 
 #[cfg(test)]

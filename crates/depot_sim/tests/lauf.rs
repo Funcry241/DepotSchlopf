@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_journal::{Art, Journal};
 use depot_kern::{Cent, Datum, Herkunft, Isin, Kurs, Kurse, Topf, TopfId};
-use depot_sim::{Drehbuch, LaufFehler, Szenario, lauf};
+use depot_sim::{Drehbuch, LaufFehler, Papierkonto, Szenario, lauf};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 
@@ -52,6 +52,11 @@ fn beispiel() -> Result<(Szenario, Drehbuch, Drehbuch), String> {
     Szenario::beispiel().ok_or_else(|| "Vorbedingung: Beispiel ungueltig".to_string())
 }
 
+/// Das Papierkonto zum Startstand des Szenarios.
+fn konto(s: &Szenario) -> Result<Papierkonto, String> {
+    Papierkonto::eroeffne(&s.start).ok_or_else(|| "Vorbedingung: Papierkonto".to_string())
+}
+
 fn datum(t: u8, m: u8) -> Result<Datum, String> {
     Datum::neu(2026, m, t).ok_or_else(|| format!("Vorbedingung: Datum {t}.{m}."))
 }
@@ -65,8 +70,9 @@ fn isin(stamm: &str) -> Result<Isin, String> {
 /// Laeuft das Beispiel ganz auf einem frischen Journal.
 fn ganzer_lauf(ort: &Ort) -> Result<(Journal, Drehbuch, Drehbuch), String> {
     let (s, mut dachs, mut maus) = beispiel()?;
+    let mut k = konto(&s)?;
     let mut j = ort.oeffnen()?;
-    lauf(&mut j, &s, &mut dachs, &mut maus).map_err(|e| format!("Lauf: {e:?}"))?;
+    lauf(&mut j, &s, &mut dachs, &mut maus, &mut k).map_err(|e| format!("Lauf: {e:?}"))?;
     Ok((j, dachs, maus))
 }
 
@@ -211,14 +217,18 @@ fn wiederanlauf_setzt_nach_dem_letzten_abschluss_fort() -> Result<(), String> {
     let (s, mut dachs, mut maus) = beispiel()?;
     let mut erster = s.clone();
     erster.tage.truncate(2);
+    // Das Konto lebt ueber den Neustart weiter.
+    let mut k = konto(&s)?;
     {
         let mut j = geteilt.oeffnen()?;
-        lauf(&mut j, &erster, &mut dachs, &mut maus).map_err(|e| format!("erster Teil: {e:?}"))?;
+        lauf(&mut j, &erster, &mut dachs, &mut maus, &mut k)
+            .map_err(|e| format!("erster Teil: {e:?}"))?;
     }
     let (_, mut dachs2, mut maus2) = beispiel()?;
     {
         let mut j = geteilt.oeffnen()?;
-        lauf(&mut j, &s, &mut dachs2, &mut maus2).map_err(|e| format!("zweiter Teil: {e:?}"))?;
+        lauf(&mut j, &s, &mut dachs2, &mut maus2, &mut k)
+            .map_err(|e| format!("zweiter Teil: {e:?}"))?;
     }
     assert_eq!(geteilt.bytes()?, ganz.bytes()?, "byte-gleiches Journal");
     assert_eq!(
@@ -230,7 +240,7 @@ fn wiederanlauf_setzt_nach_dem_letzten_abschluss_fort() -> Result<(), String> {
     let vorher = geteilt.bytes()?;
     let (_, mut d3, mut m3) = beispiel()?;
     let mut j = geteilt.oeffnen()?;
-    lauf(&mut j, &s, &mut d3, &mut m3).map_err(|e| format!("dritter Lauf: {e:?}"))?;
+    lauf(&mut j, &s, &mut d3, &mut m3, &mut k).map_err(|e| format!("dritter Lauf: {e:?}"))?;
     drop(j);
     assert_eq!(geteilt.bytes()?, vorher);
     assert_eq!(d3.aufrufe.saturating_add(m3.aufrufe), 0);
@@ -243,9 +253,13 @@ fn unvollstaendiger_tag_haelt_ohne_neue_frage() -> Result<(), String> {
     let (s, mut dachs, mut maus) = beispiel()?;
     let mut erster = s.clone();
     erster.tage.truncate(1);
+    let mut k = konto(&s)?;
     {
         let mut j = ort.oeffnen()?;
-        vorbedingung(lauf(&mut j, &erster, &mut dachs, &mut maus), "erster Tag")?;
+        vorbedingung(
+            lauf(&mut j, &erster, &mut dachs, &mut maus, &mut k),
+            "erster Tag",
+        )?;
         // Ein Absturz mitten im zweiten Tag: Ein Eintrag steht, der Abschluss fehlt.
         vorbedingung(
             j.beobachte(datum(26, 11)?, "angefangener Tag"),
@@ -255,7 +269,7 @@ fn unvollstaendiger_tag_haelt_ohne_neue_frage() -> Result<(), String> {
     let vorher = ort.bytes()?;
     let (_, mut d2, mut m2) = beispiel()?;
     let mut j = ort.oeffnen()?;
-    let r = lauf(&mut j, &s, &mut d2, &mut m2);
+    let r = lauf(&mut j, &s, &mut d2, &mut m2, &mut k);
     drop(j);
     assert!(matches!(r, Err(LaufFehler::Halt(_))), "{r:?}");
     assert_eq!(ort.bytes()?, vorher, "nichts geschrieben");
@@ -289,7 +303,7 @@ fn echte_kurse_werden_abgelehnt() -> Result<(), String> {
         letzter.kurse = mit_herkunft(&letzter.kurse, &isins, h)?;
         let vorher = ort.bytes()?;
         let mut j = ort.oeffnen()?;
-        let r = lauf(&mut j, &s, &mut dachs, &mut maus);
+        let r = lauf(&mut j, &s, &mut dachs, &mut maus, &mut konto(&s)?);
         drop(j);
         assert!(matches!(r, Err(LaufFehler::Halt(_))), "{h:?}: {r:?}");
         assert_eq!(ort.bytes()?, vorher, "{h:?}: nichts geschrieben");
@@ -346,7 +360,7 @@ fn tagesverlust_haelt_bis_zur_freigabe() -> Result<(), String> {
     )?;
     {
         let mut j = ort.oeffnen()?;
-        let r = lauf(&mut j, &s, &mut dachs, &mut maus);
+        let r = lauf(&mut j, &s, &mut dachs, &mut maus, &mut konto(&s)?);
         assert!(matches!(r, Err(LaufFehler::Halt(_))), "{r:?}");
         let waechter = von(&j, t25, "Waechter");
         assert!(
@@ -364,7 +378,7 @@ fn tagesverlust_haelt_bis_zur_freigabe() -> Result<(), String> {
     // Ein neuer Start fragt nicht einfach weiter.
     let vorher = ort.bytes()?;
     let mut j = ort.oeffnen()?;
-    let r = lauf(&mut j, &s, &mut dachs, &mut maus);
+    let r = lauf(&mut j, &s, &mut dachs, &mut maus, &mut konto(&s)?);
     drop(j);
     assert!(matches!(r, Err(LaufFehler::Halt(_))), "{r:?}");
     assert_eq!(ort.bytes()?, vorher);
@@ -380,7 +394,10 @@ fn steuerzeichen_in_antworten_brechen_das_journal_nicht() -> Result<(), String> 
         a.einschaetzung = "Zeile eins\nZeile zwei\u{7}".into();
     }
     let mut j = ort.oeffnen()?;
-    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus), "Lauf")?;
+    vorbedingung(
+        lauf(&mut j, &s, &mut dachs, &mut maus, &mut konto(&s)?),
+        "Lauf",
+    )?;
     let d = von(&j, t25, "Dachs");
     assert!(
         d.iter().any(|t| t.contains("Zeile eins Zeile zwei")),
@@ -450,7 +467,7 @@ fn notbremse_verkauft_alles_und_haelt() -> Result<(), String> {
     }
     let (mut dachs, mut maus) = (Drehbuch::default(), Drehbuch::default());
     let mut j = ort.oeffnen()?;
-    let r = lauf(&mut j, &s, &mut dachs, &mut maus);
+    let r = lauf(&mut j, &s, &mut dachs, &mut maus, &mut konto(&s)?);
     assert!(matches!(r, Err(LaufFehler::Halt(_))), "{r:?}");
     let st = j.stand();
     let waechter: Vec<&str> = st
@@ -469,18 +486,24 @@ fn notbremse_verkauft_alles_und_haelt() -> Result<(), String> {
     assert!(
         st.auftraege()
             .iter()
-            .any(|b| b.anlass == depot_regelwerk::Anlass::Notbremse)
+            .any(|b| b.beleg.anlass == depot_regelwerk::Anlass::Notbremse)
     );
     assert!(st.seit_abschluss() > 0, "der Tag bleibt offen");
     Ok(())
 }
 
-/// Laeuft die ersten `tage` Tage des Beispiels auf einem frischen Journal.
-fn angefangen(ort: &Ort, tage: usize) -> Result<(), String> {
+/// Laeuft die ersten `tage` Tage des Beispiels auf einem frischen Journal. Liefert das Konto,
+/// das danach weiterlebt.
+fn angefangen(ort: &Ort, tage: usize) -> Result<Papierkonto, String> {
     let (mut s, mut dachs, mut maus) = beispiel()?;
+    let mut k = konto(&s)?;
     s.tage.truncate(tage);
     let mut j = ort.oeffnen()?;
-    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus), "erster Teil")
+    vorbedingung(
+        lauf(&mut j, &s, &mut dachs, &mut maus, &mut k),
+        "erster Teil",
+    )?;
+    Ok(k)
 }
 
 /// K15-01 (Maus, PR #15): Der Wiederanlauf darf nur mit derselben abgeschlossenen
@@ -525,12 +548,12 @@ fn befund_k15_01_wiederanlauf_prueft_die_vorgeschichte() -> Result<(), String> {
     ];
     for (fall, aendere) in faelle {
         let ort = Ort::neu()?;
-        angefangen(&ort, 3)?;
+        let mut k = angefangen(&ort, 3)?;
         let vorher = ort.bytes()?;
         let (mut s, mut dachs, mut maus) = beispiel()?;
         aendere(&mut s)?;
         let mut j = ort.oeffnen()?;
-        let r = lauf(&mut j, &s, &mut dachs, &mut maus);
+        let r = lauf(&mut j, &s, &mut dachs, &mut maus, &mut k);
         drop(j);
         assert!(matches!(r, Err(LaufFehler::Halt(_))), "{fall}: {r:?}");
         assert_eq!(ort.bytes()?, vorher, "{fall}: nichts geschrieben");
@@ -543,12 +566,15 @@ fn befund_k15_01_wiederanlauf_prueft_die_vorgeschichte() -> Result<(), String> {
 
     // Kontrolle: Ein anderer Tag nach dem letzten Abschluss ist erlaubt.
     let ort = Ort::neu()?;
-    angefangen(&ort, 3)?;
+    let mut k = angefangen(&ort, 3)?;
     let (mut s, mut dachs, mut maus) = beispiel()?;
     let letzter = s.tage.last_mut().ok_or("Tage")?;
     letzter.ereignisse.push("anderer Ausgang".into());
     let mut j = ort.oeffnen()?;
-    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus), "Fortsetzung")?;
+    vorbedingung(
+        lauf(&mut j, &s, &mut dachs, &mut maus, &mut k),
+        "Fortsetzung",
+    )?;
     assert_eq!(j.stand().abschluss().map(|a| a.datum), Some(datum(1, 12)?));
     Ok(())
 }
@@ -563,7 +589,10 @@ fn befund_k15_02_alter_kurssatz_gilt_nicht_fuer_einen_neuen_tag() -> Result<(), 
     let zweiter = s.tage.get_mut(1).ok_or("Tage")?;
     zweiter.kurse = erster;
     let mut j = ort.oeffnen()?;
-    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus), "Lauf")?;
+    vorbedingung(
+        lauf(&mut j, &s, &mut dachs, &mut maus, &mut konto(&s)?),
+        "Lauf",
+    )?;
     let t26 = datum(26, 11)?;
     let daten = von(&j, t26, "Daten");
     assert!(
@@ -595,7 +624,7 @@ fn befund_k15_03_vergleichskurs_aus_der_zukunft() -> Result<(), String> {
     s.vorlauf = vorbedingung(Kurse::neu(zukunft, eintraege), "Vorlauf")?;
     let ort = Ort::neu()?;
     let mut j = ort.oeffnen()?;
-    let r = lauf(&mut j, &s, &mut dachs, &mut maus);
+    let r = lauf(&mut j, &s, &mut dachs, &mut maus, &mut konto(&s)?);
     let t25 = datum(25, 11)?;
     assert_eq!(buchungen_am(&j, t25), 0, "niemand gefragt: {r:?}");
     assert!(von(&j, t25, "Simulation").is_empty(), "kein Auftrag");
@@ -616,7 +645,10 @@ fn befund_k15_03_vergleichsabruf_aus_der_zukunft() -> Result<(), String> {
     s.vorlauf = vorbedingung(Kurse::neu(zukunft, eintraege), "Vorlauf")?;
     let ort = Ort::neu()?;
     let mut j = ort.oeffnen()?;
-    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus), "Lauf")?;
+    vorbedingung(
+        lauf(&mut j, &s, &mut dachs, &mut maus, &mut konto(&s)?),
+        "Lauf",
+    )?;
     let t25 = datum(25, 11)?;
     let daten = von(&j, t25, "Daten");
     assert!(
