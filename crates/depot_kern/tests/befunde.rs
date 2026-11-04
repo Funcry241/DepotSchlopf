@@ -269,6 +269,40 @@ fn main() {
     )
 }
 
+/// K15-03 (Maus, PR #15): Ein Kurs liegt an seinem Handelstag. Ein Zeitpunkt nach dem
+/// Handelstag (aus Sicht des Handelstags: aus der Zukunft) wird schon beim Bau abgelehnt; der
+/// letzte und der erste Augenblick des Tages gelten.
+#[test]
+fn befund_k15_03_kurszeitpunkt_liegt_am_handelstag() -> Result<(), String> {
+    sonde::muss_laufen(
+        &KERN,
+        r#"
+use depot_kern::{Cent, Datum, Herkunft, Kurs, KursFehler, Zeitpunkt};
+fn main() {
+    let tag = Datum::neu(2026, 11, 24).expect("gueltiges Datum");
+    let spaeter = Datum::neu(2026, 11, 26).expect("gueltiges Datum");
+    let morgen = Datum::neu(2026, 11, 25).expect("gueltiges Datum");
+    for z in [
+        Zeitpunkt::neu(spaeter, 17, 30, 0).expect("Zeit"),
+        Zeitpunkt::neu(morgen, 0, 0, 0).expect("Zeit"),
+    ] {
+        assert_eq!(
+            Kurs::neu(Cent(5_000), "EUR", tag, z, Herkunft::Simulation).err(),
+            Some(KursFehler::Handelstag),
+            "Zeitpunkt nach dem Handelstag angenommen"
+        );
+    }
+    for z in [
+        Zeitpunkt::neu(tag, 0, 0, 0).expect("Zeit"),
+        Zeitpunkt::neu(tag, 23, 59, 59).expect("Zeit"),
+    ] {
+        assert!(Kurs::neu(Cent(5_000), "EUR", tag, z, Herkunft::Simulation).is_ok());
+    }
+}
+"#,
+    )
+}
+
 /// Kurse kennen ihren Stand und das Alter jedes Kurses. Ein Kurs nach dem Stand (aus der
 /// Zukunft) und ein doppelter Kurs werden abgelehnt.
 #[test]

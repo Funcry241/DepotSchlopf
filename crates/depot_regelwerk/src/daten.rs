@@ -26,6 +26,8 @@ pub enum DatenFehler {
     KursNichtAmHandelstag(Isin),
     /// Der Vergleichskurs stammt nicht von einem frueheren Handelstag (K15-02).
     VergleichskursNichtVorher(Isin),
+    /// Leere Schnittstelle fuer die roten Tests.
+    VergleichsabrufNachAbruf,
 }
 
 /// Prueft alle Werte des Universums. Leere Liste = alles in Ordnung.

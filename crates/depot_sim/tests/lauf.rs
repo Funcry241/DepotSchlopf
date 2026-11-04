@@ -574,3 +574,30 @@ fn befund_k15_02_alter_kurssatz_gilt_nicht_fuer_einen_neuen_tag() -> Result<(), 
     assert!(von(&j, t26, "Simulation").is_empty(), "kein Auftrag");
     Ok(())
 }
+
+/// K15-03 (Maus, PR #15): Ein Vorlaufkurs mit Handelstag 24.11. und Zeitpunkt 26.11. lag am
+/// 25.11. noch nicht vor. Er wird abgelehnt, bevor ein Berater gefragt oder ein Auftrag belegt
+/// wird: schon beim Bau des Kurses oder spaetestens in der Kursprüfung des 25.11.
+#[test]
+fn befund_k15_03_vergleichskurs_aus_der_zukunft() -> Result<(), String> {
+    let (mut s, mut dachs, mut maus) = beispiel()?;
+    let t24 = datum(24, 11)?;
+    let zukunft = depot_kern::Zeitpunkt::neu(datum(26, 11)?, 17, 30, 0).ok_or("Zeit")?;
+    // Dieselben Preise wie im Vorlauf des Beispiels, nur mit dem Zeitpunkt 26.11.
+    let mut eintraege = Vec::new();
+    for (isin, alt) in s.vorlauf.alle() {
+        match Kurs::neu(alt.preis(), "EUR", t24, zukunft, Herkunft::Simulation) {
+            Ok(k) => eintraege.push((isin.clone(), k)),
+            // Schon der Bau lehnt ab: Der Kurs kann nirgends ankommen.
+            Err(_) => return Ok(()),
+        }
+    }
+    s.vorlauf = vorbedingung(Kurse::neu(zukunft, eintraege), "Vorlauf")?;
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let r = lauf(&mut j, &s, &mut dachs, &mut maus);
+    let t25 = datum(25, 11)?;
+    assert_eq!(buchungen_am(&j, t25), 0, "niemand gefragt: {r:?}");
+    assert!(von(&j, t25, "Simulation").is_empty(), "kein Auftrag");
+    Ok(())
+}

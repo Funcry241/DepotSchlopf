@@ -1155,27 +1155,39 @@ fn befund_k15_02_kurse_gehoeren_zum_handelstag() {
         "alter Kurs fuer neuen Tag: {fehler:?}"
     );
 
-    // Handelstag 02.11., Zeitpunkt und Abruf am 03.11.: frisch, aber nicht vom Handelstag.
-    let spaet = Zeitpunkt::neu(morgen, 10, 0, 0).unwrap_or_else(|| unreachable!("Zeit"));
-    let eintraege = preise_alle(10_000)
-        .iter()
-        .map(|(i, c)| {
-            let k = Kurs::neu(Cent(*c), "EUR", handelstag(), spaet, Herkunft::Simulation)
-                .unwrap_or_else(|e| unreachable!("Kurs: {e:?}"));
-            (i.clone(), k)
-        })
-        .collect();
-    let verschoben = Kurse::neu(spaet, eintraege).unwrap_or_else(|e| unreachable!("{e:?}"));
-    let fehler = pruefe_kurse(&g, &universum(), handelstag(), &verschoben, &vortag);
-    assert!(
-        fehler.contains(&DatenFehler::KursNichtAmHandelstag(isin(0))),
-        "Kurs vom Folgetag: {fehler:?}"
-    );
-
     // Der Vergleichskurs vom selben Tag ist kein Vortagskurs.
     let fehler = pruefe_kurse(&g, &universum(), handelstag(), &heute, &heute);
     assert!(
         fehler.contains(&DatenFehler::VergleichskursNichtVorher(isin(0))),
         "Vergleich mit sich selbst: {fehler:?}"
+    );
+}
+
+/// K15-03 (Maus, PR #15): Der Vergleichskurs darf nicht aus der Zukunft stammen. Ein
+/// Vergleichsabruf nach dem Abruf des Zyklus wird abgelehnt, auch wenn sein Handelstag davor
+/// liegt.
+#[test]
+fn befund_k15_03_vergleichsabruf_liegt_nicht_nach_dem_abruf() {
+    let g = Grenzen::standard();
+    let heute = kurse_alle(10_000);
+    let vortag_tag = Datum::neu(2026, 10, 30).unwrap_or_else(|| unreachable!("Datum"));
+    let kurszeit = Zeitpunkt::neu(vortag_tag, 17, 30, 0).unwrap_or_else(|| unreachable!("Zeit"));
+    // Abruf am 03.11., nach dem Abruf des Zyklus (02.11., 10:00).
+    let abruf = Datum::neu(2026, 11, 3)
+        .and_then(|d| Zeitpunkt::neu(d, 9, 0, 0))
+        .unwrap_or_else(|| unreachable!("Zeit"));
+    let eintraege = preise_alle(10_000)
+        .iter()
+        .map(|(i, c)| {
+            let k = Kurs::neu(Cent(*c), "EUR", vortag_tag, kurszeit, Herkunft::Simulation)
+                .unwrap_or_else(|e| unreachable!("Kurs: {e:?}"));
+            (i.clone(), k)
+        })
+        .collect();
+    let spaet = Kurse::neu(abruf, eintraege).unwrap_or_else(|e| unreachable!("{e:?}"));
+    let fehler = pruefe_kurse(&g, &universum(), handelstag(), &heute, &spaet);
+    assert!(
+        fehler.contains(&DatenFehler::VergleichsabrufNachAbruf),
+        "Vergleich aus der Zukunft: {fehler:?}"
     );
 }
