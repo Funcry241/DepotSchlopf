@@ -33,16 +33,28 @@ pub enum EzbFehler {
     Text(usize),
     /// Der Eintrag ergibt keinen gueltigen Termin.
     Termin(usize, TerminFehler),
+    /// An diesem Tag laesst sich nicht eindeutig sagen, welcher Eintrag welcher bekannte
+    /// Termin ist.
+    Mehrdeutig(Datum),
 }
 
-/// Liest alle Termine der Seite in ihrer Reihenfolge.
+/// Ein Eintrag der Seite, noch ohne Kennung. `nr` zaehlt ab 1 in der Reihenfolge der Seite.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EzbEintrag {
+    pub nr: usize,
+    pub datum: Datum,
+    pub titel: String,
+    pub betroffen: Betroffen,
+}
+
+/// Liest alle Eintraege der Seite in ihrer Reihenfolge.
 ///
 /// # Errors
-/// Jede Abweichung von der Form; dann gibt es keinen Termin.
-pub fn lies_ezb_termine(html: &str) -> Result<Vec<Termin>, EzbFehler> {
+/// Jede Abweichung von der Form; dann gibt es keinen Eintrag.
+pub fn lies_ezb_seite(html: &str) -> Result<Vec<EzbEintrag>, EzbFehler> {
     let liste = liste(html).ok_or(EzbFehler::Seite)?;
     let mut rest = liste.trim_start();
-    let mut termine: Vec<Termin> = Vec::new();
+    let mut eintraege: Vec<EzbEintrag> = Vec::new();
     let mut nr: usize = 0;
     while !rest.is_empty() {
         nr = nr.saturating_add(1);
@@ -52,11 +64,6 @@ pub fn lies_ezb_termine(html: &str) -> Result<Vec<Termin>, EzbFehler> {
         rest = nach_inhalt.trim_start();
         let datum = lies_datum(kopf.trim()).ok_or(EzbFehler::Datum(nr))?;
         let titel = lies_text(inhalt).ok_or(EzbFehler::Text(nr))?;
-        let gleicher_tag = termine
-            .iter()
-            .filter(|t| t.zeit() == Zeitbezug::Tag(datum))
-            .count();
-        let kennung = format!("ezb-{datum}-{}", gleicher_tag.saturating_add(1));
         let betroffen =
             if titel.contains("monetary policy meeting") && !titel.contains("non-monetary") {
                 "eur-leitzins"
@@ -64,20 +71,63 @@ pub fn lies_ezb_termine(html: &str) -> Result<Vec<Termin>, EzbFehler> {
                 "ezb"
             };
         let betroffen = Betroffen::groesse(betroffen).ok_or(EzbFehler::Form(nr))?;
-        let termin = Termin::neu(
-            &kennung,
+        // Jeder Eintrag muss einen gueltigen Termin ergeben, gleich unter welcher Kennung.
+        Termin::neu(
+            QUELLE_EZB,
             &titel,
             Zeitbezug::Tag(datum),
-            vec![betroffen],
+            vec![betroffen.clone()],
             Verlaesslichkeit::Bestaetigt,
         )
         .map_err(|e| EzbFehler::Termin(nr, e))?;
-        termine.push(termin);
+        eintraege.push(EzbEintrag {
+            nr,
+            datum,
+            titel,
+            betroffen,
+        });
     }
-    if termine.is_empty() {
+    if eintraege.is_empty() {
         return Err(EzbFehler::Seite);
     }
+    Ok(eintraege)
+}
+
+/// Ordnet die Eintraege der Seite den bekannten Terminen der EZB zu (noch: nach Reihenfolge).
+///
+/// # Errors
+/// Ein Eintrag ergibt keinen gueltigen Termin.
+pub fn ordne_zu(
+    eintraege: Vec<EzbEintrag>,
+    _bekannt: &[&Termin],
+) -> Result<Vec<Termin>, EzbFehler> {
+    let mut termine: Vec<Termin> = Vec::new();
+    for e in eintraege {
+        let gleicher_tag = termine
+            .iter()
+            .filter(|t| t.zeit() == Zeitbezug::Tag(e.datum))
+            .count();
+        let kennung = format!("ezb-{}-{}", e.datum, gleicher_tag.saturating_add(1));
+        termine.push(
+            Termin::neu(
+                &kennung,
+                &e.titel,
+                Zeitbezug::Tag(e.datum),
+                vec![e.betroffen],
+                Verlaesslichkeit::Bestaetigt,
+            )
+            .map_err(|f| EzbFehler::Termin(e.nr, f))?,
+        );
+    }
     Ok(termine)
+}
+
+/// Liest alle Termine der Seite, ohne bekannte Termine: Kennungen ab `-1` je Tag.
+///
+/// # Errors
+/// Wie `lies_ezb_seite`.
+pub fn lies_ezb_termine(html: &str) -> Result<Vec<Termin>, EzbFehler> {
+    ordne_zu(lies_ezb_seite(html)?, &[])
 }
 
 /// Der Inhalt der einzigen Liste `<dl>…</dl>` im einzigen Element `main`.

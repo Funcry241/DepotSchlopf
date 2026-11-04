@@ -13,9 +13,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use depot_journal::{Fortschreibung, Journal, JournalFehler, TerminBeleg};
-use depot_kern::{Herkunft, Zeitpunkt};
+use depot_kern::{Herkunft, Termin, Zeitpunkt};
 
-use crate::ezb::{ADRESSE_EZB, QUELLE_EZB, lies_ezb_termine};
+use crate::ezb::{ADRESSE_EZB, QUELLE_EZB, lies_ezb_seite, ordne_zu};
 use crate::netz::Netz;
 use crate::sammeln::{SammelFehler, lege_ab};
 
@@ -58,9 +58,19 @@ pub fn sammle_termine(
     let abruf = uhr().ok_or(SammelFehler::Uhr)?;
     bericht.rohdatei =
         Some(lege_ab(ablage, QUELLE_EZB, abruf, ".html", &roh).map_err(SammelFehler::Ablage)?);
+    // Die bekannten Termine dieser Quelle, je Kennung die letzte Fassung.
+    let bekannt: Vec<Termin> = journal
+        .stand()
+        .aktuelle_termine()
+        .into_values()
+        .filter(|b| b.quelle() == QUELLE_EZB)
+        .map(|b| b.termin().clone())
+        .collect();
+    let bekannt: Vec<&Termin> = bekannt.iter().collect();
     let termine = match std::str::from_utf8(&roh)
         .map_err(|_| "Seite ist kein UTF-8".to_string())
-        .and_then(|t| lies_ezb_termine(t).map_err(|e| format!("Seite unlesbar: {e:?}")))
+        .and_then(|t| lies_ezb_seite(t).map_err(|e| format!("Seite unlesbar: {e:?}")))
+        .and_then(|e| ordne_zu(e, &bekannt).map_err(|e| format!("Zuordnung: {e:?}")))
     {
         Ok(t) => t,
         Err(text) => {
@@ -70,7 +80,7 @@ pub fn sammle_termine(
     };
 
     let heute = abruf.datum().ok_or(SammelFehler::Uhr)?;
-    let auf_der_seite: BTreeSet<&str> = termine.iter().map(depot_kern::Termin::kennung).collect();
+    let auf_der_seite: BTreeSet<&str> = termine.iter().map(Termin::kennung).collect();
     bericht.fehlen = journal
         .stand()
         .aktuelle_termine()
