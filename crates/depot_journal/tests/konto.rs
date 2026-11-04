@@ -733,3 +733,52 @@ fn befund_6_n01_widerspruechliche_bestaende_sind_abweichungen() -> Result<(), St
         Err(format!("{offen:#?}"))
     }
 }
+
+/// K16-01 (Maus, PR #16): Die Einzelabfrage meldet einen Auftrag als offen, im Kontoauszug
+/// fehlt er. Das Konto widerspricht sich selbst; der Abgleich muss das melden, statt den
+/// Auftrag still als angenommen zu fuehren. Ebenso umgekehrt: Der Auszug fuehrt ihn offen,
+/// die Einzelabfrage meldet ein Ende.
+#[test]
+fn befund_k16_01_offene_auftraege_in_beide_richtungen() -> Result<(), String> {
+    let mut offen = Vec::new();
+    for (fall, status, im_auszug) in [
+        (
+            "offen laut Abfrage, fehlt im Auszug",
+            KontoStatus::Offen,
+            false,
+        ),
+        (
+            "im Auszug offen, laut Abfrage storniert",
+            KontoStatus::Storniert,
+            true,
+        ),
+    ] {
+        let p = mit_toepfen()?;
+        let mut j = oeffnen(&p)?;
+        let grenzen = Grenzen::standard();
+        vorbedingung(
+            j.reserviere_auftrag(&grenzen, TopfId::A, &verkauf(1, 10)?),
+            "reservieren",
+        )?;
+        vorbedingung(j.melde(1, &Meldung::Gesendet), "gesendet")?;
+        vorbedingung(j.melde(1, &Meldung::Angenommen), "angenommen")?;
+        let mut konto = Skript::mit_order(status, &[])?;
+        if im_auszug {
+            konto.auszug.offene.insert(1);
+        } else {
+            konto.auszug.offene.remove(&1);
+        }
+        let abw = vorbedingung(j.gleiche_ab(&konto), "Abgleich")?;
+        if abw.is_empty() {
+            offen.push(format!(
+                "{fall}: keine Abweichung, Zustand {:?}",
+                zustand(&j, 1)
+            ));
+        }
+    }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
+}
