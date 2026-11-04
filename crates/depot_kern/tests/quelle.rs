@@ -2,10 +2,9 @@
 //! Kursdatei und Schlusskurse eines Abrufs. Alle Kurse sind erfunden (D12); die Dateien haben
 //! nur die Form der Quellen.
 
-use depot_kern::quelle::lies_cent;
 use depot_kern::{
-    Cent, Datum, Herkunft, Isin, QuellenFehler, Tageskurs, Zeitpunkt, lies_tageskurse,
-    schlusskurse, xetra_schluss,
+    Cent, Datum, Herkunft, Isin, Preis, QuellenFehler, Tageskurs, Zeitpunkt, lies_preis,
+    lies_tageskurse, schlusskurse, xetra_schluss,
 };
 
 fn tag(j: u16, m: u8, t: u8) -> Result<Datum, String> {
@@ -14,6 +13,10 @@ fn tag(j: u16, m: u8, t: u8) -> Result<Datum, String> {
 
 fn utc(j: u16, m: u8, t: u8, h: u8, min: u8) -> Result<Zeitpunkt, String> {
     Zeitpunkt::neu(tag(j, m, t)?, h, min, 0).ok_or_else(|| "Vorbedingung: Zeitpunkt".into())
+}
+
+fn cent(c: i64) -> Preis {
+    Preis::aus_cent(Cent(c)).unwrap_or_else(|| unreachable!("Testpreis {c}"))
 }
 
 fn isin(text: &str) -> Result<Isin, String> {
@@ -93,16 +96,19 @@ fn frankfurter_zeit() -> Result<(), String> {
     Ok(())
 }
 
-/// Preise in ganzen Cent; feiner wird nicht gerundet, nicht Positives gilt nicht.
+/// Preise exakt bis sechs Nachkommastellen, auch feiner als ein Cent; noch feiner wird nicht
+/// gerundet, sondern abgelehnt. Nicht Positives gilt nicht.
 #[test]
-fn preise_in_cent() {
-    assert_eq!(lies_cent("215.35"), Some(Cent(21_535)));
-    assert_eq!(lies_cent("215.3"), Some(Cent(21_530)));
-    assert_eq!(lies_cent("215"), Some(Cent(21_500)));
-    assert_eq!(lies_cent("215.3500"), Some(Cent(21_535)));
-    assert_eq!(lies_cent("0.01"), Some(Cent(1)));
+fn preise_exakt() {
+    assert_eq!(lies_preis("215.35"), Some(cent(21_535)));
+    assert_eq!(lies_preis("215.3"), Some(cent(21_530)));
+    assert_eq!(lies_preis("215"), Some(cent(21_500)));
+    assert_eq!(lies_preis("215.3500"), Some(cent(21_535)));
+    assert_eq!(lies_preis("0.01"), Some(cent(1)));
+    assert_eq!(lies_preis("215.355"), Some(Preis::aus_fein(215_355_000)));
+    assert_eq!(lies_preis("0.000001"), Some(Preis::aus_fein(1)));
     for falsch in [
-        "215.355",
+        "215.3555555",
         "0",
         "0.00",
         "-1.00",
@@ -117,7 +123,7 @@ fn preise_in_cent() {
         "N/D",
         "99999999999999999999",
     ] {
-        assert_eq!(lies_cent(falsch), None, "{falsch}");
+        assert_eq!(lies_preis(falsch), None, "{falsch}");
     }
 }
 
@@ -139,15 +145,15 @@ fn kursdatei_lesen() -> Result<(), String> {
     let erwartet = vec![
         Tageskurs {
             datum: tag(2026, 10, 30)?,
-            schluss: Cent(10_120),
+            schluss: cent(10_120),
         },
         Tageskurs {
             datum: tag(2026, 11, 2)?,
-            schluss: Cent(10_300),
+            schluss: cent(10_300),
         },
         Tageskurs {
             datum: tag(2026, 11, 3)?,
-            schluss: Cent(10_375),
+            schluss: cent(10_375),
         },
     ];
     assert_eq!(k, erwartet);
@@ -166,7 +172,7 @@ fn kursdatei_lesen() -> Result<(), String> {
         knapp,
         vec![Tageskurs {
             datum: tag(2026, 11, 3)?,
-            schluss: Cent(100)
+            schluss: cent(100)
         }]
     );
     Ok(())
@@ -206,8 +212,13 @@ fn kursdatei_fehler() {
     assert_eq!(fall("03.11.2026,1,1,1,1,1\n"), Err(QuellenFehler::Datum(2)));
     assert_eq!(fall("2026-11-03,1,1,1,0,1\n"), Err(QuellenFehler::Preis(2)));
     assert_eq!(
-        fall("2026-11-03,1,1,1,1.005,1\n"),
+        fall("2026-11-03,1,1,1,1.0000001,1\n"),
         Err(QuellenFehler::Preis(2))
+    );
+    // Ein halber Cent ueber dem Hoch ist zu hoch, nicht gerundet gleich.
+    assert_eq!(
+        fall("2026-11-03,1,1,1,1.005,1\n"),
+        Err(QuellenFehler::Spanne(2))
     );
     assert_eq!(fall("2026-11-03,1,1,x,1,1\n"), Err(QuellenFehler::Preis(2)));
     assert_eq!(
@@ -269,7 +280,7 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
     let (heute, vortag) = schlusskurse(spaet, vec![(a.clone(), tage), (b.clone(), nur_zwei)])
         .map_err(|e| format!("{e:?}"))?;
     let k = heute.eintrag(&a).ok_or("Kurs fehlt")?;
-    assert_eq!(k.preis(), Cent(10_375));
+    assert_eq!(k.preis_cent(), Some(Cent(10_375)));
     assert_eq!(k.herkunft(), Herkunft::Quelle);
     assert_eq!(k.handelstag(), tag(2026, 11, 3)?);
     assert_eq!(Some(k.zeitpunkt()), xetra_schluss(tag(2026, 11, 3)?));
@@ -282,7 +293,7 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
     // Nur ein beendeter Tag: Der Vortag fehlt, er wird nicht erfunden.
     let ein_tag = vec![Tageskurs {
         datum: tag(2026, 11, 3)?,
-        schluss: Cent(500),
+        schluss: cent(500),
     }];
     let (heute, vortag) =
         schlusskurse(spaet, vec![(a.clone(), ein_tag)]).map_err(|e| format!("{e:?}"))?;
@@ -292,7 +303,7 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
     // Kein beendeter Tag: Der Wert fehlt in beiden.
     let morgen = vec![Tageskurs {
         datum: tag(2026, 11, 4)?,
-        schluss: Cent(500),
+        schluss: cent(500),
     }];
     let (heute, vortag) =
         schlusskurse(spaet, vec![(a.clone(), morgen)]).map_err(|e| format!("{e:?}"))?;
@@ -308,7 +319,7 @@ fn schlusskurse_fehler() -> Result<(), String> {
     let t = |d, c| -> Result<Tageskurs, String> {
         Ok(Tageskurs {
             datum: d,
-            schluss: Cent(c),
+            schluss: cent(c),
         })
     };
     let gut = vec![t(tag(2026, 11, 2)?, 100)?, t(tag(2026, 11, 3)?, 101)?];
@@ -325,6 +336,67 @@ fn schlusskurse_fehler() -> Result<(), String> {
     assert_eq!(
         schlusskurse(spaet, vec![(a, doppelt)]),
         Err(QuellenFehler::Reihenfolge(2))
+    );
+    Ok(())
+}
+
+/// Echte Zeilen von Alpha Vantage aus dem ersten Lauf am 04.11.2026, je mit Kopfzeile: BASF
+/// (Zeile 24), Mercedes-Benz (Zeile 3, der Vortag des Laufs) und Infineon (Zeile 10). Der Schluss
+/// liegt jeweils auf einem halben Cent: 49,925 €, 41,155 € und 49,885 €.
+const HALBE_CENT: [&str; 3] = [
+    "timestamp,open,high,low,close,volume\r\n\
+2026-10-02,49.6550,50.2300,49.3600,49.9250,1579740\r\n",
+    "timestamp,open,high,low,close,volume\r\n\
+2026-11-02,40.6250,41.3650,40.2600,41.1550,2443353\r\n",
+    "timestamp,open,high,low,close,volume\r\n\
+2026-10-22,51.6000,52.1600,49.5600,49.8850,4830045\r\n",
+];
+
+/// Echte Antwort von Alpha Vantage fuer SAP (Abruf 04.11.2026, Auszug): nur ganze Cent.
+const SAP_ECHT: &str = "timestamp,open,high,low,close,volume\r\n\
+2026-11-03,208.2000,209.1000,203.0500,206.6500,1987935\r\n\
+2026-11-02,209.7500,211.2000,207.9500,210.5000,1476327\r\n\
+2026-10-30,210.7000,214.4000,210.1500,211.2500,2032568\r\n";
+
+/// Ein Schluss feiner als ein Cent ist ein gueltiger Kurs: Er wird gelesen, nicht verworfen und
+/// nicht gerundet.
+#[test]
+fn schluss_mit_bruchteil_eines_cents() -> Result<(), String> {
+    let erwartet = [
+        ((2026, 10, 2), 49_925_000, "4992.5"),
+        ((2026, 11, 2), 41_155_000, "4115.5"),
+        ((2026, 10, 22), 49_885_000, "4988.5"),
+    ];
+    for (roh, ((j, m, t), fein, text)) in HALBE_CENT.into_iter().zip(erwartet) {
+        let k = lies_tageskurse(roh).map_err(|e| format!("{e:?} in {roh}"))?;
+        let schluss = Preis::aus_fein(fein);
+        assert_eq!(
+            k,
+            vec![Tageskurs {
+                datum: tag(j, m, t)?,
+                schluss
+            }]
+        );
+        assert_eq!(schluss.cent_text(), text);
+        // Kein ganzer Cent: Fuer Bewertung und Limits gibt es keinen still gerundeten Betrag.
+        assert_eq!(schluss.als_cent(), None);
+        // Als Kurs eines Abrufs bleibt er exakt.
+        let abruf = utc(j, m, t, 18, 0)?;
+        let wert = isin("DE000BASF111")?;
+        let (heute, _) =
+            schlusskurse(abruf, vec![(wert.clone(), k)]).map_err(|e| format!("{e:?}"))?;
+        assert_eq!(
+            heute.eintrag(&wert).map(depot_kern::Kurs::preis),
+            Some(schluss)
+        );
+        assert_eq!(heute.kurs(&wert), None);
+    }
+    // Echte Antwort in ganzen Cent: unveraendert.
+    let sap = lies_tageskurse(SAP_ECHT).map_err(|e| format!("{e:?}"))?;
+    let schluesse: Vec<Option<Cent>> = sap.iter().map(|t| t.schluss.als_cent()).collect();
+    assert_eq!(
+        schluesse,
+        vec![Some(Cent(21_125)), Some(Cent(21_050)), Some(Cent(20_665))]
     );
     Ok(())
 }

@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use depot_journal::{Journal, JournalFehler};
-use depot_kern::{Cent, Datum, Herkunft, Zeitpunkt};
+use depot_kern::{Cent, Datum, Herkunft, Preis, Zeitpunkt};
 use depot_regelwerk::DatenFehler;
 use depot_sammler::liste::pruefe_liste;
 use depot_sammler::sammeln::adresse;
@@ -45,6 +45,10 @@ fn utc(m: u8, t: u8, h: u8, min: u8) -> Result<Zeitpunkt, String> {
 }
 
 /// Erfundener Schluessel in der Form der Quelle.
+fn cent(c: i64) -> Result<Preis, String> {
+    Preis::aus_cent(Cent(c)).ok_or_else(|| "Vorbedingung: Preis".into())
+}
+
 const SCHLUESSEL: &str = "ERFUNDEN0123TEST";
 
 fn schluessel() -> Result<Schluessel, String> {
@@ -69,6 +73,11 @@ const ROH_SAP: &str = "timestamp,open,high,low,close,volume\r\n\
 const ROH_MBG: &str = "timestamp,open,high,low,close,volume\r\n\
 2026-11-04,60.1000,61.0000,59.8000,60.7500,900000\r\n\
 2026-11-03,59.5000,60.4000,59.2000,60.0500,850000\r\n";
+/// Mercedes-Benz mit dem echten Vortagsschluss auf einen halben Cent (41,155 €) aus dem ersten
+/// Lauf am 04.11.2026. Die Zeile vom 03.11. ist erfunden (D12).
+const ROH_MBG_HALB: &str = "timestamp,open,high,low,close,volume\r\n\
+2026-11-03,41.3000,41.9000,41.0500,41.4800,3100000\r\n\
+2026-11-02,40.6250,41.3650,40.2600,41.1550,2443353\r\n";
 const NOTIZ: &str = "{\n    \"Note\": \"Thank you for using Alpha Vantage! Our standard API rate limit is 25 requests per day.\"\n}";
 const FALSCHES_KUERZEL: &str = "{\n    \"Error Message\": \"Invalid API call. Please retry or visit the documentation for TIME_SERIES_DAILY.\"\n}";
 
@@ -247,8 +256,8 @@ fn normaler_lauf_belegt_und_prueft() -> Result<(), String> {
         else {
             return Err(format!("nicht belegt: {e:?}"));
         };
-        assert_eq!(*h, Some((tag(11, 4)?, Cent(heute))));
-        assert_eq!(*v, Some((tag(11, 3)?, Cent(vortag))));
+        assert_eq!(*h, Some((tag(11, 4)?, cent(heute)?)));
+        assert_eq!(*v, Some((tag(11, 3)?, cent(vortag)?)));
         assert!(
             rohdatei.starts_with(roh.join(QUELLE)),
             "{}",
@@ -491,5 +500,34 @@ fn uhr_haelt_den_lauf() -> Result<(), String> {
     let r = lauf(&journal, &roh, &mut netz, Vec::new(), &werte)?;
     assert_eq!(r, Err(SammelFehler::Uhr));
     assert!(!roh.exists());
+    Ok(())
+}
+
+/// Ein Schluss auf einen Bruchteil eines Cents wird belegt und geprueft wie jeder Kurs: Der Lauf
+/// ist verwendbar, und das Journal haelt den Preis exakt.
+#[test]
+fn halber_cent_wird_belegt() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    let werte = zwei_werte()?;
+    let sap = ROH_SAP.replacen(
+        "2026-11-04,210.0000,212.4500,209.1050,211.8000,1200000\r\n",
+        "",
+        1,
+    );
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(&sap)), ("MBG.DEX", Ok(ROH_MBG_HALB))]);
+    let (a1, a2) = (utc(11, 3, 16, 40)?, utc(11, 3, 16, 41)?);
+    let b = lauf(&journal, &roh, &mut netz, vec![a1, a2], &werte)?
+        .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert_eq!(b.pruefung, Vec::<DatenFehler>::new());
+    assert!(b.verwendbar(), "{b:?}");
+    let mbg = b.werte.get(1).map(|(_, e)| e.clone());
+    let Some(Ergebnis::Belegt { heute, vortag, .. }) = mbg else {
+        return Err(format!("nicht belegt: {mbg:?}"));
+    };
+    assert_eq!(heute, Some((tag(11, 3)?, Preis::aus_fein(41_480_000))));
+    assert_eq!(vortag, Some((tag(11, 2)?, Preis::aus_fein(41_155_000))));
+    let text = vorbedingung(fs::read_to_string(&journal), "Journal lesen")?;
+    assert!(text.contains(";4115.5;"), "{text}");
+    assert!(text.contains(";4148;"), "{text}");
     Ok(())
 }

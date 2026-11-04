@@ -9,11 +9,13 @@
 //! - `roh`: SHA-256 der rohen Antwort in Kleinbuchstaben-Hex. Wer die Antwort aufbewahrt, kann
 //!   sie damit dem Kurs zuordnen; das Journal haelt nur den Abdruck.
 //! - `isin`, `preis` in Cent, `zeitpunkt` des Kurses in UTC; sein Handelstag ist der Tag dieses
-//!   Zeitpunkts.
+//!   Zeitpunkts. Ein Preis feiner als ein Cent steht exakt mit Nachkommastellen (`4115.5`,
+//!   hoechstens vier), ohne Null am Ende (`Preis::cent_text`); ganze Cent stehen wie bisher ohne
+//!   Punkt. Nichts wird gerundet.
 //!
 //! Der Kurs liegt nie nach dem Abruf, und die Abrufe im Journal fallen nie zurueck.
 
-use depot_kern::{Cent, Herkunft, Isin, Kurs, Zeitpunkt};
+use depot_kern::{Herkunft, Isin, Kurs, Preis, Zeitpunkt};
 use sha2::{Digest, Sha256};
 
 use crate::datei::hex;
@@ -112,7 +114,7 @@ pub(crate) fn kursbeleg_text(b: &KursBeleg) -> String {
         b.abruf,
         b.roh,
         b.isin,
-        b.kurs.preis().0,
+        b.kurs.preis().cent_text(),
         b.kurs.zeitpunkt()
     )
 }
@@ -125,10 +127,10 @@ pub(crate) fn lies_kursbeleg(inhalt: &str) -> Result<KursBeleg, String> {
     let herkunft = Herkunft::aus_name(herkunft).ok_or("Kurs: Herkunft unbekannt")?;
     let abruf = Zeitpunkt::lies(abruf).ok_or("Kurs: Abruf unlesbar")?;
     let isin = Isin::neu(isin).map_err(|e| format!("Kurs: ISIN {e:?}"))?;
-    let preis = Cent(preis.parse().map_err(|_| "Kurs: Preis unlesbar")?);
+    let preis = Preis::lies_cent_text(preis).ok_or("Kurs: Preis unlesbar")?;
     let zeitpunkt = Zeitpunkt::lies(zeitpunkt).ok_or("Kurs: Zeitpunkt unlesbar")?;
     let tag = zeitpunkt.datum().ok_or("Kurs: Zeitpunkt ohne Tag")?;
-    let kurs = Kurs::neu(preis, "EUR", tag, zeitpunkt, herkunft)
+    let kurs = Kurs::exakt(preis, "EUR", tag, zeitpunkt, herkunft)
         .map_err(|e| format!("Kurs von {isin}: {e:?}"))?;
     KursBeleg::pruefe(quelle, abruf, (*roh).to_string(), isin, kurs)
 }

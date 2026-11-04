@@ -34,7 +34,8 @@ fn kurse(h: &mut Sha256, k: &Kurse) {
     feld(h, &k.stand().sekunden().to_string());
     for (isin, kurs) in k.alle() {
         feld(h, isin.als_str());
-        feld(h, &kurs.preis().0.to_string());
+        // Ganze Cent ergeben denselben Text wie bisher; der Abdruck alter Verlaeufe bleibt gleich.
+        feld(h, &kurs.preis().cent_text());
         feld(h, &format!("{:?}", kurs.waehrung()));
         feld(h, &datum(kurs.handelstag()));
         feld(h, &kurs.zeitpunkt().sekunden().to_string());

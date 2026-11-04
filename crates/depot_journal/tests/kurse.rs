@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_journal::{Art, Journal, JournalFehler, KursBeleg, inhalt_fuer, vermerk_fuer};
 use depot_kern::{
-    Cent, Datum, Grenzen, Herkunft, Instrument, InstrumentArt, Isin, Kurs, Kurse, Universum,
+    Cent, Datum, Grenzen, Herkunft, Instrument, InstrumentArt, Isin, Kurs, Kurse, Preis, Universum,
     Zeitpunkt, lies_tageskurse, schlusskurse,
 };
 use depot_regelwerk::{DatenFehler, pruefe_kurse};
@@ -169,7 +169,7 @@ fn kurs_mit_herkunft_und_abrufzeit() -> Result<(), String> {
     assert_eq!(b.quelle(), "stooq");
     assert_eq!(b.abruf(), zeit);
     assert_eq!(b.kurs().herkunft(), Herkunft::Quelle);
-    assert_eq!(b.kurs().preis(), Cent(5_180));
+    assert_eq!(b.kurs().preis_cent(), Some(Cent(5_180)));
     assert_eq!(b.roh().len(), 64);
     assert_ne!(belege.first().map(KursBeleg::roh), Some(b.roh()));
     Ok(())
@@ -300,5 +300,59 @@ fn kurseintrag_in_der_datei_nur_kanonisch() -> Result<(), String> {
     let frueher = gut.replace("16:45:00Z", "16:40:00Z");
     let r = Journal::oeffnen(&mit(&[(Art::Kurs, &gut), (Art::Kurs, &frueher)])?);
     assert!(r.is_err(), "zurueckfallender Abruf angenommen");
+    Ok(())
+}
+
+/// Ein Kurs mit Bruchteil eines Cents steht exakt im Journal: Cent mit Nachkommastellen, ohne
+/// Rundung. Ein Kurs in ganzen Cent steht wie bisher.
+#[test]
+fn kurs_mit_bruchteil_eines_cents_exakt() -> Result<(), String> {
+    let roh = "0".repeat(64);
+    let gut =
+        format!("alphavantage;quelle;2026-11-03T16:45:00Z;{roh};{A};4992.5;2026-11-03T16:35:00Z");
+    let j = vorbedingung(
+        Journal::oeffnen(&mit(&[(Art::Kurs, &gut)])?),
+        "Kurs mit halbem Cent",
+    )?;
+    let b = j.stand().kurse().first().ok_or("Beleg fehlt")?;
+    assert_eq!(b.kurs().preis(), Preis::aus_fein(49_925_000));
+    assert_eq!(b.kurs().preis_cent(), None);
+    // Nur die eine Form: keine Null am Ende, kein Komma, hoechstens vier Nachkommastellen.
+    for falsch in [
+        "4992.50",
+        "4992,5",
+        "4992.",
+        "04992.5",
+        "4992.00001",
+        "4992.0",
+    ] {
+        let f = gut.replace("4992.5", falsch);
+        let r = Journal::oeffnen(&mit(&[(Art::Kurs, &f)])?);
+        assert!(r.is_err(), "angenommen: {f}");
+    }
+    // Geschrieben wird genau diese Form, gelesen kommt derselbe Preis zurueck.
+    let p = eingerichtet()?;
+    let mut j = oeffnen(&p)?;
+    let zeit = utc(11, 3, 16, 45)?;
+    let kurs = vorbedingung(
+        Kurs::exakt(
+            Preis::aus_fein(41_155_000),
+            "EUR",
+            tag(2026, 11, 3)?,
+            utc(11, 3, 16, 35)?,
+            Herkunft::Quelle,
+        ),
+        "Kurs",
+    )?;
+    let beleg = vorbedingung(
+        KursBeleg::neu("alphavantage", zeit, b"roh", isin(B)?, kurs.clone()),
+        "Beleg",
+    )?;
+    vorbedingung(j.belege_kurs(&beleg), "belegen")?;
+    drop(j);
+    let text = vorbedingung(fs::read_to_string(&p), "Journal lesen")?;
+    assert!(text.contains(&format!(";{B};4115.5;")), "{text}");
+    let j = oeffnen(&p)?;
+    assert_eq!(j.stand().kurse().last().map(KursBeleg::kurs), Some(&kurs));
     Ok(())
 }

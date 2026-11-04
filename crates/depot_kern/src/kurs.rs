@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use crate::geld::Cent;
 use crate::instrument::Isin;
+use crate::preis::Preis;
 use crate::zeit::{Datum, Zeitpunkt};
 
 /// Die Waehrung eines Kurses. Gehandelt wird nur in Euro (Positivliste: Xetra).
@@ -54,6 +55,8 @@ impl Herkunft {
 pub enum KursFehler {
     /// Preis null oder negativ.
     NichtPositiv,
+    /// Preis in ganzen Cent zu gross fuer die exakte Fuehrung als `Preis`.
+    Bereich,
     /// Waehrung fehlt oder ist nicht `EUR`.
     Waehrung,
     /// Der Zeitpunkt des Kurses liegt nicht an seinem Handelstag.
@@ -64,10 +67,10 @@ pub enum KursFehler {
     Doppelt(Isin),
 }
 
-/// Ein geprueft gueltiger Kurs je Stueck.
+/// Ein geprueft gueltiger Kurs je Stueck. Der Preis ist exakt, auch feiner als ein Cent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Kurs {
-    preis: Cent,
+    preis: Preis,
     waehrung: Waehrung,
     handelstag: Datum,
     zeitpunkt: Zeitpunkt,
@@ -75,11 +78,11 @@ pub struct Kurs {
 }
 
 impl Kurs {
-    /// Die Waehrung kommt als Code, wie die Quelle sie liefert; nur genau `EUR` gilt.
+    /// Ein Kurs in ganzen Cent. Die Waehrung kommt als Code, wie die Quelle sie liefert; nur
+    /// genau `EUR` gilt.
     ///
     /// # Errors
-    /// Preis nicht positiv, Waehrung nicht `EUR`, Zeitpunkt nicht am Handelstag (K15-03): Ein
-    /// Kurs liegt an seinem Handelstag, nie davor und nie danach.
+    /// Wie `Kurs::exakt`; dazu `Bereich`, wenn der Preis als `Preis` ueberliefe.
     pub fn neu(
         preis: Cent,
         waehrung: &str,
@@ -88,6 +91,25 @@ impl Kurs {
         herkunft: Herkunft,
     ) -> Result<Kurs, KursFehler> {
         if preis.0 <= 0 {
+            return Err(KursFehler::NichtPositiv);
+        }
+        let preis = Preis::aus_cent(preis).ok_or(KursFehler::Bereich)?;
+        Kurs::exakt(preis, waehrung, handelstag, zeitpunkt, herkunft)
+    }
+
+    /// Ein Kurs mit exaktem Preis, auch feiner als ein Cent.
+    ///
+    /// # Errors
+    /// Preis nicht positiv, Waehrung nicht `EUR`, Zeitpunkt nicht am Handelstag (K15-03): Ein
+    /// Kurs liegt an seinem Handelstag, nie davor und nie danach.
+    pub fn exakt(
+        preis: Preis,
+        waehrung: &str,
+        handelstag: Datum,
+        zeitpunkt: Zeitpunkt,
+        herkunft: Herkunft,
+    ) -> Result<Kurs, KursFehler> {
+        if preis.fein() <= 0 {
             return Err(KursFehler::NichtPositiv);
         }
         if waehrung != "EUR" {
@@ -105,8 +127,14 @@ impl Kurs {
         })
     }
 
-    pub fn preis(&self) -> Cent {
+    /// Der exakte Preis.
+    pub fn preis(&self) -> Preis {
         self.preis
+    }
+
+    /// Der Preis in ganzen Cent; `None`, wenn er feiner ist. Nie gerundet.
+    pub fn preis_cent(&self) -> Option<Cent> {
+        self.preis.als_cent()
     }
 
     pub fn waehrung(&self) -> Waehrung {
@@ -159,9 +187,12 @@ impl Kurse {
         self.0.stand
     }
 
-    /// Preis je Stueck; `None`, wenn kein Kurs vorliegt.
+    /// Preis je Stueck in ganzen Cent, fuer Bewertung und Limits; `None`, wenn kein Kurs
+    /// vorliegt oder er feiner als ein Cent ist. Ein solcher Kurs wird hier nicht gerundet: Wer
+    /// damit Geld rechnet, faellt geschlossen aus, bis die Rundungsrichtung je Zweck als Regel
+    /// feststeht. Den exakten Preis hat `eintrag`.
     pub fn kurs(&self, isin: &Isin) -> Option<Cent> {
-        self.0.kurse.get(isin).map(Kurs::preis)
+        self.0.kurse.get(isin).and_then(Kurs::preis_cent)
     }
 
     pub fn eintrag(&self, isin: &Isin) -> Option<&Kurs> {

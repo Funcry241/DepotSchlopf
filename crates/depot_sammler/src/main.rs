@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use depot_journal::Journal;
-use depot_kern::{Cent, Datum, Zeitpunkt};
+use depot_kern::{Datum, Preis, Zeitpunkt};
 use depot_sammler::{Ergebnis, Https, Schluessel, beobachtungsliste, sammle};
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
@@ -42,16 +42,16 @@ fn jetzt() -> Option<Zeitpunkt> {
     Zeitpunkt::aus_sekunden(i64::try_from(s).ok()?)
 }
 
-fn euro(c: Cent) -> String {
-    let (e, r) = (c.0.div_euclid(100), c.0.rem_euclid(100));
-    format!("{e},{r:02} EUR")
+/// Exakt, ohne Rundung: `49,925 EUR`.
+fn euro(p: Preis) -> String {
+    format!("{} EUR", p.euro_text())
 }
 
 fn datum(d: Datum) -> String {
     format!("{:02}.{:02}.{}", d.tag(), d.monat(), d.jahr())
 }
 
-fn tag_preis(t: Option<(Datum, Cent)>) -> String {
+fn tag_preis(t: Option<(Datum, Preis)>) -> String {
     t.map_or_else(|| "-".into(), |(d, c)| format!("{} {}", datum(d), euro(c)))
 }
 

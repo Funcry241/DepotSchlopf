@@ -1,15 +1,11 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Lesende Datenversorgung, Teil Abruf (Kap. 6, R12, Wolfgang 04.11.2026: Quelle Alpha Vantage): neues Crate depot_sammler holt Xetra-Schlusskurse einer festen Beobachtungsliste ueber HTTPS, legt jede rohe Antwort unter daten/roh/ ab, belegt jeden Kurs im Journal und prueft danach mit pruefe_kurse; Hinweis zum Kontingent beendet den Lauf. Nach Maus K19-01/K19-02: Antwort mit dem Schluessel wird nie abgelegt und beendet den Lauf; run.cmd kurse meldet Erfolg nur mit verwendbaren Kursen. Schluessel nur aus der Windows-Anmeldeinformationsverwaltung, nie in Meldung, Datei oder Export. run.cmd kurse startet den Sammler ohne Gate und Export. Neue Abhaengigkeiten ureq (rustls), keyring-core und windows-native-keyring-store (nur Windows). Keine Auftraege, keine KI, keine neuen Grenzen.
+klasse: Funktion
+zweck: Schlusskurse feiner als ein Cent (Kap. 6, R4, R20; Wolfgangs erster Lauf am 04.11.2026: BASF, Mercedes-Benz, Infineon auf halbe Cent wurden verworfen). Neuer Typ Preis im Kern, exakt auf ein Millionstel Euro; jede Preisspalte wird exakt gelesen und verglichen, nichts gerundet. Journal fuehrt den Preis weiter in Cent, feinere mit Nachkommastellen; alte Journale und Abdruck bleiben gleich. pruefe_kurse vergleicht exakt; Geldrechnungen bleiben in ganzen Cent und fallen mit einem feineren Kurs geschlossen aus. Keine neuen Grenzen, keine neuen Abhaengigkeiten.
 pfade:
-Cargo.toml
-Cargo.lock
-run.cmd
-crates/depot_kern/src/zeit.rs
-crates/depot_lauf/src/main.rs
+crates/depot_kern/
+crates/depot_journal/
+crates/depot_regelwerk/
 crates/depot_sammler/
-kodex/festschreibung.txt
+crates/depot_sim/
 docs/
 CHANGELOG.md
-README.md
-kodex/freigabe.txt
