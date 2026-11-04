@@ -846,6 +846,15 @@ fn kennung_bleibt_bei_anderer_reihenfolge() -> Result<(), String> {
         zuordnung(&format!("{A}{B}"), &format!("{B2}{A2}")).map_err(f)?,
         vec![kt("ezb-2026-12-01-2", T_B2), kt("ezb-2026-12-01-1", T_A2)]
     );
+    // Mehrere neue Eintraege eines Tags werden in der Reihenfolge der Seite nummeriert.
+    assert_eq!(
+        zuordnung(ANDERER_TAG, &format!("{X}{C}{B}")).map_err(f)?,
+        vec![
+            kt("ezb-2026-12-01-1", "Joint meeting"),
+            kt("ezb-2026-12-01-2", T_C),
+            kt("ezb-2026-12-01-3", T_B)
+        ]
+    );
     // Gleicher Titel an einem anderen Tag ist ein anderer Termin.
     assert_eq!(
         zuordnung(A, ANDERER_TAG).map_err(f)?,
@@ -862,6 +871,12 @@ fn anderes_gremium_ist_ein_anderer_termin() -> Result<(), String> {
     // Maus' Gegenprobe: Statt des EZB-Rats steht am Tag nur noch der Erweiterte Rat.
     assert_eq!(
         zuordnung(A, B).map_err(f)?,
+        vec![kt("ezb-2026-12-01-2", T_B)]
+    );
+    // Anderes Gremium bei gleichen Betroffenen: nicht geldpolitischer EZB-Rat wird Erweiterter
+    // Rat.
+    assert_eq!(
+        zuordnung(C, B).map_err(f)?,
         vec![kt("ezb-2026-12-01-2", T_B)]
     );
     // Geldpolitisch wird nicht geldpolitisch.

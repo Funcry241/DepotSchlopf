@@ -101,10 +101,12 @@ pub fn lies_ezb_seite(html: &str) -> Result<Vec<EzbEintrag>, EzbFehler> {
 ///
 /// 1. Ein Eintrag mit genau Titel und Betroffenen eines bekannten Termins dieses Tags ist dieser
 ///    Termin, unveraendert.
-/// 2. Bleibt danach genau ein Eintrag und genau ein bekannter Termin ohne Gegenstueck, ist der
-///    Eintrag dieser Termin, geaendert.
-/// 3. Bleibt kein bekannter Termin ohne Gegenstueck, bekommen die uebrigen Eintraege in der
-///    Reihenfolge der Seite die naechsten freien Nummern des Tags. Eine Nummer wird nie neu
+/// 2. Die uebrigen werden je Art verglichen, also nach Gremium (EZB-Rat oder Erweiterter Rat,
+///    am Anfang des Titels) und Betroffenen (K22-02). Bleiben von einer Art genau ein Eintrag
+///    und genau ein bekannter Termin, ist der Eintrag dieser Termin, geaendert.
+/// 3. Bleibt von einer Art kein bekannter Termin, sind ihre Eintraege neu; ebenso jeder Eintrag
+///    ohne erkennbares Gremium. Neue Eintraege bekommen in der Reihenfolge der Seite die
+///    naechsten Nummern nach der hoechsten bekannten des Tags. Eine Nummer wird nie neu
 ///    vergeben.
 /// 4. Sonst, und wenn zwei Eintraege desselben Tags gleich sind, ist die Zuordnung mehrdeutig,
 ///    und es gibt keinen Termin.
@@ -152,21 +154,42 @@ pub fn ordne_zu(eintraege: Vec<EzbEintrag>, bekannt: &[&Termin]) -> Result<Vec<T
                 None => offen.push(i),
             }
         }
-        match (offen.as_slice(), frei.as_slice()) {
-            ([], _) => {}
-            ([i], [t]) => setze(&mut kennungen, *i, t.kennung()),
-            (_, []) => {
-                let mut n = bekannt
-                    .iter()
-                    .filter_map(|t| t.kennung().strip_prefix(&praefix)?.parse::<u32>().ok())
-                    .max()
-                    .unwrap_or(0);
-                for i in offen {
-                    n = n.checked_add(1).ok_or(EzbFehler::Mehrdeutig(tag))?;
-                    setze(&mut kennungen, i, &format!("{praefix}{n}"));
-                }
+        // Regeln 2 und 3 je Art: dasselbe Gremium und dieselben Betroffenen (K22-02).
+        let art_von = |i: &usize| eintraege.get(*i).and_then(|e| art(&e.titel, &e.betroffen));
+        let mut neu: Vec<usize> = offen
+            .iter()
+            .copied()
+            .filter(|i| art_von(i).is_none())
+            .collect();
+        let mut arten: Vec<Art> = offen.iter().filter_map(art_von).collect();
+        arten.sort();
+        arten.dedup();
+        for a in arten {
+            let o: Vec<usize> = offen
+                .iter()
+                .copied()
+                .filter(|i| art_von(i).as_ref() == Some(&a))
+                .collect();
+            let f: Vec<&Termin> = frei
+                .iter()
+                .copied()
+                .filter(|t| art_termin(t).as_ref() == Some(&a))
+                .collect();
+            match (o.as_slice(), f.as_slice()) {
+                ([i], [t]) => setze(&mut kennungen, *i, t.kennung()),
+                (_, []) => neu.extend(o),
+                _ => return Err(EzbFehler::Mehrdeutig(tag)),
             }
-            _ => return Err(EzbFehler::Mehrdeutig(tag)),
+        }
+        neu.sort_unstable();
+        let mut n = bekannt
+            .iter()
+            .filter_map(|t| t.kennung().strip_prefix(&praefix)?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0);
+        for i in neu {
+            n = n.checked_add(1).ok_or(EzbFehler::Mehrdeutig(tag))?;
+            setze(&mut kennungen, i, &format!("{praefix}{n}"));
         }
     }
     eintraege
@@ -184,6 +207,28 @@ pub fn ordne_zu(eintraege: Vec<EzbEintrag>, bekannt: &[&Termin]) -> Result<Vec<T
             .map_err(|f| EzbFehler::Termin(e.nr, f))
         })
         .collect()
+}
+
+/// Die Art eines Termins: Gremium und Betroffene. Ohne erkennbares Gremium keine Art.
+type Art = (&'static str, Betroffen);
+
+/// Das Gremium nach dem Anfang des Titels, in der Form der Seite.
+fn art(titel: &str, betroffen: &Betroffen) -> Option<Art> {
+    let gremium = if titel.starts_with("Governing Council of the ECB") {
+        "ezb-rat"
+    } else if titel.starts_with("General Council meeting of the ECB") {
+        "erweiterter-rat"
+    } else {
+        return None;
+    };
+    Some((gremium, betroffen.clone()))
+}
+
+fn art_termin(t: &Termin) -> Option<Art> {
+    match t.betroffen() {
+        [b] => art(t.titel(), b),
+        _ => None,
+    }
 }
 
 fn setze(kennungen: &mut [Option<String>], i: usize, kennung: &str) {
