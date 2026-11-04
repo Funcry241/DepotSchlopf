@@ -758,3 +758,16 @@ fn uhr_zurueck_haelt_an() -> Result<(), String> {
     assert_eq!(eintraege(&journal)?, vorher);
     Ok(())
 }
+
+/// Laesst sich die rohe Seite nicht ablegen, haelt der Lauf an, bevor er etwas belegt (R12).
+#[test]
+fn ohne_ablage_nichts_belegt() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    // `roh` ist eine Datei, kein Ordner: dort laesst sich nichts ablegen.
+    vorbedingung(fs::write(&roh, b"kein Ordner"), "Datei statt Ordner")?;
+    let vorher = eintraege(&journal)?;
+    let r = lauf(&journal, &roh, Ok(SEITE), utc(4, 18, 0)?)?;
+    assert!(matches!(r, Err(SammelFehler::Ablage(_))), "{r:?}");
+    assert_eq!(eintraege(&journal)?, vorher);
+    Ok(())
+}

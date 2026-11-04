@@ -213,5 +213,15 @@ fn termineintrag_in_der_datei_nur_kanonisch() -> Result<(), String> {
     let frueher = gut.replace("17:00:00Z", "16:00:00Z");
     let r = Journal::oeffnen(&mit(&[(Art::Termin, &gut), (Art::Termin, &frueher)])?);
     assert!(r.is_err(), "zurueckfallender Abruf angenommen");
+    // Ein unveraenderter Termin steht nicht zweimal im Journal, auch nicht mit spaeterem Abruf;
+    // ein geaenderter darf folgen.
+    let spaeter = gut.replace("17:00:00Z", "18:00:00Z");
+    let r = Journal::oeffnen(&mit(&[(Art::Termin, &gut), (Art::Termin, &spaeter)])?);
+    assert!(r.is_err(), "unveraenderter Termin zweimal angenommen");
+    let geaendert = spaeter.replace("EZB: Sitzung", "EZB: Sitzung (virtuell)");
+    vorbedingung(
+        Journal::oeffnen(&mit(&[(Art::Termin, &gut), (Art::Termin, &geaendert)])?),
+        "geaenderter Termin",
+    )?;
     Ok(())
 }
