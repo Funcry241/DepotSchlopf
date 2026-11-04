@@ -48,6 +48,13 @@ pub struct Bericht {
     pub pruefung: Vec<DatenFehler>,
 }
 
+impl Bericht {
+    /// Noch nicht umgesetzt (rote Tests zu K19-02).
+    pub fn verwendbar(&self) -> bool {
+        true
+    }
+}
+
 /// Was den Lauf anhaelt, bevor alles abgearbeitet ist.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SammelFehler {

@@ -232,6 +232,7 @@ fn normaler_lauf_belegt_und_prueft() -> Result<(), String> {
     assert_eq!(b.abbruch, None);
     assert_eq!(b.handelstag, Some(tag(11, 4)?));
     assert_eq!(b.pruefung, Vec::<DatenFehler>::new());
+    assert!(b.verwendbar());
     let mut rohdateien = Vec::new();
     for ((_, e), (antwort, heute, vortag)) in b
         .werte
@@ -291,6 +292,8 @@ fn am_naechsten_morgen_zu_alt() -> Result<(), String> {
     )?
     .map_err(|e| format!("Lauf: {e:?}"))?;
     assert!(b.pruefung.contains(&DatenFehler::AbrufNichtAmHandelstag));
+    // Zu alte Kurse sind belegt, aber nicht verwendbar: Der Lauf meldet keinen Erfolg (K19-02).
+    assert!(!b.verwendbar());
     assert!(
         b.pruefung
             .iter()
@@ -327,6 +330,7 @@ fn hinweis_beendet_den_lauf() -> Result<(), String> {
         Some((_, Ergebnis::NichtAbgerufen))
     ));
     assert_eq!(b.handelstag, None);
+    assert!(!b.verwendbar());
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert!(j.stand().kurse().is_empty());
     Ok(())
@@ -358,6 +362,7 @@ fn falsches_kuerzel_nur_fuer_seinen_wert() -> Result<(), String> {
         .map(|w| w.isin.clone())
         .ok_or("Vorbedingung")?;
     assert!(b.pruefung.contains(&DatenFehler::KursFehlt(sap)));
+    assert!(!b.verwendbar());
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert_eq!(j.stand().kurse().len(), 2);
     Ok(())
@@ -390,26 +395,67 @@ fn unlesbare_antwort_nicht_belegt() -> Result<(), String> {
     Ok(())
 }
 
+/// Alle Dateien unter `ordner`, samt Inhalt; ein fehlender Ordner ist leer.
+fn dateien(ordner: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut aus = Vec::new();
+    if !ordner.exists() {
+        return Ok(aus);
+    }
+    for d in vorbedingung(fs::read_dir(ordner), "Ordner")? {
+        let p = vorbedingung(d, "Eintrag")?.path();
+        if p.is_dir() {
+            aus.extend(dateien(&p)?);
+        } else {
+            aus.push((
+                p.to_string_lossy().into_owned(),
+                vorbedingung(fs::read(&p), "Datei")?,
+            ));
+        }
+    }
+    Ok(aus)
+}
+
+/// Enthaelt der Text den Schluessel, gleich in welcher Schreibweise?
+fn mit_schluessel(b: &[u8]) -> bool {
+    String::from_utf8_lossy(b)
+        .to_ascii_uppercase()
+        .contains(SCHLUESSEL)
+}
+
 /// Der Schluessel erscheint nirgends: nicht in einer Meldung, auch wenn der Abruf die Adresse
-/// nennt oder die Quelle ihn zurueckgibt, nicht im Journal, nicht in der Ablage.
+/// nennt oder die Quelle ihn zurueckgibt, nicht im Journal, nicht im Namen und nicht im Inhalt
+/// einer abgelegten Datei, in keiner Schreibweise (K19-01). Gibt die Quelle den Schluessel
+/// zurueck, wird die Antwort nicht abgelegt, und der Lauf endet.
 #[test]
 fn schluessel_erscheint_nirgends() -> Result<(), String> {
-    let (journal, roh) = ordner()?;
-    let werte = zwei_werte()?;
     let s = schluessel()?;
+    let werte = zwei_werte()?;
     let w = werte.first().ok_or("Vorbedingung: Wert")?;
     let netzfehler = format!("Verbindung zu {} fehlgeschlagen", adresse(w, &s));
-    let echo = format!("{{\"Information\": \"key {SCHLUESSEL} unknown\"}}");
-    let mut netz = Erfunden::neu(&[("SAP.DEX", Err(&netzfehler)), ("MBG.DEX", Ok(&echo))]);
-    let b = lauf(&journal, &roh, &mut netz, vec![utc(11, 4, 16, 40)?], &werte)?
-        .map_err(|e| format!("Lauf: {e:?}"))?;
-    let bericht = format!("{b:?}");
-    assert!(bericht.contains("***"), "{bericht}");
-    assert!(!bericht.contains(SCHLUESSEL), "{bericht}");
-    assert!(!vorbedingung(fs::read_to_string(&journal), "Journal")?.contains(SCHLUESSEL));
-    for d in vorbedingung(fs::read_dir(roh.join(QUELLE)), "Ablage")? {
-        let d = vorbedingung(d, "Eintrag")?;
-        assert!(!d.file_name().to_string_lossy().contains(SCHLUESSEL));
+    let gross = format!("{{\"Information\": \"key {SCHLUESSEL} unknown\"}}");
+    let klein = format!(
+        "{{\"Error Message\": \"key {} unknown\"}}",
+        SCHLUESSEL.to_ascii_lowercase()
+    );
+    let in_csv = format!("{}# {SCHLUESSEL}\r\n", ROH_MBG);
+    for (fall, antwort) in [("gross", &gross), ("klein", &klein), ("in CSV", &in_csv)] {
+        let (journal, roh) = ordner()?;
+        let mut netz = Erfunden::neu(&[("SAP.DEX", Err(&netzfehler)), ("MBG.DEX", Ok(antwort))]);
+        let b = lauf(&journal, &roh, &mut netz, vec![utc(11, 4, 16, 40)?], &werte)?
+            .map_err(|e| format!("{fall}: Lauf: {e:?}"))?;
+        let bericht = format!("{b:?}");
+        assert!(bericht.contains("***"), "{fall}: {bericht}");
+        assert!(!mit_schluessel(bericht.as_bytes()), "{fall}: {bericht}");
+        assert!(
+            !mit_schluessel(&vorbedingung(fs::read(&journal), "Journal")?),
+            "{fall}: Journal"
+        );
+        for (name, inhalt) in dateien(&roh)? {
+            assert!(!mit_schluessel(name.as_bytes()), "{fall}: Name {name}");
+            assert!(!mit_schluessel(&inhalt), "{fall}: Inhalt von {name}");
+        }
+        assert!(b.abbruch.is_some(), "{fall}: Lauf nicht beendet");
+        assert!(!b.verwendbar(), "{fall}");
     }
     Ok(())
 }
