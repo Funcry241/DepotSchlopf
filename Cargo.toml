@@ -8,6 +8,7 @@ members = [
     "crates/depot_sim",
     "crates/depot_kodex",
     "crates/depot_lauf",
+    "crates/depot_sammler",
 ]
 
 [workspace.package]
@@ -25,6 +26,11 @@ publish = false
 
 [workspace.dependencies]
 sha2 = "0.10"
+# Nur depot_sammler: HTTPS ohne C-Bibliothek ausser ring, ohne Kompression.
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
+# Nur depot_sammler unter Windows: Schluessel aus der Anmeldeinformationsverwaltung.
+keyring-core = "1.0"
+windows-native-keyring-store = { version = "1.1", default-features = false }
 depot_kern = { path = "crates/depot_kern" }
 depot_ki = { path = "crates/depot_ki" }
 depot_journal = { path = "crates/depot_journal" }

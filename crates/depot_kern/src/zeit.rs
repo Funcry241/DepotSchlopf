@@ -166,6 +166,13 @@ impl Zeitpunkt {
             .is_some_and(|(beginn, ende)| self.sekunden >= beginn && self.sekunden < ende)
     }
 
+    /// Aus Sekunden seit 01.01.1970, 00:00 Uhr UTC, etwa von der Uhr des Rechners, die der
+    /// Aufrufer liest. `None` ausserhalb der Jahre 1970 bis 9999.
+    pub fn aus_sekunden(sekunden: i64) -> Option<Zeitpunkt> {
+        let z = Zeitpunkt { sekunden };
+        z.datum().map(|_| z)
+    }
+
     /// Sekunden seit 01.01.1970, 00:00 Uhr UTC.
     pub fn sekunden(self) -> i64 {
         self.sekunden
