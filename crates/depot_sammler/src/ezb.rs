@@ -1,0 +1,294 @@
+//! Die Termine der EZB von ihrer eigenen Seite: Sitzungen des EZB-Rats und des Erweiterten
+//! Rats, je Tag ein Eintrag. Die EZB veroeffentlicht sie selbst; sie gelten deshalb als
+//! bestaetigt (R39).
+//!
+//! Gelesen wird genau die Form der Seite: im Element `main` genau eine Liste `dl` aus Paaren
+//! `<dt>TT/MM/JJJJ</dt><dd>Text<br></dd>`. Jede Abweichung ist ein Fehler mit der Nummer des
+//! Eintrags; nichts wird geraten, uebersprungen oder umgeschrieben. Eine Uhrzeit nennt die Seite
+//! nicht, also hat kein Termin eine.
+//!
+//! - **Kennung:** `ezb-JJJJ-MM-TT-n`. `n` ist die Nummer des Termins an seinem Tag; sie wird
+//!   beim ersten Erscheinen vergeben und haengt danach nie an der Stelle auf der Seite
+//!   (`ordne_zu`).
+//! - **Titel:** der Text der Seite, Leerraum zu einem Leerzeichen zusammengefasst.
+//! - **Betroffen:** `eur-leitzins` fuer eine geldpolitische Sitzung (der Text nennt
+//!   „monetary policy meeting“, nicht „non-monetary“), sonst `ezb`.
+
+use std::collections::BTreeSet;
+
+use depot_kern::{Betroffen, Datum, Termin, TerminFehler, Verlaesslichkeit, Zeitbezug};
+
+/// Name der Quelle im Journal.
+pub const QUELLE_EZB: &str = "ezb";
+/// Die Seite mit den Terminen.
+pub const ADRESSE_EZB: &str = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html";
+
+/// Warum die Seite keine Termine ergibt. Eintraege zaehlen ab 1.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EzbFehler {
+    /// Kein `main`, keine oder mehr als eine Liste, oder die Liste ist leer.
+    Seite,
+    /// Der Eintrag hat nicht die Form `<dt>…</dt><dd>…</dd>`.
+    Form(usize),
+    /// Kein Datum `TT/MM/JJJJ` im Kalender.
+    Datum(usize),
+    /// Der Text enthaelt etwas anderes als Text und ein abschliessendes `<br>`.
+    Text(usize),
+    /// Der Eintrag ergibt keinen gueltigen Termin.
+    Termin(usize, TerminFehler),
+    /// An diesem Tag laesst sich nicht eindeutig sagen, welcher Eintrag welcher bekannte
+    /// Termin ist.
+    Mehrdeutig(Datum),
+}
+
+/// Ein Eintrag der Seite, noch ohne Kennung. `nr` zaehlt ab 1 in der Reihenfolge der Seite.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EzbEintrag {
+    pub nr: usize,
+    pub datum: Datum,
+    pub titel: String,
+    pub betroffen: Betroffen,
+}
+
+/// Liest alle Eintraege der Seite in ihrer Reihenfolge.
+///
+/// # Errors
+/// Jede Abweichung von der Form; dann gibt es keinen Eintrag.
+pub fn lies_ezb_seite(html: &str) -> Result<Vec<EzbEintrag>, EzbFehler> {
+    let liste = liste(html).ok_or(EzbFehler::Seite)?;
+    let mut rest = liste.trim_start();
+    let mut eintraege: Vec<EzbEintrag> = Vec::new();
+    let mut nr: usize = 0;
+    while !rest.is_empty() {
+        nr = nr.saturating_add(1);
+        let (kopf, nach_kopf) = element(rest, "dt").ok_or(EzbFehler::Form(nr))?;
+        let (inhalt, nach_inhalt) =
+            element(nach_kopf.trim_start(), "dd").ok_or(EzbFehler::Form(nr))?;
+        rest = nach_inhalt.trim_start();
+        let datum = lies_datum(kopf.trim()).ok_or(EzbFehler::Datum(nr))?;
+        let titel = lies_text(inhalt).ok_or(EzbFehler::Text(nr))?;
+        let betroffen =
+            if titel.contains("monetary policy meeting") && !titel.contains("non-monetary") {
+                "eur-leitzins"
+            } else {
+                "ezb"
+            };
+        let betroffen = Betroffen::groesse(betroffen).ok_or(EzbFehler::Form(nr))?;
+        // Jeder Eintrag muss einen gueltigen Termin ergeben, gleich unter welcher Kennung.
+        Termin::neu(
+            QUELLE_EZB,
+            &titel,
+            Zeitbezug::Tag(datum),
+            vec![betroffen.clone()],
+            Verlaesslichkeit::Bestaetigt,
+        )
+        .map_err(|e| EzbFehler::Termin(nr, e))?;
+        eintraege.push(EzbEintrag {
+            nr,
+            datum,
+            titel,
+            betroffen,
+        });
+    }
+    if eintraege.is_empty() {
+        return Err(EzbFehler::Seite);
+    }
+    Ok(eintraege)
+}
+
+/// Ordnet die Eintraege der Seite den bekannten Terminen der EZB zu und gibt jedem seine
+/// Kennung. Die Kennung haengt nie an der Stelle auf der Seite (K22-01). Je Tag:
+///
+/// 1. Ein Eintrag mit genau Titel und Betroffenen eines bekannten Termins dieses Tags ist dieser
+///    Termin, unveraendert.
+/// 2. Die uebrigen werden je Art verglichen, also nach Gremium (EZB-Rat oder Erweiterter Rat,
+///    am Anfang des Titels) und Betroffenen (K22-02). Bleiben von einer Art genau ein Eintrag
+///    und genau ein bekannter Termin, ist der Eintrag dieser Termin, geaendert.
+/// 3. Bleibt von einer Art kein bekannter Termin, sind ihre Eintraege neu; ebenso jeder Eintrag
+///    ohne erkennbares Gremium. Neue Eintraege bekommen in der Reihenfolge der Seite die
+///    naechsten Nummern nach der hoechsten bekannten des Tags. Eine Nummer wird nie neu
+///    vergeben.
+/// 4. Sonst, und wenn zwei Eintraege desselben Tags gleich sind, ist die Zuordnung mehrdeutig,
+///    und es gibt keinen Termin.
+///
+/// Bekannte Termine ohne Gegenstueck bleiben, wie sie sind; was das bedeutet, entscheidet nicht
+/// die Zuordnung.
+///
+/// # Errors
+/// Mehrdeutige Zuordnung an einem Tag, oder ein Eintrag ergibt keinen gueltigen Termin.
+pub fn ordne_zu(eintraege: Vec<EzbEintrag>, bekannt: &[&Termin]) -> Result<Vec<Termin>, EzbFehler> {
+    let mut kennungen: Vec<Option<String>> = vec![None; eintraege.len()];
+    let tage: BTreeSet<Datum> = eintraege.iter().map(|e| e.datum).collect();
+    for tag in tage {
+        let praefix = format!("{QUELLE_EZB}-{tag}-");
+        let am_tag: Vec<usize> = eintraege
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.datum == tag)
+            .map(|(i, _)| i)
+            .collect();
+        let gleich =
+            |a: &EzbEintrag, b: &EzbEintrag| a.titel == b.titel && a.betroffen == b.betroffen;
+        let doppelt = eintraege.iter().enumerate().any(|(i, a)| {
+            eintraege
+                .iter()
+                .enumerate()
+                .any(|(j, b)| i != j && a.datum == tag && gleich(a, b) && b.datum == tag)
+        });
+        if doppelt {
+            return Err(EzbFehler::Mehrdeutig(tag));
+        }
+        let mut frei: Vec<&Termin> = bekannt
+            .iter()
+            .copied()
+            .filter(|t| t.kennung().starts_with(&praefix))
+            .collect();
+        let mut offen: Vec<usize> = Vec::new();
+        for i in am_tag {
+            let Some(e) = eintraege.get(i) else { continue };
+            let treffer = frei.iter().position(|t| {
+                t.titel() == e.titel && t.betroffen() == std::slice::from_ref(&e.betroffen)
+            });
+            match treffer {
+                Some(p) => setze(&mut kennungen, i, frei.remove(p).kennung()),
+                None => offen.push(i),
+            }
+        }
+        // Regeln 2 und 3 je Art: dasselbe Gremium und dieselben Betroffenen (K22-02).
+        let art_von = |i: &usize| eintraege.get(*i).and_then(|e| art(&e.titel, &e.betroffen));
+        let mut neu: Vec<usize> = offen
+            .iter()
+            .copied()
+            .filter(|i| art_von(i).is_none())
+            .collect();
+        let mut arten: Vec<Art> = offen.iter().filter_map(art_von).collect();
+        arten.sort();
+        arten.dedup();
+        for a in arten {
+            let o: Vec<usize> = offen
+                .iter()
+                .copied()
+                .filter(|i| art_von(i).as_ref() == Some(&a))
+                .collect();
+            let f: Vec<&Termin> = frei
+                .iter()
+                .copied()
+                .filter(|t| art_termin(t).as_ref() == Some(&a))
+                .collect();
+            match (o.as_slice(), f.as_slice()) {
+                ([i], [t]) => setze(&mut kennungen, *i, t.kennung()),
+                (_, []) => neu.extend(o),
+                _ => return Err(EzbFehler::Mehrdeutig(tag)),
+            }
+        }
+        neu.sort_unstable();
+        let mut n = bekannt
+            .iter()
+            .filter_map(|t| t.kennung().strip_prefix(&praefix)?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0);
+        for i in neu {
+            n = n.checked_add(1).ok_or(EzbFehler::Mehrdeutig(tag))?;
+            setze(&mut kennungen, i, &format!("{praefix}{n}"));
+        }
+    }
+    eintraege
+        .into_iter()
+        .zip(kennungen)
+        .map(|(e, k)| {
+            let k = k.ok_or(EzbFehler::Mehrdeutig(e.datum))?;
+            Termin::neu(
+                &k,
+                &e.titel,
+                Zeitbezug::Tag(e.datum),
+                vec![e.betroffen],
+                Verlaesslichkeit::Bestaetigt,
+            )
+            .map_err(|f| EzbFehler::Termin(e.nr, f))
+        })
+        .collect()
+}
+
+/// Die Art eines Termins: Gremium und Betroffene. Ohne erkennbares Gremium keine Art.
+type Art = (&'static str, Betroffen);
+
+/// Das Gremium nach dem Anfang des Titels, in der Form der Seite.
+fn art(titel: &str, betroffen: &Betroffen) -> Option<Art> {
+    let gremium = if titel.starts_with("Governing Council of the ECB") {
+        "ezb-rat"
+    } else if titel.starts_with("General Council meeting of the ECB") {
+        "erweiterter-rat"
+    } else {
+        return None;
+    };
+    Some((gremium, betroffen.clone()))
+}
+
+fn art_termin(t: &Termin) -> Option<Art> {
+    match t.betroffen() {
+        [b] => art(t.titel(), b),
+        _ => None,
+    }
+}
+
+fn setze(kennungen: &mut [Option<String>], i: usize, kennung: &str) {
+    if let Some(k) = kennungen.get_mut(i) {
+        *k = Some(kennung.to_string());
+    }
+}
+
+/// Liest alle Termine der Seite, ohne bekannte Termine: Kennungen ab `-1` je Tag.
+///
+/// # Errors
+/// Wie `lies_ezb_seite`.
+pub fn lies_ezb_termine(html: &str) -> Result<Vec<Termin>, EzbFehler> {
+    ordne_zu(lies_ezb_seite(html)?, &[])
+}
+
+/// Der Inhalt der einzigen Liste `<dl>…</dl>` im einzigen Element `main`.
+fn liste(html: &str) -> Option<&str> {
+    let (_, nach) = html.split_once("<main")?;
+    let (main, _) = nach.split_once("</main>")?;
+    if nach.matches("<main").count() > 0 || main.matches("<dl>").count() != 1 {
+        return None;
+    }
+    let (_, ab) = main.split_once("<dl>")?;
+    let (inhalt, _) = ab.split_once("</dl>")?;
+    Some(inhalt)
+}
+
+/// `<name>inhalt</name>` am Anfang von `text`: Inhalt und Rest danach.
+fn element<'a>(text: &'a str, name: &str) -> Option<(&'a str, &'a str)> {
+    let rest = text.strip_prefix(&format!("<{name}>"))?;
+    let ende = format!("</{name}>");
+    let (inhalt, danach) = rest.split_once(&ende)?;
+    (!inhalt.contains('<') || name == "dd").then_some((inhalt, danach))
+}
+
+/// `TT/MM/JJJJ`.
+fn lies_datum(text: &str) -> Option<Datum> {
+    let mut teile = text.split('/');
+    let mut zahl = |n: usize| {
+        let t = teile.next()?;
+        (t.len() == n && t.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| t.parse::<u16>().ok())
+            .flatten()
+    };
+    let tag = u8::try_from(zahl(2)?).ok()?;
+    let monat = u8::try_from(zahl(2)?).ok()?;
+    let jahr = zahl(4)?;
+    if teile.next().is_some() {
+        return None;
+    }
+    Datum::neu(jahr, monat, tag)
+}
+
+/// Text mit genau einem abschliessenden `<br>`, sonst ohne Auszeichnung und ohne Entitaet.
+fn lies_text(dd: &str) -> Option<String> {
+    let text = dd.trim_end().strip_suffix("<br>")?;
+    if text.contains('<') || text.contains('>') || text.contains('&') {
+        return None;
+    }
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!text.is_empty()).then_some(text)
+}

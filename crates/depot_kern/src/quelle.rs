@@ -140,20 +140,7 @@ pub fn lies_tageskurse(text: &str) -> Result<Vec<Tageskurs>, QuellenFehler> {
 }
 
 fn lies_datum(text: &str) -> Option<Datum> {
-    let mut teile = text.split('-');
-    let mut zahl = |n: usize| {
-        let t = teile.next()?;
-        (t.len() == n && t.bytes().all(|b| b.is_ascii_digit()))
-            .then(|| t.parse::<u16>().ok())
-            .flatten()
-    };
-    let jahr = zahl(4)?;
-    let monat = u8::try_from(zahl(2)?).ok()?;
-    let tag = u8::try_from(zahl(2)?).ok()?;
-    if teile.next().is_some() {
-        return None;
-    }
-    Datum::neu(jahr, monat, tag)
+    Datum::lies(text)
 }
 
 /// Zeitpunkt des Xetra-Schlusses an einem Tag.

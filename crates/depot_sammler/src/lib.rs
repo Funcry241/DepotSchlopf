@@ -21,12 +21,15 @@
     clippy::cast_sign_loss
 )]
 
+pub mod ezb;
 pub mod liste;
 pub mod netz;
 pub mod sammeln;
 pub mod schluessel;
+pub mod termine;
 
 pub use liste::{QUELLE, Wert, beobachtungsliste};
 pub use netz::{Https, Netz};
 pub use sammeln::{Bericht, Ergebnis, SammelFehler, sammle};
 pub use schluessel::Schluessel;
+pub use termine::{TerminBericht, sammle_termine};

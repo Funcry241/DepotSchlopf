@@ -102,16 +102,27 @@ fn hinweis(roh: &[u8]) -> Option<(bool, String)> {
     Some((nur_wert, kurz))
 }
 
-/// Ablage der rohen Antwort: `<ablage>/<quelle>/<abruf>_<isin>.csv`, nur neu angelegt.
-fn lege_ab(ablage: &Path, abruf: Zeitpunkt, wert: &Wert, roh: &[u8]) -> Result<PathBuf, String> {
-    let ordner = ablage.join(QUELLE);
+/// Legt eine rohe Antwort als `<ablage>/<quelle>/<abruf><zusatz>` ab, etwa
+/// `20261104T164000Z_DE0007164600.csv`. Die Datei wird nur neu angelegt, nie ueberschrieben,
+/// und vor der Rueckkehr auf den Datentraeger geschrieben.
+///
+/// # Errors
+/// Ordner oder Datei lassen sich nicht anlegen, oder die Datei gibt es schon.
+pub(crate) fn lege_ab(
+    ablage: &Path,
+    quelle: &str,
+    abruf: Zeitpunkt,
+    zusatz: &str,
+    roh: &[u8],
+) -> Result<PathBuf, String> {
+    let ordner = ablage.join(quelle);
     fs::create_dir_all(&ordner).map_err(|e| format!("{}: {e}", ordner.display()))?;
     let stempel: String = abruf
         .to_string()
         .chars()
         .filter(|c| *c != '-' && *c != ':')
         .collect();
-    let pfad = ordner.join(format!("{stempel}_{}.csv", wert.isin));
+    let pfad = ordner.join(format!("{stempel}{zusatz}"));
     OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -179,7 +190,8 @@ pub fn sammle(
             continue;
         }
         let abruf = uhr().ok_or(SammelFehler::Uhr)?;
-        let rohdatei = lege_ab(ablage, abruf, wert, &roh).map_err(SammelFehler::Ablage)?;
+        let rohdatei = lege_ab(ablage, QUELLE, abruf, &format!("_{}.csv", wert.isin), &roh)
+            .map_err(SammelFehler::Ablage)?;
         if let Some((nur_wert, text)) = hinweis(&roh) {
             let text = format!("Hinweis der Quelle: {}", schluessel.bereinige(&text));
             if !nur_wert {

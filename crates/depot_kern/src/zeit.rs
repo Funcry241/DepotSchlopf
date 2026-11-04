@@ -47,6 +47,24 @@ impl Datum {
         self.tag
     }
 
+    /// Liest genau die Form `JJJJ-MM-TT` eines Tags im Kalender.
+    pub fn lies(text: &str) -> Option<Datum> {
+        let mut teile = text.split('-');
+        let mut zahl = |n: usize| {
+            let t = teile.next()?;
+            (t.len() == n && t.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| t.parse::<u16>().ok())
+                .flatten()
+        };
+        let jahr = zahl(4)?;
+        let monat = u8::try_from(zahl(2)?).ok()?;
+        let tag = u8::try_from(zahl(2)?).ok()?;
+        if teile.next().is_some() {
+            return None;
+        }
+        Datum::neu(jahr, monat, tag)
+    }
+
     /// Wochentag nach ISO 8601: 1 Montag bis 7 Sonntag.
     pub fn wochentag(self) -> Option<u8> {
         // Der 01.01.1970 war ein Donnerstag (4).
@@ -237,6 +255,13 @@ impl Zeitpunkt {
             return None;
         }
         Zeitpunkt::neu(Datum::neu(jahr, monat, tag)?, stunde, minute, sekunde)
+    }
+}
+
+impl fmt::Display for Datum {
+    /// `JJJJ-MM-TT`, wie `Datum::lies` es liest.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:04}-{:02}-{:02}", self.jahr, self.monat, self.tag)
     }
 }
 
