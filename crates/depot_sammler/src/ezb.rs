@@ -7,11 +7,14 @@
 //! Eintrags; nichts wird geraten, uebersprungen oder umgeschrieben. Eine Uhrzeit nennt die Seite
 //! nicht, also hat kein Termin eine.
 //!
-//! - **Kennung:** `ezb-JJJJ-MM-TT-n`, `n` zaehlt die Eintraege desselben Tags ab 1 in der
-//!   Reihenfolge der Seite.
+//! - **Kennung:** `ezb-JJJJ-MM-TT-n`. `n` ist die Nummer des Termins an seinem Tag; sie wird
+//!   beim ersten Erscheinen vergeben und haengt danach nie an der Stelle auf der Seite
+//!   (`ordne_zu`).
 //! - **Titel:** der Text der Seite, Leerraum zu einem Leerzeichen zusammengefasst.
 //! - **Betroffen:** `eur-leitzins` fuer eine geldpolitische Sitzung (der Text nennt
 //!   „monetary policy meeting“, nicht „non-monetary“), sonst `ezb`.
+
+use std::collections::BTreeSet;
 
 use depot_kern::{Betroffen, Datum, Termin, TerminFehler, Verlaesslichkeit, Zeitbezug};
 
@@ -93,33 +96,100 @@ pub fn lies_ezb_seite(html: &str) -> Result<Vec<EzbEintrag>, EzbFehler> {
     Ok(eintraege)
 }
 
-/// Ordnet die Eintraege der Seite den bekannten Terminen der EZB zu (noch: nach Reihenfolge).
+/// Ordnet die Eintraege der Seite den bekannten Terminen der EZB zu und gibt jedem seine
+/// Kennung. Die Kennung haengt nie an der Stelle auf der Seite (K22-01). Je Tag:
+///
+/// 1. Ein Eintrag mit genau Titel und Betroffenen eines bekannten Termins dieses Tags ist dieser
+///    Termin, unveraendert.
+/// 2. Bleibt danach genau ein Eintrag und genau ein bekannter Termin ohne Gegenstueck, ist der
+///    Eintrag dieser Termin, geaendert.
+/// 3. Bleibt kein bekannter Termin ohne Gegenstueck, bekommen die uebrigen Eintraege in der
+///    Reihenfolge der Seite die naechsten freien Nummern des Tags. Eine Nummer wird nie neu
+///    vergeben.
+/// 4. Sonst, und wenn zwei Eintraege desselben Tags gleich sind, ist die Zuordnung mehrdeutig,
+///    und es gibt keinen Termin.
+///
+/// Bekannte Termine ohne Gegenstueck bleiben, wie sie sind; was das bedeutet, entscheidet nicht
+/// die Zuordnung.
 ///
 /// # Errors
-/// Ein Eintrag ergibt keinen gueltigen Termin.
-pub fn ordne_zu(
-    eintraege: Vec<EzbEintrag>,
-    _bekannt: &[&Termin],
-) -> Result<Vec<Termin>, EzbFehler> {
-    let mut termine: Vec<Termin> = Vec::new();
-    for e in eintraege {
-        let gleicher_tag = termine
+/// Mehrdeutige Zuordnung an einem Tag, oder ein Eintrag ergibt keinen gueltigen Termin.
+pub fn ordne_zu(eintraege: Vec<EzbEintrag>, bekannt: &[&Termin]) -> Result<Vec<Termin>, EzbFehler> {
+    let mut kennungen: Vec<Option<String>> = vec![None; eintraege.len()];
+    let tage: BTreeSet<Datum> = eintraege.iter().map(|e| e.datum).collect();
+    for tag in tage {
+        let praefix = format!("{QUELLE_EZB}-{tag}-");
+        let am_tag: Vec<usize> = eintraege
             .iter()
-            .filter(|t| t.zeit() == Zeitbezug::Tag(e.datum))
-            .count();
-        let kennung = format!("ezb-{}-{}", e.datum, gleicher_tag.saturating_add(1));
-        termine.push(
+            .enumerate()
+            .filter(|(_, e)| e.datum == tag)
+            .map(|(i, _)| i)
+            .collect();
+        let gleich =
+            |a: &EzbEintrag, b: &EzbEintrag| a.titel == b.titel && a.betroffen == b.betroffen;
+        let doppelt = eintraege.iter().enumerate().any(|(i, a)| {
+            eintraege
+                .iter()
+                .enumerate()
+                .any(|(j, b)| i != j && a.datum == tag && gleich(a, b) && b.datum == tag)
+        });
+        if doppelt {
+            return Err(EzbFehler::Mehrdeutig(tag));
+        }
+        let mut frei: Vec<&Termin> = bekannt
+            .iter()
+            .copied()
+            .filter(|t| t.kennung().starts_with(&praefix))
+            .collect();
+        let mut offen: Vec<usize> = Vec::new();
+        for i in am_tag {
+            let Some(e) = eintraege.get(i) else { continue };
+            let treffer = frei.iter().position(|t| {
+                t.titel() == e.titel && t.betroffen() == std::slice::from_ref(&e.betroffen)
+            });
+            match treffer {
+                Some(p) => setze(&mut kennungen, i, frei.remove(p).kennung()),
+                None => offen.push(i),
+            }
+        }
+        match (offen.as_slice(), frei.as_slice()) {
+            ([], _) => {}
+            ([i], [t]) => setze(&mut kennungen, *i, t.kennung()),
+            (_, []) => {
+                let mut n = bekannt
+                    .iter()
+                    .filter_map(|t| t.kennung().strip_prefix(&praefix)?.parse::<u32>().ok())
+                    .max()
+                    .unwrap_or(0);
+                for i in offen {
+                    n = n.checked_add(1).ok_or(EzbFehler::Mehrdeutig(tag))?;
+                    setze(&mut kennungen, i, &format!("{praefix}{n}"));
+                }
+            }
+            _ => return Err(EzbFehler::Mehrdeutig(tag)),
+        }
+    }
+    eintraege
+        .into_iter()
+        .zip(kennungen)
+        .map(|(e, k)| {
+            let k = k.ok_or(EzbFehler::Mehrdeutig(e.datum))?;
             Termin::neu(
-                &kennung,
+                &k,
                 &e.titel,
                 Zeitbezug::Tag(e.datum),
                 vec![e.betroffen],
                 Verlaesslichkeit::Bestaetigt,
             )
-            .map_err(|f| EzbFehler::Termin(e.nr, f))?,
-        );
+            .map_err(|f| EzbFehler::Termin(e.nr, f))
+        })
+        .collect()
+}
+
+fn setze(kennungen: &mut [Option<String>], i: usize, kennung: &str) {
+    if let Some(k) = kennungen.get_mut(i) {
+        *k = Some(kennung.to_string());
     }
-    Ok(termine)
 }
 
 /// Liest alle Termine der Seite, ohne bekannte Termine: Kennungen ab `-1` je Tag.

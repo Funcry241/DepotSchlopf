@@ -823,12 +823,22 @@ fn kennung_bleibt_bei_anderer_reihenfolge() -> Result<(), String> {
             kt("ezb-2026-12-01-1", "Meeting A")
         ]
     );
-    // Eine Nummer wird nie neu vergeben, auch nicht nach einem Wegfall.
+    // Neue Eintraege bekommen die naechsten Nummern nach allen bekannten des Tags.
+    assert_eq!(
+        zuordnung(&format!("{A}{B}"), &format!("{C}{B}{A}")).map_err(f)?,
+        vec![
+            kt("ezb-2026-12-01-3", "Meeting C"),
+            kt("ezb-2026-12-01-2", "Meeting B"),
+            kt("ezb-2026-12-01-1", "Meeting A")
+        ]
+    );
+    // Bleibt je genau einer ohne Gegenstueck, ist es derselbe Termin, geaendert: B bleibt,
+    // A wird zu C. Die alte Fassung von A bleibt im Journal.
     assert_eq!(
         zuordnung(&format!("{A}{B}"), &format!("{B}{C}")).map_err(f)?,
         vec![
             kt("ezb-2026-12-01-2", "Meeting B"),
-            kt("ezb-2026-12-01-3", "Meeting C")
+            kt("ezb-2026-12-01-1", "Meeting C")
         ]
     );
     // Der einzige Eintrag eines Tags aendert sich: fortgeschrieben unter seiner Kennung.
