@@ -55,7 +55,7 @@ pub fn pruefe_kurse(
             continue;
         };
         let kurs = eintrag.preis();
-        if kurs.0 <= 0 {
+        if kurs.fein() <= 0 {
             fehler.push(DatenFehler::KursNichtPositiv(isin));
             continue;
         }

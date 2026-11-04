@@ -285,7 +285,7 @@ fn mit_herkunft(kurse: &Kurse, isins: &[Isin], h: Herkunft) -> Result<Kurse, Str
         neu.push((
             i.clone(),
             vorbedingung(
-                Kurs::neu(k.preis(), "EUR", k.handelstag(), k.zeitpunkt(), h),
+                Kurs::exakt(k.preis(), "EUR", k.handelstag(), k.zeitpunkt(), h),
                 "Kurs",
             )?,
         ));
@@ -615,7 +615,7 @@ fn befund_k15_03_vergleichskurs_aus_der_zukunft() -> Result<(), String> {
     // Dieselben Preise wie im Vorlauf des Beispiels, nur mit dem Zeitpunkt 26.11.
     let mut eintraege = Vec::new();
     for (isin, alt) in s.vorlauf.alle() {
-        match Kurs::neu(alt.preis(), "EUR", t24, zukunft, Herkunft::Simulation) {
+        match Kurs::exakt(alt.preis(), "EUR", t24, zukunft, Herkunft::Simulation) {
             Ok(k) => eintraege.push((isin.clone(), k)),
             // Schon der Bau lehnt ab: Der Kurs kann nirgends ankommen.
             Err(_) => return Ok(()),

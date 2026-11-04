@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use depot_journal::{Journal, JournalFehler, KursBeleg};
-use depot_kern::{Cent, Datum, Grenzen, Kurs, Kurse, Zeitpunkt, lies_tageskurse, schlusskurse};
+use depot_kern::{Datum, Grenzen, Kurs, Kurse, Preis, Zeitpunkt, lies_tageskurse, schlusskurse};
 use depot_regelwerk::{DatenFehler, pruefe_kurse};
 
 use crate::liste::{QUELLE, Wert, als_universum};
@@ -27,10 +27,11 @@ use crate::schluessel::Schluessel;
 /// Was ein Wert ergeben hat.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ergebnis {
-    /// Belegt: die Schlusskurse des letzten beendeten Tags und des Tags davor, soweit vorhanden.
+    /// Belegt: die Schlusskurse des letzten beendeten Tags und des Tags davor, soweit vorhanden,
+    /// exakt.
     Belegt {
-        heute: Option<(Datum, Cent)>,
-        vortag: Option<(Datum, Cent)>,
+        heute: Option<(Datum, Preis)>,
+        vortag: Option<(Datum, Preis)>,
         rohdatei: PathBuf,
     },
     /// Nichts belegt. Die Meldung ist vom Schluessel bereinigt.
@@ -123,7 +124,7 @@ fn lege_ab(ablage: &Path, abruf: Zeitpunkt, wert: &Wert, roh: &[u8]) -> Result<P
     Ok(pfad)
 }
 
-fn tag_und_preis(k: Option<&Kurs>) -> Option<(Datum, Cent)> {
+fn tag_und_preis(k: Option<&Kurs>) -> Option<(Datum, Preis)> {
     k.map(|k| (k.handelstag(), k.preis()))
 }
 

@@ -224,7 +224,7 @@ fn main() {
     let tag = Datum::neu(2026, 11, 2).expect("gueltiges Datum");
     let zeit = Zeitpunkt::neu(tag, 10, 0, 0).expect("gueltige Uhrzeit");
     let neu = |preis: i64, w: &str| Kurs::neu(Cent(preis), w, tag, zeit, Herkunft::Broker);
-    assert_eq!(neu(10_000, "EUR").map(|k| k.preis()), Ok(Cent(10_000)));
+    assert_eq!(neu(10_000, "EUR").map(|k| k.preis_cent()), Ok(Some(Cent(10_000))));
     for w in ["USD", "eur", "", "EUR "] {
         assert_eq!(neu(10_000, w).err(), Some(KursFehler::Waehrung), "Waehrung {w:?} angenommen");
     }

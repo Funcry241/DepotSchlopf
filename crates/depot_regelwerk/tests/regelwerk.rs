@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use depot_kern::{
     BeraterId, Cent, Datum, Grenzen, Herkunft, Instrument, InstrumentArt, Isin, Kurs, KursFehler,
-    Kurse, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
+    Kurse, Preis, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
 };
 use depot_regelwerk::{
     Anlass, Befund, DatenFehler, Eingabe, Entscheidung, GenehmigterAuftrag, Kennungsvergabe,
@@ -372,6 +372,44 @@ fn kursdaten_fehlend_oder_sprunghaft() {
     // Ein Kurs von 0 kommt gar nicht erst in die Kurse (R20).
     assert_eq!(kurs(0).err(), Some(KursFehler::NichtPositiv));
     assert!(pruefe_kurse(&g, &universum(), handelstag(), &kurse_alle(10_000), &vortag).is_empty());
+}
+
+/// Der Kursvergleich rechnet exakt, auch feiner als ein Cent: Vortag 1,005 €, heute 1,156 € sind
+/// 1.502 bp und damit ein Sprung ueber 15 %. Auf ganze Cent gerundet (1,01 €) laege er darunter.
+#[test]
+fn kurssprung_exakt_mit_bruchteil_eines_cents() {
+    let g = Grenzen::standard();
+    let ersetze = |k: &Kurse, fein: i64| {
+        let eintraege = k
+            .alle()
+            .map(|(i, e)| {
+                let preis = if *i == isin(1) {
+                    Preis::aus_fein(fein)
+                } else {
+                    e.preis()
+                };
+                let neu = Kurs::exakt(preis, "EUR", e.handelstag(), e.zeitpunkt(), e.herkunft())
+                    .unwrap_or_else(|f| unreachable!("Testkurs {i}: {f:?}"));
+                (i.clone(), neu)
+            })
+            .collect();
+        Kurse::neu(k.stand(), eintraege).unwrap_or_else(|f| unreachable!("Testkurse: {f:?}"))
+    };
+    let vortag = ersetze(&vortagskurse(&preise_alle(10_000)), 1_005_000);
+    let heute = ersetze(&kurse_alle(10_000), 1_156_000);
+    assert_eq!(
+        pruefe_kurse(&g, &universum(), handelstag(), &heute, &vortag),
+        vec![DatenFehler::Kurssprung {
+            isin: isin(1),
+            sprung_bp: 1_502
+        }]
+    );
+    // Ein halber Cent ist kein Sprung: 1,155 € gegen 1,15 € bleibt im Rahmen.
+    let vortag = ersetze(&vortagskurse(&preise_alle(10_000)), 1_150_000);
+    let heute = ersetze(&kurse_alle(10_000), 1_155_000);
+    assert!(pruefe_kurse(&g, &universum(), handelstag(), &heute, &vortag).is_empty());
+    // Fuer Bewertung und Limits gibt es keinen gerundeten Betrag: Der Wert faellt dort aus.
+    assert_eq!(heute.kurs(&isin(1)), None);
 }
 
 #[test]

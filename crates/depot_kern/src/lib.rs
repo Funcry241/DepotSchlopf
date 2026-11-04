@@ -1,6 +1,6 @@
 //! DepotSchlopf – Kern.
 //!
-//! Grundtypen ohne Netz- und Dateizugriff: Geld in Cent, ISIN, Instrumente, Toepfe,
+//! Grundtypen ohne Netz- und Dateizugriff: Geld in Cent, exakte Preise, ISIN, Instrumente, Toepfe,
 //! gepruefte Kurse und ihr Lesen aus einer Quelle, Kalenderdaten, KI-Vorschlaege und die festgeschriebenen Grenzen.
 //!
 //! Leitsatz: KI schlaegt vor. Regelwerk entscheidet. Auftragsstelle schreibt.
@@ -25,6 +25,7 @@ pub mod geld;
 pub mod grenzen;
 pub mod instrument;
 pub mod kurs;
+pub mod preis;
 pub mod quelle;
 pub mod zeit;
 
@@ -33,5 +34,8 @@ pub use geld::{BP_GANZ, Cent};
 pub use grenzen::{Gebuehren, Grenzen, Universum};
 pub use instrument::{Instrument, InstrumentArt, Isin, IsinFehler};
 pub use kurs::{Herkunft, Kurs, KursFehler, Kurse, Waehrung};
-pub use quelle::{QuellenFehler, Tageskurs, lies_tageskurse, schlusskurse, xetra_schluss};
+pub use preis::Preis;
+pub use quelle::{
+    QuellenFehler, Tageskurs, lies_preis, lies_tageskurse, schlusskurse, xetra_schluss,
+};
 pub use zeit::{Datum, Zeitpunkt};

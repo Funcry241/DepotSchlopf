@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use depot_journal::{Journal, JournalFehler};
-use depot_kern::{Cent, Datum, Herkunft, Zeitpunkt};
+use depot_kern::{Cent, Datum, Herkunft, Preis, Zeitpunkt};
 use depot_regelwerk::DatenFehler;
 use depot_sammler::liste::pruefe_liste;
 use depot_sammler::sammeln::adresse;
@@ -45,6 +45,10 @@ fn utc(m: u8, t: u8, h: u8, min: u8) -> Result<Zeitpunkt, String> {
 }
 
 /// Erfundener Schluessel in der Form der Quelle.
+fn cent(c: i64) -> Result<Preis, String> {
+    Preis::aus_cent(Cent(c)).ok_or_else(|| "Vorbedingung: Preis".into())
+}
+
 const SCHLUESSEL: &str = "ERFUNDEN0123TEST";
 
 fn schluessel() -> Result<Schluessel, String> {
@@ -252,8 +256,8 @@ fn normaler_lauf_belegt_und_prueft() -> Result<(), String> {
         else {
             return Err(format!("nicht belegt: {e:?}"));
         };
-        assert_eq!(*h, Some((tag(11, 4)?, Cent(heute))));
-        assert_eq!(*v, Some((tag(11, 3)?, Cent(vortag))));
+        assert_eq!(*h, Some((tag(11, 4)?, cent(heute)?)));
+        assert_eq!(*v, Some((tag(11, 3)?, cent(vortag)?)));
         assert!(
             rohdatei.starts_with(roh.join(QUELLE)),
             "{}",
@@ -516,6 +520,12 @@ fn halber_cent_wird_belegt() -> Result<(), String> {
         .map_err(|e| format!("Lauf: {e:?}"))?;
     assert_eq!(b.pruefung, Vec::<DatenFehler>::new());
     assert!(b.verwendbar(), "{b:?}");
+    let mbg = b.werte.get(1).map(|(_, e)| e.clone());
+    let Some(Ergebnis::Belegt { heute, vortag, .. }) = mbg else {
+        return Err(format!("nicht belegt: {mbg:?}"));
+    };
+    assert_eq!(heute, Some((tag(11, 3)?, Preis::aus_fein(41_480_000))));
+    assert_eq!(vortag, Some((tag(11, 2)?, Preis::aus_fein(41_155_000))));
     let text = vorbedingung(fs::read_to_string(&journal), "Journal lesen")?;
     assert!(text.contains(";4115.5;"), "{text}");
     assert!(text.contains(";4148;"), "{text}");

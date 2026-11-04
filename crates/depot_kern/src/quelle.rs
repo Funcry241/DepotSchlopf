@@ -8,12 +8,12 @@
 //! nicht beendet ist, ist kein Schlusskurs und zaehlt nicht.
 //!
 //! Geprueft wird alles, was die Zeile selbst sagt: Datum im Kalender, Tage streng steigend,
-//! Preise positiv und in ganzen Cent, Schluss zwischen Tief und Hoch. Ob ein Kurs frisch genug
+//! Preise positiv und exakt, Schluss zwischen Tief und Hoch. Ob ein Kurs frisch genug
 //! und plausibel zum Vortag ist, prueft danach das Regelwerk wie bei jedem anderen Kurs.
 
-use crate::geld::Cent;
 use crate::instrument::Isin;
 use crate::kurs::{Herkunft, Kurs, KursFehler, Kurse};
+use crate::preis::Preis;
 use crate::zeit::{Datum, Zeitpunkt};
 
 /// Stunde und Minute des Xetra-Schlusses in Frankfurt.
@@ -30,7 +30,7 @@ pub enum QuellenFehler {
     Felder(usize),
     /// Kein Datum der Form `JJJJ-MM-TT` im Kalender.
     Datum(usize),
-    /// Ein Preis ist kein positiver Betrag in ganzen Cent.
+    /// Ein Preis ist kein positiver Betrag mit hoechstens sechs Nachkommastellen.
     Preis(usize),
     /// Der Schluss liegt nicht zwischen Tief und Hoch derselben Zeile.
     Spanne(usize),
@@ -46,30 +46,14 @@ pub enum QuellenFehler {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Tageskurs {
     pub datum: Datum,
-    pub schluss: Cent,
+    pub schluss: Preis,
 }
 
-/// Ein Betrag in Euro mit Punkt als Dezimalzeichen, etwa `215.3` oder `215.35`, in Cent.
-/// Weitere Nachkommastellen gelten nur, wenn sie null sind: Ein Kurs feiner als ein Cent wird
-/// nicht gerundet (R4).
-pub fn lies_cent(text: &str) -> Option<Cent> {
-    let (ganz, bruch) = text.split_once('.').unwrap_or((text, ""));
-    let ziffern = |t: &str| t.bytes().all(|b| b.is_ascii_digit());
-    if ganz.is_empty()
-        || !ziffern(ganz)
-        || !ziffern(bruch)
-        || (text.contains('.') && bruch.is_empty())
-    {
-        return None;
-    }
-    let (cent, rest) = bruch.split_at(bruch.len().min(2));
-    if rest.bytes().any(|b| b != b'0') {
-        return None;
-    }
-    let cent_teil: i64 = format!("{cent:0<2}").parse().ok()?;
-    let euro: i64 = ganz.parse().ok()?;
-    let betrag = euro.checked_mul(100)?.checked_add(cent_teil)?;
-    (betrag > 0).then_some(Cent(betrag))
+/// Ein positiver Betrag in Euro mit Punkt als Dezimalzeichen, etwa `49.925` oder `49.9250`,
+/// exakt mit hoechstens sechs Nachkommastellen (`Preis::lies_euro`). Feiner wird nicht gerundet,
+/// sondern abgelehnt (R4).
+pub fn lies_preis(text: &str) -> Option<Preis> {
+    Preis::lies_euro(text).filter(|p| p.fein() > 0)
 }
 
 /// Liest die Tageskurse eines Werts, alle Zeilen der Datei, aeltester Tag zuerst.
@@ -79,9 +63,9 @@ pub fn lies_cent(text: &str) -> Option<Cent> {
 /// werden geprueft, wenn es sie gibt; andere Spalten werden nicht gelesen. Das ist die Form von
 /// Stooq (`Date,Open,High,Low,Close,Volume`) und von Alpha Vantage mit `datatype=csv`
 /// (`timestamp,open,high,low,close,volume`). Die Tage steigen oder fallen streng durch die
-/// ganze Datei; Alpha Vantage liefert den neuesten zuerst. Der Schluss ist ein Betrag in
-/// ganzen Cent; Tief und Hoch duerfen feiner sein (bis sechs Nachkommastellen) und werden exakt
-/// mit dem Schluss verglichen.
+/// ganze Datei; Alpha Vantage liefert den neuesten zuerst. Schluss, Tief und Hoch werden exakt
+/// gelesen, auch feiner als ein Cent (bis sechs Nachkommastellen; Xetra notiert etwa auf halbe
+/// Cent), und exakt verglichen.
 pub fn lies_tageskurse(text: &str) -> Result<Vec<Tageskurs>, QuellenFehler> {
     let mut zeilen = text.lines().map(|z| z.strip_suffix('\r').unwrap_or(z));
     let kopf: Vec<String> = zeilen
@@ -118,21 +102,15 @@ pub fn lies_tageskurse(text: &str) -> Result<Vec<Tageskurs>, QuellenFehler> {
         }
         let feld = |s: usize| felder.get(s).copied().unwrap_or("");
         let datum = lies_datum(feld(datum_s)).ok_or(QuellenFehler::Datum(nr))?;
-        let schluss = lies_cent(feld(schluss_s)).ok_or(QuellenFehler::Preis(nr))?;
-        // Tief und Hoch dienen nur dem Vergleich und duerfen feiner als ein Cent sein; sie
-        // werden exakt verglichen, nie gerundet.
-        let fein = |s: usize| lies_fein(feld(s)).ok_or(QuellenFehler::Preis(nr));
-        let schluss_fein = schluss
-            .0
-            .checked_mul(FEIN_JE_CENT)
-            .ok_or(QuellenFehler::Preis(nr))?;
+        let preis = |s: usize| lies_preis(feld(s)).ok_or(QuellenFehler::Preis(nr));
+        let schluss = preis(schluss_s)?;
         if let Some(s) = tief_s
-            && fein(s)? > schluss_fein
+            && preis(s)? > schluss
         {
             return Err(QuellenFehler::Spanne(nr));
         }
         if let Some(s) = hoch_s
-            && fein(s)? < schluss_fein
+            && preis(s)? < schluss
         {
             return Err(QuellenFehler::Spanne(nr));
         }
@@ -159,31 +137,6 @@ pub fn lies_tageskurse(text: &str) -> Result<Vec<Tageskurs>, QuellenFehler> {
         kurse.reverse();
     }
     Ok(kurse)
-}
-
-/// Feinste Einheit fuer Tief und Hoch: ein Zehntausendstel Cent (sechs Nachkommastellen).
-const FEIN_JE_CENT: i64 = 10_000;
-
-/// Ein positiver Betrag in Euro mit hoechstens sechs Nachkommastellen, in Zehntausendstel Cent.
-/// Weitere Nachkommastellen gelten nur, wenn sie null sind.
-fn lies_fein(text: &str) -> Option<i64> {
-    let (ganz, bruch) = text.split_once('.').unwrap_or((text, ""));
-    let ziffern = |t: &str| t.bytes().all(|b| b.is_ascii_digit());
-    if ganz.is_empty()
-        || !ziffern(ganz)
-        || !ziffern(bruch)
-        || (text.contains('.') && bruch.is_empty())
-    {
-        return None;
-    }
-    let (stellen, rest) = bruch.split_at(bruch.len().min(6));
-    if rest.bytes().any(|b| b != b'0') {
-        return None;
-    }
-    let teil: i64 = format!("{stellen:0<6}").parse().ok()?;
-    let euro: i64 = ganz.parse().ok()?;
-    let betrag = euro.checked_mul(1_000_000)?.checked_add(teil)?;
-    (betrag > 0).then_some(betrag)
 }
 
 fn lies_datum(text: &str) -> Option<Datum> {
@@ -239,7 +192,7 @@ pub fn schlusskurse(
         for t in tage {
             let zeit = xetra_schluss(t.datum).ok_or(QuellenFehler::Kurs(KursFehler::Handelstag))?;
             if zeit <= abruf {
-                let kurs = Kurs::neu(t.schluss, "EUR", t.datum, zeit, Herkunft::Quelle)
+                let kurs = Kurs::exakt(t.schluss, "EUR", t.datum, zeit, Herkunft::Quelle)
                     .map_err(QuellenFehler::Kurs)?;
                 beendet.push(kurs);
             }
