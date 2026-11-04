@@ -13,7 +13,7 @@
 //! - **Betroffen:** `eur-leitzins` fuer eine geldpolitische Sitzung (der Text nennt
 //!   „monetary policy meeting“, nicht „non-monetary“), sonst `ezb`.
 
-use depot_kern::{Termin, TerminFehler};
+use depot_kern::{Betroffen, Datum, Termin, TerminFehler, Verlaesslichkeit, Zeitbezug};
 
 /// Name der Quelle im Journal.
 pub const QUELLE_EZB: &str = "ezb";
@@ -40,6 +40,89 @@ pub enum EzbFehler {
 /// # Errors
 /// Jede Abweichung von der Form; dann gibt es keinen Termin.
 pub fn lies_ezb_termine(html: &str) -> Result<Vec<Termin>, EzbFehler> {
-    let _ = html;
-    Err(EzbFehler::Seite)
+    let liste = liste(html).ok_or(EzbFehler::Seite)?;
+    let mut rest = liste.trim_start();
+    let mut termine: Vec<Termin> = Vec::new();
+    let mut nr: usize = 0;
+    while !rest.is_empty() {
+        nr = nr.saturating_add(1);
+        let (dt, nach_dt) = element(rest, "dt").ok_or(EzbFehler::Form(nr))?;
+        let (dd, nach_dd) = element(nach_dt.trim_start(), "dd").ok_or(EzbFehler::Form(nr))?;
+        rest = nach_dd.trim_start();
+        let datum = lies_datum(dt.trim()).ok_or(EzbFehler::Datum(nr))?;
+        let titel = lies_text(dd).ok_or(EzbFehler::Text(nr))?;
+        let gleicher_tag = termine
+            .iter()
+            .filter(|t| t.zeit() == Zeitbezug::Tag(datum))
+            .count();
+        let kennung = format!("ezb-{datum}-{}", gleicher_tag.saturating_add(1));
+        let betroffen =
+            if titel.contains("monetary policy meeting") && !titel.contains("non-monetary") {
+                "eur-leitzins"
+            } else {
+                "ezb"
+            };
+        let betroffen = Betroffen::groesse(betroffen).ok_or(EzbFehler::Form(nr))?;
+        let termin = Termin::neu(
+            &kennung,
+            &titel,
+            Zeitbezug::Tag(datum),
+            vec![betroffen],
+            Verlaesslichkeit::Bestaetigt,
+        )
+        .map_err(|e| EzbFehler::Termin(nr, e))?;
+        termine.push(termin);
+    }
+    if termine.is_empty() {
+        return Err(EzbFehler::Seite);
+    }
+    Ok(termine)
+}
+
+/// Der Inhalt der einzigen Liste `<dl>…</dl>` im einzigen Element `main`.
+fn liste(html: &str) -> Option<&str> {
+    let (_, nach) = html.split_once("<main")?;
+    let (main, _) = nach.split_once("</main>")?;
+    if nach.matches("<main").count() > 0 || main.matches("<dl>").count() != 1 {
+        return None;
+    }
+    let (_, ab) = main.split_once("<dl>")?;
+    let (inhalt, _) = ab.split_once("</dl>")?;
+    Some(inhalt)
+}
+
+/// `<name>inhalt</name>` am Anfang von `text`: Inhalt und Rest danach.
+fn element<'a>(text: &'a str, name: &str) -> Option<(&'a str, &'a str)> {
+    let rest = text.strip_prefix(&format!("<{name}>"))?;
+    let ende = format!("</{name}>");
+    let (inhalt, danach) = rest.split_once(&ende)?;
+    (!inhalt.contains('<') || name == "dd").then_some((inhalt, danach))
+}
+
+/// `TT/MM/JJJJ`.
+fn lies_datum(text: &str) -> Option<Datum> {
+    let mut teile = text.split('/');
+    let mut zahl = |n: usize| {
+        let t = teile.next()?;
+        (t.len() == n && t.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| t.parse::<u16>().ok())
+            .flatten()
+    };
+    let tag = u8::try_from(zahl(2)?).ok()?;
+    let monat = u8::try_from(zahl(2)?).ok()?;
+    let jahr = zahl(4)?;
+    if teile.next().is_some() {
+        return None;
+    }
+    Datum::neu(jahr, monat, tag)
+}
+
+/// Text mit genau einem abschliessenden `<br>`, sonst ohne Auszeichnung und ohne Entitaet.
+fn lies_text(dd: &str) -> Option<String> {
+    let text = dd.trim_end().strip_suffix("<br>")?;
+    if text.contains('<') || text.contains('>') || text.contains('&') {
+        return None;
+    }
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!text.is_empty()).then_some(text)
 }
