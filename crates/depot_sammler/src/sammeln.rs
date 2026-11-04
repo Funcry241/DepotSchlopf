@@ -4,6 +4,9 @@
 //! Kurs daraus im Journal, erst dann wird er verwendet. Was nicht gelesen werden kann, wird nicht
 //! belegt; die rohe Antwort bleibt zur Durchsicht liegen.
 //!
+//! Enthaelt eine Antwort den Schluessel, gleich in welcher Schreibweise, wird sie weder abgelegt
+//! noch gelesen, und der Lauf endet (K19-01).
+//!
 //! Meldet die Quelle statt Kursen einen Hinweis, gilt: Ein Fehler zu genau diesem Kuerzel
 //! (`Error Message`) betrifft nur diesen Wert. Jeder andere Hinweis, etwa das erreichte
 //! Tageskontingent, beendet den Lauf, damit kein weiterer Abruf das Kontingent belastet.
@@ -49,9 +52,12 @@ pub struct Bericht {
 }
 
 impl Bericht {
-    /// Noch nicht umgesetzt (rote Tests zu K19-02).
+    /// Sind die Kurse dieses Laufs verwendbar? Nur wenn Schlusskurse belegt sind und
+    /// `pruefe_kurse` fuer alle Werte der Liste nichts meldet (K19-02). Ein Wert mit Fehler oder
+    /// ohne Abruf fehlt dort als `KursFehlt`. Belegt bleibt alles, was abgerufen wurde;
+    /// verwendbar ist es damit noch nicht.
     pub fn verwendbar(&self) -> bool {
-        true
+        self.handelstag.is_some() && self.pruefung.is_empty()
     }
 }
 
@@ -161,6 +167,16 @@ pub fn sammle(
                 continue;
             }
         };
+        // Gibt die Quelle den Schluessel zurueck, wird die Antwort weder abgelegt noch gelesen,
+        // und der Lauf endet: Keine Datei des Rahmens enthaelt den Schluessel (K19-01).
+        if schluessel.steht_in(&roh) {
+            let text =
+                "Die Antwort enthaelt den Schluessel: nicht abgelegt, nicht belegt, Lauf beendet"
+                    .to_string();
+            bericht.abbruch = Some(text.clone());
+            bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+            continue;
+        }
         let abruf = uhr().ok_or(SammelFehler::Uhr)?;
         let rohdatei = lege_ab(ablage, abruf, wert, &roh).map_err(SammelFehler::Ablage)?;
         if let Some((nur_wert, text)) = hinweis(&roh) {

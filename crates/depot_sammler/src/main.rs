@@ -121,7 +121,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut fehler = false;
+    let verwendbar = bericht.verwendbar();
     for (w, e) in &bericht.werte {
         match e {
             Ergebnis::Belegt { heute, vortag, .. } => println!(
@@ -132,7 +132,6 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
                 tag_preis(*vortag)
             ),
             Ergebnis::Fehler(t) => {
-                fehler = true;
                 println!("  {:<20} {}  FEHLER: {t}", w.name, w.isin);
             }
             Ergebnis::NichtAbgerufen => {
@@ -141,7 +140,6 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         }
     }
     if let Some(a) = &bericht.abbruch {
-        fehler = true;
         println!("[Sammler] Lauf vorzeitig beendet: {a}");
     }
     match bericht.handelstag {
@@ -164,10 +162,16 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         "[Sammler] Belegt im Journal {}, rohe Antworten unter daten/roh/.",
         journal_pfad.display()
     );
-    if fehler {
-        ExitCode::FAILURE
-    } else {
+    // Erfolg nur mit verwendbaren Kursen: Ein spaeterer Lauf darf sich auf den Ausgang
+    // verlassen (K19-02).
+    if verwendbar {
+        println!("[Sammler] Kurse verwendbar.");
         ExitCode::SUCCESS
+    } else {
+        eprintln!(
+            "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Pruefung nicht bestanden)."
+        );
+        ExitCode::FAILURE
     }
 }
 

@@ -50,9 +50,35 @@ impl Schluessel {
         &self.0
     }
 
-    /// Ersetzt jedes Vorkommen des Schluessels durch `***`.
+    /// Steht der Schluessel in diesen Bytes, gleich in welcher Schreibweise?
+    pub fn steht_in(&self, bytes: &[u8]) -> bool {
+        let k = self.0.as_bytes();
+        bytes.windows(k.len()).any(|w| w.eq_ignore_ascii_case(k))
+    }
+
+    /// Ersetzt jedes Vorkommen des Schluessels durch `***`, gleich in welcher Schreibweise.
     pub fn bereinige(&self, text: &str) -> String {
-        text.replace(&self.0, "***")
+        // Der Schluessel ist ASCII; Grossschreibung von ASCII laesst jede Byteposition gleich.
+        let gross = text.to_ascii_uppercase();
+        let mut aus = String::with_capacity(text.len());
+        let mut rest = text;
+        let mut rest_gross = gross.as_str();
+        while let Some(pos) = rest_gross.find(self.0.as_str()) {
+            let (Some(vor), Some(nach), Some(nach_gross)) = (
+                rest.get(..pos),
+                pos.checked_add(self.0.len()).and_then(|e| rest.get(e..)),
+                pos.checked_add(self.0.len())
+                    .and_then(|e| rest_gross.get(e..)),
+            ) else {
+                return "***".into();
+            };
+            aus.push_str(vor);
+            aus.push_str("***");
+            rest = nach;
+            rest_gross = nach_gross;
+        }
+        aus.push_str(rest);
+        aus
     }
 
     /// Liest den Schluessel aus der Windows-Anmeldeinformationsverwaltung.

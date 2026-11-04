@@ -431,13 +431,17 @@ fn schluessel_erscheint_nirgends() -> Result<(), String> {
     let s = schluessel()?;
     let werte = zwei_werte()?;
     let w = werte.first().ok_or("Vorbedingung: Wert")?;
-    let netzfehler = format!("Verbindung zu {} fehlgeschlagen", adresse(w, &s));
+    let a = adresse(w, &s);
+    let netzfehler = format!(
+        "Verbindung zu {a} fehlgeschlagen ({})",
+        a.to_ascii_lowercase()
+    );
     let gross = format!("{{\"Information\": \"key {SCHLUESSEL} unknown\"}}");
     let klein = format!(
         "{{\"Error Message\": \"key {} unknown\"}}",
         SCHLUESSEL.to_ascii_lowercase()
     );
-    let in_csv = format!("{}# {SCHLUESSEL}\r\n", ROH_MBG);
+    let in_csv = format!("{ROH_MBG}# {SCHLUESSEL}\r\n");
     for (fall, antwort) in [("gross", &gross), ("klein", &klein), ("in CSV", &in_csv)] {
         let (journal, roh) = ordner()?;
         let mut netz = Erfunden::neu(&[("SAP.DEX", Err(&netzfehler)), ("MBG.DEX", Ok(antwort))]);
