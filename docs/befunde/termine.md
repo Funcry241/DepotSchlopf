@@ -36,13 +36,15 @@ Am 04.11.2026 um 21:12 UTC in der Cloud-Umgebung gegen die echte Seite gelaufen,
 **Regel jetzt** (`ezb::ordne_zu`): Die Einträge der Seite werden je Tag den bekannten EZB-Terminen aus dem Journal zugeordnet, jeweils der letzten Fassung je Kennung.
 
 1. Ein Eintrag mit genau Titel und Betroffenen eines bekannten Termins dieses Tags ist dieser Termin, unverändert.
-2. Bleiben danach genau ein Eintrag und genau ein bekannter Termin ohne Gegenstück, ist der Eintrag dieser Termin, geändert, und wird fortgeschrieben. Das ist der übliche Fall „in Frankfurt“ zu „virtual“. Die alte Fassung bleibt im Journal.
-3. Bleibt kein bekannter Termin ohne Gegenstück, bekommen die übrigen Einträge in der Reihenfolge der Seite die nächsten Nummern nach der höchsten bekannten des Tags. Eine Nummer wird nie neu vergeben.
-4. Sonst ist die Zuordnung mehrdeutig, etwa wenn sich zwei Termine eines Tags zugleich ändern, oder einer sich ändert und einer wegfällt oder dazukommt, oder zwei Einträge eines Tags gleich sind. Dann meldet der Lauf `Mehrdeutig` mit dem Tag und belegt nichts, auch nicht die eindeutigen Termine der Seite. Die rohe Seite liegt zur Durchsicht.
+2. Die übrigen werden je **Art** verglichen: Gremium (EZB-Rat „Governing Council of the ECB“ oder Erweiterter Rat „General Council meeting of the ECB“, am Anfang des Titels) und Betroffene (geldpolitisch oder nicht). Bleiben von einer Art genau ein Eintrag und genau ein bekannter Termin ohne Gegenstück, ist der Eintrag dieser Termin, geändert, und wird fortgeschrieben. Das ist der übliche Fall „in Frankfurt“ zu „virtual“. Die alte Fassung bleibt im Journal. Ein anderes Gremium oder ein anderer Gegenstand ist nie eine Änderung (K22-02).
+3. Bleibt von einer Art kein bekannter Termin ohne Gegenstück, sind ihre Einträge neu, ebenso jeder Eintrag ohne erkennbares Gremium. Neue Einträge bekommen in der Reihenfolge der Seite die nächsten Nummern nach der höchsten bekannten des Tags. Eine Nummer wird nie neu vergeben.
+4. Sonst ist die Zuordnung mehrdeutig, etwa wenn ein bekannter Termin einer Art zwei neuen Einträgen derselben Art gegenübersteht oder umgekehrt, oder wenn zwei Einträge eines Tags gleich sind. Dann meldet der Lauf `Mehrdeutig` mit dem Tag und belegt nichts, auch nicht die eindeutigen Termine der Seite. Die rohe Seite liegt zur Durchsicht.
 
-Bekannte Termine ohne Gegenstück bleiben, wie sie sind, und werden gemeldet, solange ihr Tag nicht vorbei ist. Grenze der Regel 2: Fällt an einem Tag ein Termin weg und kommt zugleich ein anderer dazu, ist das von einer Änderung nicht zu unterscheiden. Die Seite gibt dafür nichts her, und es wird als Änderung fortgeschrieben, mit beiden Fassungen im Journal.
+Bekannte Termine ohne Gegenstück bleiben, wie sie sind, und werden gemeldet, solange ihr Tag nicht vorbei ist. Grenze der Regel 2: Fällt an einem Tag ein Termin weg und kommt zugleich ein anderer **derselben Art** dazu, ist das von einer Änderung nicht zu unterscheiden. Die Seite gibt dafür nichts her, und es wird als Änderung fortgeschrieben, mit beiden Fassungen im Journal.
 
 Rote Tests am Stand `6bad595` in `a5363a5`: `kennung_bleibt_bei_anderer_reihenfolge` (Maus' Gegenprobe zuerst), `mehrdeutige_zuordnung_wird_gemeldet`, `wegfall_am_selben_tag_im_lauf` (Maus' Gegenprobe im ganzen Lauf) und `mehrdeutig_im_lauf_nichts_belegt`. Danach kam `nummer_nie_neu_vergeben` dazu, weil die Gegenprobe Z5 grün blieb.
+
+**Nach Maus' Nachprüfung (K22-02):** Regel 2 galt für den ganzen Tag. Stand am Tag statt einer geldpolitischen Sitzung des EZB-Rats nur noch eine des Erweiterten Rats, wurde sie unter der alten Kennung fortgeschrieben (1 geändert, 0 fehlend). Jetzt gelten die Regeln 2 bis 4 je Art. Rote Tests am Stand `fcdcbc3` in `e4bb668`: `anderes_gremium_ist_ein_anderer_termin` (Maus' Gegenprobe zuerst) und `gremiumwechsel_im_lauf` (im ganzen Lauf: 1 neu, alter Termin gemeldet, beide im Journal). Dazu kommt der Fall „anderes Gremium, gleiche Betroffene“, weil die Gegenprobe W1 ohne ihn grün blieb.
 
 ## Offen
 
@@ -74,15 +76,17 @@ Rote Tests zuerst: Termin in Kern und Journal in `d513a5f`, Lesen der EZB-Seite 
 | `netzfehler_legt_nichts_ab` | nichts abgelegt, nichts belegt |
 | `uhr_zurueck_haelt_an` | Journal lehnt ab, Lauf hält, nichts belegt |
 | `ohne_ablage_nichts_belegt` | Ablage scheitert: Lauf hält, bevor etwas belegt ist |
-| `kennung_bleibt_bei_anderer_reihenfolge` | Wegfall, Vertauschen, neuer Eintrag davor, Änderung eines Termins: jede Kennung bleibt |
+| `kennung_bleibt_bei_anderer_reihenfolge` | Wegfall, Vertauschen, neue Einträge in Reihenfolge der Seite, Änderung eines oder beider Termine eines Tags: jede Kennung bleibt |
 | `nummer_nie_neu_vergeben` | neue Nummer nach der höchsten bekannten, auch mit Lücke |
-| `mehrdeutige_zuordnung_wird_gemeldet` | vier mehrdeutige Fälle: kein Termin |
+| `anderes_gremium_ist_ein_anderer_termin` | anderes Gremium (mit gleichen und mit anderen Betroffenen), anderer Gegenstand, unbekanntes Gremium: neu, nie Änderung |
+| `gremiumwechsel_im_lauf` | Maus' zweite Gegenprobe im Lauf: 1 neu, 0 geändert, alter Termin gemeldet |
+| `mehrdeutige_zuordnung_wird_gemeldet` | drei mehrdeutige Fälle: kein Termin |
 | `wegfall_am_selben_tag_im_lauf` | Maus' Gegenprobe im Lauf: zweite Sitzung unverändert, erste gemeldet, nichts geschrieben |
 | `mehrdeutig_im_lauf_nichts_belegt` | gemeldet, auch der eindeutige Termin nicht belegt, rohe Seite liegt |
 
 ### Gegenproben
 
-Jede Gegenprobe ändert den Code an einer Stelle (Z1–Z6 nach K22-01) und muss mindestens einen Test rot machen. Jede ist neu übersetzt worden („Compiling …“ in der Ausgabe).
+Jede Gegenprobe ändert den Code an einer Stelle (Z1–Z6 nach K22-01, W1–W5 nach K22-02) und muss mindestens einen Test rot machen. Jede ist neu übersetzt worden („Compiling …“ in der Ausgabe).
 
 | Gegenprobe | rot |
 | --- | --- |
@@ -106,6 +110,11 @@ Jede Gegenprobe ändert den Code an einer Stelle (Z1–Z6 nach K22-01) und muss 
 | Z4 gleiche Einträge eines Tags zugelassen | `mehrdeutige_zuordnung_wird_gemeldet` |
 | Z5 neue Nummer nach Anzahl statt nach höchster | `nummer_nie_neu_vergeben` (zuerst grün geblieben; der Test ist danach dazugekommen) |
 | Z6 Lauf ohne die bekannten Termine des Journals | `wegfall_am_selben_tag_im_lauf`, `mehrdeutig_im_lauf_nichts_belegt` |
+| W1 Gremium nicht verglichen | `anderes_gremium_ist_ein_anderer_termin` (zuerst grün geblieben; der Fall mit gleichen Betroffenen ist danach dazugekommen) |
+| W2 Betroffene nicht verglichen | `anderes_gremium_ist_ein_anderer_termin` |
+| W3 unbekanntes Gremium als eigene Art | `anderes_gremium_ist_ein_anderer_termin` |
+| W4 mehrdeutige Art als neu genommen | `mehrdeutige_zuordnung_wird_gemeldet`, `mehrdeutig_im_lauf_nichts_belegt` |
+| W5 neue Einträge nicht in der Reihenfolge der Seite nummeriert | `kennung_bleibt_bei_anderer_reihenfolge`, `anderes_gremium_ist_ein_anderer_termin`, `wegfall_am_selben_tag_im_lauf` |
 | G8 rohe Seite nicht abgelegt | `erster_lauf_belegt_jeden_termin`, `zweiter_lauf_schreibt_nichts_doppelt`, `unlesbare_seite_wird_nicht_belegt` |
 
 Keine neuen Grenzen, keine neuen Abhängigkeiten.
