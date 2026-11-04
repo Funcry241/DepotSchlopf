@@ -46,11 +46,12 @@ pub fn lies_ezb_termine(html: &str) -> Result<Vec<Termin>, EzbFehler> {
     let mut nr: usize = 0;
     while !rest.is_empty() {
         nr = nr.saturating_add(1);
-        let (dt, nach_dt) = element(rest, "dt").ok_or(EzbFehler::Form(nr))?;
-        let (dd, nach_dd) = element(nach_dt.trim_start(), "dd").ok_or(EzbFehler::Form(nr))?;
-        rest = nach_dd.trim_start();
-        let datum = lies_datum(dt.trim()).ok_or(EzbFehler::Datum(nr))?;
-        let titel = lies_text(dd).ok_or(EzbFehler::Text(nr))?;
+        let (kopf, nach_kopf) = element(rest, "dt").ok_or(EzbFehler::Form(nr))?;
+        let (inhalt, nach_inhalt) =
+            element(nach_kopf.trim_start(), "dd").ok_or(EzbFehler::Form(nr))?;
+        rest = nach_inhalt.trim_start();
+        let datum = lies_datum(kopf.trim()).ok_or(EzbFehler::Datum(nr))?;
+        let titel = lies_text(inhalt).ok_or(EzbFehler::Text(nr))?;
         let gleicher_tag = termine
             .iter()
             .filter(|t| t.zeit() == Zeitbezug::Tag(datum))
