@@ -23,6 +23,31 @@ pub enum Herkunft {
     Aufzeichnung,
     /// In einer Simulation oder einem Test erfunden.
     Simulation,
+    /// Lesend von einer freigegebenen Kursquelle abgerufen (Kap. 6); welcher, steht im Beleg.
+    Quelle,
+}
+
+impl Herkunft {
+    /// Der Name im Journal.
+    pub fn name(self) -> &'static str {
+        match self {
+            Herkunft::Broker => "broker",
+            Herkunft::Aufzeichnung => "aufzeichnung",
+            Herkunft::Simulation => "simulation",
+            Herkunft::Quelle => "quelle",
+        }
+    }
+
+    pub fn aus_name(name: &str) -> Option<Herkunft> {
+        [
+            Herkunft::Broker,
+            Herkunft::Aufzeichnung,
+            Herkunft::Simulation,
+            Herkunft::Quelle,
+        ]
+        .into_iter()
+        .find(|h| h.name() == name)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

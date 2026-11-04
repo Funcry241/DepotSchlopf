@@ -13,6 +13,9 @@
 //! KI-Aufrufe nach den Regeln aus `depot_ki`. Eine `AufrufErlaubnis` entsteht nur durch
 //! `Journal::reserviere`, ein Auftrag im Journal nur durch `Journal::reserviere_auftrag`.
 //!
+//! **Kurse (R12, Kap. 6):** Ein Kurs von aussen steht vor seiner Verwendung im Journal, mit
+//! Quelle, Abrufzeit und Abdruck der rohen Antwort (`kursbeleg`).
+//!
 //! **Kontowaechter (Kap. 9, R37):** Jeder Auftrag hat einen Zustand nach fester
 //! Zustandsmaschine (`auftrag`). Reserviert wird nur mit Deckung; der Abgleich mit dem Konto
 //! belegt dessen Meldungen und meldet jede Abweichung (`konto`).
@@ -46,12 +49,14 @@ pub mod auftrag;
 pub mod datei;
 pub mod kasse;
 pub mod konto;
+pub mod kursbeleg;
 pub mod stand;
 
 pub use auftrag::{AuftragsLage, AuftragsZustand, Ausfuehrung, Meldung};
 pub use datei::{Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
 pub use kasse::{AufrufErlaubnis, KiStand};
 pub use konto::{Abweichung, Konto, KontoOrder, KontoStatus, Kontoauszug, verfuegbar};
+pub use kursbeleg::KursBeleg;
 pub use stand::{Abschluss, Art, AuftragsBeleg, FORMAT, FORMAT_ALT, Stand};
 
 #[cfg(test)]

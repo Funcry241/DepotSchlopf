@@ -28,6 +28,7 @@ use sha2::{Digest, Sha256};
 
 use crate::auftrag::{Meldung, meldung_text};
 use crate::kasse::{AufrufErlaubnis, buchung_text, naechste};
+use crate::kursbeleg::{KursBeleg, kursbeleg_text};
 use crate::stand::{
     Abschluss, Art, FORMAT, FORMAT_ALT, Stand, abschluss_text, begruendung_text, beleg_text,
     beobachtung_text, topf_text, trenne,
@@ -55,7 +56,7 @@ fn halt(text: impl Into<String>) -> JournalFehler {
     JournalFehler::Halt(text.into())
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().fold(String::new(), |mut s, b| {
         let _ = write!(s, "{b:02x}");
         s
@@ -532,7 +533,7 @@ impl Journal {
             Art::Format => Err(JournalFehler::Abgelehnt(
                 "Die Umstellung entsteht nur ueber stelle_um".into(),
             )),
-            Art::Beobachtung | Art::Topf | Art::Begruendung | Art::Abschluss => {
+            Art::Beobachtung | Art::Topf | Art::Kurs | Art::Begruendung | Art::Abschluss => {
                 self.schreibe_eintrag(art, inhalt)
             }
         }
@@ -625,6 +626,16 @@ impl Journal {
                 abdruck: abdruck.to_string(),
             }),
         )
+    }
+
+    /// Belegt einen Kurs mit Quelle, Abrufzeit und Abdruck der rohen Antwort, bevor er
+    /// verwendet wird (R12).
+    ///
+    /// # Errors
+    /// Wie `anhaengen`; `Abgelehnt` auch im Format 1 und bei einem Abruf vor dem letzten
+    /// belegten.
+    pub fn belege_kurs(&mut self, beleg: &KursBeleg) -> Result<(), JournalFehler> {
+        self.anhaengen(Art::Kurs, &kursbeleg_text(beleg))
     }
 
     /// Belegt den ganzen Stand eines Topfes im Papierdepot.
