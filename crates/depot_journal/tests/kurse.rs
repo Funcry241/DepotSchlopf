@@ -302,3 +302,17 @@ fn kurseintrag_in_der_datei_nur_kanonisch() -> Result<(), String> {
     assert!(r.is_err(), "zurueckfallender Abruf angenommen");
     Ok(())
 }
+
+/// Ein Kurs mit Bruchteil eines Cents steht exakt im Journal: Cent mit Nachkommastellen, ohne
+/// Rundung. Ein Kurs in ganzen Cent steht wie bisher.
+#[test]
+fn kurs_mit_bruchteil_eines_cents_exakt() -> Result<(), String> {
+    let roh = "0".repeat(64);
+    let gut =
+        format!("alphavantage;quelle;2026-11-03T16:45:00Z;{roh};{A};4992.5;2026-11-03T16:35:00Z");
+    vorbedingung(
+        Journal::oeffnen(&mit(&[(Art::Kurs, &gut)])?),
+        "Kurs mit halbem Cent",
+    )?;
+    Ok(())
+}

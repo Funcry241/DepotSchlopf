@@ -328,3 +328,34 @@ fn schlusskurse_fehler() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// Echte Zeilen von Alpha Vantage aus dem ersten Lauf am 04.11.2026, je mit Kopfzeile: BASF
+/// (Zeile 24), Mercedes-Benz (Zeile 3, der Vortag des Laufs) und Infineon (Zeile 10). Der Schluss
+/// liegt jeweils auf einem halben Cent: 49,925 €, 41,155 € und 49,885 €.
+const HALBE_CENT: [&str; 3] = [
+    "timestamp,open,high,low,close,volume\r\n\
+2026-10-02,49.6550,50.2300,49.3600,49.9250,1579740\r\n",
+    "timestamp,open,high,low,close,volume\r\n\
+2026-11-02,40.6250,41.3650,40.2600,41.1550,2443353\r\n",
+    "timestamp,open,high,low,close,volume\r\n\
+2026-10-22,51.6000,52.1600,49.5600,49.8850,4830045\r\n",
+];
+
+/// Echte Antwort von Alpha Vantage fuer SAP (Abruf 04.11.2026, Auszug): nur ganze Cent.
+const SAP_ECHT: &str = "timestamp,open,high,low,close,volume\r\n\
+2026-11-03,208.2000,209.1000,203.0500,206.6500,1987935\r\n\
+2026-11-02,209.7500,211.2000,207.9500,210.5000,1476327\r\n\
+2026-10-30,210.7000,214.4000,210.1500,211.2500,2032568\r\n";
+
+/// Ein Schluss feiner als ein Cent ist ein gueltiger Kurs: Er wird gelesen, nicht verworfen und
+/// nicht gerundet.
+#[test]
+fn schluss_mit_bruchteil_eines_cents() -> Result<(), String> {
+    for roh in HALBE_CENT {
+        let k = lies_tageskurse(roh).map_err(|e| format!("{e:?} in {roh}"))?;
+        assert!(!k.is_empty());
+    }
+    let sap = lies_tageskurse(SAP_ECHT).map_err(|e| format!("{e:?}"))?;
+    assert_eq!(sap.len(), 3);
+    Ok(())
+}
