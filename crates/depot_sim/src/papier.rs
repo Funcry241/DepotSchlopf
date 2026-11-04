@@ -120,7 +120,7 @@ impl Papierkonto {
             return;
         };
         let a = &o.auftrag;
-        let ausfuehrung = kurse.kurs(&a.isin).and_then(|kurs| {
+        let ausfuehrung = kurse.kurs_cent(&a.isin).and_then(|kurs| {
             let im_limit = match a.richtung {
                 Richtung::Kauf => kurs <= a.limit,
                 Richtung::Verkauf => kurs >= a.limit,

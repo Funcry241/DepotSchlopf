@@ -212,14 +212,14 @@ impl Danach {
     /// Wert zu Kursen.
     fn wert(&self, kurse: &Kurse) -> i128 {
         self.stueck.iter().fold(self.bargeld, |summe, (i, s)| {
-            summe.saturating_add(mal(kurse.kurs(i).unwrap_or(Cent::NULL), *s))
+            summe.saturating_add(mal(kurse.kurs_cent(i).unwrap_or(Cent::NULL), *s))
         })
     }
 
     /// Anteil eines Werts in Basispunkten, aufgerundet.
     fn anteil_bp(&self, isin: &Isin, kurse: &Kurse) -> i128 {
         let w = mal(
-            kurse.kurs(isin).unwrap_or(Cent::NULL),
+            kurse.kurs_cent(isin).unwrap_or(Cent::NULL),
             self.stueck.get(isin).copied().unwrap_or(0),
         );
         let gesamt = self.wert(kurse);

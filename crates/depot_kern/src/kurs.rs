@@ -187,11 +187,15 @@ impl Kurse {
         self.0.stand
     }
 
-    /// Preis je Stueck in ganzen Cent, fuer Bewertung und Limits; `None`, wenn kein Kurs
-    /// vorliegt oder er feiner als ein Cent ist. Ein solcher Kurs wird hier nicht gerundet: Wer
-    /// damit Geld rechnet, faellt geschlossen aus, bis die Rundungsrichtung je Zweck als Regel
-    /// feststeht. Den exakten Preis hat `eintrag`.
-    pub fn kurs(&self, isin: &Isin) -> Option<Cent> {
+    /// Exakter Preis je Stueck; `None`, wenn kein Kurs vorliegt. Wer daraus Geld in ganzen Cent
+    /// rechnet, rundet ausdruecklich mit `Rundung` zur sicheren Seite.
+    pub fn kurs(&self, isin: &Isin) -> Option<Preis> {
+        self.0.kurse.get(isin).map(Kurs::preis)
+    }
+
+    /// Preis je Stueck in ganzen Cent, nur wenn er genau auf einem Cent liegt; sonst `None`.
+    /// Nie gerundet.
+    pub fn kurs_cent(&self, isin: &Isin) -> Option<Cent> {
         self.0.kurse.get(isin).and_then(Kurs::preis_cent)
     }
 
