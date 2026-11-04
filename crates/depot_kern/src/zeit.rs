@@ -114,14 +114,6 @@ impl Zeitpunkt {
     pub fn sekunden(self) -> i64 {
         self.sekunden
     }
-
-    /// Liegt der Zeitpunkt an diesem Tag oder spaeter (UTC)?
-    pub fn ab_tag(self, datum: Datum) -> bool {
-        datum
-            .tage_seit_1970()
-            .and_then(|t| t.checked_mul(SEKUNDEN_JE_TAG))
-            .is_some_and(|beginn| self.sekunden >= beginn)
-    }
 }
 
 #[cfg(test)]

@@ -13,6 +13,17 @@ Maus' Befunde stehen als Tests im Repository, am Stand `7e3a8e9` rot (eigener Co
 
 Gegenproben zu Fassung 2, jeweils neu übersetzt: Abdruck nicht verglichen, Kette nicht gekettet, Ereignisse, Startstand, Positivliste, Vorlauf oder Tageskurse nicht im Abdruck, Form des Abdrucks nicht geprüft, Abruf, Kurszeitpunkt oder Vergleichskurs nicht gegen den Handelstag geprüft. Jede macht einen der neuen Tests rot.
 
+## Fassung 3 nach Maus' Nachprüfung von `316e575` (K15-03)
+
+K15-01 und der ursprüngliche Fall von K15-02 hat Maus als behoben bestätigt. Maus' Gegenprobe steht als Test im Repository, am Stand `316e575` rot (eigener Commit `c55b608`).
+
+- **K15-03:** Ein Vergleichskurs konnte aus der Zukunft stammen: ein Vorlaufkurs mit Handelstag 24.11. und Zeitpunkt 26.11. galt im Zyklus des 25.11. `Kurs::neu` nahm jeden Zeitpunkt ab dem Handelstag an, die Kursprüfung schaute beim Vergleichskurs nur auf den Handelstag. Allgemeine Regel jetzt, an zwei Stellen:
+  - Ein Kurs liegt an seinem Handelstag, nie davor und nie danach. `Kurs::neu` lehnt jeden anderen Zeitpunkt ab (`KursFehler::Handelstag`). Damit gibt es den Kurs aus der Zukunft gar nicht erst, in keinem Lauf.
+  - Die Kursprüfung nimmt nichts zum Vergleich, was es zum Abruf des Zyklus noch nicht gab: Liegt der Vergleichsabruf nach dem Abruf, ist das `VergleichsabrufNachAbruf`, und der Zyklus fällt aus, bevor ein Berater gefragt oder ein Auftrag belegt wird.
+  - `Zeitpunkt::ab_tag` hatte keinen Nutzer mehr und ist entfernt.
+- Tests: `befund_k15_03_kurszeitpunkt_liegt_am_handelstag` (Kern, mit Tagesanfang und Tagesende als Kontrolle), `befund_k15_03_vergleichsabruf_liegt_nicht_nach_dem_abruf` (Regelwerk), `befund_k15_03_vergleichskurs_aus_der_zukunft` (Simulation, Maus' Fall). Nach dem roten Commit ergänzt: `befund_k15_03_vergleichsabruf_aus_der_zukunft` (Simulation, Vorlaufkurse am 24.11., Abruf am 26.11.). Der Fall „Zeitpunkt am Folgetag“ im Regelwerkstest zu K15-02 entfällt, weil sich ein solcher Kurs nicht mehr bauen lässt; der Kerntest deckt ihn ab.
+- Gegenproben, jeweils neu übersetzt: alte Prüfung in `Kurs::neu` (nur ab Handelstag) und Tagesende eingeschlossen machen den Kerntest rot; ohne Prüfung des Vergleichsabrufs werden der Regelwerkstest und der zweite Simulationstest rot. Ohne die Prüfung in `Kurs::neu` bleibt Maus' Simulationsfall grün, weil die Prüfung des Vergleichsabrufs ihn dann fängt: Ein Kurs liegt nie nach seinem Abruf. Beide Stellen halten also unabhängig.
+
 ## Was der Lauf festlegt und was nicht
 
 Der Lauf schreibt keine Abwägung vor. Was gekauft wird, schlägt der Berater des Topfes vor und begründet jedes Ziel selbst. Der Rahmen hält nur den Schutz:

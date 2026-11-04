@@ -601,3 +601,29 @@ fn befund_k15_03_vergleichskurs_aus_der_zukunft() -> Result<(), String> {
     assert!(von(&j, t25, "Simulation").is_empty(), "kein Auftrag");
     Ok(())
 }
+
+/// K15-03, zweiter Weg: Die Vorlaufkurse liegen am 24.11., aber ihr Abruf ist vom 26.11. Auch
+/// das lag am 25.11. noch nicht vor; niemand wird gefragt, kein Auftrag.
+#[test]
+fn befund_k15_03_vergleichsabruf_aus_der_zukunft() -> Result<(), String> {
+    let (mut s, mut dachs, mut maus) = beispiel()?;
+    let zukunft = depot_kern::Zeitpunkt::neu(datum(26, 11)?, 17, 30, 0).ok_or("Zeit")?;
+    let eintraege = s
+        .vorlauf
+        .alle()
+        .map(|(i, k)| (i.clone(), k.clone()))
+        .collect();
+    s.vorlauf = vorbedingung(Kurse::neu(zukunft, eintraege), "Vorlauf")?;
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus), "Lauf")?;
+    let t25 = datum(25, 11)?;
+    let daten = von(&j, t25, "Daten");
+    assert!(
+        daten.iter().any(|t| t.contains("VergleichsabrufNachAbruf")),
+        "{daten:?}"
+    );
+    assert_eq!(buchungen_am(&j, t25), 0, "niemand gefragt");
+    assert!(von(&j, t25, "Simulation").is_empty(), "kein Auftrag");
+    Ok(())
+}

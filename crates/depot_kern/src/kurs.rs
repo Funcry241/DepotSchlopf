@@ -31,7 +31,7 @@ pub enum KursFehler {
     NichtPositiv,
     /// Waehrung fehlt oder ist nicht `EUR`.
     Waehrung,
-    /// Der Handelstag liegt nach dem Zeitpunkt des Kurses.
+    /// Der Zeitpunkt des Kurses liegt nicht an seinem Handelstag.
     Handelstag,
     /// Der Kurs ist juenger als der Stand der Kurse.
     Zukunft(Isin),
@@ -53,7 +53,8 @@ impl Kurs {
     /// Die Waehrung kommt als Code, wie die Quelle sie liefert; nur genau `EUR` gilt.
     ///
     /// # Errors
-    /// Preis nicht positiv, Waehrung nicht `EUR`, Handelstag nach dem Zeitpunkt.
+    /// Preis nicht positiv, Waehrung nicht `EUR`, Zeitpunkt nicht am Handelstag (K15-03): Ein
+    /// Kurs liegt an seinem Handelstag, nie davor und nie danach.
     pub fn neu(
         preis: Cent,
         waehrung: &str,
@@ -67,7 +68,7 @@ impl Kurs {
         if waehrung != "EUR" {
             return Err(KursFehler::Waehrung);
         }
-        if !zeitpunkt.ab_tag(handelstag) {
+        if !zeitpunkt.am_tag(handelstag) {
             return Err(KursFehler::Handelstag);
         }
         Ok(Kurs {

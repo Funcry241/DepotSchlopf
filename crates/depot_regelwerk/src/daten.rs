@@ -26,7 +26,8 @@ pub enum DatenFehler {
     KursNichtAmHandelstag(Isin),
     /// Der Vergleichskurs stammt nicht von einem frueheren Handelstag (K15-02).
     VergleichskursNichtVorher(Isin),
-    /// Leere Schnittstelle fuer die roten Tests.
+    /// Der Vergleichsabruf liegt nach dem Abruf des Zyklus: Seine Kurse lagen damals noch
+    /// nicht vor (K15-03).
     VergleichsabrufNachAbruf,
 }
 
@@ -42,6 +43,11 @@ pub fn pruefe_kurse(
     // Alter misst gegen den Abruf; der Abruf selbst muss am Handelstag liegen (K15-02).
     if !heute.stand().am_tag(handelstag) {
         fehler.push(DatenFehler::AbrufNichtAmHandelstag);
+    }
+    // Nichts zum Vergleich, was es zum Abruf noch nicht gab (K15-03). Jeder Vergleichskurs liegt
+    // an seinem Handelstag (`Kurs::neu`) und damit vor dem Handelstag des Zyklus.
+    if vortag.stand() > heute.stand() {
+        fehler.push(DatenFehler::VergleichsabrufNachAbruf);
     }
     for isin in universum.isins() {
         let Some(eintrag) = heute.eintrag(&isin) else {

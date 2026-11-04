@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: FestschreibungAenderung
-zweck: Simulierter Lauf mit erfundenen Daten und Papiergeld entlang R8, R31, D01, D03 und Kap. 11: neues Crate depot_sim mit erfundenem Szenario und Beratern nach Drehbuch; Dachs und Maus beobachten und begruenden im Journal, der Lauf haelt nur den Schutzrahmen (Kostenschutz, Zweitmeinung, Regelwerk, Datenpruefung, Waechter) und fuehrt auf Papier aus; nur erfundene Kurse. Das Journal bekommt Begruendung und Tagesabschluss; der Wiederanlauf setzt nach dem letzten Abschluss fort. Nach Maus K15-01 und K15-02: Abschluss mit Abdruck der Vorgeschichte, Kurse gehoeren zum Handelstag. Keine neuen Grenzen, keine Kaufregeln.
+zweck: Simulierter Lauf mit erfundenen Daten und Papiergeld entlang R8, R31, D01, D03 und Kap. 11: neues Crate depot_sim mit erfundenem Szenario und Beratern nach Drehbuch; Dachs und Maus beobachten und begruenden im Journal, der Lauf haelt nur den Schutzrahmen (Kostenschutz, Zweitmeinung, Regelwerk, Datenpruefung, Waechter) und fuehrt auf Papier aus; nur erfundene Kurse. Das Journal bekommt Begruendung und Tagesabschluss; der Wiederanlauf setzt nach dem letzten Abschluss fort. Nach Maus K15-01 und K15-02: Abschluss mit Abdruck der Vorgeschichte, Kurse gehoeren zum Handelstag; nach K15-03 liegt ein Kurs an seinem Handelstag und kein Vergleichsabruf nach dem Abruf. Keine neuen Grenzen, keine Kaufregeln.
 pfade:
 crates/depot_sim/
 crates/depot_journal/
