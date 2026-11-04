@@ -37,7 +37,7 @@ Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 | `depot_journal` | Das Journal als einzige dauerhafte Datei: Hash-Kette mit Anhangsvermerk, geprüfte Wiederherstellung; Papierdepot, Aufträge mit Zustand, belegte Kurse mit Quelle und Abrufzeit, Beobachtungen und KI-Buchungen. Dazu der Kontowächter: Deckung vor jeder Reservierung, Abgleich mit dem Konto, Halt bei jeder Abweichung |
 | `depot_ki` | Regeln des KI-Budgets ohne Datei; das Kassenbuch steht im Journal, eine Erlaubnis gibt es nur nach Buchung der Höchstkosten dort |
 | `depot_sim` | Simulierter Lauf mit erfundenen Daten und Papiergeld: Dachs und Maus beobachten, begründen im Journal und entscheiden im Schutzrahmen; ausgeführt wird über ein erfundenes Papierkonto, mit dem der Kontowächter abgleicht; echte Kurse halten den Lauf an |
-| `depot_sammler` | Holt Xetra-Schlusskurse lesend von Alpha Vantage, legt jede Antwort roh unter `daten/roh/` ab, belegt jeden Kurs im Journal und prüft ihn. Einziges Crate mit Netz |
+| `depot_sammler` | Holt Xetra-Schlusskurse lesend von Alpha Vantage und die Termine der EZB von ihrer Seite, legt jede Antwort roh unter `daten/roh/` ab, belegt jeden Kurs und Termin im Journal und prüft die Kurse. Einziges Crate mit Netz |
 | `depot_lauf` | Der Ein-Befehl-Einstieg `run.cmd` mit Assistenten-Export nach jedem Lauf |
 | `depot_kodex` | Das Gate: Deklaration gegen realen Diff, Pfadrollen, Festschreibung, Quellscan, Essenz, Format, Clippy, Tests |
 
@@ -72,6 +72,10 @@ run.cmd kurse einrichten
 ```
 
 Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je Wert, 15 Sekunden Abstand), belegt sie in `daten/journal.txt` und zeigt das Ergebnis der Kursprüfung. Es entstehen keine Aufträge und keine KI-Anfragen. Der Schlüssel steht nie im Journal, in einer Meldung oder im Export.
+
+### Termine der EZB (nur lesend)
+
+`run.cmd termine` holt die Sitzungstermine des EZB-Rats von der Seite der EZB, legt die Seite roh unter `daten/roh/ezb/` ab und belegt jeden Termin mit Quelle und Abrufzeit in `daten/journal.txt`. Ein Schlüssel ist nicht nötig, nur das Journal (`run.cmd kurse einrichten`). Ein unveränderter Termin wird nicht noch einmal geschrieben, ein geänderter fortgeschrieben.
 
 ## Mitmachen
 
