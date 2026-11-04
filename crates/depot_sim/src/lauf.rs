@@ -24,7 +24,7 @@
 //! zweite Frage fuer denselben Zyklus.
 
 use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung};
-use depot_kern::{BeraterId, Cent, Grenzen, Herkunft, Kurse, Topf, TopfId, Vorschlag};
+use depot_kern::{BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Vorschlag};
 use depot_ki::Sperre;
 use depot_regelwerk::{
     DatenFehler, Eingabe, GenehmigterAuftrag, WaechterBefund, entscheide, notbremse_auftraege,
@@ -129,10 +129,17 @@ fn nur_simulation(s: &Szenario) -> Result<(), LaufFehler> {
     Ok(())
 }
 
-fn depotwert<'a>(toepfe: impl Iterator<Item = &'a Topf>, kurse: &Kurse) -> Option<Cent> {
-    toepfe
-        .into_iter()
-        .try_fold(Cent::NULL, |s, t| s.checked_add(t.wert(kurse)?))
+/// Depotwert in ganzen Cent. Der heutige Wert wird abgerundet, Vergleichswerte (Vortag,
+/// Hoechststand) aufgerundet: So verdeckt die Rundung keinen Verlust (K21-01). Bei Kursen in
+/// ganzen Cent ist beides derselbe Wert.
+fn depotwert<'a>(
+    toepfe: impl Iterator<Item = &'a Topf>,
+    kurse: &Kurse,
+    rundung: Rundung,
+) -> Option<Cent> {
+    toepfe.into_iter().try_fold(Cent::NULL, |s, t| {
+        s.checked_add(t.wert_gerundet(kurse, rundung)?)
+    })
 }
 
 /// Laeuft das Szenario ab dem Tag nach dem letzten Abschluss. `konto` ist das Papierkonto;
@@ -201,7 +208,7 @@ pub fn lauf(
         for t in &s.start {
             j.setze_topf(t).map_err(journal)?;
         }
-        depotwert(s.start.iter(), &s.vorlauf).ok_or_else(|| rechnung("Startwert"))?
+        depotwert(s.start.iter(), &s.vorlauf, Rundung::Auf).ok_or_else(|| rechnung("Startwert"))?
     };
     let mut vortag = &s.vorlauf;
     let mut beteiligte = Beteiligte { dachs, maus, konto };
@@ -297,8 +304,8 @@ fn ein_tag(
         return Ok(hoch);
     }
     let toepfe: Vec<Topf> = jr.stand().toepfe().values().cloned().collect();
-    let heute = depotwert(toepfe.iter(), &tag.kurse);
-    let befund = match (heute, depotwert(toepfe.iter(), z.vortag)) {
+    let heute = depotwert(toepfe.iter(), &tag.kurse, Rundung::Ab);
+    let befund = match (heute, depotwert(toepfe.iter(), z.vortag, Rundung::Auf)) {
         (Some(wert), Some(gestern)) => waechter(z.grenzen, wert, gestern, hoch),
         _ => WaechterBefund::Unplausibel,
     };
@@ -329,7 +336,9 @@ fn ein_tag(
             return Err(halt(format!("Waechter: {befund:?}")));
         }
     }
-    let heute = heute.ok_or_else(|| rechnung("Depotwert"))?;
+    // Fuer den Hoechststand zaehlt der aufgerundete Wert (siehe `depotwert`).
+    let heute =
+        depotwert(toepfe.iter(), &tag.kurse, Rundung::Auf).ok_or_else(|| rechnung("Depotwert"))?;
     let b = beteiligte;
     topf_zyklus(jr, z, TopfId::A, b.dachs, b.maus, &mut *b.konto)?;
     topf_zyklus(jr, z, TopfId::B, b.maus, b.dachs, &mut *b.konto)?;

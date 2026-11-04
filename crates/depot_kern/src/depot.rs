@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::geld::Cent;
 use crate::instrument::Isin;
 use crate::kurs::Kurse;
-use crate::preis::Rundung;
+use crate::preis::{Preis, Rundung};
 
 /// Die beiden KIs. Dachs = Claude, Maus = GPT.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -81,13 +81,26 @@ impl Topf {
         &self.positionen
     }
 
-    /// Gesamtwert zu den gegebenen Kursen, jede Position auf ganze Cent abgerundet: Das Depot
-    /// rechnet sich nie reicher. `None`, wenn ein Kurs fehlt oder ein Ueberlauf droht.
+    /// Gesamtwert zu den gegebenen Kursen, auf ganze Cent abgerundet: Das Depot rechnet sich nie
+    /// reicher. `None`, wenn ein Kurs fehlt oder ein Ueberlauf droht.
     pub fn wert(&self, kurse: &Kurse) -> Option<Cent> {
-        let mut summe = self.bargeld;
+        self.wert_gerundet(kurse, Rundung::Ab)
+    }
+
+    /// Gesamtwert in ganzen Cent, in der genannten Richtung gerundet. Ein Vergleichswert, an dem
+    /// ein Rueckgang gemessen wird (Vortag, Hoechststand), wird aufgerundet, der heutige Wert
+    /// abgerundet: So verdeckt die Rundung keinen Verlust.
+    pub fn wert_gerundet(&self, kurse: &Kurse, rundung: Rundung) -> Option<Cent> {
+        self.wert_exakt(kurse)?.mal_stueck(1, rundung)
+    }
+
+    /// Gesamtwert exakt, ohne Rundung: fuer Grenzpruefungen (K21-01). `None`, wenn ein Kurs
+    /// fehlt oder ein Ueberlauf droht.
+    pub fn wert_exakt(&self, kurse: &Kurse) -> Option<Preis> {
+        let mut summe = Preis::aus_cent(self.bargeld)?;
         for (isin, stueck) in &self.positionen {
             let kurs = kurse.kurs(isin)?;
-            summe = summe.checked_add(kurs.mal_stueck(*stueck, Rundung::Ab)?)?;
+            summe = summe.checked_add(kurs.mal_stueck_exakt(*stueck)?)?;
         }
         Some(summe)
     }

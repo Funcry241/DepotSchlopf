@@ -13,10 +13,11 @@ use std::collections::BTreeMap;
 
 use depot_kern::{
     BeraterId, Cent, Datum, Grenzen, Herkunft, Instrument, InstrumentArt, Isin, Kurs, Kurse, Preis,
-    Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
+    Rundung, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
 };
 use depot_regelwerk::{
-    Anlass, Eingabe, Entscheidung, Kennungsvergabe, Richtung, entscheide, notbremse_auftraege,
+    Anlass, Eingabe, Entscheidung, Kennungsvergabe, Richtung, WaechterBefund, entscheide,
+    notbremse_auftraege, waechter,
 };
 
 const BASF: &str = "DE000BASF111";
@@ -119,43 +120,58 @@ fn abbau_prueft_den_anteil_exakt() {
     // Knapp darunter (134,99 € Bargeld: exakt 26,99889 %) bleibt der Bestand.
     let ent = lauf_ohne(&topf(13_499, &[(BASF, 1)]), &k);
     assert!(ent.verkaeufe.is_empty(), "{ent:?}");
+    // Auch der Topfwert zaehlt exakt: 3 BASF und 404,95 € sind exakt 26,99999 %, kein Abbau.
+    // Mit abgerundetem Topfwert (554,72 € statt 554,725 €) waeren es 27,00024 %.
+    let ent = lauf_ohne(&topf(40_495, &[(BASF, 3)]), &k);
+    assert!(ent.verkaeufe.is_empty(), "{ent:?}");
 }
 
-/// Nach dem Abbau liegt der verbleibende Bestand exakt hoechstens beim Hoechstanteil des
-/// exakten Topfwerts, fuer viele Bestaende und Bargeldbetraege mit einem Kurs auf halbem Cent.
+/// Abbau genau dann, wenn der exakte Anteil ueber Hoechstanteil plus Toleranz liegt, und danach
+/// liegt der Rest exakt hoechstens beim Hoechstanteil des exakten Topfwerts nach der eigenen
+/// Minderung (Abstand zum Limit plus Gebuehr). Viele Bestaende und Bargeldbetraege mit einem Kurs
+/// auf halbem Cent.
 #[test]
-fn abbau_laesst_exakt_hoechstens_den_hoechstanteil() {
+fn abbau_genau_dann_und_rest_exakt_im_rahmen() {
     let g = Grenzen::standard();
     let fein: i64 = 49_925_000;
     let k = kurse(&[(BASF, fein), (MBG, 41_480_000)]);
-    let mut geprueft = 0;
+    let schwelle = i128::from(g.max_anteil_bp() + g.bestand_toleranz_bp());
+    let mut faelle = (0, 0);
     for stueck in 1..=12_u64 {
-        for bargeld in (0..40_000_i64).step_by(7) {
+        for bargeld in (0..40_000_i64).step_by(3) {
             let ent = lauf_ohne(&topf(bargeld, &[(BASF, stueck)]), &k);
-            let verkauft: u64 = ent
+            let abbau: Vec<_> = ent
                 .verkaeufe
                 .iter()
                 .filter(|a| a.beleg().anlass == Anlass::Abbau)
-                .map(|a| a.auftrag().stueck)
-                .sum();
-            let rest = i128::from(stueck - verkauft) * i128::from(fein);
-            let gesamt = i128::from(bargeld) * 10_000 + i128::from(stueck) * i128::from(fein);
-            // Schwelle fuer den Abbau: Hoechstanteil plus Toleranz.
-            let schwelle = i128::from(g.max_anteil_bp() + g.bestand_toleranz_bp());
-            if i128::from(stueck) * i128::from(fein) * 10_000 > gesamt * schwelle {
-                geprueft += 1;
-                assert!(verkauft > 0, "{stueck} Stueck, {bargeld} Cent: kein Abbau");
-                assert!(
-                    rest * 10_000 <= gesamt * i128::from(g.max_anteil_bp()),
-                    "{stueck} Stueck, {bargeld} Cent: Rest {rest} ueber dem Hoechstanteil"
-                );
+                .collect();
+            let wert = i128::from(stueck) * i128::from(fein);
+            let gesamt = i128::from(bargeld) * 10_000 + wert;
+            let fall = format!("{stueck} Stueck, {bargeld} Cent");
+            if wert * 10_000 <= gesamt * schwelle {
+                faelle.0 += 1;
+                assert!(abbau.is_empty(), "{fall}: Abbau ohne Grenzuebertritt");
+                continue;
             }
+            faelle.1 += 1;
+            assert_eq!(abbau.len(), 1, "{fall}: kein einzelner Abbau: {ent:?}");
+            let Some(a) = abbau.first() else {
+                continue;
+            };
+            let (verkauft, limit) = (a.auftrag().stueck, a.auftrag().limit);
+            let volumen = limit.mal_stueck(verkauft).unwrap_or(Cent(i64::MAX));
+            let gebuehr = g.gebuehren().fuer(volumen).unwrap_or(Cent(i64::MAX));
+            let minderung = (i128::from(fein) - i128::from(limit.0) * 10_000)
+                * i128::from(verkauft)
+                + i128::from(gebuehr.0) * 10_000;
+            let rest = i128::from(stueck - verkauft) * i128::from(fein);
+            assert!(
+                rest * 10_000 <= (gesamt - minderung) * i128::from(g.max_anteil_bp()),
+                "{fall}: Rest {rest} ueber dem Hoechstanteil"
+            );
         }
     }
-    assert!(
-        geprueft > 100,
-        "Vorbedingung: nur {geprueft} Faelle ueber der Schwelle"
-    );
+    assert!(faelle.0 > 100 && faelle.1 > 100, "Vorbedingung: {faelle:?}");
 }
 
 /// 3 × 49,925 € = 149,775 € zaehlen als 149,77 €. In ganzen Cent bleibt alles wie bisher.
@@ -218,4 +234,27 @@ fn notbremse_mit_feinem_kurs() {
             (BASF.to_string(), Cent(4_943)),
         ])
     );
+}
+
+/// Waechter: Gestern 49,929 €, heute 47,43255 € sind exakt 5 % Tagesverlust. Beide abgerundet
+/// (49,92 € und 47,43 €) waeren es 4,988 %, und der Halt bliebe aus. Der Vergleichswert wird
+/// deshalb aufgerundet, der heutige Wert abgerundet; dann sind es 5,007 %.
+#[test]
+fn waechter_rundung_verdeckt_keinen_verlust() {
+    let g = Grenzen::standard();
+    let t = topf(0, &[(BASF, 1)]);
+    let gestern = kurse(&[(BASF, 49_929_000), (MBG, 41_480_000)]);
+    let heute = kurse(&[(BASF, 47_432_550), (MBG, 41_480_000)]);
+    let w = t.wert_gerundet(&heute, Rundung::Ab);
+    let v = t.wert_gerundet(&gestern, Rundung::Auf);
+    assert_eq!((w, v), (Some(Cent(4_743)), Some(Cent(4_993))));
+    let befund = w.zip(v).map(|(w, v)| waechter(&g, w, v, v));
+    assert_eq!(
+        befund,
+        Some(WaechterBefund::Tagesverlust { verlust_bp: 500 })
+    );
+    // Gegenprobe der Regel: beide abgerundet verdecken den Verlust.
+    let v_ab = t.wert_gerundet(&gestern, Rundung::Ab);
+    let verdeckt = w.zip(v_ab).map(|(w, v)| waechter(&g, w, v, v));
+    assert_eq!(verdeckt, Some(WaechterBefund::InOrdnung));
 }

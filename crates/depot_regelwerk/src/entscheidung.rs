@@ -164,15 +164,21 @@ fn frischer_kurs(g: &Grenzen, kurse: &Kurse, isin: &Isin) -> Option<Preis> {
         .flatten()
 }
 
-/// Ob `wert` mehr als `grenze_bp` von `gesamt` ist, exakt gerechnet.
-fn ueber_anteil(wert: Cent, gesamt: Cent, grenze_bp: i64) -> Option<bool> {
-    let links = i128::from(wert.0).checked_mul(i128::from(BP_GANZ))?;
-    let rechts = i128::from(gesamt.0).checked_mul(i128::from(grenze_bp))?;
+/// Ob `wert` mehr als `grenze_bp` von `gesamt` ist, exakt gerechnet. Beide Werte sind exakt,
+/// nie vorher gerundet: Eine Rundung koennte einen Grenzuebertritt verdecken (K21-01).
+fn ueber_anteil(wert: Preis, gesamt: Preis, grenze_bp: i64) -> Option<bool> {
+    let links = i128::from(wert.fein()).checked_mul(i128::from(BP_GANZ))?;
+    let rechts = i128::from(gesamt.fein()).checked_mul(i128::from(grenze_bp))?;
     Some(links > rechts)
 }
 
-/// Ganze Stuecke fuer einen Betrag, abgerundet.
-fn stueck_fuer(betrag: Cent, kurs: Preis) -> Option<u64> {
+/// Ein Betrag in ganzen Cent als exakter Wert.
+fn exakt(c: Cent) -> Option<Preis> {
+    Preis::aus_cent(c)
+}
+
+/// Ganze Stuecke fuer einen exakten Betrag, abgerundet.
+fn stueck_fuer(betrag: Preis, kurs: Preis) -> Option<u64> {
     kurs.stueck_fuer(betrag)
 }
 
@@ -274,7 +280,7 @@ fn plane(e: &Eingabe<'_>, befunde: &mut Vec<Befund>) -> Option<(Vec<Kandidat>, V
     ausstieg_positivliste(e, &mut zwang, &mut gesperrt, befunde);
 
     let topfwert = if kurse_ok {
-        Some(e.topf.wert(e.kurse)?).filter(|w| w.0 > 0)
+        Some(e.topf.wert_exakt(e.kurse)?).filter(|w| w.fein() > 0)
     } else {
         None
     };
@@ -339,7 +345,7 @@ fn plane(e: &Eingabe<'_>, befunde: &mut Vec<Befund>) -> Option<(Vec<Kandidat>, V
 /// geaendert hat.
 fn abbau_nachziehen(
     e: &Eingabe<'_>,
-    topfwert: Cent,
+    topfwert: Preis,
     zwang: &mut [Kandidat],
     verkaeufe: &[Kandidat],
     kaeufe: &[Kandidat],
@@ -354,7 +360,7 @@ fn abbau_nachziehen(
         if k.anlass != Anlass::Abbau || k.komplett {
             continue;
         }
-        let basis = topfwert.checked_sub(verlust.checked_sub(k.verlust(g)?)?)?;
+        let basis = topfwert.checked_sub(exakt(verlust.checked_sub(k.verlust(g)?)?)?)?;
         let stueck = abbau_menge(g, k, e.topf.stueck(&k.isin), basis)?;
         if stueck > k.stueck {
             k.komplett = stueck == e.topf.stueck(&k.isin);
@@ -368,15 +374,15 @@ fn abbau_nachziehen(
 /// Kleinste Verkaufsmenge, nach der der Rest (zum Kurs) hoechstens den Hoechstanteil von
 /// `basis` abzueglich der eigenen Minderung hat. `basis` ist der Topfwert nach allen anderen
 /// Auftraegen.
-fn abbau_menge(g: &Grenzen, k: &Kandidat, gehalten: u64, basis: Cent) -> Option<u64> {
+fn abbau_menge(g: &Grenzen, k: &Kandidat, gehalten: u64, basis: Preis) -> Option<u64> {
     let behalten = groesste_passende(gehalten, |r| {
         let probe = Kandidat {
             stueck: gehalten.checked_sub(r)?,
             ..k.clone()
         };
-        let gesamt = basis.checked_sub(probe.verlust(g)?)?;
+        let gesamt = basis.checked_sub(exakt(probe.verlust(g)?)?)?;
         Some(!ueber_anteil(
-            k.kurs.mal_stueck(r, Rundung::Ab)?,
+            k.kurs.mal_stueck_exakt(r)?,
             gesamt,
             g.max_anteil_bp(),
         )?)
@@ -416,7 +422,7 @@ fn ausstieg_positivliste(
 /// hoechster Gebuehr. Zukauf ist gesperrt, unabhaengig von der Umschichtungsschwelle.
 fn abbau_anteil(
     e: &Eingabe<'_>,
-    topfwert: Cent,
+    topfwert: Preis,
     zwang: &mut Vec<Kandidat>,
     gesperrt: &mut BTreeSet<Isin>,
     befunde: &mut Vec<Befund>,
@@ -428,7 +434,7 @@ fn abbau_anteil(
             continue;
         }
         let kurs = e.kurse.kurs(isin)?;
-        let wert = kurs.mal_stueck(*gehalten, Rundung::Ab)?;
+        let wert = kurs.mal_stueck_exakt(*gehalten)?;
         if !ueber_anteil(wert, topfwert, schwelle)? {
             continue;
         }
@@ -482,7 +488,7 @@ fn abbau_positionen(
         if ganz_verkauft.contains(isin) || !e.universum.handelbar(isin, g) {
             continue;
         }
-        let wert = e.kurse.kurs(isin)?.mal_stueck(*gehalten, Rundung::Ab)?;
+        let wert = e.kurse.kurs(isin)?.mal_stueck_exakt(*gehalten)?;
         bleiben.push((wert, isin.clone(), *gehalten));
     }
     let zu_viel = bleiben.len().saturating_sub(g.max_werte());
@@ -568,7 +574,7 @@ fn pruefe_vorschlag(
 )]
 fn freiwillig(
     e: &Eingabe<'_>,
-    topfwert: Cent,
+    topfwert: Preis,
     ziele: &BTreeMap<Isin, i64>,
     gesperrt: &BTreeSet<Isin>,
     verkaeufe: &mut Vec<Kandidat>,
@@ -582,8 +588,9 @@ fn freiwillig(
     for k in verkaeufe.iter() {
         zwang_volumen = zwang_volumen.checked_add(k.umschlag(g)?)?;
     }
+    // Exakt gerechnet, erst der freie Betrag in ganzen Cent abgerundet.
     let umschlag_frei = topfwert
-        .anteil_bp_ab(g.max_umschlag_bp())?
+        .mal_bp(g.max_umschlag_bp(), Rundung::Ab)?
         .checked_sub(zwang_volumen)?;
     begrenze_umschlag(g, umschlag_frei, &mut kandidaten, befunde)?;
 
@@ -614,7 +621,7 @@ fn freiwillig(
 /// Anteils und Kaufgrenze der Positionszahl, alles am Limit mit hoechster Gebuehr.
 fn kaufe(
     e: &Eingabe<'_>,
-    topfwert: Cent,
+    topfwert: Preis,
     verkaeufe: &[Kandidat],
     geplant: Vec<Kandidat>,
     kaeufe: &mut Vec<Kandidat>,
@@ -634,7 +641,7 @@ fn kaufe(
         verlust = verlust.checked_add(k.verlust(g)?)?;
     }
     // Kleinster moeglicher Topfwert nach allen Auftraegen: Basis der Kaufgrenze.
-    let gesamt_min = topfwert.checked_sub(verlust)?;
+    let gesamt_min = topfwert.checked_sub(exakt(verlust)?)?;
 
     let ganz_verkauft: BTreeSet<&Isin> = verkaeufe
         .iter()
@@ -656,7 +663,7 @@ fn kaufe(
         }
         let limit = k.limit(g)?;
         let anteil_ok = groesste_passende(k.stueck, |s| {
-            let nach = limit.mal_stueck(gehalten.checked_add(s)?)?;
+            let nach = exakt(limit.mal_stueck(gehalten.checked_add(s)?)?)?;
             Some(!ueber_anteil(nach, gesamt_min, g.max_anteil_bp())?)
         })?;
         if anteil_ok < k.stueck {
@@ -685,7 +692,7 @@ fn kaufe(
 fn sammle_kandidaten(
     e: &Eingabe<'_>,
     ziele: &BTreeMap<Isin, i64>,
-    topfwert: Cent,
+    topfwert: Preis,
     gesperrt: &BTreeSet<Isin>,
     befunde: &mut Vec<Befund>,
 ) -> Option<Vec<Kandidat>> {
@@ -699,8 +706,8 @@ fn sammle_kandidaten(
         let kurs = frischer_kurs(g, e.kurse, isin)?;
         let gehalten = e.topf.stueck(isin);
         let ziel_bp = ziele.get(isin).copied().unwrap_or(0);
-        let ist_wert = kurs.mal_stueck(gehalten, Rundung::Ab)?;
-        let ziel_wert = topfwert.anteil_bp_ab(ziel_bp)?;
+        let ist_wert = kurs.mal_stueck_exakt(gehalten)?;
+        let ziel_wert = exakt(topfwert.mal_bp(ziel_bp, Rundung::Ab)?)?;
         let ist_bp = ist_wert.in_bp_von(topfwert)?;
         let abweichung = ziel_bp.checked_sub(ist_bp)?;
         if abweichung.checked_abs()? < g.min_aenderung_bp() {

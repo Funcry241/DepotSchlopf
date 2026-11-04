@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Geld aus exakten Kursen zur sicheren Seite runden (R4, R21; Vorgabe Maus 04.11.2026). Kurse bleiben exakt; Depotbewertung abgerundet, Kauflimit (Hoechstpreis) abgerundet, Verkaufslimit (Mindestpreis) aufgerundet, in Entscheidung und Notbremse; Umschlag und hoechstmoegliche Wertminderung aufgerundet. Kurse::kurs liefert den exakten Preis, Kurse::kurs_cent nur ganze Cent. Keine neuen Grenzen, keine neuen Abhaengigkeiten.
+zweck: Geld aus exakten Kursen zur sicheren Seite runden (R4, R21; Vorgabe Maus 04.11.2026). Kurse bleiben exakt; Depotbewertung abgerundet, Kauflimit (Hoechstpreis) abgerundet, Verkaufslimit (Mindestpreis) aufgerundet, in Entscheidung und Notbremse; Umschlag und hoechstmoegliche Wertminderung aufgerundet. Kurse::kurs liefert den exakten Preis, Kurse::kurs_cent nur ganze Cent. Nach Maus K21-01: Anteilsgrenzen messen exakt (Topf::wert_exakt), Waechter misst abgerundeten heutigen Wert an aufgerundetem Vortag und Hoechststand. Keine neuen Grenzen, keine neuen Abhaengigkeiten.
 pfade:
 crates/depot_kern/
 crates/depot_regelwerk/

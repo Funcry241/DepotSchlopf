@@ -112,6 +112,10 @@ impl Preis {
         (preis.cent_text() == text).then_some(preis)
     }
 
+    pub fn checked_add(self, other: Preis) -> Option<Preis> {
+        self.0.checked_add(other.0).map(Preis)
+    }
+
     pub fn checked_sub(self, other: Preis) -> Option<Preis> {
         self.0.checked_sub(other.0).map(Preis)
     }
@@ -150,14 +154,19 @@ impl Preis {
         self.in_cent(i128::from(bp), i128::from(BP_GANZ), richtung)
     }
 
-    /// Wie viele ganze Stuecke kosten hoechstens `betrag`? Abgerundet; 0 bei nicht positivem
+    /// Wie viele ganze Stuecke kosten hoechstens den exakten `betrag`? Abgerundet; 0 bei nicht positivem
     /// Betrag oder Preis.
-    pub fn stueck_fuer(self, betrag: Cent) -> Option<u64> {
+    pub fn stueck_fuer(self, betrag: Preis) -> Option<u64> {
         if self.0 <= 0 || betrag.0 <= 0 {
             return Some(0);
         }
-        let zaehler = i128::from(betrag.0).checked_mul(i128::from(FEIN_JE_CENT))?;
-        u64::try_from(zaehler.checked_div(i128::from(self.0))?).ok()
+        u64::try_from(betrag.0.checked_div(self.0)?).ok()
+    }
+
+    /// Der exakte Wert von `stueck` Stueck, ohne Rundung. Fuer Grenzpruefungen: Ein Anteil wird
+    /// am exakten Wert gemessen, nie an einem gerundeten (K21-01). `None` bei Ueberlauf.
+    pub fn mal_stueck_exakt(self, stueck: u64) -> Option<Preis> {
+        self.0.checked_mul(i64::try_from(stueck).ok()?).map(Preis)
     }
 
     /// Wie viele Basispunkte ist `self` von `basis`? Abgerundet wie `Cent::in_bp_von`, fuer
@@ -311,10 +320,12 @@ mod tests {
             }
         }
         assert_eq!(p(i64::MAX).mal_stueck(u64::MAX, Ab), None);
-        assert_eq!(p(49_925_000).stueck_fuer(Cent(100_000)), Some(20));
-        assert_eq!(p(50_000_000).stueck_fuer(Cent(100_000)), Some(20));
-        assert_eq!(p(50_000_001).stueck_fuer(Cent(100_000)), Some(19));
-        assert_eq!(p(1).stueck_fuer(Cent(0)), Some(0));
+        assert_eq!(p(49_925_000).stueck_fuer(p(1_000_000_000)), Some(20));
+        assert_eq!(p(50_000_000).stueck_fuer(p(1_000_000_000)), Some(20));
+        assert_eq!(p(50_000_001).stueck_fuer(p(1_000_000_000)), Some(19));
+        assert_eq!(p(49_925_000).mal_stueck_exakt(3), Some(p(149_775_000)));
+        assert_eq!(p(i64::MAX).mal_stueck_exakt(2), None);
+        assert_eq!(p(1).stueck_fuer(Preis::NULL), Some(0));
     }
 
     #[test]
