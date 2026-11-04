@@ -26,6 +26,7 @@ use depot_regelwerk::{
     notbremse_auftraege, pruefe_kurse, waechter,
 };
 
+use crate::abdruck;
 use crate::szenario::{Berater, Lage, Szenario, Tag};
 
 /// Wer im Journal begruendet, ausser Dachs und Maus.
@@ -147,13 +148,27 @@ pub fn lauf(
             st.seit_abschluss()
         )));
     }
-    let fertig = st.abschluss();
-    let fertig = fertig.map(|a| (a.datum, a.hoechststand));
-    if let Some((d, _)) = fertig
-        && !s.tage.iter().any(|t| t.datum == d)
-    {
-        return Err(halt("letzter Abschluss gehoert nicht zu diesem Szenario"));
-    }
+    // Der letzte Abschluss muss genau die Vorgeschichte dieses Szenarios abdrucken (K15-01).
+    // Dann sind Zyklusnummern, Vergleichskurse und Stand bis dahin dieselben wie beim ersten
+    // Lauf; nur die Tage danach duerfen anders sein.
+    let abdruecke = abdruck::je_tag(s);
+    let fertig = match st.abschluss() {
+        None => None,
+        Some(a) => {
+            let index = s
+                .tage
+                .iter()
+                .zip(&abdruecke)
+                .position(|(t, ab)| t.datum == a.datum && *ab == a.abdruck)
+                .ok_or_else(|| {
+                    halt(
+                        "Vorgeschichte weicht ab: Das Szenario ergibt bis zum letzten Abschluss \
+                         nicht denselben Abdruck. Halt; niemand wird gefragt",
+                    )
+                })?;
+            Some((index, a.hoechststand))
+        }
+    };
     let grenzen = Grenzen::standard();
     let mut hoch = if let Some((_, h)) = fertig {
         h
@@ -165,19 +180,20 @@ pub fn lauf(
     };
     let mut vortag = &s.vorlauf;
     let mut beteiligte = Beteiligte { dachs, maus };
-    for (i, tag) in s.tage.iter().enumerate() {
+    for (i, (tag, abdruck)) in s.tage.iter().zip(&abdruecke).enumerate() {
         let nr = u32::try_from(i)
             .ok()
             .and_then(|z| z.checked_add(1))
             .ok_or_else(|| rechnung("Zyklus"))?;
         let fehler = pruefe_kurse(&grenzen, &s.universum, tag.datum, &tag.kurse, vortag);
-        if fertig.is_none_or(|(d, _)| tag.datum > d) {
+        if fertig.is_none_or(|(index, _)| i > index) {
             let z = Zyklus {
                 grenzen: &grenzen,
                 szenario: s,
                 tag,
                 vortag,
                 nr,
+                abdruck,
             };
             hoch = ein_tag(j, &z, hoch, &fehler, &mut beteiligte)?;
         }
@@ -203,6 +219,8 @@ struct Zyklus<'a> {
     vortag: &'a Kurse,
     /// Zyklusnummer fuer den Kostenschutz: der wievielte Tag des Szenarios.
     nr: u32,
+    /// Abdruck der Vorgeschichte bis einschliesslich dieses Tages.
+    abdruck: &'a str,
 }
 
 /// Ein Tag. Liefert den Hoechststand nach dem Tag.
@@ -228,7 +246,7 @@ fn ein_tag(
             DATEN,
             "Zyklus faellt aus: niemand wird gefragt, kein Auftrag",
         )?;
-        jr.schliesse_ab(tag.datum, hoch, &"0".repeat(64))
+        jr.schliesse_ab(tag.datum, hoch, z.abdruck)
             .map_err(journal)?;
         return Ok(hoch);
     }
@@ -269,7 +287,7 @@ fn ein_tag(
     topf_zyklus(jr, z, TopfId::A, beteiligte.dachs, beteiligte.maus)?;
     topf_zyklus(jr, z, TopfId::B, beteiligte.maus, beteiligte.dachs)?;
     let hoch = hoch.max(heute);
-    jr.schliesse_ab(tag.datum, hoch, &"0".repeat(64))
+    jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
     Ok(hoch)
 }

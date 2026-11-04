@@ -93,6 +93,7 @@ dependencies = [
  "depot_kern",
  "depot_ki",
  "depot_regelwerk",
+ "sha2",
 ]
 
 [[package]]

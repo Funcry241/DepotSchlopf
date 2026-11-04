@@ -261,6 +261,11 @@ fn lies_abschluss(inhalt: &str) -> Option<Abschluss> {
     };
     let hoch = Cent(hoch.parse().ok()?);
     (hoch.0 > 0).then_some(())?;
+    let form = abdruck.len() == 64
+        && abdruck
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    form.then_some(())?;
     Some(Abschluss {
         datum: lies_datum(datum)?,
         hoechststand: hoch,

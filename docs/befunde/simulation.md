@@ -4,6 +4,15 @@ Stufe 2. Wolfgang hat am 03.11.2026 die Reihenfolge freigegeben: Persistenzbasis
 
 Ein grüner Test schließt nichts. „Technisch geschlossen“ setzt erst die Prüfung durch Maus.
 
+## Fassung 2 nach Maus' Prüfung von `7e3a8e9` (K15-01, K15-02)
+
+Maus' Befunde stehen als Tests im Repository, am Stand `7e3a8e9` rot (eigener Commit `efbb364`).
+
+- **K15-01:** Der Wiederanlauf nahm eine geänderte Vorgeschichte an. Es reichte, dass das Datum des letzten Abschlusses irgendwo im Szenario vorkam; Zyklusnummern und Vergleichskurse wurden aus dem neuen Szenario nachgerechnet. Allgemeine Regel jetzt: Jeder Tagesabschluss trägt einen Abdruck der ganzen Vorgeschichte bis zu diesem Tag (`crates/depot_sim/src/abdruck.rs`): Positivliste, Startstand, Vorlauf und jeder Tag mit Datum, allen Kursen samt Herkunft und Zeitpunkt und allen Ereignissen, als Kette mit Feldlängen. Ein Wiederanlauf setzt nur fort, wenn das Szenario bis zum letzten Abschluss genau diesen Abdruck ergibt; sonst ist Halt, bevor etwas geschrieben oder jemand gefragt wird. Die Kette legt auch die Zahl der Tage fest, also Zyklusnummern und Vergleichskurse. Nur die Tage nach dem letzten Abschluss dürfen anders sein. Das Journal prüft nur die Form des Abdrucks (64 Hex-Zeichen, klein). Der Test `befund_k15_01_wiederanlauf_prueft_die_vorgeschichte` prüft sechs Änderungen und als Kontrolle einen geänderten Tag nach dem Abschluss.
+- **K15-02:** Ein alter Kurssatz galt für einen neuen Handelstag als frisch, weil das Alter nur gegen den Zeitstempel des Abrufs gemessen wurde. Allgemeine Regel jetzt, im Regelwerk für jeden Lauf: `pruefe_kurse` bekommt den Handelstag des Zyklus. Der Abruf liegt an diesem Tag, jeder Kurs hat diesen Handelstag und einen Zeitpunkt an diesem Tag, und jeder Vergleichskurs stammt von einem früheren Handelstag. Sonst ist es ein Datenfehler, und der Zyklus fällt aus. Dazu `Zeitpunkt::am_tag`. Die Tests `befund_k15_02_kurse_gehoeren_zum_handelstag` (Regelwerk) und `befund_k15_02_alter_kurssatz_gilt_nicht_fuer_einen_neuen_tag` (Simulation) prüfen das; die Regelwerkstests nehmen ihren Vergleichskurs jetzt vom Vortag.
+
+Gegenproben zu Fassung 2, jeweils neu übersetzt: Abdruck nicht verglichen, Kette nicht gekettet, Ereignisse, Startstand, Positivliste, Vorlauf oder Tageskurse nicht im Abdruck, Form des Abdrucks nicht geprüft, Abruf, Kurszeitpunkt oder Vergleichskurs nicht gegen den Handelstag geprüft. Jede macht einen der neuen Tests rot.
+
 ## Was der Lauf festlegt und was nicht
 
 Der Lauf schreibt keine Abwägung vor. Was gekauft wird, schlägt der Berater des Topfes vor und begründet jedes Ziel selbst. Der Rahmen hält nur den Schutz:
@@ -24,13 +33,13 @@ Jeder genehmigte Auftrag wird zuerst belegt (R12), dann zum Schlusskurs des Tage
 Zwei neue Arten, gelesen und geschrieben wie alle anderen (kanonische Form, R20):
 
 - `begruendung;datum;wer;text`: `wer` nicht leer, ohne `;` und ohne Rand-Leerzeichen; Text nicht leer. Steuerzeichen ersetzt der Lauf vorher durch Leerzeichen, so kann keine Antwort eine Zeile brechen.
-- `abschluss;datum;hoechststand`: Der Tag ist vollständig belegt. Daten streng steigend, Höchststand positiv.
+- `abschluss;datum;hoechststand;abdruck`: Der Tag ist vollständig belegt. Daten streng steigend, Höchststand positiv, Abdruck der Vorgeschichte (K15-01).
 
 `Stand::seit_abschluss` zählt die Einträge nach dem letzten Abschluss, auch KI-Buchungen.
 
 ## Wiederanlauf (Kap. 11)
 
-Der Lauf setzt am Tag nach dem letzten Abschluss fort. Der Höchststand kommt aus dem Abschluss, der Vergleichskurs aus dem Szenario. Ein Lauf in zwei Teilen ergibt byte-gleich dasselbe Journal wie ein ununterbrochener Lauf.
+Der Lauf setzt am Tag nach dem letzten Abschluss fort, wenn das Szenario bis dahin denselben Abdruck ergibt (K15-01). Der Höchststand kommt aus dem Abschluss, der Vergleichskurs aus der so geprüften Vorgeschichte. Ein Lauf in zwei Teilen ergibt byte-gleich dasselbe Journal wie ein ununterbrochener Lauf.
 
 Steht nach dem letzten Abschluss schon ein Eintrag, war ein Tag angefangen. Dann ist Halt, und niemand wird neu gefragt: Was der angefangene Tag gekostet hat, steht im Journal, und ihn zu wiederholen wäre eine zweite Frage im selben Zyklus. Das ist bewusst streng. Wie Wolfgang einen angefangenen Tag freigibt, kommt mit dem echten Papierbetrieb.
 

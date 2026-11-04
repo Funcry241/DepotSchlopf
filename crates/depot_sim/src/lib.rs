@@ -18,6 +18,7 @@
     clippy::cast_sign_loss
 )]
 
+mod abdruck;
 pub mod lauf;
 pub mod szenario;
 

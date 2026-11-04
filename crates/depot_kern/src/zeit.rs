@@ -101,6 +101,20 @@ impl Zeitpunkt {
             .filter(|d| *d >= 0)
     }
 
+    /// Liegt der Zeitpunkt an genau diesem Tag (UTC)?
+    pub fn am_tag(self, datum: Datum) -> bool {
+        datum
+            .tage_seit_1970()
+            .and_then(|t| t.checked_mul(SEKUNDEN_JE_TAG))
+            .and_then(|beginn| Some((beginn, beginn.checked_add(SEKUNDEN_JE_TAG)?)))
+            .is_some_and(|(beginn, ende)| self.sekunden >= beginn && self.sekunden < ende)
+    }
+
+    /// Sekunden seit 01.01.1970, 00:00 Uhr UTC.
+    pub fn sekunden(self) -> i64 {
+        self.sekunden
+    }
+
     /// Liegt der Zeitpunkt an diesem Tag oder spaeter (UTC)?
     pub fn ab_tag(self, datum: Datum) -> bool {
         datum

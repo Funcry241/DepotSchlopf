@@ -18,6 +18,7 @@ depot_kern.workspace = true
 depot_ki.workspace = true
 depot_regelwerk.workspace = true
 depot_journal.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

@@ -144,6 +144,11 @@ impl Universum {
         })
     }
 
+    /// Alle Instrumente der Liste, in ihrer Reihenfolge.
+    pub fn instrumente(&self) -> &[Instrument] {
+        &self.instrumente
+    }
+
     pub fn isins(&self) -> BTreeSet<Isin> {
         self.instrumente.iter().map(|i| i.isin.clone()).collect()
     }
