@@ -14,6 +14,7 @@ use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
 
 use crate::kasse::KiStand;
 use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
+use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
 
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,6 +26,9 @@ pub enum Art {
     /// `quelle;herkunft;abruf;roh;isin;preis;zeitpunkt`: ein Kurs von aussen, belegt bevor er
     /// verwendet wird (`kursbeleg`). Nur im Format 2; die Abrufe fallen nie zurueck.
     Kurs,
+    /// `quelle;herkunft;abruf;roh;kennung;verlaesslichkeit;zeit;betroffen;titel`: ein Termin
+    /// von aussen (`terminbeleg`, R39). Nur im Format 2; die Abrufe fallen nie zurueck.
+    Termin,
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
     /// Rechner verlaesst (R12, R24). Damit ist er reserviert (R37).
     Auftrag,
@@ -54,6 +58,7 @@ impl Art {
             Art::Beobachtung => "beobachtung",
             Art::Topf => "topf",
             Art::Kurs => "kurs",
+            Art::Termin => "termin",
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
             Art::Ki => "ki",
@@ -69,6 +74,7 @@ impl Art {
             Art::Beobachtung,
             Art::Topf,
             Art::Kurs,
+            Art::Termin,
             Art::Auftrag,
             Art::Zustand,
             Art::Ki,
@@ -120,6 +126,7 @@ pub struct Stand {
     auftraege: Vec<AuftragsLage>,
     beobachtungen: Vec<(Datum, String)>,
     kurse: Vec<KursBeleg>,
+    termine: Vec<TerminBeleg>,
     letzte_kennung: u64,
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
@@ -169,6 +176,16 @@ impl Stand {
         &self.kurse
     }
 
+    /// Alle belegten Termine in der Reihenfolge des Journals, auch alte Fassungen.
+    pub fn termine(&self) -> &[TerminBeleg] {
+        &self.termine
+    }
+
+    /// Je Kennung die juengste Fassung eines Termins.
+    pub fn aktuelle_termine(&self) -> BTreeMap<&str, &TerminBeleg> {
+        BTreeMap::new()
+    }
+
     /// Das KI-Kassenbuch.
     pub fn ki(&self) -> &KiStand {
         &self.ki
@@ -210,6 +227,7 @@ impl Stand {
                 self.toepfe.insert(t.id(), t);
             }
             Art::Kurs => self.belege_kurs(inhalt)?,
+            Art::Termin => self.belege_termin(inhalt)?,
             Art::Auftrag => {
                 let b = lies_auftrag(inhalt).ok_or("Auftrag unlesbar")?;
                 kanonisch(&auftrag_text(&b), inhalt)?;
@@ -307,6 +325,14 @@ impl Stand {
             ));
         }
         self.kurse.push(k);
+        Ok(())
+    }
+
+    /// Ein Termin von aussen.
+    fn belege_termin(&mut self, inhalt: &str) -> Result<(), String> {
+        let t = lies_terminbeleg(inhalt)?;
+        kanonisch(&terminbeleg_text(&t), inhalt)?;
+        self.termine.push(t);
         Ok(())
     }
 

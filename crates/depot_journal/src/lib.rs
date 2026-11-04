@@ -14,7 +14,8 @@
 //! `Journal::reserviere`, ein Auftrag im Journal nur durch `Journal::reserviere_auftrag`.
 //!
 //! **Kurse (R12, Kap. 6):** Ein Kurs von aussen steht vor seiner Verwendung im Journal, mit
-//! Quelle, Abrufzeit und Abdruck der rohen Antwort (`kursbeleg`).
+//! Quelle, Abrufzeit und Abdruck der rohen Antwort (`kursbeleg`). Ebenso jeder Termin
+//! (`terminbeleg`, R39); ein geaenderter Termin wird fortgeschrieben, die alte Fassung bleibt.
 //!
 //! **Kontowaechter (Kap. 9, R37):** Jeder Auftrag hat einen Zustand nach fester
 //! Zustandsmaschine (`auftrag`). Reserviert wird nur mit Deckung; der Abgleich mit dem Konto
@@ -51,6 +52,7 @@ pub mod kasse;
 pub mod konto;
 pub mod kursbeleg;
 pub mod stand;
+pub mod terminbeleg;
 
 pub use auftrag::{AuftragsLage, AuftragsZustand, Ausfuehrung, Meldung};
 pub use datei::{Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
@@ -58,6 +60,7 @@ pub use kasse::{AufrufErlaubnis, KiStand};
 pub use konto::{Abweichung, Konto, KontoOrder, KontoStatus, Kontoauszug, verfuegbar};
 pub use kursbeleg::KursBeleg;
 pub use stand::{Abschluss, Art, AuftragsBeleg, FORMAT, FORMAT_ALT, Stand};
+pub use terminbeleg::{Fortschreibung, TerminBeleg};
 
 #[cfg(test)]
 mod tests {

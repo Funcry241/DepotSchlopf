@@ -33,6 +33,7 @@ use crate::stand::{
     Abschluss, Art, FORMAT, FORMAT_ALT, Stand, abschluss_text, begruendung_text, beleg_text,
     beobachtung_text, topf_text, trenne,
 };
+use crate::terminbeleg::{Fortschreibung, TerminBeleg, terminbeleg_text};
 
 /// Kopf eines Journals im Format 2; neue Journale bekommen ihn.
 const KOPF: &str = "journal-v2";
@@ -533,9 +534,12 @@ impl Journal {
             Art::Format => Err(JournalFehler::Abgelehnt(
                 "Die Umstellung entsteht nur ueber stelle_um".into(),
             )),
-            Art::Beobachtung | Art::Topf | Art::Kurs | Art::Begruendung | Art::Abschluss => {
-                self.schreibe_eintrag(art, inhalt)
-            }
+            Art::Beobachtung
+            | Art::Topf
+            | Art::Kurs
+            | Art::Termin
+            | Art::Begruendung
+            | Art::Abschluss => self.schreibe_eintrag(art, inhalt),
         }
     }
 
@@ -636,6 +640,18 @@ impl Journal {
     /// belegten.
     pub fn belege_kurs(&mut self, beleg: &KursBeleg) -> Result<(), JournalFehler> {
         self.anhaengen(Art::Kurs, &kursbeleg_text(beleg))
+    }
+
+    /// Belegt einen Termin mit Quelle, Abrufzeit und Abdruck der rohen Antwort (R39, R12). Ein
+    /// geaenderter Termin wird unter seiner Kennung fortgeschrieben; ein unveraenderter wird
+    /// nicht noch einmal geschrieben.
+    ///
+    /// # Errors
+    /// Wie `anhaengen`; `Abgelehnt` auch im Format 1 und bei einem Abruf vor dem letzten
+    /// belegten.
+    pub fn belege_termin(&mut self, beleg: &TerminBeleg) -> Result<Fortschreibung, JournalFehler> {
+        let _ = (beleg, terminbeleg_text);
+        Err(JournalFehler::Abgelehnt("noch nicht gebaut".into()))
     }
 
     /// Belegt den ganzen Stand eines Topfes im Papierdepot.
