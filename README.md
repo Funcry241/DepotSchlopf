@@ -37,6 +37,7 @@ Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 | `depot_journal` | Das Journal als einzige dauerhafte Datei: Hash-Kette mit Anhangsvermerk, geprüfte Wiederherstellung; Papierdepot, Aufträge mit Zustand, belegte Kurse mit Quelle und Abrufzeit, Beobachtungen und KI-Buchungen. Dazu der Kontowächter: Deckung vor jeder Reservierung, Abgleich mit dem Konto, Halt bei jeder Abweichung |
 | `depot_ki` | Regeln des KI-Budgets ohne Datei; das Kassenbuch steht im Journal, eine Erlaubnis gibt es nur nach Buchung der Höchstkosten dort |
 | `depot_sim` | Simulierter Lauf mit erfundenen Daten und Papiergeld: Dachs und Maus beobachten, begründen im Journal und entscheiden im Schutzrahmen; ausgeführt wird über ein erfundenes Papierkonto, mit dem der Kontowächter abgleicht; echte Kurse halten den Lauf an |
+| `depot_sammler` | Holt Xetra-Schlusskurse lesend von Alpha Vantage, legt jede Antwort roh unter `daten/roh/` ab, belegt jeden Kurs im Journal und prüft ihn. Einziges Crate mit Netz |
 | `depot_lauf` | Der Ein-Befehl-Einstieg `run.cmd` mit Assistenten-Export nach jedem Lauf |
 | `depot_kodex` | Das Gate: Deklaration gegen realen Diff, Pfadrollen, Festschreibung, Quellscan, Essenz, Format, Clippy, Tests |
 
@@ -60,6 +61,17 @@ run.cmd
 Ein Befehl macht alles: Gate prüfen (Struktur, Festschreibung, Quellscan, Essenz, Format, Clippy, Tests) und danach `assistant_export_latest.zip` schreiben. Diese Datei kann man einer neuen KI-Sitzung geben. Unter Linux oder macOS: `cargo run -p depot_lauf`.
 
 Gate und Export nehmen genau denselben Stand: was mit `git add` vorgemerkt ist. Der Lauf prüft ihn in einer eigenen Kopie außerhalb des Projektordners, ohne dessen lokale Cargo-Einstellungen. Nicht vorgemerkte Änderungen werden weder geprüft noch exportiert; die Konsole nennt sie als Hinweis.
+
+### Echte Schlusskurse (nur lesend)
+
+Einmal den kostenlosen Schlüssel von Alpha Vantage in der Windows-Anmeldeinformationsverwaltung ablegen; `cmdkey` fragt ihn verdeckt ab:
+
+```
+cmdkey /generic:DepotSchlopf/alphavantage /user:depotschlopf /pass
+run.cmd kurse einrichten
+```
+
+Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je Wert, 15 Sekunden Abstand), belegt sie in `daten/journal.txt` und zeigt das Ergebnis der Kursprüfung. Es entstehen keine Aufträge und keine KI-Anfragen. Der Schlüssel steht nie im Journal, in einer Meldung oder im Export.
 
 ## Mitmachen
 

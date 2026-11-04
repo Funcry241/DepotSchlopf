@@ -74,6 +74,5 @@ Gegenproben, jeweils neu übersetzt, jede macht mindestens einen Test rot:
 
 ## Offen
 
-- **Abruf:** Der Container für Dachs sperrt alle geprüften Kursquellen (Stooq, Alpha Vantage, Yahoo, Börse Frankfurt). Der Abruf folgt im Crate `depot_sammler` mit einer HTTP-Abhängigkeit, sobald Wolfgang eine Quelle freigibt. Neues Crate und neue Abhängigkeit ändern die Festschreibung und brauchen eine Grenzfreigabe. Dazu gehören die festgeschriebene Quellenliste mit der Zuordnung von ISIN zum Kürzel der Quelle und das Aufbewahren der rohen Antworten in `daten/`.
-- **Schlüssel:** Braucht die Quelle einen API-Schlüssel, liest ihn der Sammler nur aus einer Datei außerhalb des Repos. Er steht nie im Journal, nie in einer Meldung und nie im Export.
+- **Abruf:** gebaut, siehe `docs/befunde/sammler.md`.
 - **Terminkalender** (EZB, Quartalszahlen): nächster Schritt.

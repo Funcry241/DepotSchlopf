@@ -1,0 +1,30 @@
+[package]
+name = "depot_sammler"
+description = "DepotSchlopf: Sammelstelle - liest Schlusskurse aus einer freigegebenen Quelle und belegt sie im Journal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+depot_kern.workspace = true
+depot_journal.workspace = true
+depot_regelwerk.workspace = true
+ureq.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+keyring-core.workspace = true
+windows-native-keyring-store.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
+
+[lints]
+workspace = true

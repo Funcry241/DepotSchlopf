@@ -607,7 +607,7 @@ Bewusst nicht übernommen ist die Menge an Verträgen und textbasierten Gates. W
 | depot\_kern | Geld in Cent, ISIN, Instrument, Bereich, Bestand, Festschreibung, Zeit in Frankfurt, Lesen von Tageskursen aus einer Quellantwort | nein | nein | vorhanden |
 | depot\_regelwerk | Prüfungen, Aufträge, einziger Erzeuger von `GenehmigterAuftrag` | nein | nein | vorhanden, wird auf Bereiche erweitert |
 | depot\_ki | Berater Dachs und Maus, Regeln des Budgets, Prompt-Vorlagen | ja | nein | Regeln vorhanden; Kassenbuch und Erlaubnis im Journal |
-| depot\_sammler | Kurse, Konto, Schlagzeilen, Termine | ja, lesend | Rohdaten | geplant; Lesen der Kursantwort und Kursbeleg im Journal vorhanden |
+| depot\_sammler | Kurse, Konto, Schlagzeilen, Termine | ja, lesend; als einziges Crate | Rohdaten, Journal | Xetra-Schlusskurse von Alpha Vantage vorhanden (`run.cmd kurse`); Konto, Schlagzeilen und Termine geplant |
 | depot\_lagebild | Kennzahlen, Punkte, Korb, Bündeln, Lagebild | nein | liest | geplant |
 | depot\_konto | Kontowächter, verfügbares Geld, Abgleich | liest Broker | Journal | im Papierbetrieb als Modul `konto` in depot\_journal (Reservierung ist der Journaleintrag); eigenes Crate mit dem echten Broker |
 | depot\_broker | Schnittstelle `Broker`, Simulation, IBKR-Papier, IBKR-Echt | ja | Journal | geplant |
