@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Lesende Datenversorgung, Teil Kurse (Kap. 6, R12, R20), noch ohne Netz: Tageskurse aus einer CSV-Antwort in der Form von Stooq oder Alpha Vantage geprueft lesen, Schlusskurs zum Xetra-Schluss um 17:35 Uhr in Frankfurt (Zeit nach EU-Recht, Zeitpunkt als UTC-Text), neue Herkunft Quelle. Jeder Kurs von aussen steht vor seiner Verwendung als Eintrag kurs im Journal mit Quelle, Herkunft, Abrufzeit und SHA-256 der rohen Antwort; Abrufe fallen nie zurueck, nur im Format 2. Belegte Kurse durchlaufen dieselben Pruefungen wie jeder Kurs. Keine neuen Grenzen, keine neuen Abhaengigkeiten, kein Netz.
+zweck: Lesende Datenversorgung, Teil Kurse (Kap. 6, R12, R20), noch ohne Netz: Tageskurse aus einer CSV-Antwort in der Form von Stooq oder Alpha Vantage geprueft lesen (Schluss in ganzen Cent, Tief und Hoch exakt bis sechs Nachkommastellen), Schlusskurs zum Xetra-Schluss um 17:35 Uhr in Frankfurt (Zeit nach EU-Recht, Zeitpunkt als UTC-Text), neue Herkunft Quelle. Jeder Kurs von aussen steht vor seiner Verwendung als Eintrag kurs im Journal mit Quelle, Herkunft, Abrufzeit und SHA-256 der rohen Antwort; Abrufe fallen nie zurueck, nur im Format 2. Belegte Kurse durchlaufen dieselben Pruefungen wie jeder Kurs. Keine neuen Grenzen, keine neuen Abhaengigkeiten, kein Netz.
 pfade:
 crates/depot_kern/
 crates/depot_journal/

@@ -16,7 +16,7 @@ Dieser Teil braucht kein Netz. Er legt fest, wie eine Antwort der Quelle gelesen
 **Tageskurse aus einer Quelle** (`crates/depot_kern/src/quelle.rs`):
 
 - `lies_tageskurse` liest eine CSV-Antwort mit Kopfzeile: genau eine Datumsspalte (`date` oder `timestamp`) und die Spalte `close`; `low` und `high` werden geprüft, wenn es sie gibt. Das ist die Form von Stooq (`Date,Open,High,Low,Close,Volume`) und von Alpha Vantage mit `datatype=csv` (`timestamp,open,high,low,close,volume`).
-- Allgemeine Regeln: Datum im Kalender, alle Zeilen mit so vielen Feldern wie der Kopf, Tage durch die ganze Datei streng steigend oder streng fallend (Alpha Vantage liefert den neuesten zuerst), Preise positiv und in ganzen Cent. Ein Preis feiner als ein Cent wird nicht gerundet, sondern abgelehnt (R4). Der Schluss liegt zwischen Tief und Hoch. Jeder Fehler nennt die Zeile.
+- Allgemeine Regeln: Datum im Kalender, alle Zeilen mit so vielen Feldern wie der Kopf, Tage durch die ganze Datei streng steigend oder streng fallend (Alpha Vantage liefert den neuesten zuerst), Preise positiv. Der Schluss steht in ganzen Cent; ein Schluss feiner als ein Cent wird nicht gerundet, sondern abgelehnt (R4). Tief und Hoch dienen nur dem Vergleich: Sie dürfen feiner sein (bis sechs Nachkommastellen, wie Alpha Vantage sie liefert) und werden exakt mit dem Schluss verglichen. Der Schluss liegt zwischen Tief und Hoch. Jeder Fehler nennt die Zeile.
 - **Schlusskurs:** der Kurs eines Handelstags zum Ende des Xetra-Handels um 17:35 Uhr in Frankfurt. `schlusskurse` bildet aus den Tageskursen eines Abrufs die Kurse des letzten beendeten Tags (`heute`) und des Tags davor (`vortag`), beide mit dem Abruf als Stand und der neuen Herkunft `Quelle`. Eine Zeile für einen Tag, dessen Handel beim Abruf nicht beendet war, ist kein Schlusskurs und zählt nicht. Fehlt der Vortag, fehlt er; er wird nicht erfunden.
 
 **Belegte Kurse** (`crates/depot_journal/src/kursbeleg.rs`, R12):
@@ -37,7 +37,7 @@ Tests, die Schnittstelle gab es vorher nicht:
 | `wochentage` | ebenda | Wochentag nach ISO 8601 |
 | `frankfurter_zeit` | ebenda | Winter, Sommer, beide Umstellungstage, ein zweites Jahr, Xetra-Schluss |
 | `preise_in_cent` | ebenda | Preis in ganzen Cent, feiner oder nicht positiv abgelehnt |
-| `kursdatei_lesen` | ebenda | Form von Stooq und Alpha Vantage ergibt dieselben Kurse |
+| `kursdatei_lesen` | ebenda | Form von Stooq und Alpha Vantage ergibt dieselben Kurse, auch in der echten Form von Alpha Vantage (CRLF, vier Nachkommastellen, Tief und Hoch feiner als ein Cent) |
 | `kursdatei_fehler` | ebenda | jede Abweichung ein Fehler mit Zeile |
 | `schlusskurse_eines_abrufs` | ebenda | offener Tag zählt nicht, Herkunft `Quelle`, Alter, fehlender Vortag |
 | `schlusskurse_fehler` | ebenda | Wert doppelt, Tage in falscher Reihenfolge |
@@ -57,6 +57,8 @@ Gegenproben, jeweils neu übersetzt, jede macht mindestens einen Test rot:
 | Zeitpunkt ohne `Z` gelesen | `zeitpunkt_als_text` |
 | Preis feiner als Cent gerundet | `preise_in_cent`, `kursdatei_fehler` |
 | Spanne nicht geprüft | `kursdatei_fehler` |
+| Tief und Hoch nur in ganzen Cent gelesen (Stand vor Fassung 2) | `kursdatei_lesen`, `kursdatei_fehler` |
+| Tief und Hoch auf ganze Cent abgeschnitten statt exakt verglichen | `kursdatei_fehler` |
 | Reihenfolge nicht geprüft | `kursdatei_fehler` |
 | absteigende Datei nicht umgedreht | `kursdatei_lesen` |
 | offener Tag zählt als Schluss | `schlusskurse_eines_abrufs` |

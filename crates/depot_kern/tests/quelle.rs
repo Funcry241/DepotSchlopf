@@ -153,6 +153,13 @@ fn kursdatei_lesen() -> Result<(), String> {
     assert_eq!(k, erwartet);
     let a = lies_tageskurse(ALPHA).map_err(|e| format!("{e:?}"))?;
     assert_eq!(a, erwartet.get(1..).unwrap_or_default());
+    // Echte Form von Alpha Vantage: Zeilenende CRLF, vier Nachkommastellen, Tief und Hoch
+    // feiner als ein Cent. Der Schluss in ganzen Cent zaehlt.
+    let fein = "timestamp,open,high,low,close,volume\r\n\
+2026-11-03,103.0000,104.1050,102.4995,103.7500,101000\r\n\
+2026-11-02,101.2000,103.4000,100.9000,103.0000,98000\r\n";
+    let f = lies_tageskurse(fein).map_err(|e| format!("{e:?}"))?;
+    assert_eq!(f, erwartet.get(1..).unwrap_or_default());
     // Nur Datum und Schluss genuegen.
     let knapp = lies_tageskurse("date,close\n2026-11-03,1.00\n").map_err(|e| format!("{e:?}"))?;
     assert_eq!(
@@ -203,6 +210,20 @@ fn kursdatei_fehler() {
         Err(QuellenFehler::Preis(2))
     );
     assert_eq!(fall("2026-11-03,1,1,x,1,1\n"), Err(QuellenFehler::Preis(2)));
+    assert_eq!(
+        fall("2026-11-03,1,1.0000001,1,1,1\n"),
+        Err(QuellenFehler::Preis(2))
+    );
+    assert_eq!(fall("2026-11-03,1,1,0,1,1\n"), Err(QuellenFehler::Preis(2)));
+    // Exakt verglichen: ein Zehntausendstel Cent ueber dem Schluss ist zu hoch.
+    assert_eq!(
+        fall("2026-11-03,1,2,1.000001,1,1\n"),
+        Err(QuellenFehler::Spanne(2))
+    );
+    assert_eq!(
+        fall("2026-11-03,1,0.999999,0.5,1,1\n"),
+        Err(QuellenFehler::Spanne(2))
+    );
     assert_eq!(
         fall("2026-11-03,1,2,1.5,1.4,1\n"),
         Err(QuellenFehler::Spanne(2))

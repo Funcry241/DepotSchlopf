@@ -79,7 +79,9 @@ pub fn lies_cent(text: &str) -> Option<Cent> {
 /// werden geprueft, wenn es sie gibt; andere Spalten werden nicht gelesen. Das ist die Form von
 /// Stooq (`Date,Open,High,Low,Close,Volume`) und von Alpha Vantage mit `datatype=csv`
 /// (`timestamp,open,high,low,close,volume`). Die Tage steigen oder fallen streng durch die
-/// ganze Datei; Alpha Vantage liefert den neuesten zuerst.
+/// ganze Datei; Alpha Vantage liefert den neuesten zuerst. Der Schluss ist ein Betrag in
+/// ganzen Cent; Tief und Hoch duerfen feiner sein (bis sechs Nachkommastellen) und werden exakt
+/// mit dem Schluss verglichen.
 pub fn lies_tageskurse(text: &str) -> Result<Vec<Tageskurs>, QuellenFehler> {
     let mut zeilen = text.lines().map(|z| z.strip_suffix('\r').unwrap_or(z));
     let kopf: Vec<String> = zeilen
@@ -116,15 +118,21 @@ pub fn lies_tageskurse(text: &str) -> Result<Vec<Tageskurs>, QuellenFehler> {
         }
         let feld = |s: usize| felder.get(s).copied().unwrap_or("");
         let datum = lies_datum(feld(datum_s)).ok_or(QuellenFehler::Datum(nr))?;
-        let preis = |s: usize| lies_cent(feld(s)).ok_or(QuellenFehler::Preis(nr));
-        let schluss = preis(schluss_s)?;
+        let schluss = lies_cent(feld(schluss_s)).ok_or(QuellenFehler::Preis(nr))?;
+        // Tief und Hoch dienen nur dem Vergleich und duerfen feiner als ein Cent sein; sie
+        // werden exakt verglichen, nie gerundet.
+        let fein = |s: usize| lies_fein(feld(s)).ok_or(QuellenFehler::Preis(nr));
+        let schluss_fein = schluss
+            .0
+            .checked_mul(FEIN_JE_CENT)
+            .ok_or(QuellenFehler::Preis(nr))?;
         if let Some(s) = tief_s
-            && preis(s)? > schluss
+            && fein(s)? > schluss_fein
         {
             return Err(QuellenFehler::Spanne(nr));
         }
         if let Some(s) = hoch_s
-            && preis(s)? < schluss
+            && fein(s)? < schluss_fein
         {
             return Err(QuellenFehler::Spanne(nr));
         }
@@ -151,6 +159,31 @@ pub fn lies_tageskurse(text: &str) -> Result<Vec<Tageskurs>, QuellenFehler> {
         kurse.reverse();
     }
     Ok(kurse)
+}
+
+/// Feinste Einheit fuer Tief und Hoch: ein Zehntausendstel Cent (sechs Nachkommastellen).
+const FEIN_JE_CENT: i64 = 10_000;
+
+/// Ein positiver Betrag in Euro mit hoechstens sechs Nachkommastellen, in Zehntausendstel Cent.
+/// Weitere Nachkommastellen gelten nur, wenn sie null sind.
+fn lies_fein(text: &str) -> Option<i64> {
+    let (ganz, bruch) = text.split_once('.').unwrap_or((text, ""));
+    let ziffern = |t: &str| t.bytes().all(|b| b.is_ascii_digit());
+    if ganz.is_empty()
+        || !ziffern(ganz)
+        || !ziffern(bruch)
+        || (text.contains('.') && bruch.is_empty())
+    {
+        return None;
+    }
+    let (stellen, rest) = bruch.split_at(bruch.len().min(6));
+    if rest.bytes().any(|b| b != b'0') {
+        return None;
+    }
+    let teil: i64 = format!("{stellen:0<6}").parse().ok()?;
+    let euro: i64 = ganz.parse().ok()?;
+    let betrag = euro.checked_mul(1_000_000)?.checked_add(teil)?;
+    (betrag > 0).then_some(betrag)
 }
 
 fn lies_datum(text: &str) -> Option<Datum> {
