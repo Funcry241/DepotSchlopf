@@ -857,6 +857,35 @@ fn kennung_bleibt_bei_anderer_reihenfolge() -> Result<(), String> {
     Ok(())
 }
 
+/// Eine Nummer wird nie neu vergeben: Neue Eintraege zaehlen ab der hoechsten bekannten Nummer
+/// des Tags, auch wenn dazwischen eine fehlt.
+#[test]
+fn nummer_nie_neu_vergeben() -> Result<(), String> {
+    let termin = |kennung: &str, titel: &str| {
+        depot_kern::Termin::neu(
+            kennung,
+            titel,
+            Zeitbezug::Tag(tag(2026, 12, 1)?),
+            vec![Betroffen::groesse("ezb").ok_or("Vorbedingung: Groesse")?],
+            Verlaesslichkeit::Bestaetigt,
+        )
+        .map_err(|e| format!("Vorbedingung Termin: {e:?}"))
+    };
+    let a = termin("ezb-2026-12-01-1", "Meeting A")?;
+    let b = termin("ezb-2026-12-01-3", "Meeting B")?;
+    let t = ordne_zu(
+        lies_ezb_seite(&seite(&format!("{A}{B}{C}"))).map_err(|e| format!("{e:?}"))?,
+        &[&a, &b],
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    let k: Vec<&str> = t.iter().map(depot_kern::Termin::kennung).collect();
+    assert_eq!(
+        k,
+        vec!["ezb-2026-12-01-1", "ezb-2026-12-01-3", "ezb-2026-12-01-4"]
+    );
+    Ok(())
+}
+
 /// Ist nicht eindeutig, welcher Eintrag welcher bekannte Termin ist, gibt es keinen Termin.
 #[test]
 fn mehrdeutige_zuordnung_wird_gemeldet() -> Result<(), String> {

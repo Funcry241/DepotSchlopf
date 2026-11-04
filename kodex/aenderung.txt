@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Termine im Ereignisregister, Teil EZB (R39, R12; Wolfgang 04.11.2026). Termin im Kern (Kennung, Titel, Zeitbezug, Betroffene, Verlaesslichkeit), Eintrag termin im Journal mit Quelle, Abrufzeit und Abdruck, Fortschreibung unter der Kennung. run.cmd termine holt die Sitzungstermine von der Seite der EZB, legt sie roh ab, liest genau ihre Form und belegt jeden Termin. Nur lesend, keine Auftraege, keine KI. Keine neuen Grenzen, keine neuen Abhaengigkeiten.
+zweck: Termine im Ereignisregister, Teil EZB (R39, R12; Wolfgang 04.11.2026). Termin im Kern (Kennung, Titel, Zeitbezug, Betroffene, Verlaesslichkeit), Eintrag termin im Journal mit Quelle, Abrufzeit und Abdruck, Fortschreibung unter der Kennung. run.cmd termine holt die Sitzungstermine von der Seite der EZB, legt sie roh ab, liest genau ihre Form und belegt jeden Termin. Nach Maus K22-01: Kennung haengt nicht an der Reihenfolge der Seite, Zuordnung je Tag zu bekannten Terminen, mehrdeutig wird gemeldet und nichts belegt. Nur lesend, keine Auftraege, keine KI. Keine neuen Grenzen, keine neuen Abhaengigkeiten.
 pfade:
 crates/depot_kern/
 crates/depot_journal/
