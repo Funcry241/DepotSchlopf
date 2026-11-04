@@ -1,6 +1,6 @@
 //! Taeglicher Waechter: Tagesverlust und Notbremse, und die Verkaufsauftraege der Notbremse.
 
-use depot_kern::{Cent, Grenzen, Kurse, Topf};
+use depot_kern::{BP_GANZ, Cent, Grenzen, Kurse, Rundung, Topf};
 
 use crate::auftrag::{Anlass, Auftrag, GenehmigterAuftrag, Kennungsvergabe, RegelBeleg, Richtung};
 
@@ -70,7 +70,11 @@ pub fn notbremse_auftraege(
             return None;
         }
         let kurs = kurse.kurs(isin)?;
-        let limit = kurs.checked_sub(kurs.anteil_bp_ab(grenzen.limit_abstand_bp())?)?;
+        // Mindestpreis, aufgerundet: nie billiger als Kurs und Limit-Abstand vorsehen.
+        let limit = kurs.mal_bp(
+            BP_GANZ.checked_sub(grenzen.limit_abstand_bp())?,
+            Rundung::Auf,
+        )?;
         geplant.push((isin.clone(), *stueck, limit));
     }
     let kennungen = vergabe.vergib(geplant.len())?;

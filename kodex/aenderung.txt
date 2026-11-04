@@ -1,11 +1,9 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Schlusskurse feiner als ein Cent (Kap. 6, R4, R20; Wolfgangs erster Lauf am 04.11.2026: BASF, Mercedes-Benz, Infineon auf halbe Cent wurden verworfen). Neuer Typ Preis im Kern, exakt auf ein Millionstel Euro; jede Preisspalte wird exakt gelesen und verglichen, nichts gerundet. Journal fuehrt den Preis weiter in Cent, feinere mit Nachkommastellen; alte Journale und Abdruck bleiben gleich. pruefe_kurse vergleicht exakt; Geldrechnungen bleiben in ganzen Cent und fallen mit einem feineren Kurs geschlossen aus. Keine neuen Grenzen, keine neuen Abhaengigkeiten.
+zweck: Geld aus exakten Kursen zur sicheren Seite runden (R4, R21; Vorgabe Maus 04.11.2026). Kurse bleiben exakt; Depotbewertung abgerundet, Kauflimit (Hoechstpreis) abgerundet, Verkaufslimit (Mindestpreis) aufgerundet, in Entscheidung und Notbremse; Umschlag und hoechstmoegliche Wertminderung aufgerundet. Kurse::kurs liefert den exakten Preis, Kurse::kurs_cent nur ganze Cent. Keine neuen Grenzen, keine neuen Abhaengigkeiten.
 pfade:
 crates/depot_kern/
-crates/depot_journal/
 crates/depot_regelwerk/
-crates/depot_sammler/
 crates/depot_sim/
 docs/
 CHANGELOG.md

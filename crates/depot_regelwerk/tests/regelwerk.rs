@@ -408,8 +408,9 @@ fn kurssprung_exakt_mit_bruchteil_eines_cents() {
     let vortag = ersetze(&vortagskurse(&preise_alle(10_000)), 1_150_000);
     let heute = ersetze(&kurse_alle(10_000), 1_155_000);
     assert!(pruefe_kurse(&g, &universum(), handelstag(), &heute, &vortag).is_empty());
-    // Fuer Bewertung und Limits gibt es keinen gerundeten Betrag: Der Wert faellt dort aus.
-    assert_eq!(heute.kurs(&isin(1)), None);
+    // Der Kurs bleibt exakt; ganze Cent gibt es nur, wo er genau auf einem Cent liegt.
+    assert_eq!(heute.kurs(&isin(1)), Some(Preis::aus_fein(1_155_000)));
+    assert_eq!(heute.kurs_cent(&isin(1)), None);
 }
 
 #[test]
@@ -510,7 +511,7 @@ fn zufallstest_grenzen_am_schlusskurs() {
                 x.stueck >= 1 && x.stueck <= gehalten,
                 "Runde {runde}: Verkauf ueber Bestand"
             );
-            let kurs = kurse.kurs(&x.isin).unwrap_or(Cent::NULL);
+            let kurs = kurse.kurs_cent(&x.isin).unwrap_or(Cent::NULL);
             assert!(
                 x.limit < kurs && x.limit >= Cent(kurs.0.saturating_mul(99).saturating_div(100)),
                 "Runde {runde}: Verkaufslimit"
@@ -540,7 +541,7 @@ fn zufallstest_grenzen_am_schlusskurs() {
                 u.handelbar(&x.isin, &g),
                 "Runde {runde}: Kauf ausserhalb der Positivliste"
             );
-            let kurs = kurse.kurs(&x.isin).unwrap_or(Cent::NULL);
+            let kurs = kurse.kurs_cent(&x.isin).unwrap_or(Cent::NULL);
             assert!(
                 x.limit > kurs
                     && x.limit

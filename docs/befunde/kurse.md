@@ -80,7 +80,7 @@ Wolfgangs erster echter Lauf am 04.11.2026 hat bei BASF, Mercedes-Benz (Vortag) 
 - **Kurs:** `Kurs::preis` ist der exakte `Preis`. `Kurs::exakt` nimmt einen `Preis`, `Kurs::neu` wie bisher ganze Cent. `Kurs::preis_cent` gibt ganze Cent oder `None`.
 - **Journal:** Das Feld `preis` bleibt in Cent. Ganze Cent stehen wie bisher ohne Punkt (`4148`), ein feinerer Preis steht mit den nötigen Nachkommastellen ohne Null am Ende (`4115.5`, höchstens vier Stellen, `Preis::cent_text`). Gelesen wird nur genau diese Form. Bestehende Journale bleiben damit gültig und kanonisch, und der Abdruck des simulierten Verlaufs bleibt für ganze Cent gleich (K15-01, `befund_k16_02_altes_journal_wird_fortgesetzt`).
 - **Kursvergleich:** `pruefe_kurse` vergleicht exakt. Vortag 1,005 € und heute 1,156 € ergeben 1.502 bp, also einen Sprung. Auf ganze Cent gerundet (1,01 €) wären es 1.445 bp, und der Sprung bliebe unentdeckt.
-- **Geld:** Bewertung und Limits rechnen weiter in ganzen Cent. `Kurse::kurs` gibt für einen Preis feiner als ein Cent `None` zurück, und wer damit Geld rechnet (Entscheidung, Wächter, Notbremse, Depotwert), fällt geschlossen aus. Stillschweigend gerundet wird dort nichts. Bevor Kurse aus der Quelle in Entscheidungen eingehen, muss die Rundungsrichtung je Zweck als Regel feststehen (siehe Offen).
+- **Geld:** Mit Fassung 3 fiel jede Geldrechnung mit einem solchen Kurs geschlossen aus. Fassung 4 rundet dort zur sicheren Seite, siehe unten.
 - **Sammler:** `Ergebnis::Belegt` trägt den exakten Preis, und `run.cmd kurse` zeigt ihn ungerundet an (`49,925 EUR`).
 
 Tests, an `c9fc313` rot (die echten Zeilen wurden verworfen):
@@ -103,9 +103,39 @@ Dazu kommen, mit der neuen Schnittstelle: `kurssprung_exakt_mit_bruchteil_eines_
 
 Die Journalform prüft das Journal doppelt: `Preis::lies_cent_text` liest nur die kanonische Form, und das Journal vergleicht jeden Eintrag zusätzlich mit seiner eigenen Schreibweise. Eine Gegenprobe, die nur die erste Prüfung abschaltet, bleibt deshalb grün.
 
+## Fassung 4: Geld aus exakten Kursen, zur sicheren Seite gerundet
+
+Vorgabe von Maus am 04.11.2026, von Wolfgang weitergegeben: Eingelesene Kurse bleiben exakt. Gerundet wird erst dort, wo wirklich ganze Cent gebraucht werden, und jedes Mal zur sicheren Seite. Die Regel gilt für jeden Kurs, auch für einen in ganzen Cent.
+
+- **Kern** (`crates/depot_kern/src/preis.rs`): `Rundung::Ab` und `Rundung::Auf`. `Preis::mal_stueck(stueck, rundung)` und `Preis::mal_bp(bp, rundung)` rechnen exakt in `i128` und runden erst am Schluss, in der Richtung, die der Aufrufer nennt. `Preis::stueck_fuer(betrag)` ergibt die ganzen Stücke, die höchstens `betrag` kosten. `Kurse::kurs` liefert jetzt den exakten `Preis`, `Kurse::kurs_cent` ganze Cent nur dann, wenn der Preis genau auf einem Cent liegt.
+- **Depotbewertung abgerundet:** `Topf::wert` rundet jede Position ab, und auch in der Entscheidung zählt jeder Positionswert abgerundet (Anteil, Abbau, Umschichtung). Das Depot rechnet sich dadurch nie reicher.
+- **Kauflimit als Höchstpreis abgerundet:** Kurs × (1 + Abstand), abgerundet auf ganze Cent. **Verkaufslimit als Mindestpreis aufgerundet:** Kurs × (1 − Abstand), aufgerundet. Das gilt in der Entscheidung und in der Notbremse. Kein Auftrag kauft damit teurer oder verkauft billiger, als Kurs und Limit-Abstand vorsehen.
+- **Deckung:** Reserviert wird wie bisher Limit × Menge plus höchste Gebühr. Das Limit hat ganze Cent und liegt beim Kauf über jedem möglichen Ausführungspreis. Die Umschlaggrenze und die höchstmögliche Wertminderung eines Auftrags rechnen aufgerundet.
+- **Änderung bei ganzen Cent:** Beim Verkaufslimit ändert sich für ganze Cent nichts, denn Kurs − abgerundeter Abstand ist dasselbe wie das aufgerundete Produkt. Das Kauflimit war bisher Kurs + aufgerundeter Abstand und konnte deshalb einen Cent über dem Höchstpreis liegen: Bei 99,99 € war es 100,99 €, obwohl der Höchstpreis bei 100,9899 € liegt. Jetzt ist es 100,98 €. Alle bisherigen Tests und der Abdruck des simulierten Verlaufs bleiben grün.
+
+Tests, an `451ca7c` rot (`crates/depot_regelwerk/tests/rundung.rs`, mit den Kursen aus Wolfgangs Lauf):
+
+| Test | zeigt |
+| --- | --- |
+| `bewertung_abgerundet` | 3 × 49,925 € zählen als 149,77 € |
+| `kauflimit_hoechstpreis_abgerundet` | 99,99 € ergibt das Limit 100,98 € (vorher 100,99 €), 49,925 € ergibt 50,42 € |
+| `verkaufslimit_mindestpreis_aufgerundet` | 41,155 € ergibt das Limit 40,75 € |
+| `notbremse_mit_feinem_kurs` | Die Notbremse verkauft mit 41,155 € und 49,925 € zu 40,75 € und 49,43 € (vorher kein Verkauf) |
+
+Dazu kommt der Einheitstest `auf_ganze_cent` in `preis.rs`: beide Richtungen, negative Beträge, gleiches Ergebnis wie `Cent::mal_stueck` bei ganzen Cent, Überlauf, Stücke für einen Betrag.
+
+| Gegenprobe | rot |
+| --- | --- |
+| Bewertung aufgerundet | `bewertung_abgerundet` |
+| Kauflimit aufgerundet | `kauflimit_hoechstpreis_abgerundet` |
+| Verkaufslimit abgerundet | `verkaufslimit_mindestpreis_aufgerundet` |
+| Notbremse rundet ab | `notbremse_mit_feinem_kurs` |
+| `Auf` rundet auch glatte Beträge auf | `auf_ganze_cent` und weitere |
+
 ## Offen
 
-- **Rundungsrichtung für Geld aus feinen Preisen:** Bevor Kurse aus einer Quelle in Bewertung, Limits oder die Notbremse eingehen, braucht es eine Regel je Zweck, zum Beispiel Bewertung abgerundet, Kauflimit aufgerundet, Verkaufslimit abgerundet. Bis dahin fällt jede Geldrechnung mit einem solchen Kurs geschlossen aus.
+- **Papierausführung mit feinem Kurs:** Das erfundene Papierkonto der Simulation führt nur zu Kursen in ganzen Cent aus (`Kurse::kurs_cent`), bei einem feineren Kurs verfällt die Order. Solange die Simulation nur erfundene Kurse in ganzen Cent hat, spielt das keine Rolle. Für den Papierbetrieb mit Kursen aus der Quelle braucht die Ausführung eine Regel: Kaufbetrag aufgerundet, Verkaufserlös abgerundet.
+
 
 - **Abruf:** gebaut, siehe `docs/befunde/sammler.md`.
 - **Terminkalender** (EZB, Quartalszahlen): nächster Schritt.

@@ -272,8 +272,8 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
     let (heute, vortag) =
         schlusskurse(frueh, vec![(a.clone(), tage.clone())]).map_err(|e| format!("{e:?}"))?;
     assert_eq!(heute.stand(), frueh);
-    assert_eq!(heute.kurs(&a), Some(Cent(10_300)));
-    assert_eq!(vortag.kurs(&a), Some(Cent(10_120)));
+    assert_eq!(heute.kurs_cent(&a), Some(Cent(10_300)));
+    assert_eq!(vortag.kurs_cent(&a), Some(Cent(10_120)));
 
     // Um 17:45 Uhr ist er es; sein Kurs ist zehn Minuten alt.
     let spaet = utc(2026, 11, 3, 16, 45)?;
@@ -285,10 +285,10 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
     assert_eq!(k.handelstag(), tag(2026, 11, 3)?);
     assert_eq!(Some(k.zeitpunkt()), xetra_schluss(tag(2026, 11, 3)?));
     assert_eq!(heute.alter_s(&a), Some(600));
-    assert_eq!(vortag.kurs(&a), Some(Cent(10_300)));
+    assert_eq!(vortag.kurs_cent(&a), Some(Cent(10_300)));
     assert_eq!(vortag.stand(), spaet);
-    assert_eq!(heute.kurs(&b), Some(Cent(10_300)));
-    assert_eq!(vortag.kurs(&b), Some(Cent(10_120)));
+    assert_eq!(heute.kurs_cent(&b), Some(Cent(10_300)));
+    assert_eq!(vortag.kurs_cent(&b), Some(Cent(10_120)));
 
     // Nur ein beendeter Tag: Der Vortag fehlt, er wird nicht erfunden.
     let ein_tag = vec![Tageskurs {
@@ -297,8 +297,8 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
     }];
     let (heute, vortag) =
         schlusskurse(spaet, vec![(a.clone(), ein_tag)]).map_err(|e| format!("{e:?}"))?;
-    assert_eq!(heute.kurs(&a), Some(Cent(500)));
-    assert_eq!(vortag.kurs(&a), None);
+    assert_eq!(heute.kurs_cent(&a), Some(Cent(500)));
+    assert_eq!(vortag.kurs_cent(&a), None);
 
     // Kein beendeter Tag: Der Wert fehlt in beiden.
     let morgen = vec![Tageskurs {
@@ -307,7 +307,7 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
     }];
     let (heute, vortag) =
         schlusskurse(spaet, vec![(a.clone(), morgen)]).map_err(|e| format!("{e:?}"))?;
-    assert_eq!((heute.kurs(&a), vortag.kurs(&a)), (None, None));
+    assert_eq!((heute.kurs_cent(&a), vortag.kurs_cent(&a)), (None, None));
     Ok(())
 }
 
@@ -389,7 +389,7 @@ fn schluss_mit_bruchteil_eines_cents() -> Result<(), String> {
             heute.eintrag(&wert).map(depot_kern::Kurs::preis),
             Some(schluss)
         );
-        assert_eq!(heute.kurs(&wert), None);
+        assert_eq!(heute.kurs_cent(&wert), None);
     }
     // Echte Antwort in ganzen Cent: unveraendert.
     let sap = lies_tageskurse(SAP_ECHT).map_err(|e| format!("{e:?}"))?;

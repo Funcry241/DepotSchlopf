@@ -34,7 +34,7 @@ pub use geld::{BP_GANZ, Cent};
 pub use grenzen::{Gebuehren, Grenzen, Universum};
 pub use instrument::{Instrument, InstrumentArt, Isin, IsinFehler};
 pub use kurs::{Herkunft, Kurs, KursFehler, Kurse, Waehrung};
-pub use preis::Preis;
+pub use preis::{Preis, Rundung};
 pub use quelle::{
     QuellenFehler, Tageskurs, lies_preis, lies_tageskurse, schlusskurse, xetra_schluss,
 };

@@ -11,7 +11,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use depot_kern::{
-    BP_GANZ, BeraterId, Cent, Grenzen, Isin, Kurse, Topf, TopfId, Universum, Vorschlag,
+    BP_GANZ, BeraterId, Cent, Grenzen, Isin, Kurse, Preis, Rundung, Topf, TopfId, Universum,
+    Vorschlag,
 };
 
 use crate::auftrag::{Anlass, Auftrag, GenehmigterAuftrag, Kennungsvergabe, RegelBeleg, Richtung};
@@ -106,7 +107,8 @@ struct Kandidat {
     isin: Isin,
     richtung: Richtung,
     stueck: u64,
-    kurs: Cent,
+    /// Exakter Kurs; ganze Cent entstehen erst beim Runden zur sicheren Seite.
+    kurs: Preis,
     komplett: bool,
     anlass: Anlass,
 }
@@ -122,33 +124,40 @@ impl Kandidat {
         self.limit(g)?.mal_stueck(self.stueck)
     }
 
-    /// Volumen fuer die Umschlaggrenze: am hoeheren Preis aus Kurs und Limit. Ein Kauf fuehrt
-    /// hoechstens zum Limit aus, ein Verkauf mindestens zum Limit, oft zum Kurs oder darueber.
+    /// Volumen fuer die Umschlaggrenze: am hoeheren Preis aus Kurs und Limit, aufgerundet. Ein
+    /// Kauf fuehrt hoechstens zum Limit aus, ein Verkauf mindestens zum Limit, oft zum Kurs oder
+    /// darueber.
     fn umschlag(&self, g: &Grenzen) -> Option<Cent> {
-        self.limit(g)?.max(self.kurs).mal_stueck(self.stueck)
+        Preis::aus_cent(self.limit(g)?)?
+            .max(self.kurs)
+            .mal_stueck(self.stueck, Rundung::Auf)
     }
 
     /// Hoechstmoegliche Wertminderung des Topfes durch diesen Auftrag: Abstand zwischen Kurs und
-    /// Limit je Stueck plus hoechste Gebuehr.
+    /// Limit je Stueck, aufgerundet, plus hoechste Gebuehr.
     fn verlust(&self, g: &Grenzen) -> Option<Cent> {
         let limit = self.limit(g)?;
-        let abstand = self.kurs.checked_sub(limit)?.abs()?;
+        let abstand = self.kurs.checked_sub(Preis::aus_cent(limit)?)?.abs()?;
         let volumen = limit.mal_stueck(self.stueck)?;
         abstand
-            .mal_stueck(self.stueck)?
+            .mal_stueck(self.stueck, Rundung::Auf)?
             .checked_add(g.gebuehren().fuer(volumen)?)
     }
 }
 
-fn limit_fuer(g: &Grenzen, kurs: Cent, richtung: Richtung) -> Option<Cent> {
+/// Das Limit in ganzen Cent zur sicheren Seite: Ein Kauflimit ist ein Hoechstpreis und wird
+/// abgerundet, ein Verkaufslimit ist ein Mindestpreis und wird aufgerundet. So kauft kein
+/// Auftrag teurer und verkauft keiner billiger als Kurs und Limit-Abstand vorsehen.
+fn limit_fuer(g: &Grenzen, kurs: Preis, richtung: Richtung) -> Option<Cent> {
+    let abstand = g.limit_abstand_bp();
     match richtung {
-        Richtung::Kauf => kurs.checked_add(kurs.anteil_bp_auf(g.limit_abstand_bp())?),
-        Richtung::Verkauf => kurs.checked_sub(kurs.anteil_bp_ab(g.limit_abstand_bp())?),
+        Richtung::Kauf => kurs.mal_bp(BP_GANZ.checked_add(abstand)?, Rundung::Ab),
+        Richtung::Verkauf => kurs.mal_bp(BP_GANZ.checked_sub(abstand)?, Rundung::Auf),
     }
 }
 
 /// Kurs eines Werts, wenn er vorliegt und nicht aelter als das Hoechstalter ist.
-fn frischer_kurs(g: &Grenzen, kurse: &Kurse, isin: &Isin) -> Option<Cent> {
+fn frischer_kurs(g: &Grenzen, kurse: &Kurse, isin: &Isin) -> Option<Preis> {
     let alter = kurse.alter_s(isin)?;
     (alter <= g.kurs_hoechstalter_s())
         .then(|| kurse.kurs(isin))
@@ -163,11 +172,8 @@ fn ueber_anteil(wert: Cent, gesamt: Cent, grenze_bp: i64) -> Option<bool> {
 }
 
 /// Ganze Stuecke fuer einen Betrag, abgerundet.
-fn stueck_fuer(betrag: Cent, kurs: Cent) -> Option<u64> {
-    if kurs.0 <= 0 || betrag.0 <= 0 {
-        return Some(0);
-    }
-    u64::try_from(betrag.0.checked_div(kurs.0)?).ok()
+fn stueck_fuer(betrag: Cent, kurs: Preis) -> Option<u64> {
+    kurs.stueck_fuer(betrag)
 }
 
 /// Die groesste Stueckzahl in `0..=hoechstens`, fuer die `passt` gilt. `passt` muss fallend
@@ -370,7 +376,7 @@ fn abbau_menge(g: &Grenzen, k: &Kandidat, gehalten: u64, basis: Cent) -> Option<
         };
         let gesamt = basis.checked_sub(probe.verlust(g)?)?;
         Some(!ueber_anteil(
-            k.kurs.mal_stueck(r)?,
+            k.kurs.mal_stueck(r, Rundung::Ab)?,
             gesamt,
             g.max_anteil_bp(),
         )?)
@@ -422,7 +428,7 @@ fn abbau_anteil(
             continue;
         }
         let kurs = e.kurse.kurs(isin)?;
-        let wert = kurs.mal_stueck(*gehalten)?;
+        let wert = kurs.mal_stueck(*gehalten, Rundung::Ab)?;
         if !ueber_anteil(wert, topfwert, schwelle)? {
             continue;
         }
@@ -476,7 +482,7 @@ fn abbau_positionen(
         if ganz_verkauft.contains(isin) || !e.universum.handelbar(isin, g) {
             continue;
         }
-        let wert = e.kurse.kurs(isin)?.mal_stueck(*gehalten)?;
+        let wert = e.kurse.kurs(isin)?.mal_stueck(*gehalten, Rundung::Ab)?;
         bleiben.push((wert, isin.clone(), *gehalten));
     }
     let zu_viel = bleiben.len().saturating_sub(g.max_werte());
@@ -693,7 +699,7 @@ fn sammle_kandidaten(
         let kurs = frischer_kurs(g, e.kurse, isin)?;
         let gehalten = e.topf.stueck(isin);
         let ziel_bp = ziele.get(isin).copied().unwrap_or(0);
-        let ist_wert = kurs.mal_stueck(gehalten)?;
+        let ist_wert = kurs.mal_stueck(gehalten, Rundung::Ab)?;
         let ziel_wert = topfwert.anteil_bp_ab(ziel_bp)?;
         let ist_bp = ist_wert.in_bp_von(topfwert)?;
         let abweichung = ziel_bp.checked_sub(ist_bp)?;

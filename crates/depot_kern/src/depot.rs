@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use crate::geld::Cent;
 use crate::instrument::Isin;
 use crate::kurs::Kurse;
+use crate::preis::Rundung;
 
 /// Die beiden KIs. Dachs = Claude, Maus = GPT.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -80,12 +81,13 @@ impl Topf {
         &self.positionen
     }
 
-    /// Gesamtwert zu den gegebenen Kursen. `None`, wenn ein Kurs fehlt oder ein Ueberlauf droht.
+    /// Gesamtwert zu den gegebenen Kursen, jede Position auf ganze Cent abgerundet: Das Depot
+    /// rechnet sich nie reicher. `None`, wenn ein Kurs fehlt oder ein Ueberlauf droht.
     pub fn wert(&self, kurse: &Kurse) -> Option<Cent> {
         let mut summe = self.bargeld;
         for (isin, stueck) in &self.positionen {
             let kurs = kurse.kurs(isin)?;
-            summe = summe.checked_add(kurs.mal_stueck(*stueck)?)?;
+            summe = summe.checked_add(kurs.mal_stueck(*stueck, Rundung::Ab)?)?;
         }
         Some(summe)
     }

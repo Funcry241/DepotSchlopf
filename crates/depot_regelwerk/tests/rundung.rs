@@ -116,7 +116,7 @@ fn kauflimit_hoechstpreis_abgerundet() {
 #[test]
 fn verkaufslimit_mindestpreis_aufgerundet() {
     let k = kurse(&[(BASF, 49_925_000), (MBG, 41_155_000)]);
-    let ent = lauf(&topf(100_000, &[(MBG, 100)]), &k, &[]);
+    let ent = lauf(&topf(1_600_000, &[(MBG, 100)]), &k, &[]);
     let verkaeufe: Vec<_> = ent
         .verkaeufe
         .iter()

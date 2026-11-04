@@ -318,7 +318,7 @@ fn main() {
     let k = Kurs::neu(Cent(10_000), "EUR", tag, um(10, 0), Herkunft::Broker).expect("Kurs");
     let kurse = Kurse::neu(um(10, 20), vec![(isin.clone(), k.clone())]).expect("Kurse");
     assert_eq!(kurse.stand(), um(10, 20));
-    assert_eq!(kurse.kurs(&isin), Some(Cent(10_000)));
+    assert_eq!(kurse.kurs_cent(&isin), Some(Cent(10_000)));
     assert_eq!(kurse.alter_s(&isin), Some(1_200));
     assert_eq!(
         Kurse::neu(um(9, 59), vec![(isin.clone(), k.clone())]).err(),
