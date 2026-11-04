@@ -1407,3 +1407,50 @@ fn befund_k10_02_utf16_umgeht_die_muster_nicht() -> Result<(), String> {
         ],
     )
 }
+
+// ---------------------------------------------------------------------------------------------
+// Netzzugang bleibt im Blatt (Kap. 6)
+// ---------------------------------------------------------------------------------------------
+
+const JOURNAL_TOML: &str = "crates/depot_journal/Cargo.toml";
+
+/// Netzzugang hat nur ein Crate aus der Erlaubnisliste. Kein anderes Crate bekommt ihn ueber eine
+/// Abhaengigkeit: weder von einem Netz-Crate, auch nicht umbenannt oder nur fuer ein Zielsystem,
+/// noch von einem Crate, das Netz haben darf.
+#[test]
+fn netz_bleibt_im_blatt() -> Result<(), String> {
+    let baum = Baum::neu()?;
+    baum.kontrolle()?;
+    let abhaengig = |zeilen: &'static str| {
+        move |b: &Baum| -> Result<Vec<String>, String> {
+            b.deklariere("Funktion", &[JOURNAL_TOML])?;
+            b.ersetze(
+                JOURNAL_TOML,
+                "sha2.workspace = true\n",
+                &format!("sha2.workspace = true\n{zeilen}"),
+            )?;
+            Ok(b.gate())
+        }
+    };
+    let direkt = abhaengig("ureq = \"3\"\n");
+    let umbenannt = abhaengig(
+        "\n[target.'cfg(windows)'.dependencies]\nweb = { package = \"ureq\", version = \"3\" }\n",
+    );
+    let ueber_sammler = abhaengig("depot_sammler = { path = \"../depot_sammler\" }\n");
+    alle_faelle(
+        &baum,
+        &[
+            ("Netz-Crate direkt", &direkt, "Netzzugang ohne Erlaubnis"),
+            (
+                "Netz-Crate umbenannt fuer ein Zielsystem",
+                &umbenannt,
+                "Netzzugang ohne Erlaubnis",
+            ),
+            (
+                "ueber den Sammler",
+                &ueber_sammler,
+                "Netzzugang ohne Erlaubnis",
+            ),
+        ],
+    )
+}

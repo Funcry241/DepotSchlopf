@@ -8,7 +8,9 @@
 //! - Kern und Regelwerk sind rein: kein Datei-, Netz-, Umgebungs-, Prozess-, Thread- oder
 //!   Zeitzugriff ueber `std`, aufgeloest ueber gruppierte, umbenannte und Glob-Importe sowie
 //!   `extern crate`. Reine Crates haengen nur von reinen Crates und ruhigen Bibliotheken ab.
-//! - Netzzugang nur in den Crates aus `NETZ_ERLAUBT`.
+//! - Netzzugang nur in den Crates aus `NETZ_ERLAUBT`. Kein anderes Crate haengt von einem
+//!   Netz-Crate oder von einem Crate aus `NETZ_ERLAUBT` ab; Netzzugang bleibt so in einem Blatt
+//!   des Abhaengigkeitsbaums und erreicht nie Regelwerk, Journal oder Gate.
 //!
 //! - Geprueft wird, was kompiliert werden kann: Im Crate liegen nur `Cargo.toml`, `src/` und
 //!   `tests/`; darin nur `.rs`-Dateien, und jede wird vollstaendig geprueft. `#[path]` und
@@ -43,7 +45,8 @@ const UNREIN: [&[&str]; 6] = [
     &["std", "thread"],
 ];
 /// Netzzugang nur in diesen Crates. Erweitern nur ueber eine KodexAenderung.
-const NETZ_ERLAUBT: [&str; 0] = [];
+/// `depot_sammler`: lesender Abruf freigegebener Quellen (Kap. 6), Wolfgang 04.11.2026.
+const NETZ_ERLAUBT: [&str; 1] = ["depot_sammler"];
 const NETZ_CRATES: [&str; 5] = ["reqwest", "ureq", "hyper", "tokio", "socket2"];
 const NETZ_TYPEN: [&str; 3] = ["TcpStream", "UdpSocket", "TcpListener"];
 /// Gruppen, die einen harten Lint enthalten.
@@ -320,6 +323,15 @@ fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
             ));
         }
     }
+    if !NETZ_ERLAUBT.contains(&krate) {
+        for name in manifest::abhaengigkeits_namen(&m) {
+            if NETZ_CRATES.contains(&name.as_str()) || NETZ_ERLAUBT.contains(&name.as_str()) {
+                fehler.push(format!(
+                    "crates/{krate}: haengt von {name} ab: Netzzugang ohne Erlaubnis"
+                ));
+            }
+        }
+    }
     if REIN.contains(&krate) {
         for name in manifest::abhaengigkeits_namen(&m) {
             if !REIN.contains(&name.as_str()) && !RUHIG.contains(&name.as_str()) {
@@ -419,6 +431,17 @@ mod tests {
         let p = "x.rs";
         assert!(!pruefe_datei("depot_ki", true, p, "use reqwest::Client;").is_empty());
         assert!(!pruefe_datei("depot_ki", true, p, "use std::{net::TcpStream as T};").is_empty());
+    }
+
+    #[test]
+    fn netz_nur_im_sammler() {
+        let p = "x.rs";
+        assert!(pruefe_datei("depot_sammler", true, p, "use ureq::Agent;").is_empty());
+        assert!(
+            pruefe_datei("depot_sammler", true, p, "fn f(s: std::net::TcpStream) {}").is_empty()
+        );
+        assert!(!pruefe_datei("depot_journal", true, p, "use ureq::Agent;").is_empty());
+        assert!(!pruefe_datei("depot_lauf", true, p, "fn f(s: TcpStream) {}").is_empty());
     }
 
     #[test]

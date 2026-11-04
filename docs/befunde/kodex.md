@@ -79,3 +79,16 @@ Bei K7-01 sind zwei Schichten absichtlich doppelt: Jede Bedeutung eines Alias wi
 - **Makros und Reexporte:** Der Kodex expandiert keine Makros und verfolgt keine Reexporte fremder Crates. Dafür stehen die Crate-Grenzen der reinen Crates (nur reine Crates und `sha2`), das Verbot von `include!` und `#[path]` und das Verbot, `std` im reinen Crate als Ganzes einzubinden. Interne Weiterreichungen einzelner unbedenklicher `std`-Module (etwa `std::fmt`) bleiben erlaubt; verbotene Module werden an jeder Stelle des aufgelösten Pfads erkannt.
 - **Urheberschaft der Freigabe (1·R08):** Der Kodex prüft die Bindung an Diff und Festschreibung, nicht, wer die Datei geschrieben hat. Dass Wolfgang sie erteilt, sichern die Regeln auf GitHub (nur Wolfgang führt zusammen). Eine maschinenprüfbare Unterschrift wäre ein eigener späterer Schritt.
 - **Export (1·G06, 1·R03):** Der Export in `depot_lauf` liest Pfade noch zeilenweise und überspringt Lesefehler. Das ist Produktivcode und gehört zum Schnitt „Export“.
+
+## Netzzugang für den Sammler (Kap. 6)
+
+Wolfgang hat am 04.11.2026 die lesende Datenversorgung freigegeben. Den Abruf übernimmt das Crate `depot_sammler`; es steht damit als einziges auf der Liste `NETZ_ERLAUBT`. Damit das Netz nicht über eine Abhängigkeit in andere Crates wandert, gilt jetzt eine allgemeine Regel: Kein Crate außerhalb der Liste hängt von einem Netz-Crate (`reqwest`, `ureq`, `hyper`, `tokio`, `socket2`) oder von einem Crate der Liste ab. Das gilt für jeden Abhängigkeitsabschnitt, auch für zielsystemabhängige, und auch unter anderem Namen (`package = …`). Der Leser der Abhängigkeitsnamen nennt dafür jetzt auch in zielsystemabhängigen Abschnitten das umbenannte Paket.
+
+| Test | Datei | zeigt |
+| --- | --- | --- |
+| `netz_nur_im_sammler` | `crates/depot_kodex/src/quellscan.rs` | Netz im Sammler erlaubt, in Journal und Lauf abgelehnt |
+| `netz_bleibt_im_blatt` | `crates/depot_kodex/tests/befunde.rs` | Netz-Crate direkt, umbenannt nur für Windows, und Abhängigkeit vom Sammler: jeweils abgelehnt |
+
+Gegenproben, jeweils neu übersetzt: ohne die neue Regel scheitern alle drei Fälle von `netz_bleibt_im_blatt`; ohne das umbenannte Paket in zielsystemabhängigen Abschnitten scheitert der zweite Fall.
+
+Grenze: Ein Crate, das ein anderes Programm startet (`std::process`), könnte darüber ins Netz. Außerhalb der reinen Crates ist `std::process` erlaubt, weil `depot_lauf` Git und Cargo startet. Diese Grenze sichert weiter die Durchsicht jeder Änderung.
