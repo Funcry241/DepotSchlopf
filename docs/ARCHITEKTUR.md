@@ -612,6 +612,7 @@ Bewusst nicht übernommen ist die Menge an Verträgen und textbasierten Gates. W
 | depot\_konto | Kontowächter, verfügbares Geld, Abgleich | liest Broker | Journal | geplant |
 | depot\_broker | Schnittstelle `Broker`, Simulation, IBKR-Papier, IBKR-Echt | ja | Journal | geplant |
 | depot\_journal | Hash-Kette mit Anhangsvermerk, Prüfung, Wiederherstellung, Stand aus dem Journal (Töpfe, Aufträge, Beobachtungen, KI-Buchungen), einziger Erzeuger von `AufrufErlaubnis` | nein | ja | vorhanden (Persistenzbasis) |
+| depot\_sim | Simulierter Lauf mit erfundenen Daten: Szenario, Berater nach Drehbuch, Tag für Tag beobachten, fragen, prüfen lassen, entscheiden, auf Papier ausführen, abschließen | nein | Journal | vorhanden (nur erfundene Kurse) |
 | depot\_bericht | Tages- und Monatsbericht, Steuer-Export | nein | liest | geplant |
 | depot\_kodex | Gate | nein | liest Repository | vorhanden |
 | depot\_lauf | `run.cmd`, Dienst, Befehle, Assistenten-Export | je nach Befehl | ja | vorhanden |

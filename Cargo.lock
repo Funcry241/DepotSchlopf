@@ -86,6 +86,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "depot_sim"
+version = "0.1.0"
+dependencies = [
+ "depot_journal",
+ "depot_kern",
+ "depot_ki",
+ "depot_regelwerk",
+ "sha2",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
