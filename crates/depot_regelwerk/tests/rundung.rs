@@ -16,7 +16,7 @@ use depot_kern::{
     Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
 };
 use depot_regelwerk::{
-    Eingabe, Entscheidung, Kennungsvergabe, Richtung, entscheide, notbremse_auftraege,
+    Anlass, Eingabe, Entscheidung, Kennungsvergabe, Richtung, entscheide, notbremse_auftraege,
 };
 
 const BASF: &str = "DE000BASF111";
@@ -86,6 +86,76 @@ fn lauf(topf: &Topf, kurse: &Kurse, ziele: &[(&str, i64)]) -> Entscheidung {
         },
         &mut Kennungsvergabe::nach(0),
     )
+}
+
+/// Ohne Vorschlag: nur die zwingenden Schritte.
+fn lauf_ohne(topf: &Topf, kurse: &Kurse) -> Entscheidung {
+    entscheide(
+        &Eingabe {
+            grenzen: &Grenzen::standard(),
+            universum: &universum(),
+            topf,
+            kurse,
+            vorschlag: None,
+            halt: false,
+        },
+        &mut Kennungsvergabe::nach(0),
+    )
+}
+
+/// Maus' Gegenprobe zu PR #21: 1 BASF zu 49,925 € und 134,98 € Bargeld sind exakt 27,00035 %
+/// Anteil, also ueber 25 % plus 2 Punkte Toleranz. Mit abgerundeten Werten (49,92 € von
+/// 184,90 €) waeren es 26,99838 %, und der Abbau bliebe aus. Grenzen pruefen exakt.
+#[test]
+fn abbau_prueft_den_anteil_exakt() {
+    let k = kurse(&[(BASF, 49_925_000), (MBG, 41_480_000)]);
+    let ent = lauf_ohne(&topf(13_498, &[(BASF, 1)]), &k);
+    let abbau: Vec<_> = ent
+        .verkaeufe
+        .iter()
+        .map(|a| (a.auftrag().stueck, a.beleg().anlass))
+        .collect();
+    assert_eq!(abbau, vec![(1, Anlass::Abbau)], "{ent:?}");
+    // Knapp darunter (134,99 € Bargeld: exakt 26,99889 %) bleibt der Bestand.
+    let ent = lauf_ohne(&topf(13_499, &[(BASF, 1)]), &k);
+    assert!(ent.verkaeufe.is_empty(), "{ent:?}");
+}
+
+/// Nach dem Abbau liegt der verbleibende Bestand exakt hoechstens beim Hoechstanteil des
+/// exakten Topfwerts, fuer viele Bestaende und Bargeldbetraege mit einem Kurs auf halbem Cent.
+#[test]
+fn abbau_laesst_exakt_hoechstens_den_hoechstanteil() {
+    let g = Grenzen::standard();
+    let fein: i64 = 49_925_000;
+    let k = kurse(&[(BASF, fein), (MBG, 41_480_000)]);
+    let mut geprueft = 0;
+    for stueck in 1..=12_u64 {
+        for bargeld in (0..40_000_i64).step_by(7) {
+            let ent = lauf_ohne(&topf(bargeld, &[(BASF, stueck)]), &k);
+            let verkauft: u64 = ent
+                .verkaeufe
+                .iter()
+                .filter(|a| a.beleg().anlass == Anlass::Abbau)
+                .map(|a| a.auftrag().stueck)
+                .sum();
+            let rest = i128::from(stueck - verkauft) * i128::from(fein);
+            let gesamt = i128::from(bargeld) * 10_000 + i128::from(stueck) * i128::from(fein);
+            // Schwelle fuer den Abbau: Hoechstanteil plus Toleranz.
+            let schwelle = i128::from(g.max_anteil_bp() + g.bestand_toleranz_bp());
+            if i128::from(stueck) * i128::from(fein) * 10_000 > gesamt * schwelle {
+                geprueft += 1;
+                assert!(verkauft > 0, "{stueck} Stueck, {bargeld} Cent: kein Abbau");
+                assert!(
+                    rest * 10_000 <= gesamt * i128::from(g.max_anteil_bp()),
+                    "{stueck} Stueck, {bargeld} Cent: Rest {rest} ueber dem Hoechstanteil"
+                );
+            }
+        }
+    }
+    assert!(
+        geprueft > 100,
+        "Vorbedingung: nur {geprueft} Faelle ueber der Schwelle"
+    );
 }
 
 /// 3 × 49,925 € = 149,775 € zaehlen als 149,77 €. In ganzen Cent bleibt alles wie bisher.
