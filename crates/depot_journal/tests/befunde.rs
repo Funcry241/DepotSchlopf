@@ -11,7 +11,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use depot_journal::{Art, Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
+use depot_journal::{
+    Art, AuftragsZustand, Journal, JournalFehler, Meldung, inhalt_fuer, vermerk_fuer,
+};
 use depot_kern::{Cent, Datum, Grenzen, Herkunft, Isin, Kurs, Kurse, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::{Kennungsvergabe, notbremse_auftraege};
 
@@ -609,63 +611,11 @@ fn auftrag(nr: u64) -> String {
     format!("{nr};A;DE0007164600;Verkauf;5;9900;Notbremse")
 }
 
-/// 1·F09: Die Vergabe setzt nach einem Neustart hinter der letzten belegten Kennung fort. Das
-/// Journal nimmt keine Kennung zweimal und keine kleinere an; eine solche Datei fuehrt zu Halt.
-#[test]
-fn befund_1_f09_kennungen_ueberstehen_den_neustart() -> Result<(), String> {
-    let p = eingerichtet()?;
-    let mut j = oeffnen(&p)?;
-    if j.kennungsvergabe() != Kennungsvergabe::nach(0) {
-        return Err("Vorbedingung: leeres Journal beginnt bei 0".into());
-    }
-    vorbedingung(j.anhaengen(Art::Auftrag, &auftrag(7)), "Auftrag 7")?;
-    drop(j);
-    let mut j = oeffnen(&p)?;
-    if j.kennungsvergabe().letzte() != 7 || j.stand().auftraege().len() != 1 {
-        return Err(format!(
-            "nach dem Neustart: letzte {}",
-            j.kennungsvergabe().letzte()
-        ));
-    }
-    let vorher = vorbedingung(fs::read(&p), "lesen")?;
-    let mut offen = Vec::new();
-    for nr in [7, 3] {
-        match j.anhaengen(Art::Auftrag, &auftrag(nr)) {
-            Err(JournalFehler::Abgelehnt(_)) => {}
-            anders => offen.push(format!("Kennung {nr}: {anders:?}")),
-        }
-    }
-    if vorbedingung(fs::read(&p), "lesen")? != vorher {
-        offen.push("abgelehnte Kennung geschrieben".into());
-    }
-    if j.anhaengen(Art::Auftrag, &auftrag(8)).is_err() {
-        offen.push("naechste Kennung nach Ablehnung nicht angenommen".into());
-    }
-    drop(j);
-    for (fall, nrn) in [("doppelt", [4, 4]), ("kleiner", [4, 2])] {
-        let datei = neuer_pfad()?;
-        let erster = auftrag(nrn[0]);
-        let zweiter = auftrag(nrn[1]);
-        bestaetigt_geschrieben(
-            &datei,
-            &inhalt_fuer(&[(Art::Auftrag, &erster), (Art::Auftrag, &zweiter)]),
-        )?;
-        if let Err(e) = halt(Journal::oeffnen(&datei)) {
-            offen.push(format!("Datei {fall}: {e}"));
-        }
-    }
-    if offen.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("{offen:#?}"))
-    }
-}
+/// Topf A mit 10 Stueck DE0007164600, als Eintrag.
+const TOPF_A: &str = "A;100000;DE0007164600:10";
 
-/// Ein Auftrag aus dem Regelwerk wird mit seiner Kennung belegt; die Vergabe danach liegt
-/// dahinter.
-#[test]
-fn genehmigter_auftrag_wird_belegt() -> Result<(), String> {
-    let p = eingerichtet()?;
+/// Ein genehmigter Verkauf aller 10 Stueck aus Topf A mit genau dieser Kennung.
+fn genehmigt(nr: u64) -> Result<depot_regelwerk::GenehmigterAuftrag, String> {
     let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
     let wert = isin("DE0007164600")?;
     topf.setze_bestand(wert.clone(), 10);
@@ -679,29 +629,111 @@ fn genehmigter_auftrag_wird_belegt() -> Result<(), String> {
         Kurse::neu(zeit, [(wert, kurs)].into_iter().collect()),
         "Kurse",
     )?;
-    let mut j = oeffnen(&p)?;
-    vorbedingung(j.anhaengen(Art::Auftrag, &auftrag(41)), "Auftrag 41")?;
-    let mut vergabe = j.kennungsvergabe();
+    let mut vergabe = Kennungsvergabe::nach(nr.checked_sub(1).ok_or("Vorbedingung: nr")?);
     let auftraege = notbremse_auftraege(&Grenzen::standard(), &topf, &kurse, &mut vergabe)
         .ok_or("Vorbedingung: Notbremse")?;
-    let [a] = auftraege.as_slice() else {
-        return Err("Vorbedingung: ein Auftrag".into());
-    };
-    vorbedingung(j.belege(TopfId::A, a), "belegen")?;
-    if j.belege(TopfId::A, a).is_ok() {
-        return Err("derselbe Auftrag zweimal belegt".into());
+    match auftraege.as_slice() {
+        [a] => Ok(a.clone()),
+        _ => Err("Vorbedingung: ein Auftrag".into()),
+    }
+}
+
+/// 1·F09: Die Vergabe setzt nach einem Neustart hinter der letzten belegten Kennung fort. Das
+/// Journal nimmt keine Kennung zweimal und keine kleinere an; eine solche Datei fuehrt zu Halt.
+/// Damit die Stueck frei sind, ist der fruehere Auftrag jeweils verworfen: Abgelehnt wird nur
+/// wegen der Kennung.
+#[test]
+fn befund_1_f09_kennungen_ueberstehen_den_neustart() -> Result<(), String> {
+    let p = eingerichtet()?;
+    let mut j = oeffnen(&p)?;
+    if j.kennungsvergabe() != Kennungsvergabe::nach(0) {
+        return Err("Vorbedingung: leeres Journal beginnt bei 0".into());
+    }
+    let g = Grenzen::standard();
+    vorbedingung(j.anhaengen(Art::Topf, TOPF_A), "Topf A")?;
+    vorbedingung(
+        j.reserviere_auftrag(&g, TopfId::A, &genehmigt(7)?),
+        "Auftrag 7",
+    )?;
+    vorbedingung(j.melde(7, &Meldung::Verworfen), "Auftrag 7 verworfen")?;
+    drop(j);
+    let mut j = oeffnen(&p)?;
+    if j.kennungsvergabe().letzte() != 7 || j.stand().auftraege().len() != 1 {
+        return Err(format!(
+            "nach dem Neustart: letzte {}",
+            j.kennungsvergabe().letzte()
+        ));
+    }
+    let vorher = vorbedingung(fs::read(&p), "lesen")?;
+    let mut offen = Vec::new();
+    for nr in [7, 3] {
+        match j.reserviere_auftrag(&g, TopfId::A, &genehmigt(nr)?) {
+            Err(JournalFehler::Abgelehnt(m)) if m.contains("Auftragskennung") => {}
+            anders => offen.push(format!("Kennung {nr}: {anders:?}")),
+        }
+    }
+    if vorbedingung(fs::read(&p), "lesen")? != vorher {
+        offen.push("abgelehnte Kennung geschrieben".into());
+    }
+    if j.reserviere_auftrag(&g, TopfId::A, &genehmigt(8)?).is_err() {
+        offen.push("naechste Kennung nach Ablehnung nicht angenommen".into());
+    }
+    drop(j);
+    for (fall, nrn) in [("doppelt", [4, 4]), ("kleiner", [4, 2])] {
+        let datei = neuer_pfad()?;
+        let erster = auftrag(nrn[0]);
+        let zweiter = auftrag(nrn[1]);
+        let verworfen = format!("{};verworfen", nrn[0]);
+        bestaetigt_geschrieben(
+            &datei,
+            &inhalt_fuer(&[
+                (Art::Topf, TOPF_A),
+                (Art::Auftrag, &erster),
+                (Art::Zustand, &verworfen),
+                (Art::Auftrag, &zweiter),
+            ]),
+        )?;
+        match halt(Journal::oeffnen(&datei)) {
+            Ok(m) if m.contains("Auftragskennung") => {}
+            Ok(m) => offen.push(format!("Datei {fall}: anderer Grund: {m}")),
+            Err(e) => offen.push(format!("Datei {fall}: {e}")),
+        }
+    }
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
+}
+
+/// Ein Auftrag aus dem Regelwerk wird mit seiner Kennung reserviert; die Vergabe danach liegt
+/// dahinter. Derselbe Auftrag laesst sich kein zweites Mal reservieren.
+#[test]
+fn genehmigter_auftrag_wird_belegt() -> Result<(), String> {
+    let p = eingerichtet()?;
+    let mut j = oeffnen(&p)?;
+    vorbedingung(j.anhaengen(Art::Topf, TOPF_A), "Topf A")?;
+    let grenzen = Grenzen::standard();
+    let auftrag = genehmigt(42)?;
+    vorbedingung(
+        j.reserviere_auftrag(&grenzen, TopfId::A, &auftrag),
+        "reservieren",
+    )?;
+    if j.reserviere_auftrag(&grenzen, TopfId::A, &auftrag).is_ok() {
+        return Err("derselbe Auftrag zweimal reserviert".into());
     }
     drop(j);
     let j = oeffnen(&p)?;
     match j.stand().auftraege().last() {
-        Some(b)
-            if b.nr == a.auftrag().kennung.nr()
-                && b.isin == a.auftrag().isin
-                && b.richtung == a.auftrag().richtung
-                && b.stueck == a.auftrag().stueck
-                && b.limit == a.auftrag().limit
-                && b.anlass == a.beleg().anlass
-                && b.topf == TopfId::A => {}
+        Some(l)
+            if l.beleg.nr == auftrag.auftrag().kennung.nr()
+                && l.beleg.isin == auftrag.auftrag().isin
+                && l.beleg.richtung == auftrag.auftrag().richtung
+                && l.beleg.stueck == auftrag.auftrag().stueck
+                && l.beleg.limit == auftrag.auftrag().limit
+                && l.beleg.anlass == auftrag.beleg().anlass
+                && l.beleg.topf == TopfId::A
+                && l.zustand == AuftragsZustand::Reserviert => {}
         anders => return Err(format!("belegt: {anders:?}")),
     }
     if j.kennungsvergabe().letzte() != 42 {

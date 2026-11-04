@@ -39,6 +39,8 @@ Der Lauf schreibt keine Abwägung vor. Was gekauft wird, schlägt der Berater de
 
 Jeder genehmigte Auftrag wird zuerst belegt (R12), dann zum Schlusskurs des Tages ausgeführt, wenn dieser das Limit einhält; sonst verfällt er. Verkäufe vor Käufen. Jede Ausführung kostet die Gebühr nach Tarif. Bargeld und Bestand werden nie negativ, sonst Halt. Danach steht der neue Topf im Journal.
 
+Seit dem Schritt Kontowächter und Auftragszustände läuft die Ausführung über ein erfundenes Papierkonto: reservieren mit Deckung, als gesendet belegen, senden, Markt, Abgleich. Jede Ausführung steht als eigener Zustandseintrag im Journal und bucht den Topf. Käufe gehen erst raus, wenn alle Verkäufe des Topfes ausgeführt sind. Siehe `docs/befunde/konto.md`.
+
 ## Journal: Begründung und Tagesabschluss
 
 Zwei neue Arten, gelesen und geschrieben wie alle anderen (kanonische Form, R20):

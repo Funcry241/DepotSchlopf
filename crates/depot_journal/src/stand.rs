@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use depot_kern::{Cent, Datum, Isin, Topf, TopfId};
 use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 
+use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
+
 use crate::kasse::KiStand;
 
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
@@ -20,8 +22,11 @@ pub enum Art {
     /// `topf;bargeld;isin:stueck,…`: der ganze Stand eines Topfes im Papierdepot.
     Topf,
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
-    /// Rechner verlaesst (R12, R24).
+    /// Rechner verlaesst (R12, R24). Damit ist er reserviert (R37).
     Auftrag,
+    /// `nr;meldung`: der naechste Zustand eines Auftrags (R37, Kap. 10). Eine Ausfuehrung
+    /// steht als `nr;ausfuehrung;stueck;kurs;gebuehr` und bucht sie im Topf.
+    Zustand,
     /// `berater;datum;zyklus;cent`: eine Buchung des KI-Kassenbuchs, geprueft nach den Regeln
     /// aus `depot_ki` (K13-02).
     Ki,
@@ -30,6 +35,9 @@ pub enum Art {
     /// `datum;wer;text`: warum etwas geschieht oder nicht geschieht. `wer` ist ein Berater
     /// oder eine Stelle des Rahmens; die Kaufentscheidung begruenden die Berater selbst.
     Begruendung,
+    /// `2`: Umstellung eines Journals im Format 1 auf Format 2 (K16-02). Nur einmal, nur ohne
+    /// angefangenen Tag; danach gelten Auftragszustaende und Deckung.
+    Format,
     /// `datum;hoechststand;abdruck`: Der Tag ist vollstaendig belegt. `abdruck` bindet ihn an
     /// seine ganze Vorgeschichte (64 Hex-Zeichen). Ein Wiederanlauf setzt nur nach einem
     /// Abschluss fort; die Daten steigen streng.
@@ -42,10 +50,12 @@ impl Art {
             Art::Beobachtung => "beobachtung",
             Art::Topf => "topf",
             Art::Auftrag => "auftrag",
+            Art::Zustand => "zustand",
             Art::Ki => "ki",
             Art::KiGrenzen => "ki-grenzen",
             Art::Begruendung => "begruendung",
             Art::Abschluss => "abschluss",
+            Art::Format => "format",
         }
     }
 
@@ -54,10 +64,12 @@ impl Art {
             Art::Beobachtung,
             Art::Topf,
             Art::Auftrag,
+            Art::Zustand,
             Art::Ki,
             Art::KiGrenzen,
             Art::Begruendung,
             Art::Abschluss,
+            Art::Format,
         ]
         .into_iter()
         .find(|a| a.name() == name)
@@ -88,11 +100,18 @@ pub struct Abschluss {
     pub abdruck: String,
 }
 
+/// Format 1: Journale bis PR #15. Ein Auftrag darin ist mit seinem Ergebnis im naechsten Topf
+/// gebucht und hat keine Zustaende.
+pub const FORMAT_ALT: u8 = 1;
+/// Format 2: Auftraege mit Zustandsmaschine und Deckung (R37).
+pub const FORMAT: u8 = 2;
+
 /// Der Stand, wie er aus dem Journal folgt.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stand {
+    format: u8,
     toepfe: BTreeMap<TopfId, Topf>,
-    auftraege: Vec<AuftragsBeleg>,
+    auftraege: Vec<AuftragsLage>,
     beobachtungen: Vec<(Datum, String)>,
     letzte_kennung: u64,
     ki: KiStand,
@@ -102,13 +121,36 @@ pub struct Stand {
 }
 
 impl Stand {
+    pub(crate) fn im_format(format: u8) -> Stand {
+        Stand {
+            format,
+            ..Stand::default()
+        }
+    }
+
+    /// Das Format, nach dem die Eintraege gelten: `FORMAT_ALT` oder `FORMAT`.
+    pub fn format(&self) -> u8 {
+        self.format
+    }
+
     /// Der zuletzt belegte Stand je Topf des Papierdepots.
     pub fn toepfe(&self) -> &BTreeMap<TopfId, Topf> {
         &self.toepfe
     }
 
-    pub fn auftraege(&self) -> &[AuftragsBeleg] {
+    /// Alle Auftraege mit ihrem Zustand, in der Reihenfolge ihrer Kennungen.
+    pub fn auftraege(&self) -> &[AuftragsLage] {
         &self.auftraege
+    }
+
+    /// Der Auftrag mit dieser Kennung.
+    pub fn auftrag(&self, nr: u64) -> Option<&AuftragsLage> {
+        self.auftraege.iter().find(|l| l.beleg.nr == nr)
+    }
+
+    /// Die Auftraege, die noch keinen Endzustand haben.
+    pub fn offene_auftraege(&self) -> impl Iterator<Item = &AuftragsLage> {
+        self.auftraege.iter().filter(|l| l.zustand.offen())
     }
 
     pub fn beobachtungen(&self) -> &[(Datum, String)] {
@@ -152,6 +194,7 @@ impl Stand {
             Art::Topf => {
                 let t = lies_topf(inhalt).ok_or("Topf unlesbar")?;
                 kanonisch(&topf_text(&t), inhalt)?;
+                self.pruefe_deckung(&t, None)?;
                 self.toepfe.insert(t.id(), t);
             }
             Art::Auftrag => {
@@ -164,8 +207,26 @@ impl Stand {
                         self.letzte_kennung
                     ));
                 }
+                if self.format == FORMAT_ALT {
+                    // Format 1: Das Ergebnis steht im naechsten Topf; der Auftrag bindet nichts.
+                    self.letzte_kennung = nr;
+                    self.auftraege.push(AuftragsLage::alt(b));
+                    self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+                    return Ok(());
+                }
+                let topf = self
+                    .toepfe
+                    .get(&b.topf)
+                    .ok_or_else(|| format!("Auftrag {nr}: Topf {:?} fehlt", b.topf))?;
+                let neu = AuftragsLage::reserviert(b);
+                self.pruefe_deckung(topf, Some(&neu))?;
                 self.letzte_kennung = nr;
-                self.auftraege.push(b);
+                self.auftraege.push(neu);
+            }
+            Art::Zustand => {
+                let (nr, m) = lies_meldung(inhalt).ok_or("Zustand unlesbar")?;
+                kanonisch(&meldung_text(nr, &m), inhalt)?;
+                self.melde(nr, &m)?;
             }
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
             Art::Ki => self.ki.buche(inhalt)?,
@@ -174,9 +235,30 @@ impl Stand {
                 kanonisch(&begruendung_text(b.0, &b.1, &b.2), inhalt)?;
                 self.begruendungen.push(b);
             }
+            Art::Format => {
+                kanonisch(&FORMAT.to_string(), inhalt)?;
+                if self.format != FORMAT_ALT {
+                    return Err(format!("Umstellung im Format {}", self.format));
+                }
+                if self.seit_abschluss > 0 {
+                    return Err("Umstellung nur ohne angefangenen Tag".into());
+                }
+                // Die Umstellung beginnt keinen Tag: Sie aendert nur, nach welchen Regeln die
+                // folgenden Eintraege gelten.
+                self.format = FORMAT;
+                return Ok(());
+            }
             Art::Abschluss => {
                 let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
                 kanonisch(&abschluss_text(&a), inhalt)?;
+                // Tagesorders enden am Tag (Kap. 10): Ein Tag mit offenem Auftrag ist nicht
+                // vollstaendig belegt.
+                if let Some(l) = self.offene_auftraege().next() {
+                    return Err(format!(
+                        "Abschluss mit offenem Auftrag {} ({:?})",
+                        l.beleg.nr, l.zustand
+                    ));
+                }
                 if let Some(vorher) = &self.abschluss
                     && a.datum <= vorher.datum
                 {
@@ -194,6 +276,114 @@ impl Stand {
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
         Ok(())
     }
+
+    /// Wendet die Meldung zu einem Auftrag an: naechster Zustand und bei einer Ausfuehrung die
+    /// Buchung im Topf. Ein Fehler laesst den Stand unveraendert.
+    fn melde(&mut self, nr: u64, m: &Meldung) -> Result<(), String> {
+        let index = self
+            .auftraege
+            .iter()
+            .position(|l| l.beleg.nr == nr)
+            .ok_or_else(|| format!("Auftrag {nr} unbekannt"))?;
+        let alt = self.auftraege.get(index).ok_or("Auftrag fehlt")?;
+        let neu = alt.nach(m)?;
+        let topf = self
+            .toepfe
+            .get(&neu.beleg.topf)
+            .ok_or_else(|| format!("Auftrag {nr}: Topf fehlt"))?;
+        let topf = match m {
+            Meldung::Ausfuehrung(a) => buche(topf, &neu.beleg, a)?,
+            _ => topf.clone(),
+        };
+        self.pruefe_deckung(&topf, Some(&neu))?;
+        self.toepfe.insert(topf.id(), topf);
+        if let Some(platz) = self.auftraege.get_mut(index) {
+            *platz = neu;
+        }
+        Ok(())
+    }
+
+    /// Die Deckung eines Topfes (R37, Kap. 9): Das Bargeld traegt alle offenen Kaeufe am Limit,
+    /// der Bestand jedes Werts alle offenen Verkaeufe. `ersatz` steht fuer den Auftrag mit
+    /// seiner Kennung oder kommt neu hinzu. Was ein Kauf darueber hinaus an Gebuehr braucht,
+    /// prueft der Kontowaechter vor der Reservierung (`Journal::reserviere_auftrag`).
+    fn pruefe_deckung(&self, topf: &Topf, ersatz: Option<&AuftragsLage>) -> Result<(), String> {
+        let ersetzt = ersatz.map(|e| e.beleg.nr);
+        let offene = self
+            .auftraege
+            .iter()
+            .filter(|l| Some(l.beleg.nr) != ersetzt)
+            .chain(ersatz)
+            .filter(|l| l.beleg.topf == topf.id() && l.zustand.offen());
+        let mut kauf = Cent::NULL;
+        let mut verkauf: BTreeMap<&Isin, u64> = BTreeMap::new();
+        for l in offene {
+            let offen = l.offen_stueck();
+            match l.beleg.richtung {
+                Richtung::Kauf => {
+                    kauf = l
+                        .beleg
+                        .limit
+                        .mal_stueck(offen)
+                        .and_then(|v| kauf.checked_add(v))
+                        .ok_or("Deckung: Ueberlauf")?;
+                }
+                Richtung::Verkauf => {
+                    let summe = verkauf.entry(&l.beleg.isin).or_insert(0);
+                    *summe = summe.checked_add(offen).ok_or("Deckung: Ueberlauf")?;
+                }
+            }
+        }
+        if kauf > topf.bargeld() {
+            return Err(format!(
+                "Deckung: offene Kaeufe {} Cent ueber dem Bargeld {} Cent",
+                kauf.0,
+                topf.bargeld().0
+            ));
+        }
+        for (isin, stueck) in verkauf {
+            if stueck > topf.stueck(isin) {
+                return Err(format!(
+                    "Deckung: {stueck} Stueck {isin} im Verkauf, {} im Bestand",
+                    topf.stueck(isin)
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Bucht eine Ausfuehrung im Topf: Bargeld und Bestand nie negativ.
+fn buche(topf: &Topf, b: &AuftragsBeleg, a: &crate::auftrag::Ausfuehrung) -> Result<Topf, String> {
+    let volumen = a
+        .kurs
+        .mal_stueck(a.stueck)
+        .ok_or("Ausfuehrung: Ueberlauf")?;
+    let gehalten = topf.stueck(&b.isin);
+    let (bargeld, stueck) = match b.richtung {
+        Richtung::Kauf => (
+            topf.bargeld()
+                .checked_sub(volumen)
+                .and_then(|g| g.checked_sub(a.gebuehr)),
+            gehalten.checked_add(a.stueck),
+        ),
+        Richtung::Verkauf => (
+            topf.bargeld()
+                .checked_add(volumen)
+                .and_then(|g| g.checked_sub(a.gebuehr)),
+            gehalten.checked_sub(a.stueck),
+        ),
+    };
+    let (Some(bargeld), Some(stueck)) = (bargeld, stueck) else {
+        return Err(format!("Auftrag {}: Ausfuehrung nicht buchbar", b.nr));
+    };
+    let mut neu = Topf::neu(topf.id(), bargeld)
+        .map_err(|_| format!("Auftrag {}: Bargeld wuerde negativ", b.nr))?;
+    for (isin, n) in topf.positionen() {
+        neu.setze_bestand(isin.clone(), *n);
+    }
+    neu.setze_bestand(b.isin.clone(), stueck);
+    Ok(neu)
 }
 
 fn kanonisch(neu: &str, alt: &str) -> Result<(), String> {
@@ -273,7 +463,7 @@ fn lies_abschluss(inhalt: &str) -> Option<Abschluss> {
     })
 }
 
-fn topf_name(t: TopfId) -> &'static str {
+pub(crate) fn topf_name(t: TopfId) -> &'static str {
     match t {
         TopfId::A => "A",
         TopfId::B => "B",
@@ -352,7 +542,7 @@ pub(crate) fn beleg_text(topf: TopfId, g: &GenehmigterAuftrag) -> String {
     })
 }
 
-fn auftrag_text(b: &AuftragsBeleg) -> String {
+pub(crate) fn auftrag_text(b: &AuftragsBeleg) -> String {
     format!(
         "{};{};{};{};{};{};{}",
         b.nr,

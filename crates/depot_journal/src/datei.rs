@@ -26,13 +26,18 @@ use depot_ki::{Sperre, grenzabdruck};
 use depot_regelwerk::{GenehmigterAuftrag, Kennungsvergabe};
 use sha2::{Digest, Sha256};
 
+use crate::auftrag::{Meldung, meldung_text};
 use crate::kasse::{AufrufErlaubnis, buchung_text, naechste};
 use crate::stand::{
-    Abschluss, Art, Stand, abschluss_text, begruendung_text, beleg_text, beobachtung_text,
-    topf_text, trenne,
+    Abschluss, Art, FORMAT, FORMAT_ALT, Stand, abschluss_text, begruendung_text, beleg_text,
+    beobachtung_text, topf_text, trenne,
 };
 
-const KOPF: &str = "journal-v1";
+/// Kopf eines Journals im Format 2; neue Journale bekommen ihn.
+const KOPF: &str = "journal-v2";
+/// Kopf eines Journals im Format 1 (bis PR #15). Es wird nach seinen Regeln gelesen und erst
+/// nach der Umstellung mit neuen Auftraegen fortgesetzt (K16-02).
+const KOPF_ALT: &str = "journal-v1";
 const VERMERK_KOPF: &str = "vermerk-v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -321,10 +326,12 @@ pub struct Journal {
 /// Prueft alle Eintraege nach dem Kopf und rechnet den Stand nach.
 fn nachrechnen(zeilen: &[String]) -> Result<(Vec<(Art, String)>, Stand), JournalFehler> {
     let mut alle = zeilen.iter();
-    if alle.next().map(String::as_str) != Some(KOPF) {
-        return Err(halt("Kopfzeile fehlt"));
-    }
-    let mut stand = Stand::default();
+    let format = match alle.next().map(String::as_str) {
+        Some(KOPF) => FORMAT,
+        Some(KOPF_ALT) => FORMAT_ALT,
+        _ => return Err(halt("Kopfzeile fehlt")),
+    };
+    let mut stand = Stand::im_format(format);
     let mut eintraege = Vec::new();
     for (i, z) in alle.enumerate() {
         let nr = i.saturating_add(2);
@@ -502,10 +509,13 @@ impl Journal {
     /// Haengt einen Eintrag an. Er wird vorher genauso geprueft wie beim Oeffnen.
     ///
     /// KI-Buchungen und Grenzabdruecke entstehen nur ueber `reserviere`, immer unter den
-    /// heutigen Grenzen (K13-03). Aeltere stehen nur im Journal, das geoeffnet wird.
+    /// heutigen Grenzen (K13-03). Aeltere stehen nur im Journal, das geoeffnet wird. Auftraege
+    /// entstehen nur ueber `reserviere_auftrag` mit der Deckung des Kontowaechters, ihre
+    /// Zustaende nur ueber `melde` und `gleiche_ab`.
     ///
     /// # Errors
-    /// `Abgelehnt` fuer einen unzulaessigen Eintrag und fuer jeden KI-Eintrag; nichts wird
+    /// `Abgelehnt` fuer einen unzulaessigen Eintrag, fuer jeden KI-Eintrag, jeden Auftrag und
+    /// jeden Auftragszustand; nichts wird
     /// geschrieben. `Halt` nach einem Schreib- oder Synchronisationsfehler; dann bleibt das
     /// Journal gesperrt.
     pub fn anhaengen(&mut self, art: Art, inhalt: &str) -> Result<(), JournalFehler> {
@@ -513,7 +523,16 @@ impl Journal {
             Art::Ki | Art::KiGrenzen => Err(JournalFehler::Abgelehnt(
                 "KI-Eintraege entstehen nur ueber reserviere".into(),
             )),
-            Art::Beobachtung | Art::Topf | Art::Auftrag | Art::Begruendung | Art::Abschluss => {
+            Art::Auftrag => Err(JournalFehler::Abgelehnt(
+                "Auftraege entstehen nur ueber reserviere_auftrag".into(),
+            )),
+            Art::Zustand => Err(JournalFehler::Abgelehnt(
+                "Auftragszustaende entstehen nur ueber melde und gleiche_ab".into(),
+            )),
+            Art::Format => Err(JournalFehler::Abgelehnt(
+                "Die Umstellung entsteht nur ueber stelle_um".into(),
+            )),
+            Art::Beobachtung | Art::Topf | Art::Begruendung | Art::Abschluss => {
                 self.schreibe_eintrag(art, inhalt)
             }
         }
@@ -616,16 +635,31 @@ impl Journal {
         self.anhaengen(Art::Topf, &topf_text(topf))
     }
 
-    /// Belegt einen genehmigten Auftrag, bevor er den Rechner verlaesst (R12).
-    ///
-    /// # Errors
-    /// Wie `anhaengen`; `Abgelehnt` auch, wenn die Kennung nicht groesser als die letzte ist.
-    pub fn belege(
+    /// Schreibt einen genehmigten Auftrag; die Deckung hat `reserviere_auftrag` geprueft.
+    pub(crate) fn schreibe_auftrag(
         &mut self,
         topf: TopfId,
         auftrag: &GenehmigterAuftrag,
     ) -> Result<(), JournalFehler> {
-        self.anhaengen(Art::Auftrag, &beleg_text(topf, auftrag))
+        self.schreibe_eintrag(Art::Auftrag, &beleg_text(topf, auftrag))
+    }
+
+    /// Stellt ein abgeschlossenes Journal im Format 1 auf Format 2 um (K16-02). Seine Auftraege
+    /// bleiben, wie sie sind: belegt, im Topf gebucht, ohne Reservierung. Danach gelten fuer
+    /// jeden neuen Eintrag Auftragszustaende und Deckung. Im Format 2 tut der Aufruf nichts.
+    ///
+    /// # Errors
+    /// `Abgelehnt`, wenn ein Tag angefangen ist; sonst wie `anhaengen`.
+    pub fn stelle_um(&mut self) -> Result<(), JournalFehler> {
+        if self.stand().format() == FORMAT {
+            return Ok(());
+        }
+        self.schreibe_eintrag(Art::Format, &FORMAT.to_string())
+    }
+
+    /// Schreibt den naechsten Zustand eines Auftrags.
+    pub(crate) fn schreibe_meldung(&mut self, nr: u64, m: &Meldung) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Zustand, &meldung_text(nr, m))
     }
 
     /// Prueft die KI-Grenzen, bucht die Hoechstkosten dauerhaft und gibt erst dann die

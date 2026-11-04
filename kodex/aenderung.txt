@@ -1,16 +1,9 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Simulierter Lauf mit erfundenen Daten und Papiergeld entlang R8, R31, D01, D03 und Kap. 11: neues Crate depot_sim mit erfundenem Szenario und Beratern nach Drehbuch; Dachs und Maus beobachten und begruenden im Journal, der Lauf haelt nur den Schutzrahmen (Kostenschutz, Zweitmeinung, Regelwerk, Datenpruefung, Waechter) und fuehrt auf Papier aus; nur erfundene Kurse. Das Journal bekommt Begruendung und Tagesabschluss; der Wiederanlauf setzt nach dem letzten Abschluss fort. Nach Maus K15-01 und K15-02: Abschluss mit Abdruck der Vorgeschichte, Kurse gehoeren zum Handelstag; nach K15-03 liegt ein Kurs an seinem Handelstag und kein Vergleichsabruf nach dem Abruf. Keine neuen Grenzen, keine Kaufregeln.
+klasse: Funktion
+zweck: Kontowaechter und Auftragszustaende am Papierkonto entlang R37, Kap. 9 und 10 (2·A09, 1·F07, Abgleichteil von 6·N01): feste Zustandsmaschine je Auftrag im Journal, Deckung je Topf nach jedem Eintrag, Abschluss nur ohne offenen Auftrag, Auftraege nur ueber reserviere_auftrag mit Deckung samt hoechstmoeglicher Gebuehr, Abgleich mit dem Konto belegt dessen Meldungen und meldet jede Abweichung. Der simulierte Lauf sendet an ein erfundenes Papierkonto, gleicht ab und haelt bei jeder Abweichung; der Wiederanlauf gleicht zuerst ab und sendet nichts. Nach Maus K16-01 und K16-02: offene Auftraege in beide Richtungen verglichen; Formatuebergang fuer Journale aus PR #15 (Kopf journal-v1 nach alten Regeln gelesen, Umstellung format;2 nur ohne angefangenen Tag). Nur Papiergeld, keine echten Schnittstellen, keine neuen Grenzen, keine neuen Abhaengigkeiten.
 pfade:
-crates/depot_sim/
 crates/depot_journal/
-crates/depot_kern/
-crates/depot_regelwerk/
-Cargo.toml
-Cargo.lock
-kodex/festschreibung.txt
-kodex/freigabe.txt
-kodex/aenderung.txt
+crates/depot_sim/
 docs/
 CHANGELOG.md
 README.md

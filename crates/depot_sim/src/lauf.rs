@@ -7,26 +7,32 @@
 //! weiterlaesst (R31), dass das Regelwerk entscheidet (D01) und dass Daten- und Verlustgrenzen
 //! halten (D03).
 //!
-//! **Ablauf eines Tages:** Ereignisse beobachten. Kurse pruefen; bei einem Fehler faellt der
-//! Zyklus aus. Waechter: Tagesverlust oder unplausible Werte halten an, die Notbremse
-//! verkauft alles und haelt an; der Tag bleibt dann offen. Dann je Topf: der zustaendige
-//! Berater schlaegt vor, der andere prueft, das Regelwerk entscheidet, jeder Auftrag wird
-//! belegt und auf Papier zum Schlusskurs ausgefuehrt. Zuletzt der Abschluss.
+//! **Ablauf eines Tages:** Ereignisse beobachten. Kontowaechter: Journal und Papierkonto
+//! stimmen ueberein, sonst Halt. Kurse pruefen; bei einem Fehler faellt der Zyklus aus.
+//! Waechter: Tagesverlust oder unplausible Werte halten an, die Notbremse verkauft alles und
+//! haelt an; der Tag bleibt dann offen. Dann je Topf: der zustaendige Berater schlaegt vor,
+//! der andere prueft, das Regelwerk entscheidet. Jeder Auftrag wird mit Deckung reserviert,
+//! als gesendet belegt und dann an das Papierkonto gesendet; nach dem Markt gleicht der
+//! Kontowaechter ab und belegt jede Ausfuehrung. Kaeufe erst, wenn alle Verkaeufe des Topfes
+//! ausgefuehrt sind. Zuletzt der Abschluss; er setzt voraus, dass kein Auftrag offen ist.
 //!
-//! **Wiederanlauf:** Der Lauf setzt nach dem letzten Abschluss fort. Hat das Journal Eintraege
+//! **Wiederanlauf:** Der Lauf setzt nach dem letzten Abschluss fort. Zuerst gleicht der
+//! Kontowaechter mit dem Papierkonto ab und belegt, was dort aus offenen Auftraegen geworden
+//! ist; gesendet wird dabei nichts (R37). Jede Abweichung ist Halt. Hat das Journal Eintraege
 //! nach dem letzten Abschluss, war ein Tag angefangen: Halt, und niemand wird neu gefragt.
 //! Was ein angefangener Tag gekostet hat, steht im Journal; ihn zu wiederholen, waere eine
 //! zweite Frage fuer denselben Zyklus.
 
-use depot_journal::{Journal, JournalFehler};
+use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung};
 use depot_kern::{BeraterId, Cent, Grenzen, Herkunft, Kurse, Topf, TopfId, Vorschlag};
 use depot_ki::Sperre;
 use depot_regelwerk::{
-    DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide,
-    notbremse_auftraege, pruefe_kurse, waechter,
+    DatenFehler, Eingabe, GenehmigterAuftrag, WaechterBefund, entscheide, notbremse_auftraege,
+    pruefe_kurse, waechter,
 };
 
 use crate::abdruck;
+use crate::papier::{Broker, Sendeantwort};
 use crate::szenario::{Berater, Lage, Szenario, Tag};
 
 /// Wer im Journal begruendet, ausser Dachs und Maus.
@@ -35,6 +41,8 @@ const WAECHTER: &str = "Waechter";
 const KOSTENSCHUTZ: &str = "Kostenschutz";
 const REGELWERK: &str = "Regelwerk";
 const SIMULATION: &str = "Simulation";
+const KONTOWAECHTER: &str = "Kontowaechter";
+const AUFTRAGSSTELLE: &str = "Auftragsstelle";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LaufFehler {
@@ -127,32 +135,26 @@ fn depotwert<'a>(toepfe: impl Iterator<Item = &'a Topf>, kurse: &Kurse) -> Optio
         .try_fold(Cent::NULL, |s, t| s.checked_add(t.wert(kurse)?))
 }
 
-/// Laeuft das Szenario ab dem Tag nach dem letzten Abschluss.
+/// Laeuft das Szenario ab dem Tag nach dem letzten Abschluss. `konto` ist das Papierkonto;
+/// es lebt unabhaengig vom Journal weiter, auch ueber einen Neustart.
 ///
 /// # Errors
-/// `Halt` bei Kursen, die nicht erfunden sind, bei einem angefangenen Tag im Journal, bei
-/// einem Journal, das nicht zum Szenario passt, bei einem Befund des Waechters und bei jedem
-/// Fehler des Journals.
+/// `Halt` bei Kurse, die nicht erfunden sind, bei einem angefangenen Tag im Journal, bei
+/// einem Journal, das nicht zum Szenario passt, bei einer Abweichung zum Konto, bei einem
+/// Befund des Waechters und bei jedem Fehler des Journals.
 pub fn lauf(
     j: &mut Journal,
     s: &Szenario,
     dachs: &mut dyn Berater,
     maus: &mut dyn Berater,
+    konto: &mut dyn Broker,
 ) -> Result<(), LaufFehler> {
     nur_simulation(s)?;
-    let st = j.stand();
-    if st.seit_abschluss() > 0 {
-        return Err(halt(format!(
-            "{} Eintraege nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
-             abgeschlossen. Halt bis zur Pruefung; niemand wird neu gefragt",
-            st.seit_abschluss()
-        )));
-    }
     // Der letzte Abschluss muss genau die Vorgeschichte dieses Szenarios abdrucken (K15-01).
     // Dann sind Zyklusnummern, Vergleichskurse und Stand bis dahin dieselben wie beim ersten
     // Lauf; nur die Tage danach duerfen anders sein.
     let abdruecke = abdruck::je_tag(s);
-    let fertig = match st.abschluss() {
+    let fertig = match j.stand().abschluss() {
         None => None,
         Some(a) => {
             let index = s
@@ -169,6 +171,29 @@ pub fn lauf(
             Some((index, a.hoechststand))
         }
     };
+    let neu = fertig.is_none() && j.stand().seit_abschluss() == 0;
+    if !neu {
+        // Wiederanlauf: zuerst der Abgleich (Kap. 11). Er belegt, was aus offenen Auftraegen
+        // geworden ist, und sendet nichts.
+        let abweichungen = j.gleiche_ab(&*konto).map_err(journal)?;
+        if !abweichungen.is_empty() {
+            return Err(halt(format!(
+                "Kontowaechter beim Wiederanlauf: {abweichungen:?}. Halt bis zur Pruefung; \
+                 niemand wird gefragt, nichts gesendet"
+            )));
+        }
+    }
+    let st = j.stand();
+    if st.seit_abschluss() > 0 {
+        return Err(halt(format!(
+            "{} Eintraege nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
+             abgeschlossen. Halt bis zur Pruefung; niemand wird neu gefragt",
+            st.seit_abschluss()
+        )));
+    }
+    // Ein abgeschlossenes Journal im Format 1 wird umgestellt, bevor neue Auftraege entstehen
+    // (K16-02). Ein neues Journal hat schon Format 2.
+    j.stelle_um().map_err(journal)?;
     let grenzen = Grenzen::standard();
     let mut hoch = if let Some((_, h)) = fertig {
         h
@@ -179,7 +204,7 @@ pub fn lauf(
         depotwert(s.start.iter(), &s.vorlauf).ok_or_else(|| rechnung("Startwert"))?
     };
     let mut vortag = &s.vorlauf;
-    let mut beteiligte = Beteiligte { dachs, maus };
+    let mut beteiligte = Beteiligte { dachs, maus, konto };
     for (i, (tag, abdruck)) in s.tage.iter().zip(&abdruecke).enumerate() {
         let nr = u32::try_from(i)
             .ok()
@@ -205,9 +230,29 @@ pub fn lauf(
     Ok(())
 }
 
-struct Beteiligte<'a, 'b> {
+/// Der Kontowaechter: Abgleich mit dem Konto. Jede Abweichung steht im Journal und haelt den
+/// Lauf an; nichts wird verkauft oder ausgeglichen.
+fn kontowaechter(j: &mut Journal, tag: &Tag, konto: &dyn Broker) -> Result<(), LaufFehler> {
+    let abweichungen = j.gleiche_ab(konto).map_err(journal)?;
+    if abweichungen.is_empty() {
+        return Ok(());
+    }
+    for a in &abweichungen {
+        begruende(j, tag, KONTOWAECHTER, &format!("{a:?}"))?;
+    }
+    begruende(
+        j,
+        tag,
+        KONTOWAECHTER,
+        "Abweichung zum Konto: Halt bis zur Pruefung; kein Verkauf, kein Ausgleich",
+    )?;
+    Err(halt(format!("Kontowaechter: {abweichungen:?}")))
+}
+
+struct Beteiligte<'a, 'b, 'c> {
     dachs: &'a mut dyn Berater,
     maus: &'b mut dyn Berater,
+    konto: &'c mut dyn Broker,
 }
 
 /// Was fuer einen Tag fest ist.
@@ -229,13 +274,14 @@ fn ein_tag(
     z: &Zyklus<'_>,
     hoch: Cent,
     fehler: &[DatenFehler],
-    beteiligte: &mut Beteiligte<'_, '_>,
+    beteiligte: &mut Beteiligte<'_, '_, '_>,
 ) -> Result<Cent, LaufFehler> {
     let tag = z.tag;
     for ereignis in &tag.ereignisse {
         jr.beobachte(tag.datum, &sauber(ereignis))
             .map_err(journal)?;
     }
+    kontowaechter(jr, tag, &*beteiligte.konto)?;
     if !fehler.is_empty() {
         for f in fehler {
             begruende(jr, tag, DATEN, &format!("{f:?}"))?;
@@ -269,7 +315,7 @@ fn ein_tag(
                 let mut vergabe = jr.kennungsvergabe();
                 let auftraege = notbremse_auftraege(z.grenzen, topf, &tag.kurse, &mut vergabe)
                     .ok_or_else(|| halt("Notbremse: Kurs fehlt; Halt ohne Verkauf"))?;
-                fuehre_aus(jr, z, topf, &auftraege)?;
+                fuehre_aus(jr, z, topf.id(), &auftraege, &mut *beteiligte.konto)?;
             }
             return Err(halt(format!("Waechter: {befund:?}")));
         }
@@ -284,8 +330,9 @@ fn ein_tag(
         }
     }
     let heute = heute.ok_or_else(|| rechnung("Depotwert"))?;
-    topf_zyklus(jr, z, TopfId::A, beteiligte.dachs, beteiligte.maus)?;
-    topf_zyklus(jr, z, TopfId::B, beteiligte.maus, beteiligte.dachs)?;
+    let b = beteiligte;
+    topf_zyklus(jr, z, TopfId::A, b.dachs, b.maus, &mut *b.konto)?;
+    topf_zyklus(jr, z, TopfId::B, b.maus, b.dachs, &mut *b.konto)?;
     let hoch = hoch.max(heute);
     jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
@@ -329,6 +376,7 @@ fn topf_zyklus(
     id: TopfId,
     frager: &mut dyn Berater,
     pruefer: &mut dyn Berater,
+    konto: &mut dyn Broker,
 ) -> Result<(), LaufFehler> {
     let (tag, zyklus) = (z.tag, z.nr);
     let topf = j
@@ -403,98 +451,119 @@ fn topf_zyklus(
     for b in &ent.befunde {
         begruende(j, tag, REGELWERK, &format!("{t}: {b:?}"))?;
     }
-    let auftraege: Vec<GenehmigterAuftrag> = ent.verkaeufe.into_iter().chain(ent.kaeufe).collect();
-    fuehre_aus(j, z, &topf, &auftraege)
+    if ent.verkaeufe.is_empty() {
+        return fuehre_aus(j, z, id, &ent.kaeufe, konto);
+    }
+    let alle = fuehre_aus(j, z, id, &ent.verkaeufe, konto);
+    // Das Regelwerk rechnet die Kaeufe mit dem Erloes der Verkaeufe: Sie gehen nur raus, wenn
+    // alle Verkaeufe ausgefuehrt sind; sonst verfallen sie.
+    match alle {
+        Ok(()) if verkauft(j, &ent.verkaeufe) => fuehre_aus(j, z, id, &ent.kaeufe, konto),
+        Ok(()) if ent.kaeufe.is_empty() => Ok(()),
+        Ok(()) => begruende(
+            j,
+            tag,
+            SIMULATION,
+            &format!("{t}: Kaeufe entfallen: nicht alle Verkaeufe ausgefuehrt"),
+        ),
+        Err(e) => Err(e),
+    }
 }
 
-/// Belegt jeden Auftrag und fuehrt ihn auf Papier zum Schlusskurs aus, wenn der Kurs das Limit
-/// einhaelt; sonst verfaellt er. Verkaeufe kommen vor Kaeufen. Jede Ausfuehrung kostet die
-/// Gebuehr nach Tarif. Bargeld und Bestand werden nie negativ; sonst Halt.
+/// Sind alle diese Auftraege ganz ausgefuehrt?
+fn verkauft(j: &Journal, auftraege: &[GenehmigterAuftrag]) -> bool {
+    auftraege.iter().all(|a| {
+        j.stand()
+            .auftrag(a.auftrag().kennung.nr())
+            .map(|l| l.zustand)
+            == Some(AuftragsZustand::Gefuellt)
+    })
+}
+
+/// Die Auftragsstelle: Jeder Auftrag wird mit Deckung reserviert (Kontowaechter), als
+/// gesendet belegt und erst dann an das Konto gesendet. Ohne Antwort gilt der Sendestatus als
+/// unbekannt; geklaert wird nur ueber den Abgleich, nie durch einen zweiten Versand (R37).
+/// Danach laeuft der Markt, und der Kontowaechter gleicht ab: Jede Ausfuehrung steht im
+/// Journal, jede Abweichung haelt an.
 fn fuehre_aus(
     j: &mut Journal,
     z: &Zyklus<'_>,
-    topf: &Topf,
+    id: TopfId,
     auftraege: &[GenehmigterAuftrag],
+    konto: &mut dyn Broker,
 ) -> Result<(), LaufFehler> {
-    let (g, tag) = (z.grenzen, z.tag);
+    let tag = z.tag;
     if auftraege.is_empty() {
         return Ok(());
     }
-    let id = topf.id();
     let t = topf_name(id);
-    let mut bargeld = topf.bargeld();
-    let mut bestand = topf.positionen().clone();
+    let mut gesendet = Vec::new();
     for a in auftraege {
-        j.belege(id, a).map_err(journal)?;
-        let auf = a.auftrag();
-        let nr = auf.kennung.nr();
-        let kurs = tag
-            .kurse
-            .kurs(&auf.isin)
-            .ok_or_else(|| halt(format!("Kurs von {} fehlt", auf.isin)))?;
-        let im_limit = match auf.richtung {
-            Richtung::Kauf => kurs <= auf.limit,
-            Richtung::Verkauf => kurs >= auf.limit,
+        let nr = a.auftrag().kennung.nr();
+        match j.reserviere_auftrag(z.grenzen, id, a) {
+            Ok(()) => {}
+            Err(JournalFehler::Abgelehnt(grund)) => {
+                begruende(
+                    j,
+                    tag,
+                    KONTOWAECHTER,
+                    &format!("{t}: Auftrag {nr} nicht reserviert: {grund}"),
+                )?;
+                continue;
+            }
+            Err(e) => return Err(journal(e)),
+        }
+        j.melde(nr, &Meldung::Gesendet).map_err(journal)?;
+        match konto.sende(a) {
+            Sendeantwort::Angenommen => j.melde(nr, &Meldung::Angenommen).map_err(journal)?,
+            Sendeantwort::Abgelehnt(grund) => {
+                j.melde(nr, &Meldung::Abgelehnt).map_err(journal)?;
+                begruende(
+                    j,
+                    tag,
+                    AUFTRAGSSTELLE,
+                    &format!("{t}: Auftrag {nr} abgelehnt: {grund}"),
+                )?;
+            }
+            Sendeantwort::KeineAntwort => {
+                j.melde(nr, &Meldung::Unbekannt).map_err(journal)?;
+                begruende(
+                    j,
+                    tag,
+                    AUFTRAGSSTELLE,
+                    &format!(
+                        "{t}: Auftrag {nr}: Sendestatus unbekannt; nur Abgleich, kein neuer Versand"
+                    ),
+                )?;
+            }
+        }
+        gesendet.push(nr);
+    }
+    konto.markt(&tag.kurse);
+    kontowaechter(j, tag, &*konto)?;
+    for nr in gesendet {
+        let Some(l) = j.stand().auftrag(nr).cloned() else {
+            return Err(halt(format!("{t}: Auftrag {nr} fehlt im Journal")));
         };
-        if !im_limit {
+        for a in &l.ausfuehrungen {
             begruende(
                 j,
                 tag,
                 SIMULATION,
                 &format!(
-                    "{t}: Auftrag {nr} verfaellt: Kurs {} ausserhalb des Limits",
-                    kurs.0
+                    "{t}: Auftrag {nr} ausgefuehrt: {:?} {} Stueck {} zu {} Cent, Gebuehr {} Cent",
+                    l.beleg.richtung, a.stueck, l.beleg.isin, a.kurs.0, a.gebuehr.0
                 ),
             )?;
-            continue;
         }
-        let volumen = kurs
-            .mal_stueck(auf.stueck)
-            .ok_or_else(|| rechnung("Volumen"))?;
-        let gebuehr = g
-            .gebuehren()
-            .fuer(volumen)
-            .ok_or_else(|| rechnung("Gebuehr"))?;
-        let gehalten = bestand.get(&auf.isin).copied().unwrap_or(0);
-        let (neu_bargeld, neu_stueck) = match auf.richtung {
-            Richtung::Kauf => (
-                bargeld
-                    .checked_sub(volumen)
-                    .and_then(|b| b.checked_sub(gebuehr)),
-                gehalten.checked_add(auf.stueck),
-            ),
-            Richtung::Verkauf => (
-                bargeld
-                    .checked_add(volumen)
-                    .and_then(|b| b.checked_sub(gebuehr)),
-                gehalten.checked_sub(auf.stueck),
-            ),
-        };
-        let (Some(neu_bargeld), Some(neu_stueck)) = (neu_bargeld, neu_stueck) else {
-            return Err(halt(format!("{t}: Auftrag {nr} nicht ausfuehrbar")));
-        };
-        if neu_bargeld.0 < 0 {
-            return Err(halt(format!("{t}: Auftrag {nr}: Bargeld wuerde negativ")));
+        if l.zustand == AuftragsZustand::Verfallen {
+            begruende(
+                j,
+                tag,
+                SIMULATION,
+                &format!("{t}: Auftrag {nr} verfaellt: Kurs ausserhalb des Limits"),
+            )?;
         }
-        bargeld = neu_bargeld;
-        if neu_stueck == 0 {
-            bestand.remove(&auf.isin);
-        } else {
-            bestand.insert(auf.isin.clone(), neu_stueck);
-        }
-        begruende(
-            j,
-            tag,
-            SIMULATION,
-            &format!(
-                "{t}: Auftrag {nr} ausgefuehrt: {:?} {} Stueck {} zu {} Cent, Gebuehr {} Cent",
-                auf.richtung, auf.stueck, auf.isin, kurs.0, gebuehr.0
-            ),
-        )?;
     }
-    let mut neu = Topf::neu(id, bargeld).map_err(|e| halt(format!("{t}: {e:?}")))?;
-    for (isin, stueck) in bestand {
-        neu.setze_bestand(isin, stueck);
-    }
-    j.setze_topf(&neu).map_err(journal)
+    Ok(())
 }
