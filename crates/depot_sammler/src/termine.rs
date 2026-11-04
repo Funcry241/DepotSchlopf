@@ -9,13 +9,15 @@
 //! nicht mehr auf der Seite, wird nur gemeldet (`fehlen`); was das bedeutet, entscheidet nicht
 //! der Sammler.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use depot_journal::Journal;
-use depot_kern::Zeitpunkt;
+use depot_journal::{Fortschreibung, Journal, JournalFehler, TerminBeleg};
+use depot_kern::{Herkunft, Zeitpunkt};
 
+use crate::ezb::{ADRESSE_EZB, QUELLE_EZB, lies_ezb_termine};
 use crate::netz::Netz;
-use crate::sammeln::SammelFehler;
+use crate::sammeln::{SammelFehler, lege_ab};
 
 /// Der Bericht eines Laufs ueber die Termine.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -40,10 +42,60 @@ pub struct TerminBericht {
 /// # Errors
 /// Journal, Ablage oder Uhr versagen. Was bis dahin belegt ist, bleibt belegt.
 pub fn sammle_termine(
-    _journal: &mut Journal,
-    _netz: &mut dyn Netz,
-    _uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
-    _ablage: &Path,
+    journal: &mut Journal,
+    netz: &mut dyn Netz,
+    uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
+    ablage: &Path,
 ) -> Result<TerminBericht, SammelFehler> {
-    Ok(TerminBericht::default())
+    let mut bericht = TerminBericht::default();
+    let roh = match netz.hole(ADRESSE_EZB) {
+        Ok(r) => r,
+        Err(e) => {
+            bericht.fehler = Some(format!("Abruf: {e}"));
+            return Ok(bericht);
+        }
+    };
+    let abruf = uhr().ok_or(SammelFehler::Uhr)?;
+    bericht.rohdatei =
+        Some(lege_ab(ablage, QUELLE_EZB, abruf, ".html", &roh).map_err(SammelFehler::Ablage)?);
+    let termine = match std::str::from_utf8(&roh)
+        .map_err(|_| "Seite ist kein UTF-8".to_string())
+        .and_then(|t| lies_ezb_termine(t).map_err(|e| format!("Seite unlesbar: {e:?}")))
+    {
+        Ok(t) => t,
+        Err(text) => {
+            bericht.fehler = Some(text);
+            return Ok(bericht);
+        }
+    };
+
+    let heute = abruf.datum().ok_or(SammelFehler::Uhr)?;
+    let auf_der_seite: BTreeSet<&str> = termine.iter().map(depot_kern::Termin::kennung).collect();
+    bericht.fehlen = journal
+        .stand()
+        .aktuelle_termine()
+        .into_iter()
+        .filter(|(kennung, b)| {
+            b.quelle() == QUELLE_EZB
+                && !auf_der_seite.contains(kennung)
+                && b.termin().zeit().tag().is_some_and(|tag| tag >= heute)
+        })
+        .map(|(kennung, _)| kennung.to_string())
+        .collect();
+
+    for termin in termine {
+        let beleg = TerminBeleg::neu(QUELLE_EZB, Herkunft::Quelle, abruf, &roh, termin)
+            .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
+        match journal
+            .belege_termin(&beleg)
+            .map_err(SammelFehler::Journal)?
+        {
+            Fortschreibung::Neu => bericht.neu = bericht.neu.saturating_add(1),
+            Fortschreibung::Geaendert => bericht.geaendert = bericht.geaendert.saturating_add(1),
+            Fortschreibung::Unveraendert => {
+                bericht.unveraendert = bericht.unveraendert.saturating_add(1);
+            }
+        }
+    }
+    Ok(bericht)
 }

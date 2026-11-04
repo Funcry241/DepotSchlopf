@@ -30,6 +30,7 @@ const HILFE: &str = "Aufruf:\n  run.cmd                  alles: Gate pruefen und
 run.cmd kodex            dasselbe\n  run.cmd festschreibung   Festschreibung neu schreiben (nur fuer FestschreibungAenderung)\n  \
 run.cmd kurse            Schlusskurse holen, im Journal belegen und pruefen (nur lesend)\n  \
 run.cmd kurse einrichten Journal daten/journal.txt einmal anlegen\n  \
+run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
 
 /// Offene Reste frueherer Laeufe: Eine liegengebliebene Sperrdatei bedeutet einen Absturz
@@ -110,8 +111,8 @@ fn main() -> ExitCode {
     };
 
     // Der Sammler laeuft fuer sich: kein Gate, kein Export. Netz hat nur er (Kodex).
-    if befehl == "kurse" {
-        return sammler(&wurzel, &optionen);
+    if befehl == "kurse" || befehl == "termine" {
+        return sammler(&wurzel, &args);
     }
 
     let mut kodex_args: Vec<String> = match befehl.as_str() {

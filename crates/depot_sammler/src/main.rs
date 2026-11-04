@@ -1,6 +1,7 @@
-//! `depot_sammler` – holt Xetra-Schlusskurse, belegt sie im Journal und prueft sie.
+//! `depot_sammler` – holt Xetra-Schlusskurse und Termine, belegt sie im Journal und prueft sie.
 //!
-//! Aufruf ueber `run.cmd kurse` (oder `run.cmd kurse einrichten` beim ersten Mal). Das Journal
+//! Aufruf ueber `run.cmd kurse` (oder `run.cmd kurse einrichten` beim ersten Mal) und
+//! `run.cmd termine`. Das Journal
 //! liegt unter `daten/journal.txt`, die rohen Antworten unter `daten/roh/`; beides bleibt auf dem
 //! eigenen Rechner (`.gitignore`, Export ohne `daten/`).
 
@@ -22,7 +23,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use depot_journal::Journal;
 use depot_kern::{Datum, Preis, Zeitpunkt};
-use depot_sammler::{Ergebnis, Https, Schluessel, beobachtungsliste, sammle};
+use depot_sammler::{
+    Ergebnis, Https, Schluessel, beobachtungsliste, ezb::ADRESSE_EZB, sammle, sammle_termine,
+};
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
 const PAUSE: Duration = Duration::from_secs(15);
@@ -175,6 +178,52 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
     }
 }
 
+fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
+    let mut journal = match Journal::oeffnen(journal_pfad) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!(
+                "[Sammler] FEHLER: Journal {}: {e:?}. Beim ersten Mal: run.cmd kurse einrichten",
+                journal_pfad.display()
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    println!("[Sammler] Hole die Termine der EZB von {ADRESSE_EZB} ...");
+    let mut netz = Https::neu();
+    let mut uhr = jetzt;
+    let bericht = match sammle_termine(
+        &mut journal,
+        &mut netz,
+        &mut uhr,
+        &wurzel.join("daten").join("roh"),
+    ) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("[Sammler] FEHLER, Lauf angehalten: {e:?}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Some(d) = &bericht.rohdatei {
+        println!("[Sammler] Rohe Seite: {}", d.display());
+    }
+    if let Some(f) = &bericht.fehler {
+        eprintln!("[Sammler] FEHLER, nichts belegt: {f}");
+        return ExitCode::FAILURE;
+    }
+    println!(
+        "[Sammler] Termine: {} neu, {} geaendert, {} unveraendert. Belegt im Journal {}.",
+        bericht.neu,
+        bericht.geaendert,
+        bericht.unveraendert,
+        journal_pfad.display()
+    );
+    for k in &bericht.fehlen {
+        println!("  {k}: steht im Journal, aber nicht mehr auf der Seite (nur gemeldet)");
+    }
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let Some(wurzel) = wurzel() else {
         eprintln!(
@@ -192,8 +241,9 @@ fn main() -> ExitCode {
     {
         [] | ["kurse"] => kurse(&wurzel, &journal),
         ["einrichten"] | ["kurse", "einrichten"] => einrichten(&journal),
+        ["termine"] => termine(&wurzel, &journal),
         _ => {
-            eprintln!("Aufruf: run.cmd kurse | run.cmd kurse einrichten");
+            eprintln!("Aufruf: run.cmd kurse | run.cmd kurse einrichten | run.cmd termine");
             ExitCode::from(2)
         }
     }

@@ -9,9 +9,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use depot_journal::{Journal, JournalFehler};
+use depot_journal::{Journal, JournalFehler, TerminBeleg};
 use depot_kern::{
-    Betroffen, Datum, Herkunft, TerminFehler, Verlaesslichkeit, Zeitbezug, Zeitpunkt,
+    Betroffen, Datum, Herkunft, Termin, TerminFehler, Verlaesslichkeit, Zeitbezug, Zeitpunkt,
 };
 use depot_sammler::ezb::{ADRESSE_EZB, EzbFehler, QUELLE_EZB, lies_ezb_termine};
 use depot_sammler::{Netz, SammelFehler, TerminBericht, sammle_termine};
@@ -599,7 +599,12 @@ fn geaenderter_termin_wird_fortgeschrieben() -> Result<(), String> {
     lauf(&journal, &roh, Ok(SEITE), utc(4, 18, 0)?)?.map_err(|e| format!("{e:?}"))?;
     let alt = "General Council meeting of the ECB in Frankfurt<br>";
     let neu = "General Council meeting of the ECB (virtual)<br>";
-    assert_eq!(SEITE.matches(alt).count(), 1, "Vorbedingung: Text einmal");
+    // Der Text steht zuerst am 26.11.2026; `replacen` aendert nur diesen Eintrag.
+    let stelle = |t: &str| SEITE.find(t).unwrap_or(usize::MAX);
+    assert!(
+        stelle("26/11/2026") < stelle(alt) && stelle(alt) < stelle("16/12/2026"),
+        "Vorbedingung: Text zuerst am 26.11."
+    );
     let seite = SEITE.replacen(alt, neu, 1);
     let um = utc(5, 18, 0)?;
     let b = lauf(&journal, &roh, Ok(&seite), um)?.map_err(|e| format!("{e:?}"))?;
@@ -634,7 +639,6 @@ fn geaenderter_termin_wird_fortgeschrieben() -> Result<(), String> {
 fn fehlender_termin_wird_nur_gemeldet() -> Result<(), String> {
     let (journal, roh) = ordner()?;
     lauf(&journal, &roh, Ok(SEITE), utc(4, 18, 0)?)?.map_err(|e| format!("{e:?}"))?;
-    let vorher = eintraege(&journal)?;
     // Der Eintrag vom 26.11.2026 verschwindet von der Seite.
     let start = SEITE.find("26/11/2026").ok_or("Vorbedingung: 26.11.")?;
     let ab = SEITE
@@ -654,6 +658,27 @@ fn fehlender_termin_wird_nur_gemeldet() -> Result<(), String> {
         SEITE.get(..ab).ok_or("Vorbedingung")?,
         SEITE.get(bis..).ok_or("Vorbedingung")?
     );
+    // Ein kuenftiger Termin einer anderen Quelle steht nie auf der Seite der EZB und wird
+    // nicht gemeldet.
+    {
+        let mut j = vorbedingung(Journal::oeffnen(&journal), "Journal oeffnen")?;
+        let anderer = vorbedingung(
+            Termin::neu(
+                "andere-2026-12-01",
+                "Erfundener Termin",
+                Zeitbezug::Tag(tag(2026, 12, 1)?),
+                vec![Betroffen::groesse("test").ok_or("Vorbedingung: Groesse")?],
+                Verlaesslichkeit::Vermutet,
+            ),
+            "Termin",
+        )?;
+        let beleg = vorbedingung(
+            TerminBeleg::neu("andere", Herkunft::Quelle, utc(4, 18, 30)?, b"x", anderer),
+            "Beleg",
+        )?;
+        vorbedingung(j.belege_termin(&beleg), "Beleg im Journal")?;
+    }
+    let vorher = eintraege(&journal)?;
     let b = lauf(&journal, &roh, Ok(&seite), utc(5, 18, 0)?)?.map_err(|e| format!("{e:?}"))?;
     assert_eq!(b.fehler, None);
     assert_eq!((b.neu, b.geaendert, b.unveraendert), (0, 0, 51));
@@ -692,6 +717,7 @@ fn unlesbare_seite_wird_nicht_belegt() -> Result<(), String> {
     let mut zeiten = vec![utc(4, 19, 0)?].into_iter();
     let mut uhr = move || zeiten.next();
     let b = sammle_termine(&mut j, &mut netz, &mut uhr, &roh).map_err(|e| format!("{e:?}"))?;
+    drop(j);
     assert!(b.fehler.is_some());
     assert!(b.rohdatei.is_some());
     assert_eq!(eintraege(&journal)?, vorher);
