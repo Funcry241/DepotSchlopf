@@ -83,6 +83,26 @@ fn kurse_alle(cent: i64) -> Kurse {
     kurse(&preise_alle(cent))
 }
 
+/// Der Handelstag aller Testkurse.
+fn handelstag() -> Datum {
+    Datum::neu(2026, 11, 2).unwrap_or_else(|| unreachable!("Handelstag ungueltig"))
+}
+
+/// Vergleichskurse vom vorigen Handelstag, Freitag 30.10.2026, 17:30 Uhr UTC.
+fn vortagskurse(preise: &Preise) -> Kurse {
+    let tag = Datum::neu(2026, 10, 30).unwrap_or_else(|| unreachable!("Vortag ungueltig"));
+    let zeit = Zeitpunkt::neu(tag, 17, 30, 0).unwrap_or_else(|| unreachable!("Vortag ungueltig"));
+    let eintraege = preise
+        .iter()
+        .map(|(i, c)| {
+            let k = Kurs::neu(Cent(*c), "EUR", tag, zeit, Herkunft::Simulation)
+                .unwrap_or_else(|e| unreachable!("Vortagskurs {i} {c}: {e:?}"));
+            (i.clone(), k)
+        })
+        .collect();
+    Kurse::neu(zeit, eintraege).unwrap_or_else(|e| unreachable!("Vortagskurse: {e:?}"))
+}
+
 fn topf_neu(id: TopfId, bargeld: Cent) -> Topf {
     Topf::neu(id, bargeld).unwrap_or_else(|e| unreachable!("Testtopf: {e:?}"))
 }
@@ -338,12 +358,12 @@ fn gleiche_eingabe_gleiche_ausgabe() {
 #[test]
 fn kursdaten_fehlend_oder_sprunghaft() {
     let g = Grenzen::standard();
-    let vortag = kurse_alle(10_000);
+    let vortag = vortagskurse(&preise_alle(10_000));
     let mut preise = preise_alle(10_000);
     preise.remove(&isin(0));
     preise.insert(isin(1), 12_000);
     let heute = kurse(&preise);
-    let fehler = pruefe_kurse(&g, &universum(), &heute, &vortag);
+    let fehler = pruefe_kurse(&g, &universum(), handelstag(), &heute, &vortag);
     assert!(fehler.contains(&DatenFehler::KursFehlt(isin(0))));
     assert!(fehler.contains(&DatenFehler::Kurssprung {
         isin: isin(1),
@@ -351,7 +371,7 @@ fn kursdaten_fehlend_oder_sprunghaft() {
     }));
     // Ein Kurs von 0 kommt gar nicht erst in die Kurse (R20).
     assert_eq!(kurs(0).err(), Some(KursFehler::NichtPositiv));
-    assert!(pruefe_kurse(&g, &universum(), &vortag, &vortag).is_empty());
+    assert!(pruefe_kurse(&g, &universum(), handelstag(), &kurse_alle(10_000), &vortag).is_empty());
 }
 
 #[test]

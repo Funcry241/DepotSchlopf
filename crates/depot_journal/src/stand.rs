@@ -30,8 +30,9 @@ pub enum Art {
     /// `datum;wer;text`: warum etwas geschieht oder nicht geschieht. `wer` ist ein Berater
     /// oder eine Stelle des Rahmens; die Kaufentscheidung begruenden die Berater selbst.
     Begruendung,
-    /// `datum;hoechststand`: Der Tag ist vollstaendig belegt. Ein Wiederanlauf setzt nur nach
-    /// einem Abschluss fort; die Daten steigen streng.
+    /// `datum;hoechststand;abdruck`: Der Tag ist vollstaendig belegt. `abdruck` bindet ihn an
+    /// seine ganze Vorgeschichte (64 Hex-Zeichen). Ein Wiederanlauf setzt nur nach einem
+    /// Abschluss fort; die Daten steigen streng.
     Abschluss,
 }
 
@@ -76,6 +77,17 @@ pub struct AuftragsBeleg {
     pub anlass: Anlass,
 }
 
+/// Ein Tagesabschluss.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Abschluss {
+    pub datum: Datum,
+    /// Hoechststand des Depotwerts bis zu diesem Tag.
+    pub hoechststand: Cent,
+    /// Abdruck der Vorgeschichte bis zu diesem Tag: SHA-256 in Kleinbuchstaben-Hex. Wer ihn
+    /// bildet, legt der Aufrufer fest; das Journal prueft nur die Form.
+    pub abdruck: String,
+}
+
 /// Der Stand, wie er aus dem Journal folgt.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stand {
@@ -85,7 +97,7 @@ pub struct Stand {
     letzte_kennung: u64,
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
-    abschluss: Option<(Datum, Cent)>,
+    abschluss: Option<Abschluss>,
     seit_abschluss: usize,
 }
 
@@ -113,9 +125,9 @@ impl Stand {
         &self.begruendungen
     }
 
-    /// Der letzte Tagesabschluss: Datum und Hoechststand des Depotwerts.
-    pub fn abschluss(&self) -> Option<(Datum, Cent)> {
-        self.abschluss
+    /// Der letzte Tagesabschluss.
+    pub fn abschluss(&self) -> Option<&Abschluss> {
+        self.abschluss.as_ref()
     }
 
     /// Zahl der Eintraege seit dem letzten Abschluss. Mehr als null heisst: Ein Tag ist
@@ -163,18 +175,18 @@ impl Stand {
                 self.begruendungen.push(b);
             }
             Art::Abschluss => {
-                let (datum, hoch) = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
-                kanonisch(&abschluss_text(datum, hoch), inhalt)?;
-                if let Some((vorher, _)) = self.abschluss
-                    && datum <= vorher
+                let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
+                kanonisch(&abschluss_text(&a), inhalt)?;
+                if let Some(vorher) = &self.abschluss
+                    && a.datum <= vorher.datum
                 {
                     return Err(format!(
                         "Abschluss {} nicht nach dem letzten ({})",
-                        datum_text(datum),
-                        datum_text(vorher)
+                        datum_text(a.datum),
+                        datum_text(vorher.datum)
                     ));
                 }
-                self.abschluss = Some((datum, hoch));
+                self.abschluss = Some(a);
                 self.seit_abschluss = 0;
                 return Ok(());
             }
@@ -238,15 +250,22 @@ fn lies_begruendung(inhalt: &str) -> Option<(Datum, String, String)> {
     Some((lies_datum(datum)?, wer.to_string(), text.to_string()))
 }
 
-pub(crate) fn abschluss_text(d: Datum, hoechststand: Cent) -> String {
-    format!("{};{}", datum_text(d), hoechststand.0)
+pub(crate) fn abschluss_text(a: &Abschluss) -> String {
+    format!("{};{};{}", datum_text(a.datum), a.hoechststand.0, a.abdruck)
 }
 
-fn lies_abschluss(inhalt: &str) -> Option<(Datum, Cent)> {
-    let (datum, hoch) = inhalt.split_once(';')?;
+fn lies_abschluss(inhalt: &str) -> Option<Abschluss> {
+    let teile: Vec<&str> = inhalt.split(';').collect();
+    let [datum, hoch, abdruck] = teile.as_slice() else {
+        return None;
+    };
     let hoch = Cent(hoch.parse().ok()?);
     (hoch.0 > 0).then_some(())?;
-    Some((lies_datum(datum)?, hoch))
+    Some(Abschluss {
+        datum: lies_datum(datum)?,
+        hoechststand: hoch,
+        abdruck: (*abdruck).to_string(),
+    })
 }
 
 fn topf_name(t: TopfId) -> &'static str {

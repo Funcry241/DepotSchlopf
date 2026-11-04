@@ -4,7 +4,7 @@
 //! und einen Vergleichskurs vom Vortag. Fehlt der Vergleichskurs, ist der Sprungtest nicht
 //! bestanden, sondern ein eigener Fehler (R20, 1·F08).
 
-use depot_kern::{Grenzen, Isin, Kurse, Universum};
+use depot_kern::{Datum, Grenzen, Isin, Kurse, Universum};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DatenFehler {
@@ -18,12 +18,19 @@ pub enum DatenFehler {
     KeinVergleichskurs(Isin),
     /// Kurs aelter als das Hoechstalter (R06), oder sein Alter ist nicht bestimmbar.
     KursZuAlt(Isin),
+    /// Leere Schnittstelle fuer die roten Tests.
+    AbrufNichtAmHandelstag,
+    /// Leere Schnittstelle fuer die roten Tests.
+    KursNichtAmHandelstag(Isin),
+    /// Leere Schnittstelle fuer die roten Tests.
+    VergleichskursNichtVorher(Isin),
 }
 
 /// Prueft alle Werte des Universums. Leere Liste = alles in Ordnung.
 pub fn pruefe_kurse(
     grenzen: &Grenzen,
     universum: &Universum,
+    _handelstag: Datum,
     heute: &Kurse,
     vortag: &Kurse,
 ) -> Vec<DatenFehler> {

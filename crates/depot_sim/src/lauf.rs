@@ -148,6 +148,7 @@ pub fn lauf(
         )));
     }
     let fertig = st.abschluss();
+    let fertig = fertig.map(|a| (a.datum, a.hoechststand));
     if let Some((d, _)) = fertig
         && !s.tage.iter().any(|t| t.datum == d)
     {
@@ -169,7 +170,7 @@ pub fn lauf(
             .ok()
             .and_then(|z| z.checked_add(1))
             .ok_or_else(|| rechnung("Zyklus"))?;
-        let fehler = pruefe_kurse(&grenzen, &s.universum, &tag.kurse, vortag);
+        let fehler = pruefe_kurse(&grenzen, &s.universum, tag.datum, &tag.kurse, vortag);
         if fertig.is_none_or(|(d, _)| tag.datum > d) {
             let z = Zyklus {
                 grenzen: &grenzen,
@@ -227,7 +228,8 @@ fn ein_tag(
             DATEN,
             "Zyklus faellt aus: niemand wird gefragt, kein Auftrag",
         )?;
-        jr.schliesse_ab(tag.datum, hoch).map_err(journal)?;
+        jr.schliesse_ab(tag.datum, hoch, &"0".repeat(64))
+            .map_err(journal)?;
         return Ok(hoch);
     }
     let toepfe: Vec<Topf> = jr.stand().toepfe().values().cloned().collect();
@@ -267,7 +269,8 @@ fn ein_tag(
     topf_zyklus(jr, z, TopfId::A, beteiligte.dachs, beteiligte.maus)?;
     topf_zyklus(jr, z, TopfId::B, beteiligte.maus, beteiligte.dachs)?;
     let hoch = hoch.max(heute);
-    jr.schliesse_ab(tag.datum, hoch).map_err(journal)?;
+    jr.schliesse_ab(tag.datum, hoch, &"0".repeat(64))
+        .map_err(journal)?;
     Ok(hoch)
 }
 

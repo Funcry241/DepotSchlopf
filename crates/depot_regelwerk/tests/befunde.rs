@@ -16,8 +16,8 @@ use depot_kern::{
     Kurse, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
 };
 use depot_regelwerk::{
-    Anlass, AuftragsKennung, Eingabe, Entscheidung, GenehmigterAuftrag, Kennungsvergabe, Richtung,
-    entscheide, notbremse_auftraege, pruefe_kurse,
+    Anlass, AuftragsKennung, DatenFehler, Eingabe, Entscheidung, GenehmigterAuftrag,
+    Kennungsvergabe, Richtung, entscheide, notbremse_auftraege, pruefe_kurse,
 };
 
 const ISINS: [&str; 11] = [
@@ -94,6 +94,26 @@ fn kurse_mit_alter(preise: &Preise, minuten: u8) -> Kurse {
 
 fn kurse_alle(cent: i64) -> Kurse {
     kurse(&preise_alle(cent))
+}
+
+/// Der Handelstag aller Testkurse.
+fn handelstag() -> Datum {
+    Datum::neu(2026, 11, 2).unwrap_or_else(|| unreachable!("Handelstag ungueltig"))
+}
+
+/// Vergleichskurse vom vorigen Handelstag, Freitag 30.10.2026, 17:30 Uhr UTC.
+fn vortagskurse(preise: &Preise) -> Kurse {
+    let tag = Datum::neu(2026, 10, 30).unwrap_or_else(|| unreachable!("Vortag ungueltig"));
+    let zeit = Zeitpunkt::neu(tag, 17, 30, 0).unwrap_or_else(|| unreachable!("Vortag ungueltig"));
+    let eintraege = preise
+        .iter()
+        .map(|(i, c)| {
+            let k = Kurs::neu(Cent(*c), "EUR", tag, zeit, Herkunft::Simulation)
+                .unwrap_or_else(|e| unreachable!("Vortagskurs {i} {c}: {e:?}"));
+            (i.clone(), k)
+        })
+        .collect();
+    Kurse::neu(zeit, eintraege).unwrap_or_else(|e| unreachable!("Vortagskurse: {e:?}"))
 }
 
 fn topf_neu(id: TopfId, bargeld: Cent) -> Topf {
@@ -323,7 +343,7 @@ fn befund_1_r06_veralteter_kurs_erzeugt_keinen_auftrag() {
     topf.setze_bestand(isin(10), 20); // ausserhalb der Positivliste: zwingender Ausstieg
     topf.setze_bestand(isin(0), 10);
     let v = vorschlag(BeraterId::Dachs, &[(1, 2_000)]);
-    let vortag = kurse_alle(10_000);
+    let vortag = vortagskurse(&preise_alle(10_000));
     let frisch = kurse_mit_alter(&preise_alle(10_000), 20);
     let alt = kurse_mit_alter(&preise_alle(10_000), 21);
 
@@ -334,7 +354,7 @@ fn befund_1_r06_veralteter_kurs_erzeugt_keinen_auftrag() {
         "Vorbedingung"
     );
     assert!(
-        pruefe_kurse(&g, &universum(), &frisch, &vortag).is_empty(),
+        pruefe_kurse(&g, &universum(), handelstag(), &frisch, &vortag).is_empty(),
         "Vorbedingung"
     );
 
@@ -349,7 +369,7 @@ fn befund_1_r06_veralteter_kurs_erzeugt_keinen_auftrag() {
         "Notbremse mit veralteten Kursen"
     );
     assert!(
-        !pruefe_kurse(&g, &universum(), &alt, &vortag).is_empty(),
+        !pruefe_kurse(&g, &universum(), handelstag(), &alt, &vortag).is_empty(),
         "veraltete Kurse nicht gemeldet"
     );
 }
@@ -528,8 +548,8 @@ fn befund_1_f08_fehlender_vortag_ist_kein_bestandener_sprungtest() {
     let heute = kurse_alle(10_000);
     let mut preise = preise_alle(10_000);
     preise.remove(&isin(3));
-    let vortag = kurse(&preise);
-    let fehler = pruefe_kurse(&g, &universum(), &heute, &vortag);
+    let vortag = vortagskurse(&preise);
+    let fehler = pruefe_kurse(&g, &universum(), handelstag(), &heute, &vortag);
     assert!(
         !fehler.is_empty(),
         "fehlender Vortagskurs von {} wurde still akzeptiert",
@@ -894,14 +914,17 @@ fn grenzfall_orderzahl_genau_an_der_grenze() {
 #[test]
 fn grenzfall_kurssprung_genau_an_der_grenze() {
     let g = Grenzen::standard();
-    let vortag = kurse_alle(10_000);
+    let vortag = vortagskurse(&preise_alle(10_000));
     let mut preise = preise_alle(10_000);
     preise.insert(isin(0), 11_500);
     let heute = kurse(&preise);
-    assert!(pruefe_kurse(&g, &universum(), &heute, &vortag).is_empty());
+    assert!(pruefe_kurse(&g, &universum(), handelstag(), &heute, &vortag).is_empty());
     preise.insert(isin(0), 11_501);
     let heute = kurse(&preise);
-    assert_eq!(pruefe_kurse(&g, &universum(), &heute, &vortag).len(), 1);
+    assert_eq!(
+        pruefe_kurse(&g, &universum(), handelstag(), &heute, &vortag).len(),
+        1
+    );
 }
 
 /// Kauflimit: hoechstens 1 % ueber dem Kurs, Verkaufslimit hoechstens 1 % darunter.
@@ -1099,5 +1122,60 @@ fn befund_k9_03_abbruch_verbraucht_keine_kennung() {
         vergabe.letzte(),
         start,
         "Entscheidung hat Nummern verbraucht"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// K15-02 – Kurse muessen zum Handelstag des Zyklus gehoeren (Maus, PR #15)
+// ---------------------------------------------------------------------------------------------
+
+/// Ein alter Kurssatz mit seinem eigenen Zeitstempel ist am Abrufzeitpunkt frisch. Er darf
+/// trotzdem nicht als Kurs eines spaeteren Handelstags gelten. Ebenso gehoert ein Kurs, dessen
+/// Zeitpunkt an einem anderen Tag liegt, nicht zu seinem Handelstag, und der Vergleichskurs muss
+/// vor dem Handelstag liegen.
+#[test]
+fn befund_k15_02_kurse_gehoeren_zum_handelstag() {
+    let g = Grenzen::standard();
+    let vortag = vortagskurse(&preise_alle(10_000));
+    let heute = kurse_alle(10_000);
+    assert!(
+        pruefe_kurse(&g, &universum(), handelstag(), &heute, &vortag).is_empty(),
+        "Vorbedingung"
+    );
+
+    // Derselbe Kurssatz fuer den naechsten Handelstag.
+    let morgen = Datum::neu(2026, 11, 3).unwrap_or_else(|| unreachable!("Datum"));
+    let fehler = pruefe_kurse(&g, &universum(), morgen, &heute, &vortag);
+    assert!(
+        fehler.contains(&DatenFehler::AbrufNichtAmHandelstag),
+        "alter Abruf fuer neuen Tag: {fehler:?}"
+    );
+    assert!(
+        fehler.contains(&DatenFehler::KursNichtAmHandelstag(isin(0))),
+        "alter Kurs fuer neuen Tag: {fehler:?}"
+    );
+
+    // Handelstag 02.11., Zeitpunkt und Abruf am 03.11.: frisch, aber nicht vom Handelstag.
+    let spaet = Zeitpunkt::neu(morgen, 10, 0, 0).unwrap_or_else(|| unreachable!("Zeit"));
+    let eintraege = preise_alle(10_000)
+        .iter()
+        .map(|(i, c)| {
+            let k = Kurs::neu(Cent(*c), "EUR", handelstag(), spaet, Herkunft::Simulation)
+                .unwrap_or_else(|e| unreachable!("Kurs: {e:?}"));
+            (i.clone(), k)
+        })
+        .collect();
+    let verschoben = Kurse::neu(spaet, eintraege).unwrap_or_else(|e| unreachable!("{e:?}"));
+    let fehler = pruefe_kurse(&g, &universum(), handelstag(), &verschoben, &vortag);
+    assert!(
+        fehler.contains(&DatenFehler::KursNichtAmHandelstag(isin(0))),
+        "Kurs vom Folgetag: {fehler:?}"
+    );
+
+    // Der Vergleichskurs vom selben Tag ist kein Vortagskurs.
+    let fehler = pruefe_kurse(&g, &universum(), handelstag(), &heute, &heute);
+    assert!(
+        fehler.contains(&DatenFehler::VergleichskursNichtVorher(isin(0))),
+        "Vergleich mit sich selbst: {fehler:?}"
     );
 }

@@ -43,7 +43,7 @@ pub mod stand;
 
 pub use datei::{Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
 pub use kasse::{AufrufErlaubnis, KiStand};
-pub use stand::{Art, AuftragsBeleg, Stand};
+pub use stand::{Abschluss, Art, AuftragsBeleg, Stand};
 
 #[cfg(test)]
 mod tests {

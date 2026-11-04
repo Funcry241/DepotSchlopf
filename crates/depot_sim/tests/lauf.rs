@@ -104,7 +104,7 @@ fn beispiel_laeuft_durch_und_steht_im_journal() -> Result<(), String> {
     let (j, _, _) = ganzer_lauf(&ort)?;
     let st = j.stand();
     let letzter = datum(1, 12)?;
-    assert_eq!(st.abschluss().map(|(d, _)| d), Some(letzter));
+    assert_eq!(st.abschluss().map(|a| a.datum), Some(letzter));
     assert_eq!(st.seit_abschluss(), 0, "jeder Tag ist abgeschlossen");
     assert_eq!(st.beobachtungen().len(), 6, "jedes Ereignis ist beobachtet");
     assert_eq!(st.toepfe().len(), 2);
@@ -472,5 +472,105 @@ fn notbremse_verkauft_alles_und_haelt() -> Result<(), String> {
             .any(|b| b.anlass == depot_regelwerk::Anlass::Notbremse)
     );
     assert!(st.seit_abschluss() > 0, "der Tag bleibt offen");
+    Ok(())
+}
+
+/// Laeuft die ersten `tage` Tage des Beispiels auf einem frischen Journal.
+fn angefangen(ort: &Ort, tage: usize) -> Result<(), String> {
+    let (mut s, mut dachs, mut maus) = beispiel()?;
+    s.tage.truncate(tage);
+    let mut j = ort.oeffnen()?;
+    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus), "erster Teil")
+}
+
+/// K15-01 (Maus, PR #15): Der Wiederanlauf darf nur mit derselben abgeschlossenen
+/// Vorgeschichte fortsetzen. Jede Aenderung davor haelt an, ohne zu schreiben und ohne zu
+/// fragen; nur die Tage nach dem letzten Abschluss duerfen anders sein.
+#[test]
+fn befund_k15_01_wiederanlauf_prueft_die_vorgeschichte() -> Result<(), String> {
+    type Aenderung = fn(&mut Szenario) -> Result<(), String>;
+    let faelle: [(&str, Aenderung); 6] = [
+        ("abgeschlossener Tag entfernt", |s| {
+            s.tage.remove(1);
+            Ok(())
+        }),
+        ("Kurs eines abgeschlossenen Tags", |s| {
+            let isins: Vec<Isin> = s.universum.isins().into_iter().collect();
+            let t = s.tage.first_mut().ok_or("Tage")?;
+            let d = t.datum;
+            t.kurse = gleiche_kurse(d, &isins, 5_010)?;
+            Ok(())
+        }),
+        ("Ereignis eines abgeschlossenen Tags", |s| {
+            let t = s.tage.first_mut().ok_or("Tage")?;
+            t.ereignisse.push("nachtraeglich erfunden".into());
+            Ok(())
+        }),
+        ("Vorlauf", |s| {
+            let isins: Vec<Isin> = s.universum.isins().into_iter().collect();
+            s.vorlauf = gleiche_kurse(datum(24, 11)?, &isins, 5_000)?;
+            Ok(())
+        }),
+        ("Startstand", |s| {
+            s.start = vec![
+                Topf::neu(TopfId::A, Cent(1_000_001)).map_err(|e| format!("{e:?}"))?,
+                Topf::neu(TopfId::B, Cent(1_000_000)).map_err(|e| format!("{e:?}"))?,
+            ];
+            Ok(())
+        }),
+        ("Positivliste", |s| {
+            s.universum = depot_kern::Universum::neu(Vec::new());
+            Ok(())
+        }),
+    ];
+    for (fall, aendere) in faelle {
+        let ort = Ort::neu()?;
+        angefangen(&ort, 3)?;
+        let vorher = ort.bytes()?;
+        let (mut s, mut dachs, mut maus) = beispiel()?;
+        aendere(&mut s)?;
+        let mut j = ort.oeffnen()?;
+        let r = lauf(&mut j, &s, &mut dachs, &mut maus);
+        drop(j);
+        assert!(matches!(r, Err(LaufFehler::Halt(_))), "{fall}: {r:?}");
+        assert_eq!(ort.bytes()?, vorher, "{fall}: nichts geschrieben");
+        assert_eq!(
+            dachs.aufrufe.saturating_add(maus.aufrufe),
+            0,
+            "{fall}: niemand gefragt"
+        );
+    }
+
+    // Kontrolle: Ein anderer Tag nach dem letzten Abschluss ist erlaubt.
+    let ort = Ort::neu()?;
+    angefangen(&ort, 3)?;
+    let (mut s, mut dachs, mut maus) = beispiel()?;
+    let letzter = s.tage.last_mut().ok_or("Tage")?;
+    letzter.ereignisse.push("anderer Ausgang".into());
+    let mut j = ort.oeffnen()?;
+    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus), "Fortsetzung")?;
+    assert_eq!(j.stand().abschluss().map(|a| a.datum), Some(datum(1, 12)?));
+    Ok(())
+}
+
+/// K15-02 (Maus, PR #15): Ein Kurssatz gehoert zu seinem Handelstag. Traegt der 26.11. die
+/// Kurse des 25.11., faellt der Zyklus aus: Niemand wird gefragt, kein Auftrag.
+#[test]
+fn befund_k15_02_alter_kurssatz_gilt_nicht_fuer_einen_neuen_tag() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (mut s, mut dachs, mut maus) = beispiel()?;
+    let erster = s.tage.first().ok_or("Tage")?.kurse.clone();
+    let zweiter = s.tage.get_mut(1).ok_or("Tage")?;
+    zweiter.kurse = erster;
+    let mut j = ort.oeffnen()?;
+    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus), "Lauf")?;
+    let t26 = datum(26, 11)?;
+    let daten = von(&j, t26, "Daten");
+    assert!(
+        daten.iter().any(|t| t.contains("AbrufNichtAmHandelstag")),
+        "{daten:?}"
+    );
+    assert_eq!(buchungen_am(&j, t26), 0, "niemand gefragt");
+    assert!(von(&j, t26, "Simulation").is_empty(), "kein Auftrag");
     Ok(())
 }

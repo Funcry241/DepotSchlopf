@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use depot_journal::{Art, Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
+use depot_journal::{Abschluss, Art, Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
 use depot_kern::{Cent, Datum};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
@@ -66,6 +66,11 @@ fn tag(t: u8) -> Result<Datum, String> {
     Datum::neu(2026, 11, t).ok_or_else(|| format!("Vorbedingung: Datum {t}.11."))
 }
 
+/// Ein Abdruck in gueltiger Form.
+fn abdruck() -> String {
+    "ab".repeat(32)
+}
+
 fn abgelehnt<T: std::fmt::Debug>(r: &Result<T, JournalFehler>, fall: &str) {
     assert!(
         matches!(r, Err(JournalFehler::Abgelehnt(_))),
@@ -115,18 +120,34 @@ fn abschluss_nur_vorwaerts_und_mit_positivem_hoechststand() -> Result<(), String
     let o = Ort::eingerichtet()?;
     let mut j = o.oeffnen()?;
     assert_eq!(j.stand().abschluss(), None);
-    abgelehnt(&j.schliesse_ab(tag(25)?, Cent(0)), "Hoechststand null");
+    abgelehnt(
+        &j.schliesse_ab(tag(25)?, Cent(0), &abdruck()),
+        "Hoechststand null",
+    );
     vorbedingung(
-        j.schliesse_ab(tag(25)?, Cent(2_000_000)),
+        j.schliesse_ab(tag(25)?, Cent(2_000_000), &abdruck()),
         "erster Abschluss",
     )?;
-    abgelehnt(&j.schliesse_ab(tag(25)?, Cent(2_000_000)), "derselbe Tag");
-    abgelehnt(&j.schliesse_ab(tag(24)?, Cent(2_000_000)), "frueherer Tag");
+    abgelehnt(
+        &j.schliesse_ab(tag(25)?, Cent(2_000_000), &abdruck()),
+        "derselbe Tag",
+    );
+    abgelehnt(
+        &j.schliesse_ab(tag(24)?, Cent(2_000_000), &abdruck()),
+        "frueherer Tag",
+    );
     vorbedingung(
-        j.schliesse_ab(tag(26)?, Cent(2_100_000)),
+        j.schliesse_ab(tag(26)?, Cent(2_100_000), &abdruck()),
         "zweiter Abschluss",
     )?;
-    assert_eq!(j.stand().abschluss(), Some((tag(26)?, Cent(2_100_000))));
+    assert_eq!(
+        j.stand().abschluss(),
+        Some(&Abschluss {
+            datum: tag(26)?,
+            hoechststand: Cent(2_100_000),
+            abdruck: abdruck(),
+        })
+    );
     Ok(())
 }
 
@@ -139,7 +160,7 @@ fn eintraege_seit_dem_abschluss_werden_gezaehlt() -> Result<(), String> {
         vorbedingung(j.beobachte(tag(25)?, "Termin"), "Beobachtung")?;
         vorbedingung(j.begruende(tag(25)?, "Maus", "warten"), "Begruendung")?;
         assert_eq!(j.stand().seit_abschluss(), 2);
-        vorbedingung(j.schliesse_ab(tag(25)?, Cent(1)), "Abschluss")?;
+        vorbedingung(j.schliesse_ab(tag(25)?, Cent(1), &abdruck()), "Abschluss")?;
         assert_eq!(j.stand().seit_abschluss(), 0);
         vorbedingung(
             j.reserviere(depot_kern::BeraterId::Dachs, tag(26)?, 2),
@@ -154,29 +175,71 @@ fn eintraege_seit_dem_abschluss_werden_gezaehlt() -> Result<(), String> {
 
 #[test]
 fn nicht_kanonische_eintraege_halten_beim_oeffnen() -> Result<(), String> {
+    let ab = abdruck();
+    let gut_abschluss = format!("2026-11-25;100;{ab}");
     let gut = Ort::mit(&[
         (Art::Begruendung, "2026-11-25;Dachs;Text"),
-        (Art::Abschluss, "2026-11-25;100"),
+        (Art::Abschluss, &gut_abschluss),
     ])?;
     gut.oeffnen()?;
-    for (fall, eintraege) in [
+    let faelle: Vec<(&str, Vec<(Art, String)>)> = vec![
         (
             "Datum kurz",
-            vec![(Art::Begruendung, "2026-11-5;Dachs;Text")],
+            vec![(Art::Begruendung, "2026-11-5;Dachs;Text".into())],
         ),
-        ("wer leer", vec![(Art::Begruendung, "2026-11-25;;Text")]),
-        ("Text fehlt", vec![(Art::Begruendung, "2026-11-25;Dachs")]),
-        ("fuehrende Null", vec![(Art::Abschluss, "2026-11-25;0100")]),
-        ("Abschluss null", vec![(Art::Abschluss, "2026-11-25;0")]),
+        (
+            "wer leer",
+            vec![(Art::Begruendung, "2026-11-25;;Text".into())],
+        ),
+        (
+            "Text fehlt",
+            vec![(Art::Begruendung, "2026-11-25;Dachs".into())],
+        ),
+        (
+            "fuehrende Null",
+            vec![(Art::Abschluss, format!("2026-11-25;0100;{ab}"))],
+        ),
+        (
+            "Abschluss null",
+            vec![(Art::Abschluss, format!("2026-11-25;0;{ab}"))],
+        ),
         (
             "Abschluss rueckwaerts",
             vec![
-                (Art::Abschluss, "2026-11-26;100"),
-                (Art::Abschluss, "2026-11-25;100"),
+                (Art::Abschluss, format!("2026-11-26;100;{ab}")),
+                (Art::Abschluss, format!("2026-11-25;100;{ab}")),
             ],
         ),
-    ] {
-        let o = Ort::mit(&eintraege)?;
+        // K15-01: Der Abdruck hat genau eine Form.
+        (
+            "Abdruck fehlt",
+            vec![(Art::Abschluss, "2026-11-25;100".into())],
+        ),
+        (
+            "Abdruck zu kurz",
+            vec![(
+                Art::Abschluss,
+                format!("2026-11-25;100;{}", "ab".repeat(31)),
+            )],
+        ),
+        (
+            "Abdruck gross geschrieben",
+            vec![(
+                Art::Abschluss,
+                format!("2026-11-25;100;{}", "AB".repeat(32)),
+            )],
+        ),
+        (
+            "Abdruck kein Hex",
+            vec![(
+                Art::Abschluss,
+                format!("2026-11-25;100;{}", "xy".repeat(32)),
+            )],
+        ),
+    ];
+    for (fall, eintraege) in faelle {
+        let liste: Vec<(Art, &str)> = eintraege.iter().map(|(a, t)| (*a, t.as_str())).collect();
+        let o = Ort::mit(&liste)?;
         let r = Journal::oeffnen(&o.journal);
         assert!(matches!(r, Err(JournalFehler::Halt(_))), "{fall}: {r:?}");
     }

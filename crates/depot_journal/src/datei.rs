@@ -28,7 +28,8 @@ use sha2::{Digest, Sha256};
 
 use crate::kasse::{AufrufErlaubnis, buchung_text, naechste};
 use crate::stand::{
-    Art, Stand, abschluss_text, begruendung_text, beleg_text, beobachtung_text, topf_text, trenne,
+    Abschluss, Art, Stand, abschluss_text, begruendung_text, beleg_text, beobachtung_text,
+    topf_text, trenne,
 };
 
 const KOPF: &str = "journal-v1";
@@ -591,8 +592,20 @@ impl Journal {
     /// # Errors
     /// Wie `anhaengen`; `Abgelehnt` auch, wenn das Datum nicht nach dem letzten Abschluss liegt
     /// oder der Hoechststand nicht positiv ist.
-    pub fn schliesse_ab(&mut self, datum: Datum, hoechststand: Cent) -> Result<(), JournalFehler> {
-        self.anhaengen(Art::Abschluss, &abschluss_text(datum, hoechststand))
+    pub fn schliesse_ab(
+        &mut self,
+        datum: Datum,
+        hoechststand: Cent,
+        abdruck: &str,
+    ) -> Result<(), JournalFehler> {
+        self.anhaengen(
+            Art::Abschluss,
+            &abschluss_text(&Abschluss {
+                datum,
+                hoechststand,
+                abdruck: abdruck.to_string(),
+            }),
+        )
     }
 
     /// Belegt den ganzen Stand eines Topfes im Papierdepot.
