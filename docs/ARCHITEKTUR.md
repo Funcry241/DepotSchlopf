@@ -144,7 +144,7 @@ Ein Bereich ist ein virtueller Teil desselben IBKR-Kontos mit eigenem Geld, eige
 
 Wolfgangs Rechner läuft dauerhaft und ist die Sammelstelle. Er kanalisiert Welt, Kurse und Konto in wenige, sinnvolle Anfragen an die KIs (R10).
 
-**Sammeln:** Kurse und Kontostand in der Handelszeit in festem Abstand, Schlagzeilen aus freigegebenen RSS-Quellen in festem Abstand, Ereignisse aus allen freigegebenen Quellenarten (R39). Kursdaten kommen zunächst als kostenlose, verzögerte IBKR-Kurse. Das reicht für Entscheidungen über Stunden und Tage, weil die Stopps beim Broker in Echtzeit arbeiten. Ein Echtzeit-Abo ist eine eigene Kostenart und braucht Wolfgangs Zustimmung (R8, R15).
+**Sammeln:** Kurse und Kontostand in der Handelszeit in festem Abstand, Schlagzeilen aus freigegebenen RSS-Quellen in festem Abstand, Ereignisse aus allen freigegebenen Quellenarten (R39). Kursdaten kommen zunächst als kostenlose, verzögerte IBKR-Kurse. Das reicht für Entscheidungen über Stunden und Tage, weil die Stopps beim Broker in Echtzeit arbeiten. Ein Echtzeit-Abo ist eine eigene Kostenart und braucht Wolfgangs Zustimmung (R8, R15). Bis zum Anschluss des Brokers kommen für den Papierbetrieb Xetra-Schlusskurse aus einer kostenlosen, lesenden Quelle. Jeder Kurs von außen steht vor seiner Verwendung mit Quelle, Abrufzeit und Abdruck der rohen Antwort im Journal (R12) und durchläuft dieselben Prüfungen wie jeder Kurs.
 
 **Ein Weltbild (R42):** Ob ein Wert gut oder schlecht zu halten ist, ergibt sich aus dem Gesamtverständnis dessen, was in der Welt geschieht und was bevorsteht. Die Sammelstelle pflegt dafür ein einziges, gemeinsames Weltbild aus vier Teilen: dem Ereignisregister (R39), dem Beobachtungsjournal (R40), der Wirkungskarte (R41) und den daraus deterministisch gerechneten Zusammenhängen. Langfrist und Kurzfrist lesen aus demselben Weltbild, nur mit anderem Blick: Langfrist achtet auf Trends und Strukturwandel über Monate und Jahre, Kurzfrist auf beobachtete Reaktionen auf einzelne Ereignisse über Stunden bis Wochen. Eine Erkenntnis, die nur ein Bereich kennt, gibt es nicht. Der Bereich Sicher bleibt ohne KI.
 
@@ -604,14 +604,14 @@ Bewusst nicht übernommen ist die Menge an Verträgen und textbasierten Gates. W
 
 | Crate | Inhalt | Netz | Datei | Stand |
 | --- | --- | --- | --- | --- |
-| depot\_kern | Geld in Cent, ISIN, Instrument, Bereich, Bestand, Festschreibung | nein | nein | vorhanden |
+| depot\_kern | Geld in Cent, ISIN, Instrument, Bereich, Bestand, Festschreibung, Zeit in Frankfurt, Lesen von Tageskursen aus einer Quellantwort | nein | nein | vorhanden |
 | depot\_regelwerk | Prüfungen, Aufträge, einziger Erzeuger von `GenehmigterAuftrag` | nein | nein | vorhanden, wird auf Bereiche erweitert |
 | depot\_ki | Berater Dachs und Maus, Regeln des Budgets, Prompt-Vorlagen | ja | nein | Regeln vorhanden; Kassenbuch und Erlaubnis im Journal |
-| depot\_sammler | Kurse, Konto, Schlagzeilen, Termine | ja, lesend | Rohdaten | geplant |
+| depot\_sammler | Kurse, Konto, Schlagzeilen, Termine | ja, lesend | Rohdaten | geplant; Lesen der Kursantwort und Kursbeleg im Journal vorhanden |
 | depot\_lagebild | Kennzahlen, Punkte, Korb, Bündeln, Lagebild | nein | liest | geplant |
 | depot\_konto | Kontowächter, verfügbares Geld, Abgleich | liest Broker | Journal | im Papierbetrieb als Modul `konto` in depot\_journal (Reservierung ist der Journaleintrag); eigenes Crate mit dem echten Broker |
 | depot\_broker | Schnittstelle `Broker`, Simulation, IBKR-Papier, IBKR-Echt | ja | Journal | geplant |
-| depot\_journal | Hash-Kette mit Anhangsvermerk, Prüfung, Wiederherstellung, Stand aus dem Journal (Töpfe, Aufträge mit Zustand, Beobachtungen, KI-Buchungen), einziger Erzeuger von `AufrufErlaubnis` und von Aufträgen im Journal; Kontowächter (Deckung, Abgleich) | nein | ja | vorhanden (Persistenzbasis, Auftragszustände, Kontowächter am Papierkonto) |
+| depot\_journal | Hash-Kette mit Anhangsvermerk, Prüfung, Wiederherstellung, Stand aus dem Journal (Töpfe, Aufträge mit Zustand, belegte Kurse, Beobachtungen, KI-Buchungen), einziger Erzeuger von `AufrufErlaubnis` und von Aufträgen im Journal; Kontowächter (Deckung, Abgleich) | nein | ja | vorhanden (Persistenzbasis, Auftragszustände, Kontowächter am Papierkonto) |
 | depot\_sim | Simulierter Lauf mit erfundenen Daten: Szenario, Berater nach Drehbuch, Tag für Tag beobachten, fragen, prüfen lassen, entscheiden, auf Papier ausführen, abschließen | nein | Journal | vorhanden (nur erfundene Kurse) |
 | depot\_bericht | Tages- und Monatsbericht, Steuer-Export | nein | liest | geplant |
 | depot\_kodex | Gate | nein | liest Repository | vorhanden |

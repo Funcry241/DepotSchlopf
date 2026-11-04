@@ -1,5 +1,10 @@
 //! Kalenderdaten und Zeitpunkte. Beide werden beim Eintritt geprueft (R20); eine rohe Zahl ist
 //! kein Datum. Die Uhr liest der Kern nie, den Zeitpunkt "jetzt" reicht der Aufrufer herein.
+//!
+//! Als Text steht ein Zeitpunkt immer in UTC: `2026-11-04T16:35:00Z`. Gelesen wird nur genau
+//! diese Form.
+
+use std::fmt;
 
 /// Ein gueltiges Datum des gregorianischen Kalenders zwischen 1970 und 9999.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -40,6 +45,57 @@ impl Datum {
 
     pub fn tag(self) -> u8 {
         self.tag
+    }
+
+    /// Wochentag nach ISO 8601: 1 Montag bis 7 Sonntag.
+    pub fn wochentag(self) -> Option<u8> {
+        // Der 01.01.1970 war ein Donnerstag (4).
+        let t = self
+            .tage_seit_1970()?
+            .checked_add(3)?
+            .checked_rem_euclid(7)?;
+        u8::try_from(t).ok()?.checked_add(1)
+    }
+
+    /// Der letzte Sonntag eines Monats.
+    fn letzter_sonntag(jahr: u16, monat: u8) -> Option<Datum> {
+        let ende = Datum::neu(jahr, monat, tage_im_monat(jahr, monat))?;
+        let zurueck = ende.wochentag()?.checked_rem(7)?;
+        Datum::neu(jahr, monat, ende.tag.checked_sub(zurueck)?)
+    }
+
+    /// Das Datum zu einer Tageszahl seit dem 01.01.1970 (Umkehrung nach H. Hinnant).
+    fn aus_tagen(tage: i64) -> Option<Datum> {
+        let z = tage.checked_add(719_468)?;
+        let era = z.checked_div_euclid(146_097)?;
+        let doe = z.checked_sub(era.checked_mul(146_097)?)?;
+        let yoe = doe
+            .checked_sub(doe.checked_div(1_460)?)?
+            .checked_add(doe.checked_div(36_524)?)?
+            .checked_sub(doe.checked_div(146_096)?)?
+            .checked_div(365)?;
+        let doy = doe.checked_sub(
+            yoe.checked_mul(365)?
+                .checked_add(yoe.checked_div(4)?)?
+                .checked_sub(yoe.checked_div(100)?)?,
+        )?;
+        let mp = doy.checked_mul(5)?.checked_add(2)?.checked_div(153)?;
+        let tag = doy
+            .checked_sub(mp.checked_mul(153)?.checked_add(2)?.checked_div(5)?)?
+            .checked_add(1)?;
+        let monat = if mp < 10 {
+            mp.checked_add(3)?
+        } else {
+            mp.checked_sub(9)?
+        };
+        let jahr = yoe
+            .checked_add(era.checked_mul(400)?)?
+            .checked_add(i64::from(monat <= 2))?;
+        Datum::neu(
+            u16::try_from(jahr).ok()?,
+            u8::try_from(monat).ok()?,
+            u8::try_from(tag).ok()?,
+        )
     }
 
     /// Tage seit dem 01.01.1970 (Verfahren nach H. Hinnant, nur geprueft gerechnet).
@@ -113,6 +169,81 @@ impl Zeitpunkt {
     /// Sekunden seit 01.01.1970, 00:00 Uhr UTC.
     pub fn sekunden(self) -> i64 {
         self.sekunden
+    }
+
+    /// Der Tag in UTC.
+    pub fn datum(self) -> Option<Datum> {
+        Datum::aus_tagen(self.sekunden.checked_div_euclid(SEKUNDEN_JE_TAG)?)
+    }
+
+    /// Stunde, Minute und Sekunde in UTC.
+    pub fn uhrzeit(self) -> Option<(u8, u8, u8)> {
+        let s = self.sekunden.checked_rem_euclid(SEKUNDEN_JE_TAG)?;
+        let teil = |n: i64| u8::try_from(n).ok();
+        Some((
+            teil(s.checked_div(3_600)?)?,
+            teil(s.checked_rem(3_600)?.checked_div(60)?)?,
+            teil(s.checked_rem(60)?)?,
+        ))
+    }
+
+    /// Uhrzeit in Frankfurt am Main (MEZ, im Sommer MESZ). Umgestellt wird nach EU-Recht am
+    /// letzten Sonntag im Maerz und im Oktober um 01:00 Uhr UTC. `None` fuer eine Uhrzeit, die
+    /// es dort nicht gibt oder die doppelt vorkommt: Der Kalender raet nie.
+    pub fn frankfurt(datum: Datum, stunde: u8, minute: u8, sekunde: u8) -> Option<Zeitpunkt> {
+        let ortszeit = Zeitpunkt::neu(datum, stunde, minute, sekunde)?;
+        let mut treffer = [1_i64, 2].into_iter().filter_map(|stunden| {
+            let utc = Zeitpunkt {
+                sekunden: ortszeit.sekunden.checked_sub(stunden.checked_mul(3_600)?)?,
+            };
+            (utc.sommerzeit()? == (stunden == 2)).then_some(utc)
+        });
+        let erster = treffer.next()?;
+        treffer.next().is_none().then_some(erster)
+    }
+
+    /// Gilt in Frankfurt zu diesem Zeitpunkt Sommerzeit?
+    fn sommerzeit(self) -> Option<bool> {
+        let jahr = self.datum()?.jahr;
+        let wechsel = |monat| Zeitpunkt::neu(Datum::letzter_sonntag(jahr, monat)?, 1, 0, 0);
+        Some(self >= wechsel(3)? && self < wechsel(10)?)
+    }
+
+    /// Liest genau die Form `JJJJ-MM-TTThh:mm:ssZ`.
+    pub fn lies(text: &str) -> Option<Zeitpunkt> {
+        let (datum, uhr) = text.strip_suffix('Z')?.split_once('T')?;
+        let zahl = |t: &str, n: usize| -> Option<u16> {
+            (t.len() == n && t.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| t.parse().ok())
+                .flatten()
+        };
+        let klein = |t: &str| zahl(t, 2).and_then(|z| u8::try_from(z).ok());
+        let mut d = datum.split('-');
+        let mut u = uhr.split(':');
+        let jahr = zahl(d.next()?, 4)?;
+        let monat = klein(d.next()?)?;
+        let tag = klein(d.next()?)?;
+        let stunde = klein(u.next()?)?;
+        let minute = klein(u.next()?)?;
+        let sekunde = klein(u.next()?)?;
+        if d.next().is_some() || u.next().is_some() {
+            return None;
+        }
+        Zeitpunkt::neu(Datum::neu(jahr, monat, tag)?, stunde, minute, sekunde)
+    }
+}
+
+impl fmt::Display for Zeitpunkt {
+    /// `JJJJ-MM-TTThh:mm:ssZ`; ein Zeitpunkt ausserhalb des Kalenders steht als Sekundenzahl.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.datum().zip(self.uhrzeit()) {
+            Some((tag, (stunde, minute, sekunde))) => write!(
+                f,
+                "{:04}-{:02}-{:02}T{stunde:02}:{minute:02}:{sekunde:02}Z",
+                tag.jahr, tag.monat, tag.tag
+            ),
+            None => write!(f, "@{}", self.sekunden),
+        }
     }
 }
 

@@ -13,6 +13,7 @@ use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
 
 use crate::kasse::KiStand;
+use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
 
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +22,9 @@ pub enum Art {
     Beobachtung,
     /// `topf;bargeld;isin:stueck,…`: der ganze Stand eines Topfes im Papierdepot.
     Topf,
+    /// `quelle;herkunft;abruf;roh;isin;preis;zeitpunkt`: ein Kurs von aussen, belegt bevor er
+    /// verwendet wird (`kursbeleg`). Nur im Format 2; die Abrufe fallen nie zurueck.
+    Kurs,
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
     /// Rechner verlaesst (R12, R24). Damit ist er reserviert (R37).
     Auftrag,
@@ -49,6 +53,7 @@ impl Art {
         match self {
             Art::Beobachtung => "beobachtung",
             Art::Topf => "topf",
+            Art::Kurs => "kurs",
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
             Art::Ki => "ki",
@@ -63,6 +68,7 @@ impl Art {
         [
             Art::Beobachtung,
             Art::Topf,
+            Art::Kurs,
             Art::Auftrag,
             Art::Zustand,
             Art::Ki,
@@ -113,6 +119,7 @@ pub struct Stand {
     toepfe: BTreeMap<TopfId, Topf>,
     auftraege: Vec<AuftragsLage>,
     beobachtungen: Vec<(Datum, String)>,
+    kurse: Vec<KursBeleg>,
     letzte_kennung: u64,
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
@@ -157,6 +164,11 @@ impl Stand {
         &self.beobachtungen
     }
 
+    /// Alle belegten Kurse in der Reihenfolge des Journals.
+    pub fn kurse(&self) -> &[KursBeleg] {
+        &self.kurse
+    }
+
     /// Das KI-Kassenbuch.
     pub fn ki(&self) -> &KiStand {
         &self.ki
@@ -197,6 +209,7 @@ impl Stand {
                 self.pruefe_deckung(&t, None)?;
                 self.toepfe.insert(t.id(), t);
             }
+            Art::Kurs => self.belege_kurs(inhalt)?,
             Art::Auftrag => {
                 let b = lies_auftrag(inhalt).ok_or("Auftrag unlesbar")?;
                 kanonisch(&auftrag_text(&b), inhalt)?;
@@ -274,6 +287,26 @@ impl Stand {
             }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    /// Ein Kurs von aussen: nur im Format 2, Abrufe fallen nie zurueck.
+    fn belege_kurs(&mut self, inhalt: &str) -> Result<(), String> {
+        if self.format == FORMAT_ALT {
+            return Err("Kurs im Format 1: vor dem ersten Kurs stelle_um".into());
+        }
+        let k = lies_kursbeleg(inhalt)?;
+        kanonisch(&kursbeleg_text(&k), inhalt)?;
+        if let Some(vorher) = self.kurse.last()
+            && k.abruf() < vorher.abruf()
+        {
+            return Err(format!(
+                "Abruf {} vor dem letzten belegten ({})",
+                k.abruf(),
+                vorher.abruf()
+            ));
+        }
+        self.kurse.push(k);
         Ok(())
     }
 

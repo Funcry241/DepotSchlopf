@@ -211,3 +211,40 @@ fn befund_k16_02_umstellung_nur_abgeschlossen_und_einmal() -> Result<(), String>
         Err(format!("{offen:#?}"))
     }
 }
+
+/// Kurse von aussen gibt es erst im Format 2: Ein altes Journal belegt sie erst nach der
+/// Umstellung, und danach liest es sich wieder.
+#[test]
+fn kurs_erst_nach_der_umstellung() -> Result<(), String> {
+    let p = altes_journal()?;
+    let tag = datum(3, 11)?;
+    let zeit = depot_kern::xetra_schluss(tag).ok_or("Vorbedingung: Schluss")?;
+    let isin = vorbedingung(depot_kern::Isin::neu("DE0007164600"), "ISIN")?;
+    let kurs = vorbedingung(
+        depot_kern::Kurs::neu(
+            depot_kern::Cent(10_375),
+            "EUR",
+            tag,
+            zeit,
+            depot_kern::Herkunft::Quelle,
+        ),
+        "Kurs",
+    )?;
+    let beleg = vorbedingung(
+        depot_journal::KursBeleg::neu("stooq", zeit, b"roh", isin, kurs),
+        "Beleg",
+    )?;
+    let mut j = Journal::oeffnen(&p).map_err(|e| format!("altes Journal: {e:?}"))?;
+    let r = j.belege_kurs(&beleg);
+    if !matches!(r, Err(depot_journal::JournalFehler::Abgelehnt(_))) {
+        return Err(format!("Kurs im Format 1: {r:?}"));
+    }
+    vorbedingung(j.stelle_um(), "Umstellung")?;
+    vorbedingung(j.belege_kurs(&beleg), "Kurs nach der Umstellung")?;
+    drop(j);
+    let j = Journal::oeffnen(&p).map_err(|e| format!("wieder geoeffnet: {e:?}"))?;
+    if j.stand().kurse() != [beleg] {
+        return Err(format!("Kurse nach Neustart: {:?}", j.stand().kurse()));
+    }
+    Ok(())
+}
