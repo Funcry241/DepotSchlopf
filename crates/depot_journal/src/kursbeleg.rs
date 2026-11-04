@@ -30,14 +30,14 @@ pub struct KursBeleg {
     kurs: Kurs,
 }
 
-fn quelle_gueltig(quelle: &str) -> bool {
+pub(crate) fn quelle_gueltig(quelle: &str) -> bool {
     !quelle.is_empty()
         && quelle
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-fn abdruck_gueltig(roh: &str) -> bool {
+pub(crate) fn abdruck_gueltig(roh: &str) -> bool {
     roh.len() == 64
         && roh
             .bytes()

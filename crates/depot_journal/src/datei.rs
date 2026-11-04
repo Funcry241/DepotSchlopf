@@ -650,8 +650,13 @@ impl Journal {
     /// Wie `anhaengen`; `Abgelehnt` auch im Format 1 und bei einem Abruf vor dem letzten
     /// belegten.
     pub fn belege_termin(&mut self, beleg: &TerminBeleg) -> Result<Fortschreibung, JournalFehler> {
-        let _ = (beleg, terminbeleg_text);
-        Err(JournalFehler::Abgelehnt("noch nicht gebaut".into()))
+        let ergebnis = match self.stand.termin(beleg.termin().kennung()) {
+            Some(alt) if alt.termin() == beleg.termin() => return Ok(Fortschreibung::Unveraendert),
+            Some(_) => Fortschreibung::Geaendert,
+            None => Fortschreibung::Neu,
+        };
+        self.anhaengen(Art::Termin, &terminbeleg_text(beleg))?;
+        Ok(ergebnis)
     }
 
     /// Belegt den ganzen Stand eines Topfes im Papierdepot.

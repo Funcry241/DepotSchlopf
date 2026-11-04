@@ -164,8 +164,29 @@ impl Termin {
         betroffen: Vec<Betroffen>,
         verlaesslichkeit: Verlaesslichkeit,
     ) -> Result<Termin, TerminFehler> {
-        let _ = (kennung, titel, zeit, betroffen, verlaesslichkeit);
-        Err(TerminFehler::Kennung)
+        if !name_gueltig(kennung, 80) {
+            return Err(TerminFehler::Kennung);
+        }
+        if titel.is_empty()
+            || titel.chars().count() > 200
+            || titel.chars().any(|c| c.is_control() || c == ';')
+        {
+            return Err(TerminFehler::Titel);
+        }
+        let mut betroffen = betroffen;
+        let anzahl = betroffen.len();
+        betroffen.sort();
+        betroffen.dedup();
+        if betroffen.is_empty() || betroffen.len() != anzahl {
+            return Err(TerminFehler::Betroffen);
+        }
+        Ok(Termin {
+            kennung: kennung.to_string(),
+            titel: titel.to_string(),
+            zeit,
+            betroffen,
+            verlaesslichkeit,
+        })
     }
 
     pub fn kennung(&self) -> &str {

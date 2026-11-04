@@ -102,7 +102,7 @@ fn termin_mit_quelle_und_abrufzeit() -> Result<(), String> {
         "{text}"
     );
     let j = oeffnen(&p)?;
-    assert_eq!(j.stand().termine(), [b.clone()]);
+    assert_eq!(j.stand().termine(), std::slice::from_ref(&b));
     let aktuell = j.stand().aktuelle_termine();
     assert_eq!(aktuell.get("ezb-2026-12-17"), Some(&&b));
     assert_eq!(b.termin(), &t);

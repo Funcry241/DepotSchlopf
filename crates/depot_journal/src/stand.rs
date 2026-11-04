@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use depot_kern::{Cent, Datum, Isin, Topf, TopfId};
+use depot_kern::{Cent, Datum, Isin, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 
 use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
@@ -183,7 +183,25 @@ impl Stand {
 
     /// Je Kennung die juengste Fassung eines Termins.
     pub fn aktuelle_termine(&self) -> BTreeMap<&str, &TerminBeleg> {
-        BTreeMap::new()
+        self.termine
+            .iter()
+            .map(|b| (b.termin().kennung(), b))
+            .collect()
+    }
+
+    /// Die juengste Fassung des Termins mit dieser Kennung.
+    pub fn termin(&self, kennung: &str) -> Option<&TerminBeleg> {
+        self.termine
+            .iter()
+            .rev()
+            .find(|b| b.termin().kennung() == kennung)
+    }
+
+    /// Der letzte Abruf eines belegten Kurses oder Termins. Kein Abruf faellt dahinter zurueck.
+    fn letzter_abruf(&self) -> Option<Zeitpunkt> {
+        let k = self.kurse.last().map(KursBeleg::abruf);
+        let t = self.termine.last().map(TerminBeleg::abruf);
+        k.max(t)
     }
 
     /// Das KI-Kassenbuch.
@@ -315,13 +333,12 @@ impl Stand {
         }
         let k = lies_kursbeleg(inhalt)?;
         kanonisch(&kursbeleg_text(&k), inhalt)?;
-        if let Some(vorher) = self.kurse.last()
-            && k.abruf() < vorher.abruf()
+        if let Some(vorher) = self.letzter_abruf()
+            && k.abruf() < vorher
         {
             return Err(format!(
-                "Abruf {} vor dem letzten belegten ({})",
-                k.abruf(),
-                vorher.abruf()
+                "Abruf {} vor dem letzten belegten ({vorher})",
+                k.abruf()
             ));
         }
         self.kurse.push(k);
@@ -329,9 +346,31 @@ impl Stand {
     }
 
     /// Ein Termin von aussen.
+    /// Nur im Format 2, Abrufe fallen nie zurueck, und ein Eintrag aendert den Termin seiner
+    /// Kennung: Ein unveraenderter Termin steht nicht zweimal hintereinander im Journal.
     fn belege_termin(&mut self, inhalt: &str) -> Result<(), String> {
+        if self.format == FORMAT_ALT {
+            return Err("Termin im Format 1: vor dem ersten Termin stelle_um".into());
+        }
         let t = lies_terminbeleg(inhalt)?;
         kanonisch(&terminbeleg_text(&t), inhalt)?;
+        if let Some(vorher) = self.letzter_abruf()
+            && t.abruf() < vorher
+        {
+            return Err(format!(
+                "Abruf {} vor dem letzten belegten ({vorher})",
+                t.abruf()
+            ));
+        }
+        if self
+            .termin(t.termin().kennung())
+            .is_some_and(|alt| alt.termin() == t.termin())
+        {
+            return Err(format!(
+                "Termin {} unveraendert noch einmal belegt",
+                t.termin().kennung()
+            ));
+        }
         self.termine.push(t);
         Ok(())
     }
