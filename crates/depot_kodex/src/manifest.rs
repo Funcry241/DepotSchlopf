@@ -213,7 +213,12 @@ pub fn abhaengigkeits_namen(m: &Wert) -> Vec<String> {
         for w in ziele.values() {
             for a in ABSCHNITTE {
                 if let Some(Wert::Tabelle(t)) = w.feld(a) {
-                    aus.extend(t.keys().cloned());
+                    for (alias, d) in t {
+                        aus.push(alias.clone());
+                        if let Some(p) = d.feld("package").and_then(Wert::text) {
+                            aus.push(p.to_string());
+                        }
+                    }
                 }
             }
         }
