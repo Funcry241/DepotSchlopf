@@ -9,6 +9,7 @@ crates/depot_regelwerk/
 Cargo.toml
 Cargo.lock
 kodex/festschreibung.txt
+kodex/freigabe.txt
 kodex/aenderung.txt
 docs/
 CHANGELOG.md
