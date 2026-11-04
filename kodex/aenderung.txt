@@ -1,7 +1,14 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: KodexAenderung
-zweck: Netzzugang fuer depot_sammler (Kap. 6, lesende Datenversorgung, Wolfgang 04.11.2026) und allgemeine Regel, dass kein anderes Crate ueber eine Abhaengigkeit Netz bekommt, auch nicht ueber ein umbenanntes oder zielsystemabhaengiges Netz-Crate oder ueber den Sammler. Kein Produktivcode, keine Grenzen, keine Abhaengigkeiten.
+klasse: FestschreibungAenderung
+zweck: Lesende Datenversorgung, Teil Abruf (Kap. 6, R12, Wolfgang 04.11.2026: Quelle Alpha Vantage): neues Crate depot_sammler holt Xetra-Schlusskurse einer festen Beobachtungsliste ueber HTTPS, legt jede rohe Antwort unter daten/roh/ ab, belegt jeden Kurs im Journal und prueft danach mit pruefe_kurse; Hinweis zum Kontingent beendet den Lauf. Schluessel nur aus der Windows-Anmeldeinformationsverwaltung, nie in Meldung, Datei oder Export. run.cmd kurse startet den Sammler ohne Gate und Export. Neue Abhaengigkeiten ureq (rustls), keyring-core und windows-native-keyring-store (nur Windows). Keine Auftraege, keine KI, keine neuen Grenzen.
 pfade:
-crates/depot_kodex/
-docs/befunde/kodex.md
+Cargo.toml
+Cargo.lock
+run.cmd
+crates/depot_kern/src/zeit.rs
+crates/depot_lauf/src/main.rs
+crates/depot_sammler/
+kodex/festschreibung.txt
+docs/
 CHANGELOG.md
+README.md

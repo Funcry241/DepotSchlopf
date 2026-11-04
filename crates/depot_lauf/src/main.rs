@@ -28,6 +28,8 @@ use std::process::ExitCode;
 
 const HILFE: &str = "Aufruf:\n  run.cmd                  alles: Gate pruefen und Assistenten-Export schreiben\n  \
 run.cmd kodex            dasselbe\n  run.cmd festschreibung   Festschreibung neu schreiben (nur fuer FestschreibungAenderung)\n  \
+run.cmd kurse            Schlusskurse holen, im Journal belegen und pruefen (nur lesend)\n  \
+run.cmd kurse einrichten Journal daten/journal.txt einmal anlegen\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
 
 /// Offene Reste frueherer Laeufe: Eine liegengebliebene Sperrdatei bedeutet einen Absturz
@@ -76,6 +78,22 @@ fn kodex(dir: &Path, bau: &Path, konsole: &mut String, args: &[String]) -> i32 {
     }
 }
 
+/// Startet den Sammler im Projektordner und gibt seinen Ausgang weiter.
+fn sammler(wurzel: &Path, args: &[String]) -> ExitCode {
+    let mut c = std::process::Command::new("cargo");
+    c.current_dir(wurzel)
+        .args(["run", "--quiet", "-p", "depot_sammler", "--"])
+        .args(args);
+    match c.status() {
+        Ok(s) if s.success() => ExitCode::SUCCESS,
+        Ok(_) => ExitCode::FAILURE,
+        Err(e) => {
+            eprintln!("[DepotSchlopf] FEHLER: cargo nicht startbar: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let befehl = args
@@ -90,6 +108,11 @@ fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     };
+
+    // Der Sammler laeuft fuer sich: kein Gate, kein Export. Netz hat nur er (Kodex).
+    if befehl == "kurse" {
+        return sammler(&wurzel, &optionen);
+    }
 
     let mut kodex_args: Vec<String> = match befehl.as_str() {
         "alles" | "kodex" => vec!["--voll".into()],
