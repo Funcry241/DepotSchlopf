@@ -26,7 +26,7 @@ use depot_journal::{Journal, anbieter, kurssperre};
 use depot_kern::{Boerse, Datum, Preis, Zeitpunkt};
 use depot_sammler::{
     Anbieter, Ergebnis, Https, Schluessel, Zugang, beobachtungsliste, einordnen, ezb::ADRESSE_EZB,
-    sammle, sammle_termine,
+    sammle, sammle_termine, zugang_laden,
 };
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
@@ -79,12 +79,15 @@ fn einrichten(journal: &Path) -> ExitCode {
     }
 }
 
-/// Haelt im Anbieterprotokoll fest, was der Lauf ueber Schluessel und Quelle sagt.
+/// Haelt im Anbieterprotokoll fest, was der Lauf ueber Schluessel und Quelle sagt, je Quelle
+/// eine Zeile, nur fuer Quellen, die er abgerufen hat.
 fn vermerke(wurzel: &Path, bericht: &depot_sammler::Bericht) {
-    if let (Some(ergebnis), Some(zeit)) = (einordnen(bericht), jetzt()) {
-        let e = anbieter::Eintrag::neu(zeit, anbieter::Wer::Kursquelle, ergebnis, None);
-        if let Err(f) = anbieter::anhaengen(&wurzel.join("daten").join(anbieter::DATEI), &e) {
-            eprintln!("[Sammler] Anbieterprotokoll nicht geschrieben: {f}");
+    for a in Anbieter::ALLE {
+        if let (Some(ergebnis), Some(zeit)) = (einordnen(bericht, a), jetzt()) {
+            let e = anbieter::Eintrag::neu(zeit, a.protokoll(), ergebnis, None);
+            if let Err(f) = anbieter::anhaengen(&wurzel.join("daten").join(anbieter::DATEI), &e) {
+                eprintln!("[Sammler] Anbieterprotokoll nicht geschrieben: {f}");
+            }
         }
     }
 }
@@ -118,22 +121,14 @@ fn sperre(wurzel: &Path) {
     }
 }
 
-/// Die Schluessel der Quellen, die diese Werte brauchen. Fehlt einer, wird das gemeldet, und
-/// nur die Werte dieser Quelle werden nicht abgerufen.
+/// Alle hinterlegten Schluessel, auch fuer Quellen, die dieser Lauf nicht abruft: Der Schutz
+/// prueft jede Antwort gegen jeden. Gemeldet wird nur, was ein Wert des Laufs braucht.
 fn zugang(werte: &[depot_sammler::Wert]) -> Zugang {
-    let mut anbieter: Vec<Anbieter> = werte.iter().map(|w| Anbieter::fuer(w.boerse)).collect();
-    anbieter.sort();
-    anbieter.dedup();
-    anbieter.into_iter().fold(
-        Zugang::leer(),
-        |z, a| match Schluessel::aus_anmeldeverwaltung(a) {
-            Ok(s) => z.mit(a, s),
-            Err(e) => {
-                eprintln!("[Sammler] FEHLER {}: {e}", a.dienst());
-                z
-            }
-        },
-    )
+    let (zugang, meldungen) = zugang_laden(werte, Schluessel::aus_anmeldeverwaltung);
+    for m in meldungen {
+        eprintln!("[Sammler] FEHLER {m}");
+    }
+    zugang
 }
 
 fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode {
@@ -203,6 +198,9 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
             ),
             Ergebnis::Fehler(t) => {
                 println!("  {:<20} {}  FEHLER: {t}", w.name, w.isin);
+            }
+            Ergebnis::Uebersprungen(t) => {
+                println!("  {:<20} {}  nicht abgerufen: {t}", w.name, w.isin);
             }
             Ergebnis::NichtAbgerufen => {
                 println!("  {:<20} {}  nicht abgerufen", w.name, w.isin);

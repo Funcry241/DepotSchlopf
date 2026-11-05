@@ -327,7 +327,7 @@ fn ohne_tiingo_schluessel_nur_xetra() -> Result<(), String> {
         Some((_, Ergebnis::Belegt { .. }))
     ));
     assert!(
-        matches!(b.werte.get(1), Some((_, Ergebnis::Fehler(t))) if t.contains("DepotSchlopf/tiingo")),
+        matches!(b.werte.get(1), Some((_, Ergebnis::Uebersprungen(t))) if t.contains("DepotSchlopf/tiingo")),
         "{:?}",
         b.werte
     );
@@ -368,7 +368,7 @@ fn ohne_referenzkurse_kein_dollarwert() -> Result<(), String> {
             Some((_, Ergebnis::Belegt { .. }))
         ));
         assert!(
-            matches!(b.werte.get(1), Some((_, Ergebnis::Fehler(t))) if t.contains("Referenzkurse der EZB")),
+            matches!(b.werte.get(1), Some((_, Ergebnis::Uebersprungen(t))) if t.contains("Referenzkurse der EZB")),
             "{:?}",
             b.werte
         );
@@ -445,5 +445,89 @@ fn schluessel_in_antwort_ist_sicherheitsabbruch() -> Result<(), String> {
             }
         }
     }
+    Ok(())
+}
+
+/// Maus' Befund 1 zu 5b70fa5: Auch ein Lauf fuer eine einzige Boerse kennt fuer den Schutz alle
+/// hinterlegten Schluessel. Gibt Alpha Vantage den Tiingo-Schluessel zurueck, ist das ein
+/// Sicherheitsabbruch, und keine Datei enthaelt ihn. Gemeldet wird ein fehlender Schluessel nur,
+/// wenn ein Wert des Laufs ihn braucht.
+#[test]
+fn einzelboerse_kennt_alle_schluessel() -> Result<(), String> {
+    let alle = werte()?;
+    let xetra = nur(&alle, Boerse::Xetra);
+    let laden = |a: Anbieter| match a {
+        Anbieter::AlphaVantage => Schluessel::neu(AV),
+        Anbieter::Tiingo => Schluessel::fuer(Anbieter::Tiingo, TI),
+    };
+    let (zugang, meldungen) = depot_sammler::zugang_laden(&xetra, laden);
+    assert!(meldungen.is_empty(), "{meldungen:?}");
+    assert!(zugang.steht_in(TI.as_bytes()));
+    assert!(zugang.steht_in(AV.as_bytes()));
+
+    let (journal, roh) = ordner()?;
+    let mit_ti = format!("{ROH_SAP}{TI}\r\n");
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(mit_ti))]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        &zugang,
+        vec![utc(11, 4, 16, 40)?],
+        &xetra,
+    )?
+    .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert!(b.sicherheitsabbruch);
+    assert_eq!(fs::read_dir(roh.join(QUELLE)).map_or(0, Iterator::count), 0);
+
+    // Fehlt der Tiingo-Schluessel, meldet ein Xetra-Lauf das nicht; ein NYSE-Lauf schon.
+    let ohne_ti = |a: Anbieter| match a {
+        Anbieter::AlphaVantage => Schluessel::neu(AV),
+        Anbieter::Tiingo => Err("fehlt".to_string()),
+    };
+    let (_, m) = depot_sammler::zugang_laden(&xetra, ohne_ti);
+    assert!(m.is_empty(), "{m:?}");
+    let (_, m) = depot_sammler::zugang_laden(&nur(&alle, Boerse::Nyse), ohne_ti);
+    assert_eq!(m.len(), 1, "{m:?}");
+    Ok(())
+}
+
+/// Maus' Befund 2 zu 5b70fa5: Das Anbieterprotokoll verbucht je Quelle. Ein erfolgreicher
+/// Tiingo-Abruf sagt nichts ueber Alpha Vantage, und ein nicht abgerufener Wert (Schluessel
+/// fehlt, Referenzkurse fehlen) zaehlt fuer keine Quelle.
+#[test]
+fn anbieterprotokoll_je_quelle() -> Result<(), String> {
+    use depot_journal::anbieter::{Ergebnis as E, Wer};
+    let (journal, roh) = ordner()?;
+    let alle = werte()?;
+    let nur_ti = Zugang::leer().mit(
+        Anbieter::Tiingo,
+        vorbedingung(Schluessel::fuer(Anbieter::Tiingo, TI), "Schluessel")?,
+    );
+    let mut netz = Erfunden::neu(&[
+        (
+            "ezb",
+            Ok(ezb(&[("2026-11-04", "1.1224"), ("2026-11-03", "1.25")])),
+        ),
+        ("aapl", Ok(ROH_AAPL.to_string())),
+    ]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        &nur_ti,
+        vec![utc(11, 4, 21, 4)?, utc(11, 4, 21, 5)?],
+        &alle,
+    )?
+    .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert!(matches!(
+        b.werte.first(),
+        Some((_, Ergebnis::Uebersprungen(_)))
+    ));
+    assert_eq!(depot_sammler::einordnen(&b, Anbieter::Tiingo), Some(E::Ok));
+    assert_eq!(depot_sammler::einordnen(&b, Anbieter::AlphaVantage), None);
+    assert_eq!(Anbieter::Tiingo.protokoll(), Wer::Tiingo);
+    assert_eq!(Anbieter::AlphaVantage.protokoll(), Wer::Kursquelle);
+    assert_eq!(Wer::aus_kurz(Wer::Tiingo.kurz()), Some(Wer::Tiingo));
     Ok(())
 }
