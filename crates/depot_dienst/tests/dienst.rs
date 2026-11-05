@@ -10,10 +10,13 @@ use std::sync::{Arc, Mutex, PoisonError};
 use depot_dienst::http::{self, Anfrage, LeseFehler};
 use depot_dienst::schluessel::Wer;
 use depot_dienst::werkbank::{Anlass, Art, Dienst, Frueher, Lagerechner, Starter};
-use depot_dienst::zeitplan::{Erledigt, Zeitplan, faellig, naechster};
+use depot_dienst::zeitplan::{
+    Erledigt, Zeitplan, abrufe_fuer, faellig, faellig_fuer, letzter_abruf_fuer, naechster,
+    naechster_fuer,
+};
 use depot_dienst::{Umwelt, behandle};
 use depot_dienst::{autostart, kostenschutz, seiten};
-use depot_kern::{BeraterId, Datum, Zeitpunkt};
+use depot_kern::{BeraterId, Boerse, Datum, Zeitpunkt};
 use depot_lage::{Hinterlegt, Umgebung, Zugang, lagebild};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
@@ -43,8 +46,13 @@ fn donnerstag(h: u8, m: u8) -> Result<Zeitpunkt, String> {
 
 /// Ein harmloser Starter: gibt eine Zeile aus und endet mit dem gewuenschten Ergebnis.
 fn echo_starter(erfolg: bool) -> Starter {
+    echo_starter_je_art(move |_| erfolg)
+}
+
+/// Wie `echo_starter`, mit Ergebnis je Art des Auftrags.
+fn echo_starter_je_art(erfolg: impl Fn(Art) -> bool + Send + Sync + 'static) -> Starter {
     Box::new(move |art: Art, _wurzel: &Path| {
-        let code = if erfolg { "0" } else { "3" };
+        let code = if erfolg(art) { "0" } else { "3" };
         let zeile = format!("lauf {}", art.kurz());
         #[cfg(windows)]
         {
@@ -422,6 +430,7 @@ fn zeitplan_text_streng() -> Result<(), String> {
     let e = Erledigt {
         termine: Some(tag),
         kurse: None,
+        kurse_nyse: None,
     };
     assert_eq!(Erledigt::lies(&e.als_text()), Ok(e));
     assert!(Erledigt::lies("erledigt-v1\ntermine=2026-13-01\nkurse=\n").is_err());
@@ -444,12 +453,17 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
     let termine = Erledigt {
         termine: Some(do_),
         kurse: None,
+        kurse_nyse: None,
     };
     assert_eq!(faellig(&p, &termine, do_, (17, 44)), None);
-    assert_eq!(faellig(&p, &termine, do_, (17, 45)), Some(Art::Kurse));
+    assert_eq!(
+        faellig(&p, &termine, do_, (17, 45)),
+        Some(Art::KurseVon(Boerse::Xetra))
+    );
     let beide = Erledigt {
         termine: Some(do_),
         kurse: Some(do_),
+        kurse_nyse: None,
     };
     assert_eq!(faellig(&p, &beide, do_, (23, 59)), None);
     assert_eq!(faellig(&p, &leer, sa, (18, 0)), None);
@@ -467,6 +481,7 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
     let freitag_fertig = Erledigt {
         termine: some(Datum::neu(2026, 11, 6), "Freitag")?.into(),
         kurse: some(Datum::neu(2026, 11, 6), "Freitag")?.into(),
+        kurse_nyse: None,
     };
     assert_eq!(
         naechster(
@@ -496,6 +511,7 @@ fn zeitplan_ruht_an_boersenfeiertagen() -> Result<(), String> {
     let fertig = Erledigt {
         termine: Some(d23),
         kurse: Some(d23),
+        kurse_nyse: None,
     };
     assert_eq!(
         naechster(&p, &fertig, d23),
@@ -560,7 +576,7 @@ fn zeitplan_startet_termine_kurse_und_danach_papier() -> Result<(), String> {
         .map_err(|e| format!("Erledigt fehlt: {e}"))?;
     assert_eq!(
         erledigt,
-        "erledigt-v1\ntermine=2026-11-05\nkurse=2026-11-05\n"
+        "erledigt-v2\ntermine=2026-11-05\nkurse=2026-11-05\nkurse_nyse=\n"
     );
     let neu = dienst(wurzel, true);
     assert!(neu.schritt(donnerstag(20, 0)?).is_none());
@@ -1400,6 +1416,164 @@ fn nach_einem_ausfall_sagt_der_zeitplan_wie_es_weitergeht() -> Result<(), String
             );
             assert!(!hinweis.contains("geht es von selbst"), "{hinweis}");
         }
+    }
+    Ok(())
+}
+
+/// Kurse je Boerse: Xetra zur eingestellten Uhrzeit, die NYSE zehn Minuten nach ihrem eigenen
+/// Schluss in Frankfurter Zeit, mit Sommerzeit und verkuerzten Tagen. An einem Tag, an dem nur
+/// eine Boerse handelt, nur diese. Der letzte Abruf des Tages bestimmt den Papiertag.
+#[test]
+fn kurse_je_boerse_nach_ihrem_schluss() -> Result<(), String> {
+    let p = Zeitplan {
+        an: true,
+        ..Zeitplan::default()
+    };
+    let beide = [Boerse::Xetra, Boerse::Nyse];
+    let tag = |m, t| some(Datum::neu(2026, m, t), "Datum");
+    // Donnerstag, 05.11.: beide offen, NYSE 16:00 New York = 22:00 Frankfurt.
+    let do_ = tag(11, 5)?;
+    assert_eq!(
+        abrufe_fuer(&p, do_, &beide),
+        vec![(Boerse::Xetra, (17, 45)), (Boerse::Nyse, (22, 10))]
+    );
+    // 29.10.: Frankfurt schon Winterzeit, New York noch Sommerzeit: 21:00 + 10 Minuten.
+    assert_eq!(
+        abrufe_fuer(&p, tag(10, 29)?, &beide),
+        vec![(Boerse::Xetra, (17, 45)), (Boerse::Nyse, (21, 10))]
+    );
+    // 27.11., Tag nach Thanksgiving: NYSE schliesst um 13:00 New York = 19:00 Frankfurt.
+    assert_eq!(
+        abrufe_fuer(&p, tag(11, 27)?, &beide),
+        vec![(Boerse::Xetra, (17, 45)), (Boerse::Nyse, (19, 10))]
+    );
+    // 26.11., Thanksgiving: nur Xetra. 24.12.: nur die NYSE (bis 13:00 New York).
+    assert_eq!(
+        abrufe_fuer(&p, tag(11, 26)?, &beide),
+        vec![(Boerse::Xetra, (17, 45))]
+    );
+    assert_eq!(
+        abrufe_fuer(&p, tag(12, 24)?, &beide),
+        vec![(Boerse::Nyse, (19, 10))]
+    );
+    assert!(letzter_abruf_fuer(&p, do_, Boerse::Nyse, &beide));
+    assert!(!letzter_abruf_fuer(&p, do_, Boerse::Xetra, &beide));
+    assert!(letzter_abruf_fuer(&p, tag(11, 26)?, Boerse::Xetra, &beide));
+
+    // Faellig: Termine, dann Xetra, dann NYSE, je einmal.
+    let mut e = Erledigt::default();
+    assert_eq!(
+        faellig_fuer(&p, &e, do_, (17, 45), &beide),
+        Some(Art::Termine)
+    );
+    e.setze(Art::Termine, do_);
+    assert_eq!(
+        faellig_fuer(&p, &e, do_, (17, 45), &beide),
+        Some(Art::KurseVon(Boerse::Xetra))
+    );
+    e.setze(Art::KurseVon(Boerse::Xetra), do_);
+    assert_eq!(faellig_fuer(&p, &e, do_, (22, 9), &beide), None);
+    assert_eq!(
+        naechster_fuer(&p, &e, do_, &beide),
+        Some((Art::KurseVon(Boerse::Nyse), do_, (22, 10)))
+    );
+    assert_eq!(
+        faellig_fuer(&p, &e, do_, (22, 10), &beide),
+        Some(Art::KurseVon(Boerse::Nyse))
+    );
+    e.setze(Art::KurseVon(Boerse::Nyse), do_);
+    assert_eq!(faellig_fuer(&p, &e, do_, (23, 59), &beide), None);
+    assert_eq!(e.kurse_nyse, Some(do_));
+    // Heiligabend handelt nur die NYSE: der Zeitplan laeuft, aber nur fuer sie.
+    let mut h = Erledigt::default();
+    h.setze(Art::Termine, tag(12, 24)?);
+    assert_eq!(
+        faellig_fuer(&p, &h, tag(12, 24)?, (19, 10), &beide),
+        Some(Art::KurseVon(Boerse::Nyse))
+    );
+    Ok(())
+}
+
+/// Ein Erledigt der frueheren Form (ohne Abruf je Boerse) wird gelesen; `kurse` war Xetra.
+/// Geschrieben wird nur die neue Form.
+#[test]
+fn erledigt_frueherer_form() -> Result<(), String> {
+    let tag = some(Datum::neu(2026, 11, 5), "Datum")?;
+    let alt = Erledigt::lies("erledigt-v1\ntermine=2026-11-05\nkurse=2026-11-05\n")?;
+    assert_eq!(
+        alt,
+        Erledigt {
+            termine: Some(tag),
+            kurse: Some(tag),
+            kurse_nyse: None,
+        }
+    );
+    assert_eq!(
+        alt.als_text(),
+        "erledigt-v2\ntermine=2026-11-05\nkurse=2026-11-05\nkurse_nyse=\n"
+    );
+    assert!(Erledigt::lies("erledigt-v1\ntermine=\nkurse=\nkurse_nyse=\n").is_err());
+    assert!(Erledigt::lies("erledigt-v2\ntermine=\nkurse=\n").is_err());
+    Ok(())
+}
+
+/// Mit zwei Boersen: Der Papiertag folgt erst dem letzten Abruf des Tages (NYSE), und nur, wenn
+/// ein Abruf dieses Tages erfolgreich war. Ein gescheiterter Xetra-Abruf haelt ihn nicht auf,
+/// wenn die NYSE gelingt, und umgekehrt.
+#[test]
+fn papiertag_nach_dem_letzten_abruf_des_tages() -> Result<(), String> {
+    for (xetra_ok, nyse_ok, zeitplan_an, papier) in [
+        (true, true, true, true),
+        (false, true, true, true),
+        (true, false, true, true),
+        (false, false, true, false),
+        (true, true, false, false),
+    ] {
+        let wurzel = eingeschaltet(ordner()?)?;
+        // Ein Starter, der je Auftrag so endet, wie diese Runde es will.
+        let d = Arc::new(Dienst::neu(
+            wurzel,
+            TOKEN.into(),
+            echo_starter_je_art(move |a| match a {
+                Art::KurseVon(Boerse::Xetra) => xetra_ok,
+                Art::KurseVon(Boerse::Nyse) => nyse_ok,
+                _ => true,
+            }),
+            leeres_lagebild(),
+        ));
+        d.sperre().boersen = vec![Boerse::Xetra, Boerse::Nyse];
+        let (nr, kind) = some(d.schritt(donnerstag(17, 46)?), "Termine")?;
+        d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+        let (nr, kind) = some(d.schritt(donnerstag(17, 46)?), "Xetra")?;
+        assert_eq!(
+            d.sperre().laufend.as_ref().map(|a| a.art),
+            Some(Art::KurseVon(Boerse::Xetra))
+        );
+        d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+        assert!(wartend(&d).is_empty(), "nach Xetra noch kein Papiertag");
+        assert!(
+            d.schritt(donnerstag(22, 9)?).is_none(),
+            "NYSE erst um 22:10"
+        );
+        let (nr, kind) = some(d.schritt(donnerstag(22, 10)?), "NYSE")?;
+        assert_eq!(
+            d.sperre().laufend.as_ref().map(|a| a.art),
+            Some(Art::KurseVon(Boerse::Nyse))
+        );
+        if !zeitplan_an {
+            d.setze_zeitplan(Zeitplan {
+                an: false,
+                ..Zeitplan::default()
+            })
+            .map_err(|e| format!("Zeitplan ausschalten: {e:?}"))?;
+        }
+        d.verfolge(nr, kind, || donnerstag(22, 11).ok());
+        let erwartet = if papier {
+            vec![(Art::Papier, Anlass::Zeitplan)]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(wartend(&d), erwartet, "Xetra {xetra_ok}, NYSE {nyse_ok}");
     }
     Ok(())
 }

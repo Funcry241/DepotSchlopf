@@ -1,11 +1,8 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Nach einem Neustart ohne Cargo starten (Maus 05.11.2026, Punkt 2, Teil 1): run.cmd und run.cmd update vermerken gepruefte Baeume in daten/geprueft.txt; ein mit Cargo gebauter Dienst sichert nach einer Weile seine Programme mit SHA-256-Abdruck nach daten/programm/<baum>/ (nur gepruefter Baum, sauberer Projektordner); DepotSchlopf.cmd prueft den gesicherten Stand vor dem Start mit einem festen PowerShell-Aufruf, sonst baut er mit Cargo. Auftraege laufen aus dem Stand ohne Cargo, das Update weiter mit Gate. Keine Grenze geaendert, keine neue Abhaengigkeit. Gestapelt; Pfade gegen die Basis-PR.
+zweck: Abruf je Boerse, Schritt 4 (Wolfgang 05.11.2026, Vorschlag von Maus): Der Zeitplan ruft jede Boerse der Liste kurz nach ihrem eigenen Schluss ab (Xetra zur eingestellten Uhrzeit, andere 10 Minuten nach ihrem Schluss in Frankfurter Zeit; Art::KurseVon, run.cmd kurse xetra|nyse). Der Papiertag folgt nach dem letzten Abruf des Tages, wenn ein Abruf dieses Tages erfolgreich war. dienst_erledigt.txt in Form erledigt-v2, alte Form wird gelesen. Keine Grenze geaendert, keine neue Abhaengigkeit, kein Netz im Dienst.
 pfade:
-crates/depot_kern/
 crates/depot_dienst/
-crates/depot_lauf/
 docs/
 CHANGELOG.md
-DepotSchlopf.cmd
 kodex/aenderung.txt
