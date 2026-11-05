@@ -786,6 +786,51 @@ fn tagesergebnis_nennt_den_fehler_des_anbieters() -> Result<(), String> {
     Ok(())
 }
 
+/// Maus' Restbefund zu PR #33: Ein altes Journal schrieb ein verworfenes Urteil als „Veto:
+/// keine verwertbare Antwort“. Das ist kein Beitrag; ein echtes Veto schon.
+#[test]
+fn altes_veto_ohne_verwertbare_antwort_ist_kein_beitrag() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 5)?;
+    drop(jr);
+    stummer_tag(&ort, 5)?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 6)?;
+    for (wer, text) in [
+        ("Papiertag", "Papiergeld; Ausfuehrung zum Schlusskurs"),
+        ("Dachs", "Topf A: SAP gefaellt [Kosten 3 von 24 Cent]"),
+        (
+            "Maus",
+            "Topf A: Veto: keine verwertbare Antwort: Limit [Kosten 0 von 24 Cent]",
+        ),
+        (
+            "Maus",
+            "Topf B: keine verwertbare Antwort: unlesbar [Kosten 0 von 24 Cent]",
+        ),
+    ] {
+        vorbedingung(jr.begruende(tag(6)?, wer, text), "Begruendung")?;
+    }
+    let l = lagebild(&umgebung(abends(6)?, Zugang::Offen(jr.stand())));
+    let t = tag_nr(&l, 0)?;
+    assert_eq!(t.datum, tag(6)?);
+    let maus = ki_nr(t, 1)?;
+    assert_eq!(maus.1.klasse, "halt", "{maus:?}");
+    assert!(maus.1.text.contains("ohne verwendbare Antwort"), "{maus:?}");
+    // Dachs' alter Eintrag ohne Kennwort ist weder gruen noch rot.
+    assert_eq!(ki_nr(t, 0)?.1.klasse, "offen", "{:?}", t.ki);
+    drop(l);
+    vorbedingung(
+        jr.begruende(tag(6)?, "Maus", "Topf A: Veto: zu konzentriert"),
+        "Begruendung",
+    )?;
+    let l = lagebild(&umgebung(abends(6)?, Zugang::Offen(jr.stand())));
+    let maus = ki_nr(tag_nr(&l, 0)?, 1)?;
+    assert_eq!(maus.1.klasse, "gut", "{maus:?}");
+    assert!(maus.1.text.contains("2 verworfen"), "{maus:?}");
+    Ok(())
+}
+
 /// Ein nachgeholter Abruf (Rechner schlief um 17:35) heisst „Kurse zu alt“, ohne Knopf, der
 /// heute nichts mehr aendert; der Tag laeuft ohne Fragen an die Berater und sagt das.
 #[test]

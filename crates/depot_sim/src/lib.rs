@@ -37,4 +37,6 @@ pub use papiertag::{
     Ausgang, Tageskurse, Tageslage, kurse_von_heute, papiertag, tageskurse, tageskurse_am,
     tageslage, tagnummer,
 };
-pub use szenario::{Antwort, Berater, Drehbuch, Lage, Stumm, Szenario, Tag, Urteil};
+pub use szenario::{
+    Antwort, Berater, Drehbuch, KEINE_VERWERTBARE_ANTWORT, Lage, Stumm, Szenario, Tag, Urteil,
+};

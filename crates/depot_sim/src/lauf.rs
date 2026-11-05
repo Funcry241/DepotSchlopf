@@ -35,7 +35,7 @@ use depot_regelwerk::{
 
 use crate::abdruck;
 use crate::papier::{Broker, Sendeantwort};
-use crate::szenario::{Berater, Lage, Szenario, Tag};
+use crate::szenario::{Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Szenario, Tag};
 
 /// Wer im Journal begruendet, ausser Dachs und Maus.
 const DATEN: &str = "Daten";
@@ -116,11 +116,26 @@ pub fn gefragt(text: &str) -> Option<Gefragt> {
     let rest = [TopfId::A, TopfId::B]
         .into_iter()
         .find_map(|t| text.strip_prefix(topf_name(t))?.strip_prefix(": "))?;
-    let nach = |wort: &str| rest.strip_prefix(wort).is_some_and(|r| r.starts_with(": "));
-    if nach(URTEIL_VERWORFEN) || nach(ANTWORT_VERWORFEN) {
+    let nach = |wort: &str| rest.strip_prefix(wort)?.strip_prefix(": ");
+    if nach(URTEIL_VERWORFEN).is_some() || nach(ANTWORT_VERWORFEN).is_some() {
         return Some(Gefragt::Verworfen);
     }
-    if nach(ANTWORT_VERWENDET) || nach(ZUSTIMMUNG) || nach(VETO) {
+    // Journale vor dem ausdruecklichen „Antwort verworfen“ schrieben eine verworfene Antwort
+    // als `Topf A: keine verwertbare Antwort: …` und ein verworfenes Urteil als `Topf B: Veto:
+    // keine verwertbare Antwort: …`. Beides ist kein Beitrag (Maus, Restbefund zu PR #33). Im
+    // Zweifel zaehlt ein Eintrag als verworfen, nie als Beitrag.
+    if rest.starts_with(KEINE_VERWERTBARE_ANTWORT)
+        || [ZUSTIMMUNG, VETO, ANTWORT_VERWENDET]
+            .into_iter()
+            .filter_map(nach)
+            .any(|r| r.starts_with(KEINE_VERWERTBARE_ANTWORT))
+    {
+        return Some(Gefragt::Verworfen);
+    }
+    if [ANTWORT_VERWENDET, ZUSTIMMUNG, VETO]
+        .into_iter()
+        .any(|w| nach(w).is_some())
+    {
         return Some(Gefragt::Verwendet);
     }
     let r = rest.strip_prefix(NICHT_ANGEBUNDEN)?;

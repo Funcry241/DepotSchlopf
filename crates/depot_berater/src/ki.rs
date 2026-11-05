@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use depot_journal::AufrufErlaubnis;
 use depot_journal::anbieter::{self, Eintrag, Ergebnis as Ausgang, Kosten};
 use depot_kern::{BeraterId, Cent, Grenzen, Universum, Vorschlag, Zeitpunkt};
-use depot_sim::{Antwort, Berater, Lage, Urteil};
+use depot_sim::{Antwort, Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Urteil};
 
 use crate::anbieter::{Anbieter, Verbrauch};
 use crate::frage::{self, sauber};
@@ -420,7 +420,7 @@ impl<N: Netz> Berater for KiBerater<N> {
             Err(grund) => Antwort {
                 verwertbar: false,
                 einschaetzung: format!(
-                    "keine verwertbare Antwort: {} [{}]",
+                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
                     sauber(&grund),
                     e.kosten
                 ),
@@ -452,7 +452,7 @@ impl<N: Netz> Berater for KiBerater<N> {
                 verwertbar: false,
                 zustimmung: false,
                 begruendung: format!(
-                    "keine verwertbare Antwort: {} [{}]",
+                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
                     sauber(&grund),
                     e.kosten
                 ),

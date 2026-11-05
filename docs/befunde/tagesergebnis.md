@@ -77,6 +77,16 @@ Das Papierdepot beginnt mit: „Nur Papiergeld, simuliert: Jeder Auftrag gilt al
 - Ein verworfenes Urteil gilt als Zustimmung.
 - Eine verworfene Antwort trägt ihren Vorschlag weiter.
 
+## Fassung 3: alte Journale
+
+**Befund (Maus, Restbefund):** Vor Fassung 2 stand ein verworfenes Urteil als `Topf B: Veto: keine verwertbare Antwort: …` im Journal. Die Anzeige wertete das als echtes Veto und zeigte es grün.
+
+**Regel:** Wer gefragt wurde und nichts verwerten konnte, schreibt seit jeher mit `depot_sim::KEINE_VERWERTBARE_ANTWORT` (`depot_berater` nimmt dieselbe Festkonstante). `gefragt` wertet einen Eintrag als verworfen, wenn er direkt nach dem Topf oder nach `Zustimmung`, `Veto` oder `Antwort verwendet` mit diesen Worten beginnt. Im Zweifel zählt ein Eintrag als verworfen, nie als Beitrag. Ein echtes Veto bleibt ein Beitrag.
+
+**Gegenproben** (jeweils rot):
+- Altes Veto ohne verwertbare Antwort zählt als Beitrag.
+- Nur der alte Vorschlag wird erkannt, das alte Veto nicht.
+
 ## Tests
 
 - **`crates/depot_lage/tests/lage.rs`:**
@@ -89,6 +99,7 @@ Das Papierdepot beginnt mit: „Nur Papiergeld, simuliert: Jeder Auftrag gilt al
   - `tagesergebnis_nennt_den_fehler_des_anbieters`: Eine verworfene Antwort heißt „gefragt ohne verwendbare Antwort: Anbieterlimit“, auch neben einem erfolgreichen Aufruf. Ohne Protokoll bleibt sie rot mit „Antwort verworfen“.
   - `nachgeholter_abruf_heisst_kurse_zu_alt`: Abruf um 20:00 Uhr, „Kurse zu alt“ ohne Knopf, der Tag danach „abgeschlossen ohne Handel“, beide KIs nicht gefragt.
   - `papierdepot_nennt_die_simulation`.
+  - `altes_veto_ohne_verwertbare_antwort_ist_kein_beitrag`: alte Einträge „Veto: keine verwertbare Antwort“ und „keine verwertbare Antwort“ sind rot, ein echtes Veto ist grün.
 - **`crates/depot_berater/tests/berater.rs`:** `warum_nicht` für fehlenden Schlüssel, Sperre und Anbieterpause, `None` mit Schlüssel.
 - **`crates/depot_sim/tests/papiertag.rs`:**
   - `Stumm` schreibt keinen erfundenen Grund.

@@ -39,6 +39,11 @@ pub struct Lage<'a> {
     pub ereignisse: &'a [String],
 }
 
+/// So beginnt die Einschaetzung oder Begruendung, wenn ein Berater gefragt wurde, seine Antwort
+/// aber nicht verwerten konnte. Die Anzeige erkennt daran auch Eintraege alter Journale, die
+/// `verwertbar` noch nicht kannten.
+pub const KEINE_VERWERTBARE_ANTWORT: &str = "keine verwertbare Antwort";
+
 /// Die Antwort auf eine Frage nach Zielgewichten: Einschaetzung der Lage und vielleicht ein
 /// Vorschlag. Die Kaufentscheidung trifft der Berater; das Journal haelt seine Begruendung fest.
 #[derive(Clone, Debug, PartialEq, Eq)]

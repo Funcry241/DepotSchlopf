@@ -652,6 +652,24 @@ fn verworfene_antwort_und_urteil_stehen_als_verworfen() -> Result<(), String> {
         gefragt("Topf A: nicht angebunden, nicht gefragt; kein Vorschlag"),
         Some(Gefragt::NichtAngebunden(None))
     );
+    // Alte Journale (vor `verwertbar`): verworfene Antworten und Urteile sind kein Beitrag,
+    // ein echtes Veto schon (Maus' Restbefund zu PR #33).
+    assert_eq!(
+        gefragt("Topf B: Veto: keine verwertbare Antwort: Limit [Kosten 0 von 24 Cent]"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(
+        gefragt("Topf A: keine verwertbare Antwort: unlesbar [Kosten 3 von 24 Cent]"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(
+        gefragt("Topf B: Veto: zu konzentriert [Kosten 3 von 24 Cent]"),
+        Some(Gefragt::Verwendet)
+    );
+    assert_eq!(
+        gefragt("Topf A: Antwort verwendet: keine verwertbare Antwort: x"),
+        Some(Gefragt::Verworfen)
+    );
     assert_eq!(gefragt("Topf A: SAP 2000 bp: Antwort verwendet: x"), None);
     assert_eq!(gefragt("Antwort verwendet: x"), None);
     Ok(())
