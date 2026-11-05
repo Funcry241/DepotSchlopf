@@ -28,8 +28,9 @@ use std::process::ExitCode;
 
 const HILFE: &str = "Aufruf:\n  run.cmd                  alles: Gate pruefen und Assistenten-Export schreiben\n  \
 run.cmd kodex            dasselbe\n  run.cmd festschreibung   Festschreibung neu schreiben (nur fuer FestschreibungAenderung)\n  \
-run.cmd kurse            Schlusskurse holen, im Journal belegen und pruefen (nur lesend)\n  \
+run.cmd kurse            Schlusskurse und Nachrichten holen, im Journal belegen und pruefen (nur lesend)\n  \
 run.cmd kurse einrichten Journal daten/journal.txt einmal anlegen\n  \
+run.cmd nachrichten      nur die Nachrichten holen und im Journal belegen (nur lesend)\n  \
 run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)\n  \
 run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
@@ -117,7 +118,7 @@ fn main() -> ExitCode {
     };
 
     // Der Sammler laeuft fuer sich: kein Gate, kein Export. Netz hat nur er (Kodex).
-    if befehl == "kurse" || befehl == "termine" {
+    if befehl == "kurse" || befehl == "nachrichten" || befehl == "termine" {
         return sammler(&wurzel, &args);
     }
     // Der Papiertag laeuft fuer sich: kein Netz, nur Papiergeld.

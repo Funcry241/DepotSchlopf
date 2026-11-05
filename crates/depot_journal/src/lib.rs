@@ -16,6 +16,7 @@
 //! **Kurse (R12, Kap. 6):** Ein Kurs von aussen steht vor seiner Verwendung im Journal, mit
 //! Quelle, Abrufzeit und Abdruck der rohen Antwort (`kursbeleg`). Ebenso jeder Termin
 //! (`terminbeleg`, R39); ein geaenderter Termin wird fortgeschrieben, die alte Fassung bleibt.
+//! Ebenso jede Nachricht (`nachrichtbeleg`, R40).
 //!
 //! **Kontowaechter (Kap. 9, R37):** Jeder Auftrag hat einen Zustand nach fester
 //! Zustandsmaschine (`auftrag`). Reserviert wird nur mit Deckung; der Abgleich mit dem Konto
@@ -51,6 +52,7 @@ pub mod datei;
 pub mod kasse;
 pub mod konto;
 pub mod kursbeleg;
+pub mod nachrichtbeleg;
 pub mod stand;
 pub mod terminbeleg;
 
@@ -59,6 +61,7 @@ pub use datei::{Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
 pub use kasse::{AufrufErlaubnis, KiStand};
 pub use konto::{Abweichung, Konto, KontoOrder, KontoStatus, Kontoauszug, verfuegbar};
 pub use kursbeleg::KursBeleg;
+pub use nachrichtbeleg::{MAX_NACHRICHT, NachrichtBeleg};
 pub use stand::{Abschluss, Art, AuftragsBeleg, FORMAT, FORMAT_ALT, Stand};
 pub use terminbeleg::{Fortschreibung, TerminBeleg};
 

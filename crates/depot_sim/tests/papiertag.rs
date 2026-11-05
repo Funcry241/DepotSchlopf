@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use depot_journal::{Art, Journal, KursBeleg};
+use depot_journal::{Art, Journal, KursBeleg, NachrichtBeleg};
 use depot_kern::{
     BeraterId, Cent, Datum, Herkunft, Instrument, InstrumentArt, Isin, Kurs, Preis, Topf, TopfId,
     Universum, Vorschlag, Zeitpunkt,
@@ -550,4 +550,100 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
     assert_eq!(schutz.len(), 2, "{schutz:?}");
     assert!(schutz.iter().all(|t| t.contains("MonatVoll")), "{schutz:?}");
     Ok(())
+}
+
+/// Merkt sich, was er in der Lage gesehen hat; schlaegt nichts vor.
+#[derive(Default)]
+struct Leser {
+    gesehen: Vec<String>,
+}
+
+impl depot_sim::Berater for Leser {
+    fn vorschlagen(
+        &mut self,
+        _erlaubnis: depot_journal::AufrufErlaubnis,
+        lage: &depot_sim::Lage<'_>,
+    ) -> Antwort {
+        self.gesehen.extend(lage.ereignisse.iter().cloned());
+        Antwort {
+            einschaetzung: "gelesen".into(),
+            vorschlag: None,
+        }
+    }
+
+    fn pruefen(
+        &mut self,
+        _erlaubnis: depot_journal::AufrufErlaubnis,
+        _lage: &depot_sim::Lage<'_>,
+        _vorschlag: &Vorschlag,
+    ) -> Urteil {
+        Urteil {
+            zustimmung: false,
+            begruendung: "nicht gefragt".into(),
+        }
+    }
+}
+
+/// Nachrichten des Sammlers stehen als eigene Belege im Journal und beginnen keinen Tag. Die
+/// Berater sehen die vom Handelstag und vom Tag davor (UTC), hoechstens
+/// `MAX_NACHRICHTEN_LAGE`, die neueste zuerst.
+#[test]
+fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    // Wie `run.cmd kurse`: erst die Kurse, dann die Nachrichten.
+    belege_kurse(&mut j)?;
+    let abruf = some(Zeitpunkt::neu(tag(5)?, 17, 0, 0), "Abruf")?;
+    let mut belege = |zeit: Zeitpunkt, text: &str| -> Result<(), String> {
+        let b = vorbedingung(
+            NachrichtBeleg::neu("alphavantage-news", abruf, b"roh", zeit, text),
+            "Nachricht",
+        )?;
+        vorbedingung(j.belege_nachricht(&b), "Beleg").map(|_| ())
+    };
+    belege(some(Zeitpunkt::neu(tag(3)?, 23, 59, 0), "Zeit")?, "zu alt")?;
+    for i in 0..40u8 {
+        belege(
+            some(Zeitpunkt::neu(tag(4)?, i / 2, (i % 2) * 30, 0), "Zeit")?,
+            &format!("gestern {i:02}"),
+        )?;
+    }
+    belege(some(Zeitpunkt::neu(tag(5)?, 15, 14, 0), "Zeit")?, "heute")?;
+    let mut k = konto(&ort, &j)?;
+    let mut dachs = Leser::default();
+    let aus = papiertag(
+        &mut j,
+        tag(5)?,
+        &universum()?,
+        &start()?,
+        &mut dachs,
+        &mut Stumm,
+        &mut k,
+    );
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let n: Vec<&String> = dachs
+        .gesehen
+        .iter()
+        .filter(|t| t.starts_with("Nachricht "))
+        .collect();
+    assert_eq!(n.len(), depot_sim::MAX_NACHRICHTEN_LAGE);
+    assert_eq!(
+        n.first().map(|t| t.as_str()),
+        Some("Nachricht 05.11.2026 15:14 UTC (alphavantage-news): heute")
+    );
+    // Von 40 Nachrichten des Vortags fallen die 11 aeltesten weg (00:00 bis 05:00).
+    assert_eq!(
+        n.last().map(|t| t.as_str()),
+        Some("Nachricht 04.11.2026 05:30 UTC (alphavantage-news): gestern 11")
+    );
+    assert!(!dachs.gesehen.iter().any(|t| t.contains("zu alt")));
+    Ok(())
+}
+
+fn belege_kurse(j: &mut Journal) -> Result<(), String> {
+    belege(
+        j,
+        5,
+        &[(&sap()?, "230.10", "231.00"), (&allianz()?, "350", "351.5")],
+    )
 }

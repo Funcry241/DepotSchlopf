@@ -1,6 +1,6 @@
-//! Ein kleiner JSON-Leser und -Schreiber, nur fuer die Anfragen an die Anbieter und ihre
-//! Antworten. Keine fremde Bibliothek: Gelesen wird mit fester Hoechsttiefe, Zahlen bleiben
-//! Text, bis jemand eine ganze Zahl verlangt.
+//! Ein kleiner JSON-Leser und -Schreiber fuer die Antworten der Quellen und Anbieter (Sammler,
+//! Berater). Keine fremde Bibliothek: Gelesen wird mit fester Hoechsttiefe, Zahlen bleiben Text,
+//! bis jemand eine ganze Zahl verlangt. Kein Netz hier.
 
 use std::fmt::Write as _;
 

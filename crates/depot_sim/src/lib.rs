@@ -33,5 +33,5 @@ pub mod szenario;
 pub use lauf::{LaufFehler, lauf};
 pub use papier::{Broker, Papierkonto, Sendeantwort};
 pub use papierdatei::Papierdatei;
-pub use papiertag::{Ausgang, Tageskurse, papiertag, tageskurse};
+pub use papiertag::{Ausgang, MAX_NACHRICHTEN_LAGE, Tageskurse, papiertag, tageskurse};
 pub use szenario::{Antwort, Berater, Drehbuch, Lage, Stumm, Szenario, Tag, Urteil};

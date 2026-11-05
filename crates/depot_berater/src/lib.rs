@@ -3,9 +3,9 @@
 //! Das einzige Crate ausser dem Sammler mit Netzzugang (Kodex `NETZ_ERLAUBT`, Wolfgang
 //! 05.11.2026), und ein Blatt im Abhaengigkeitsbaum: Es haengt von `depot_sim` ab, nie
 //! umgekehrt. Gefragt wird nur mit einer `AufrufErlaubnis`, die das Journal vorher gebucht hat.
-//! Gesendet werden nur Papierdepot, Kurse und Termine. Die Schluessel liegen nur in der
-//! Windows-Anmeldeinformationsverwaltung. Nach jedem Aufruf werden die tatsaechlichen Kosten
-//! mit der Reservierung verglichen; jede Ueberschreitung sperrt die KIs (`daten/ki.halt`).
+//! Gesendet werden nur Papierdepot, Kurse, Termine und die belegten Nachrichten. Die Schluessel
+//! liegen nur in der Windows-Anmeldeinformationsverwaltung. Nach jedem Aufruf werden die
+//! tatsaechlichen Kosten mit der Reservierung verglichen; jede Ueberschreitung sperrt die KIs (`daten/ki.halt`).
 
 #![forbid(
     unsafe_code,
@@ -21,7 +21,7 @@
 
 pub mod anbieter;
 pub mod frage;
-pub mod json;
+pub use depot_kern::json;
 pub mod ki;
 pub mod netz;
 pub mod schluessel;

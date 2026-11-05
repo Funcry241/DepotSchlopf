@@ -14,6 +14,7 @@ use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
 
 use crate::kasse::KiStand;
 use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
+use crate::nachrichtbeleg::{NachrichtBeleg, lies_nachrichtbeleg, nachrichtbeleg_text};
 use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
 
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
@@ -29,6 +30,9 @@ pub enum Art {
     /// `quelle;herkunft;abruf;roh;kennung;verlaesslichkeit;zeit;betroffen;titel`: ein Termin
     /// von aussen (`terminbeleg`, R39). Nur im Format 2; die Abrufe fallen nie zurueck.
     Termin,
+    /// `quelle;abruf;roh;zeit;text`: eine Nachricht von aussen (`nachrichtbeleg`, R40). Nur im
+    /// Format 2; die Abrufe fallen nie zurueck.
+    Nachricht,
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
     /// Rechner verlaesst (R12, R24). Damit ist er reserviert (R37).
     Auftrag,
@@ -59,6 +63,7 @@ impl Art {
             Art::Topf => "topf",
             Art::Kurs => "kurs",
             Art::Termin => "termin",
+            Art::Nachricht => "nachricht",
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
             Art::Ki => "ki",
@@ -75,6 +80,7 @@ impl Art {
             Art::Topf,
             Art::Kurs,
             Art::Termin,
+            Art::Nachricht,
             Art::Auftrag,
             Art::Zustand,
             Art::Ki,
@@ -127,6 +133,7 @@ pub struct Stand {
     beobachtungen: Vec<(Datum, String)>,
     kurse: Vec<KursBeleg>,
     termine: Vec<TerminBeleg>,
+    nachrichten: Vec<NachrichtBeleg>,
     letzte_kennung: u64,
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
@@ -197,11 +204,18 @@ impl Stand {
             .find(|b| b.termin().kennung() == kennung)
     }
 
-    /// Der letzte Abruf eines belegten Kurses oder Termins. Kein Abruf faellt dahinter zurueck.
+    /// Alle belegten Nachrichten in der Reihenfolge des Journals.
+    pub fn nachrichten(&self) -> &[NachrichtBeleg] {
+        &self.nachrichten
+    }
+
+    /// Der letzte Abruf eines belegten Kurses, Termins oder einer Nachricht. Kein Abruf faellt
+    /// dahinter zurueck.
     fn letzter_abruf(&self) -> Option<Zeitpunkt> {
         let k = self.kurse.last().map(KursBeleg::abruf);
         let t = self.termine.last().map(TerminBeleg::abruf);
-        k.max(t)
+        let n = self.nachrichten.last().map(NachrichtBeleg::abruf);
+        k.max(t).max(n)
     }
 
     /// Das KI-Kassenbuch.
@@ -219,7 +233,7 @@ impl Stand {
         self.abschluss.as_ref()
     }
 
-    /// Zahl der Eintraege seit dem letzten Abschluss, ohne Kurs- und Terminbelege. Mehr als
+    /// Zahl der Eintraege seit dem letzten Abschluss, ohne Kurs-, Termin- und Nachrichtenbelege. Mehr als
     /// null heisst: Ein Tag ist angefangen und nicht abgeschlossen.
     pub fn seit_abschluss(&self) -> usize {
         self.seit_abschluss
@@ -252,6 +266,10 @@ impl Stand {
             }
             Art::Termin => {
                 self.belege_termin(inhalt)?;
+                return Ok(());
+            }
+            Art::Nachricht => {
+                self.belege_nachricht(inhalt)?;
                 return Ok(());
             }
             Art::Auftrag => {
@@ -380,6 +398,29 @@ impl Stand {
             ));
         }
         self.termine.push(t);
+        Ok(())
+    }
+
+    /// Eine Nachricht von aussen. Nur im Format 2, Abrufe fallen nie zurueck, und dieselbe
+    /// Nachricht steht nicht zweimal im Journal.
+    fn belege_nachricht(&mut self, inhalt: &str) -> Result<(), String> {
+        if self.format == FORMAT_ALT {
+            return Err("Nachricht im Format 1: vor der ersten Nachricht stelle_um".into());
+        }
+        let n = lies_nachrichtbeleg(inhalt)?;
+        kanonisch(&nachrichtbeleg_text(&n), inhalt)?;
+        if let Some(vorher) = self.letzter_abruf()
+            && n.abruf() < vorher
+        {
+            return Err(format!(
+                "Abruf {} vor dem letzten belegten ({vorher})",
+                n.abruf()
+            ));
+        }
+        if self.nachrichten.iter().any(|alt| alt.gleich(&n)) {
+            return Err("Nachricht noch einmal belegt".into());
+        }
+        self.nachrichten.push(n);
         Ok(())
     }
 

@@ -1,7 +1,8 @@
 //! `depot_sammler` – holt Xetra-Schlusskurse und Termine, belegt sie im Journal und prueft sie.
 //!
-//! Aufruf ueber `run.cmd kurse` (oder `run.cmd kurse einrichten` beim ersten Mal) und
-//! `run.cmd termine`. Das Journal
+//! Aufruf ueber `run.cmd kurse` (oder `run.cmd kurse einrichten` beim ersten Mal),
+//! `run.cmd nachrichten` und `run.cmd termine`. `run.cmd kurse` holt nach den Kursen auch die
+//! Nachrichten. Das Journal
 //! liegt unter `daten/journal.txt`, die rohen Antworten unter `daten/roh/`; beides bleibt auf dem
 //! eigenen Rechner (`.gitignore`, Export ohne `daten/`).
 
@@ -24,7 +25,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use depot_journal::Journal;
 use depot_kern::{Datum, Preis, Zeitpunkt};
 use depot_sammler::{
-    Ergebnis, Https, Schluessel, beobachtungsliste, ezb::ADRESSE_EZB, sammle, sammle_termine,
+    Ergebnis, Https, Schluessel, beobachtungsliste, ezb::ADRESSE_EZB, sammle, sammle_nachrichten,
+    sammle_termine,
 };
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
@@ -77,6 +79,27 @@ fn einrichten(journal: &Path) -> ExitCode {
     }
 }
 
+/// Je Wert eine Zeile: Schlusskurse oder warum es keine gibt.
+fn zeige_werte(werte: &[(depot_sammler::Wert, Ergebnis)]) {
+    for (w, e) in werte {
+        match e {
+            Ergebnis::Belegt { heute, vortag, .. } => println!(
+                "  {:<20} {}  Schluss {}  Vortag {}",
+                w.name,
+                w.isin,
+                tag_preis(*heute),
+                tag_preis(*vortag)
+            ),
+            Ergebnis::Fehler(t) => {
+                println!("  {:<20} {}  FEHLER: {t}", w.name, w.isin);
+            }
+            Ergebnis::NichtAbgerufen => {
+                println!("  {:<20} {}  nicht abgerufen", w.name, w.isin);
+            }
+        }
+    }
+}
+
 fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
     let werte = match beobachtungsliste() {
         Ok(w) => w,
@@ -125,23 +148,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         }
     };
     let verwendbar = bericht.verwendbar();
-    for (w, e) in &bericht.werte {
-        match e {
-            Ergebnis::Belegt { heute, vortag, .. } => println!(
-                "  {:<20} {}  Schluss {}  Vortag {}",
-                w.name,
-                w.isin,
-                tag_preis(*heute),
-                tag_preis(*vortag)
-            ),
-            Ergebnis::Fehler(t) => {
-                println!("  {:<20} {}  FEHLER: {t}", w.name, w.isin);
-            }
-            Ergebnis::NichtAbgerufen => {
-                println!("  {:<20} {}  nicht abgerufen", w.name, w.isin);
-            }
-        }
-    }
+    zeige_werte(&bericht.werte);
     if let Some(a) = &bericht.abbruch {
         println!("[Sammler] Lauf vorzeitig beendet: {a}");
     }
@@ -165,6 +172,14 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         "[Sammler] Belegt im Journal {}, rohe Antworten unter daten/roh/.",
         journal_pfad.display()
     );
+    // Danach die Nachrichten mit demselben Schluessel. Sie aendern den Ausgang nicht: Ohne
+    // Nachrichten entscheiden die Berater aus Kursen und Terminen.
+    if bericht.abbruch.is_none() {
+        std::thread::sleep(PAUSE);
+        let _ = nachrichten_holen(&mut journal, &mut netz, &schluessel, &mut uhr, wurzel);
+    } else {
+        println!("[Sammler] Nachrichten nicht geholt, weil der Lauf vorzeitig endete.");
+    }
     // Erfolg nur mit verwendbaren Kursen: Ein spaeterer Lauf darf sich auf den Ausgang
     // verlassen (K19-02).
     if verwendbar {
@@ -174,6 +189,70 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         eprintln!(
             "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Pruefung nicht bestanden)."
         );
+        ExitCode::FAILURE
+    }
+}
+
+/// Ein Abruf der Nachrichten; meldet das Ergebnis. `true`, wenn nichts schiefging.
+fn nachrichten_holen(
+    journal: &mut Journal,
+    netz: &mut Https,
+    schluessel: &Schluessel,
+    uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
+    wurzel: &Path,
+) -> bool {
+    println!("[Sammler] Hole die Nachrichten von Alpha Vantage ...");
+    match sammle_nachrichten(
+        journal,
+        netz,
+        schluessel,
+        uhr,
+        &wurzel.join("daten").join("roh"),
+    ) {
+        Ok(b) => {
+            if let Some(d) = &b.rohdatei {
+                println!("[Sammler] Rohe Antwort: {}", d.display());
+            }
+            if let Some(f) = &b.fehler {
+                eprintln!("[Sammler] Nachrichten: nichts belegt: {f}");
+                return false;
+            }
+            println!(
+                "[Sammler] Nachrichten: {} neu, {} schon belegt.",
+                b.neu, b.bekannt
+            );
+            true
+        }
+        Err(e) => {
+            eprintln!("[Sammler] FEHLER bei den Nachrichten, angehalten: {e:?}");
+            false
+        }
+    }
+}
+
+fn nachrichten(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
+    let schluessel = match Schluessel::aus_anmeldeverwaltung() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[Sammler] FEHLER: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut journal = match Journal::oeffnen(journal_pfad) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!(
+                "[Sammler] FEHLER: Journal {}: {e:?}. Beim ersten Mal: run.cmd kurse einrichten",
+                journal_pfad.display()
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut netz = Https::neu();
+    let mut uhr = jetzt;
+    if nachrichten_holen(&mut journal, &mut netz, &schluessel, &mut uhr, wurzel) {
+        ExitCode::SUCCESS
+    } else {
         ExitCode::FAILURE
     }
 }
@@ -242,8 +321,11 @@ fn main() -> ExitCode {
         [] | ["kurse"] => kurse(&wurzel, &journal),
         ["einrichten"] | ["kurse", "einrichten"] => einrichten(&journal),
         ["termine"] => termine(&wurzel, &journal),
+        ["nachrichten"] => nachrichten(&wurzel, &journal),
         _ => {
-            eprintln!("Aufruf: run.cmd kurse | run.cmd kurse einrichten | run.cmd termine");
+            eprintln!(
+                "Aufruf: run.cmd kurse | run.cmd kurse einrichten | run.cmd nachrichten | run.cmd termine"
+            );
             ExitCode::from(2)
         }
     }

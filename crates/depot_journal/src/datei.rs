@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 use crate::auftrag::{Meldung, meldung_text};
 use crate::kasse::{AufrufErlaubnis, buchung_text, naechste};
 use crate::kursbeleg::{KursBeleg, kursbeleg_text};
+use crate::nachrichtbeleg::{NachrichtBeleg, nachrichtbeleg_text};
 use crate::stand::{
     Abschluss, Art, FORMAT, FORMAT_ALT, Stand, abschluss_text, begruendung_text, beleg_text,
     beobachtung_text, topf_text, trenne,
@@ -538,6 +539,7 @@ impl Journal {
             | Art::Topf
             | Art::Kurs
             | Art::Termin
+            | Art::Nachricht
             | Art::Begruendung
             | Art::Abschluss => self.schreibe_eintrag(art, inhalt),
         }
@@ -657,6 +659,21 @@ impl Journal {
         };
         self.anhaengen(Art::Termin, &terminbeleg_text(beleg))?;
         Ok(ergebnis)
+    }
+
+    /// Belegt eine Nachricht mit Quelle, Abrufzeit und Abdruck der rohen Antwort (R40, R12).
+    /// Dieselbe Nachricht (gleiche Zeit, gleicher Text) wird nicht noch einmal geschrieben;
+    /// dann `false`.
+    ///
+    /// # Errors
+    /// Wie `anhaengen`; `Abgelehnt` auch im Format 1 und bei einem Abruf vor dem letzten
+    /// belegten.
+    pub fn belege_nachricht(&mut self, beleg: &NachrichtBeleg) -> Result<bool, JournalFehler> {
+        if self.stand.nachrichten().iter().any(|alt| alt.gleich(beleg)) {
+            return Ok(false);
+        }
+        self.anhaengen(Art::Nachricht, &nachrichtbeleg_text(beleg))?;
+        Ok(true)
     }
 
     /// Belegt den ganzen Stand eines Topfes im Papierdepot.
