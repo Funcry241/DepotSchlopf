@@ -327,7 +327,7 @@ fn ohne_tiingo_schluessel_nur_xetra() -> Result<(), String> {
         Some((_, Ergebnis::Belegt { .. }))
     ));
     assert!(
-        matches!(b.werte.get(1), Some((_, Ergebnis::Fehler(t))) if t.contains("DepotSchlopf/tiingo")),
+        matches!(b.werte.get(1), Some((_, Ergebnis::Uebersprungen(t))) if t.contains("DepotSchlopf/tiingo")),
         "{:?}",
         b.werte
     );
@@ -368,7 +368,7 @@ fn ohne_referenzkurse_kein_dollarwert() -> Result<(), String> {
             Some((_, Ergebnis::Belegt { .. }))
         ));
         assert!(
-            matches!(b.werte.get(1), Some((_, Ergebnis::Fehler(t))) if t.contains("Referenzkurse der EZB")),
+            matches!(b.werte.get(1), Some((_, Ergebnis::Uebersprungen(t))) if t.contains("Referenzkurse der EZB")),
             "{:?}",
             b.werte
         );
@@ -478,7 +478,7 @@ fn einzelboerse_kennt_alle_schluessel() -> Result<(), String> {
     )?
     .map_err(|e| format!("Lauf: {e:?}"))?;
     assert!(b.sicherheitsabbruch);
-    assert!(fs::read_dir(roh.join(QUELLE)).map_or(0, Iterator::count) == 0);
+    assert_eq!(fs::read_dir(roh.join(QUELLE)).map_or(0, Iterator::count), 0);
 
     // Fehlt der Tiingo-Schluessel, meldet ein Xetra-Lauf das nicht; ein NYSE-Lauf schon.
     let ohne_ti = |a: Anbieter| match a {
@@ -505,7 +505,10 @@ fn anbieterprotokoll_je_quelle() -> Result<(), String> {
         vorbedingung(Schluessel::fuer(Anbieter::Tiingo, TI), "Schluessel")?,
     );
     let mut netz = Erfunden::neu(&[
-        ("ezb", Ok(ezb(&[("2026-11-04", "1.1224"), ("2026-11-03", "1.25")]))),
+        (
+            "ezb",
+            Ok(ezb(&[("2026-11-04", "1.1224"), ("2026-11-03", "1.25")])),
+        ),
         ("aapl", Ok(ROH_AAPL.to_string())),
     ]);
     let b = lauf(
@@ -517,7 +520,10 @@ fn anbieterprotokoll_je_quelle() -> Result<(), String> {
         &alle,
     )?
     .map_err(|e| format!("Lauf: {e:?}"))?;
-    assert!(matches!(b.werte.first(), Some((_, Ergebnis::Uebersprungen(_)))));
+    assert!(matches!(
+        b.werte.first(),
+        Some((_, Ergebnis::Uebersprungen(_)))
+    ));
     assert_eq!(depot_sammler::einordnen(&b, Anbieter::Tiingo), Some(E::Ok));
     assert_eq!(depot_sammler::einordnen(&b, Anbieter::AlphaVantage), None);
     assert_eq!(Anbieter::Tiingo.protokoll(), Wer::Tiingo);

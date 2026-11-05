@@ -1,9 +1,11 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Abruf je Boerse, Schritt 3 (Wolfgang 05.11.2026, Tiingo-Plan freigegeben): Der Sammler holt Werte der NYSE bei Tiingo mit eigenem Schluessel (DepotSchlopf/tiingo, depot_sammler::Anbieter, Zugang) und rechnet sie mit den EZB-Referenzkursen desselben Tages in Euro um (einmal je Lauf geholt, roh abgelegt). Xetra bleibt bei Alpha Vantage. Fehlt ein Schluessel oder die EZB-Datei, fallen nur die betroffenen Werte aus. Jede Antwort wird gegen alle Schluessel geprueft. run.cmd kurse xetra|nyse ruft nur eine Boerse ab. Netz weiter nur im Sammler, keine Grenze geaendert, keine neue Abhaengigkeit.
+zweck: Abruf je Boerse, Schritt 3 (Wolfgang 05.11.2026, Tiingo-Plan freigegeben): Der Sammler holt Werte der NYSE bei Tiingo mit eigenem Schluessel (DepotSchlopf/tiingo, depot_sammler::Anbieter, Zugang) und rechnet sie mit den EZB-Referenzkursen desselben Tages in Euro um (einmal je Lauf geholt, roh abgelegt). Xetra bleibt bei Alpha Vantage. Fehlt ein Schluessel oder die EZB-Datei, fallen nur die betroffenen Werte aus. Jede Antwort wird gegen alle hinterlegten Schluessel geprueft, auch bei einem Lauf fuer nur eine Boerse; Anbieterprotokoll je Quelle (neu: tiingo, depot_journal::anbieter::Wer::Tiingo). run.cmd kurse xetra|nyse ruft nur eine Boerse ab. Netz weiter nur im Sammler, keine Grenze geaendert, keine neue Abhaengigkeit.
 pfade:
 crates/depot_kern/
 crates/depot_sammler/
+crates/depot_journal/
+crates/depot_dienst/
 docs/
 CHANGELOG.md
 run.cmd
