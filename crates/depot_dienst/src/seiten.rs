@@ -254,6 +254,21 @@ fn wochentag_text(d: Datum) -> &'static str {
 }
 
 /// Der naechste Lauf des Zeitplans als Satz.
+/// Wie es nach einem gescheiterten Lauf weitergeht, aus dem tatsaechlichen Zeitplan: von selbst
+/// nur, wenn er an ist (Maus, Befund 3 zu #38). Der Lauf selbst kennt den Zeitplan nicht.
+fn weiter_text(z: &Zustand, heute: Option<Datum>) -> String {
+    let naechster = naechster_text(z, heute);
+    let naechster = naechster.trim_end_matches('.');
+    if z.zeitplan.an && heute.is_some() {
+        format!("Nach Zeitplan geht es von selbst weiter: {naechster}.")
+    } else {
+        format!(
+            "DepotSchlopf startet nichts von selbst: {naechster}. Kurse und Papiertag startest \
+             du von Hand über die Knöpfe im Lagebild."
+        )
+    }
+}
+
 pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     if let Some(f) = &z.erledigt_fehler {
         return format!(
@@ -348,16 +363,17 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
                     .is_some_and(|e| ortszeit(e).is_some_and(|o| o.0 == t))
             })
         {
-            let klasse = if a.erfolg == Some(true) {
-                "gut"
+            let (klasse, weiter) = if a.erfolg == Some(true) {
+                ("gut", String::new())
             } else {
-                "halt"
+                ("halt", format!(" {}", weiter_text(z, heute)))
             };
             let _ = write!(
                 s,
-                "<p class=\"kopf {klasse}\" id=\"hinweis\">{}: {}</p>",
+                "<p class=\"kopf {klasse}\" id=\"hinweis\">{}: {}{}</p>",
                 maskiere(a.art.name()),
-                maskiere(h)
+                maskiere(h),
+                maskiere(&weiter)
             );
         }
     }

@@ -1612,3 +1612,46 @@ fn neustart_waehrend_des_kursabrufs_ohne_papiertag() -> Result<(), String> {
     assert!(satz.contains("kein Papiertag"), "{satz}");
     Ok(())
 }
+
+/// Maus, Befund 3 zu #38: Ob es nach einem Ausfall von selbst weitergeht, sagt der Dienst aus
+/// seinem tatsaechlichen Zeitplan, nicht der Sammler. Ohne Zeitplan: nichts von selbst; mit
+/// Zeitplan: der naechste geplante Lauf.
+#[test]
+fn nach_einem_ausfall_sagt_der_zeitplan_wie_es_weitergeht() -> Result<(), String> {
+    let zeilen: &'static [&'static str] =
+        &["[Hinweis] Papiertag heute ausgefallen. Die Verbindung kam bis 17:54 Uhr nicht wieder."];
+    let t = donnerstag(17, 45)?;
+    for an in [false, true] {
+        let wurzel = if an {
+            eingeschaltet(ordner()?)?
+        } else {
+            ordner()?
+        };
+        let d = Arc::new(Dienst::neu(
+            wurzel,
+            TOKEN.into(),
+            zeilen_starter(zeilen),
+            leeres_lagebild(),
+        ));
+        d.einreihen(Art::Kurse, Anlass::Hand)
+            .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
+        let (nr, kind) = some(d.schritt(t), "Start")?;
+        d.verfolge(nr, kind, || donnerstag(17, 55).ok());
+        let seite = seiten::live("s", &d.sperre(), t.datum());
+        let (_, rest) = some(seite.split_once("id=\"hinweis\">"), "Hinweis")?;
+        let (hinweis, _) = some(rest.split_once("</p>"), "Ende")?;
+        if an {
+            assert!(
+                hinweis.contains("Nach Zeitplan geht es von selbst weiter"),
+                "{hinweis}"
+            );
+        } else {
+            assert!(
+                hinweis.contains("DepotSchlopf startet nichts von selbst"),
+                "{hinweis}"
+            );
+            assert!(!hinweis.contains("geht es von selbst"), "{hinweis}");
+        }
+    }
+    Ok(())
+}
