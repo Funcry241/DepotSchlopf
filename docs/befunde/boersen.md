@@ -57,6 +57,16 @@ Die Kursprüfung bleibt dieselbe. Neu ist, wie ihre Befunde wirken:
 1. **Sicherheitsabbruch:** Kam erst ein gültiger Kurs und danach eine Antwort mit dem Schlüssel, endete der Lauf. Die bis dahin belegten Kurse galten aber als verwendbar, weil fehlende Kandidaten nicht mehr zählen. Damit hätte der Zeitplan den Papiertag starten können. Jetzt setzt ein Schutzabbruch `Bericht::sicherheitsabbruch`, und nichts aus dem Lauf ist verwendbar. Ein Abbruch wegen des Tageskontingents bleibt ein fehlender Kandidat. Test: `schluesselabbruch_macht_den_ganzen_abruf_unbrauchbar`.
 2. **Feiertagszeile:** Der Kalender galt nur im Zeitplan. Eine Xetra-Zeile für den 1. Januar wurde als Schlusskurs gelesen. Jetzt lehnt `schlusskurse` jeden Wert ab, dessen Datei eine Zeile für einen Tag ohne Handel seiner Börse enthält (`QuellenFehler::KeinHandelstag`, Wochenende eingeschlossen). Die Quelle widerspricht dann dem Kalender, und das klärt ein Mensch. Ist der Wert ein Kandidat, fällt er aus. Ist er gehalten, fällt der Zyklus aus. Test: `zeile_an_einem_boersenfeiertag_ist_kein_schlusskurs`.
 
+## Fassung 3 nach Maus' Restbefund
+
+Der Sicherheitsabbruch griff nur über den Ausgang des Sammlers, also nur im Zeitplan. Ein von Hand gestarteter Papiertag nahm die schon belegten Teilkurse trotzdem. Jetzt legt der Sammler nach einem Sicherheitsabbruch `daten/kurse.halt` an (`depot_journal::kurssperre`). Darin steht ein fester Grund, nie der Schlüssel. Solange die Datei liegt, gilt:
+
+- Der Sammler ruft nichts ab.
+- `papierlauf::papier` beginnt keinen Papiertag, gleich ob der Zeitplan oder ein Mensch ihn startet. Beide Wege laufen über `run.cmd papier`.
+- Das Lagebild zeigt „Kurssperre“ als Halt.
+
+Aufheben heißt: prüfen, den Schlüssel bei Bedarf erneuern, dann die Datei löschen. Lässt sich die Sperre nicht schreiben, meldet der Sammler das als Fehler: „KEINEN Papiertag starten“. Tests: `kurssperre_haelt_auch_den_handstart`, `kurssperre::sperre_liegt_bis_sie_geloescht_wird`, `kurssperre_ist_halt`.
+
 ## Nicht in diesem Schritt
 
 - **Abrufzeit:** Mit nur Xetra-Werten bleibt der Abruf kurz nach 17:35 Uhr richtig. Wolfgang hat am 05.11.2026 entschieden, Maus' Vorschlag zu folgen: Kurse je Börse kurz nach ihrem Schluss abrufen, die Altersprüfung je Abrufzeitpunkt, danach ein gemeinsamer Papiertag. Kein gemeinsamer Abruf um 22:30 Uhr. Das kommt in einem eigenen Schritt.

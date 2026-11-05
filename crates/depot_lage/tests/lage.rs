@@ -957,3 +957,17 @@ fn feiertag_ist_geschlossen_und_auslassung_sichtbar() -> Result<(), String> {
     assert!(p.text.contains("Börse geschlossen"), "{p:?}");
     Ok(())
 }
+
+/// Die Kurssperre nach einem Sicherheitsabbruch ist Halt mit eigenem Text.
+#[test]
+fn kurssperre_ist_halt() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let jr = ort.oeffnen()?;
+    let mut umg = umgebung(abends(5)?, Zugang::Offen(jr.stand()));
+    umg.sperren = vec!["kurse.halt".into()];
+    let l = lagebild(&umg);
+    let p = punkt(&l, "Kurssperre")?;
+    assert_eq!(p.ampel, depot_lage::Ampel::Halt, "{p:?}");
+    assert!(p.text.contains("Sicherheitsgründen"), "{p:?}");
+    Ok(())
+}

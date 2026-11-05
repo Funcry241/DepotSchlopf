@@ -644,12 +644,25 @@ fn schluessel_punkte(
     (schluessel, hinweise)
 }
 
-/// Rechnet das Lagebild.
-pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
-    let mut punkte = vec![journal_punkt(u.journal)];
+/// Je Sperrdatei im Datenordner ein Punkt.
+fn sperr_punkte(u: &Umgebung<'_>, punkte: &mut Vec<Punkt>) {
     for s in &u.sperren {
         if s == "ki.halt" {
             punkte.push(kostenschutz_punkt(u.ki_halt.as_deref()));
+            continue;
+        }
+        if s == depot_journal::kurssperre::KURSSPERRE {
+            punkte.push(punkt(
+                "Kurssperre",
+                Ampel::Halt,
+                format!(
+                    "daten/{s} liegt: Ein Kursabruf endete aus Sicherheitsgründen (die Quelle gab \
+                     den Schlüssel zurück). Kein Abruf und kein Papiertag, auch nicht von Hand, \
+                     bis ein Mensch geprüft, den Schlüssel bei Bedarf erneuert und die Datei \
+                     gelöscht hat."
+                ),
+                Some(Abhilfe::Pruefen),
+            ));
             continue;
         }
         punkte.push(punkt(
@@ -662,6 +675,12 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
             Some(Abhilfe::Pruefen),
         ));
     }
+}
+
+/// Rechnet das Lagebild.
+pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
+    let mut punkte = vec![journal_punkt(u.journal)];
+    sperr_punkte(u, &mut punkte);
     let (schluessel, hinweise) = schluessel_punkte(u, &mut punkte);
     let heute = u.jetzt.datum();
     let werte = beobachtungsliste();

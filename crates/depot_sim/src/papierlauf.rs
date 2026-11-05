@@ -32,6 +32,15 @@ pub fn papier(
     maus: &mut dyn Berater,
 ) -> Result<Vec<String>, String> {
     let mut zeilen = Vec::new();
+    // Nach einem Sicherheitsabbruch des Sammlers beginnt kein Papiertag, auch nicht von Hand:
+    // Seine Teilkurse werden nie verwendet (Maus, Restbefund zu #34).
+    if let Some(grund) = depot_journal::kurssperre::kurssperre(&wurzel.join("daten")) {
+        return Err(format!(
+            "daten/{} liegt ({grund}). Kein Papiertag, bis ein Mensch geprueft und die Datei \
+             geloescht hat",
+            depot_journal::kurssperre::KURSSPERRE
+        ));
+    }
     let pfad = wurzel.join("daten").join("journal.txt");
     let mut j = Journal::oeffnen(&pfad).map_err(|e| {
         format!(
