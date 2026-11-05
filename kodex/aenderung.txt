@@ -1,10 +1,11 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Termine im Ereignisregister, Teil EZB (R39, R12; Wolfgang 04.11.2026). Termin im Kern (Kennung, Titel, Zeitbezug, Betroffene, Verlaesslichkeit), Eintrag termin im Journal mit Quelle, Abrufzeit und Abdruck, Fortschreibung unter der Kennung. run.cmd termine holt die Sitzungstermine von der Seite der EZB, legt sie roh ab, liest genau ihre Form und belegt jeden Termin. Nach Maus K22-01: Kennung haengt nicht an der Reihenfolge der Seite, Zuordnung je Tag zu bekannten Terminen, mehrdeutig wird gemeldet und nichts belegt. K22-02: Fortschreibung nur bei gleichem Gremium und gleichen Betroffenen. Nur lesend, keine Auftraege, keine KI. Keine neuen Grenzen, keine neuen Abhaengigkeiten.
+zweck: Papiertag mit echten Kursen, Fassung 2 nach Maus K23-01 bis K23-03 (Stoerung des Kontos haelt vor jeder Bestaetigung, Abgleich vor schon abgeschlossen, Erststart wiederholbar). (Wolfgang 05.11.2026: mutiger und schneller, sofort taeglicher Papierhandel). run.cmd papier fuehrt einen Tag mit den heute vom Sammler belegten Schlusskursen und den belegten Terminen als Ereignissen, nur auf dem Papierkonto (daten/papierkonto.txt, unabhaengig vom Journal, Kontowaechter gleicht ab). Ein Tag nur mit Kursen von heute, einmal je Handelstag; angefangener Tag oder Abweichung zum Konto ist Halt. Kurs- und Terminbelege beginnen keinen Tag. Papierkonto fuehrt Kurse feiner als ein Cent zur sicheren Seite aus (Kauf auf, Verkauf ab). Berater ohne Anbindung werden nicht gefragt und reservieren nichts; Dachs und Maus folgen in einem eigenen Schritt. Beobachtungsliste nach depot_kern (reine Daten). Keine neuen Grenzen, keine neuen Abhaengigkeiten, kein Netz, kein echtes Geld.
 pfade:
 crates/depot_kern/
 crates/depot_journal/
 crates/depot_sammler/
+crates/depot_sim/
 crates/depot_lauf/
 docs/
 CHANGELOG.md

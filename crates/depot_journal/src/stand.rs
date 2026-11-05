@@ -219,8 +219,8 @@ impl Stand {
         self.abschluss.as_ref()
     }
 
-    /// Zahl der Eintraege seit dem letzten Abschluss. Mehr als null heisst: Ein Tag ist
-    /// angefangen und nicht abgeschlossen.
+    /// Zahl der Eintraege seit dem letzten Abschluss, ohne Kurs- und Terminbelege. Mehr als
+    /// null heisst: Ein Tag ist angefangen und nicht abgeschlossen.
     pub fn seit_abschluss(&self) -> usize {
         self.seit_abschluss
     }
@@ -244,8 +244,16 @@ impl Stand {
                 self.pruefe_deckung(&t, None)?;
                 self.toepfe.insert(t.id(), t);
             }
-            Art::Kurs => self.belege_kurs(inhalt)?,
-            Art::Termin => self.belege_termin(inhalt)?,
+            // Belege von aussen beginnen keinen Tag: Der Sammler schreibt sie vor dem Papiertag
+            // ins selbe Journal; sie fragen niemanden und reservieren nichts.
+            Art::Kurs => {
+                self.belege_kurs(inhalt)?;
+                return Ok(());
+            }
+            Art::Termin => {
+                self.belege_termin(inhalt)?;
+                return Ok(());
+            }
             Art::Auftrag => {
                 let b = lies_auftrag(inhalt).ok_or("Auftrag unlesbar")?;
                 kanonisch(&auftrag_text(&b), inhalt)?;
