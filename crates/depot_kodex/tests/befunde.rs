@@ -1438,6 +1438,7 @@ fn netz_bleibt_im_blatt() -> Result<(), String> {
     );
     let ueber_sammler = abhaengig("depot_sammler = { path = \"../depot_sammler\" }\n");
     let ueber_berater = abhaengig("depot_berater = { path = \"../depot_berater\" }\n");
+    let ueber_dienst = abhaengig("depot_dienst = { path = \"../depot_dienst\" }\n");
     alle_faelle(
         &baum,
         &[
@@ -1455,6 +1456,11 @@ fn netz_bleibt_im_blatt() -> Result<(), String> {
             (
                 "ueber den Berater",
                 &ueber_berater,
+                "Netzzugang ohne Erlaubnis",
+            ),
+            (
+                "ueber den Dienst",
+                &ueber_dienst,
                 "Netzzugang ohne Erlaubnis",
             ),
         ],

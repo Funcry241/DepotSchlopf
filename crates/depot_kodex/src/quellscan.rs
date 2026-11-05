@@ -11,6 +11,9 @@
 //! - Netzzugang nur in den Crates aus `NETZ_ERLAUBT`. Kein anderes Crate haengt von einem
 //!   Netz-Crate oder von einem Crate aus `NETZ_ERLAUBT` ab; Netzzugang bleibt so in einem Blatt
 //!   des Abhaengigkeitsbaums und erreicht nie Regelwerk, Journal oder Gate.
+//! - Nur lokal lauschen duerfen die Crates aus `NETZ_LOKAL`: `TcpListener::bind` nur woertlich
+//!   auf `Ipv4Addr::LOCALHOST`, dazu angenommene Verbindungen; kein Verbindungsaufbau, kein UDP,
+//!   keine Namensaufloesung, kein Netz-Crate. Auch von ihnen haengt kein anderes Crate ab.
 //!
 //! - Geprueft wird, was kompiliert werden kann: Im Crate liegen nur `Cargo.toml`, `src/` und
 //!   `tests/`; darin nur `.rs`-Dateien, und jede wird vollstaendig geprueft. `#[path]` und
@@ -49,6 +52,22 @@ const UNREIN: [&[&str]; 6] = [
 /// `depot_berater`: Fragen an Dachs (Claude) und Maus (GPT) mit Websuche, fuer den Papierhandel,
 /// nur mit vorher gebuchter Erlaubnis aus dem Kassenbuch (R8), Wolfgang 05.11.2026.
 const NETZ_ERLAUBT: [&str; 2] = ["depot_sammler", "depot_berater"];
+/// Nur auf dem eigenen Rechner lauschen (127.0.0.1), nie hinaus. Erweitern nur ueber eine
+/// KodexAenderung. `depot_dienst`: Dienst mit lokaler Weboberflaeche, Wolfgang 05.11.2026
+/// („Ja, nur 127.0.0.1“).
+const NETZ_LOKAL: [&str; 1] = ["depot_dienst"];
+/// In lokalen Crates verboten: jeder Weg hinaus und jede Namensaufloesung.
+const LOKAL_VERBOTEN: [&str; 9] = [
+    "connect",
+    "connect_timeout",
+    "UdpSocket",
+    "ToSocketAddrs",
+    "to_socket_addrs",
+    "lookup_host",
+    "UnixStream",
+    "UnixListener",
+    "UnixDatagram",
+];
 const NETZ_CRATES: [&str; 5] = ["reqwest", "ureq", "hyper", "tokio", "socket2"];
 const NETZ_TYPEN: [&str; 3] = ["TcpStream", "UdpSocket", "TcpListener"];
 /// Gruppen, die einen harten Lint enthalten.
@@ -208,6 +227,135 @@ fn rein_importe(krate: &str, anzeige: &str, importe: &[rust::Import]) -> Vec<Str
     fehler
 }
 
+/// Lokales Lauschen. Die Adresse muss sich aus dem Quelltext allein als 127.0.0.1 belegen
+/// lassen, ohne dass ein Name des Crates sie umlenken kann:
+/// - Jedes Wort `bind` ist ein direkter Aufruf `bind(`: kein Typparameter (`bind::<…>`), kein
+///   Funktionswert, kein Umweg.
+/// - Sein einziges Argument ist genau `(::std::net::Ipv4Addr::LOCALHOST, PORT)` oder
+///   `::std::net::SocketAddrV4::new(::std::net::Ipv4Addr::LOCALHOST, PORT)`. Der volle Pfad mit
+///   `::` vorn meint immer die Standardbibliothek; ein Alias, ein eigener Typ, ein Glob-Import
+///   oder ein Modul namens `std` kann ihn nicht ersetzen. Nach der Adresse folgt nur der Port,
+///   danach schliesst der Aufruf: Kein Methodenaufruf veraendert die Adresse.
+/// - Kein `extern crate`: So heisst nichts anderes `std`. Abhaengigkeiten sind festgeschrieben.
+/// - Kein Wort aus `LOKAL_VERBOTEN`.
+fn pruefe_lokal(anzeige: &str, t: &[Token]) -> Vec<String> {
+    let mut fehler = Vec::new();
+    let mut gemeldet = BTreeSet::new();
+    for (i, tok) in t.iter().enumerate() {
+        let Token::Wort(w) = tok else {
+            continue;
+        };
+        if LOKAL_VERBOTEN.contains(&w.as_str()) && gemeldet.insert(w.clone()) {
+            fehler.push(format!(
+                "{anzeige}: {w} im nur lokalen Crate: kein Weg hinaus, keine Namensaufloesung"
+            ));
+        }
+        if w == "extern"
+            && t.get(i.saturating_add(1))
+                .is_some_and(|x| x.ist_wort("crate"))
+        {
+            fehler.push(format!(
+                "{anzeige}: extern crate im nur lokalen Crate (koennte std umbenennen)"
+            ));
+        }
+        if w == "bind" && !bind_lokal(t, i) {
+            fehler.push(format!(
+                "{anzeige}: bind nicht als direkter Aufruf mit \
+                 (::std::net::Ipv4Addr::LOCALHOST, PORT) (nur 127.0.0.1)"
+            ));
+        }
+    }
+    fehler
+}
+
+/// Stelle der Klammer, die die Klammer an Stelle `auf` schliesst.
+fn schliessende(t: &[Token], auf: usize) -> Option<usize> {
+    let mut tiefe = 0_usize;
+    for (j, x) in t.iter().enumerate().skip(auf) {
+        if x.ist("(") || x.ist("[") || x.ist("{") {
+            tiefe = tiefe.checked_add(1)?;
+        } else if x.ist(")") || x.ist("]") || x.ist("}") {
+            tiefe = tiefe.checked_sub(1)?;
+            if tiefe == 0 {
+                return x.ist(")").then_some(j);
+            }
+        }
+    }
+    None
+}
+
+/// Folgt ab Stelle `i` genau die Wortfolge `muster` (`::` als Zeichen)? Gibt die Stelle danach.
+fn folge(t: &[Token], i: usize, muster: &[&str]) -> Option<usize> {
+    let mut j = i;
+    for m in muster {
+        let x = t.get(j)?;
+        let passt = if *m == "::" || *m == "(" || *m == "," {
+            x.ist(m)
+        } else {
+            x.ist_wort(m)
+        };
+        if !passt {
+            return None;
+        }
+        j = j.checked_add(1)?;
+    }
+    Some(j)
+}
+
+const LOKALE_ADRESSE: [&str; 9] = [
+    "::",
+    "std",
+    "::",
+    "net",
+    "::",
+    "Ipv4Addr",
+    "::",
+    "LOCALHOST",
+    ",",
+];
+const SOCKADDR_NEU: [&str; 9] = [
+    "::",
+    "std",
+    "::",
+    "net",
+    "::",
+    "SocketAddrV4",
+    "::",
+    "new",
+    "(",
+];
+
+/// Ist das Wort `bind` an Stelle `i` ein direkter Aufruf, dessen einziges Argument die lokale
+/// Adresse mit Port ist?
+fn bind_lokal(t: &[Token], i: usize) -> bool {
+    let Some(auf) = i.checked_add(1) else {
+        return false;
+    };
+    if !t.get(auf).is_some_and(|x| x.ist("(")) {
+        return false;
+    }
+    let Some(zu) = schliessende(t, auf) else {
+        return false;
+    };
+    let Some(start) = auf.checked_add(1) else {
+        return false;
+    };
+    // Die innere Klammer (Tupel oder `new(`) muss genau vor der Klammer des Aufrufs schliessen.
+    let innen = if t.get(start).is_some_and(|x| x.ist("(")) {
+        Some(start)
+    } else {
+        folge(t, start, &SOCKADDR_NEU).and_then(|j| j.checked_sub(1))
+    };
+    let Some(innen) = innen else {
+        return false;
+    };
+    let Some(nach_innen) = innen.checked_add(1) else {
+        return false;
+    };
+    folge(t, nach_innen, &LOKALE_ADRESSE).is_some()
+        && schliessende(t, innen).and_then(|j| j.checked_add(1)) == Some(zu)
+}
+
 /// Prueft eine Quelldatei. `produktiv` heisst: liegt unter `src/`.
 pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> Vec<String> {
     let mut fehler = Vec::new();
@@ -280,7 +428,8 @@ pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> 
             }
         }
         if !NETZ_ERLAUBT.contains(&krate) {
-            let netz = rust::enthaelt(p, &["std", "net"])
+            let lokal = NETZ_LOKAL.contains(&krate);
+            let netz = (!lokal && rust::enthaelt(p, &["std", "net"]))
                 || p.first().is_some_and(|s| NETZ_CRATES.contains(&s.as_str()));
             if netz && gemeldet.insert(format!("netz {}", p.join("::"))) {
                 fehler.push(format!(
@@ -290,7 +439,9 @@ pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> 
             }
         }
     }
-    if !NETZ_ERLAUBT.contains(&krate) {
+    if NETZ_LOKAL.contains(&krate) {
+        fehler.extend(pruefe_lokal(anzeige, &t));
+    } else if !NETZ_ERLAUBT.contains(&krate) {
         for tok in &t {
             if let Token::Wort(w) = tok
                 && NETZ_TYPEN.contains(&w.as_str())
@@ -327,7 +478,10 @@ fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
     }
     if !NETZ_ERLAUBT.contains(&krate) {
         for name in manifest::abhaengigkeits_namen(&m) {
-            if NETZ_CRATES.contains(&name.as_str()) || NETZ_ERLAUBT.contains(&name.as_str()) {
+            if NETZ_CRATES.contains(&name.as_str())
+                || NETZ_ERLAUBT.contains(&name.as_str())
+                || NETZ_LOKAL.contains(&name.as_str())
+            {
                 fehler.push(format!(
                     "crates/{krate}: haengt von {name} ab: Netzzugang ohne Erlaubnis"
                 ));
@@ -446,6 +600,67 @@ mod tests {
         );
         assert!(!pruefe_datei("depot_journal", true, p, "use ureq::Agent;").is_empty());
         assert!(!pruefe_datei("depot_lauf", true, p, "fn f(s: TcpStream) {}").is_empty());
+    }
+
+    #[test]
+    fn dienst_lauscht_nur_lokal() {
+        let p = "x.rs";
+        let gut = [
+            "use std::net::TcpListener;\nfn f() { let l = TcpListener::bind((::std::net::Ipv4Addr::LOCALHOST, 47410)); }",
+            "fn f() { let l = std::net::TcpListener::bind(::std::net::SocketAddrV4::new(::std::net::Ipv4Addr::LOCALHOST, http::PORT)); }",
+            "fn f() { let l = TcpListener::bind((::std::net::Ipv4Addr::LOCALHOST, port(1, 2))); }",
+            "fn f(s: std::net::TcpStream) {}",
+        ];
+        for q in gut {
+            assert!(pruefe_datei("depot_dienst", true, p, q).is_empty(), "{q}");
+        }
+        let schlecht = [
+            // Maus' Gegenprobe zu #27: Typparameter vor der Klammer.
+            "fn f() { std::net::TcpListener::bind::<&str>(\"0.0.0.0:47410\"); }",
+            "fn f() { TcpListener::bind((::std::net::Ipv4Addr::UNSPECIFIED, 1)); }",
+            "fn f() { TcpListener::bind(\"127.0.0.1:1\"); }",
+            "fn f(a: SocketAddr) { TcpListener::bind(a); }",
+            // Funktionswert statt Aufruf.
+            "fn f() { let b = TcpListener::bind; b(\"0.0.0.0:1\"); }",
+            "fn f() { [\"0.0.0.0:1\"].map(TcpListener::bind); }",
+            // Namen, die das Crate umlenken koennte: ohne vollen Pfad, Alias, eigener Typ.
+            "use std::net::Ipv4Addr;\nfn f() { TcpListener::bind((Ipv4Addr::LOCALHOST, 1)); }",
+            "fn f() { TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 1)); }",
+            "use std::net::Ipv6Addr as V;\nfn f() { TcpListener::bind((V::LOCALHOST, 1)); }",
+            "struct Ipv4Addr; impl Ipv4Addr { const LOCALHOST: &str = \"0.0.0.0\"; }\nfn f() { TcpListener::bind((Ipv4Addr::LOCALHOST, 1)); }",
+            "extern crate fremd as std;\nfn f() {}",
+            // Etwas nach der Adresse oder nach dem Tupel.
+            "fn f() { TcpListener::bind((::std::net::Ipv4Addr::LOCALHOST.to_ipv6_mapped(), 1)); }",
+            "fn f() { TcpListener::bind((::std::net::Ipv4Addr::LOCALHOST, 1).umlenken()); }",
+            "fn f() { TcpListener::bind(::std::net::SocketAddrV4::new(::std::net::Ipv4Addr::LOCALHOST, 1).anders()); }",
+            "fn f() { TcpListener::bind(((::std::net::Ipv4Addr::LOCALHOST, 1)).0); }",
+            "fn f() { TcpListener::bind((::std::net::Ipv4Addr::LOCALHOST, 1), x); }",
+            "fn f() { TcpListener::bind(",
+            "fn f() { TcpStream::connect((::std::net::Ipv4Addr::LOCALHOST, 1)); }",
+            "fn f() { std::net::UdpSocket::bind((::std::net::Ipv4Addr::LOCALHOST, 1)); }",
+            "fn f() { \"x:1\".to_socket_addrs(); }",
+            "use ureq::Agent;",
+        ];
+        for q in schlecht {
+            let f = pruefe_datei("depot_dienst", true, p, q);
+            assert!(
+                f.iter().any(|e| e.contains("bind")
+                    || e.contains("extern crate")
+                    || e.contains("nur lokalen")
+                    || e.contains("Netz")),
+                "{q}: {f:?}"
+            );
+        }
+        // Andere Crates duerfen nicht einmal lokal lauschen.
+        assert!(
+            !pruefe_datei(
+                "depot_lage",
+                true,
+                p,
+                "fn f() { TcpListener::bind((::std::net::Ipv4Addr::LOCALHOST, 1)); }"
+            )
+            .is_empty()
+        );
     }
 
     #[test]

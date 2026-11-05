@@ -18,13 +18,15 @@ pub enum Rolle {
     Unbekannt,
 }
 
-const WERKZEUG: [&str; 7] = [
+const WERKZEUG: [&str; 8] = [
     "Cargo.toml",
     "Cargo.lock",
     "rust-toolchain.toml",
     "rustfmt.toml",
     ".gitignore",
     "run.cmd",
+    // Starter per Doppelklick fuer den Dienst mit Oberflaeche (Wolfgang 05.11.2026).
+    "DepotSchlopf.cmd",
     "LICENSE",
 ];
 
@@ -128,7 +130,9 @@ mod tests {
         assert_eq!(rolle("crates/depot_ki/src/budget.rs"), Rolle::Produktiv);
         assert_eq!(rolle("crates/depot_ki/tests/budget.rs"), Rolle::Test);
         assert_eq!(rolle("crates/depot_ki/Cargo.toml"), Rolle::Werkzeug);
+        assert_eq!(rolle("DepotSchlopf.cmd"), Rolle::Werkzeug);
         assert_eq!(rolle("geheim.sh"), Rolle::Unbekannt);
+        assert_eq!(rolle("anders.cmd"), Rolle::Unbekannt);
     }
 
     #[test]
