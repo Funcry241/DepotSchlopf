@@ -25,6 +25,7 @@ pub mod geld;
 pub mod grenzen;
 pub mod instrument;
 pub mod kurs;
+pub mod liste;
 pub mod preis;
 pub mod quelle;
 pub mod termin;

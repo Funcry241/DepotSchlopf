@@ -24,7 +24,9 @@
 //! zweite Frage fuer denselben Zyklus.
 
 use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung};
-use depot_kern::{BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Vorschlag};
+use depot_kern::{
+    BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
+};
 use depot_ki::Sperre;
 use depot_regelwerk::{
     DatenFehler, Eingabe, GenehmigterAuftrag, WaechterBefund, entscheide, notbremse_auftraege,
@@ -50,11 +52,11 @@ pub enum LaufFehler {
     Halt(String),
 }
 
-fn halt(text: impl Into<String>) -> LaufFehler {
+pub(crate) fn halt(text: impl Into<String>) -> LaufFehler {
     LaufFehler::Halt(text.into())
 }
 
-fn journal(e: JournalFehler) -> LaufFehler {
+pub(crate) fn journal(e: JournalFehler) -> LaufFehler {
     halt(match e {
         JournalFehler::Belegt => "Journal belegt".into(),
         JournalFehler::Halt(t) => format!("Journal: Halt: {t}"),
@@ -62,7 +64,7 @@ fn journal(e: JournalFehler) -> LaufFehler {
     })
 }
 
-fn rechnung(was: &str) -> LaufFehler {
+pub(crate) fn rechnung(was: &str) -> LaufFehler {
     halt(format!("Rechenfehler: {was}"))
 }
 
@@ -132,7 +134,7 @@ fn nur_simulation(s: &Szenario) -> Result<(), LaufFehler> {
 /// Depotwert in ganzen Cent. Der heutige Wert wird abgerundet, Vergleichswerte (Vortag,
 /// Hoechststand) aufgerundet: So verdeckt die Rundung keinen Verlust (K21-01). Bei Kursen in
 /// ganzen Cent ist beides derselbe Wert.
-fn depotwert<'a>(
+pub(crate) fn depotwert<'a>(
     toepfe: impl Iterator<Item = &'a Topf>,
     kurse: &Kurse,
     rundung: Rundung,
@@ -221,7 +223,7 @@ pub fn lauf(
         if fertig.is_none_or(|(index, _)| i > index) {
             let z = Zyklus {
                 grenzen: &grenzen,
-                szenario: s,
+                universum: &s.universum,
                 tag,
                 vortag,
                 nr,
@@ -239,7 +241,11 @@ pub fn lauf(
 
 /// Der Kontowaechter: Abgleich mit dem Konto. Jede Abweichung steht im Journal und haelt den
 /// Lauf an; nichts wird verkauft oder ausgeglichen.
-fn kontowaechter(j: &mut Journal, tag: &Tag, konto: &dyn Broker) -> Result<(), LaufFehler> {
+pub(crate) fn kontowaechter(
+    j: &mut Journal,
+    tag: &Tag,
+    konto: &dyn Broker,
+) -> Result<(), LaufFehler> {
     let abweichungen = j.gleiche_ab(konto).map_err(journal)?;
     if abweichungen.is_empty() {
         return Ok(());
@@ -256,27 +262,28 @@ fn kontowaechter(j: &mut Journal, tag: &Tag, konto: &dyn Broker) -> Result<(), L
     Err(halt(format!("Kontowaechter: {abweichungen:?}")))
 }
 
-struct Beteiligte<'a, 'b, 'c> {
-    dachs: &'a mut dyn Berater,
-    maus: &'b mut dyn Berater,
-    konto: &'c mut dyn Broker,
+pub(crate) struct Beteiligte<'a, 'b, 'c> {
+    pub(crate) dachs: &'a mut dyn Berater,
+    pub(crate) maus: &'b mut dyn Berater,
+    pub(crate) konto: &'c mut dyn Broker,
 }
 
 /// Was fuer einen Tag fest ist.
-struct Zyklus<'a> {
-    grenzen: &'a Grenzen,
-    szenario: &'a Szenario,
-    tag: &'a Tag,
+pub(crate) struct Zyklus<'a> {
+    pub(crate) grenzen: &'a Grenzen,
+    /// Was gehandelt werden darf (Positivliste).
+    pub(crate) universum: &'a Universum,
+    pub(crate) tag: &'a Tag,
     /// Die Kurse des letzten plausiblen Tages davor.
-    vortag: &'a Kurse,
-    /// Zyklusnummer fuer den Kostenschutz: der wievielte Tag des Szenarios.
-    nr: u32,
+    pub(crate) vortag: &'a Kurse,
+    /// Zyklusnummer fuer den Kostenschutz; sie steigt von Tag zu Tag.
+    pub(crate) nr: u32,
     /// Abdruck der Vorgeschichte bis einschliesslich dieses Tages.
-    abdruck: &'a str,
+    pub(crate) abdruck: &'a str,
 }
 
 /// Ein Tag. Liefert den Hoechststand nach dem Tag.
-fn ein_tag(
+pub(crate) fn ein_tag(
     jr: &mut Journal,
     z: &Zyklus<'_>,
     hoch: Cent,
@@ -377,6 +384,47 @@ fn erlaubnis(
     }
 }
 
+/// Fragt den zustaendigen Berater nach einem Vorschlag, wenn er angebunden ist und der
+/// Kostenschutz es erlaubt. Einschaetzung und Begruendungen stehen danach im Journal.
+fn frage(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    id: TopfId,
+    frager: &mut dyn Berater,
+    lage: &Lage<'_>,
+) -> Result<Option<Vorschlag>, LaufFehler> {
+    let (tag, zyklus) = (z.tag, z.nr);
+    let wer = id.berater();
+    let t = topf_name(id);
+    let mut vorschlag: Option<Vorschlag> = None;
+    // Ein Berater ohne Anbindung wird nicht gefragt und kostet nichts: Fuer ihn wird keine
+    // Erlaubnis reserviert. Ohne Vorschlag oder ohne Zweitmeinung gibt es keinen Auftrag.
+    if !frager.angebunden() {
+        begruende(
+            j,
+            tag,
+            name(wer),
+            &format!("{t}: nicht angebunden, nicht gefragt; kein Vorschlag"),
+        )?;
+    } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag")? {
+        let antwort = frager.vorschlagen(e, lage);
+        begruende(
+            j,
+            tag,
+            name(wer),
+            &format!("{t}: {}", antwort.einschaetzung),
+        )?;
+        if let Some(v) = &antwort.vorschlag {
+            for (isin, bp) in &v.zielgewichte_bp {
+                let grund = v.begruendung.get(isin).map_or("", String::as_str);
+                begruende(j, tag, name(wer), &format!("{t}: {isin} {bp} bp: {grund}"))?;
+            }
+        }
+        vorschlag = antwort.vorschlag;
+    }
+    Ok(vorschlag)
+}
+
 /// Ein Topf in einem Zyklus: Der zustaendige Berater schlaegt vor, der andere prueft, das
 /// Regelwerk entscheidet.
 fn topf_zyklus(
@@ -394,7 +442,7 @@ fn topf_zyklus(
         .get(&id)
         .cloned()
         .ok_or_else(|| halt(format!("{} fehlt im Journal", topf_name(id))))?;
-    let (wer, zweiter) = (id.berater(), andere(id.berater()));
+    let zweiter = andere(id.berater());
     let t = topf_name(id);
     let lage = Lage {
         datum: tag.datum,
@@ -402,22 +450,15 @@ fn topf_zyklus(
         kurse: &tag.kurse,
         ereignisse: &tag.ereignisse,
     };
-    let mut vorschlag: Option<Vorschlag> = None;
-    if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag")? {
-        let antwort = frager.vorschlagen(e, &lage);
+    let mut vorschlag = frage(j, z, id, frager, &lage)?;
+    if vorschlag.is_some() && !pruefer.angebunden() {
+        vorschlag = None;
         begruende(
             j,
             tag,
-            name(wer),
-            &format!("{t}: {}", antwort.einschaetzung),
+            name(zweiter),
+            &format!("{t}: nicht angebunden, nicht gefragt; ohne Zweitmeinung kein Auftrag"),
         )?;
-        if let Some(v) = &antwort.vorschlag {
-            for (isin, bp) in &v.zielgewichte_bp {
-                let grund = v.begruendung.get(isin).map_or("", String::as_str);
-                begruende(j, tag, name(wer), &format!("{t}: {isin} {bp} bp: {grund}"))?;
-            }
-        }
-        vorschlag = antwort.vorschlag;
     }
     if let Some(v) = vorschlag.take()
         && let Some(e) = erlaubnis(
@@ -449,7 +490,7 @@ fn topf_zyklus(
     let ent = entscheide(
         &Eingabe {
             grenzen: z.grenzen,
-            universum: &z.szenario.universum,
+            universum: z.universum,
             topf: &topf,
             kurse: &tag.kurse,
             vorschlag: vorschlag.as_ref(),

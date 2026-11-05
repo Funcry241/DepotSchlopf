@@ -77,6 +77,8 @@ Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je
 
 `run.cmd termine` holt die Sitzungstermine des EZB-Rats von der Seite der EZB, legt die Seite roh unter `daten/roh/ezb/` ab und belegt jeden Termin mit Quelle und Abrufzeit in `daten/journal.txt`. Ein Schlüssel ist nicht nötig, nur das Journal (`run.cmd kurse einrichten`). Ein unveränderter Termin wird nicht noch einmal geschrieben, ein geänderter fortgeschrieben.
 
+`run.cmd papier` führt nach `run.cmd kurse` einen Papiertag mit den heute belegten Schlusskursen: Kontowächter, Regelwerk und Papierkonto `daten/papierkonto.txt`, nur Papiergeld, einmal je Handelstag. Ohne Kurse von heute hält er an. Bis Dachs und Maus angebunden sind, wird keine KI gefragt.
+
 ## Mitmachen
 
 [Beitragsregeln](docs/CONTRIBUTING.md) · [Sicherheit](docs/SECURITY.md) · [Umgang miteinander](docs/CODE_OF_CONDUCT.md) · [Änderungen](CHANGELOG.md)

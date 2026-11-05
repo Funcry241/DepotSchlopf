@@ -57,6 +57,11 @@ pub struct Urteil {
 /// Ein Berater. Jede Frage kostet eine `AufrufErlaubnis`; die gibt es nur, wenn das Journal die
 /// Hoechstkosten vorher gebucht hat (R8). Der Berater verbraucht sie.
 pub trait Berater {
+    /// Ist der Berater erreichbar? Ein Berater ohne Anbindung wird nicht gefragt; fuer ihn
+    /// wird keine Erlaubnis reserviert und nichts gebucht.
+    fn angebunden(&self) -> bool {
+        true
+    }
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort;
     fn pruefen(
         &mut self,
@@ -64,6 +69,36 @@ pub trait Berater {
         lage: &Lage<'_>,
         vorschlag: &Vorschlag,
     ) -> Urteil;
+}
+
+/// Ein Berater ohne Anbindung: Er wird nie gefragt. Bis Dachs und Maus angebunden sind,
+/// laeuft der Papiertag mit ihm; dann entstehen nur zwingende Auftraege des Regelwerks.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Stumm;
+
+impl Berater for Stumm {
+    fn angebunden(&self) -> bool {
+        false
+    }
+
+    fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
+        Antwort {
+            einschaetzung: "nicht angebunden".into(),
+            vorschlag: None,
+        }
+    }
+
+    fn pruefen(
+        &mut self,
+        _erlaubnis: AufrufErlaubnis,
+        _lage: &Lage<'_>,
+        _vorschlag: &Vorschlag,
+    ) -> Urteil {
+        Urteil {
+            zustimmung: false,
+            begruendung: "nicht angebunden".into(),
+        }
+    }
 }
 
 /// Ein Berater nach Drehbuch: Er antwortet je Tag, wie es vorher aufgeschrieben ist. Ohne
