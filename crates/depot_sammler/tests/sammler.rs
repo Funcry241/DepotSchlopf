@@ -530,12 +530,17 @@ fn schluesselabbruch_macht_den_ganzen_abruf_unbrauchbar() -> Result<(), String> 
         &werte,
     )?
     .map_err(|e| format!("Lauf: {e:?}"))?;
-    assert!(matches!(
-        b.werte.first(),
-        Some((_, Ergebnis::Belegt { .. }))
-    ));
     assert!(b.abbruch.is_some());
     assert!(!b.verwendbar(), "{b:?}");
+    // Maus' Restbefund (3f0240b): Auch wenn die Kurssperre sich nicht schreiben laesst, darf
+    // kein Teilkurs eines solchen Abrufs im Journal stehen. Belegt wird erst, wenn der Abruf
+    // ohne Sicherheitsabbruch endet.
+    let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
+    assert!(j.stand().kurse().is_empty(), "{:?}", j.stand().kurse());
+    assert!(
+        matches!(b.werte.first(), Some((_, Ergebnis::Fehler(t))) if t.contains("Sicherheitsabbruch")),
+        "{b:?}"
+    );
     Ok(())
 }
 
