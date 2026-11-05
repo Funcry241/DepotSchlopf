@@ -175,23 +175,32 @@ fn auftraege_starten_die_programme_des_stands() -> Result<(), String> {
 #[test]
 fn windows_starter_startet_keinen_beschaedigten_waechter() -> Result<(), String> {
     let (wurzel, bau) = projekt()?;
+    fs::write(
+        wurzel.join("DepotSchlopf.cmd"),
+        include_bytes!("../../../DepotSchlopf.cmd"),
+    )
+    .map_err(|e| e.to_string())?;
+    fs::write(
+        wurzel.join("cargo.cmd"),
+        b"@echo off\r\necho rueckfall > daten\\cargo-aufgerufen.txt\r\nexit /b 0\r\n",
+    )
+    .map_err(|e| e.to_string())?;
+    git(&wurzel, &["add", "-A"])?;
+    git(&wurzel, &["commit", "-q", "-m", "Starter"])?;
     let baum = sauberer_baum(&wurzel)?;
     als_geprueft(&wurzel, &baum)?;
     let s = sichere(&wurzel, &baum, &bau)?;
     fs::write(s.programm("depot_waechter"), "beschaedigt").map_err(|e| e.to_string())?;
-    let starter = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/start-gesichert.ps1");
-    let aus = Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-        ])
-        .arg(starter)
+    let aus = Command::new("cmd.exe")
+        .args(["/D", "/C", "DepotSchlopf.cmd", "--ohne-browser"])
         .current_dir(&wurzel)
+        .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| e.to_string())?;
-    assert_eq!(aus.status.code(), Some(2), "{aus:?}");
+    assert!(aus.status.success(), "{aus:?}");
+    assert!(
+        wurzel.join("daten/cargo-aufgerufen.txt").is_file(),
+        "{aus:?}"
+    );
     Ok(())
 }

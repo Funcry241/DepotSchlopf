@@ -19,7 +19,7 @@ Maus' zweiter von drei Punkten am 05.11.2026. Erster Teil: Nach einem PC-Neustar
 
 Der neue und der vorige Stand bleiben, ältere werden gelöscht, soweit sie nicht in Gebrauch sind.
 
-**Starten:** Das mitgelieferte PowerShell-Skript prüft Baum, Gate-Nachweis und Abdrücke, bevor es den gesicherten Wächter startet. Bei einer fehlgeschlagenen Prüfung baut `DepotSchlopf.cmd` mit Cargo. Der Wächter prüft den Stand ebenfalls:
+**Starten:** Der PowerShell-Aufruf im mitgelieferten Starter prüft Baum, Gate-Nachweis und Abdrücke, bevor es den gesicherten Wächter startet. Bei einer fehlgeschlagenen Prüfung baut `DepotSchlopf.cmd` mit Cargo. Der Wächter prüft den Stand ebenfalls:
 
 | Bedingung | sonst |
 |---|---|
