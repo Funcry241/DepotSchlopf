@@ -344,3 +344,114 @@ fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// Ein Kauf von Dachs mit Zustimmung von Maus am Tag `t`.
+fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
+    let mut dachs = Drehbuch::default();
+    dachs.antworten.insert(
+        d,
+        Antwort {
+            einschaetzung: "SAP".into(),
+            vorschlag: Some(Vorschlag {
+                berater: BeraterId::Dachs,
+                zielgewichte_bp: [(sap.clone(), 2_000)].into_iter().collect(),
+                begruendung: [(sap.clone(), "beobachtet".to_string())]
+                    .into_iter()
+                    .collect(),
+            }),
+        },
+    );
+    let mut maus = Drehbuch::default();
+    maus.urteile.insert(
+        d,
+        Urteil {
+            zustimmung: true,
+            begruendung: "passt".into(),
+        },
+    );
+    (dachs, maus)
+}
+
+/// Maus' Gegenprobe 1 (PR #23): Laesst sich das Papierkonto nicht schreiben, haelt der Tag an,
+/// bevor das Journal eine Ausfuehrung oder den Abschluss bestaetigt.
+#[test]
+fn schreibfehler_des_kontos_haelt_vor_jeder_bestaetigung() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let sap = sap()?;
+    let mut j = ort.oeffnen()?;
+    belege(&mut j, 5, &[(&sap, "230", "231"), (&allianz()?, "350", "351")])?;
+    let mut k = konto(&ort, &j)?;
+    let vorher = vorbedingung(fs::read_to_string(&ort.konto), "Konto lesen")?;
+    // Die Nebendatei ist ein Ordner: Jedes Schreiben des Kontos scheitert.
+    vorbedingung(
+        fs::create_dir_all(ort.konto.with_extension("txt.neu")),
+        "Schreiben blockieren",
+    )?;
+    let d = tag(5)?;
+    let (mut dachs, mut maus) = kaeufer(d, &sap);
+    let aus = papiertag(&mut j, d, &universum()?, &start()?, &mut dachs, &mut maus, &mut k);
+    assert!(matches!(aus, Err(LaufFehler::Halt(_))), "{aus:?}");
+    assert!(j.stand().abschluss().is_none(), "kein Abschluss");
+    assert!(
+        j.stand().auftraege().iter().all(|l| l.ausfuehrungen.is_empty()),
+        "keine bestaetigte Ausfuehrung"
+    );
+    assert_eq!(
+        vorbedingung(fs::read_to_string(&ort.konto), "Konto lesen")?,
+        vorher
+    );
+    Ok(())
+}
+
+/// Maus' Gegenprobe 2 (PR #23): Auch ein schon abgeschlossener Tag gleicht zuerst ab.
+#[test]
+fn schon_abgeschlossen_erst_nach_dem_abgleich() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    belege(&mut j, 5, &[(&sap()?, "230", "231"), (&allianz()?, "350", "351")])?;
+    drop(j);
+    stumm_tag(&ort, 5)?.map_err(|e| format!("Tag 1: {e:?}"))?;
+    let text = vorbedingung(fs::read_to_string(&ort.konto), "Konto lesen")?;
+    let falsch = text.replace("bargeld;1000000", "bargeld;1000001");
+    assert_ne!(falsch, text, "Vorbedingung: Bargeld in der Datei");
+    vorbedingung(fs::write(&ort.konto, falsch), "Konto schreiben")?;
+    let aus = stumm_tag(&ort, 5)?;
+    assert!(
+        matches!(&aus, Err(LaufFehler::Halt(t)) if t.contains("Kontowaechter")),
+        "{aus:?}"
+    );
+    Ok(())
+}
+
+/// Maus' Gegenprobe 3 (PR #23): Ein Erststart, der vor dem Depot anhaelt, laesst sich
+/// wiederholen, sobald Kurse da sind.
+#[test]
+fn erststart_ohne_kurse_ist_wiederholbar() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let aus = stumm_tag(&ort, 5)?;
+    assert!(matches!(aus, Err(LaufFehler::Halt(_))), "{aus:?}");
+    let mut j = ort.oeffnen()?;
+    assert!(j.stand().toepfe().is_empty(), "Vorbedingung: kein Depot");
+    belege(&mut j, 5, &[(&sap()?, "230", "231"), (&allianz()?, "350", "351")])?;
+    drop(j);
+    let aus = stumm_tag(&ort, 5)?;
+    assert!(
+        matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
+        "Ausgang: {aus:?}"
+    );
+    Ok(())
+}
+
+/// Ein angefangenes Konto mit Bewegung gilt ohne Depot im Journal nicht als Einrichtung.
+#[test]
+fn konto_mit_bewegung_ohne_depot_haelt() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    Papierdatei::oeffnen(&ort.konto, false, &start()?)?;
+    let text = vorbedingung(fs::read_to_string(&ort.konto), "Konto lesen")?;
+    vorbedingung(
+        fs::write(&ort.konto, text.replace("sendungen;0", "sendungen;1")),
+        "Konto schreiben",
+    )?;
+    assert!(Papierdatei::oeffnen(&ort.konto, false, &start()?).is_err());
+    Ok(())
+}
