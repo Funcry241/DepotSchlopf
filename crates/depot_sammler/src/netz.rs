@@ -201,7 +201,8 @@ impl fmt::Debug for Takt<'_> {
 /// Holt eine Adresse; scheitert der Abruf voruebergehend, nach `WARTEZEITEN` erneut, solange
 /// der naechste Versuch spaetestens zur Frist beginnt. Die Frist rechnet `frist_ab` aus der Uhr
 /// beim ersten Scheitern; `None` heisst: nicht wiederholen. Die Uhr wird nur nach einem
-/// Scheitern gefragt.
+/// Scheitern gefragt, und noch einmal unmittelbar vor jedem weiteren Versuch: Liegt er nach der
+/// Frist, unterbleibt er.
 ///
 /// # Errors
 /// Siehe `Ausfall`.
@@ -255,14 +256,24 @@ pub fn hole_mit_wiederholung(
                 fehler,
             });
         };
-        versuch = versuch.saturating_add(1);
         (takt.melde)(&Verlauf::Wartet {
             um,
-            versuch,
+            versuch: versuch.saturating_add(1),
             von,
-            fehler,
+            fehler: fehler.clone(),
         });
         (takt.schlafe)(*pause);
+        // Unmittelbar vor dem Versuch noch einmal die Uhr: Das Warten kann laenger gedauert
+        // haben als geplant (Ruhezustand, Uhr gestellt). Nach der Frist geht nichts mehr hinaus
+        // (Maus, Befund 2 zu #38).
+        if (takt.uhr)().is_none_or(|j| j > frist) {
+            return Err(Ausfall::FristVorbei {
+                frist,
+                versuche: versuch,
+                fehler,
+            });
+        }
+        versuch = versuch.saturating_add(1);
     }
 }
 
@@ -272,8 +283,8 @@ pub fn verlauf_text(v: &Verlauf) -> String {
         Verlauf::Wartet {
             um, versuch, von, ..
         } => format!(
-            "Verbindung weg. Nächster Versuch um {} (Versuch {versuch} von {von}). DepotSchlopf \
-             macht von selbst weiter, du musst nichts tun.",
+            "Verbindung weg. Nächster Versuch um {} (Versuch {versuch} von {von}). Der Abruf \
+             versucht es von selbst noch einmal, du musst nichts tun.",
             depot_kern::hinweis::uhr_text(*um).unwrap_or_else(|| "gleich".into())
         ),
         Verlauf::WiederDa { versuch } => {
@@ -297,16 +308,17 @@ pub fn ausfall_text(a: &Ausfall, verwendbar: bool, grenzen: &Grenzen) -> String 
         }
         Ausfall::Endgueltig(_) => "Der Abruf wurde abgelehnt".into(),
     };
+    // Nur, was aus diesem Lauf folgt. Ob und wann es von selbst weitergeht, weiss nur der
+    // Dienst aus seinem Zeitplan; er sagt es dazu (Maus, Befund 3 zu #38).
     if verwendbar {
         format!(
-            "{grund}. Nicht alle Kandidaten sind abgerufen; der Papiertag läuft ohne sie. Du \
-             musst nichts tun."
+            "{grund}. Nicht alle Kandidaten sind abgerufen; ein Papiertag mit diesen Kursen \
+             läuft ohne sie."
         )
     } else {
         format!(
-            "Papiertag heute ausgefallen. {grund}. DepotSchlopf versucht es heute nicht mehr \
-             und läuft am nächsten Handelstag wieder von selbst. Bitte bis dahin die \
-             Internetverbindung prüfen."
+            "Papiertag heute ausgefallen. {grund}. Mit den Kursen dieses Laufs kann heute kein \
+             Papiertag laufen. Bitte die Internetverbindung prüfen."
         )
     }
 }

@@ -101,6 +101,11 @@ type Lauf = (Result<Bericht, SammelFehler>, Vec<Verlauf>, u64);
 /// Ein Lauf ab `start`; die Uhr geht nur mit dem Warten weiter. Gibt Bericht, Meldungen und
 /// die Summe des Wartens zurueck.
 fn lauf(netz: &mut Folge, start: Zeitpunkt) -> Result<Lauf, String> {
+    lauf_mit(netz, start, 0)
+}
+
+/// Wie `lauf`; jedes Warten dauert `ueberzug` Sekunden laenger als geplant (Ruhezustand).
+fn lauf_mit(netz: &mut Folge, start: Zeitpunkt, ueberzug: u64) -> Result<Lauf, String> {
     let (journal, roh) = ordner()?;
     let mut j = vorbedingung(Journal::oeffnen(&journal), "Journal oeffnen")?;
     let jetzt = Rc::new(Cell::new(start.sekunden()));
@@ -110,7 +115,7 @@ fn lauf(netz: &mut Folge, start: Zeitpunkt) -> Result<Lauf, String> {
     let mut uhr = move || Zeitpunkt::aus_sekunden(j2.get());
     let (j3, g2) = (Rc::clone(&jetzt), Rc::clone(&gewartet));
     let mut schlafe = move |d: Duration| {
-        let s = d.as_secs();
+        let s = d.as_secs().saturating_add(ueberzug);
         g2.set(g2.get().saturating_add(s));
         j3.set(
             j3.get()
@@ -207,8 +212,8 @@ fn router_neustart_waehrend_des_kursabrufs() -> Result<(), String> {
 }
 
 /// Bleibt die Verbindung weg, endet die Wiederholung vor dem Ende des Frischefensters: Ein
-/// Versuch, der erst nach 17:54:30 Uhr beginnen koennte, unterbleibt. Der Lauf endet, kein
-/// weiterer Wert wird abgerufen, nichts ist verwendbar, und der Hinweis sagt, warum der
+/// Versuch, der erst nach 17:54:30 Uhr beginnen koennte, unterbleibt. Bei dieser Quelle wird
+/// kein weiterer Wert abgerufen, nichts ist verwendbar, und der Hinweis sagt, warum der
 /// Papiertag heute ausfaellt.
 #[test]
 fn verbindung_bleibt_weg_bis_zum_ende_der_frist() -> Result<(), String> {
@@ -223,18 +228,17 @@ fn verbindung_bleibt_weg_bis_zum_ende_der_frist() -> Result<(), String> {
         return Err(format!("FristVorbei erwartet: {b:?}"));
     };
     assert!(!b.verwendbar(), "{b:?}");
+    // Bei derselben Quelle wird nichts mehr abgerufen.
     assert!(
-        matches!(b.werte.last(), Some((_, Ergebnis::NichtAbgerufen))),
+        matches!(b.werte.last(), Some((_, Ergebnis::Uebersprungen(t))) if t.contains("Verbindung zu")),
         "{b:?}"
     );
     let text = ausfall_text(a, b.verwendbar(), &Grenzen::standard());
     assert!(text.starts_with("Papiertag heute ausgefallen."), "{text}");
     assert!(text.contains("bis 17:54 Uhr nicht wieder"), "{text}");
     assert!(text.contains("älter als 20 Minuten"), "{text}");
-    assert!(
-        text.contains("nächsten Handelstag wieder von selbst"),
-        "{text}"
-    );
+    // Ob es von selbst weitergeht, sagt der Dienst aus seinem Zeitplan, nicht der Sammler.
+    assert!(!text.contains("von selbst"), "{text}");
     Ok(())
 }
 
@@ -290,5 +294,25 @@ fn nach_der_frist_kein_zweiter_versuch() -> Result<(), String> {
         matches!(b.verbindung, Some(Ausfall::FristVorbei { versuche: 1, .. })),
         "{b:?}"
     );
+    Ok(())
+}
+
+/// Maus, Befund 2 zu #38: Dauert das Warten laenger als geplant (der Rechner schlief, die Uhr
+/// sprang), prueft der Sammler die Frist unmittelbar vor dem naechsten Versuch noch einmal. Ein
+/// Versuch nach der Frist geht nicht hinaus.
+#[test]
+fn nach_langem_warten_kein_versuch_nach_der_frist() -> Result<(), String> {
+    let mut netz = Folge::neu(vec![weg(), Ok(ROH_SAP), Ok(ROH_MBG)]);
+    // 16:52:00 gescheitert; geplant 16:52:30, das Warten dauert aber bis 16:57:30.
+    let (b, meldungen, gewartet) = lauf_mit(&mut netz, utc(11, 4, 16, 52, 0)?, 300)?;
+    let b = b.map_err(|e| format!("Lauf: {e:?}"))?;
+    assert_eq!(netz.abrufe, 1, "kein Versuch nach 16:54:30");
+    assert_eq!(gewartet, 330);
+    assert_eq!(meldungen.len(), 1, "{meldungen:?}");
+    assert!(
+        matches!(b.verbindung, Some(Ausfall::FristVorbei { versuche: 1, .. })),
+        "{b:?}"
+    );
+    assert!(!b.verwendbar());
     Ok(())
 }
