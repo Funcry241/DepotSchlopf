@@ -9,6 +9,7 @@ members = [
     "crates/depot_kodex",
     "crates/depot_lauf",
     "crates/depot_sammler",
+    "crates/depot_lage",
 ]
 
 [workspace.package]
@@ -36,6 +37,7 @@ depot_ki = { path = "crates/depot_ki" }
 depot_journal = { path = "crates/depot_journal" }
 depot_regelwerk = { path = "crates/depot_regelwerk" }
 depot_kodex = { path = "crates/depot_kodex" }
+depot_sim = { path = "crates/depot_sim" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

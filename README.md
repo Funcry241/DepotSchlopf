@@ -38,6 +38,7 @@ Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 | `depot_ki` | Regeln des KI-Budgets ohne Datei; das Kassenbuch steht im Journal, eine Erlaubnis gibt es nur nach Buchung der Höchstkosten dort |
 | `depot_sim` | Simulierter Lauf mit erfundenen Daten und Papiergeld: Dachs und Maus beobachten, begründen im Journal und entscheiden im Schutzrahmen; ausgeführt wird über ein erfundenes Papierkonto, mit dem der Kontowächter abgleicht; echte Kurse halten den Lauf an |
 | `depot_sammler` | Holt Xetra-Schlusskurse lesend von Alpha Vantage und die Termine der EZB von ihrer Seite, legt jede Antwort roh unter `daten/roh/` ab, belegt jeden Kurs und Termin im Journal und prüft die Kurse. Einziges Crate mit Netz |
+| `depot_lage` | Das Lagebild ohne Netz: Bereitschaft für den nächsten Papiertag mit Ampel und nächstem Schritt, KI-Budget je KI direkt aus dem Kassenbuch, Papierdepot, Aufträge, Begründungen von Dachs und Maus, festgeschriebene Grenzen. Rechnet mit denselben Prüfungen wie Papiertag und Kostenschutz |
 | `depot_lauf` | Der Ein-Befehl-Einstieg `run.cmd` mit Assistenten-Export nach jedem Lauf |
 | `depot_kodex` | Das Gate: Deklaration gegen realen Diff, Pfadrollen, Festschreibung, Quellscan, Essenz, Format, Clippy, Tests |
 
@@ -78,6 +79,8 @@ Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je
 `run.cmd termine` holt die Sitzungstermine des EZB-Rats von der Seite der EZB, legt die Seite roh unter `daten/roh/ezb/` ab und belegt jeden Termin mit Quelle und Abrufzeit in `daten/journal.txt`. Ein Schlüssel ist nicht nötig, nur das Journal (`run.cmd kurse einrichten`). Ein unveränderter Termin wird nicht noch einmal geschrieben, ein geänderter fortgeschrieben.
 
 `run.cmd papier` führt nach `run.cmd kurse` einen Papiertag mit den heute belegten Schlusskursen: Kontowächter, Regelwerk und Papierkonto `daten/papierkonto.txt`, nur Papiergeld, einmal je Handelstag. Ohne Kurse von heute hält er an. Bis Dachs und Maus angebunden sind, wird keine KI gefragt.
+
+`run.cmd lage` schreibt das Lagebild nach `daten/lage.html` (im Browser öffnen): was für den nächsten Papiertag bereit ist oder fehlt, KI-Budget, Papierdepot, Begründungen und Grenzen. Es liest nur. Die dauerhafte Oberfläche mit Config-Seite folgt.
 
 ## Mitmachen
 

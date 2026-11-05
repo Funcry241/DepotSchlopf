@@ -32,6 +32,7 @@ run.cmd kurse            Schlusskurse holen, im Journal belegen und pruefen (nur
 run.cmd kurse einrichten Journal daten/journal.txt einmal anlegen\n  \
 run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)\n  \
 run.cmd papier           Papiertag mit den heute belegten Schlusskursen (nur Papiergeld)\n  \
+run.cmd lage             Lagebild nach daten/lage.html: Bereitschaft, KI-Budget, Depot, Gespraech\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
 
 /// Offene Reste frueherer Laeufe: Eine liegengebliebene Sperrdatei bedeutet einen Absturz
@@ -123,6 +124,10 @@ fn main() -> ExitCode {
     // Der Papiertag laeuft fuer sich: kein Netz, nur Papiergeld.
     if befehl == "papier" {
         return programm(&wurzel, "depot_sim", &args);
+    }
+    // Das Lagebild liest nur und schreibt nur daten/lage.html: kein Netz, keine Schluessel.
+    if befehl == "lage" {
+        return programm(&wurzel, "depot_lage", &optionen);
     }
 
     let mut kodex_args: Vec<String> = match befehl.as_str() {
