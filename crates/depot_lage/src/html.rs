@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 use depot_kern::{BeraterId, Cent, TopfId};
 
 use crate::budget::{BudgetStatus, euro};
-use crate::{Ampel, Lagebild, datum_text, zeit_text};
+use crate::{Abhilfe, Ampel, Lagebild, datum_text, zeit_text};
 
 /// Maskiert Text fuer HTML, auch in Attributen.
 pub fn maskiere(text: &str) -> String {
@@ -57,7 +57,8 @@ fn berater_text(b: BeraterId) -> &'static str {
     }
 }
 
-const STIL: &str = "\
+/// Das Stylesheet der Seiten, auch fuer den Dienst.
+pub const STIL: &str = "\
 :root{--grund:#f7f7f5;--flaeche:#fff;--text:#1d1d1b;--leise:#6b6b66;--linie:#e3e3de;\
 --gut:#1f7a3d;--offen:#9a6700;--halt:#b42318;color-scheme:light dark}\
 @media (prefers-color-scheme:dark){:root{--grund:#161615;--flaeche:#1f1f1d;--text:#ececea;\
@@ -87,12 +88,16 @@ fn kopf(l: &Lagebild, s: &mut String) {
     );
 }
 
-fn punkte(l: &Lagebild, s: &mut String) {
+/// Erzeugt zu einer Abhilfe fertiges, sicheres HTML (etwa einen Knopf) oder nichts.
+pub type Knopf<'a> = &'a dyn Fn(Abhilfe) -> Option<String>;
+
+fn punkte(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
     s.push_str("<section><h2>Bereitschaft</h2><table>");
     for p in &l.punkte {
+        let k = p.abhilfe.and_then(knopf).unwrap_or_default();
         let _ = write!(
             s,
-            "<tr><td><span class=\"marke {}\">{}</span></td><td>{}</td><td>{}</td></tr>",
+            "<tr><td><span class=\"marke {}\">{}</span></td><td>{}</td><td>{}</td><td>{k}</td></tr>",
             ampel_klasse(p.ampel),
             ampel_text(p.ampel),
             maskiere(p.name),
@@ -253,6 +258,19 @@ fn grenzen(l: &Lagebild, s: &mut String) {
     );
 }
 
+/// Die Abschnitte des Lagebilds ohne Seitenrahmen. `knopf` setzt zu jeder Abhilfe ein
+/// Bedienelement; ohne Bedienung `&|_| None`.
+pub fn inhalt(l: &Lagebild, knopf: Knopf<'_>) -> String {
+    let mut s = String::with_capacity(16_384);
+    kopf(l, &mut s);
+    punkte(l, knopf, &mut s);
+    budget(l, &mut s);
+    depot(l, &mut s);
+    gespraech(l, &mut s);
+    grenzen(l, &mut s);
+    s
+}
+
 /// Die ganze Seite.
 pub fn seite(l: &Lagebild) -> String {
     let mut s = String::with_capacity(16_384);
@@ -263,12 +281,7 @@ pub fn seite(l: &Lagebild) -> String {
          <title>DepotSchlopf</title><style>{STIL}</style></head><body><main>\
          <h1>DepotSchlopf</h1><div class=\"leise\">Nur Papiergeld.</div>"
     );
-    kopf(l, &mut s);
-    punkte(l, &mut s);
-    budget(l, &mut s);
-    depot(l, &mut s);
-    gespraech(l, &mut s);
-    grenzen(l, &mut s);
+    s.push_str(&inhalt(l, &|_| None));
     s.push_str("</main></body></html>\n");
     s
 }

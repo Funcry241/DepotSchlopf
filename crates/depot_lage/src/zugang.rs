@@ -58,3 +58,23 @@ pub fn mit_journal<R>(daten: &Path, f: impl FnOnce(Zugang<'_>) -> R) -> R {
         Err(e) => f(Zugang::Fehler(&fehler_text(&e))),
     }
 }
+
+/// Sperrdateien im Datenordner: `*.sperre` (abgebrochener Lauf) und `*.halt` (etwa
+/// `ki.halt` nach einer Kostenueberschreitung). Jede ist Halt, bis ein Mensch geprueft und sie
+/// geloescht hat. Ein nicht lesbarer Ordner zaehlt nicht; das Journal meldet ihn ohnehin.
+pub fn sperrdateien(daten: &Path) -> Vec<String> {
+    let mut aus: Vec<String> = fs::read_dir(daten)
+        .map(|e| {
+            e.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| {
+                    Path::new(n).extension().is_some_and(|x| {
+                        x.eq_ignore_ascii_case("sperre") || x.eq_ignore_ascii_case("halt")
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    aus.sort();
+    aus
+}

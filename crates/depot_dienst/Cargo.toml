@@ -1,0 +1,25 @@
+[package]
+name = "depot_dienst"
+description = "DepotSchlopf: Dienst mit lokaler Weboberflaeche (nur 127.0.0.1) - Live-Ansicht, eine Config-Seite, Zeitplan"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+depot_kern.workspace = true
+depot_lage.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+keyring-core.workspace = true
+windows-native-keyring-store.workspace = true
+
+[lints]
+workspace = true

@@ -488,3 +488,17 @@ fn neu_offen_und_belegt_ueber_mit_journal() -> Result<(), String> {
     drop(offen);
     Ok(())
 }
+
+/// Sperrdateien: `*.sperre` und `*.halt` in jeder Schreibweise, sonst nichts.
+#[test]
+fn sperrdateien_sperre_und_halt() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    for n in ["lauf.sperre", "ki.halt", "X.HALT", "notiz.txt"] {
+        vorbedingung(fs::write(ort.dir.join(n), ""), "Datei")?;
+    }
+    assert_eq!(
+        depot_lage::sperrdateien(&ort.dir),
+        vec!["X.HALT".to_string(), "ki.halt".into(), "lauf.sperre".into()]
+    );
+    Ok(())
+}

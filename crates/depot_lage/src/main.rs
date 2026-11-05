@@ -22,7 +22,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use depot_kern::{BeraterId, Zeitpunkt};
-use depot_lage::{Hinterlegt, Umgebung, html, lagebild, mit_journal};
+use depot_lage::{Hinterlegt, Umgebung, html, lagebild, mit_journal, sperrdateien};
 
 fn wurzel() -> Option<PathBuf> {
     let start = std::env::current_dir().ok()?;
@@ -35,20 +35,6 @@ fn wurzel() -> Option<PathBuf> {
 fn jetzt() -> Option<Zeitpunkt> {
     let s = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
     Zeitpunkt::aus_sekunden(i64::try_from(s).ok()?)
-}
-
-/// Liegengebliebene Sperrdateien wie in `run.cmd` (abgebrochener frueherer Lauf).
-fn sperren(daten: &Path) -> Vec<String> {
-    let mut aus: Vec<String> = fs::read_dir(daten)
-        .map(|e| {
-            e.flatten()
-                .map(|e| e.file_name().to_string_lossy().into_owned())
-                .filter(|n| n.ends_with(".sperre"))
-                .collect()
-        })
-        .unwrap_or_default();
-    aus.sort();
-    aus
 }
 
 fn schreibe(pfad: &Path, text: &str) -> Result<(), String> {
@@ -69,7 +55,7 @@ fn schreibe(pfad: &Path, text: &str) -> Result<(), String> {
 fn lauf(wurzel: &Path) -> Result<PathBuf, String> {
     let daten = wurzel.join("daten");
     let jetzt = jetzt().ok_or("Uhr liefert keinen Zeitpunkt")?;
-    let sperren = sperren(&daten);
+    let sperren = sperrdateien(&daten);
     let l = mit_journal(&daten, |journal| {
         lagebild(&Umgebung {
             jetzt,

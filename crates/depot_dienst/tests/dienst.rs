@@ -1,0 +1,620 @@
+//! Der Dienst: Schutz gegen fremde Webseiten, Zeitplan einmal je Tag, Auftraege mit Protokoll,
+//! Seiten ohne Schluessel. Jede Vorbereitung prueft ihren Erfolg ausdruecklich.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+
+use depot_dienst::autostart;
+use depot_dienst::http::{self, Anfrage, LeseFehler};
+use depot_dienst::schluessel::Wer;
+use depot_dienst::werkbank::{Anlass, Art, Dienst, Lagerechner, Starter};
+use depot_dienst::zeitplan::{Erledigt, Zeitplan, faellig, naechster};
+use depot_dienst::{Umwelt, behandle};
+use depot_kern::{BeraterId, Datum, Zeitpunkt};
+use depot_lage::{Hinterlegt, Umgebung, Zugang, lagebild};
+
+static ZAEHLER: AtomicU32 = AtomicU32::new(0);
+const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+const HOST: &str = "127.0.0.1:47410";
+const HERKUNFT: &str = "http://127.0.0.1:47410";
+
+fn some<T>(o: Option<T>, was: &str) -> Result<T, String> {
+    o.ok_or_else(|| format!("Vorbedingung {was}"))
+}
+
+fn ordner() -> Result<PathBuf, String> {
+    let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("depot_dienst_{}_{n}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("daten")).map_err(|e| format!("Vorbedingung Ordner: {e}"))?;
+    Ok(dir)
+}
+
+/// Donnerstag, 05.11.2026, Frankfurter Zeit.
+fn donnerstag(h: u8, m: u8) -> Result<Zeitpunkt, String> {
+    some(
+        Datum::neu(2026, 11, 5).and_then(|d| Zeitpunkt::frankfurt(d, h, m, 0)),
+        "Zeitpunkt",
+    )
+}
+
+/// Ein harmloser Starter: gibt eine Zeile aus und endet mit dem gewuenschten Ergebnis.
+fn echo_starter(erfolg: bool) -> Starter {
+    Box::new(move |art: Art, _wurzel: &Path| {
+        let code = if erfolg { "0" } else { "3" };
+        let zeile = format!("lauf {}", art.kurz());
+        #[cfg(windows)]
+        {
+            let mut c = Command::new("cmd");
+            c.args(["/C", &format!("echo {zeile}& exit /b {code}")]);
+            c
+        }
+        #[cfg(not(windows))]
+        {
+            let mut c = Command::new("sh");
+            c.args(["-c", &format!("echo {zeile}; exit {code}")]);
+            c
+        }
+    })
+}
+
+fn leeres_lagebild() -> Lagerechner {
+    Box::new(|_wurzel: &Path, jetzt: Zeitpunkt| {
+        let l = lagebild(&Umgebung {
+            jetzt,
+            journal: Zugang::NichtEingerichtet,
+            kursquelle: Hinterlegt::Nein,
+            berater: [
+                (BeraterId::Dachs, Hinterlegt::Nein),
+                (BeraterId::Maus, Hinterlegt::Nein),
+            ],
+            sperren: Vec::new(),
+        });
+        (l, "<section>LAGEBILD</section>".to_string())
+    })
+}
+
+fn dienst(wurzel: PathBuf, erfolg: bool) -> Arc<Dienst> {
+    Arc::new(Dienst::neu(
+        wurzel,
+        TOKEN.into(),
+        echo_starter(erfolg),
+        leeres_lagebild(),
+    ))
+}
+
+/// Eine Umwelt, die nur mitschreibt.
+#[derive(Default)]
+struct Attrappe {
+    abgelegt: Mutex<Vec<(Wer, String)>>,
+    autostart: Mutex<Option<bool>>,
+}
+
+impl Umwelt for Attrappe {
+    fn schluessel(&self, _wer: Wer) -> Hinterlegt {
+        Hinterlegt::Ja
+    }
+
+    fn schluessel_ablegen(&self, wer: Wer, text: &str) -> Result<(), String> {
+        let s = wer.pruefe(text)?;
+        self.abgelegt
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((wer, s));
+        Ok(())
+    }
+
+    fn autostart(&self, _wurzel: &Path) -> bool {
+        false
+    }
+
+    fn autostart_setzen(&self, _wurzel: &Path, an: bool) -> Result<(), String> {
+        *self
+            .autostart
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(an);
+        Ok(())
+    }
+}
+
+fn anfrage(methode: &str, ziel: &str, kopf: &[(&str, &str)], rumpf: &str) -> Anfrage {
+    let (pfad, abfrage) = ziel.split_once('?').unwrap_or((ziel, ""));
+    Anfrage {
+        methode: methode.into(),
+        pfad: pfad.into(),
+        abfrage: abfrage.into(),
+        kopf: kopf
+            .iter()
+            .map(|(n, w)| ((*n).to_string(), (*w).to_string()))
+            .collect(),
+        rumpf: rumpf.as_bytes().to_vec(),
+    }
+}
+
+fn formular_post(ziel: &str, rumpf: &str) -> Anfrage {
+    anfrage(
+        "POST",
+        ziel,
+        &[
+            ("Host", HOST),
+            ("Origin", HERKUNFT),
+            ("Content-Type", "application/x-www-form-urlencoded"),
+        ],
+        rumpf,
+    )
+}
+
+fn status(antwort: &[u8]) -> Result<u16, String> {
+    let t = String::from_utf8_lossy(antwort);
+    let code = some(t.split(' ').nth(1), "Statuszeile")?;
+    code.parse().map_err(|_| "Statuscode unlesbar".into())
+}
+
+fn text(antwort: &[u8]) -> String {
+    String::from_utf8_lossy(antwort).into_owned()
+}
+
+fn wartend(d: &Dienst) -> Vec<(Art, Anlass)> {
+    d.sperre().warteschlange.iter().copied().collect()
+}
+
+// --- HTTP lesen ---
+
+#[test]
+fn http_liest_genau_eine_anfrage() -> Result<(), String> {
+    let roh =
+        b"POST /zeitplan?x=1 HTTP/1.1\r\nHost: 127.0.0.1:47410\r\nContent-Length: 3\r\n\r\na=b";
+    let a = http::lies(&mut &roh[..]).map_err(|e| format!("{e:?}"))?;
+    assert_eq!(a.methode, "POST");
+    assert_eq!(a.pfad, "/zeitplan");
+    assert_eq!(a.abfrage, "x=1");
+    assert_eq!(a.kopf("host"), Some("127.0.0.1:47410"));
+    assert_eq!(a.rumpf, b"a=b");
+    Ok(())
+}
+
+#[test]
+fn http_lehnt_unklare_anfragen_ab() {
+    let faelle: [&[u8]; 6] = [
+        b"GET / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n",
+        b"POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\na",
+        b"POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\nab",
+        b"GET http://fremd/ HTTP/1.1\r\n\r\n",
+        b"GET / HTTP/2\r\n\r\n",
+        b"GET / HTTP/1.1\r\nKaputt\r\n\r\n",
+    ];
+    for f in faelle {
+        assert_eq!(http::lies(&mut &f[..]), Err(LeseFehler::Kaputt), "{f:?}");
+    }
+    let gross = format!(
+        "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+        http::RUMPF_MAX + 1
+    );
+    assert_eq!(http::lies(&mut gross.as_bytes()), Err(LeseFehler::ZuGross));
+    let mut riesig = b"GET / HTTP/1.1\r\nX: ".to_vec();
+    riesig.extend(std::iter::repeat_n(b'a', http::KOPF_MAX + 10));
+    assert_eq!(http::lies(&mut &riesig[..]), Err(LeseFehler::ZuGross));
+    assert_eq!(
+        http::lies(&mut &b"GET / HTTP/1.1\r\n"[..]),
+        Err(LeseFehler::Abgebrochen)
+    );
+}
+
+#[test]
+fn formular_entschluesselt_streng() {
+    assert_eq!(
+        http::formular(b"a=1+2&b=%C3%A4"),
+        Some(vec![("a".into(), "1 2".into()), ("b".into(), "ä".into())])
+    );
+    assert_eq!(http::formular(b"a=%G1"), None);
+    assert_eq!(http::formular(b"a=%FF"), None);
+    assert!(http::gleich("abc", "abc"));
+    assert!(!http::gleich("abc", "abd"));
+    assert!(!http::gleich("abc", "abcd"));
+}
+
+// --- Schutz gegen fremde Webseiten ---
+
+#[test]
+fn fremder_host_wird_abgelehnt() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let umw = Attrappe::default();
+    let t = donnerstag(12, 0)?;
+    for host in [
+        None,
+        Some("boese.example:47410"),
+        Some("127.0.0.1:80"),
+        Some("127.0.0.1"),
+        Some("localhost.boese.example:47410"),
+    ] {
+        let kopf: Vec<(&str, &str)> = host.map(|h| ("Host", h)).into_iter().collect();
+        let a = anfrage("GET", "/", &kopf, "");
+        assert_eq!(status(&behandle(&d, &umw, &a, t))?, 403, "{host:?}");
+    }
+    for host in [HOST, "localhost:47410"] {
+        let a = anfrage("GET", "/", &[("Host", host)], "");
+        assert_eq!(status(&behandle(&d, &umw, &a, t))?, 200, "{host}");
+    }
+    Ok(())
+}
+
+#[test]
+fn post_braucht_herkunft_formular_und_token() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let umw = Attrappe::default();
+    let t = donnerstag(12, 0)?;
+    let rumpf = format!("t={TOKEN}&art=kurse");
+    let ohne_herkunft = anfrage(
+        "POST",
+        "/ausfuehren",
+        &[
+            ("Host", HOST),
+            ("Content-Type", "application/x-www-form-urlencoded"),
+        ],
+        &rumpf,
+    );
+    assert_eq!(status(&behandle(&d, &umw, &ohne_herkunft, t))?, 403);
+    for herkunft in ["null", "http://boese.example", "http://127.0.0.1:47411"] {
+        let a = anfrage(
+            "POST",
+            "/ausfuehren",
+            &[
+                ("Host", HOST),
+                ("Origin", herkunft),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ],
+            &rumpf,
+        );
+        assert_eq!(status(&behandle(&d, &umw, &a, t))?, 403, "{herkunft}");
+    }
+    let json = anfrage(
+        "POST",
+        "/ausfuehren",
+        &[
+            ("Host", HOST),
+            ("Origin", HERKUNFT),
+            ("Content-Type", "text/plain"),
+        ],
+        &rumpf,
+    );
+    assert_eq!(status(&behandle(&d, &umw, &json, t))?, 400);
+    for falsch in ["", "t=", "t=0123456789abcdef0123456789abcdee&art=kurse"] {
+        let a = formular_post("/ausfuehren", falsch);
+        assert_eq!(status(&behandle(&d, &umw, &a, t))?, 403, "{falsch}");
+    }
+    assert!(wartend(&d).is_empty(), "nichts darf eingereiht sein");
+    let a = formular_post("/ausfuehren", &rumpf);
+    let r = behandle(&d, &umw, &a, t);
+    assert_eq!(status(&r)?, 303);
+    assert!(text(&r).contains("Location: /?m=auftrag\r\n"));
+    assert_eq!(wartend(&d), vec![(Art::Kurse, Anlass::Hand)]);
+    // Dieselbe Art nicht doppelt.
+    let r = behandle(&d, &umw, &a, t);
+    assert!(text(&r).contains("Location: /?m=auftrag_belegt\r\n"));
+    assert_eq!(wartend(&d).len(), 1);
+    Ok(())
+}
+
+#[test]
+fn antworten_verbieten_einbetten_und_fremde_skripte() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let umw = Attrappe::default();
+    let a = anfrage("GET", "/", &[("Host", HOST)], "");
+    let r = text(&behandle(&d, &umw, &a, donnerstag(12, 0)?));
+    for kopf in [
+        "Content-Security-Policy: default-src 'none'; script-src 'self';",
+        "frame-ancestors 'none'",
+        "X-Frame-Options: DENY",
+        "X-Content-Type-Options: nosniff",
+        "Cache-Control: no-store",
+        // Gleiche Herkunft: Der Browser sendet bei Formularen die eigene Herkunft, nie "null".
+        "Referrer-Policy: same-origin",
+    ] {
+        assert!(r.contains(kopf), "{kopf}");
+    }
+    assert!(!r.contains("<script>"), "kein eingebettetes Skript");
+    assert!(r.contains("<script src=\"/app.js\"></script>"));
+    Ok(())
+}
+
+#[test]
+fn meldungen_spiegeln_keine_eingabe() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let umw = Attrappe::default();
+    let a = anfrage(
+        "GET",
+        "/?m=%3Cscript%3Ealert(1)%3C/script%3E<b>",
+        &[("Host", HOST)],
+        "",
+    );
+    let r = text(&behandle(&d, &umw, &a, donnerstag(12, 0)?));
+    assert!(!r.contains("alert(1)"));
+    assert!(!r.contains("<b>"));
+    let a = anfrage("GET", "/einrichtung?m=zeitplan", &[("Host", HOST)], "");
+    let r = text(&behandle(&d, &umw, &a, donnerstag(12, 0)?));
+    assert!(r.contains("Zeitplan gespeichert und aktiv."));
+    Ok(())
+}
+
+// --- Schluessel ---
+
+#[test]
+fn schluessel_wird_geprueft_abgelegt_und_nie_gezeigt() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let umw = Attrappe::default();
+    let t = donnerstag(12, 0)?;
+    let ungueltig = formular_post(
+        "/schluessel",
+        &format!("t={TOKEN}&wer=alphavantage&wert=kurz"),
+    );
+    let r = text(&behandle(&d, &umw, &ungueltig, t));
+    assert!(r.contains("m=schluessel_ungueltig"));
+    let geheim = "Attrappe_Dachs-0123456789_ABCDEFGHIJ";
+    let gut = formular_post(
+        "/schluessel",
+        &format!("t={TOKEN}&wer=anthropic&wert=%20{geheim}%20"),
+    );
+    let r = text(&behandle(&d, &umw, &gut, t));
+    assert!(r.contains("Location: /einrichtung?m=schluessel#schluessel"));
+    assert!(!r.contains(geheim));
+    assert_eq!(
+        *umw.abgelegt.lock().unwrap_or_else(PoisonError::into_inner),
+        vec![(Wer::Berater(BeraterId::Dachs), geheim.to_string())]
+    );
+    let seite = anfrage("GET", "/einrichtung", &[("Host", HOST)], "");
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(!s.contains(geheim), "die Seite zeigt keinen Schluessel");
+    assert!(s.contains("hinterlegt"));
+    assert!(s.contains("DepotSchlopf/anthropic"));
+    assert!(s.contains("type=\"password\""));
+    Ok(())
+}
+
+#[test]
+fn schluesselregeln() {
+    assert!(Wer::Kursquelle.pruefe("ABCD1234").is_ok());
+    assert!(Wer::Kursquelle.pruefe("abcd1234").is_err());
+    assert!(Wer::Kursquelle.pruefe("ABC123").is_err());
+    let dachs = Wer::Berater(BeraterId::Dachs);
+    assert!(dachs.pruefe("Attrappe_Maus-abcdefghij").is_ok());
+    assert!(dachs.pruefe("Attrappe Maus-abcdefghij").is_err());
+    assert!(dachs.pruefe("kurz").is_err());
+    assert!(dachs.pruefe(&"a".repeat(257)).is_err());
+    assert_eq!(Wer::aus_kurz("openai"), Some(Wer::Berater(BeraterId::Maus)));
+    assert_eq!(Wer::aus_kurz("fremd"), None);
+}
+
+// --- Zeitplan ---
+
+#[test]
+fn zeitplan_text_streng() -> Result<(), String> {
+    let p = Zeitplan::default();
+    assert_eq!(Zeitplan::lies(&p.als_text()), Ok(p));
+    for kaputt in [
+        "zeitplan-v1\nan=ja\ntermine=17:40\nkurse=17:45\n",
+        "zeitplan-v1\nan=ja\ntermine=7:40\nkurse=17:45\npapier_danach=ja\n",
+        "zeitplan-v1\nan=ja\ntermine=24:00\nkurse=17:45\npapier_danach=ja\n",
+        "zeitplan-v1\nan=JA\ntermine=17:40\nkurse=17:45\npapier_danach=ja\n",
+        "zeitplan-v1\nan=ja\ntermine=17:40\nkurse=17:45\npapier_danach=ja",
+        "zeitplan-v1\r\nan=ja\r\ntermine=17:40\r\nkurse=17:45\r\npapier_danach=ja\r\n",
+        "zeitplan-v1\nan=ja\ntermine=17:40\nkurse=17:45\npapier_danach=ja\nmehr\n",
+    ] {
+        assert!(Zeitplan::lies(kaputt).is_err(), "{kaputt:?}");
+    }
+    let tag = some(Datum::neu(2026, 11, 5), "Datum")?;
+    let e = Erledigt {
+        termine: Some(tag),
+        kurse: None,
+    };
+    assert_eq!(Erledigt::lies(&e.als_text()), Ok(e));
+    assert!(Erledigt::lies("erledigt-v1\ntermine=2026-13-01\nkurse=\n").is_err());
+    Ok(())
+}
+
+#[test]
+fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
+    let p = Zeitplan::default();
+    let do_ = some(Datum::neu(2026, 11, 5), "Donnerstag")?;
+    let sa = some(Datum::neu(2026, 11, 7), "Samstag")?;
+    let mo = some(Datum::neu(2026, 11, 9), "Montag")?;
+    let leer = Erledigt::default();
+    assert_eq!(faellig(&p, &leer, do_, (17, 39)), None);
+    assert_eq!(faellig(&p, &leer, do_, (17, 40)), Some(Art::Termine));
+    assert_eq!(faellig(&p, &leer, do_, (23, 0)), Some(Art::Termine));
+    let termine = Erledigt {
+        termine: Some(do_),
+        kurse: None,
+    };
+    assert_eq!(faellig(&p, &termine, do_, (17, 44)), None);
+    assert_eq!(faellig(&p, &termine, do_, (17, 45)), Some(Art::Kurse));
+    let beide = Erledigt {
+        termine: Some(do_),
+        kurse: Some(do_),
+    };
+    assert_eq!(faellig(&p, &beide, do_, (23, 59)), None);
+    assert_eq!(faellig(&p, &leer, sa, (18, 0)), None);
+    let aus = Zeitplan { an: false, ..p };
+    assert_eq!(faellig(&aus, &leer, do_, (18, 0)), None);
+    assert_eq!(naechster(&aus, &leer, do_), None);
+    assert_eq!(
+        naechster(&p, &beide, do_),
+        Some((
+            Art::Termine,
+            some(Datum::neu(2026, 11, 6), "Freitag")?,
+            (17, 40)
+        ))
+    );
+    let freitag_fertig = Erledigt {
+        termine: some(Datum::neu(2026, 11, 6), "Freitag")?.into(),
+        kurse: some(Datum::neu(2026, 11, 6), "Freitag")?.into(),
+    };
+    assert_eq!(
+        naechster(
+            &p,
+            &freitag_fertig,
+            some(Datum::neu(2026, 11, 6), "Freitag")?
+        ),
+        Some((Art::Termine, mo, (17, 40)))
+    );
+    Ok(())
+}
+
+// --- Werkbank ---
+
+#[test]
+fn auftrag_laeuft_mit_protokoll_und_eindeutiger_kennung() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(12, 0)?;
+    d.einreihen(Art::Termine, Anlass::Hand)
+        .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
+    let (nr, kind) = some(d.schritt(t), "Start")?;
+    assert!(d.sperre().laufend.is_some());
+    assert!(
+        d.einreihen(Art::Termine, Anlass::Hand).is_err(),
+        "laeuft schon"
+    );
+    // Waehrend ein Auftrag laeuft, wird kein Lagebild gerechnet.
+    assert!(d.sperre().lage.is_none());
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+    let z = d.sperre();
+    assert!(z.laufend.is_none());
+    let a = some(z.verlauf.front(), "Verlauf")?;
+    assert_eq!(a.erfolg, Some(true));
+    assert_eq!(a.protokoll, vec!["lauf termine".to_string()]);
+    assert_eq!(a.kennung, format!("{}-{nr}", t.sekunden()));
+    drop(z);
+    assert!(d.schritt(t).is_none());
+    assert!(d.sperre().lage.is_some(), "danach das Lagebild");
+    Ok(())
+}
+
+#[test]
+fn zeitplan_startet_termine_kurse_und_danach_papier() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    // 17:46: beide faellig, Termine zuerst.
+    let t = donnerstag(17, 46)?;
+    let (nr, kind) = some(d.schritt(t), "Termine")?;
+    assert_eq!(
+        d.sperre().laufend.as_ref().map(|a| (a.art, a.anlass)),
+        Some((Art::Termine, Anlass::Zeitplan))
+    );
+    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    let (nr, kind) = some(d.schritt(t), "Kurse")?;
+    d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+    assert_eq!(wartend(&d), vec![(Art::Papier, Anlass::Zeitplan)]);
+    let (nr, kind) = some(d.schritt(t), "Papier")?;
+    d.verfolge(nr, kind, || donnerstag(17, 48).ok());
+    assert!(d.schritt(t).is_none(), "heute nichts mehr");
+    // Ein Neustart startet heute nichts noch einmal.
+    let erledigt = fs::read_to_string(wurzel.join("daten").join("dienst_erledigt.txt"))
+        .map_err(|e| format!("Erledigt fehlt: {e}"))?;
+    assert_eq!(
+        erledigt,
+        "erledigt-v1\ntermine=2026-11-05\nkurse=2026-11-05\n"
+    );
+    let neu = dienst(wurzel, true);
+    assert!(neu.schritt(donnerstag(20, 0)?).is_none());
+    assert!(wartend(&neu).is_empty());
+    Ok(())
+}
+
+#[test]
+fn kein_papiertag_nach_gescheitertem_kursabruf() -> Result<(), String> {
+    let d = dienst(ordner()?, false);
+    let t = donnerstag(17, 46)?;
+    let (nr, kind) = some(d.schritt(t), "Termine")?;
+    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    let (nr, kind) = some(d.schritt(t), "Kurse")?;
+    d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+    assert!(wartend(&d).is_empty());
+    let z = d.sperre();
+    assert_eq!(
+        z.verlauf.iter().map(|a| a.erfolg).collect::<Vec<_>>(),
+        vec![Some(false), Some(false)]
+    );
+    Ok(())
+}
+
+#[test]
+fn unlesbarer_zeitplan_schaltet_ihn_aus() -> Result<(), String> {
+    let wurzel = ordner()?;
+    fs::write(wurzel.join("daten").join("zeitplan.txt"), "an=ja\n")
+        .map_err(|e| format!("Vorbedingung: {e}"))?;
+    let d = dienst(wurzel.clone(), true);
+    assert!(!d.sperre().zeitplan.an);
+    assert!(d.sperre().zeitplan_fehler.is_some());
+    assert!(d.schritt(donnerstag(18, 0)?).is_none());
+    assert!(wartend(&d).is_empty());
+    // Dasselbe bei unlesbarem Erledigt: Es koennte sonst zweimal am Tag starten.
+    let w2 = ordner()?;
+    fs::write(
+        w2.join("daten").join("dienst_erledigt.txt"),
+        "erledigt-v1\n",
+    )
+    .map_err(|e| format!("Vorbedingung: {e}"))?;
+    let d2 = dienst(w2, true);
+    assert!(!d2.sperre().zeitplan.an);
+    assert!(d2.schritt(donnerstag(18, 0)?).is_none());
+    Ok(())
+}
+
+#[test]
+fn zeitplan_ueber_die_seite_speichern_und_aktivieren() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let umw = Attrappe::default();
+    let t = donnerstag(12, 0)?;
+    let ungueltig = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&an=ja&termine=8:00&kurse=18:00"),
+    );
+    assert!(text(&behandle(&d, &umw, &ungueltig, t)).contains("m=zeitplan_ungueltig"));
+    assert_eq!(d.sperre().zeitplan, Zeitplan::default());
+    let a = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&termine=08%3A00&kurse=18%3A05"),
+    );
+    assert!(text(&behandle(&d, &umw, &a, t)).contains("m=zeitplan#zeitplan"));
+    let erwartet = Zeitplan {
+        an: false,
+        termine: (8, 0),
+        kurse: (18, 5),
+        papier_danach: false,
+    };
+    assert_eq!(d.sperre().zeitplan, erwartet);
+    let datei = fs::read_to_string(wurzel.join("daten").join("zeitplan.txt"))
+        .map_err(|e| format!("Datei fehlt: {e}"))?;
+    assert_eq!(Zeitplan::lies(&datei), Ok(erwartet));
+    let seite = text(&behandle(
+        &d,
+        &umw,
+        &anfrage("GET", "/einrichtung", &[("Host", HOST)], ""),
+        t,
+    ));
+    assert!(seite.contains("gespeichert und aktiv"));
+    Ok(())
+}
+
+// --- Autostart ---
+
+#[test]
+fn autostart_nur_mit_harmlosem_pfad() -> Result<(), String> {
+    let gut = autostart::inhalt(Path::new("C:\\Users\\Wolfgang\\DepotSchlopf"))?;
+    assert!(gut.contains("\"C:\\Users\\Wolfgang\\DepotSchlopf\\DepotSchlopf.cmd\" --ohne-browser"));
+    for boese in ["C:\\a%PATH%", "C:\\a\"&calc", "C:\\a!x!", "C:\\a\r\nx", ""] {
+        assert!(autostart::inhalt(Path::new(boese)).is_err(), "{boese:?}");
+    }
+    let d = dienst(ordner()?, true);
+    let umw = Attrappe::default();
+    let a = formular_post("/autostart", &format!("t={TOKEN}&an=an"));
+    assert!(text(&behandle(&d, &umw, &a, donnerstag(12, 0)?)).contains("m=autostart_an"));
+    assert_eq!(
+        *umw.autostart.lock().unwrap_or_else(PoisonError::into_inner),
+        Some(true)
+    );
+    Ok(())
+}
