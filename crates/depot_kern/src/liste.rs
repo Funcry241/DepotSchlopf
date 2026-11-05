@@ -2,9 +2,10 @@
 //!
 //! Die Liste steht im Code und aendert sich nur mit einer geprueften Aenderung. Der Papiertag
 //! handelt nur Werte dieser Liste (`als_universum`): Was keinen geprueften Schlusskurs hat, kann
-//! nicht gehandelt werden. Reine Daten ohne Netz; den Abruf macht `depot_sammler`. Alpha Vantage
-//! fuehrt Xetra-Werte mit der Endung `.DEX`, Werte der NYSE ohne Endung. Die kostenlose Stufe
-//! erlaubt 25 Abrufe am Tag; ein Lauf braucht einen Abruf je Wert.
+//! nicht gehandelt werden. Reine Daten ohne Netz; den Abruf macht `depot_sammler`.
+//! Xetra-Werte kommen von Alpha Vantage mit der Endung `.DEX`, Werte der NYSE von Tiingo, im
+//! Kuerzel ohne Endung (`quelle`). Die kostenlose Stufe von Alpha Vantage erlaubt 25 Abrufe am Tag; ein Lauf braucht
+//! einen Abruf je Wert.
 //!
 //! Jeder Wert gehoert zu einer Boerse; ihr Schluss bestimmt, ab wann sein Schlusskurs gilt, und
 //! ihr Kalender, an welchen Tagen er gehandelt wird (`handelstag`).
@@ -13,8 +14,20 @@ use crate::boerse::Boerse;
 use crate::grenzen::Universum;
 use crate::instrument::{Instrument, InstrumentArt, Isin};
 
-/// Name der Quelle im Journal (`kurs;quelle;…`).
+/// Name der Quelle fuer Xetra-Werte im Journal (`kurs;quelle;…`).
 pub const QUELLE: &str = "alphavantage";
+
+/// Name der Quelle fuer Werte der NYSE im Journal: Tiingo (freigegeben am 05.11.2026). Die
+/// kostenlose Stufe von Tiingo hat ein eigenes Kontingent, unabhaengig von Alpha Vantage.
+pub const QUELLE_US: &str = "tiingo";
+
+/// Die Quelle, bei der die Werte einer Boerse abgerufen werden.
+pub fn quelle(boerse: Boerse) -> &'static str {
+    match boerse {
+        Boerse::Xetra => QUELLE,
+        Boerse::Nyse => QUELLE_US,
+    }
+}
 
 /// Ein Eintrag der Liste: ISIN, Boerse, Kuerzel bei der Quelle, Name.
 pub type Eintrag<'a> = (&'a str, Boerse, &'a str, &'a str);

@@ -1,7 +1,8 @@
-//! `depot_sammler` – holt Xetra-Schlusskurse und Termine, belegt sie im Journal und prueft sie.
+//! `depot_sammler` – holt Schlusskurse und Termine, belegt sie im Journal und prueft sie.
 //!
-//! Aufruf ueber `run.cmd kurse` (oder `run.cmd kurse einrichten` beim ersten Mal) und
-//! `run.cmd termine`. Das Journal
+//! Aufruf ueber `run.cmd kurse` (alle Werte), `run.cmd kurse xetra` oder `run.cmd kurse nyse`
+//! (nur die Werte einer Boerse, kurz nach ihrem Schluss), `run.cmd kurse einrichten` beim
+//! ersten Mal und `run.cmd termine`. Das Journal
 //! liegt unter `daten/journal.txt`, die rohen Antworten unter `daten/roh/`; beides bleibt auf dem
 //! eigenen Rechner (`.gitignore`, Export ohne `daten/`).
 
@@ -22,10 +23,10 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use depot_journal::{Journal, anbieter, kurssperre};
-use depot_kern::{Datum, Preis, Zeitpunkt};
+use depot_kern::{Boerse, Datum, Preis, Zeitpunkt};
 use depot_sammler::{
-    Ergebnis, Https, Schluessel, beobachtungsliste, einordnen, ezb::ADRESSE_EZB, sammle,
-    sammle_termine,
+    Anbieter, Ergebnis, Https, Schluessel, Zugang, beobachtungsliste, einordnen, ezb::ADRESSE_EZB,
+    sammle, sammle_termine,
 };
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
@@ -117,24 +118,43 @@ fn sperre(wurzel: &Path) {
     }
 }
 
-fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
+/// Die Schluessel der Quellen, die diese Werte brauchen. Fehlt einer, wird das gemeldet, und
+/// nur die Werte dieser Quelle werden nicht abgerufen.
+fn zugang(werte: &[depot_sammler::Wert]) -> Zugang {
+    let mut anbieter: Vec<Anbieter> = werte.iter().map(|w| Anbieter::fuer(w.boerse)).collect();
+    anbieter.sort();
+    anbieter.dedup();
+    anbieter.into_iter().fold(
+        Zugang::leer(),
+        |z, a| match Schluessel::aus_anmeldeverwaltung(a) {
+            Ok(s) => z.mit(a, s),
+            Err(e) => {
+                eprintln!("[Sammler] FEHLER {}: {e}", a.dienst());
+                z
+            }
+        },
+    )
+}
+
+fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode {
     if gesperrt(wurzel) {
         return ExitCode::FAILURE;
     }
     let werte = match beobachtungsliste() {
-        Ok(w) => w,
+        Ok(w) => w
+            .into_iter()
+            .filter(|w| boerse.is_none_or(|b| w.boerse == b))
+            .collect::<Vec<_>>(),
         Err(e) => {
             eprintln!("[Sammler] FEHLER: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let schluessel = match Schluessel::aus_anmeldeverwaltung() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[Sammler] FEHLER: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
+    if werte.is_empty() {
+        println!("[Sammler] Keine Werte dieser Boerse in der Liste, nichts abzurufen.");
+        return ExitCode::SUCCESS;
+    }
+    let schluessel = zugang(&werte);
     let mut journal = match Journal::oeffnen(journal_pfad) {
         Ok(j) => j,
         Err(e) => {
@@ -146,7 +166,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         }
     };
     println!(
-        "[Sammler] Hole {} Werte von Alpha Vantage, {} Sekunden Abstand ...",
+        "[Sammler] Hole {} Werte (Xetra: Alpha Vantage, NYSE: Tiingo mit EZB-Referenzkursen), {} Sekunden Abstand ...",
         werte.len(),
         PAUSE.as_secs()
     );
@@ -296,11 +316,15 @@ fn main() -> ExitCode {
         .collect::<Vec<_>>()
         .as_slice()
     {
-        [] | ["kurse"] => kurse(&wurzel, &journal),
+        [] | ["kurse"] => kurse(&wurzel, &journal, None),
+        ["kurse", "xetra"] => kurse(&wurzel, &journal, Some(Boerse::Xetra)),
+        ["kurse", "nyse"] => kurse(&wurzel, &journal, Some(Boerse::Nyse)),
         ["einrichten"] | ["kurse", "einrichten"] => einrichten(&journal),
         ["termine"] => termine(&wurzel, &journal),
         _ => {
-            eprintln!("Aufruf: run.cmd kurse | run.cmd kurse einrichten | run.cmd termine");
+            eprintln!(
+                "Aufruf: run.cmd kurse [xetra|nyse] | run.cmd kurse einrichten | run.cmd termine"
+            );
             ExitCode::from(2)
         }
     }

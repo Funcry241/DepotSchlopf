@@ -1,8 +1,10 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Abruf je Boerse, Schritt 2 (Wolfgang 05.11.2026, Tiingo-Plan freigegeben): Umrechnung eines Schlusses in Dollar in Euro mit dem Referenzkurs der EZB desselben Tages (depot_kern::devisen, schlusskurse_in_euro), abgerundet auf sechs Nachkommastellen; fehlt der Kurs des Tages, ergibt der Wert keinen Kurs (KeinDevisenkurs), kein Rueckgriff auf aeltere Tage. Nur Kern, kein Netz, keine Grenze geaendert, keine neue Abhaengigkeit.
+zweck: Abruf je Boerse, Schritt 3 (Wolfgang 05.11.2026, Tiingo-Plan freigegeben): Der Sammler holt Werte der NYSE bei Tiingo mit eigenem Schluessel (DepotSchlopf/tiingo, depot_sammler::Anbieter, Zugang) und rechnet sie mit den EZB-Referenzkursen desselben Tages in Euro um (einmal je Lauf geholt, roh abgelegt). Xetra bleibt bei Alpha Vantage. Fehlt ein Schluessel oder die EZB-Datei, fallen nur die betroffenen Werte aus. Jede Antwort wird gegen alle Schluessel geprueft. run.cmd kurse xetra|nyse ruft nur eine Boerse ab. Netz weiter nur im Sammler, keine Grenze geaendert, keine neue Abhaengigkeit.
 pfade:
 crates/depot_kern/
+crates/depot_sammler/
 docs/
 CHANGELOG.md
+run.cmd
 kodex/aenderung.txt

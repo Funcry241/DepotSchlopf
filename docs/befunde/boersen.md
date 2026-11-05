@@ -87,11 +87,21 @@ Ein Kurs gilt nur in Euro. Ein Wert der NYSE bekommt einen Kurs erst über `schl
 
 Noch ohne Netz: Den EZB-Text holt im nächsten Schritt der Sammler, zusammen mit Tiingo und dem Zeitplan je Börse. Tests: `tests/devisen.rs` (`liest_dollar_je_tag`, `kaputter_text_ergibt_keine_kurse`, `umrechnung_nur_am_selben_tag_abgerundet`, `nyse_in_euro`, `xetra_bleibt_unveraendert`); der echte EZB-Text vom 05.11.2026 wurde einmal von Hand gelesen (USD 1,1224).
 
+## Abruf je Börse, Schritt 3: Tiingo und EZB im Sammler
+
+- **Quelle je Börse:** Xetra-Werte kommen weiter von Alpha Vantage, Werte der NYSE von Tiingo (`depot_kern::liste::quelle`, `depot_sammler::Anbieter`). Jede Quelle hat ihren eigenen Schlüssel in der Windows-Anmeldeverwaltung (`DepotSchlopf/alphavantage`, `DepotSchlopf/tiingo`). Der Tiingo-Schlüssel besteht aus 20 bis 64 Kleinbuchstaben und Ziffern. Fehlt der Schlüssel einer Quelle, werden nur ihre Werte nicht abgerufen; der Grund steht im Bericht, und ein Kandidat fällt nur aus der Auswahl.
+- **Schlüsselschutz:** Jede Antwort, auch die der EZB, wird gegen alle Schlüssel geprüft, gleich in welcher Schreibweise. Jede Meldung wird von allen bereinigt. Ein Treffer ist ein Sicherheitsabbruch wie bisher: nichts abgelegt, nichts belegt, Kurssperre.
+- **Tiingo-Abruf:** `https://api.tiingo.com/tiingo/daily/<kürzel>/prices?startDate=<14 Tage zurück>&format=csv&columns=date,close,high,low&token=…`. Das Kürzel steht klein, eine Klasse mit Bindestrich (`BRK.B` wird `brk-b`). Die Antwortform stammt aus der Dokumentation von Tiingo. Aus der Cloud-Umgebung ist api.tiingo.com gesperrt, deshalb bestätigt sie erst der erste echte Lauf. Weicht sie ab, wird der Wert als unlesbar gemeldet und nicht belegt.
+- **Referenzkurse:** Enthält der Lauf einen Wert in Dollar, dessen Schlüssel vorhanden ist, holt der Sammler vorher einmal `eurofxref-hist-90d.xml` und legt die Datei roh unter `daten/roh/ezb-referenzkurse/` ab. Belegt wird der Schluss in Euro (`schlusskurse_in_euro`), unter der Quelle `tiingo`. Lässt sich die EZB-Datei nicht holen oder lesen, wird kein Dollarwert abgerufen; Xetra bleibt unberührt.
+- **Lauf je Börse:** `run.cmd kurse xetra` und `run.cmd kurse nyse` rufen nur die Werte einer Börse ab, `run.cmd kurse` alle. Der Sammler prüft nur die Werte seines Laufs, Pflicht sind die gehaltenen Werte dieser Börse; alle zusammen prüft der Papiertag. Den Zeitplan je Börse bringt der nächste Schritt.
+
+Tests: `depot_sammler/tests/tiingo.rs` (`schluessel_von_tiingo`, `abrufadresse_tiingo`, `nyse_von_tiingo_in_euro`, `ohne_tiingo_schluessel_nur_xetra`, `ohne_referenzkurse_kein_dollarwert`, `schluessel_in_antwort_ist_sicherheitsabbruch`).
+
 ## Nicht in diesem Schritt
 
 - **Abrufzeit:** Mit nur Xetra-Werten bleibt der Abruf kurz nach 17:35 Uhr richtig. Wolfgang hat am 05.11.2026 entschieden, Maus' Vorschlag zu folgen: Kurse je Börse kurz nach ihrem Schluss abrufen, die Altersprüfung je Abrufzeitpunkt, danach ein gemeinsamer Papiertag. Kein gemeinsamer Abruf um 22:30 Uhr. Schritt 1 ist umgesetzt: Das Alter eines Kurses misst sich an seinem eigenen Abruf (`Kurse::mit_abrufen`), Test `alter_je_abruf_nicht_je_spaetestem_abruf`. Zeitplan je Börse und Papiertag nach dem letzten Abruf kommen mit Tiingo, wenn die ersten US-Werte in der Liste stehen.
 - **Rotation der Kandidaten und Tiingo als US-Quelle:** eigener PR, freigegeben am 05.11.2026.
-- **Abruf der EZB-Kurse und von Tiingo, Zeitplan je Börse:** nächster Schritt im Sammler und im Dienst.
+- **Zeitplan je Börse, Tiingo-Schlüssel in der Einrichtung, erste US-Werte in der Liste:** nächster Schritt im Dienst.
 
 ## Tests
 
