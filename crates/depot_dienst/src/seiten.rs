@@ -6,12 +6,13 @@ use std::fmt::Write as _;
 
 use depot_kern::Datum;
 use depot_lage::html::{STIL, maskiere};
-use depot_lage::{Abhilfe, Betrieb, Grenzwert, SchluesselStand, datum_text, zeit_text};
+use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, zeit_text};
 
+use crate::http::feld;
 use crate::kostenschutz;
 use crate::schluessel::Wer;
-use crate::werkbank::{Anlass, Art, Auftrag, Zustand};
-use crate::zeitplan::{Zeitplan, naechster, uhrzeit_text};
+use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand};
+use crate::zeitplan::{Zeitplan, lies_uhrzeit, naechster, uhrzeit_text};
 
 const STIL_DIENST: &str = "\
 nav{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}nav a{color:inherit}\
@@ -67,7 +68,9 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "auftrag" => ("gut", "Auftrag eingereiht. Er steht unter Tätigkeit."),
         "auftrag_belegt" => (
             "offen",
-            "Nicht eingereiht: Dieser Auftrag läuft oder wartet schon, oder es warten zu viele.",
+            "Nicht eingereiht: Dieser Auftrag läuft oder wartet schon, ist gerade erst fertig \
+             geworden (doppelt geklickt oder Seite neu gesendet?), oder es warten zu viele. \
+             Nichts wurde doppelt gestartet; unter Tätigkeit steht, was läuft.",
         ),
         "schluessel" => (
             "gut",
@@ -89,11 +92,23 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "zeitplan" => ("gut", "Zeitplan gespeichert und aktiv."),
         "zeitplan_ungueltig" => (
             "halt",
-            "Zeitplan nicht gespeichert: Uhrzeit im Format hh:mm.",
+            "Zeitplan nicht gespeichert: Uhrzeit im Format hh:mm. Die übrigen Eingaben stehen \
+             noch im Formular.",
+        ),
+        "zeitplan_einrichtung" => (
+            "halt",
+            "Zeitplan nicht eingeschaltet: Erst muss die Einrichtung vollständig sein. Was fehlt, \
+             steht beim Zeitplan. Ihre Eingaben stehen noch im Formular.",
+        ),
+        "zeitplan_lage" => (
+            "offen",
+            "Zeitplan nicht eingeschaltet: Der Stand wird gerade neu geprüft. Bitte in ein paar \
+             Sekunden noch einmal speichern; Ihre Eingaben stehen noch im Formular.",
         ),
         "zeitplan_fehler" => (
             "halt",
-            "Zeitplan nicht gespeichert: Datei nicht schreibbar. Der alte gilt weiter.",
+            "Zeitplan nicht gespeichert: Datei nicht schreibbar. Der alte gilt weiter; Ihre \
+             Eingaben stehen noch im Formular.",
         ),
         "autostart_an" => (
             "gut",
@@ -180,6 +195,15 @@ pub fn rahmen(
     s
 }
 
+fn anlass_zeile(a: &Auftrag) -> String {
+    let t = anlass_text(a.anlass);
+    if a.frueher == Frueher::Nein {
+        t.to_string()
+    } else {
+        format!("{t}, vor dem Neustart")
+    }
+}
+
 fn anlass_text(a: Anlass) -> &'static str {
     match a {
         Anlass::Hand => "von Hand",
@@ -252,6 +276,9 @@ fn protokoll(id: &str, a: &Auftrag, offen: bool) -> String {
 }
 
 fn ergebnis(a: &Auftrag) -> (&'static str, &'static str) {
+    if a.frueher == Frueher::Unterbrochen {
+        return ("halt", "unterbrochen");
+    }
     match a.erfolg {
         Some(true) => ("gut", "erfolgreich"),
         Some(false) => ("halt", "abgebrochen"),
@@ -302,13 +329,19 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
                  <td><span class=\"{klasse}\">{text}</span>{}</td></tr>",
                 maskiere(a.art.name()),
                 maskiere(&a.kennung),
-                anlass_text(a.anlass),
+                maskiere(&anlass_zeile(a)),
                 maskiere(&zeit_text(a.start)),
                 a.ende.map(|e| maskiere(&zeit_text(e))).unwrap_or_default(),
                 protokoll("v", a, false)
             );
         }
         s.push_str("</table></div>");
+    }
+    if let Some(f) = &z.verlauf_fehler {
+        let _ = write!(s, "<p class=\"kopf halt\">{}</p>", maskiere(f));
+    }
+    if let Some(h) = &z.verlauf_hinweis {
+        let _ = write!(s, "<p class=\"offen\">{}</p>", maskiere(h));
     }
     s.push_str("</section>");
     s
@@ -332,31 +365,8 @@ fn update_hinweis(z: &Zustand) -> String {
     }
 }
 
-/// Der Gesamtstatus: der des Lagebilds, ergaenzt um den Zeitplan des Dienstes. `None`, solange
-/// das Lagebild noch nicht berechnet ist.
-pub fn gesamtstatus(z: &Zustand) -> Option<Betrieb> {
-    let b = z.lage.as_ref()?.betrieb.clone();
-    let zeitplan_fehler = z
-        .erledigt_fehler
-        .as_ref()
-        .or(z.zeitplan_fehler.as_ref())
-        .map(|f| format!("Zeitplan: {f}. Datei prüfen oder löschen, dann Dienst neu starten."));
-    Some(match (b, zeitplan_fehler) {
-        (Betrieb::EingriffNoetig(mut g), Some(f)) => {
-            g.push(f);
-            Betrieb::EingriffNoetig(g)
-        }
-        (_, Some(f)) => Betrieb::EingriffNoetig(vec![f]),
-        (Betrieb::Bereit, None) if !z.zeitplan.an => Betrieb::Pausiert(vec![
-            "Zeitplan aus: Es läuft nur, was von Hand gestartet wird. Einschalten unter Einrichtung."
-                .into(),
-        ]),
-        (b, None) => b,
-    })
-}
-
 fn gesamtstatus_teil(z: &Zustand) -> String {
-    let Some(b) = gesamtstatus(z) else {
+    let Some(b) = z.gesamtstatus() else {
         return String::new();
     };
     let mut s = format!(
@@ -418,6 +428,60 @@ fn regel(w: Wer) -> &'static str {
     }
 }
 
+/// Eingaben des Zeitplan-Formulars, die nach einer Ablehnung wieder im Formular stehen. Nur
+/// gueltige Werte werden uebernommen; ein Schluessel ist nie dabei.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Entwurf {
+    pub an: Option<bool>,
+    pub termine: Option<(u8, u8)>,
+    pub kurse: Option<(u8, u8)>,
+    pub papier_danach: Option<bool>,
+}
+
+impl Entwurf {
+    /// Aus einem Formular oder der Abfrage einer Seite. Ohne `entwurf=ja` ist nichts zu
+    /// uebernehmen (sonst waeren fehlende Haken nicht von einem fehlenden Entwurf zu trennen).
+    pub fn aus_formular(f: &[(String, String)]) -> Entwurf {
+        let haken = |n: &str| match feld(f, n) {
+            None => Some(false),
+            Some("ja") => Some(true),
+            Some(_) => None,
+        };
+        let zeit = |n: &str| feld(f, n).and_then(lies_uhrzeit);
+        let ist_formular = feld(f, "t").is_some() || feld(f, "entwurf") == Some("ja");
+        if !ist_formular {
+            return Entwurf::default();
+        }
+        Entwurf {
+            an: haken("an"),
+            termine: zeit("termine"),
+            kurse: zeit("kurse"),
+            papier_danach: haken("papier_danach"),
+        }
+    }
+
+    /// Als Teil einer Abfrage (`&entwurf=ja&...`), nur mit gueltigen Werten.
+    pub fn als_abfrage(&self) -> String {
+        let mut q = String::from("&entwurf=ja");
+        if self.an == Some(true) {
+            q.push_str("&an=ja");
+        }
+        if self.papier_danach == Some(true) {
+            q.push_str("&papier_danach=ja");
+        }
+        for (n, w) in [("termine", self.termine), ("kurse", self.kurse)] {
+            if let Some(u) = w {
+                let _ = write!(q, "&{n}={}", uhrzeit_text(u).replace(':', "%3A"));
+            }
+        }
+        q
+    }
+
+    fn leer(self) -> bool {
+        self == Entwurf::default()
+    }
+}
+
 /// Was die Einrichtung ueber Gespeichertes weiss.
 #[derive(Clone, Debug)]
 pub struct Einrichtung {
@@ -428,6 +492,8 @@ pub struct Einrichtung {
     /// `Some(true)`: Datei stimmt mit dem aktiven Zeitplan ueberein; `Some(false)`: weicht ab
     /// oder ist unlesbar; `None`: keine Datei (Voreinstellung).
     pub zeitplan_gespeichert: Option<bool>,
+    /// Abgelehnte Eingaben, die wieder im Formular stehen.
+    pub entwurf: Entwurf,
     pub autostart: bool,
     pub wurzel: String,
     pub grenzen: Vec<Grenzwert>,
@@ -574,11 +640,45 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
         "aus".into()
     };
     let haken = |b: bool| if b { " checked" } else { "" };
+    // Nach einer Ablehnung stehen die eigenen Eingaben im Formular, sonst der aktive Plan.
+    let ent = &e.entwurf;
+    let f = Zeitplan {
+        an: ent.an.unwrap_or(p.an),
+        termine: ent.termine.unwrap_or(p.termine),
+        kurse: ent.kurse.unwrap_or(p.kurse),
+        papier_danach: ent.papier_danach.unwrap_or(p.papier_danach),
+    };
+    let entwurf_hinweis = if ent.leer() {
+        ""
+    } else {
+        "<p class=\"offen\">Das Formular zeigt Ihre letzten, nicht gespeicherten Eingaben.</p>"
+    };
+    // Unpassende Knoepfe erklaeren, was fehlt.
+    let voraussetzung = match zustand.einschalten_erlaubt() {
+        Ok(()) => String::new(),
+        Err(_) if p.an => String::new(),
+        Err(ZeitplanAbgelehnt::Einrichtung(fehlt)) => {
+            let mut liste = String::from(
+                "<p class=\"leise\">Einschalten geht erst, wenn alles eingerichtet ist. Es fehlt:</p><ul>",
+            );
+            for punkt in &fehlt {
+                let _ = write!(liste, "<li>{}</li>", maskiere(punkt));
+            }
+            liste.push_str(
+                "</ul><p class=\"leise\">Ausschalten und Uhrzeiten ändern geht immer.</p>",
+            );
+            liste
+        }
+        Err(_) => "<p class=\"leise\">Einschalten geht, sobald der Stand geprüft ist (wenige \
+                   Sekunden). Ausschalten und Uhrzeiten ändern geht immer.</p>"
+            .to_string(),
+    };
     let _ = write!(
         s,
         "<section id=\"zeitplan\"><h2>Zeitplan</h2>\
          <p>Aktiv: {} · {gespeichert}</p><p class=\"leise\">Montag bis Freitag, Frankfurter \
-         Zeit. Jeder Lauf höchstens einmal am Tag, auch nach einem Neustart.</p>\
+         Zeit. Jeder Lauf höchstens einmal am Tag, auch nach einem Neustart.</p>{voraussetzung}\
+         {entwurf_hinweis}\
          <form method=\"post\" action=\"/zeitplan\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <label><input type=\"checkbox\" name=\"an\" value=\"ja\"{}> Zeitplan an</label>\
@@ -589,10 +689,10 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <button type=\"submit\">Speichern und aktivieren</button></form></section>",
         maskiere(&aktiv),
         maskiere(token),
-        haken(p.an),
-        uhrzeit_text(p.termine),
-        uhrzeit_text(p.kurse),
-        haken(p.papier_danach)
+        haken(f.an),
+        uhrzeit_text(f.termine),
+        uhrzeit_text(f.kurse),
+        haken(f.papier_danach)
     );
 }
 
@@ -711,6 +811,19 @@ pub fn einrichtung(
 /// tragen dann das Token des neuen Starts.
 pub const APP_JS: &str = r#""use strict";
 (function () {
+  // Doppelklicks: Ein abgesendetes Formular sperrt seinen Knopf. Der Dienst lehnt doppelte
+  // Auftraege ohnehin ab; so sieht man sofort, dass der Klick angekommen ist.
+  document.addEventListener("submit", function (e) {
+    var b = e.target.querySelector("button[type=submit]");
+    if (b) {
+      if (b.disabled) { e.preventDefault(); return; }
+      setTimeout(function () { b.disabled = true; b.textContent = "wird gesendet …"; }, 0);
+    }
+  }, true);
+  // Zurueck im Browser zeigt die Seite aus dem Speicher: Knoepfe wieder freigeben.
+  window.addEventListener("pageshow", function () {
+    document.querySelectorAll("button[disabled]").forEach(function (b) { b.disabled = false; });
+  });
   var ziel = document.querySelector("[data-teil]");
   var banner = document.getElementById("getrennt");
   if (!ziel) { return; }

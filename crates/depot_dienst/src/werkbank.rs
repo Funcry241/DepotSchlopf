@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use depot_kern::Zeitpunkt;
-use depot_lage::{Ampel, Betrieb, Lagebild, ortszeit};
+use depot_lage::anbieter::Wer as Quelle;
+use depot_lage::{Ampel, Betrieb, Lagebild, SchluesselStand, ortszeit};
 
 use crate::zeitplan::{Erledigt, Zeitplan, faellig};
 
@@ -92,6 +93,17 @@ pub enum Anlass {
     Zeitplan,
 }
 
+/// Ob ein Auftrag aus einem frueheren Start des Dienstes stammt (`daten/dienst_verlauf.txt`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Frueher {
+    /// Aus diesem Start.
+    Nein,
+    /// Vor dem Neustart beendet.
+    Beendet,
+    /// Lief, als der Dienst endete: unterbrochen.
+    Unterbrochen,
+}
+
 /// Ein Auftrag mit Protokoll.
 #[derive(Clone, Debug)]
 pub struct Auftrag {
@@ -104,6 +116,7 @@ pub struct Auftrag {
     pub ende: Option<Zeitpunkt>,
     pub erfolg: Option<bool>,
     pub protokoll: Vec<String>,
+    pub frueher: Frueher,
 }
 
 /// Das zuletzt gerechnete Lagebild, schon als HTML.
@@ -114,6 +127,8 @@ pub struct Lage {
     pub naechster_schritt: String,
     /// Gesamtstatus aus dem Lagebild; die Oberflaeche ergaenzt den Zeitplan.
     pub betrieb: Betrieb,
+    /// Stand jedes Schluessels aus dem Lagebild.
+    pub schluessel: Vec<(Quelle, SchluesselStand)>,
     pub html: String,
 }
 
@@ -147,6 +162,95 @@ pub struct Zustand {
     pub neustart: bool,
     /// Stand des letzten Updates fuer die Seite; `true` heisst Fehler.
     pub update_meldung: Option<(bool, String)>,
+    /// Warum der Verlauf frueherer Starts nicht vollstaendig gezeigt wird.
+    pub verlauf_hinweis: Option<String>,
+    /// Der Verlauf liess sich zuletzt nicht schreiben; bis das wieder geht, startet nichts.
+    pub verlauf_fehler: Option<String>,
+}
+
+/// Warum ein Zeitplan nicht gespeichert wurde.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ZeitplanAbgelehnt {
+    /// Einschalten erst, wenn die Einrichtung vollstaendig ist: was fehlt.
+    Einrichtung(Vec<String>),
+    /// Das Lagebild ist noch nicht berechnet; gleich noch einmal.
+    LageFehlt,
+    /// Datei nicht schreibbar; der alte Zeitplan gilt weiter.
+    Datei(String),
+}
+
+fn quelle_name(w: Quelle) -> &'static str {
+    match w {
+        Quelle::Kursquelle => "Kursquelle Alpha Vantage",
+        Quelle::Dachs => "Dachs (Claude)",
+        Quelle::Maus => "Maus (GPT)",
+    }
+}
+
+/// Ein Auftrag von Hand, der so kurz nach dem Ende desselben Auftrags kommt, gilt als
+/// Doppelklick oder erneutes Absenden und wird nicht eingereiht.
+pub const DOPPELT_SEKUNDEN: i64 = 30;
+
+impl Zustand {
+    /// Der Gesamtstatus: der des Lagebilds, ergaenzt um den Zeitplan des Dienstes. `None`,
+    /// solange das Lagebild noch nicht berechnet ist.
+    pub fn gesamtstatus(&self) -> Option<Betrieb> {
+        let b = self.lage.as_ref()?.betrieb.clone();
+        let zeitplan_fehler = self
+            .erledigt_fehler
+            .as_ref()
+            .or(self.zeitplan_fehler.as_ref())
+            .map(|f| format!("Zeitplan: {f}. Datei prüfen oder löschen, dann Dienst neu starten."));
+        Some(match (b, zeitplan_fehler) {
+            (Betrieb::EingriffNoetig(mut g), Some(f)) => {
+                g.push(f);
+                Betrieb::EingriffNoetig(g)
+            }
+            (_, Some(f)) => Betrieb::EingriffNoetig(vec![f]),
+            (Betrieb::Bereit, None) if !self.zeitplan.an => Betrieb::Pausiert(vec![
+                "Zeitplan aus: Es läuft nur, was von Hand gestartet wird. Einschalten unter \
+                 Einrichtung."
+                    .into(),
+            ]),
+            (b, None) => b,
+        })
+    }
+
+    /// Darf der Zeitplan jetzt eingeschaltet werden? Nur mit berechnetem Lagebild und ohne
+    /// Eingriff (Maus: Betrieb erst nach vollstaendig gepruefter Einrichtung). Ein Zeitplan
+    /// mit Lesefehler zaehlt hier nicht: Neu speichern ist gerade der Weg heraus.
+    ///
+    /// # Errors
+    /// Warum nicht.
+    pub fn einschalten_erlaubt(&self) -> Result<(), ZeitplanAbgelehnt> {
+        let Some(l) = self.lage.as_ref().filter(|_| !self.lage_veraltet) else {
+            return Err(ZeitplanAbgelehnt::LageFehlt);
+        };
+        // Ausdruecklich jede noetige Einstellung (Maus zu #32): jeder Schluessel hinterlegt und
+        // nicht abgelehnt, dazu kein Eingriff. „Läuft ohne KI“ reicht nicht.
+        let mut fehlt: Vec<String> = l
+            .schluessel
+            .iter()
+            .filter(|(_, st)| {
+                !matches!(
+                    st,
+                    SchluesselStand::Hinterlegt | SchluesselStand::Geprueft(_)
+                )
+            })
+            .map(|(w, st)| format!("{}: Schlüssel {}", quelle_name(*w), st.text()))
+            .collect();
+        if l.schluessel.is_empty() {
+            fehlt.push("Stand der Schlüssel unbekannt".into());
+        }
+        if let Betrieb::EingriffNoetig(g) = &l.betrieb {
+            fehlt.extend(g.iter().cloned());
+        }
+        if fehlt.is_empty() {
+            Ok(())
+        } else {
+            Err(ZeitplanAbgelehnt::Einrichtung(fehlt))
+        }
+    }
 }
 
 /// Wie ein Auftrag gestartet wird. Im Betrieb `depotschlopf` ueber Cargo, in Tests ein
@@ -270,6 +374,21 @@ impl Dienst {
             ..zeitplan
         };
         let start: String = crate::neues_token().chars().take(16).collect();
+        let (verlauf, verlauf_hinweis) = match crate::verlauf::laden(&wurzel) {
+            Ok(g) => (
+                g.auftraege.into_iter().collect(),
+                (g.unlesbar > 0).then(|| {
+                    format!(
+                        "{} Zeilen in daten/dienst_verlauf.txt unlesbar; sie fehlen im Verlauf.",
+                        g.unlesbar
+                    )
+                }),
+            ),
+            Err(e) => (
+                VecDeque::new(),
+                Some(format!("Verlauf früherer Starts: {e}")),
+            ),
+        };
         Dienst {
             wurzel,
             token,
@@ -278,7 +397,7 @@ impl Dienst {
                 naechste_nr: 1,
                 laufend: None,
                 warteschlange: VecDeque::new(),
-                verlauf: VecDeque::new(),
+                verlauf,
                 zeitplan,
                 zeitplan_fehler,
                 erledigt,
@@ -287,6 +406,8 @@ impl Dienst {
                 lage_veraltet: true,
                 neustart: false,
                 update_meldung: None,
+                verlauf_hinweis,
+                verlauf_fehler: None,
             }),
             starter,
             lagerechner,
@@ -306,13 +427,40 @@ impl Dienst {
         einreihen(&mut z, art, anlass)
     }
 
-    /// Speichert und aktiviert einen neuen Zeitplan.
+    /// Reiht einen Auftrag von Hand ein. Wie `einreihen`, dazu: Derselbe Auftrag, der vor
+    /// weniger als `DOPPELT_SEKUNDEN` endete, wird nicht noch einmal eingereiht (Doppelklick,
+    /// erneutes Absenden).
     ///
     /// # Errors
-    /// Die Datei laesst sich nicht schreiben; dann gilt der alte weiter.
-    pub fn setze_zeitplan(&self, plan: Zeitplan) -> Result<(), String> {
+    /// Wie `einreihen`, oder gerade erst erledigt.
+    pub fn von_hand(&self, art: Art, jetzt: Zeitpunkt) -> Result<(), &'static str> {
         let mut z = self.sperre();
-        schreibe_ganz(&zeitplan_pfad(&self.wurzel), &plan.als_text())?;
+        let gerade = z.verlauf.iter().any(|a| {
+            a.art == art
+                && a.frueher == Frueher::Nein
+                && a.ende
+                    .and_then(|e| jetzt.sekunden_seit(e))
+                    .is_some_and(|s| s < DOPPELT_SEKUNDEN)
+        });
+        if gerade {
+            return Err("gerade erst erledigt");
+        }
+        einreihen(&mut z, art, Anlass::Hand)
+    }
+
+    /// Speichert und aktiviert einen neuen Zeitplan. Einschalten (aus wird an) geht nur, wenn
+    /// `Zustand::einschalten_erlaubt`; Ausschalten und Aendern eines laufenden Zeitplans immer.
+    ///
+    /// # Errors
+    /// Einschalten nicht erlaubt, oder die Datei laesst sich nicht schreiben; dann gilt der alte
+    /// weiter.
+    pub fn setze_zeitplan(&self, plan: Zeitplan) -> Result<(), ZeitplanAbgelehnt> {
+        let mut z = self.sperre();
+        if plan.an && !z.zeitplan.an {
+            z.einschalten_erlaubt()?;
+        }
+        schreibe_ganz(&zeitplan_pfad(&self.wurzel), &plan.als_text())
+            .map_err(ZeitplanAbgelehnt::Datei)?;
         z.zeitplan = plan;
         z.zeitplan_fehler = None;
         Ok(())
@@ -338,7 +486,26 @@ impl Dienst {
                 ende: None,
                 erfolg: None,
                 protokoll: Vec::new(),
+                frueher: Frueher::Nein,
             };
+            // Erst dauerhaft vermerken, dann starten (Maus zu #32): Ein Lauf, der nicht im
+            // Verlauf steht, startet nicht, und die Oberflaeche zeigt den Grund.
+            if let Err(e) =
+                crate::verlauf::vermerke(&self.wurzel, &crate::verlauf::start_zeile(&auftrag))
+            {
+                auftrag
+                    .protokoll
+                    .push(format!("Nicht gestartet: Verlauf nicht schreibbar ({e})."));
+                auftrag.ende = Some(jetzt);
+                auftrag.erfolg = Some(false);
+                z.verlauf_fehler = Some(format!(
+                    "Verlauf nicht schreibbar ({e}). Aufträge starten erst wieder, wenn \
+                     daten/dienst_verlauf.txt geschrieben werden kann."
+                ));
+                ablegen(&mut z, auftrag);
+                return None;
+            }
+            z.verlauf_fehler = None;
             let mut befehl = (self.starter)(art, &self.wurzel);
             befehl
                 .stdin(Stdio::null())
@@ -353,6 +520,7 @@ impl Dienst {
                     auftrag.protokoll.push(format!("Start fehlgeschlagen: {e}"));
                     auftrag.ende = Some(jetzt);
                     auftrag.erfolg = Some(false);
+                    ende_vermerken(&self.wurzel, &mut z, &auftrag);
                     ablegen(&mut z, auftrag);
                 }
             }
@@ -377,6 +545,7 @@ impl Dienst {
                 gesamt: bild.gesamt,
                 naechster_schritt: bild.naechster_schritt,
                 betrieb: bild.betrieb,
+                schluessel: bild.schluessel,
                 html,
             });
             z.lage_veraltet = false;
@@ -446,6 +615,7 @@ impl Dienst {
             && z.zeitplan.papier_danach;
         let eingespielt =
             erfolg && a.art == Art::Update && crate::rueckfall::offen_pfad(&self.wurzel).exists();
+        ende_vermerken(&self.wurzel, &mut z, &a);
         ablegen(&mut z, a);
         z.lage_veraltet = true;
         if eingespielt {
@@ -489,6 +659,17 @@ fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static s
     }
     z.warteschlange.push_back((art, anlass));
     Ok(())
+}
+
+/// Vermerkt das Ende; ein Schreibfehler steht sofort unter Taetigkeit.
+fn ende_vermerken(wurzel: &Path, z: &mut Zustand, a: &Auftrag) {
+    if let Err(e) = crate::verlauf::vermerke(wurzel, &crate::verlauf::ende_zeile(a)) {
+        z.verlauf_fehler = Some(format!(
+            "Ende von {} nicht im Verlauf vermerkt ({e}); nach einem Neustart erschiene der Lauf \
+             als unterbrochen.",
+            a.kennung
+        ));
+    }
 }
 
 fn ablegen(z: &mut Zustand, a: Auftrag) {

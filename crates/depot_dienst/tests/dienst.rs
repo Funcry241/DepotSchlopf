@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use depot_dienst::http::{self, Anfrage, LeseFehler};
 use depot_dienst::schluessel::Wer;
-use depot_dienst::werkbank::{Anlass, Art, Dienst, Lagerechner, Starter};
+use depot_dienst::werkbank::{Anlass, Art, Dienst, Frueher, Lagerechner, Starter};
 use depot_dienst::zeitplan::{Erledigt, Zeitplan, faellig, naechster};
 use depot_dienst::{Umwelt, behandle};
 use depot_dienst::{autostart, kostenschutz, seiten};
@@ -607,9 +607,16 @@ fn k29_01_lesefehler_halten_den_zeitplan_an() -> Result<(), String> {
         [0xff_u8, 0xfe, 0x00],
     )
     .map_err(|e| format!("Vorbedingung: {e}"))?;
-    let d2 = dienst(w2, true);
+    // Mit fertiger Einrichtung, damit das Einschalten selbst erlaubt ist.
+    let d2 = Arc::new(Dienst::neu(
+        w2,
+        TOKEN.into(),
+        echo_starter(true),
+        lagebild_mit_schluesseln(true),
+    ));
     assert!(!d2.sperre().zeitplan.an);
     assert!(d2.sperre().erledigt_fehler.is_some());
+    assert!(d2.schritt(donnerstag(17, 59)?).is_none());
     let an = formular_post(
         "/zeitplan",
         &format!("t={TOKEN}&an=ja&termine=17%3A40&kurse=17%3A45&papier_danach=ja"),
@@ -882,5 +889,282 @@ fn sperre_des_kostenschutzes_gefuehrt_aufheben() -> Result<(), String> {
     assert!(r.contains("m=kostenschutz_frei"), "{r}");
     let s = text(&behandle(&d, &umw, &seite, t));
     assert!(s.contains("Keine Sperre"), "{s}");
+    Ok(())
+}
+
+// --- Fehlbedienung: Einschalten, Eingaben erhalten, Doppelklicks, Unterbrechungen ---
+
+fn ort(location: &str) -> String {
+    location
+        .lines()
+        .find_map(|z| z.strip_prefix("Location: "))
+        .unwrap_or_default()
+        // Den Teil nach `#` sendet ein Browser nicht.
+        .split('#')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn get(d: &Dienst, ziel: &str, t: Zeitpunkt) -> String {
+    text(&behandle(
+        d,
+        &Attrappe::default(),
+        &anfrage("GET", ziel, &[("Host", HOST)], ""),
+        t,
+    ))
+}
+
+#[test]
+fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let umw = Attrappe::default();
+    let t = donnerstag(12, 0)?;
+    let an = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&an=ja&termine=08%3A15&kurse=18%3A05&papier_danach=ja"),
+    );
+    // Noch kein Lagebild: nicht eingeschaltet, Eingaben bleiben.
+    let r = text(&behandle(&d, &umw, &an, t));
+    assert!(r.contains("m=zeitplan_lage"), "{r}");
+    assert!(!d.sperre().zeitplan.an);
+    // Lagebild da, aber Eingriff noetig (kein Journal, keine Schluessel).
+    assert!(d.schritt(t).is_none());
+    let r = text(&behandle(&d, &umw, &an, t));
+    assert!(r.contains("m=zeitplan_einrichtung"), "{r}");
+    assert!(!d.sperre().zeitplan.an);
+    assert!(
+        !wurzel.join("daten").join("zeitplan.txt").exists(),
+        "nichts gespeichert"
+    );
+    // Die Seite zeigt die eigenen Eingaben wieder und sagt, was fehlt.
+    let seite = get(&d, &ort(&r), t);
+    assert!(seite.contains("Zeitplan nicht eingeschaltet"), "{seite}");
+    assert!(seite.contains("value=\"08:15\""), "{seite}");
+    assert!(seite.contains("value=\"18:05\""), "{seite}");
+    assert!(seite.contains("nicht gespeicherten Eingaben"), "{seite}");
+    assert!(seite.contains("Einschalten geht erst"), "{seite}");
+    // Ohne Entwurf zeigt die Seite den aktiven Plan.
+    let seite = get(&d, "/einrichtung", t);
+    assert!(seite.contains("value=\"17:40\""), "{seite}");
+    // Uhrzeiten aendern ohne Einschalten geht immer.
+    let aus = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&termine=08%3A15&kurse=18%3A05"),
+    );
+    assert!(text(&behandle(&d, &umw, &aus, t)).contains("m=zeitplan#"));
+    // Mit fertiger Einrichtung geht das Einschalten.
+    let fertig = Arc::new(Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        echo_starter(true),
+        lagebild_mit_schluesseln(true),
+    ));
+    assert!(fertig.schritt(t).is_none());
+    assert!(text(&behandle(&fertig, &umw, &an, t)).contains("m=zeitplan#"));
+    assert!(fertig.sperre().zeitplan.an);
+    Ok(())
+}
+
+#[test]
+fn ungueltige_eingabe_laesst_die_gueltigen_stehen() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(12, 0)?;
+    let f = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&termine=8%3A00&kurse=18%3A20&papier_danach=ja"),
+    );
+    let r = text(&behandle(&d, &Attrappe::default(), &f, t));
+    let ziel = ort(&r);
+    assert!(ziel.contains("m=zeitplan_ungueltig"), "{ziel}");
+    assert!(
+        ziel.contains("kurse=18%3A20") && !ziel.contains("termine="),
+        "{ziel}"
+    );
+    let seite = get(&d, &ziel, t);
+    assert!(seite.contains("value=\"18:20\""), "{seite}");
+    // Fremde Werte in der Abfrage erscheinen nicht.
+    let seite = get(
+        &d,
+        "/einrichtung?entwurf=ja&kurse=%3Cb%3E&termine=99%3A99",
+        t,
+    );
+    assert!(
+        !seite.contains("&lt;b&gt;") && !seite.contains("99:99"),
+        "{seite}"
+    );
+    Ok(())
+}
+
+#[test]
+fn doppelklick_startet_nichts_doppelt() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let umw = Attrappe::default();
+    let t = donnerstag(12, 0)?;
+    let klick = formular_post("/ausfuehren", &format!("t={TOKEN}&art=papier"));
+    assert!(text(&behandle(&d, &umw, &klick, t)).contains("m=auftrag"));
+    let r = text(&behandle(&d, &umw, &klick, t));
+    assert!(r.contains("m=auftrag_belegt"), "{r}");
+    assert_eq!(wartend(&d), vec![(Art::Papier, Anlass::Hand)]);
+    let (nr, kind) = some(d.schritt(t), "Start")?;
+    d.verfolge(nr, kind, || donnerstag(12, 0).ok());
+    // Erneut gesendet gleich nach dem Ende: nicht noch einmal.
+    let r = text(&behandle(&d, &umw, &klick, donnerstag(12, 0)?));
+    assert!(r.contains("m=auftrag_belegt"), "{r}");
+    assert!(wartend(&d).is_empty());
+    // Mit Abstand ist es ein neuer, gewollter Auftrag.
+    let spaeter = some(
+        Zeitpunkt::aus_sekunden(t.sekunden().saturating_add(60)),
+        "spaeter",
+    )?;
+    assert!(text(&behandle(&d, &umw, &klick, spaeter)).contains("m=auftrag"));
+    assert_eq!(wartend(&d), vec![(Art::Papier, Anlass::Hand)]);
+    // Das Skript sperrt abgesendete Knoepfe.
+    let js = get(&d, "/app.js", t);
+    assert!(js.contains("b.disabled = true"), "{js}");
+    Ok(())
+}
+
+#[test]
+fn verlauf_uebersteht_neustart_und_zeigt_unterbrochenes() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(12, 0)?;
+    d.einreihen(Art::Termine, Anlass::Hand)
+        .map_err(|e| format!("Vorbedingung: {e}"))?;
+    let (nr, kind) = some(d.schritt(t), "Termine")?;
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+    // Der naechste Lauf wird gestartet, aber der Dienst endet, bevor er fertig ist.
+    d.einreihen(Art::Kurse, Anlass::Hand)
+        .map_err(|e| format!("Vorbedingung: {e}"))?;
+    let (_, mut kind) = some(d.schritt(donnerstag(12, 2)?), "Kurse")?;
+    let _ = kind.wait();
+    drop(d);
+    let neu = dienst(wurzel.clone(), true);
+    let z = neu.sperre();
+    let v: Vec<(Art, Frueher, Option<bool>)> = z
+        .verlauf
+        .iter()
+        .map(|a| (a.art, a.frueher, a.erfolg))
+        .collect();
+    assert_eq!(
+        v,
+        vec![
+            (Art::Kurse, Frueher::Unterbrochen, Some(false)),
+            (Art::Termine, Frueher::Beendet, Some(true)),
+        ]
+    );
+    let seite = seiten::live("s", &z, t.datum());
+    drop(z);
+    assert!(
+        seite.contains("unterbrochen") && seite.contains("vor dem Neustart"),
+        "{seite}"
+    );
+    assert!(
+        seite.contains("Der Dienst endete während dieses Laufs"),
+        "{seite}"
+    );
+    // Ein zweiter Neustart zeigt dasselbe (die Datei wird nur gekuerzt).
+    drop(neu);
+    let wieder = dienst(wurzel, true);
+    assert_eq!(wieder.sperre().verlauf.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn verlauf_liest_streng() {
+    let g = depot_dienst::verlauf::lies(
+        "verlauf-v1;start;1-1;kurse;hand;1800000000\n\
+         kaputt\n\
+         verlauf-v1;start;1-2;fuchs;hand;1800000000\n\
+         verlauf-v1;ende;1-1;kurse;hand;1800000000;1800000060;ok\n\
+         verlauf-v1;ende;1-3;termine;zeitplan;1800000000;-;fehler;mehr\n",
+    );
+    assert_eq!(g.unlesbar, 3);
+    assert_eq!(g.auftraege.len(), 1);
+    assert!(
+        g.auftraege
+            .first()
+            .is_some_and(|a| a.erfolg == Some(true) && a.frueher == Frueher::Beendet)
+    );
+}
+
+/// Maus zu #32: „Läuft ohne KI“ reicht zum Einschalten nicht; jeder Schluessel wird
+/// ausdruecklich geprueft, und die Seite nennt, was fehlt.
+#[test]
+fn einschalten_verlangt_jeden_schluessel() -> Result<(), String> {
+    let ohne_maus: Lagerechner = Box::new(|_wurzel: &Path, jetzt: Zeitpunkt| {
+        let mut l = lagebild(&Umgebung {
+            jetzt,
+            journal: Zugang::NichtEingerichtet,
+            kursquelle: Hinterlegt::Ja,
+            berater: [
+                (BeraterId::Dachs, Hinterlegt::Ja),
+                (BeraterId::Maus, Hinterlegt::Nein),
+            ],
+            sperren: Vec::new(),
+            anbieter: Vec::new(),
+            anbieter_unlesbar: 0,
+            ki_halt: None,
+        });
+        // Wie mit eingerichtetem Journal: nur Maus fehlt.
+        l.betrieb = depot_lage::Betrieb::OhneKi(vec!["Maus (GPT): kein Schlüssel".into()]);
+        (l, String::new())
+    });
+    let d = Arc::new(Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        echo_starter(true),
+        ohne_maus,
+    ));
+    let t = donnerstag(12, 0)?;
+    assert!(d.schritt(t).is_none());
+    let an = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&an=ja&termine=17%3A40&kurse=17%3A45&papier_danach=ja"),
+    );
+    let r = text(&behandle(&d, &Attrappe::default(), &an, t));
+    assert!(r.contains("m=zeitplan_einrichtung"), "{r}");
+    assert!(!d.sperre().zeitplan.an);
+    let seite = get(&d, "/einrichtung", t);
+    assert!(
+        seite.contains("<li>Maus (GPT): Schlüssel fehlt</li>"),
+        "{seite}"
+    );
+    assert!(!seite.contains("<li>Dachs (Claude)"), "{seite}");
+    Ok(())
+}
+
+/// Maus zu #32: Erst dauerhaft vermerken, dann starten. Laesst sich der Verlauf nicht
+/// schreiben, startet nichts, und die Oberflaeche zeigt es sofort.
+#[test]
+fn ohne_schreibbaren_verlauf_startet_nichts() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let datei = depot_dienst::verlauf::pfad(&wurzel);
+    fs::create_dir_all(&datei).map_err(|e| format!("Vorbedingung: {e}"))?;
+    let d = dienst(wurzel, true);
+    let t = donnerstag(12, 0)?;
+    d.einreihen(Art::Termine, Anlass::Hand)
+        .map_err(|e| format!("Vorbedingung: {e}"))?;
+    assert!(d.schritt(t).is_none(), "nichts gestartet");
+    let z = d.sperre();
+    assert!(z.laufend.is_none());
+    let a = some(z.verlauf.front(), "Verlauf")?;
+    assert_eq!(a.erfolg, Some(false));
+    assert!(a.protokoll.iter().any(|p| p.starts_with("Nicht gestartet")));
+    let seite = seiten::live("s", &z, t.datum());
+    drop(z);
+    assert!(seite.contains("Verlauf nicht schreibbar"), "{seite}");
+    // Wieder schreibbar: Der naechste Auftrag startet.
+    fs::remove_dir(&datei).map_err(|e| format!("Vorbedingung: {e}"))?;
+    d.einreihen(Art::Kurse, Anlass::Hand)
+        .map_err(|e| format!("Vorbedingung: {e}"))?;
+    let (nr, kind) = some(d.schritt(t), "Start")?;
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+    let text = fs::read_to_string(&datei).map_err(|e| format!("Verlauf: {e}"))?;
+    assert!(text.starts_with("verlauf-v1;start;"), "{text}");
+    assert!(d.sperre().verlauf_fehler.is_none(), "Fehler verschwindet");
     Ok(())
 }

@@ -1,11 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Fehlerfaelle alltagstauglich (Maus 05.11.2026 auf Wolfgangs Frage zu Fehlbedienung, KI-Limits, fehlender Konfiguration). depot_journal::anbieter: Anbieterprotokoll daten/anbieter.txt (nur Anzeige, streng gelesen, ohne Schluessel und Antworttexte). depot_berater und depot_sammler vermerken jedes Ergebnis (Limit mit retry-after, Guthaben, Schluessel abgelehnt, ueberlastet, Netz, unklar, Kosten) samt tatsaechlicher Kosten; kein automatischer Wiederholversuch. depot_lage: Schluesselstand fehlt/hinterlegt/geprueft/abgelehnt ohne Testaufrufe, Anbieterhinweis mit naechstem Versuch, Gesamtstatus bereit/ohne KI/pausiert/Eingriff noetig, Budget verbraucht/reserviert/verfuegbar, Punkt KI-Kostenschutz. depot_dienst: Stand je Schluessel, Gesamtstatus mit Zeitplan, gefuehrte Aufhebung von ki.halt (Bestaetigung, Abdruck der gesehenen Fassung, nur ohne laufenden oder wartenden Auftrag, Grund in daten/ki_halt_aufgehoben.txt; Kassenbuch und Kostenpruefung unveraendert). Zeitplan ab Werk aus (Maus: Betrieb erst nach bewusstem Einschalten). Fassung 2 nach Maus: vollstaendig bereit nur mit fertiger Einrichtung (Abhilfe::braucht_menschen); Pause des Anbieters wird vor der Reservierung und vor dem Senden eingehalten (anbieter::pausiert, auch Limit im Lauf, unlesbares Protokoll = kein Aufruf). Keine neue Abhaengigkeit, keine Grenze, kein Netz-Crate.
+zweck: Fehlbedienung abfangen (Maus 05.11.2026). depot_dienst: Zeitplan einschalten nur mit aktuellem Lagebild und ohne Eingriff (Zustand::einschalten_erlaubt), Ausschalten und Aendern immer; abgelehnte Zeitplan-Eingaben bleiben im Formular (nur gepruefte Werte, Entwurf); Auftrag von Hand nicht erneut binnen 30 s nach dem Ende desselben (Dienst::von_hand), app.js sperrt abgesendete Knoepfe; daten/dienst_verlauf.txt haelt Start und Ende jedes Auftrags, nach Neustart sichtbar, unterbrochene Laeufe als solche. Fassung 2 nach Maus: Einschalten prueft jeden Schluessel ausdruecklich (hinterlegt oder geprueft) und nennt, was fehlt; Start erst nach dauerhaft vermerkter Startzeile, Schreibfehler sofort sichtbar. Keine neue Abhaengigkeit, keine Grenze, kein Netz.
 pfade:
-crates/depot_journal/
-crates/depot_berater/
-crates/depot_sammler/
-crates/depot_lage/
 crates/depot_dienst/
 docs/
 CHANGELOG.md
