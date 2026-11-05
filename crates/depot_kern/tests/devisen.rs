@@ -261,3 +261,48 @@ fn dollar_nur_im_eigenen_tagesblock() -> Result<(), String> {
     assert_eq!(d.usd_je_eur(tag(2026, 11, 5)?), Some(euro("1.2")?));
     Ok(())
 }
+
+/// Maus' Restbefund zu f267b0f: Attribute werden vollstaendig gelesen. Ein Name zweimal, gleich
+/// in welcher Schreibweise (Anfuehrungszeichen, Leerraum, Gross- und Kleinschreibung), verwirft
+/// den ganzen Text, statt dass der erste Wert gilt. Ebenso ein unbekanntes Attribut an einem
+/// `Cube` oder ein Rest, der kein Attribut ist. Gueltige Schreibweisen nach XML gelten.
+#[test]
+fn attribute_vollstaendig_und_eindeutig() -> Result<(), String> {
+    let fall = |tag: &str| {
+        format!(
+            "<?xml version=\"1.0\"?><gesmes:Envelope xmlns=\"y\"><Cube>{tag}</Cube></gesmes:Envelope>"
+        )
+    };
+    let tag_mit = |usd: &str| format!("<Cube time=\"2026-11-05\">{usd}</Cube>");
+    for kaputt in [
+        tag_mit("<Cube currency=\"USD\" rate=\"1.2\" rate='2.4'/>"),
+        tag_mit("<Cube currency=\"USD\" rate=\"1.2\" rate=\"1.2\"/>"),
+        tag_mit("<Cube currency=\"USD\" rate=\"1.2\" Rate=\"2.4\"/>"),
+        tag_mit("<Cube currency=\"USD\" currency='USD' rate=\"1.2\"/>"),
+        tag_mit("<Cube currency=\"USD\" rate=\"1.2\" x/>"),
+        tag_mit("<Cube currency=\"USD\" rate=\"1.2\" kurs=\"1.3\"/>"),
+        tag_mit("<Cube currency=\"USD\" rate=\"1.2/>"),
+        tag_mit("<Cube currency=\"USD\"rate=\"1.2\"/>"),
+        tag_mit("<Cube currency=USD rate=\"1.2\"/>"),
+        "<Cube time=\"2026-11-05\" time='2026-11-04'><Cube currency=\"USD\" rate=\"1.2\"/></Cube>"
+            .to_string(),
+    ] {
+        assert!(
+            Devisen::lies_ezb(&fall(&kaputt)).is_err(),
+            "angenommen: {kaputt}"
+        );
+    }
+    let doppelt_huelle = "<gesmes:Envelope xmlns=\"a\" xmlns='b'><Cube><Cube time=\"2026-11-05\">\
+                          <Cube currency=\"USD\" rate=\"1.2\"/></Cube></Cube></gesmes:Envelope>";
+    assert!(Devisen::lies_ezb(doppelt_huelle).is_err());
+    // Gueltig nach XML: einfache Anfuehrungszeichen und Leerraum um `=`.
+    for gut in [
+        tag_mit("<Cube currency='USD' rate='1.2'/>"),
+        tag_mit("<Cube currency = \"USD\"\n rate= \"1.2\" />"),
+        tag_mit("<Cube rate=\"1.2\" currency=\"USD\"/>"),
+    ] {
+        let d = lies(&fall(&gut))?;
+        assert_eq!(d.usd_je_eur(tag(2026, 11, 5)?), Some(euro("1.2")?), "{gut}");
+    }
+    Ok(())
+}
