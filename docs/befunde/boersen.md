@@ -81,6 +81,8 @@ Ein Kurs gilt nur in Euro. Ein Wert der NYSE bekommt einen Kurs erst über `schl
 - Ein kaputter Eintrag im EZB-Text verwirft den ganzen Text (`DevisenFehler`), statt still zu fehlen.
 - `schlusskurse` ohne Referenzkurse lehnt den Dollar weiter ab (`KursFehler::Waehrung`).
 
+**Nach Maus' Gegenproben zu aba39b0:** Ein abgeschnittener Text ergab einen Kurs, und ein Dollarkurs außerhalb seines Tagesblocks wurde dem zuletzt gelesenen Tag zugeschlagen. Jetzt prüft `lies_ezb` den ganzen Aufbau, bevor ein Kurs gilt: genau eine Hülle `gesmes:Envelope`, jedes Element in der Reihenfolge geschlossen, in der es geöffnet wurde, nichts nach der Hülle; darin genau ein `Cube` ohne Attribute, darin nur Tage (`Cube` mit genau `time`), darin nur Währungen (`Cube` mit genau `currency` und `rate`, ohne Inhalt). Ein Dollarkurs gehört nur zu dem Tag, in dessen Block er steht; außerhalb ist er `DevisenFehler::OhneTag`, jeder andere Verstoß `DevisenFehler::Aufbau`, und der ganze Text wird verworfen. Tests: `abgeschnittener_text_ergibt_keine_kurse` (jede Schnittstelle), `dollar_nur_im_eigenen_tagesblock`.
+
 Noch ohne Netz: Den EZB-Text holt im nächsten Schritt der Sammler, zusammen mit Tiingo und dem Zeitplan je Börse. Tests: `tests/devisen.rs` (`liest_dollar_je_tag`, `kaputter_text_ergibt_keine_kurse`, `umrechnung_nur_am_selben_tag_abgerundet`, `nyse_in_euro`, `xetra_bleibt_unveraendert`); der echte EZB-Text vom 05.11.2026 wurde einmal von Hand gelesen (USD 1,1224).
 
 ## Nicht in diesem Schritt

@@ -81,7 +81,9 @@ fn kaputter_text_ergibt_keine_kurse() -> Result<(), String> {
         );
     }
     assert_eq!(
-        Devisen::lies_ezb("<Cube><Cube currency=\"USD\" rate=\"1.1\"/></Cube>"),
+        Devisen::lies_ezb(
+            "<gesmes:Envelope><Cube><Cube currency=\"USD\" rate=\"1.1\"/></Cube></gesmes:Envelope>"
+        ),
         Err(DevisenFehler::OhneTag)
     );
     Ok(())
@@ -230,10 +232,10 @@ fn dollar_nur_im_eigenen_tagesblock() -> Result<(), String> {
     for mitte in [
         format!("<Cube time=\"2026-11-05\"><Cube time=\"2026-11-04\">{usd}</Cube></Cube>"),
         format!("<Cube time=\"2026-11-05\">{usd}</Cube></Cube><Cube>"),
-        format!("<Cube time=\"2026-11-05\"><Cube currency=\"USD\" rate=\"1.2\"></Cube>"),
+        "<Cube time=\"2026-11-05\"><Cube currency=\"USD\" rate=\"1.2\"></Cube>".to_string(),
         format!("<Cube time=\"2026-11-05\">{usd}</Cube time>"),
         format!("<Cube time=\"2026-11-05\">{usd}</Wuerfel></Cube>"),
-        format!("<Cube time=\"2026-11-05\" currency=\"USD\" rate=\"1.2\"/>"),
+        "<Cube time=\"2026-11-05\" currency=\"USD\" rate=\"1.2\"/>".to_string(),
         format!("<Cube time=\"2026-11-05\">{usd}<Cube></Cube></Cube>"),
     ] {
         assert!(
