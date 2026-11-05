@@ -48,6 +48,6 @@ Maus' drei Gegenproben stehen als Tests in `crates/depot_sim/tests/papiertag.rs`
 
 ## Offen
 
-- Dachs und Maus anbinden (Claude und GPT mit Websuche), KI-Kostendeckel 20 € im Monat (Wolfgang, 05.11.2026), neue Grenzen für konzentriertes Handeln: Freigabepaket mit Grenzfreigabe.
+- Dachs und Maus anbinden: gebaut, siehe `docs/befunde/berater.md`.
 - Auswahl verbreitern innerhalb von 25 Abrufen am Tag.
 - `run.cmd tag`: Kurse, Termine und Papiertag in einem Schritt.

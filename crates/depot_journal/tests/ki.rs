@@ -63,13 +63,15 @@ fn buchungen_in(p: &Path) -> Result<usize, String> {
     Ok(j.stand().ki().buchungen().len())
 }
 
-/// Fuellt den Monat von Dachs (zwei Zyklen zu je zwei Aufrufen) und schliesst das Journal.
+/// Fuellt den Monat von Dachs (23 Zyklen zu je zwei Aufrufen) und schliesst das Journal.
 fn monat_voll(p: &Path) -> Result<(), String> {
     let mut k = journal(p)?;
-    for (t, z) in [(2, 1), (2, 1), (3, 2), (3, 2)] {
-        vorbedingung(k.reserviere(DACHS, tag(t)?, z), "Reservierung")?;
+    for t in 1..=23_u8 {
+        for _ in 0..2 {
+            vorbedingung(k.reserviere(DACHS, tag(t)?, u32::from(t)), "Reservierung")?;
+        }
     }
-    match k.reserviere(DACHS, tag(4)?, 3) {
+    match k.reserviere(DACHS, tag(24)?, 24) {
         Err(depot_ki::Sperre::MonatVoll) => Ok(()),
         anders => Err(format!("Vorbedingung Monat voll: {anders:?}")),
     }
