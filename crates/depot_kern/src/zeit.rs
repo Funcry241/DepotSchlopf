@@ -296,6 +296,16 @@ impl Zeitpunkt {
         )
     }
 
+    /// Dieser Zeitpunkt als Ortszeit in Frankfurt: Tag, Stunde, Minute, Sekunde und ob
+    /// Sommerzeit gilt. Umkehrung von `frankfurt`; `None` nur ausserhalb des Kalenders.
+    pub fn in_frankfurt(self) -> Option<(Datum, u8, u8, u8, bool)> {
+        let sommer = self.sommerzeit()?;
+        let stunden: i64 = if sommer { 2 } else { 1 };
+        let ort = Zeitpunkt::aus_sekunden(self.sekunden.checked_add(stunden.checked_mul(3_600)?)?)?;
+        let (h, m, s) = ort.uhrzeit()?;
+        Some((ort.datum()?, h, m, s, sommer))
+    }
+
     /// Uhrzeit in New York (EST, im Sommer EDT). Umgestellt wird nach US-Recht am zweiten
     /// Sonntag im Maerz und am ersten Sonntag im November um 02:00 Uhr Ortszeit. `None` wie bei
     /// `frankfurt`.

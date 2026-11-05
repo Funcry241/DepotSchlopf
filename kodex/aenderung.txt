@@ -1,12 +1,10 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Abruf je Boerse, Schritt 3 (Wolfgang 05.11.2026, Tiingo-Plan freigegeben): Der Sammler holt Werte der NYSE bei Tiingo mit eigenem Schluessel (DepotSchlopf/tiingo, depot_sammler::Anbieter, Zugang) und rechnet sie mit den EZB-Referenzkursen desselben Tages in Euro um (einmal je Lauf geholt, roh abgelegt). Xetra bleibt bei Alpha Vantage. Fehlt ein Schluessel oder die EZB-Datei, fallen nur die betroffenen Werte aus. Jede Antwort wird gegen alle hinterlegten Schluessel geprueft, auch bei einem Lauf fuer nur eine Boerse; Anbieterprotokoll je Quelle (neu: tiingo, depot_journal::anbieter::Wer::Tiingo). run.cmd kurse xetra|nyse ruft nur eine Boerse ab. Netz weiter nur im Sammler, keine Grenze geaendert, keine neue Abhaengigkeit.
+zweck: Kurze Netzausfaelle beim Kursabruf (Maus 05.11.2026, Punkt 1 von 3): Der Sammler wiederholt einen voruebergehend gescheiterten Abruf (Verbindung, Name, Zeitgrenze, Status 5xx) nach 30, 60 und 120 Sekunden, hoechstens viermal und nur innerhalb des bestehenden Frischefensters (Schluss der Boerse plus Hoechstalter minus Zeitgrenze). Ablehnungen werden nie wiederholt; die Frist wird unmittelbar vor jedem Versuch neu geprueft; bleibt die Verbindung zu einer Quelle weg, ruft der Lauf nur bei ihr nichts mehr ab, ein Ausfall der EZB trifft nur Werte in Dollar. Ob es von selbst weitergeht, sagt der Dienst aus dem Zeitplan (Maus, Befunde 1-3 zu #38). Hinweiszeilen in Alltagssprache (depot_kern::hinweis) zeigt der Dienst gross in der Live-Ansicht. Keine Grenze geaendert, keine neue Abhaengigkeit, Netz weiter nur im Sammler.
 pfade:
 crates/depot_kern/
 crates/depot_sammler/
-crates/depot_journal/
 crates/depot_dienst/
 docs/
 CHANGELOG.md
-run.cmd
 kodex/aenderung.txt

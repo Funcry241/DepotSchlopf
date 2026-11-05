@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 
 use depot_kern::Datum;
 use depot_lage::html::{STIL, maskiere};
-use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, zeit_text};
+use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, ortszeit, zeit_text};
 
 use crate::http::feld;
 use crate::kostenschutz;
@@ -253,6 +253,24 @@ fn wochentag_text(d: Datum) -> &'static str {
     }
 }
 
+/// Wie es nach einem gescheiterten Lauf weitergeht, aus dem tatsaechlichen Zeitplan: von selbst
+/// nur, wenn er an ist und kein Fehler ihn anhaelt. Der Lauf selbst kennt den Zeitplan nicht.
+fn weiter_text(z: &Zustand, heute: Option<Datum>) -> String {
+    let naechster = naechster_text(z, heute);
+    if z.erledigt_fehler.is_some() || z.zeitplan_fehler.is_some() {
+        return naechster;
+    }
+    let naechster = naechster.trim_end_matches('.');
+    if z.zeitplan.an && heute.is_some() {
+        format!("Nach Zeitplan geht es von selbst weiter: {naechster}.")
+    } else {
+        format!(
+            "DepotSchlopf startet nichts von selbst: {naechster}. Kurse und Papiertag startest \
+             du von Hand über die Knöpfe im Lagebild."
+        )
+    }
+}
+
 /// Der naechste Lauf des Zeitplans als Satz.
 pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     if let Some(f) = &z.erledigt_fehler {
@@ -318,19 +336,46 @@ fn ergebnis(a: &Auftrag) -> (&'static str, &'static str) {
 /// Was der Dienst tut: laufender Auftrag, Warteschlange, naechster Lauf, Verlauf.
 pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
     let mut s = String::from("<section><h2>Tätigkeit</h2>");
-    match &z.laufend {
-        Some(a) => {
+    if let Some(a) = &z.laufend {
+        let _ = write!(
+            s,
+            "<p class=\"kopf offen\">Läuft: {} ({}) seit {}</p><p class=\"leise\">Kennung {}</p>{}",
+            maskiere(a.art.name()),
+            anlass_text(a.anlass),
+            maskiere(&zeit_text(a.start)),
+            maskiere(&a.kennung),
+            protokoll("l", a, true)
+        );
+        if let Some(h) = &a.hinweis {
             let _ = write!(
                 s,
-                "<p class=\"kopf offen\">Läuft: {} ({}) seit {}</p><p class=\"leise\">Kennung {}</p>{}",
-                maskiere(a.art.name()),
-                anlass_text(a.anlass),
-                maskiere(&zeit_text(a.start)),
-                maskiere(&a.kennung),
-                protokoll("l", a, true)
+                "<p class=\"kopf offen\" id=\"hinweis\">{}</p>",
+                maskiere(h)
             );
         }
-        None => s.push_str("<p class=\"kopf\">Gerade läuft nichts.</p>"),
+    } else {
+        s.push_str("<p class=\"kopf\">Gerade läuft nichts.</p>");
+        // Was der letzte Lauf heute zu sagen hatte, etwa warum der Papiertag ausfiel.
+        if let Some(a) = z.verlauf.front()
+            && let Some(h) = &a.hinweis
+            && heute.is_some_and(|t| {
+                a.ende
+                    .is_some_and(|e| ortszeit(e).is_some_and(|o| o.0 == t))
+            })
+        {
+            let (klasse, weiter) = if a.erfolg == Some(true) {
+                ("gut", String::new())
+            } else {
+                ("halt", format!(" {}", weiter_text(z, heute)))
+            };
+            let _ = write!(
+                s,
+                "<p class=\"kopf {klasse}\" id=\"hinweis\">{}: {}{}</p>",
+                maskiere(a.art.name()),
+                maskiere(h),
+                maskiere(&weiter)
+            );
+        }
     }
     if !z.warteschlange.is_empty() {
         let liste: Vec<String> = z
@@ -355,12 +400,16 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
             let _ = write!(
                 s,
                 "<tr><td>{}<br><span class=\"leise\">{}</span></td><td>{}</td><td>{}</td><td>{}</td>\
-                 <td><span class=\"{klasse}\">{text}</span>{}</td></tr>",
+                 <td><span class=\"{klasse}\">{text}</span>{}{}</td></tr>",
                 maskiere(a.art.name()),
                 maskiere(&a.kennung),
                 maskiere(&anlass_zeile(a)),
                 maskiere(&zeit_text(a.start)),
                 a.ende.map(|e| maskiere(&zeit_text(e))).unwrap_or_default(),
+                a.hinweis
+                    .as_ref()
+                    .map(|h| format!("<br>{}", maskiere(h)))
+                    .unwrap_or_default(),
                 protokoll("v", a, false)
             );
         }
