@@ -66,6 +66,9 @@ pub enum Ergebnis {
     },
     /// Nichts belegt. Die Meldung ist vom Schluessel bereinigt.
     Fehler(String),
+    /// Nicht abgerufen, mit Grund: Der Schluessel seiner Quelle fehlt, oder er notiert nicht in
+    /// Euro und die Referenzkurse fehlen. Zaehlt fuer keine Quelle im Anbieterprotokoll.
+    Uebersprungen(String),
     /// Nicht abgerufen, weil der Lauf vorher beendet wurde.
     NichtAbgerufen,
 }
@@ -138,34 +141,36 @@ pub fn adresse(wert: &Wert, schluessel: &Schluessel, ab: Option<Datum>) -> Strin
     }
 }
 
-/// Was ein Lauf ueber den Schluessel und die Quelle sagt, fuer das Anbieterprotokoll. `None`,
-/// wenn nichts abgerufen wurde.
-pub fn einordnen(b: &Bericht) -> Option<depot_journal::anbieter::Ergebnis> {
+/// Was ein Lauf ueber den Schluessel und eine Quelle sagt, fuer das Anbieterprotokoll. Gezaehlt
+/// werden nur die Werte dieser Quelle, die abgerufen wurden (Maus, Befund 2 zu #37): Ein Erfolg
+/// der einen Quelle sagt nichts ueber den Schluessel der anderen. `None`, wenn bei ihr nichts
+/// abgerufen wurde.
+pub fn einordnen(b: &Bericht, quelle: Anbieter) -> Option<depot_journal::anbieter::Ergebnis> {
     use depot_journal::anbieter::Ergebnis as E;
-    let fehler: Vec<String> = b
+    let eigene: Vec<&Ergebnis> = b
         .werte
         .iter()
-        .filter_map(|(_, e)| match e {
+        .filter(|(w, _)| Anbieter::fuer(w.boerse) == quelle)
+        .map(|(_, e)| e)
+        .collect();
+    if eigene.iter().any(|e| matches!(e, Ergebnis::Belegt { .. })) {
+        return Some(E::Ok);
+    }
+    let fehler: Vec<String> = eigene
+        .iter()
+        .filter_map(|e| match e {
             Ergebnis::Fehler(t) => Some(t.to_ascii_lowercase()),
             _ => None,
         })
         .collect();
-    if b.werte
-        .iter()
-        .any(|(_, e)| matches!(e, Ergebnis::Belegt { .. }))
-    {
-        return Some(E::Ok);
-    }
-    let abbruch = b
-        .abbruch
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if abbruch.contains("rate limit") || abbruch.contains("requests per") {
-        return Some(E::Limit);
-    }
     if fehler.is_empty() {
         return None;
+    }
+    if fehler
+        .iter()
+        .any(|t| t.contains("rate limit") || t.contains("requests per"))
+    {
+        return Some(E::Limit);
     }
     if fehler.iter().all(|t| t.contains("apikey")) {
         return Some(E::Abgelehnt);
@@ -254,10 +259,12 @@ fn hole_devisen(
             "Referenzkurse der EZB: {text}; Wert in Dollar nicht abgerufen"
         )),
     };
-    // Frist der fruehesten Boerse des Laufs: Spaeter nuetzten die Referenzkurse keinem Wert.
+    // Frist der fruehesten Boerse, deren Werte die Referenzkurse brauchen (nicht in Euro):
+    // Spaeter nuetzten sie keinem Wert. Werte in Euro verkuerzen die Frist nicht.
     let frist_ab = |jetzt: Zeitpunkt| {
         werte
             .iter()
+            .filter(|w| w.boerse.waehrung() != "EUR")
             .filter_map(|w| frist(w.boerse, &Grenzen::standard(), jetzt))
             .min()
     };
@@ -479,7 +486,9 @@ pub fn sammle(
         let schluessel = match abrufbar(zugang, &vorbereitung.referenz, wert) {
             Ok(s) => s,
             Err(text) => {
-                bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+                bericht
+                    .werte
+                    .push((wert.clone(), Ergebnis::Uebersprungen(text)));
                 continue;
             }
         };

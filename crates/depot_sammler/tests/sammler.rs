@@ -360,7 +360,7 @@ fn hinweis_beendet_den_lauf() -> Result<(), String> {
     assert_eq!(b.handelstag, None);
     assert!(!b.verwendbar());
     assert_eq!(
-        depot_sammler::einordnen(&b),
+        depot_sammler::einordnen(&b, depot_sammler::Anbieter::AlphaVantage),
         Some(anbieter::Ergebnis::Limit)
     );
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
@@ -398,7 +398,10 @@ fn falsches_kuerzel_nur_fuer_seinen_wert() -> Result<(), String> {
     assert!(b.pruefung.is_empty(), "{:?}", b.pruefung);
     assert!(b.verwendbar());
     // Ein Kurs kam an: Der Schluessel gilt.
-    assert_eq!(depot_sammler::einordnen(&b), Some(anbieter::Ergebnis::Ok));
+    assert_eq!(
+        depot_sammler::einordnen(&b, depot_sammler::Anbieter::AlphaVantage),
+        Some(anbieter::Ergebnis::Ok)
+    );
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert_eq!(j.stand().kurse().len(), 2);
     drop(j);
@@ -627,7 +630,7 @@ fn ungueltiger_schluessel_wird_als_abgelehnt_erkannt() -> Result<(), String> {
     )?
     .map_err(|e| format!("Lauf: {e:?}"))?;
     assert_eq!(
-        depot_sammler::einordnen(&b),
+        depot_sammler::einordnen(&b, depot_sammler::Anbieter::AlphaVantage),
         Some(anbieter::Ergebnis::Abgelehnt)
     );
     Ok(())
