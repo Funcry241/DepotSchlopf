@@ -22,7 +22,11 @@ const KOPF: &str = "anbieter-v1";
 /// Wessen Aufruf.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Wer {
+    /// Kursquelle fuer Xetra (Alpha Vantage).
     Kursquelle,
+    /// Kursquelle fuer die NYSE (Tiingo). Jede Quelle hat eigene Zeilen: Ein Ergebnis der einen
+    /// sagt nichts ueber den Schluessel der anderen.
+    Tiingo,
     Dachs,
     Maus,
 }
@@ -31,13 +35,14 @@ impl Wer {
     pub fn kurz(self) -> &'static str {
         match self {
             Wer::Kursquelle => "kursquelle",
+            Wer::Tiingo => "tiingo",
             Wer::Dachs => "dachs",
             Wer::Maus => "maus",
         }
     }
 
     pub fn aus_kurz(k: &str) -> Option<Wer> {
-        [Wer::Kursquelle, Wer::Dachs, Wer::Maus]
+        [Wer::Kursquelle, Wer::Tiingo, Wer::Dachs, Wer::Maus]
             .into_iter()
             .find(|w| w.kurz() == k)
     }

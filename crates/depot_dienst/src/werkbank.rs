@@ -185,6 +185,7 @@ pub enum ZeitplanAbgelehnt {
 fn quelle_name(w: Quelle) -> &'static str {
     match w {
         Quelle::Kursquelle => "Kursquelle Alpha Vantage",
+        Quelle::Tiingo => "Kursquelle Tiingo",
         Quelle::Dachs => "Dachs (Claude)",
         Quelle::Maus => "Maus (GPT)",
     }

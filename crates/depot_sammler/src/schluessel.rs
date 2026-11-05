@@ -29,6 +29,17 @@ pub enum Anbieter {
 }
 
 impl Anbieter {
+    /// Alle Quellen mit Schluessel.
+    pub const ALLE: [Anbieter; 2] = [Anbieter::AlphaVantage, Anbieter::Tiingo];
+
+    /// Name im Anbieterprotokoll: je Quelle eigene Zeilen.
+    pub fn protokoll(self) -> depot_journal::anbieter::Wer {
+        match self {
+            Anbieter::AlphaVantage => depot_journal::anbieter::Wer::Kursquelle,
+            Anbieter::Tiingo => depot_journal::anbieter::Wer::Tiingo,
+        }
+    }
+
     /// Die Quelle fuer die Werte einer Boerse, wie `depot_kern::liste::quelle`.
     pub fn fuer(boerse: depot_kern::Boerse) -> Anbieter {
         match boerse {
@@ -237,4 +248,27 @@ impl Zugang {
             .values()
             .fold(text.to_string(), |t, s| s.bereinige(&t))
     }
+}
+
+/// Laedt die Schluessel fuer einen Lauf: **alle** hinterlegten, auch die der Quellen, die dieser
+/// Lauf nicht abruft, damit jede Antwort gegen jeden Schluessel geprueft wird (Maus, Befund 1 zu
+/// #37). Ein fehlender oder unlesbarer Schluessel wird nur gemeldet, wenn ein Wert des Laufs ihn
+/// braucht; dann werden nur dessen Werte nicht abgerufen. Die Meldungen nennen keinen Schluessel.
+pub fn zugang_laden(
+    werte: &[depot_kern::liste::Wert],
+    laden: impl Fn(Anbieter) -> Result<Schluessel, String>,
+) -> (Zugang, Vec<String>) {
+    let mut zugang = Zugang::leer();
+    let mut meldungen = Vec::new();
+    for a in Anbieter::ALLE {
+        match laden(a) {
+            Ok(s) => zugang = zugang.mit(a, s),
+            Err(e) => {
+                if werte.iter().any(|w| Anbieter::fuer(w.boerse) == a) {
+                    meldungen.push(format!("{}: {e}", a.dienst()));
+                }
+            }
+        }
+    }
+    (zugang, meldungen)
 }
