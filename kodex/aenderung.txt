@@ -6,6 +6,7 @@ Cargo.toml
 Cargo.lock
 run.cmd
 kodex/festschreibung.txt
+kodex/freigabe.txt
 crates/depot_berater/
 crates/depot_ki/
 crates/depot_kern/src/grenzen.rs
