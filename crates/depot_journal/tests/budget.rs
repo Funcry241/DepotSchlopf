@@ -60,10 +60,10 @@ const DACHS: BeraterId = BeraterId::Dachs;
 
 #[test]
 fn hoechstkosten_je_aufruf() {
-    assert_eq!(KiDeckel::standard(DACHS).hoechstkosten(), Some(Cent(41)));
+    assert_eq!(KiDeckel::standard(DACHS).hoechstkosten(), Some(Cent(24)));
     assert_eq!(
         KiDeckel::standard(BeraterId::Maus).hoechstkosten(),
-        Some(Cent(23))
+        Some(Cent(12))
     );
 }
 
@@ -227,8 +227,8 @@ fn eingabe_deckel() {
     let Some(erl) = erl else {
         panic!("keine Erlaubnis");
     };
-    assert!(erl.eingabe_passt(&"a".repeat(100_000)));
-    assert!(!erl.eingabe_passt(&"a".repeat(100_001)));
+    assert!(erl.eingabe_passt(&"a".repeat(40_000)));
+    assert!(!erl.eingabe_passt(&"a".repeat(40_001)));
 }
 
 fn reservieren(k: &mut Journal, t: Datum, zyklus: u32) {

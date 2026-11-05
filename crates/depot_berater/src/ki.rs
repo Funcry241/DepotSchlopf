@@ -1,8 +1,10 @@
 //! Dachs und Maus als Berater: eine Frage, ein Aufruf, eine Kostenpruefung danach.
 //!
-//! Vor jedem Aufruf hat das Journal die Hoechstkosten gebucht (`AufrufErlaubnis`). Nach jedem
+//! Vor jedem Aufruf hat das Journal die Hoechstkosten gebucht (`AufrufErlaubnis`); die Anfrage
+//! ist vorher auf `max_token_ein` Bytes begrenzt, die Antwort auf `max_token_aus`, und es gibt
+//! keine Werkzeuge des Anbieters. Nach jedem
 //! Aufruf rechnet der Berater aus dem Verbrauch, den der Anbieter meldet, die tatsaechlichen
-//! Kosten. Liegen sie ueber der Reservierung, sind mehr Suchen oder mehr Ausgabe-Token
+//! Kosten. Liegen sie ueber der Reservierung, gab es eine Suche, sind mehr Token
 //! verbraucht als erlaubt, oder ist der Verbrauch unbekannt, schreibt er die Sperrdatei
 //! (`daten/ki.halt`). Solange sie liegt, ist keine KI angebunden: Niemand wird gefragt, bis
 //! Wolfgang den Grund geprueft und die Datei geloescht hat.
@@ -123,11 +125,14 @@ impl<N: Netz> KiBerater<N> {
             return ohne("KI gesperrt".into());
         }
         let deckel = *erlaubnis.deckel();
-        // Eingabe vor dem Senden begrenzen: Anweisung und Frage zusammen.
-        if !erlaubnis.eingabe_passt(&format!("{system}{frage}")) {
-            return ohne("Eingabe ueber dem Deckel, nicht gesendet".into());
-        }
+        // Die ganze Anfrage vor dem Senden begrenzen (K25-01). Ein Token umfasst mindestens ein
+        // Byte, und ohne Werkzeuge fuegt der Anbieter nichts ein; die Anfrage enthaelt mehr
+        // Bytes als ihre Rahmenzeichen Token. So sind die reservierten Hoechstkosten eine
+        // gesicherte Obergrenze.
         let inhalt = self.anbieter.anfrage(&deckel, system, frage);
+        if !erlaubnis.eingabe_passt(&inhalt) {
+            return ohne("Anfrage ueber dem Deckel, nicht gesendet".into());
+        }
         let mut bearer = String::new();
         let kopf = self.anbieter.kopf(schluessel.als_str(), &mut bearer);
         let r = self
@@ -171,17 +176,18 @@ impl<N: Netz> KiBerater<N> {
         };
         let v = gelesen.verbrauch;
         let reserviert = erlaubnis.buchung().reserviert;
-        let ist = deckel.kosten_ist(v.token_ein, v.token_aus, v.suchen);
+        let ist = deckel.kosten_ist(v.token_ein, v.token_aus);
         let kosten = kostenzeile(ist.map(|c| c.0), reserviert.0, v);
         let ueber = match ist {
             None => Some("Kosten nicht berechenbar".to_string()),
             Some(c) if c > reserviert => {
                 Some(format!("{} Cent ueber {} reserviert", c.0, reserviert.0))
             }
-            Some(_) if v.suchen > u64::from(deckel.max_suchen()) => Some(format!(
-                "{} Suchen ueber {} erlaubt",
-                v.suchen,
-                deckel.max_suchen()
+            Some(_) if v.suchen > 0 => Some(format!("{} Suchen, keine erlaubt", v.suchen)),
+            Some(_) if v.token_ein > u64::from(deckel.max_token_ein()) => Some(format!(
+                "{} Eingabe-Token ueber {} erlaubt",
+                v.token_ein,
+                deckel.max_token_ein()
             )),
             Some(_) if v.token_aus > u64::from(deckel.max_token_aus()) => Some(format!(
                 "{} Ausgabe-Token ueber {} erlaubt",
@@ -240,7 +246,7 @@ impl<N: Netz> Berater for KiBerater<N> {
     }
 
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
-        let system = frage::system(self.wer, &self.grenzen, erlaubnis.deckel().max_suchen());
+        let system = frage::system(self.wer, &self.grenzen);
         let f = frage::vorschlag_frage(lage, &self.universum);
         let e = self.fragen(&erlaubnis, &system, &f);
         match e
@@ -269,7 +275,7 @@ impl<N: Netz> Berater for KiBerater<N> {
         lage: &Lage<'_>,
         vorschlag: &Vorschlag,
     ) -> Urteil {
-        let system = frage::system(self.wer, &self.grenzen, erlaubnis.deckel().max_suchen());
+        let system = frage::system(self.wer, &self.grenzen);
         let f = frage::urteil_frage(lage, &self.universum, vorschlag);
         let e = self.fragen(&erlaubnis, &system, &f);
         match e

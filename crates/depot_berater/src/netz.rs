@@ -3,10 +3,10 @@
 
 use std::time::Duration;
 
-/// Hoechstgroesse einer Antwort. Eine Antwort mit Suchergebnissen hat einige 100 KB.
+/// Hoechstgroesse einer Antwort. 16.000 Ausgabe-Token haben weit weniger.
 pub const MAX_ANTWORT: u64 = 4 * 1024 * 1024;
-/// Zeitgrenze eines Aufrufs vom Verbindungsaufbau bis zum letzten Byte. Mit Websuche dauert
-/// eine Antwort laenger als ein Kursabruf.
+/// Zeitgrenze eines Aufrufs vom Verbindungsaufbau bis zum letzten Byte. Mit Denken dauert eine
+/// Antwort laenger als ein Kursabruf.
 pub const ZEITGRENZE: Duration = Duration::from_secs(300);
 
 /// Was beim Versand schiefging.

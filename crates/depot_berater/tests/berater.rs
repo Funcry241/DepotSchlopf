@@ -72,13 +72,12 @@ fn ok(inhalt: &str) -> Result<Rueckmeldung, NetzFehler> {
     })
 }
 
-/// Eine Antwort von Claude mit Text, Token und Suchen.
+/// Eine Antwort von Claude mit Text, Token und Suchen (erlaubt sind keine).
 fn claude(text: &str, ein: u64, aus: u64, suchen: u64) -> Result<Rueckmeldung, NetzFehler> {
     ok(&format!(
         concat!(
             "{{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[",
-            "{{\"type\":\"server_tool_use\",\"id\":\"s1\",\"name\":\"web_search\",\"input\":{{\"query\":\"SAP\"}}}},",
-            "{{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"s1\",\"content\":[]}},",
+            "{{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"x\"}},",
             "{{\"type\":\"text\",\"text\":{}}}],",
             "\"stop_reason\":\"end_turn\",",
             "\"usage\":{{\"input_tokens\":{},\"cache_creation_input_tokens\":0,",
@@ -92,12 +91,12 @@ fn claude(text: &str, ein: u64, aus: u64, suchen: u64) -> Result<Rueckmeldung, N
     ))
 }
 
-/// Eine Antwort von GPT mit Text, Token und einer Suche.
+/// Eine Antwort von GPT mit Text und Token, ohne Suche.
 fn gpt(text: &str, ein: u64, aus: u64) -> Result<Rueckmeldung, NetzFehler> {
     ok(&format!(
         concat!(
             "{{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[",
-            "{{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\"}},",
+            "{{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":[]}},",
             "{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[",
             "{{\"type\":\"output_text\",\"text\":{}}}]}}],",
             "\"usage\":{{\"input_tokens\":{},\"output_tokens\":{}}}}}"
@@ -196,7 +195,7 @@ fn dachs_schlaegt_vor_und_die_kosten_stehen_dabei() -> Result<(), String> {
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();
     netz.antworten
-        .push_back(claude(VORSCHLAG, 20_000, 1_500, 1));
+        .push_back(claude(VORSCHLAG, 20_000, 1_500, 0));
     let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
     assert!(dachs.angebunden());
     let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
@@ -204,11 +203,11 @@ fn dachs_schlaegt_vor_und_die_kosten_stehen_dabei() -> Result<(), String> {
     let v = some(antwort.vorschlag.clone(), "Vorschlag")?;
     assert_eq!(v.berater, BeraterId::Dachs);
     assert_eq!(v.zielgewichte_bp.get(&sap()?), Some(&3_000));
-    // 20.000 x 2 $ + 1.500 x 10 $ je Mio. + 1 Suche zu 1 Cent = 6,5 Cent, aufgerundet 7.
+    // 20.000 x 2 $ + 1.500 x 10 $ je Mio. = 5,5 Cent, aufgerundet 6.
     assert!(
         antwort
             .einschaetzung
-            .contains("Kosten 7 von 41 Cent reserviert"),
+            .contains("Kosten 6 von 24 Cent reserviert"),
         "{}",
         antwort.einschaetzung
     );
@@ -220,13 +219,12 @@ fn dachs_schlaegt_vor_und_die_kosten_stehen_dabei() -> Result<(), String> {
             .any(|(k, w)| k == "x-api-key" && w == SCHLUESSEL)
     );
     assert!(!inhalt.contains(SCHLUESSEL), "Schluessel nur im Kopf");
+    assert!(!inhalt.contains("tools"), "keine Werkzeuge: {inhalt}");
     for teil in [
         "\"model\":\"claude-sonnet-5-5\"",
         "\"max_tokens\":16000",
         "\"thinking\":{\"type\":\"adaptive\"}",
         "\"effort\":\"medium\"",
-        "\"max_uses\":5",
-        "web_search_20260209",
         "DE0007164600",
         "Quartalszahlen",
     ] {
@@ -258,8 +256,8 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
     let e = ort.erlaubnis(BeraterId::Maus, 1)?;
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
     assert!(u.zustimmung, "{u:?}");
-    // 10.000 x 1 $ + 800 x 5 $ je Mio. + 1 Suche = 2,4 Cent, aufgerundet 3.
-    assert!(u.begruendung.contains("Kosten 3 von 23 Cent"), "{u:?}");
+    // 10.000 x 1 $ + 800 x 5 $ je Mio. = 1,4 Cent, aufgerundet 2.
+    assert!(u.begruendung.contains("Kosten 2 von 12 Cent"), "{u:?}");
     let e = ort.erlaubnis(BeraterId::Maus, 1)?;
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
     assert!(!u.zustimmung, "\"ja\" ist keine Zustimmung: {u:?}");
@@ -270,11 +268,11 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
             .any(|(k, w)| k == "authorization" && w == &format!("Bearer {SCHLUESSEL}"))
     );
     assert!(!inhalt.contains(SCHLUESSEL));
+    assert!(!inhalt.contains("tools"), "keine Werkzeuge: {inhalt}");
     for teil in [
         "\"model\":\"gpt-6.1-terra\"",
         "\"max_output_tokens\":16000",
         "\"reasoning\":{\"effort\":\"medium\"}",
-        "\"max_tool_calls\":5",
         "\"store\":false",
     ] {
         assert!(inhalt.contains(teil), "{teil} fehlt in {inhalt}");
@@ -286,15 +284,15 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
 fn kosten_ueber_der_reservierung_sperren_alle_kis() -> Result<(), String> {
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();
-    // 200.000 x 2 $ + 1.500 x 10 $ + 2 Suchen = 43,5 Cent, aufgerundet 44 > 41 reserviert.
+    // 200.000 x 2 $ + 1.500 x 10 $ = 41,5 Cent, aufgerundet 42 > 24 reserviert.
     netz.antworten
-        .push_back(claude(VORSCHLAG, 200_000, 1_500, 2));
+        .push_back(claude(VORSCHLAG, 200_000, 1_500, 0));
     let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
     let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
     let antwort = mit_lage(|l| dachs.vorschlagen(e, l))?;
     assert!(antwort.vorschlag.is_none(), "{antwort:?}");
     assert!(
-        antwort.einschaetzung.contains("44 Cent ueber 41"),
+        antwort.einschaetzung.contains("42 Cent ueber 24"),
         "{antwort:?}"
     );
     assert!(ort.sperre().exists(), "Sperrdatei geschrieben");
@@ -306,15 +304,18 @@ fn kosten_ueber_der_reservierung_sperren_alle_kis() -> Result<(), String> {
 }
 
 #[test]
-fn zu_viele_suchen_sperren() -> Result<(), String> {
+fn jede_suche_sperrt() -> Result<(), String> {
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();
-    netz.antworten.push_back(claude(VORSCHLAG, 1_000, 100, 6));
+    netz.antworten.push_back(claude(VORSCHLAG, 1_000, 100, 1));
     let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
     let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
     let antwort = mit_lage(|l| dachs.vorschlagen(e, l))?;
     assert!(antwort.vorschlag.is_none());
-    assert!(antwort.einschaetzung.contains("6 Suchen"), "{antwort:?}");
+    assert!(
+        antwort.einschaetzung.contains("1 Suchen, keine erlaubt"),
+        "{antwort:?}"
+    );
     assert!(ort.sperre().exists());
     Ok(())
 }
@@ -448,7 +449,7 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
     let mut netz_dachs = Attrappe::default();
     netz_dachs
         .antworten
-        .push_back(claude(VORSCHLAG, 20_000, 1_500, 1));
+        .push_back(claude(VORSCHLAG, 20_000, 1_500, 0));
     let mut netz_maus = Attrappe::default();
     netz_maus.antworten.push_back(gpt(
         "{\"zustimmung\": true, \"begruendung\": \"Zahlen belegt\"}",
@@ -554,5 +555,44 @@ fn zurueckgegebener_schluessel_gelangt_nie_ins_ergebnis() -> Result<(), String> 
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
     assert!(!u.zustimmung, "{u:?}");
     assert!(!format!("{u:?}").contains(SCHLUESSEL), "{u:?}");
+    Ok(())
+}
+
+/// Maus' Gegenprobe zu #25 (K25-01): Die Reservierung muss eine gesicherte Obergrenze sein.
+/// Ohne Werkzeuge fuegt der Anbieter nichts ein; eine Anfrage ueber dem Deckel wird gar nicht
+/// gesendet, und meldet der Anbieter trotzdem mehr Eingabe-Token, sperrt der Berater.
+#[test]
+fn reservierung_ist_eine_gesicherte_obergrenze() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut dachs = berater(&ort, BeraterId::Dachs, Attrappe::default())?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let max = e.deckel().max_token_ein();
+    let lang = vec!["x".repeat(usize::try_from(max).map_err(|e| e.to_string())?)];
+    let topf = vorbedingung(Topf::neu(TopfId::A, Cent(500_000)), "Topf")?;
+    let kurse = kurse()?;
+    let lage = Lage {
+        datum: tag()?,
+        topf: &topf,
+        kurse: &kurse,
+        ereignisse: &lang,
+    };
+    let a = dachs.vorschlagen(e, &lage);
+    assert!(a.vorschlag.is_none());
+    assert!(a.einschaetzung.contains("nicht gesendet"), "{a:?}");
+    assert!(dachs.netz().gesendet.is_empty(), "nichts gesendet");
+    assert!(!ort.sperre().exists());
+
+    // Meldet der Anbieter mehr Eingabe-Token als erlaubt, sperrt der Berater, auch wenn die
+    // Kosten noch unter der Reservierung liegen.
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(claude(VORSCHLAG, u64::from(max).saturating_add(1), 0, 0));
+    let mut maus_ort = Ort::neu()?;
+    let mut d = berater(&maus_ort, BeraterId::Dachs, netz)?;
+    let e = maus_ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| d.vorschlagen(e, l))?;
+    assert!(a.vorschlag.is_none(), "{a:?}");
+    assert!(a.einschaetzung.contains("Eingabe-Token"), "{a:?}");
+    assert!(maus_ort.sperre().exists());
     Ok(())
 }

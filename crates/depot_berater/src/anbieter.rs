@@ -1,12 +1,13 @@
 //! Die beiden Anbieter: Anfrage bauen, Antwort lesen. Kein Netz hier.
 //!
-//! - Dachs = Claude (Anthropic, Messages API) mit dem Werkzeug `web_search`.
-//! - Maus = GPT-6.1 Terra (OpenAI, Responses API) mit dem Werkzeug `web_search`.
+//! - Dachs = Claude Sonnet 5.5 (Anthropic, Messages API).
+//! - Maus = GPT-6.1 Terra (OpenAI, Responses API).
 //!
-//! Beide denken mit mittlerer Tiefe (Wolfgang, 05.11.2026). Beide bekommen die Antwortgrenze
-//! `max_token_aus` (Denken eingeschlossen) und die Suchgrenze `max_suchen` aus dem Deckel der
-//! Erlaubnis. Aus jeder Antwort wird der Verbrauch gelesen: Eingabe-Token (mit den
-//! Suchergebnissen, die der Anbieter selbst einfuegt), Ausgabe-Token und Zahl der Suchen.
+//! Beide denken mit mittlerer Tiefe (Wolfgang, 05.11.2026) und bekommen die Antwortgrenze
+//! `max_token_aus` (Denken eingeschlossen) aus dem Deckel der Erlaubnis. Werkzeuge des Anbieters,
+//! auch die Websuche, werden nie freigegeben: Was sie einfuegen, liesse sich vor dem Aufruf nicht
+//! begrenzen (K25-01). Aus jeder Antwort wird der Verbrauch gelesen: Eingabe-Token,
+//! Ausgabe-Token und Zahl der Suchen, die null sein muss.
 
 use depot_kern::BeraterId;
 use depot_ki::KiDeckel;
@@ -110,13 +111,11 @@ impl Anbieter {
                     "\"thinking\":{{\"type\":\"adaptive\"}},",
                     "\"output_config\":{{\"effort\":\"medium\"}},",
                     "\"system\":{},",
-                    "\"tools\":[{{\"type\":\"web_search_20260209\",\"name\":\"web_search\",\"max_uses\":{}}}],",
                     "\"messages\":[{{\"role\":\"user\",\"content\":{}}}]}}"
                 ),
                 zitiere(self.modell()),
                 deckel.max_token_aus(),
                 zitiere(system),
-                deckel.max_suchen(),
                 zitiere(frage)
             ),
             Anbieter::OpenAi => format!(
@@ -124,14 +123,12 @@ impl Anbieter {
                     "{{\"model\":{},\"max_output_tokens\":{},",
                     "\"reasoning\":{{\"effort\":\"medium\"}},",
                     "\"instructions\":{},",
-                    "\"tools\":[{{\"type\":\"web_search\"}}],\"max_tool_calls\":{},",
                     "\"store\":false,",
                     "\"input\":{}}}"
                 ),
                 zitiere(self.modell()),
                 deckel.max_token_aus(),
                 zitiere(system),
-                deckel.max_suchen(),
                 zitiere(frage)
             ),
         }

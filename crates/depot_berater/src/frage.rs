@@ -36,7 +36,7 @@ fn prozent(bp: i64) -> String {
 }
 
 /// Die Anweisung an das Modell, fuer beide Fragen gleich.
-pub fn system(wer: BeraterId, grenzen: &Grenzen, max_suchen: u32) -> String {
+pub fn system(wer: BeraterId, grenzen: &Grenzen) -> String {
     format!(
         "Du bist {wer}, einer von zwei KI-Beratern im Papierhandel von DepotSchlopf. Es geht nur \
 um Papiergeld: echte Kurse, aber kein echtes Geld. Du beobachtest, was in der Welt gerade \
@@ -44,8 +44,8 @@ passiert und was angekuendigt ist (Zahlen, Termine, Treffen, Nachrichten), und r
 du sagst nichts voraus. Handelbar sind nur die genannten Werte. Keine Hebel, keine \
 Leerverkaeufe, keine Derivate. Ausgefuehrt wird zum Schlusskurs des Tages. Das Regelwerk setzt \
 die Grenzen: hoechstens {werte} Werte je Topf, je Wert hoechstens {anteil} des Topfs, der Rest \
-ist Bargeld; Auftraege unter {min} EUR entfallen. Nutze die Websuche fuer aktuelle Nachrichten \
-zu den Werten, hoechstens {max_suchen} Suchen. Begruende knapp und sachlich, auf Deutsch. \
+ist Bargeld; Auftraege unter {min} EUR entfallen. Du hast keine Websuche; entscheide aus den \
+genannten Kursen, Terminen und Nachrichten und aus deinem Wissen. Begruende knapp und sachlich, auf Deutsch. \
 Antworte am Ende ausschliesslich mit dem verlangten JSON-Objekt, ohne weiteren Text.",
         wer = name(wer),
         werte = grenzen.max_werte(),

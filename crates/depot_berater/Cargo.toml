@@ -1,6 +1,6 @@
 [package]
 name = "depot_berater"
-description = "DepotSchlopf: Dachs (Claude) und Maus (GPT) als Berater im Papierhandel, mit Websuche und Kostenpruefung nach jedem Aufruf"
+description = "DepotSchlopf: Dachs (Claude) und Maus (GPT) als Berater im Papierhandel, mit gesicherter Kostengrenze vor und Kostenpruefung nach jedem Aufruf"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
