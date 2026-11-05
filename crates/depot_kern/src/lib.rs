@@ -20,6 +20,7 @@
     clippy::cast_sign_loss
 )]
 
+pub mod abdruck;
 pub mod boerse;
 pub mod depot;
 pub mod devisen;

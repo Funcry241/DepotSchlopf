@@ -1,9 +1,11 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: KI-Aufrufe bei abgebrochener Verbindung (Maus 05.11.2026, Punkt 3 von 3): Eine sicher nicht gesendete Anfrage (NetzFehler::NichtGesendet) sendet der Berater nach 30 und 60 Sekunden erneut, hoechstens dreimal, unter derselben Reservierung; eine vielleicht angekommene (Unklar) nie, die Kostensperre greift und nennt den Grund in Worten. Hinweiszeilen fuer die Live-Ansicht, Erklaerung in der Einrichtung. Kassenbuch, Deckel und Grenzen unveraendert, keine neue Abhaengigkeit. Gestapelt; Pfade gegen die Basis-PR.
+zweck: Nach einem Neustart ohne Cargo starten (Maus 05.11.2026, Punkt 2, Teil 1): run.cmd und run.cmd update vermerken gepruefte Baeume in daten/geprueft.txt; ein mit Cargo gebauter Dienst sichert nach einer Weile seine Programme mit SHA-256-Abdruck nach daten/programm/<baum>/ (nur gepruefter Baum, sauberer Projektordner); DepotSchlopf.cmd prueft den gesicherten Stand vor dem Start mit einem festen PowerShell-Aufruf, sonst baut er mit Cargo. Auftraege laufen aus dem Stand ohne Cargo, das Update weiter mit Gate. Keine Grenze geaendert, keine neue Abhaengigkeit. Gestapelt; Pfade gegen die Basis-PR.
 pfade:
-crates/depot_berater/
+crates/depot_kern/
 crates/depot_dienst/
+crates/depot_lauf/
 docs/
 CHANGELOG.md
+DepotSchlopf.cmd
 kodex/aenderung.txt
