@@ -101,3 +101,22 @@ Wolfgang hat am 05.11.2026 freigegeben, dass Dachs (Claude) und Maus (GPT) über
 | --- | --- | --- |
 | `netz_nur_im_sammler_und_berater` | `crates/depot_kodex/src/quellscan.rs` | Netz in Sammler und Berater erlaubt, in Simulation, Journal und Lauf abgelehnt |
 | `netz_bleibt_im_blatt`, Fall „ueber den Berater“ | `crates/depot_kodex/tests/befunde.rs` | Abhängigkeit vom Berater: abgelehnt |
+
+## Nur lokal lauschen: der Dienst (Oberfläche)
+
+Wolfgang hat am 05.11.2026 freigegeben, dass DepotSchlopf als Dienst mit einer lokalen Weboberfläche läuft, erreichbar nur vom eigenen Rechner („Ja, nur 127.0.0.1“). Das übernimmt das kommende Crate `depot_dienst`. Es steht nicht auf `NETZ_ERLAUBT`, sondern auf einer eigenen, engeren Liste `NETZ_LOKAL`:
+
+- `TcpListener::bind` nur wörtlich auf `Ipv4Addr::LOCALHOST`, als Tupel `(Ipv4Addr::LOCALHOST, port)` oder in `SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)`, jeweils auch mit `std::net::` davor. Direkt danach folgt `,` oder `)`: Die Adresse steht im Quelltext, nie in einer Variable, einer Zeichenkette oder einer Einstellung, und kein Methodenaufruf verändert sie.
+- Angenommene Verbindungen (`TcpStream` aus `accept`) sind erlaubt. Verboten sind `connect`, `connect_timeout`, `UdpSocket`, Unix-Sockets, `ToSocketAddrs`/`to_socket_addrs`, `lookup_host` und jedes Netz-Crate.
+- Kein anderes Crate hängt von `depot_dienst` ab. Jedes andere Crate darf auch lokal nicht lauschen.
+
+Den Schutz der Seite gegen Aufrufe fremder Webseiten (Host- und Origin-Prüfung, Token) bringt `depot_dienst` selbst mit; der Kodex sichert nur, dass nichts von außen den Dienst erreicht und der Dienst nicht hinaus kann.
+
+| Test | Datei | zeigt |
+| --- | --- | --- |
+| `dienst_lauscht_nur_lokal` | `crates/depot_kodex/src/quellscan.rs` | erlaubt: Tupel, `SocketAddrV4::new` mit `std::net::`, angenommene Verbindung; abgelehnt: `UNSPECIFIED`, Zeichenkette, Variable, `LOCALHOST.to_ipv6_mapped()`, `connect`, `UdpSocket`, `to_socket_addrs`, Netz-Crate; lokales Lauschen in `depot_lage` abgelehnt |
+| `netz_bleibt_im_blatt`, Fall „ueber den Dienst“ | `crates/depot_kodex/tests/befunde.rs` | Abhängigkeit vom Dienst: abgelehnt |
+
+Gegenproben, jeweils neu übersetzt: Ohne den Eintrag in `NETZ_LOKAL` scheitern die erlaubten Fälle; ohne die Prüfung von `bind` gehen `UNSPECIFIED`, Zeichenkette und Variable durch; ohne `NETZ_LOKAL` in der Abhängigkeitsprüfung geht „ueber den Dienst“ durch.
+
+Grenze wie beim Sammler: Ein Programmstart über `std::process` bleibt außerhalb der reinen Crates erlaubt und wird in der Durchsicht geprüft.
