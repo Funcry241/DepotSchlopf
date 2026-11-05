@@ -22,7 +22,9 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use depot_kern::{BeraterId, Zeitpunkt};
-use depot_lage::{Hinterlegt, Umgebung, html, lagebild, mit_journal, sperrdateien};
+use depot_lage::{
+    Hinterlegt, Umgebung, anbieterprotokoll, html, ki_halt, lagebild, mit_journal, sperrdateien,
+};
 
 fn wurzel() -> Option<PathBuf> {
     let start = std::env::current_dir().ok()?;
@@ -56,6 +58,7 @@ fn lauf(wurzel: &Path) -> Result<PathBuf, String> {
     let daten = wurzel.join("daten");
     let jetzt = jetzt().ok_or("Uhr liefert keinen Zeitpunkt")?;
     let sperren = sperrdateien(&daten);
+    let (anbieter, anbieter_unlesbar) = anbieterprotokoll(&daten);
     let l = mit_journal(&daten, |journal| {
         lagebild(&Umgebung {
             jetzt,
@@ -66,6 +69,9 @@ fn lauf(wurzel: &Path) -> Result<PathBuf, String> {
                 (BeraterId::Maus, Hinterlegt::Unbekannt),
             ],
             sperren,
+            anbieter,
+            anbieter_unlesbar,
+            ki_halt: ki_halt(&daten),
         })
     });
     fs::create_dir_all(&daten).map_err(|e| format!("{}: {e}", daten.display()))?;

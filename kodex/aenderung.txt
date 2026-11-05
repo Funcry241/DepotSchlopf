@@ -1,11 +1,12 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Update mit Rueckfall (Wolfgang 05.11.2026: gepruefter Update-Ablauf mit Rueckfall, ohne Konsole; Maus: Updates gegen fremde Webseiten schuetzen). depot_lauf: run.cmd update pruefen (git fetch origin main, nennt neue Staende) und run.cmd update (neuer Stand Byte fuer Byte in eigene Kopie, ganzes Gate mit Basis seines Vorgaengers, Kopie danach unveraendert; nur dann merge --ff-only; nur auf main, nichts Lokales geaendert, keine Sperre, nie ein abgelehnter Stand; daten/update_offen.txt vor dem Vorruecken). depot_dienst: Knoepfe in der Einrichtung (POST mit Host, Herkunft, Token), Update nur allein und einmal je Start, Neustart mit Code 3 erst wenn nichts mehr wartet, Bestaetigung nach 15 s, Kennung des Starts laesst die Seite neu laden. Neues Programm depot_waechter im selben Crate hinter DepotSchlopf.cmd: Neustart, Rueckfall mit git reset --keep und Ablehnungsliste. DepotSchlopf.cmd und run.cmd lesen ihren Rest als einen Block. Fassung 2 nach Maus: Stand auf Probe muss sich selbst bestaetigen; jedes Ende davor (auch Code 0) und Ablauf der Frist von 120 s fallen zurueck, der Waechter startet den Dienst direkt und beendet ihn bei Fristablauf. Keine neue Abhaengigkeit, keine Grenze, kein Netz-Crate; git fetch laeuft als eigener Git-Prozess.
+zweck: Fehlerfaelle alltagstauglich (Maus 05.11.2026 auf Wolfgangs Frage zu Fehlbedienung, KI-Limits, fehlender Konfiguration). depot_journal::anbieter: Anbieterprotokoll daten/anbieter.txt (nur Anzeige, streng gelesen, ohne Schluessel und Antworttexte). depot_berater und depot_sammler vermerken jedes Ergebnis (Limit mit retry-after, Guthaben, Schluessel abgelehnt, ueberlastet, Netz, unklar, Kosten) samt tatsaechlicher Kosten; kein automatischer Wiederholversuch. depot_lage: Schluesselstand fehlt/hinterlegt/geprueft/abgelehnt ohne Testaufrufe, Anbieterhinweis mit naechstem Versuch, Gesamtstatus bereit/ohne KI/pausiert/Eingriff noetig, Budget verbraucht/reserviert/verfuegbar, Punkt KI-Kostenschutz. depot_dienst: Stand je Schluessel, Gesamtstatus mit Zeitplan, gefuehrte Aufhebung von ki.halt (Bestaetigung, Abdruck der gesehenen Fassung, nur ohne laufenden oder wartenden Auftrag, Grund in daten/ki_halt_aufgehoben.txt; Kassenbuch und Kostenpruefung unveraendert). Zeitplan ab Werk aus (Maus: Betrieb erst nach bewusstem Einschalten). Fassung 2 nach Maus: vollstaendig bereit nur mit fertiger Einrichtung (Abhilfe::braucht_menschen); Pause des Anbieters wird vor der Reservierung und vor dem Senden eingehalten (anbieter::pausiert, auch Limit im Lauf, unlesbares Protokoll = kein Aufruf). Keine neue Abhaengigkeit, keine Grenze, kein Netz-Crate.
 pfade:
-DepotSchlopf.cmd
-run.cmd
+crates/depot_journal/
+crates/depot_berater/
+crates/depot_sammler/
+crates/depot_lage/
 crates/depot_dienst/
-crates/depot_lauf/
 docs/
 CHANGELOG.md
 README.md

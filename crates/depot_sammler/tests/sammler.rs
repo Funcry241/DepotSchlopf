@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use depot_journal::{Journal, JournalFehler};
+use depot_journal::{Journal, JournalFehler, anbieter};
 use depot_kern::{Cent, Datum, Herkunft, Preis, Zeitpunkt};
 use depot_regelwerk::DatenFehler;
 use depot_sammler::liste::pruefe_liste;
@@ -340,6 +340,10 @@ fn hinweis_beendet_den_lauf() -> Result<(), String> {
     ));
     assert_eq!(b.handelstag, None);
     assert!(!b.verwendbar());
+    assert_eq!(
+        depot_sammler::einordnen(&b),
+        Some(anbieter::Ergebnis::Limit)
+    );
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert!(j.stand().kurse().is_empty());
     Ok(())
@@ -372,6 +376,8 @@ fn falsches_kuerzel_nur_fuer_seinen_wert() -> Result<(), String> {
         .ok_or("Vorbedingung")?;
     assert!(b.pruefung.contains(&DatenFehler::KursFehlt(sap)));
     assert!(!b.verwendbar());
+    // Ein Kurs kam an: Der Schluessel gilt.
+    assert_eq!(depot_sammler::einordnen(&b), Some(anbieter::Ergebnis::Ok));
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert_eq!(j.stand().kurse().len(), 2);
     Ok(())
@@ -529,5 +535,27 @@ fn halber_cent_wird_belegt() -> Result<(), String> {
     let text = vorbedingung(fs::read_to_string(&journal), "Journal lesen")?;
     assert!(text.contains(";4115.5;"), "{text}");
     assert!(text.contains(";4148;"), "{text}");
+    Ok(())
+}
+
+/// Lehnt die Quelle den Schluessel bei jedem Wert ab, steht das als abgelehnt im Protokoll.
+#[test]
+fn ungueltiger_schluessel_wird_als_abgelehnt_erkannt() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    let werte = zwei_werte()?;
+    let falsch = "{\n    \"Error Message\": \"the parameter apikey is invalid or missing. Please claim your free API key.\"\n}";
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(falsch)), ("MBG.DEX", Ok(falsch))]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        vec![utc(11, 4, 16, 40)?, utc(11, 4, 16, 41)?],
+        &werte,
+    )?
+    .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert_eq!(
+        depot_sammler::einordnen(&b),
+        Some(anbieter::Ergebnis::Abgelehnt)
+    );
     Ok(())
 }

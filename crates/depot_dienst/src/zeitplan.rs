@@ -22,10 +22,12 @@ pub struct Zeitplan {
 }
 
 impl Default for Zeitplan {
-    /// Termine 17:40, Kurse 17:45 (nach dem Xetra-Schluss um 17:35), dann der Papiertag.
+    /// Termine 17:40, Kurse 17:45 (nach dem Xetra-Schluss um 17:35), dann der Papiertag, aber
+    /// **aus**: Der Betrieb von selbst beginnt erst, wenn der Mensch ihn in der Einrichtung
+    /// bewusst einschaltet. Ein erster neugieriger Start loest so keinen KI-Aufruf aus.
     fn default() -> Zeitplan {
         Zeitplan {
-            an: true,
+            an: false,
             termine: (17, 40),
             kurse: (17, 45),
             papier_danach: true,

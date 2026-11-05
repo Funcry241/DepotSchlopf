@@ -78,10 +78,33 @@ td.z,th.z{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 ol.gespraech{list-style:none;padding:0;margin:0}ol.gespraech li{padding:6px 0;\
 border-bottom:1px solid var(--linie)}ol.gespraech b{display:inline-block;min-width:90px}";
 
-fn kopf(l: &Lagebild, s: &mut String) {
+fn kopf(l: &Lagebild, mit_betrieb: bool, s: &mut String) {
+    if !mit_betrieb {
+        let _ = write!(
+            s,
+            "<section><div class=\"kopf {}\">{}</div><div class=\"leise\">Stand {}</div></section>",
+            ampel_klasse(l.gesamt),
+            maskiere(&l.naechster_schritt),
+            maskiere(&zeit_text(l.jetzt))
+        );
+        return;
+    }
     let _ = write!(
         s,
-        "<section><div class=\"kopf {}\">{}</div><div class=\"leise\">Stand {}</div></section>",
+        "<section id=\"betrieb\"><div class=\"kopf {}\">{}</div>",
+        l.betrieb.klasse(),
+        maskiere(l.betrieb.titel())
+    );
+    if !l.betrieb.gruende().is_empty() {
+        s.push_str("<ul>");
+        for g in l.betrieb.gruende() {
+            let _ = write!(s, "<li>{}</li>", maskiere(g));
+        }
+        s.push_str("</ul>");
+    }
+    let _ = write!(
+        s,
+        "<div class=\"{}\">{}</div><div class=\"leise\">Stand {}</div></section>",
         ampel_klasse(l.gesamt),
         maskiere(&l.naechster_schritt),
         maskiere(&zeit_text(l.jetzt))
@@ -113,8 +136,9 @@ fn budget(l: &Lagebild, s: &mut String) {
     }
     s.push_str(
         "<section><h2>KI-Budget</h2><div class=\"breit\"><table><tr><th>KI</th>\
-         <th>Status</th><th class=\"z\">Heute</th><th class=\"z\">Monat</th>\
-         <th class=\"z\">Rest Monat</th><th class=\"z\">Jahr</th><th class=\"z\">je Aufruf</th>\
+         <th>Status</th><th class=\"z\">Verbraucht im Monat</th>\
+         <th class=\"z\">Reserviert im Monat</th><th class=\"z\">Verfügbar im Monat</th>\
+         <th class=\"z\">Heute</th><th class=\"z\">Jahr</th><th class=\"z\">je Aufruf</th>\
          </tr>",
     );
     for b in &l.budget {
@@ -123,31 +147,42 @@ fn budget(l: &Lagebild, s: &mut String) {
             BudgetStatus::Gesperrt(_) => "halt",
             _ => "offen",
         };
+        let unbekannt = if b.monat_unbekannt > 0 {
+            format!(" · {} Aufrufe unbekannt", b.monat_unbekannt)
+        } else {
+            String::new()
+        };
         let _ = write!(
             s,
             "<tr><td>{}</td><td class=\"{klasse}\">{}</td>\
+             <td class=\"z\">{}<br><span class=\"leise\">{} Aufrufe abgerechnet{unbekannt}</span></td>\
+             <td class=\"z\">{} von {}<br><span class=\"leise\">{}/{} Aufrufe</span></td>\
+             <td class=\"z\"><b>{}</b></td>\
              <td class=\"z\">{} · {}/{} Aufrufe</td>\
-             <td class=\"z\">{} von {} · {}/{} Aufrufe</td><td class=\"z\">{}</td>\
              <td class=\"z\">{} von {}</td><td class=\"z\">{}</td></tr>",
             berater_text(b.berater),
             maskiere(&b.status.text()),
-            euro(b.heute_gebucht),
-            b.heute_aufrufe,
-            b.heute_aufrufe_max,
+            euro(b.monat_verbraucht),
+            b.monat_abgerechnet,
             euro(b.monat_gebucht),
             euro(b.monat_grenze),
             b.monat_aufrufe,
             b.monat_aufrufe_max,
             euro(b.monat_rest),
+            euro(b.heute_gebucht),
+            b.heute_aufrufe,
+            b.heute_aufrufe_max,
             euro(b.jahr_gebucht),
             euro(b.jahr_grenze),
             geld(b.je_aufruf),
         );
     }
     s.push_str(
-        "</table></div><p class=\"leise\">Gebucht sind die Höchstkosten jedes reservierten \
-         Aufrufs, direkt aus dem KI-Kassenbuch im Journal. Die tatsächlichen Kosten folgen mit \
-         der Anbindung der Berater.</p></section>",
+        "</table></div><p class=\"leise\"><b>Verbraucht</b> ist, was die Anbieter je Aufruf \
+         gemeldet haben (daten/anbieter.txt). <b>Reserviert</b> sind die Höchstkosten jedes \
+         Aufrufs im KI-Kassenbuch des Journals; damit rechnet der Kostenschutz, auch wenn \
+         weniger verbraucht wurde. <b>Verfügbar</b> ist die Monatsgrenze minus Reserviertes: \
+         So viel darf in diesem Monat noch reserviert werden.</p></section>",
     );
 }
 
@@ -261,8 +296,13 @@ fn grenzen(l: &Lagebild, s: &mut String) {
 /// Die Abschnitte des Lagebilds ohne Seitenrahmen. `knopf` setzt zu jeder Abhilfe ein
 /// Bedienelement; ohne Bedienung `&|_| None`.
 pub fn inhalt(l: &Lagebild, knopf: Knopf<'_>) -> String {
+    inhalt_mit(l, knopf, true)
+}
+
+/// Wie `inhalt`; ohne Gesamtstatus, wenn die Oberflaeche ihn selbst zeigt (mit dem Zeitplan).
+pub fn inhalt_mit(l: &Lagebild, knopf: Knopf<'_>, mit_betrieb: bool) -> String {
     let mut s = String::with_capacity(16_384);
-    kopf(l, &mut s);
+    kopf(l, mit_betrieb, &mut s);
     punkte(l, knopf, &mut s);
     budget(l, &mut s);
     depot(l, &mut s);

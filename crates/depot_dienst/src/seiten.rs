@@ -6,8 +6,9 @@ use std::fmt::Write as _;
 
 use depot_kern::Datum;
 use depot_lage::html::{STIL, maskiere};
-use depot_lage::{Abhilfe, Grenzwert, Hinterlegt, datum_text, zeit_text};
+use depot_lage::{Abhilfe, Betrieb, Grenzwert, SchluesselStand, datum_text, zeit_text};
 
+use crate::kostenschutz;
 use crate::schluessel::Wer;
 use crate::werkbank::{Anlass, Art, Auftrag, Zustand};
 use crate::zeitplan::{Zeitplan, naechster, uhrzeit_text};
@@ -49,6 +50,9 @@ pub fn abhilfe_knopf(token: &str, a: Abhilfe) -> Option<String> {
         Abhilfe::SchluesselKursquelle | Abhilfe::SchluesselBerater(_) => {
             Some("<a href=\"/einrichtung#schluessel\">Zur Einrichtung</a>".into())
         }
+        Abhilfe::KostenschutzPruefen => {
+            Some("<a href=\"/einrichtung#kostenschutz\">Zur Prüfung</a>".into())
+        }
         Abhilfe::Pruefen | Abhilfe::Warten => None,
     }
 }
@@ -68,6 +72,11 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "schluessel" => (
             "gut",
             "Schlüssel in der Anmeldeinformationsverwaltung gespeichert. Er gilt ab dem nächsten Lauf.",
+        ),
+        "schluessel_protokoll" => (
+            "offen",
+            "Schlüssel gespeichert, aber das Anbieterprotokoll war nicht schreibbar. Der Stand \
+             zeigt bis zum nächsten Aufruf den alten Befund.",
         ),
         "schluessel_ungueltig" => (
             "halt",
@@ -102,6 +111,28 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "update_belegt" => (
             "offen",
             "Update nicht eingereiht: Es geht nur, wenn kein anderer Auftrag läuft oder wartet.",
+        ),
+        "kostenschutz_aufgehoben" => (
+            "gut",
+            "Sperre aufgehoben, Grund festgehalten. Die Reservierung bleibt gebucht; jeder \
+             weitere Aufruf durchläuft wieder die Kostenprüfung.",
+        ),
+        "kostenschutz_unbestaetigt" => (
+            "offen",
+            "Nicht aufgehoben: Bitte zuerst bestätigen, dass Sie die Kosten beim Anbieter geprüft haben.",
+        ),
+        "kostenschutz_belegt" => (
+            "offen",
+            "Nicht aufgehoben: Es läuft oder wartet ein Auftrag. Danach erneut versuchen.",
+        ),
+        "kostenschutz_geaendert" => (
+            "halt",
+            "Nicht aufgehoben: Die Sperre hat sich inzwischen geändert. Bitte den neuen Grund prüfen.",
+        ),
+        "kostenschutz_frei" => ("gut", "Es liegt keine Sperre des Kostenschutzes vor."),
+        "kostenschutz_fehler" => (
+            "halt",
+            "Nicht aufgehoben: Datei nicht les- oder schreibbar. Die Sperre gilt weiter.",
         ),
         _ => return None,
     })
@@ -301,9 +332,53 @@ fn update_hinweis(z: &Zustand) -> String {
     }
 }
 
+/// Der Gesamtstatus: der des Lagebilds, ergaenzt um den Zeitplan des Dienstes. `None`, solange
+/// das Lagebild noch nicht berechnet ist.
+pub fn gesamtstatus(z: &Zustand) -> Option<Betrieb> {
+    let b = z.lage.as_ref()?.betrieb.clone();
+    let zeitplan_fehler = z
+        .erledigt_fehler
+        .as_ref()
+        .or(z.zeitplan_fehler.as_ref())
+        .map(|f| format!("Zeitplan: {f}. Datei prüfen oder löschen, dann Dienst neu starten."));
+    Some(match (b, zeitplan_fehler) {
+        (Betrieb::EingriffNoetig(mut g), Some(f)) => {
+            g.push(f);
+            Betrieb::EingriffNoetig(g)
+        }
+        (_, Some(f)) => Betrieb::EingriffNoetig(vec![f]),
+        (Betrieb::Bereit, None) if !z.zeitplan.an => Betrieb::Pausiert(vec![
+            "Zeitplan aus: Es läuft nur, was von Hand gestartet wird. Einschalten unter Einrichtung."
+                .into(),
+        ]),
+        (b, None) => b,
+    })
+}
+
+fn gesamtstatus_teil(z: &Zustand) -> String {
+    let Some(b) = gesamtstatus(z) else {
+        return String::new();
+    };
+    let mut s = format!(
+        "<section id=\"betrieb\"><div class=\"kopf {}\">{}</div>",
+        b.klasse(),
+        maskiere(b.titel())
+    );
+    if !b.gruende().is_empty() {
+        s.push_str("<ul>");
+        for g in b.gruende() {
+            let _ = write!(s, "<li>{}</li>", maskiere(g));
+        }
+        s.push_str("</ul>");
+    }
+    s.push_str("</section>");
+    s
+}
+
 /// Der Inhalt der Live-Seite (auch `/teil/live`).
 pub fn live(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
     let mut s = marke(start);
+    s.push_str(&gesamtstatus_teil(z));
     s.push_str(&update_hinweis(z));
     s.push_str(&taetigkeit(z, heute));
     match &z.lage {
@@ -325,22 +400,15 @@ pub fn status(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
         .map(|l| l.naechster_schritt.clone())
         .unwrap_or_default();
     format!(
-        "{}<section>{}<div class=\"kopf\">{}</div><div>{}</div>\
+        "{}{}<section>{}<div class=\"kopf\">{}</div><div>{}</div>\
          <div class=\"leise\">Nächster geplanter Lauf: {}</div></section>",
         marke(start),
+        gesamtstatus_teil(z),
         update_hinweis(z),
         maskiere(&jetzt),
         maskiere(&lage),
         maskiere(&naechster_text(z, heute))
     )
-}
-
-fn hinterlegt_text(h: Hinterlegt) -> (&'static str, &'static str) {
-    match h {
-        Hinterlegt::Ja => ("gut", "hinterlegt"),
-        Hinterlegt::Nein => ("halt", "fehlt"),
-        Hinterlegt::Unbekannt => ("offen", "unbekannt (nur unter Windows)"),
-    }
 }
 
 fn regel(w: Wer) -> &'static str {
@@ -353,7 +421,10 @@ fn regel(w: Wer) -> &'static str {
 /// Was die Einrichtung ueber Gespeichertes weiss.
 #[derive(Clone, Debug)]
 pub struct Einrichtung {
-    pub schluessel: Vec<(Wer, Hinterlegt)>,
+    /// Stand je Schluessel aus Anmeldeverwaltung und Anbieterprotokoll.
+    pub schluessel: Vec<(Wer, SchluesselStand)>,
+    /// Inhalt von `daten/ki.halt`, falls die Sperre des Kostenschutzes liegt.
+    pub ki_halt: Result<Option<String>, String>,
     /// `Some(true)`: Datei stimmt mit dem aktiven Zeitplan ueberein; `Some(false)`: weicht ab
     /// oder ist unlesbar; `None`: keine Datei (Voreinstellung).
     pub zeitplan_gespeichert: Option<bool>,
@@ -369,12 +440,14 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
     s.push_str(
         "<section id=\"schluessel\"><h2>Schlüssel</h2><p class=\"leise\">Gespeichert wird nur in \
          der Windows-Anmeldeinformationsverwaltung, nie im Projektordner. Die Seite zeigt keinen \
-         Schlüssel, nur ob einer hinterlegt ist. <b>Speichern heißt hier zugleich aktiv:</b> \
-         Der nächste Lauf liest ihn.</p><div class=\"breit\"><table>\
+         Schlüssel, nur ob einer hinterlegt ist und was der Anbieter beim letzten Aufruf dazu \
+         sagte. Geprüft wird nur bei echten Läufen, nie mit eigenen, kostenpflichtigen \
+         Testaufrufen. <b>Speichern heißt hier zugleich aktiv:</b> Der nächste Lauf liest ihn.</p><div class=\"breit\"><table>\
          <tr><th>Wofür</th><th>Stand</th><th>Neu hinterlegen</th></tr>",
     );
-    for (w, h) in &e.schluessel {
-        let (klasse, text) = hinterlegt_text(*h);
+    for (w, st) in &e.schluessel {
+        let klasse = st.klasse();
+        let text = maskiere(&st.text());
         let _ = write!(
             s,
             "<tr><td>{}<br><span class=\"leise\">{}</span></td>\
@@ -393,6 +466,47 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
         );
     }
     s.push_str("</table></div></section>");
+}
+
+fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
+    s.push_str("<section id=\"kostenschutz\"><h2>Sperre des Kostenschutzes</h2>");
+    let inhalt = match &e.ki_halt {
+        Ok(None) => {
+            s.push_str(
+                "<p><span class=\"gut\">frei</span>: Keine Sperre. Jeder KI-Aufruf durchläuft \
+                 trotzdem die Kostenprüfung.</p></section>",
+            );
+            return;
+        }
+        Ok(Some(t)) => t,
+        Err(f) => {
+            let _ = write!(
+                s,
+                "<p class=\"halt\">{}. Die KI wird nicht gefragt, bis die Datei lesbar ist.</p></section>",
+                maskiere(f)
+            );
+            return;
+        }
+    };
+    let _ = write!(
+        s,
+        "<p><span class=\"halt\">gesperrt</span>: Ein KI-Aufruf hat mehr gekostet als \
+         reserviert, oder seine Kosten sind unbekannt. Bis zur Prüfung fragt der Papiertag keine \
+         KI.</p><pre>{}</pre>\
+         <p class=\"leise\">So prüfen: im Konto des Anbieters die Kosten des genannten Aufrufs \
+         ansehen. Aufheben ändert nichts am Kassenbuch: Die Reservierung bleibt gebucht und zählt \
+         im Budget. Jeder weitere Aufruf durchläuft wieder die Kostenprüfung und sperrt bei einer \
+         Abweichung erneut. Der Grund bleibt in daten/ki_halt_aufgehoben.txt.</p>\
+         <form method=\"post\" action=\"/kostenschutz\">\
+         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
+         <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
+         Ich habe die Kosten beim Anbieter geprüft.</label>\
+         <button type=\"submit\">Sperre aufheben</button></form></section>",
+        maskiere(inhalt),
+        maskiere(token),
+        kostenschutz::abdruck(inhalt)
+    );
 }
 
 fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
@@ -441,7 +555,8 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
             "<span class=\"offen\">Datei weicht vom aktiven Zeitplan ab</span>".into()
         }
         (None, None) => {
-            "<span class=\"offen\">Voreinstellung aktiv, noch nicht gespeichert</span>".into()
+            "<span class=\"offen\">noch nicht gespeichert: aus, bis Sie ihn einschalten</span>"
+                .into()
         }
     };
     let aktiv = if p.an {
@@ -574,6 +689,7 @@ pub fn einrichtung(
         status(start, z, heute)
     );
     schluessel_teil(token, e, &mut s);
+    kostenschutz_teil(token, e, &mut s);
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);
     autostart_teil(token, e, &mut s);
