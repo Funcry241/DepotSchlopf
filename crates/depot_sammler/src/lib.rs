@@ -22,7 +22,7 @@
 )]
 
 pub mod ezb;
-pub mod liste;
+pub use depot_kern::liste;
 pub mod netz;
 pub mod sammeln;
 pub mod schluessel;

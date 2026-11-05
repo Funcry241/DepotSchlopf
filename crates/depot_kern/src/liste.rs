@@ -1,11 +1,13 @@
 //! Die Beobachtungsliste: welche Werte der Sammler unter welchem Kuerzel bei der Quelle abruft.
 //!
-//! Die Liste steht im Code und aendert sich nur mit einer geprueften Aenderung. Sie ist kein
-//! Universum fuer den Handel; sie sagt nur, wessen Schlusskurse beobachtet werden. Alpha Vantage
+//! Die Liste steht im Code und aendert sich nur mit einer geprueften Aenderung. Der Papiertag
+//! handelt nur Werte dieser Liste (`als_universum`): Was keinen geprueften Schlusskurs hat, kann
+//! nicht gehandelt werden. Reine Daten ohne Netz; den Abruf macht `depot_sammler`. Alpha Vantage
 //! fuehrt Xetra-Werte mit der Endung `.DEX`. Die kostenlose Stufe erlaubt 25 Abrufe am Tag; ein
 //! Lauf braucht einen Abruf je Wert.
 
-use depot_kern::{Instrument, InstrumentArt, Isin, Universum};
+use crate::grenzen::Universum;
+use crate::instrument::{Instrument, InstrumentArt, Isin};
 
 /// Name der Quelle im Journal (`kurs;quelle;…`).
 pub const QUELLE: &str = "alphavantage";

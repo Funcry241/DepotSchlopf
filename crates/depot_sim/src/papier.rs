@@ -7,13 +7,19 @@
 //! abgelehnt.
 //!
 //! **Markt:** Tagesorders werden zu den Schlusskursen des Tages ausgefuehrt, wenn der Kurs das
-//! Limit einhaelt, sonst verfallen sie. Jede Ausfuehrung kostet die Gebuehr nach Tarif.
+//! Limit einhaelt, sonst verfallen sie. Jede Ausfuehrung kostet die Gebuehr nach Tarif. Ein
+//! Kurs feiner als ein Cent wird zur sicheren Seite gerundet: ein Kauf zum aufgerundeten, ein
+//! Verkauf zum abgerundeten Cent. Das Limit gilt am exakten Kurs.
+//!
+//! **Datei:** `als_text` und `aus_text` halten das Konto ueber einen Neustart, unabhaengig vom
+//! Journal. Nur so hat der Kontowaechter beim Papiertag etwas, womit er abgleichen kann.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use depot_journal::{Ausfuehrung, Konto, KontoOrder, KontoStatus, Kontoauszug};
-use depot_kern::{Cent, Gebuehren, Grenzen, Isin, Kurse, Topf};
-use depot_regelwerk::{Auftrag, GenehmigterAuftrag, Richtung};
+use depot_kern::{Cent, Gebuehren, Grenzen, Isin, Kurse, Rundung, Topf};
+use depot_regelwerk::{GenehmigterAuftrag, Richtung};
 
 /// Antwort des Brokers auf einen Versand.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,17 +35,31 @@ pub trait Broker: Konto {
     fn sende(&mut self, auftrag: &GenehmigterAuftrag) -> Sendeantwort;
     /// Der Markt laeuft bis zum Schluss dieses Handelstags.
     fn markt(&mut self, kurse: &Kurse);
+    /// Eine Stoerung des Kontos: Sein Stand ist nicht gesichert. Dann haelt der Lauf an, bevor
+    /// das Journal noch etwas vom Konto bestaetigt (K23-01).
+    fn stoerung(&self) -> Option<String> {
+        None
+    }
 }
 
-#[derive(Clone, Debug)]
+/// Was das Konto von einem Auftrag festhaelt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Order {
+    isin: Isin,
+    richtung: Richtung,
+    stueck: u64,
+    limit: Cent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct PapierOrder {
-    auftrag: Auftrag,
+    auftrag: Order,
     status: KontoStatus,
     ausfuehrungen: Vec<Ausfuehrung>,
 }
 
 /// Das erfundene Gesamtkonto.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Papierkonto {
     bargeld: Cent,
     bestand: BTreeMap<Isin, u64>,
@@ -86,7 +106,7 @@ impl Papierkonto {
             .filter(|o| o.status == KontoStatus::Offen)
     }
 
-    fn gedeckt(&self, a: &Auftrag) -> Option<bool> {
+    fn gedeckt(&self, a: &Order) -> Option<bool> {
         match a.richtung {
             Richtung::Kauf => {
                 let mut frei = self.bargeld;
@@ -109,7 +129,7 @@ impl Papierkonto {
         }
     }
 
-    fn bedarf(&self, a: &Auftrag) -> Option<Cent> {
+    fn bedarf(&self, a: &Order) -> Option<Cent> {
         let v = a.limit.mal_stueck(a.stueck)?;
         v.checked_add(self.gebuehren.fuer(v)?)
     }
@@ -120,10 +140,18 @@ impl Papierkonto {
             return;
         };
         let a = &o.auftrag;
-        let ausfuehrung = kurse.kurs_cent(&a.isin).and_then(|kurs| {
-            let im_limit = match a.richtung {
-                Richtung::Kauf => kurs <= a.limit,
-                Richtung::Verkauf => kurs >= a.limit,
+        let ausfuehrung = kurse.kurs(&a.isin).and_then(|exakt| {
+            // Limit in ganzen Cent: Aufgerundet liegt ein Kurs genau dann nicht ueber dem Limit,
+            // wenn er es exakt nicht tut; abgerundet ebenso nicht darunter.
+            let (kurs, im_limit) = match a.richtung {
+                Richtung::Kauf => {
+                    let k = exakt.mal_stueck(1, Rundung::Auf)?;
+                    (k, k <= a.limit)
+                }
+                Richtung::Verkauf => {
+                    let k = exakt.mal_stueck(1, Rundung::Ab)?;
+                    (k, k >= a.limit)
+                }
             };
             im_limit.then_some(())?;
             let volumen = kurs.mal_stueck(a.stueck)?;
@@ -202,7 +230,13 @@ impl Broker for Papierkonto {
             // bleibt, wie sie ist (R24, R37).
             return Sendeantwort::Abgelehnt(format!("Kennung {nr} schon vergeben"));
         }
-        let status = if self.gedeckt(a) == Some(true) {
+        let o = Order {
+            isin: a.isin.clone(),
+            richtung: a.richtung,
+            stueck: a.stueck,
+            limit: a.limit,
+        };
+        let status = if self.gedeckt(&o) == Some(true) {
             KontoStatus::Offen
         } else {
             KontoStatus::Abgelehnt
@@ -210,7 +244,7 @@ impl Broker for Papierkonto {
         self.orders.insert(
             nr,
             PapierOrder {
-                auftrag: a.clone(),
+                auftrag: o,
                 status,
                 ausfuehrungen: Vec::new(),
             },
@@ -231,5 +265,133 @@ impl Broker for Papierkonto {
         for nr in offen {
             self.schluss(nr, kurse);
         }
+    }
+}
+
+const KOPF: &str = "papierkonto-v1";
+
+fn richtung_text(r: Richtung) -> &'static str {
+    match r {
+        Richtung::Kauf => "kauf",
+        Richtung::Verkauf => "verkauf",
+    }
+}
+
+fn status_text(s: KontoStatus) -> &'static str {
+    match s {
+        KontoStatus::Offen => "offen",
+        KontoStatus::Gefuellt => "gefuellt",
+        KontoStatus::Abgelehnt => "abgelehnt",
+        KontoStatus::Storniert => "storniert",
+        KontoStatus::Verfallen => "verfallen",
+    }
+}
+
+fn lies_status(t: &str) -> Option<KontoStatus> {
+    [
+        KontoStatus::Offen,
+        KontoStatus::Gefuellt,
+        KontoStatus::Abgelehnt,
+        KontoStatus::Storniert,
+        KontoStatus::Verfallen,
+    ]
+    .into_iter()
+    .find(|s| status_text(*s) == t)
+}
+
+fn lies_richtung(t: &str) -> Option<Richtung> {
+    [Richtung::Kauf, Richtung::Verkauf]
+        .into_iter()
+        .find(|r| richtung_text(*r) == t)
+}
+
+impl Papierkonto {
+    /// Das Konto als Text, eine Angabe je Zeile. `aus_text` liest genau diese Form.
+    pub fn als_text(&self) -> String {
+        let mut t = format!(
+            "{KOPF}\nbargeld;{}\nsendungen;{}\n",
+            self.bargeld.0, self.sendungen
+        );
+        for (isin, n) in &self.bestand {
+            let _ = writeln!(t, "bestand;{isin};{n}");
+        }
+        for (nr, o) in &self.orders {
+            let a = &o.auftrag;
+            let _ = writeln!(
+                t,
+                "order;{nr};{};{};{};{};{}",
+                a.isin,
+                richtung_text(a.richtung),
+                a.stueck,
+                a.limit.0,
+                status_text(o.status)
+            );
+            for x in &o.ausfuehrungen {
+                let _ = writeln!(
+                    t,
+                    "ausfuehrung;{nr};{};{};{}",
+                    x.stueck, x.kurs.0, x.gebuehr.0
+                );
+            }
+        }
+        t
+    }
+
+    /// Liest ein Konto aus `als_text`. Nur genau diese Form gilt: Was sich nicht Zeichen fuer
+    /// Zeichen wieder so schreiben laesst, wird abgelehnt (fail-closed).
+    ///
+    /// # Errors
+    /// Nennt die erste unlesbare Zeile.
+    pub fn aus_text(text: &str) -> Result<Papierkonto, String> {
+        let mut zeilen = text.lines();
+        if zeilen.next() != Some(KOPF) {
+            return Err(format!("Papierkonto: Kopf {KOPF} fehlt"));
+        }
+        let mut k = Papierkonto {
+            bargeld: Cent::NULL,
+            bestand: BTreeMap::new(),
+            orders: BTreeMap::new(),
+            gebuehren: Grenzen::standard().gebuehren(),
+            sendungen: 0,
+        };
+        for z in zeilen {
+            let f: Vec<&str> = z.split(';').collect();
+            let fehler = || format!("Papierkonto: Zeile unlesbar: {z}");
+            match f.as_slice() {
+                ["bargeld", b] => k.bargeld = Cent(b.parse().map_err(|_| fehler())?),
+                ["sendungen", n] => k.sendungen = n.parse().map_err(|_| fehler())?,
+                ["bestand", isin, n] => {
+                    let isin = Isin::neu(isin).map_err(|_| fehler())?;
+                    k.bestand.insert(isin, n.parse().map_err(|_| fehler())?);
+                }
+                ["order", nr, isin, r, stueck, limit, status] => {
+                    let o = PapierOrder {
+                        auftrag: Order {
+                            isin: Isin::neu(isin).map_err(|_| fehler())?,
+                            richtung: lies_richtung(r).ok_or_else(fehler)?,
+                            stueck: stueck.parse().map_err(|_| fehler())?,
+                            limit: Cent(limit.parse().map_err(|_| fehler())?),
+                        },
+                        status: lies_status(status).ok_or_else(fehler)?,
+                        ausfuehrungen: Vec::new(),
+                    };
+                    k.orders.insert(nr.parse().map_err(|_| fehler())?, o);
+                }
+                ["ausfuehrung", nr, stueck, kurs, gebuehr] => {
+                    let nr: u64 = nr.parse().map_err(|_| fehler())?;
+                    let o = k.orders.get_mut(&nr).ok_or_else(fehler)?;
+                    o.ausfuehrungen.push(Ausfuehrung {
+                        stueck: stueck.parse().map_err(|_| fehler())?,
+                        kurs: Cent(kurs.parse().map_err(|_| fehler())?),
+                        gebuehr: Cent(gebuehr.parse().map_err(|_| fehler())?),
+                    });
+                }
+                _ => return Err(fehler()),
+            }
+        }
+        if k.als_text() != text {
+            return Err("Papierkonto: nicht in der eigenen Form geschrieben".into());
+        }
+        Ok(k)
     }
 }
