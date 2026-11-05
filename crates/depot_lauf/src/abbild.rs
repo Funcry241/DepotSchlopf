@@ -107,7 +107,7 @@ pub struct Abbild {
     pub kopie: PathBuf,
 }
 
-fn git_roh(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+pub fn git_roh(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     // Feste Angaben fuer `commit-tree`: Der Lauf braucht keine Identitaet des Nutzers.
     let aus = Command::new("git")
         .arg("-C")
@@ -129,7 +129,7 @@ fn git_roh(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     Ok(aus.stdout)
 }
 
-fn git_text(dir: &Path, args: &[&str]) -> Result<String, String> {
+pub fn git_text(dir: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&git_roh(dir, args)?)
         .trim()
         .to_string())
@@ -207,9 +207,36 @@ pub fn festhalten_in(wurzel: &Path, ablage: &Path) -> Result<Option<Abbild>, Str
         commit_args.extend(["-p", k.as_str()]);
     }
     let commit = git_text(wurzel, &commit_args)?;
-    let dateien = dateien_im_baum(wurzel, &baum)?;
+    kopie_anlegen(wurzel, &ablage.join("stand"), baum, &commit).map(Some)
+}
 
-    let kopie = ablage.join("stand");
+/// Legt die Arbeitskopie eines vorhandenen Commits unter `ablage/<name>` an, Byte fuer Byte aus
+/// seinen Blobs wie bei `festhalten` (fuer das Update).
+///
+/// # Errors
+/// Der Commit ist unbekannt, die Kopie laesst sich nicht anlegen, oder oberhalb der Kopie liegt
+/// eine fremde Cargo-Konfiguration.
+pub fn festhalten_commit(
+    wurzel: &Path,
+    ablage: &Path,
+    name: &str,
+    commit: &str,
+) -> Result<Abbild, String> {
+    let baum = git_text(
+        wurzel,
+        &["rev-parse", "--verify", &format!("{commit}^{{tree}}")],
+    )?;
+    kopie_anlegen(wurzel, &ablage.join(name), baum, commit)
+}
+
+fn kopie_anlegen(
+    wurzel: &Path,
+    kopie: &Path,
+    baum: String,
+    commit: &str,
+) -> Result<Abbild, String> {
+    let dateien = dateien_im_baum(wurzel, &baum)?;
+    let kopie = kopie.to_path_buf();
     alte_kopie_weg(wurzel, &kopie)?;
     let pfad = kopie.to_string_lossy();
     git_roh(
@@ -221,7 +248,7 @@ pub fn festhalten_in(wurzel: &Path, ablage: &Path) -> Result<Option<Abbild>, Str
             "--no-checkout",
             "--detach",
             &pfad,
-            &commit,
+            commit,
         ],
     )?;
     for (datei, blob, x) in &dateien {
@@ -249,11 +276,11 @@ pub fn festhalten_in(wurzel: &Path, ablage: &Path) -> Result<Option<Abbild>, Str
                 .join(", ")
         ));
     }
-    Ok(Some(Abbild {
+    Ok(Abbild {
         baum,
         dateien: dateien.into_iter().map(|(p, b, _)| (p, b)).collect(),
         kopie,
-    }))
+    })
 }
 
 /// Alle Dateien der Kopie ausser `.git` und dem Build-Ordner `target/`, relativ und mit `/`.
@@ -293,7 +320,7 @@ fn dateien_der_kopie(dir: &Path, rel: &str, aus: &mut Vec<String>, fehler: &mut 
 
 /// Was die Kopie nach dem Gate vom festgehaltenen Stand trennt; leer, wenn sie Byte fuer Byte
 /// gleich ist.
-fn vergleiche(wurzel: &Path, abbild: &Abbild) -> Vec<String> {
+pub fn vergleiche(wurzel: &Path, abbild: &Abbild) -> Vec<String> {
     let mut vorhanden = Vec::new();
     let mut probleme = Vec::new();
     dateien_der_kopie(&abbild.kopie, "", &mut vorhanden, &mut probleme);

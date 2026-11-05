@@ -100,6 +100,8 @@ Doppelklick auf `DepotSchlopf.cmd` startet den Dienst und öffnet http://127.0.0
 - **Live:** was gerade läuft (mit Protokoll), was wartet, der nächste geplante Lauf, dazu das Lagebild mit KI-Budget je KI, Papierdepot und dem Gespräch von Dachs und Maus. Die Seite frischt sich selbst auf und zeigt, wenn der Dienst nicht antwortet.
 - **Einrichtung:** die eine Config-Seite. Schlüssel gehen direkt in die Windows-Anmeldeinformationsverwaltung (die Seite zeigt nur „hinterlegt“), Verbindungstest der Quellen, Zeitplan (Mo–Fr, Termine 17:40, Kurse 17:45, danach Papiertag; jeder Lauf höchstens einmal am Tag), Autostart mit Windows. Grenzen und Budgets stehen nur zur Ansicht; sie ändern sich nur über eine Grenzfreigabe.
 
+- **Update:** „Nach Update suchen“ nennt die neuen Stände auf `main`. „Update einspielen“ prüft den neuen Stand zuerst mit dem ganzen Gate in einem eigenen Ordner und rückt den Projektordner nur dann vorwärts, ohne Lokales zu überschreiben. Danach startet der Dienst neu und die Seite lädt sich selbst neu; kommt der neue Stand nicht hoch, setzt `DepotSchlopf.cmd` den alten zurück. Dasselbe ohne Oberfläche: `run.cmd update pruefen` und `run.cmd update`.
+
 Schutz gegen fremde Webseiten: Jede Anfrage braucht `Host` 127.0.0.1 oder localhost mit dem eigenen Port, jede Änderung zusätzlich die eigene Herkunft und den Zufallswert dieses Dienststarts. Antworten verbieten Einbetten und fremde Skripte.
 
 ## Mitmachen

@@ -168,7 +168,7 @@ impl Erledigt {
         match art {
             Art::Termine => self.termine = Some(tag),
             Art::Kurse => self.kurse = Some(tag),
-            Art::Einrichten | Art::Papier => {}
+            Art::Einrichten | Art::Papier | Art::UpdatePruefen | Art::Update => {}
         }
     }
 }

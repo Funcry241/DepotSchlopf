@@ -20,6 +20,7 @@
 
 mod abbild;
 mod export;
+mod update;
 mod zip;
 
 use std::fs;
@@ -33,6 +34,8 @@ run.cmd kurse einrichten Journal daten/journal.txt einmal anlegen\n  \
 run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)\n  \
 run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)\n  \
 run.cmd lage             Lagebild nach daten/lage.html: Bereitschaft, KI-Budget, Depot, Gespraech\n  \
+run.cmd update pruefen   neue Staende auf main nennen (git fetch, aendert nichts)\n  \
+run.cmd update           neuen Stand im Pruefordner mit dem Gate pruefen, nur dann vorwaerts einspielen\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
 
 /// Offene Reste frueherer Laeufe: Eine liegengebliebene Sperrdatei bedeutet einen Absturz
@@ -128,6 +131,10 @@ fn main() -> ExitCode {
     // Das Lagebild liest nur und schreibt nur daten/lage.html: kein Netz, keine Schluessel.
     if befehl == "lage" {
         return programm(&wurzel, "depot_lage", &optionen);
+    }
+    // Das Update prueft den neuen Stand in einer eigenen Kopie und rueckt nur vorwaerts vor.
+    if befehl == "update" {
+        return update::lauf(&wurzel, &optionen);
     }
 
     let mut kodex_args: Vec<String> = match befehl.as_str() {

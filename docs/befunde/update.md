@@ -1,0 +1,48 @@
+# Update mit Rückfall
+
+Wolfgang am 05.11.2026: ein geprüfter Update-Ablauf mit Rückfall, ohne Konsole. Maus: Updates wie Schlüssel und Konfiguration gegen fremde Webseiten schützen. Dieser Schritt baut auf dem Dienst auf (`docs/befunde/dienst.md`).
+
+## Ablauf
+
+1. **Prüfen** (Knopf „Nach Update suchen“ oder `run.cmd update pruefen`): `git fetch origin main`, dann die neuen Stände `alt..neu` als Liste. Am Projektordner ändert sich nichts.
+2. **Einspielen** (Knopf „Update einspielen“ oder `run.cmd update`):
+   - Vorbedingungen: Projektordner auf dem Zweig `main`, keine verfolgte Datei lokal geändert, keine `daten/*.sperre`, kein unbestätigtes Update (`daten/update_offen.txt`).
+   - Der lokale Stand muss Vorgänger des neuen sein (`merge-base --is-ancestor`). Eigene lokale Commits blockieren das Update, statt überschrieben zu werden.
+   - Ein Stand aus `daten/update_abgelehnt.txt` wird nie wieder eingespielt; erst ein neuerer Stand auf `main`.
+   - Der neue Stand wird Byte für Byte aus seinen Blobs in eine eigene Kopie außerhalb des Projektordners geschrieben (wie beim Gate von `run.cmd`, mit eigenem Build-Ordner `bau-update`). Dort läuft das ganze Gate (`--voll`, Basis ist der Vorgänger des neuen Stands, wie die Prüfung von `main` auf GitHub). Danach muss die Kopie unverändert sein.
+   - Nur dann: Vorbedingungen und `HEAD` noch einmal prüfen, `daten/update_offen.txt` schreiben (`update-v1`, `vorher=`, `neu=`), `git merge --ff-only`. Scheitert das Vorrücken, verschwindet die Markierung wieder.
+3. **Neustart:** Nach dem erfolgreichen Auftrag endet der Dienst mit Code 3, sobald kein anderer Auftrag mehr läuft oder wartet. Ein eingereihter Lauf geht also nicht verloren.
+4. **Wächter** (`depot_waechter`, gerufen von `DepotSchlopf.cmd`): baut den Dienst, startet ihn und wartet.
+   - Code 3 mit offenem Update: neu bauen, ohne Browser neu starten.
+   - Bau scheitert oder der Dienst endet mit Fehler, solange das Update offen ist: **Rückfall.** `git reset --keep vorher`, den neuen Stand in `daten/update_abgelehnt.txt` vermerken, Markierung löschen, alten Stand bauen und starten. Das braucht nur Git, keinen Code des neuen Stands.
+   - Steht der Projektordner weder auf `vorher` noch auf `neu`, oder ist die Markierung unlesbar, fasst der Rückfall nichts an und meldet es.
+5. **Bestätigen:** Läuft der neue Dienst 15 Sekunden, löscht er die Markierung („Update bestätigt“). Erst dann ist ein weiteres Update möglich.
+6. **Seite:** Jede Antwort trägt eine nicht geheime Kennung des Dienststarts (`data-start`). Antwortet nach der Unterbrechung ein neuer Start, lädt `/app.js` die Seite neu, damit die Formulare das Token des neuen Starts tragen. Während der Pause zeigt der Hinweis „Verbindung getrennt, etwa beim Neustart nach einem Update“.
+
+Das Update läuft nur allein: Es lässt sich nur einreihen, wenn nichts läuft oder wartet, und nur einmal je Dienststart. Der Knopf ist ein POST wie jeder andere: eigener Host, eigene Herkunft, Token dieses Starts.
+
+## Warum ein Wächter statt einer Schleife in `DepotSchlopf.cmd`
+
+`cmd` liest eine Befehlsdatei während des Laufs Stück für Stück nach. Ein Update, das `DepotSchlopf.cmd` ändert, könnte eine laufende Schleife mitten in einer Zeile weiterlesen lassen. Deshalb steht in `DepotSchlopf.cmd` und `run.cmd` alles nach der Prüfung auf Rust in einem Klammerblock, den `cmd` einmal ganz liest, und die Schleife liegt im Wächter, einem Rust-Programm mit denselben strengen Lints. Der Wächter baut nur `--bin depot_dienst`; seine eigene, laufende Datei bleibt unberührt und wird erst beim nächsten Start neu gebaut.
+
+## Netz
+
+`git fetch` holt den Stand von `origin` (GitHub) über Git als eigenen Prozess. Kein Rust-Code des Projekts öffnet dafür eine Verbindung; `depot_lauf` bleibt ohne Netz-Crate. Der Wächter belegt nur kurz `127.0.0.1:47410`, um zu sehen, ob der Dienst schon läuft (wörtlich nach `NETZ_LOKAL`).
+
+## Grenzen
+
+- Das Gate prüft den neuen Stand vollständig und die Grenzfreigabe seines letzten Schritts. Die Freigaben früherer Stände dazwischen hat die Prüfung auf `main` (GitHub) je Stand geprüft; lokal wird sie nicht wiederholt.
+- Ein Fehler, der erst nach den 15 Sekunden auftritt, löst keinen Rückfall mehr aus. Dann bleibt der neue Stand, und der Wächter endet mit Fehler.
+- Ändert ein Update den Wächter selbst, gilt das ab dem nächsten Start von `DepotSchlopf.cmd`.
+
+## Tests
+
+- `crates/depot_lauf/src/update.rs` mit echten Git-Ordnern (Ursprung, Projektordner, zweiter Klon): nichts Neues; neuer Stand genannt, Prüfen ändert nichts, Einspielen nur vorwärts mit Markierung; offenes Update, lokale Änderung, fremder Zweig, Sperrdatei blockieren; eigener lokaler Commit wird nicht überschrieben; abgelehnter Stand kommt nicht wieder, ein neuerer schon.
+- `crates/depot_dienst/tests/update.rs`: Update nur allein, Neustart erst wenn nichts mehr wartet, nur einmal je Start; Knöpfe und Kennung des Starts auf jeder Seite; Markierung streng gelesen; Rückfall setzt zurück und lehnt ab, lokale Dateien bleiben; fremder Stand und unlesbare Markierung werden nicht angefasst; Bestätigen nur auf dem neuen Stand.
+
+**Gegenproben** (jeweils rot): Update-Sperre in `einreihen` aus; Neustart trotz wartender Aufträge; Rückfall ohne Prüfung des Stands; ohne Vorgänger-Prüfung; ohne Ablehnungsliste; ohne Prüfung lokaler Änderungen.
+
+**Probelauf unter Linux** in einer Kopie des Projekts:
+- Ein nicht baubarer neuer Stand mit offener Markierung: Der Wächter setzt auf den alten Stand zurück, vermerkt den neuen als abgelehnt und startet den alten Dienst.
+- Ein guter Stand: Der Dienst zeigt „läuft zur Probe“, nach 15 Sekunden „bestätigt“.
+- Ein Klick auf „Update einspielen“ im Browser (Einspielen durch eine Attrappe ersetzt, um das Gate zu sparen): Der Dienst endet mit Code 3, der Wächter startet ihn neu, die Seite lädt sich selbst neu und trägt das neue Token.

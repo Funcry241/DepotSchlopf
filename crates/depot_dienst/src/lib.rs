@@ -21,6 +21,7 @@
 
 pub mod autostart;
 pub mod http;
+pub mod rueckfall;
 pub mod schluessel;
 pub mod seiten;
 pub mod werkbank;
@@ -104,6 +105,27 @@ pub fn lagerechner(token: String, umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerec
     })
 }
 
+/// Der Projektordner: der erste Ordner ab dem aktuellen, der `kodex/festschreibung.txt` hat.
+pub fn finde_wurzel() -> Option<std::path::PathBuf> {
+    let start = std::env::current_dir().ok()?;
+    start
+        .ancestors()
+        .find(|d| d.join("kodex").join("festschreibung.txt").is_file())
+        .map(Path::to_path_buf)
+}
+
+/// Oeffnet die Seite im Standardbrowser (nur unter Windows) und nennt die Adresse.
+pub fn oeffne_browser() {
+    let adresse = format!("http://127.0.0.1:{}/", http::PORT);
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &adresse])
+            .spawn();
+    }
+    println!("[Dienst] Oberflaeche: {adresse}");
+}
+
 fn heute(jetzt: Zeitpunkt) -> Option<depot_kern::Datum> {
     ortszeit(jetzt).map(|(d, ..)| d)
 }
@@ -115,12 +137,20 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let meldung = seiten::meldung(&a.abfrage);
     match a.pfad.as_str() {
         "/" => {
-            let inhalt = seiten::live(&d.sperre(), tag);
+            let inhalt = seiten::live(&d.start, &d.sperre(), tag);
             let s = seiten::rahmen("/", Some("/teil/live"), meldung, &inhalt);
             antwort(200, HTML, s.as_bytes())
         }
-        "/teil/live" => antwort(200, HTML, seiten::live(&d.sperre(), tag).as_bytes()),
-        "/teil/status" => antwort(200, HTML, seiten::status(&d.sperre(), tag).as_bytes()),
+        "/teil/live" => antwort(
+            200,
+            HTML,
+            seiten::live(&d.start, &d.sperre(), tag).as_bytes(),
+        ),
+        "/teil/status" => antwort(
+            200,
+            HTML,
+            seiten::status(&d.start, &d.sperre(), tag).as_bytes(),
+        ),
         "/einrichtung" => {
             // Erst ausserhalb der Sperre nachsehen, was gespeichert ist.
             let datei = werkbank::lies_falls_da(&d.wurzel.join("daten").join("zeitplan.txt"));
@@ -133,6 +163,15 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 autostart: u.autostart(&d.wurzel),
                 wurzel: d.wurzel.display().to_string(),
                 grenzen: grenzwerte(),
+                abgelehnt: werkbank::lies_falls_da(&rueckfall::abgelehnt_pfad(&d.wurzel)).map(
+                    |t| {
+                        t.unwrap_or_default()
+                            .lines()
+                            .map(|z| rueckfall::kurz(z.trim()).to_string())
+                            .filter(|z| !z.is_empty())
+                            .collect()
+                    },
+                ),
             };
             let zustand = d.sperre();
             let gespeichert = seiten::Einrichtung {
@@ -143,7 +182,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 },
                 ..gespeichert
             };
-            let inhalt = seiten::einrichtung(&d.token, &zustand, tag, &gespeichert);
+            let inhalt = seiten::einrichtung(&d.token, &d.start, &zustand, tag, &gespeichert);
             drop(zustand);
             let seite = seiten::rahmen("/einrichtung", None, meldung, &inhalt);
             antwort(200, HTML, seite.as_bytes())
@@ -198,9 +237,12 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage) -> Vec<u8> {
             let Some(art) = feld(&f, "art").and_then(Art::aus_kurz) else {
                 return http::text(400, "Abgelehnt: Auftrag unbekannt");
             };
-            match d.einreihen(art, Anlass::Hand) {
-                Ok(()) => http::umleitung("/?m=auftrag"),
-                Err(_) => http::umleitung("/?m=auftrag_belegt"),
+            let update = matches!(art, Art::Update | Art::UpdatePruefen);
+            match (d.einreihen(art, Anlass::Hand), update) {
+                (Ok(()), false) => http::umleitung("/?m=auftrag"),
+                (Err(_), false) => http::umleitung("/?m=auftrag_belegt"),
+                (Ok(()), true) => http::umleitung("/einrichtung?m=update#update"),
+                (Err(_), true) => http::umleitung("/einrichtung?m=update_belegt#update"),
             }
         }
         "/schluessel" => {
