@@ -13,3 +13,4 @@ kodex/festschreibung.txt
 docs/
 CHANGELOG.md
 README.md
+kodex/freigabe.txt
