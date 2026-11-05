@@ -405,9 +405,20 @@ fn ohne_schluessel_oder_mit_sperrdatei_nicht_angebunden() -> Result<(), String> 
         ort.sperre(),
     );
     assert!(!ohne.angebunden());
+    assert_eq!(
+        ohne.warum_nicht().as_deref(),
+        Some("kein Schlüssel hinterlegt")
+    );
+    let gut = berater(&ort, BeraterId::Dachs, Attrappe::default())?;
+    assert_eq!(gut.warum_nicht(), None);
     vorbedingung(fs::write(ort.sperre(), "geprueft?"), "Sperrdatei")?;
     let mit = berater(&ort, BeraterId::Dachs, Attrappe::default())?;
     assert!(!mit.angebunden());
+    assert!(
+        mit.warum_nicht().is_some_and(|g| g.contains("ki.halt")),
+        "{:?}",
+        mit.warum_nicht()
+    );
     Ok(())
 }
 
@@ -781,6 +792,13 @@ fn pause_des_anbieters_wird_vor_dem_aufruf_eingehalten() -> Result<(), String> {
     // Nicht angebunden: Der Papiertag reserviert fuer ihn nichts.
     assert!(!dachs.angebunden());
     assert!(dachs.pause().is_some());
+    assert!(
+        dachs
+            .warum_nicht()
+            .is_some_and(|g| g.starts_with("Anbieterpause")),
+        "{:?}",
+        dachs.warum_nicht()
+    );
     // Auch mit Erlaubnis wird nichts gesendet.
     let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
     let a = mit_lage(|l| dachs.vorschlagen(e, l))?;

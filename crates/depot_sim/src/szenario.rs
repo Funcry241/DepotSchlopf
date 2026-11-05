@@ -62,6 +62,11 @@ pub trait Berater {
     fn angebunden(&self) -> bool {
         true
     }
+    /// Warum der Berater nicht angebunden ist, in Worten fuer das Journal (etwa „kein
+    /// Schlüssel“). `None`, wenn er angebunden ist oder es keinen genaueren Grund gibt.
+    fn warum_nicht(&self) -> Option<String> {
+        None
+    }
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort;
     fn pruefen(
         &mut self,

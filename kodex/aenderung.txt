@@ -1,8 +1,10 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Fehlbedienung abfangen (Maus 05.11.2026). depot_dienst: Zeitplan einschalten nur mit aktuellem Lagebild und ohne Eingriff (Zustand::einschalten_erlaubt), Ausschalten und Aendern immer; abgelehnte Zeitplan-Eingaben bleiben im Formular (nur gepruefte Werte, Entwurf); Auftrag von Hand nicht erneut binnen 30 s nach dem Ende desselben (Dienst::von_hand), app.js sperrt abgesendete Knoepfe; daten/dienst_verlauf.txt haelt Start und Ende jedes Auftrags, nach Neustart sichtbar, unterbrochene Laeufe als solche. Fassung 2 nach Maus: Einschalten prueft jeden Schluessel ausdruecklich (hinterlegt oder geprueft) und nennt, was fehlt; Start erst nach dauerhaft vermerkter Startzeile, Schreibfehler sofort sichtbar. Keine neue Abhaengigkeit, keine Grenze, kein Netz.
+zweck: Tagesergebnis ohne Konsole (Maus' Praxistest 05.11.2026). depot_lage::tage zeigt je Handelstag seit dem ersten Papiertag, ob er abgeschlossen, ohne Handel (Kursbefunde in Worten), angefangen oder ausgefallen ist, mit Grund, und je KI, ob sie beigetragen hat oder warum nicht (Anbieterprotokoll und Journal). depot_sim: Berater::warum_nicht, der Grund steht im Journal; depot_berater nennt kein Schluessel, Sperre oder Anbieterpause. Schlusskurse mit zu alten Kursen in Worten, ohne Knopf Kurse abrufen. Papierdepot nennt die Simulation zum Schlusskurs. Nur Anzeige: keine Grenze, keine neue Abhaengigkeit, kein Netz.
 pfade:
-crates/depot_dienst/
+crates/depot_sim/
+crates/depot_berater/
+crates/depot_lage/
 docs/
 CHANGELOG.md
 README.md

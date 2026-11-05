@@ -160,6 +160,11 @@ fn erster_papiertag_eroeffnet_depot_und_schliesst_ab() -> Result<(), String> {
         texte.iter().any(|t| t.contains("nicht angebunden")),
         "{texte:?}"
     );
+    // Stumm nennt keinen Grund; im Journal steht dann keine Klammer.
+    assert!(
+        !texte.iter().any(|t| t.contains("nicht angebunden (")),
+        "{texte:?}"
+    );
     assert!(ort.konto.is_file(), "Papierkonto als Datei");
     drop(j);
     // Derselbe Tag noch einmal: nichts geschieht.

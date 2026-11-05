@@ -394,6 +394,16 @@ impl<N: Netz> Berater for KiBerater<N> {
         self.schluessel.is_some() && !self.gesperrt() && self.pause().is_none()
     }
 
+    fn warum_nicht(&self) -> Option<String> {
+        if self.schluessel.is_none() {
+            return Some("kein Schlüssel hinterlegt".into());
+        }
+        if self.gesperrt() {
+            return Some("Kostenschutz gesperrt, daten/ki.halt".into());
+        }
+        self.pause().map(|p| format!("Anbieterpause: {p}"))
+    }
+
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::vorschlag_frage(lage, &self.universum);

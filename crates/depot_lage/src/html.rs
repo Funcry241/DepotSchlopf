@@ -186,11 +186,48 @@ fn budget(l: &Lagebild, s: &mut String) {
     );
 }
 
+/// Je Handelstag: lief der Papiertag, und wer von Dachs und Maus hat beigetragen.
+fn tage(l: &Lagebild, s: &mut String) {
+    if l.tage.is_empty() {
+        return;
+    }
+    s.push_str(
+        "<section id=\"tage\"><h2>Tagesergebnis</h2><p class=\"leise\">Je Handelstag seit dem \
+         ersten Papiertag: ob er lief, und ob Dachs und Maus tatsächlich geantwortet haben. Ein \
+         abgeschlossener Tag allein sagt nicht, dass eine KI mitgewirkt hat.</p>\
+         <div class=\"breit\"><table><tr><th>Tag</th><th>Papiertag</th><th>Dachs</th>\
+         <th>Maus</th></tr>",
+    );
+    for t in &l.tage {
+        let ki = |b: BeraterId| {
+            t.ki.iter().find(|(x, _)| *x == b).map_or_else(
+                || "<span class=\"leise\">–</span>".to_string(),
+                |(_, k)| format!("<span class=\"{}\">{}</span>", k.klasse, maskiere(&k.text)),
+            )
+        };
+        let _ = write!(
+            s,
+            "<tr><td>{}</td><td><span class=\"{}\">{}</span></td><td>{}</td><td>{}</td></tr>",
+            datum_text(t.datum),
+            t.stand.klasse(),
+            maskiere(&t.stand.text()),
+            ki(BeraterId::Dachs),
+            ki(BeraterId::Maus)
+        );
+    }
+    s.push_str("</table></div></section>");
+}
+
 fn depot(l: &Lagebild, s: &mut String) {
     let Some(d) = &l.depot else {
         return;
     };
-    s.push_str("<section><h2>Papierdepot</h2>");
+    s.push_str(
+        "<section><h2>Papierdepot</h2><p class=\"leise\">Nur Papiergeld, simuliert: Jeder \
+         Auftrag gilt als zum Schlusskurs des Entscheidungstags ausgeführt. Ob eine echte Order \
+         zu diesem Preis ausgeführt worden wäre, bleibt offen; ein Plus hier ist ein \
+         Simulationsergebnis.</p>",
+    );
     if d.toepfe.is_empty() {
         s.push_str("<p class=\"leise\">Noch kein Depot: Es entsteht mit dem ersten Papiertag.</p>");
     } else {
@@ -304,6 +341,7 @@ pub fn inhalt_mit(l: &Lagebild, knopf: Knopf<'_>, mit_betrieb: bool) -> String {
     let mut s = String::with_capacity(16_384);
     kopf(l, mit_betrieb, &mut s);
     punkte(l, knopf, &mut s);
+    tage(l, &mut s);
     budget(l, &mut s);
     depot(l, &mut s);
     gespraech(l, &mut s);

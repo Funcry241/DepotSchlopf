@@ -68,6 +68,14 @@ pub(crate) fn rechnung(was: &str) -> LaufFehler {
     halt(format!("Rechenfehler: {was}"))
 }
 
+/// „nicht angebunden“, mit dem Grund des Beraters, wenn er einen nennt.
+fn nicht_angebunden(b: &dyn Berater) -> String {
+    b.warum_nicht().map_or_else(
+        || "nicht angebunden".to_string(),
+        |g| format!("nicht angebunden ({})", sauber(&g)),
+    )
+}
+
 fn name(b: BeraterId) -> &'static str {
     match b {
         BeraterId::Dachs => "Dachs",
@@ -417,7 +425,10 @@ fn frage(
             j,
             tag,
             name(wer),
-            &format!("{t}: nicht angebunden, nicht gefragt; kein Vorschlag"),
+            &format!(
+                "{t}: {}, nicht gefragt; kein Vorschlag",
+                nicht_angebunden(frager)
+            ),
         )?;
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag")? {
         let antwort = frager.vorschlagen(e, lage);
@@ -470,7 +481,10 @@ fn topf_zyklus(
             j,
             tag,
             name(zweiter),
-            &format!("{t}: nicht angebunden, nicht gefragt; ohne Zweitmeinung kein Auftrag"),
+            &format!(
+                "{t}: {}, nicht gefragt; ohne Zweitmeinung kein Auftrag",
+                nicht_angebunden(pruefer)
+            ),
         )?;
     }
     if let Some(v) = vorschlag.take()
