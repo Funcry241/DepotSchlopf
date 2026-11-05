@@ -1,11 +1,14 @@
 //! Ein Lauf des Sammlers: je Wert abrufen, roh ablegen, lesen, belegen; danach pruefen.
 //!
-//! Reihenfolge je Wert (R12): Erst liegt die rohe Antwort unter `daten/roh/`, dann steht jeder
-//! Kurs daraus im Journal, erst dann wird er verwendet. Was nicht gelesen werden kann, wird nicht
-//! belegt; die rohe Antwort bleibt zur Durchsicht liegen.
+//! Reihenfolge (R12): Erst liegt die rohe Antwort unter `daten/roh/`, dann steht jeder Kurs
+//! daraus im Journal, erst dann wird er verwendet. Was nicht gelesen werden kann, wird nicht
+//! belegt; die rohe Antwort bleibt zur Durchsicht liegen. Ins Journal kommen die Kurse erst,
+//! wenn der Lauf ohne Sicherheitsabbruch zu Ende ist, in der Reihenfolge ihres Abrufs.
 //!
 //! Enthaelt eine Antwort den Schluessel, gleich in welcher Schreibweise, wird sie weder abgelegt
-//! noch gelesen, und der Lauf endet (K19-01).
+//! noch gelesen, und der Lauf endet (K19-01). Dann wird auch kein schon gelesener Kurs dieses
+//! Laufs belegt: Ein Papiertag, auch von Hand gestartet, findet keine Teilkurse (Maus,
+//! Restbefund zu #34), selbst wenn die Kurssperre sich nicht schreiben laesst.
 //!
 //! Meldet die Quelle statt Kursen einen Hinweis, gilt: Ein Fehler zu genau diesem Kuerzel
 //! (`Error Message`) betrifft nur diesen Wert. Jeder andere Hinweis, etwa das erreichte
@@ -190,7 +193,8 @@ fn tag_und_preis(k: Option<&Kurs>) -> Option<(Datum, Preis)> {
 /// zwischen zwei Abrufen.
 ///
 /// # Errors
-/// Journal, Ablage oder Uhr versagen. Was bis dahin belegt ist, bleibt belegt.
+/// Journal, Ablage oder Uhr versagen. Was bis dahin belegt ist, bleibt belegt; vor dem Ende
+/// der Abrufe ist das nichts.
 pub fn sammle(
     journal: &mut Journal,
     netz: &mut dyn Netz,
@@ -211,6 +215,7 @@ pub fn sammle(
     let mut heute: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
     let mut vortag: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
     let mut letzter_abruf: Option<Zeitpunkt> = None;
+    let mut offen: Vec<KursBeleg> = Vec::new();
 
     for (i, wert) in werte.iter().enumerate() {
         if bericht.abbruch.is_some() {
@@ -264,14 +269,15 @@ pub fn sammle(
                 continue;
             }
         };
-        // Belegen, bevor irgendetwas die Kurse verwendet (R12): erst der Vortag, dann heute.
+        // Belegt wird nach dem Lauf, bevor irgendetwas die Kurse verwendet (R12): je Wert erst
+        // der Vortag, dann heute.
         for kurs in [v.eintrag(&wert.isin), h.eintrag(&wert.isin)]
             .into_iter()
             .flatten()
         {
             let beleg = KursBeleg::neu(QUELLE, abruf, &roh, wert.isin.clone(), kurs.clone())
                 .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
-            journal.belege_kurs(&beleg).map_err(SammelFehler::Journal)?;
+            offen.push(beleg);
         }
         if let Some(k) = h.eintrag(&wert.isin) {
             heute.push((wert.isin.clone(), k.clone()));
@@ -290,8 +296,47 @@ pub fn sammle(
         ));
     }
 
-    if let Some(stand) = letzter_abruf {
-        pruefe(&mut bericht, journal, werte, stand, heute, vortag)?;
+    let gelesen = Gelesen {
+        offen,
+        letzter_abruf,
+        heute,
+        vortag,
+    };
+    abschliessen(bericht, journal, werte, gelesen)
+}
+
+/// Was ein Lauf gelesen, aber noch nicht belegt hat.
+struct Gelesen {
+    offen: Vec<KursBeleg>,
+    letzter_abruf: Option<Zeitpunkt>,
+    heute: Vec<(depot_kern::Isin, Kurs)>,
+    vortag: Vec<(depot_kern::Isin, Kurs)>,
+}
+
+/// Nach den Abrufen: ohne Sicherheitsabbruch alles in Abrufreihenfolge belegen und pruefen;
+/// nach einem Sicherheitsabbruch nichts belegen.
+fn abschliessen(
+    mut bericht: Bericht,
+    journal: &mut Journal,
+    werte: &[Wert],
+    g: Gelesen,
+) -> Result<Bericht, SammelFehler> {
+    if bericht.sicherheitsabbruch {
+        for (_, e) in &mut bericht.werte {
+            if matches!(e, Ergebnis::Belegt { .. }) {
+                *e = Ergebnis::Fehler(
+                    "Nicht belegt: Sicherheitsabbruch des Laufs, kein Kurs dieses Abrufs zaehlt"
+                        .into(),
+                );
+            }
+        }
+        return Ok(bericht);
+    }
+    for beleg in &g.offen {
+        journal.belege_kurs(beleg).map_err(SammelFehler::Journal)?;
+    }
+    if let Some(stand) = g.letzter_abruf {
+        pruefe(&mut bericht, journal, werte, stand, g.heute, g.vortag)?;
     }
     Ok(bericht)
 }

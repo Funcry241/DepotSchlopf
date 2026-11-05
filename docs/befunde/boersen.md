@@ -67,6 +67,10 @@ Der Sicherheitsabbruch griff nur über den Ausgang des Sammlers, also nur im Zei
 
 Aufheben heißt: prüfen, den Schlüssel bei Bedarf erneuern, dann in der Einrichtung unter „Kurssperre“ aufheben, wie die Sperre des Kostenschutzes (Abdruck der gesehenen Fassung, ausdrückliche Bestätigung, nur ohne laufenden Auftrag; Grund bleibt in `daten/kurse_halt_aufgehoben.txt`). Nie von Hand löschen. Lässt sich die Sperre nicht schreiben, meldet der Sammler das als Fehler: „KEINEN Papiertag starten“. Tests: `kurssperre_haelt_auch_den_handstart`, `kurssperre::sperre_liegt_bis_sie_geloescht_wird`, `kurssperre_ist_halt`, `kurssperre_gefuehrt_aufheben`.
 
+## Fassung 4 nach Maus' Restbefund (3f0240b)
+
+Ließ sich die Kurssperre nicht schreiben, lief ein Papiertag von Hand weiter mit den schon belegten Teilkursen. Die Ursache lag im Sammler: Er belegte jeden Kurs gleich nach seinem Abruf. Jetzt sammelt er die Belege während des Laufs und schreibt sie erst ins Journal, wenn alle Abrufe ohne Sicherheitsabbruch zu Ende sind. Die Reihenfolge bleibt die des Abrufs. Nach einem Sicherheitsabbruch kommt kein Kurs dieses Laufs ins Journal, und der Bericht nennt die schon gelesenen Werte „Nicht belegt: Sicherheitsabbruch“. Die rohen Antworten ohne Schlüssel bleiben zur Durchsicht unter `daten/roh/`. Die Kurssperre bleibt als zweite Schranke, und sie hält den nächsten Abruf an. Test: `schluesselabbruch_macht_den_ganzen_abruf_unbrauchbar` (Journal ohne Kurse).
+
 ## Nicht in diesem Schritt
 
 - **Abrufzeit:** Mit nur Xetra-Werten bleibt der Abruf kurz nach 17:35 Uhr richtig. Wolfgang hat am 05.11.2026 entschieden, Maus' Vorschlag zu folgen: Kurse je Börse kurz nach ihrem Schluss abrufen, die Altersprüfung je Abrufzeitpunkt, danach ein gemeinsamer Papiertag. Kein gemeinsamer Abruf um 22:30 Uhr. Das kommt in einem eigenen Schritt.
