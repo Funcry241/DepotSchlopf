@@ -254,10 +254,12 @@ fn hole_devisen(
             "Referenzkurse der EZB: {text}; Wert in Dollar nicht abgerufen"
         )),
     };
-    // Frist der fruehesten Boerse des Laufs: Spaeter nuetzten die Referenzkurse keinem Wert.
+    // Frist der fruehesten Boerse, deren Werte die Referenzkurse brauchen (nicht in Euro):
+    // Spaeter nuetzten sie keinem Wert. Werte in Euro verkuerzen die Frist nicht.
     let frist_ab = |jetzt: Zeitpunkt| {
         werte
             .iter()
+            .filter(|w| w.boerse.waehrung() != "EUR")
             .filter_map(|w| frist(w.boerse, &Grenzen::standard(), jetzt))
             .min()
     };
