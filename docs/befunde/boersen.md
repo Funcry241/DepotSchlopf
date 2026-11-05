@@ -95,7 +95,11 @@ Noch ohne Netz: Den EZB-Text holt im nächsten Schritt der Sammler, zusammen mit
 - **Referenzkurse:** Enthält der Lauf einen Wert in Dollar, dessen Schlüssel vorhanden ist, holt der Sammler vorher einmal `eurofxref-hist-90d.xml` und legt die Datei roh unter `daten/roh/ezb-referenzkurse/` ab. Belegt wird der Schluss in Euro (`schlusskurse_in_euro`), unter der Quelle `tiingo`. Lässt sich die EZB-Datei nicht holen oder lesen, wird kein Dollarwert abgerufen; Xetra bleibt unberührt.
 - **Lauf je Börse:** `run.cmd kurse xetra` und `run.cmd kurse nyse` rufen nur die Werte einer Börse ab, `run.cmd kurse` alle. Der Sammler prüft nur die Werte seines Laufs, Pflicht sind die gehaltenen Werte dieser Börse; alle zusammen prüft der Papiertag. Den Zeitplan je Börse bringt der nächste Schritt.
 
-Tests: `depot_sammler/tests/tiingo.rs` (`schluessel_von_tiingo`, `abrufadresse_tiingo`, `nyse_von_tiingo_in_euro`, `ohne_tiingo_schluessel_nur_xetra`, `ohne_referenzkurse_kein_dollarwert`, `schluessel_in_antwort_ist_sicherheitsabbruch`).
+**Nach Maus' Befunden zu 5b70fa5:**
+1. Ein Lauf für eine einzige Börse lud nur deren Schlüssel. Eine Antwort von Alpha Vantage mit dem Tiingo-Schlüssel wäre so abgelegt worden. Jetzt lädt jeder Lauf **alle** hinterlegten Schlüssel für den Schutz (`zugang_laden`). Ein fehlender Schlüssel wird nur gemeldet, wenn ein Wert des Laufs ihn braucht.
+2. Ein Tiingo-Erfolg stand im Anbieterprotokoll unter der Kursquelle, die die Oberfläche Alpha Vantage zuordnet. Jetzt bucht der Sammler je Quelle (`einordnen(bericht, quelle)`, neuer Eintrag `tiingo` im Anbieterprotokoll). Gezählt werden nur abgerufene Werte dieser Quelle. Ein Wert, der wegen eines fehlenden Schlüssels oder fehlender Referenzkurse nicht abgerufen wurde, heißt `Uebersprungen` und zählt für keine Quelle.
+
+Tests: `einzelboerse_kennt_alle_schluessel`, `anbieterprotokoll_je_quelle`, `depot_sammler/tests/tiingo.rs` (`schluessel_von_tiingo`, `abrufadresse_tiingo`, `nyse_von_tiingo_in_euro`, `ohne_tiingo_schluessel_nur_xetra`, `ohne_referenzkurse_kein_dollarwert`, `schluessel_in_antwort_ist_sicherheitsabbruch`).
 
 ## Nicht in diesem Schritt
 

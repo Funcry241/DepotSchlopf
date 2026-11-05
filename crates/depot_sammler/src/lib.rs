@@ -32,5 +32,5 @@ pub mod termine;
 pub use liste::{QUELLE, QUELLE_US, Wert, beobachtungsliste};
 pub use netz::{Ausfall, Https, Netz, NetzFehler, Takt, Verlauf};
 pub use sammeln::{ADRESSE_DEVISEN, Bericht, Ergebnis, SammelFehler, einordnen, sammle};
-pub use schluessel::{Anbieter, Schluessel, Zugang};
+pub use schluessel::{Anbieter, Schluessel, Zugang, zugang_laden};
 pub use termine::{TerminBericht, sammle_termine};
