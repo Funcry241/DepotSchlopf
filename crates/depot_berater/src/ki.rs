@@ -81,6 +81,13 @@ impl<N: Netz> KiBerater<N> {
         self.gesperrt || self.sperre.exists()
     }
 
+    /// Steht der eigene Schluessel in diesem Text?
+    fn enthaelt_schluessel(&self, text: &str) -> bool {
+        self.schluessel
+            .as_ref()
+            .is_some_and(|s| text.contains(s.als_str()))
+    }
+
     fn bereinigt(&self, text: &str) -> String {
         self.schluessel
             .as_ref()
@@ -146,6 +153,15 @@ impl<N: Netz> KiBerater<N> {
                 sauber(&self.bereinigt(&kurz))
             ));
         }
+        // Geheimnisschutz fuer jede Antwort, nicht nur fuer Fehler: Gibt der Anbieter den
+        // Schluessel zurueck, wird nichts davon verwendet. Geprueft wird hier roh und unten am
+        // fertigen Ergebnis (`ohne_geheimnis`), denn JSON kann ihn verschluesselt enthalten.
+        if self.enthaelt_schluessel(&String::from_utf8_lossy(&antwort.inhalt)) {
+            return Ergebnis {
+                text: Err(GEHEIMNIS.into()),
+                kosten: "Kosten nicht gelesen".into(),
+            };
+        }
         let gelesen = match self.anbieter.lies(&antwort.inhalt) {
             Ok(g) => g,
             Err(e) => {
@@ -188,12 +204,34 @@ impl<N: Netz> KiBerater<N> {
     }
 }
 
+/// Meldung, wenn eine Antwort den Schluessel enthaelt. Sie nennt ihn nicht.
+const GEHEIMNIS: &str = "Antwort enthielt den Schluessel des Anbieters; verworfen";
+
 fn kostenzeile(ist: Option<i64>, reserviert: i64, v: Verbrauch) -> String {
     let ist = ist.map_or_else(|| "?".into(), |c| c.to_string());
     format!(
         "Kosten {ist} von {reserviert} Cent reserviert, {} Token rein, {} raus, {} Suchen",
         v.token_ein, v.token_aus, v.suchen
     )
+}
+
+impl<N: Netz> KiBerater<N> {
+    /// Jeder Text, der aus einer Antwort ins Journal geht, ohne Schluessel; sonst verworfen.
+    fn ohne_geheimnis_antwort(&self, a: Antwort) -> Result<Antwort, String> {
+        let mut texte = std::iter::once(&a.einschaetzung)
+            .chain(a.vorschlag.iter().flat_map(|v| v.begruendung.values()));
+        if texte.any(|t| self.enthaelt_schluessel(t)) {
+            return Err(GEHEIMNIS.into());
+        }
+        Ok(a)
+    }
+
+    fn ohne_geheimnis_urteil(&self, u: Urteil) -> Result<Urteil, String> {
+        if self.enthaelt_schluessel(&u.begruendung) {
+            return Err(GEHEIMNIS.into());
+        }
+        Ok(u)
+    }
 }
 
 impl<N: Netz> Berater for KiBerater<N> {
@@ -208,6 +246,7 @@ impl<N: Netz> Berater for KiBerater<N> {
         match e
             .text
             .and_then(|t| frage::lies_vorschlag(&t, self.wer, &self.universum))
+            .and_then(|a| self.ohne_geheimnis_antwort(a))
         {
             Ok(mut a) => {
                 a.einschaetzung = format!("{} [{}]", a.einschaetzung, e.kosten);
@@ -233,7 +272,11 @@ impl<N: Netz> Berater for KiBerater<N> {
         let system = frage::system(self.wer, &self.grenzen, erlaubnis.deckel().max_suchen());
         let f = frage::urteil_frage(lage, &self.universum, vorschlag);
         let e = self.fragen(&erlaubnis, &system, &f);
-        match e.text.and_then(|t| frage::lies_urteil(&t)) {
+        match e
+            .text
+            .and_then(|t| frage::lies_urteil(&t))
+            .and_then(|u| self.ohne_geheimnis_urteil(u))
+        {
             Ok(mut u) => {
                 u.begruendung = format!("{} [{}]", u.begruendung, e.kosten);
                 u
