@@ -7,5 +7,4 @@ crates/depot_sammler/
 crates/depot_dienst/
 docs/
 CHANGELOG.md
-run.cmd
 kodex/aenderung.txt
