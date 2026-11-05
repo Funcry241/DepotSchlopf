@@ -614,14 +614,29 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
     s.push_str("</table></div></section>");
 }
 
+/// Was bei einer abgebrochenen KI-Anfrage geschieht, in Alltagssprache (Maus, 05.11.2026).
+pub const KI_VERBINDUNG: &str = "<details id=\"ki-verbindung\"><summary>Wenn die Verbindung bei \
+     einer KI-Anfrage wegbricht</summary><ul>\
+     <li><b>Die Anfrage ist gar nicht erst hinausgegangen</b> (kein Internet, Adresse nicht \
+     gefunden, Verbindung abgewiesen): Sie hat nichts gekostet. DepotSchlopf versucht es nach 30 \
+     und nach 60 Sekunden von selbst noch einmal. Klappt es dann nicht, läuft der Papiertag \
+     heute ohne diese KI. Du musst nichts tun.</li>\
+     <li><b>Die Anfrage war schon abgeschickt, dann brach die Verbindung ab</b>: Sie kann beim \
+     Anbieter angekommen sein und Geld gekostet haben, ohne dass DepotSchlopf die Antwort kennt. \
+     Ein zweiter Versuch könnte doppelt kosten. Deshalb fragt DepotSchlopf nicht noch einmal, \
+     sondern sperrt beide KIs. Du siehst im Konto des Anbieters nach, was der Aufruf gekostet \
+     hat, und hebst die Sperre hier auf.</li></ul></details>";
+
 fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
     s.push_str("<section id=\"kostenschutz\"><h2>Sperre des Kostenschutzes</h2>");
     let inhalt = match &e.ki_halt {
         Ok(None) => {
             s.push_str(
                 "<p><span class=\"gut\">frei</span>: Keine Sperre. Jeder KI-Aufruf durchläuft \
-                 trotzdem die Kostenprüfung.</p></section>",
+                 trotzdem die Kostenprüfung.</p>",
             );
+            s.push_str(KI_VERBINDUNG);
+            s.push_str("</section>");
             return;
         }
         Ok(Some(t)) => t,
@@ -637,8 +652,8 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
     let _ = write!(
         s,
         "<p><span class=\"halt\">gesperrt</span>: Ein KI-Aufruf hat mehr gekostet als \
-         reserviert, oder seine Kosten sind unbekannt. Bis zur Prüfung fragt der Papiertag keine \
-         KI.</p><pre>{}</pre>\
+         reserviert, oder seine Kosten sind unbekannt, etwa weil die Verbindung nach dem \
+         Absenden abbrach. Bis zur Prüfung fragt der Papiertag keine KI.</p><pre>{}</pre>{}\
          <p class=\"leise\">So prüfen: im Konto des Anbieters die Kosten des genannten Aufrufs \
          ansehen. Aufheben ändert nichts am Kassenbuch: Die Reservierung bleibt gebucht und zählt \
          im Budget. Jeder weitere Aufruf durchläuft wieder die Kostenprüfung und sperrt bei einer \
@@ -650,6 +665,7 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
          Ich habe die Kosten beim Anbieter geprüft.</label>\
          <button type=\"submit\">Sperre aufheben</button></form></section>",
         maskiere(inhalt),
+        KI_VERBINDUNG,
         maskiere(token),
         kostenschutz::abdruck(inhalt)
     );

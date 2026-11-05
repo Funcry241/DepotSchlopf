@@ -8,10 +8,22 @@
 //! verbraucht als erlaubt, oder ist der Verbrauch unbekannt, schreibt er die Sperrdatei
 //! (`daten/ki.halt`). Solange sie liegt, ist keine KI angebunden: Niemand wird gefragt, bis
 //! Wolfgang den Grund geprueft und die Datei geloescht hat.
+//!
+//! **Scheitert der Versand** (Maus, 05.11.2026), zaehlt allein, ob die Anfrage den Anbieter
+//! erreicht haben kann (`NetzFehler`):
+//! - Sicher nicht gesendet (Name, Verbindungsaufbau): Sie kostet nichts. Der Berater versucht es
+//!   nach `WARTEZEITEN` erneut, unter derselben Reservierung. So erreicht hoechstens eine
+//!   Anfrage je Reservierung den Anbieter, und die gebuchten Hoechstkosten bleiben die Grenze.
+//! - Vielleicht angekommen (Abbruch nach dem Absenden, Zeitgrenze): Was sie gekostet hat, ist
+//!   unbekannt. Nie wiederholen: Ein zweiter Versuch koennte doppelt kosten. Die Sperre
+//!   `daten/ki.halt` greift, bis Wolfgang die Kosten beim Anbieter geprueft hat.
+//!
+//! Beides steht als Hinweiszeile (`depot_kern::hinweis`) in Alltagssprache in der Ausgabe.
 
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use depot_journal::AufrufErlaubnis;
 use depot_journal::anbieter::{self, Eintrag, Ergebnis as Ausgang, Kosten};
@@ -22,6 +34,10 @@ use crate::anbieter::{Anbieter, Verbrauch};
 use crate::frage::{self, sauber};
 use crate::netz::{Netz, NetzFehler};
 use crate::schluessel::Schluessel;
+
+/// Wartezeit vor dem zweiten und dritten Versand einer sicher nicht gesendeten Anfrage. Mehr
+/// Versuche gibt es nicht.
+pub const WARTEZEITEN: [Duration; 2] = [Duration::from_secs(30), Duration::from_secs(60)];
 
 /// Pfad des Anbieterprotokolls und die Uhr fuer seine Eintraege.
 type Protokoll = (PathBuf, fn() -> Option<Zeitpunkt>);
@@ -41,6 +57,8 @@ pub struct KiBerater<N: Netz> {
     /// Der Anbieter hat in diesem Lauf ein Limit gemeldet; bis zum Ende des Laufs pausiert,
     /// auch wenn das Protokoll nicht geschrieben werden konnte.
     limit_im_lauf: bool,
+    /// Wartet vor einem neuen Versand; in Tests ohne echtes Warten.
+    schlafe: fn(Duration),
 }
 
 impl<N: Netz> fmt::Debug for KiBerater<N> {
@@ -81,7 +99,48 @@ impl<N: Netz> KiBerater<N> {
             gesperrt: false,
             protokoll: None,
             limit_im_lauf: false,
+            schlafe: std::thread::sleep,
         }
+    }
+
+    /// Wartet mit `schlafe` statt echt (fuer Tests).
+    #[must_use]
+    pub fn mit_warten(mut self, schlafe: fn(Duration)) -> Self {
+        self.schlafe = schlafe;
+        self
+    }
+
+    fn name(&self) -> &'static str {
+        match self.wer {
+            BeraterId::Dachs => "Dachs",
+            BeraterId::Maus => "Maus",
+        }
+    }
+
+    /// Gibt eine Hinweiszeile fuer die Oberflaeche aus.
+    fn hinweis(&self, text: &str) {
+        println!(
+            "{}",
+            depot_kern::hinweis::zeile(&format!("{}: {text}", self.name()))
+        );
+    }
+
+    /// Wann der naechste Versuch beginnt, als Uhrzeit, wenn die Uhr des Protokolls sie kennt.
+    fn um(&self, pause: Duration) -> String {
+        self.protokoll
+            .as_ref()
+            .and_then(|(_, uhr)| uhr())
+            .and_then(|j| {
+                Zeitpunkt::aus_sekunden(
+                    j.sekunden()
+                        .checked_add(i64::try_from(pause.as_secs()).ok()?)?,
+                )
+            })
+            .and_then(depot_kern::hinweis::uhr_text)
+            .map_or_else(
+                || format!("in {} Sekunden", pause.as_secs()),
+                |u| format!("um {u}"),
+            )
     }
 
     /// Vermerkt jeden Aufruf in `pfad` (`daten/anbieter.txt`): Ergebnis, Kosten, Wartezeit.
@@ -214,6 +273,67 @@ impl<N: Netz> KiBerater<N> {
         )
     }
 
+    /// Sendet die Anfrage; eine sicher nicht gesendete nach `WARTEZEITEN` erneut, unter
+    /// derselben Reservierung. Eine vielleicht angekommene nie: Dann sperrt der Berater.
+    ///
+    /// # Errors
+    /// Die Meldung fuer den Aufruf: nicht gesendet, oder gesperrt mit Grund.
+    fn sende(
+        &mut self,
+        kopf: &[(&str, &str)],
+        inhalt: &str,
+        reserviert: Cent,
+    ) -> Result<crate::netz::Rueckmeldung, String> {
+        let von = WARTEZEITEN.len().saturating_add(1);
+        let mut warten = WARTEZEITEN.iter();
+        let mut versuch = 1_usize;
+        loop {
+            match self
+                .netz
+                .sende(self.anbieter.url(), kopf, inhalt.as_bytes())
+            {
+                Ok(a) => return Ok(a),
+                Err(NetzFehler::NichtGesendet(e)) => {
+                    self.vermerke(Ausgang::Netz, None, Kosten::Keine, reserviert, None);
+                    let e = self.bereinigt(&e);
+                    // Vor einem neuen Versand noch einmal: keine Sperre, keine Pause.
+                    let frei = !self.gesperrt() && self.pause().is_none();
+                    let Some(pause) = warten.next().filter(|_| frei) else {
+                        self.hinweis(&format!(
+ "Anfrage hat den Anbieter auch nach {versuch} Versuchen nicht erreicht (keine Verbindung). Sie hat nichts gekostet. Dieser Papiertag läuft ohne diese KI weiter."
+ ));
+                        return Err(format!("nicht gesendet: {e}"));
+                    };
+                    versuch = versuch.saturating_add(1);
+                    self.hinweis(&format!(
+ "Anfrage hat den Anbieter nicht erreicht (keine Verbindung) und nichts gekostet. Nächster Versuch {} (Versuch {versuch} von {von}). DepotSchlopf macht von selbst weiter, du musst nichts tun.",
+ self.um(*pause)
+ ));
+                    (self.schlafe)(*pause);
+                    if self.gesperrt() {
+                        self.hinweis("Kein weiterer Versuch: Der Kostenschutz ist gesperrt.");
+                        return Err("nicht gesendet: KI gesperrt".into());
+                    }
+                    if let Some(p) = self.pause() {
+                        self.hinweis("Kein weiterer Versuch: Der Anbieter pausiert.");
+                        return Err(format!("nicht gesendet: pausiert: {p}"));
+                    }
+                }
+                Err(NetzFehler::Unklar(e)) => {
+                    self.vermerke(Ausgang::Unklar, None, Kosten::Unbekannt, reserviert, None);
+                    let e = self.bereinigt(&e);
+                    self.hinweis(
+ "Verbindung nach dem Absenden abgebrochen. Die Anfrage kann beim Anbieter angekommen sein und Geld gekostet haben. Deshalb fragt DepotSchlopf nicht noch einmal, sondern sperrt beide KIs. Bitte im Konto des Anbieters die Kosten ansehen und dann in der Einrichtung die Sperre aufheben.",
+ );
+                    let m = self.sperre(&format!(
+ "Verbindung nach dem Absenden abgebrochen; die Anfrage kann angekommen sein und gekostet haben, Kosten unbekannt: {e}"
+                ));
+                    return Err(m);
+                }
+            }
+        }
+    }
+
     fn fragen(&mut self, erlaubnis: &AufrufErlaubnis, system: &str, frage: &str) -> Ergebnis {
         let ohne = |t: String| Ergebnis {
             text: Err(t),
@@ -242,21 +362,9 @@ impl<N: Netz> KiBerater<N> {
         }
         let mut bearer = String::new();
         let kopf = self.anbieter.kopf(schluessel.als_str(), &mut bearer);
-        let r = self
-            .netz
-            .sende(self.anbieter.url(), &kopf, inhalt.as_bytes());
-        let antwort = match r {
-            Err(NetzFehler::NichtGesendet(e)) => {
-                self.vermerke(Ausgang::Netz, None, Kosten::Keine, reserviert, None);
-                return ohne(format!("nicht gesendet: {}", self.bereinigt(&e)));
-            }
-            Err(NetzFehler::Unklar(e)) => {
-                self.vermerke(Ausgang::Unklar, None, Kosten::Unbekannt, reserviert, None);
-                let e = self.bereinigt(&e);
-                let m = self.sperre(&format!("Antwort fehlt, Kosten unbekannt: {e}"));
-                return ohne(m);
-            }
+        let antwort = match self.sende(&kopf, &inhalt, reserviert) {
             Ok(a) => a,
+            Err(m) => return ohne(m),
         };
         if antwort.status != 200 {
             return ohne(self.ablehnung(&antwort, reserviert));

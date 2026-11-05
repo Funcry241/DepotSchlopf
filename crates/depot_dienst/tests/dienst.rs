@@ -1312,6 +1312,34 @@ fn hinweis_des_laufs_steht_gross_in_der_live_ansicht() -> Result<(), String> {
     Ok(())
 }
 
+/// Maus zu KI-Aufrufen: Die Einrichtung erklaert in Alltagssprache den Unterschied zwischen
+/// einer Anfrage, die nie hinausging (wird wiederholt, kostet nichts), und einer, die nach dem
+/// Absenden abbrach (Kostensperre, nie wiederholt). Mit und ohne Sperre.
+#[test]
+fn einrichtung_erklaert_abgebrochene_ki_anfragen() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(18, 0)?;
+    let ohne = get(&d, "/einrichtung", t);
+    assert!(ohne.contains("gar nicht erst hinausgegangen"), "{ohne}");
+    assert!(
+        ohne.contains("Ein zweiter Versuch könnte doppelt kosten"),
+        "{ohne}"
+    );
+    fs::write(
+        kostenschutz::pfad(&wurzel),
+        "Dachs am Kostenschutz gesperrt: Verbindung nach dem Absenden abgebrochen\n",
+    )
+    .map_err(|e| format!("Vorbedingung Sperre: {e}"))?;
+    let mit = get(&d, "/einrichtung", t);
+    assert!(
+        mit.contains("Verbindung nach dem Absenden abgebrochen"),
+        "{mit}"
+    );
+    assert!(mit.contains("id=\"ki-verbindung\""), "{mit}");
+    Ok(())
+}
+
 /// Maus, Befund 3 zu #38: Ob es nach einem Ausfall von selbst weitergeht, sagt der Dienst aus
 /// seinem tatsaechlichen Zeitplan, nicht der Sammler. Ohne Zeitplan: nichts von selbst; mit
 /// Zeitplan: der naechste geplante Lauf. Bei unlesbarem Erledigt-Stand bleibt der Zeitplan

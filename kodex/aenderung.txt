@@ -1,9 +1,8 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Kurze Netzausfaelle beim Kursabruf (Maus 05.11.2026, Punkt 1 von 3): Der Sammler wiederholt einen voruebergehend gescheiterten Abruf (Verbindung, Name, Zeitgrenze, Status 5xx) nach 30, 60 und 120 Sekunden, hoechstens viermal und nur innerhalb des bestehenden Frischefensters (Schluss der Boerse plus Hoechstalter minus Zeitgrenze). Ablehnungen werden nie wiederholt; die Frist wird unmittelbar vor jedem Versuch neu geprueft; bleibt die Verbindung zu einer Quelle weg, ruft der Lauf nur bei ihr nichts mehr ab, ein Ausfall der EZB trifft nur Werte in Dollar. Ob es von selbst weitergeht, sagt der Dienst aus dem Zeitplan (Maus, Befunde 1-3 zu #38). Hinweiszeilen in Alltagssprache (depot_kern::hinweis) zeigt der Dienst gross in der Live-Ansicht. Keine Grenze geaendert, keine neue Abhaengigkeit, Netz weiter nur im Sammler.
+zweck: KI-Aufrufe bei abgebrochener Verbindung (Maus 05.11.2026, Punkt 3 von 3): Eine sicher nicht gesendete Anfrage (NetzFehler::NichtGesendet) sendet der Berater nach 30 und 60 Sekunden erneut, hoechstens dreimal, unter derselben Reservierung; eine vielleicht angekommene (Unklar) nie, die Kostensperre greift und nennt den Grund in Worten. Hinweiszeilen fuer die Live-Ansicht, Erklaerung in der Einrichtung. Kassenbuch, Deckel und Grenzen unveraendert, keine neue Abhaengigkeit. Gestapelt; Pfade gegen die Basis-PR.
 pfade:
-crates/depot_kern/
-crates/depot_sammler/
+crates/depot_berater/
 crates/depot_dienst/
 docs/
 CHANGELOG.md
