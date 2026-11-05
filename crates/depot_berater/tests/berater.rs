@@ -207,7 +207,7 @@ fn dachs_schlaegt_vor_und_die_kosten_stehen_dabei() -> Result<(), String> {
     assert!(
         antwort
             .einschaetzung
-            .contains("Kosten 7 von 16 Cent reserviert"),
+            .contains("Kosten 7 von 41 Cent reserviert"),
         "{}",
         antwort.einschaetzung
     );
@@ -221,8 +221,10 @@ fn dachs_schlaegt_vor_und_die_kosten_stehen_dabei() -> Result<(), String> {
     assert!(!inhalt.contains(SCHLUESSEL), "Schluessel nur im Kopf");
     for teil in [
         "\"model\":\"claude-sonnet-5-5\"",
-        "\"max_tokens\":4000",
-        "\"max_uses\":2",
+        "\"max_tokens\":16000",
+        "\"thinking\":{\"type\":\"adaptive\"}",
+        "\"effort\":\"medium\"",
+        "\"max_uses\":5",
         "web_search_20260209",
         "DE0007164600",
         "Quartalszahlen",
@@ -255,8 +257,8 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
     let e = ort.erlaubnis(BeraterId::Maus, 1)?;
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
     assert!(u.zustimmung, "{u:?}");
-    // 10.000 x 2,50 $ + 800 x 15 $ je Mio. + 1 Suche = 4,7 Cent, aufgerundet 5.
-    assert!(u.begruendung.contains("Kosten 5 von 21 Cent"), "{u:?}");
+    // 10.000 x 1 $ + 800 x 5 $ je Mio. + 1 Suche = 2,4 Cent, aufgerundet 3.
+    assert!(u.begruendung.contains("Kosten 3 von 23 Cent"), "{u:?}");
     let e = ort.erlaubnis(BeraterId::Maus, 1)?;
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
     assert!(!u.zustimmung, "\"ja\" ist keine Zustimmung: {u:?}");
@@ -268,9 +270,10 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
     );
     assert!(!inhalt.contains(SCHLUESSEL));
     for teil in [
-        "\"model\":\"gpt-5.4\"",
-        "\"max_output_tokens\":4000",
-        "\"max_tool_calls\":2",
+        "\"model\":\"gpt-6.1-terra\"",
+        "\"max_output_tokens\":16000",
+        "\"reasoning\":{\"effort\":\"medium\"}",
+        "\"max_tool_calls\":5",
         "\"store\":false",
     ] {
         assert!(inhalt.contains(teil), "{teil} fehlt in {inhalt}");
@@ -282,15 +285,15 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
 fn kosten_ueber_der_reservierung_sperren_alle_kis() -> Result<(), String> {
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();
-    // 70.000 x 2 $ + 1.500 x 10 $ + 2 Suchen = 17,5 Cent, aufgerundet 18 > 16 reserviert.
+    // 200.000 x 2 $ + 1.500 x 10 $ + 2 Suchen = 43,5 Cent, aufgerundet 44 > 41 reserviert.
     netz.antworten
-        .push_back(claude(VORSCHLAG, 70_000, 1_500, 2));
+        .push_back(claude(VORSCHLAG, 200_000, 1_500, 2));
     let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
     let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
     let antwort = mit_lage(|l| dachs.vorschlagen(e, l))?;
     assert!(antwort.vorschlag.is_none(), "{antwort:?}");
     assert!(
-        antwort.einschaetzung.contains("18 Cent ueber 16"),
+        antwort.einschaetzung.contains("44 Cent ueber 41"),
         "{antwort:?}"
     );
     assert!(ort.sperre().exists(), "Sperrdatei geschrieben");
@@ -305,12 +308,12 @@ fn kosten_ueber_der_reservierung_sperren_alle_kis() -> Result<(), String> {
 fn zu_viele_suchen_sperren() -> Result<(), String> {
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();
-    netz.antworten.push_back(claude(VORSCHLAG, 1_000, 100, 3));
+    netz.antworten.push_back(claude(VORSCHLAG, 1_000, 100, 6));
     let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
     let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
     let antwort = mit_lage(|l| dachs.vorschlagen(e, l))?;
     assert!(antwort.vorschlag.is_none());
-    assert!(antwort.einschaetzung.contains("3 Suchen"), "{antwort:?}");
+    assert!(antwort.einschaetzung.contains("6 Suchen"), "{antwort:?}");
     assert!(ort.sperre().exists());
     Ok(())
 }

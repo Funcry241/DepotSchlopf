@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: FestschreibungAenderung
-zweck: Papierhandel mit Dachs und Maus (Wolfgang 05.11.2026). Neues Crate depot_berater (Claude und GPT mit Websuche, Schluessel nur in der Windows-Anmeldeverwaltung, Kostenpruefung nach jedem Aufruf, Sperre bei Ueberschreitung); run.cmd papier fragt beide. KI-Deckel 20 EUR im Monat fuer beide zusammen (je KI 46 Aufrufe und 10 EUR), hoechstens 2 Websuchen je Aufruf. Grenzen fuer konzentriertes Handeln: 4 Werte, 40 % je Wert, Umschlag 100 %, ETFs frei. Braucht die Grenzfreigabe von Wolfgang.
+zweck: Papierhandel mit Dachs und Maus (Wolfgang 05.11.2026). Neues Crate depot_berater (Claude Sonnet 5.5 und GPT-6.1 Terra mit Websuche, Schluessel nur in der Windows-Anmeldeverwaltung, Kostenpruefung nach jedem Aufruf, Sperre bei Ueberschreitung); run.cmd papier fragt beide. KI-Deckel 20 EUR im Monat je KI (46 Aufrufe), Denktiefe mittel, hoechstens 5 Websuchen je Aufruf. Grenzen fuer konzentriertes Handeln: 4 Werte, 40 % je Wert, Umschlag 100 %, ETFs frei. Braucht die Grenzfreigabe von Wolfgang.
 pfade:
 Cargo.toml
 Cargo.lock

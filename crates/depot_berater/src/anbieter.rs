@@ -1,10 +1,11 @@
 //! Die beiden Anbieter: Anfrage bauen, Antwort lesen. Kein Netz hier.
 //!
 //! - Dachs = Claude (Anthropic, Messages API) mit dem Werkzeug `web_search`.
-//! - Maus = GPT (OpenAI, Responses API) mit dem Werkzeug `web_search`.
+//! - Maus = GPT-6.1 Terra (OpenAI, Responses API) mit dem Werkzeug `web_search`.
 //!
-//! Beide bekommen die Antwortgrenze `max_token_aus` und die Suchgrenze `max_suchen` aus dem
-//! Deckel der Erlaubnis. Aus jeder Antwort wird der Verbrauch gelesen: Eingabe-Token (mit den
+//! Beide denken mit mittlerer Tiefe (Wolfgang, 05.11.2026). Beide bekommen die Antwortgrenze
+//! `max_token_aus` (Denken eingeschlossen) und die Suchgrenze `max_suchen` aus dem Deckel der
+//! Erlaubnis. Aus jeder Antwort wird der Verbrauch gelesen: Eingabe-Token (mit den
 //! Suchergebnissen, die der Anbieter selbst einfuegt), Ausgabe-Token und Zahl der Suchen.
 
 use depot_kern::BeraterId;
@@ -14,8 +15,8 @@ use crate::json::{self, Json, zitiere};
 
 /// Modell von Dachs. Preise im Deckel (`depot_ki`): 2 $ / 10 $ je Mio. Token.
 pub const MODELL_DACHS: &str = "claude-sonnet-5-5";
-/// Modell von Maus. Preise im Deckel (`depot_ki`): 2,50 $ / 15 $ je Mio. Token.
-pub const MODELL_MAUS: &str = "gpt-5.4";
+/// Modell von Maus (Wolfgang, 05.11.2026). Preise im Deckel (`depot_ki`): 1 $ / 5 $ je Mio. Token.
+pub const MODELL_MAUS: &str = "gpt-6.1-terra";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Anbieter {
@@ -106,7 +107,7 @@ impl Anbieter {
             Anbieter::Anthropic => format!(
                 concat!(
                     "{{\"model\":{},\"max_tokens\":{},",
-                    "\"thinking\":{{\"type\":\"between_tools\"}},",
+                    "\"thinking\":{{\"type\":\"adaptive\"}},",
                     "\"output_config\":{{\"effort\":\"medium\"}},",
                     "\"system\":{},",
                     "\"tools\":[{{\"type\":\"web_search_20260209\",\"name\":\"web_search\",\"max_uses\":{}}}],",
@@ -121,7 +122,7 @@ impl Anbieter {
             Anbieter::OpenAi => format!(
                 concat!(
                     "{{\"model\":{},\"max_output_tokens\":{},",
-                    "\"reasoning\":{{\"effort\":\"low\"}},",
+                    "\"reasoning\":{{\"effort\":\"medium\"}},",
                     "\"instructions\":{},",
                     "\"tools\":[{{\"type\":\"web_search\"}}],\"max_tool_calls\":{},",
                     "\"store\":false,",

@@ -60,10 +60,10 @@ const DACHS: BeraterId = BeraterId::Dachs;
 
 #[test]
 fn hoechstkosten_je_aufruf() {
-    assert_eq!(KiDeckel::standard(DACHS).hoechstkosten(), Some(Cent(16)));
+    assert_eq!(KiDeckel::standard(DACHS).hoechstkosten(), Some(Cent(41)));
     assert_eq!(
         KiDeckel::standard(BeraterId::Maus).hoechstkosten(),
-        Some(Cent(21))
+        Some(Cent(23))
     );
 }
 
@@ -99,7 +99,7 @@ fn neuer_zyklus_am_selben_tag_gesperrt() {
     }
 }
 
-/// Jeden Tag ein neuer Zyklus, einen Monat lang: hoechstens 46 Aufrufe, hoechstens 10 €.
+/// Jeden Tag ein neuer Zyklus, einen Monat lang: hoechstens 46 Aufrufe, hoechstens 20 €.
 #[test]
 fn monat_hoechstens_46_aufrufe() {
     let p = neuer_pfad();
@@ -227,8 +227,8 @@ fn eingabe_deckel() {
     let Some(erl) = erl else {
         panic!("keine Erlaubnis");
     };
-    assert!(erl.eingabe_passt(&"a".repeat(50_000)));
-    assert!(!erl.eingabe_passt(&"a".repeat(50_001)));
+    assert!(erl.eingabe_passt(&"a".repeat(100_000)));
+    assert!(!erl.eingabe_passt(&"a".repeat(100_001)));
 }
 
 fn reservieren(k: &mut Journal, t: Datum, zyklus: u32) {
@@ -272,15 +272,15 @@ fn erschoepfter_monat_bleibt_bis_zum_folgemonat_gesperrt() {
 fn alte_buchungen_zaehlen_nach_einer_grenzaenderung_weiter() {
     let alt = "0".repeat(64);
     let p = leerer_pfad();
-    // Unter den alten Grenzen kostete ein Aufruf 300 Cent; heute waere das unzulaessig.
+    // Unter den alten Grenzen kostete ein Aufruf 600 Cent; heute waere das unzulaessig.
     schreib(
         &p,
         &[
             (Art::KiGrenzen, alt.as_str()),
-            (Art::Ki, "Dachs;2026-11-02;1;300"),
-            (Art::Ki, "Dachs;2026-11-02;1;300"),
-            (Art::Ki, "Dachs;2026-11-03;2;300"),
-            (Art::Ki, "Dachs;2026-11-03;2;300"),
+            (Art::Ki, "Dachs;2026-11-02;1;600"),
+            (Art::Ki, "Dachs;2026-11-02;1;600"),
+            (Art::Ki, "Dachs;2026-11-03;2;600"),
+            (Art::Ki, "Dachs;2026-11-03;2;600"),
         ],
     );
     let mut j = journal(&p);

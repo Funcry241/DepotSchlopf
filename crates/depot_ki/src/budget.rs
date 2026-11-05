@@ -59,10 +59,11 @@ pub struct KiDeckel {
 }
 
 impl KiDeckel {
-    /// Papierhandel ab 05.11.2026, KI-Kosten hoechstens 20 € im Monat fuer beide zusammen:
-    /// - Dachs = Claude Sonnet 5.5: 50.000 Token rein, 4.000 raus, 2 $ / 10 $ je Mio.
-    /// - Maus = GPT-5.4: 50.000 Token rein, 4.000 raus, 2,50 $ / 15 $ je Mio.
-    /// - Beide: hoechstens 2 Websuchen je Aufruf zu 10 $ je 1.000 Suchen.
+    /// Papierhandel ab 05.11.2026, KI-Kosten hoechstens 20 € im Monat je KI (Wolfgang),
+    /// Denktiefe mittel. Die Ausgabe-Grenze schliesst das Denken ein.
+    /// - Dachs = Claude Sonnet 5.5: 100.000 Token rein, 16.000 raus, 2 $ / 10 $ je Mio.
+    /// - Maus = GPT-6.1 Terra: 100.000 Token rein, 16.000 raus, 1 $ / 5 $ je Mio.
+    /// - Beide: hoechstens 5 Websuchen je Aufruf zu 10 $ je 1.000 Suchen.
     ///
     /// Die Eingabe-Grenze schliesst die Suchergebnisse ein, die der Anbieter selbst einfuegt.
     /// Sie laesst sich vorher nicht pruefen; der Client rechnet nach jedem Aufruf die
@@ -70,13 +71,13 @@ impl KiDeckel {
     /// ueberschreiten.
     pub fn standard(berater: BeraterId) -> KiDeckel {
         let (max_token_ein, max_token_aus, ein, aus) = match berater {
-            BeraterId::Dachs => (50_000, 4_000, 200, 1_000),
-            BeraterId::Maus => (50_000, 4_000, 250, 1_500),
+            BeraterId::Dachs => (100_000, 16_000, 200, 1_000),
+            BeraterId::Maus => (100_000, 16_000, 100, 500),
         };
         KiDeckel {
             max_token_ein,
             max_token_aus,
-            max_suchen: 2,
+            max_suchen: 5,
             // Ein ungueltiger Festwert sperrt jeden Aufruf: Mit Hoechstpreisen laesst sich keine
             // Reservierung berechnen, `pruefe` meldet `Rechenfehler` (fail-closed).
             preise: Preise::neu(ein, aus).unwrap_or(Preise {
@@ -152,16 +153,16 @@ pub struct KiGrenzen {
 
 impl KiGrenzen {
     /// Papierhandel ab 05.11.2026, je KI: 2 Aufrufe je Zyklus (eigener Vorschlag und
-    /// Zweitmeinung zum anderen Topf), 1 Zyklus je Tag, 46 Aufrufe und 10 € je Monat,
-    /// 120 € je Jahr. Zusammen hoechstens 20 € im Monat (Wolfgang, 05.11.2026). 46 Aufrufe
+    /// Zweitmeinung zum anderen Topf), 1 Zyklus je Tag, 46 Aufrufe und 20 € je Monat,
+    /// 240 € je Jahr (Wolfgang, 05.11.2026: je KI hoechstens 20 € im Monat). 46 Aufrufe
     /// reichen fuer 23 Handelstage; gebucht werden die Hoechstkosten.
     pub fn standard() -> KiGrenzen {
         KiGrenzen {
             aufrufe_je_zyklus: 2,
             zyklen_je_tag: 1,
             aufrufe_je_monat: 46,
-            kosten_je_monat: Cent(1_000),
-            kosten_je_jahr: Cent(12_000),
+            kosten_je_monat: Cent(2_000),
+            kosten_je_jahr: Cent(24_000),
         }
     }
 
@@ -364,7 +365,7 @@ mod tests {
     fn budget_vor_dem_aufruf_geprueft() -> Result<(), String> {
         let g = KiGrenzen::standard();
         let mut d = KiDeckel::standard(MAUS);
-        d.max_token_aus = 1_000_000; // 0,13 € + 15,00 € + 0,02 € > 10 €
+        d.max_token_aus = 5_000_000; // 0,10 € + 25,00 € + 0,05 € > 20 €
         assert_eq!(
             pruefe(&g, &d, &[], MAUS, tag(5)?, 1),
             Err(Sperre::MonatsbudgetErschoepft)
@@ -387,26 +388,24 @@ mod tests {
         Ok(())
     }
 
-    /// Die Hoechstkosten beider Deckel passen 46-mal in das Monatsbudget: 20 € im Monat fuer
-    /// beide zusammen (Wolfgang, 05.11.2026).
+    /// Die Hoechstkosten jedes Deckels passen 46-mal in das Monatsbudget: je KI hoechstens
+    /// 20 € im Monat (Wolfgang, 05.11.2026).
     #[test]
     fn zwanzig_euro_im_monat() {
         let g = KiGrenzen::standard();
-        let mut summe = 0;
         for b in [BeraterId::Dachs, MAUS] {
             let h = KiDeckel::standard(b)
                 .hoechstkosten()
                 .map_or(i64::MAX, |c| c.0);
             let monat = h.saturating_mul(i64::from(g.aufrufe_je_monat));
             assert!(monat <= g.kosten_je_monat.0, "{b:?}: {monat}");
-            summe += g.kosten_je_monat.0;
         }
-        assert!(summe <= 2_000);
+        assert!(g.kosten_je_monat.0 <= 2_000);
         assert_eq!(
             KiDeckel::standard(BeraterId::Dachs).hoechstkosten(),
-            Some(Cent(16))
+            Some(Cent(41))
         );
-        assert_eq!(KiDeckel::standard(MAUS).hoechstkosten(), Some(Cent(21)));
+        assert_eq!(KiDeckel::standard(MAUS).hoechstkosten(), Some(Cent(23)));
     }
 
     /// Tatsaechliche Kosten: Token und Suchen zusammen aufgerundet.
