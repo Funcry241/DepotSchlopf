@@ -1,11 +1,8 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Abruf je Boerse, Schritt 5 (Tiingo-Plan, Wolfgang 05.11.2026): fuenf erste NYSE-Werte in der Beobachtungsliste (JPM, KO, JNJ, XOM, V), Kontingent je Quelle als Regel in pruefe_liste (Alpha Vantage 25, Tiingo 500), Tiingo-Schluessel DepotSchlopf/tiingo in der Einrichtung und als Punkt im Lagebild. Keine Grenze geaendert, keine neue Abhaengigkeit, Netz wie bisher nur im Sammler.
+zweck: Nach einem Neustart den Papiertag nachholen oder schuetzen (Maus 05.11.2026, Punkt 2, Teil 2): dienst_erledigt.txt (erledigt-v3) merkt sich den Tag eines erfolgreichen Kursabrufs des Zeitplans (kurse_ok) und den Tag, fuer den der Papiertag gestartet wurde (papier, unmittelbar vor dem Start). Der Papiertag ist faellig als Zustand statt als Ereignis: alle Abrufe des Tages gestartet, einer heute erfolgreich, Papiertag heute noch nicht gestartet. So holt ein neu gestarteter Dienst einen nicht begonnenen Papiertag mit den Kursen von heute nach und startet einen begonnenen nie zweimal. Die Live-Ansicht sagt nach einem Neustart, wo der Tag steht. Keine Grenze geaendert, keine neue Abhaengigkeit. Gestapelt auf #40 und Zeitplan je Boerse (#41); Pfade gegen die Basis-PR #40.
 pfade:
-crates/depot_kern/
-crates/depot_lage/
 crates/depot_dienst/
-crates/depot_sammler/
 docs/
 CHANGELOG.md
 kodex/aenderung.txt

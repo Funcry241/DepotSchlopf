@@ -183,9 +183,6 @@ pub struct Zustand {
     pub verlauf_hinweis: Option<String>,
     /// Der Verlauf liess sich zuletzt nicht schreiben; bis das wieder geht, startet nichts.
     pub verlauf_fehler: Option<String>,
-    /// Der Tag, an dem zuletzt ein Kursabruf des Zeitplans erfolgreich war. Nach dem letzten
-    /// Abruf dieses Tages folgt der Papiertag nur, wenn hier dieser Tag steht.
-    pub kurse_erfolg: Option<Datum>,
     /// Die Boersen der Liste (`depot_kern::liste::boersen`), je eine mit eigenem Kursabruf.
     pub boersen: Vec<Boerse>,
 }
@@ -432,7 +429,6 @@ impl Dienst {
                 programm_meldung: None,
                 verlauf_hinweis,
                 verlauf_fehler: None,
-                kurse_erfolg: None,
                 boersen: depot_kern::liste::boersen(),
             }),
             starter,
@@ -501,6 +497,15 @@ impl Dienst {
         if z.laufend.is_none()
             && let Some((art, anlass)) = z.warteschlange.pop_front()
         {
+            if art == Art::Papier && anlass == Anlass::Zeitplan {
+                let noch_faellig = ortszeit(jetzt).is_some_and(|(tag, h, m, _, _)| {
+                    faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen)
+                        == Some(Art::Papier)
+                });
+                if z.erledigt_fehler.is_some() || !noch_faellig {
+                    return None;
+                }
+            }
             let nr = z.naechste_nr;
             z.naechste_nr = nr.saturating_add(1);
             let mut auftrag = Auftrag {
@@ -533,6 +538,19 @@ impl Dienst {
                 return None;
             }
             z.verlauf_fehler = None;
+            // Den Papiertag des Zeitplans erst beim Start als gestartet vermerken: Endet der
+            // Dienst, waehrend er nur wartet, holt der naechste Start ihn nach.
+            if art == Art::Papier
+                && anlass == Anlass::Zeitplan
+                && let Err(e) = self.papier_vermerken(&mut z, jetzt)
+            {
+                auftrag.protokoll.push(format!("Nicht gestartet: {e}"));
+                auftrag.ende = Some(jetzt);
+                auftrag.erfolg = Some(false);
+                ende_vermerken(&self.wurzel, &mut z, &auftrag);
+                ablegen(&mut z, auftrag);
+                return None;
+            }
             let mut befehl = (self.starter)(art, &self.wurzel);
             befehl
                 .stdin(Stdio::null())
@@ -581,7 +599,7 @@ impl Dienst {
     }
 
     fn zeitplan_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
-        if z.erledigt_fehler.is_some() {
+        if z.neustart || z.erledigt_fehler.is_some() {
             return;
         }
         let Some((tag, h, m, _, _)) = ortszeit(jetzt) else {
@@ -590,15 +608,25 @@ impl Dienst {
         let Some(art) = faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen) else {
             return;
         };
-        // Erst festhalten, dann starten: Ein Neustart startet nichts doppelt.
+        // Der Papiertag wird erst bei seinem Start vermerkt (`schritt`); wartet er schon, bleibt
+        // es bei dem einen.
+        if art == Art::Papier {
+            let _ = einreihen(z, art, Anlass::Zeitplan);
+            return;
+        }
+        // Bei voller Warteschlange bleibt der Abruf faellig. Vor der Ausfuehrung wird
+        // er dauerhaft vermerkt, damit ein Neustart ihn nicht doppelt startet.
+        if einreihen(z, art, Anlass::Zeitplan).is_err() {
+            return;
+        }
         let mut neu = z.erledigt;
         neu.setze(art, tag);
         match schreibe_ganz(&erledigt_pfad(&self.wurzel), &neu.als_text()) {
             Ok(()) => {
                 z.erledigt = neu;
-                let _ = einreihen(z, art, Anlass::Zeitplan);
             }
             Err(e) => {
+                let _ = z.warteschlange.pop_back();
                 z.zeitplan.an = false;
                 z.zeitplan_fehler = Some(format!("Zeitplan angehalten: {e}"));
             }
@@ -636,7 +664,10 @@ impl Dienst {
         };
         a.ende = uhr();
         a.erfolg = Some(erfolg);
-        let papier_danach = papier_nach_abruf(&mut z, &a, erfolg);
+        let ende = a.ende;
+        if erfolg {
+            self.kurse_ok_vermerken(&mut z, &a);
+        }
         let eingespielt =
             erfolg && a.art == Art::Update && crate::rueckfall::offen_pfad(&self.wurzel).exists();
         ende_vermerken(&self.wurzel, &mut z, &a);
@@ -646,8 +677,51 @@ impl Dienst {
             z.neustart = true;
             z.update_meldung = Some((false, "Update eingespielt. Der Dienst startet neu.".into()));
         }
-        if papier_danach {
-            let _ = einreihen(&mut z, Art::Papier, Anlass::Zeitplan);
+        // Folgt jetzt der Papiertag, steht er gleich in der Warteschlange.
+        if let Some(jetzt) = ende {
+            self.zeitplan_pruefen(&mut z, jetzt);
+        }
+    }
+
+    /// Vermerkt den Papiertag des Zeitplans als heute gestartet, bevor er startet.
+    fn papier_vermerken(&self, z: &mut Zustand, jetzt: Zeitpunkt) -> Result<(), String> {
+        let (tag, ..) = ortszeit(jetzt).ok_or("Uhr liefert keinen Tag")?;
+        let mut neu = z.erledigt;
+        neu.papier = Some(tag);
+        match schreibe_ganz(&erledigt_pfad(&self.wurzel), &neu.als_text()) {
+            Ok(()) => {
+                z.erledigt = neu;
+                Ok(())
+            }
+            Err(e) => {
+                z.zeitplan.an = false;
+                z.zeitplan_fehler = Some(format!("Zeitplan angehalten: {e}"));
+                Err(format!("daten/dienst_erledigt.txt nicht schreibbar ({e})"))
+            }
+        }
+    }
+
+    /// Nach einem erfolgreichen Kursabruf des Zeitplans: Sein Tag zaehlt dauerhaft als Tag mit
+    /// Kursen (`Erledigt::kurse_ok`). So folgt der Papiertag auch nach einem Neustart. Der Tag
+    /// ist der, an dem der Zeitplan den Abruf gestartet hat.
+    fn kurse_ok_vermerken(&self, z: &mut Zustand, a: &Auftrag) {
+        let Art::KurseVon(boerse) = a.art else {
+            return;
+        };
+        if a.anlass != Anlass::Zeitplan || z.erledigt_fehler.is_some() {
+            return;
+        }
+        let Some(tag) = z.erledigt.kurse_von(boerse) else {
+            return;
+        };
+        let mut neu = z.erledigt;
+        neu.kurse_ok = Some(tag);
+        match schreibe_ganz(&erledigt_pfad(&self.wurzel), &neu.als_text()) {
+            Ok(()) => z.erledigt = neu,
+            Err(e) => {
+                z.zeitplan.an = false;
+                z.zeitplan_fehler = Some(format!("Zeitplan angehalten: {e}"));
+            }
         }
     }
 
@@ -671,28 +745,6 @@ impl Dienst {
             a.protokoll.push(kuerze(zeile));
         }
     }
-}
-
-/// Nach einem Kursabruf des Zeitplans: Ist er erfolgreich, zaehlt sein Tag als Tag mit Kursen.
-/// War es der letzte Abruf dieses Tages und hatte der Tag einen erfolgreichen Abruf, folgt der
-/// Papiertag (wenn eingestellt). Der Tag ist der, an dem der Zeitplan den Abruf gestartet hat.
-fn papier_nach_abruf(z: &mut Zustand, a: &Auftrag, erfolg: bool) -> bool {
-    let Art::KurseVon(boerse) = a.art else {
-        return false;
-    };
-    if a.anlass != Anlass::Zeitplan {
-        return false;
-    }
-    let Some(tag) = z.erledigt.kurse_von(boerse) else {
-        return false;
-    };
-    if erfolg {
-        z.kurse_erfolg = Some(tag);
-    }
-    z.zeitplan.an
-        && z.zeitplan.papier_danach
-        && z.kurse_erfolg == Some(tag)
-        && crate::zeitplan::letzter_abruf_fuer(&z.zeitplan, tag, boerse, &z.boersen)
 }
 
 fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static str> {
@@ -726,4 +778,85 @@ fn ende_vermerken(wurzel: &Path, z: &mut Zustand, a: &Auftrag) {
 fn ablegen(z: &mut Zustand, a: Auftrag) {
     z.verlauf.push_front(a);
     z.verlauf.truncate(VERLAUF);
+}
+
+/// Wo der Tag nach einem Neustart des Dienstes steht (Maus 05.11.2026): was passiert ist, ob
+/// DepotSchlopf selbst weitermacht und ob der Mensch etwas tun muss. `None`, wenn heute kein
+/// Neustart den Ablauf beruehrt hat. `true` heisst: Der Mensch muss hinsehen.
+pub fn nach_neustart(z: &Zustand, tag: Datum) -> Option<(bool, String)> {
+    let heute = |a: &Auftrag| ortszeit(a.start).is_some_and(|o| o.0 == tag);
+    let kurse = |a: Art| matches!(a, Art::Kurse | Art::KurseVon(_));
+    let frueher = |art: &dyn Fn(Art) -> bool, wie: Frueher| {
+        z.verlauf
+            .iter()
+            .any(|a| a.frueher == wie && art(a.art) && heute(a))
+    };
+    let dieser_start = |art: &dyn Fn(Art) -> bool| {
+        z.laufend
+            .iter()
+            .chain(z.verlauf.iter())
+            .any(|a| a.frueher == Frueher::Nein && art(a.art) && heute(a))
+    };
+    let papier = |a: Art| a == Art::Papier;
+    // Ein Papiertag des Zeitplans aus diesem Start, laufend, wartend oder beendet.
+    let papier_jetzt = z
+        .laufend
+        .iter()
+        .chain(z.verlauf.iter())
+        .find(|a| a.frueher == Frueher::Nein && a.art == Art::Papier && heute(a))
+        .filter(|a| a.anlass == Anlass::Zeitplan)
+        .map(|a| if a.ende.is_none() { None } else { a.erfolg })
+        .or_else(|| {
+            (z.erledigt.kurse_ok == Some(tag)
+                && z.warteschlange.contains(&(Art::Papier, Anlass::Zeitplan)))
+            .then_some(None)
+        });
+    let kurse_vorher = frueher(&kurse, Frueher::Beendet) || frueher(&kurse, Frueher::Unterbrochen);
+    if let Some(ausgang) = papier_jetzt {
+        if dieser_start(&kurse) || !kurse_vorher {
+            return None;
+        }
+        return Some(match ausgang {
+            None => (
+                false,
+                "Nach dem Neustart holt DepotSchlopf den Papiertag mit den Kursen von heute \
+                 nach. Du musst nichts tun."
+                    .into(),
+            ),
+            Some(true) => (
+                false,
+                "Nach dem Neustart hat DepotSchlopf den Papiertag mit den Kursen von heute \
+                 nachgeholt. Du musst nichts tun."
+                    .into(),
+            ),
+            Some(false) => (
+                true,
+                "Nach dem Neustart wollte DepotSchlopf den Papiertag nachholen, er hielt an. \
+                 Den Grund zeigt sein Protokoll im Verlauf."
+                    .into(),
+            ),
+        });
+    }
+    if frueher(&papier, Frueher::Unterbrochen) && !dieser_start(&papier) {
+        return Some((
+            true,
+            "Der Papiertag lief schon, als DepotSchlopf endete (etwa bei einem Neustart von \
+             Windows). Der heutige Schutz bleibt: Er startet heute nicht noch einmal von selbst, \
+             und ein angefangener Tag hält jeden weiteren Papiertag an, bis du ihn geprüft hast. \
+             Was zu tun ist, steht im Lagebild unter „Papiertag“."
+                .into(),
+        ));
+    }
+    if frueher(&kurse, Frueher::Unterbrochen)
+        && !dieser_start(&kurse)
+        && z.erledigt.kurse_ok != Some(tag)
+    {
+        return Some((
+            true,
+            "Der Kursabruf lief, als DepotSchlopf endete. Ohne Kurse von heute folgt heute kein \
+             Papiertag von selbst. Der aktuelle Zeitplan steht unter Tätigkeit."
+                .into(),
+        ));
+    }
+    None
 }

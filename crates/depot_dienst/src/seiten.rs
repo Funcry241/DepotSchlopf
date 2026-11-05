@@ -382,6 +382,15 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
             );
         }
     }
+    // Nach einem Neustart: wo der Tag stehen blieb und ob DepotSchlopf selbst weitermacht.
+    if let Some((halt, text)) = heute.and_then(|t| crate::werkbank::nach_neustart(z, t)) {
+        let klasse = if halt { "halt" } else { "gut" };
+        let _ = write!(
+            s,
+            "<p class=\"kopf {klasse}\" id=\"neustart\">{}</p>",
+            maskiere(&text)
+        );
+    }
     if !z.warteschlange.is_empty() {
         let liste: Vec<String> = z
             .warteschlange
