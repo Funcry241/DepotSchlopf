@@ -377,21 +377,37 @@ impl Journal {
         schreibe_atomar(&vermerk, v.text().as_bytes()).map_err(halt)
     }
 
+    /// Ist hier ein Journal eingerichtet? `false` nur, wenn weder Journal noch Vermerk da
+    /// sind: Dann, und nur dann, darf `einrichten` neu beginnen. Fehlt nur das Journal, ist der
+    /// Datenbestand unvollstaendig, nicht neu (K26-01). Liest nichts und sperrt nichts; ob ein
+    /// vorhandenes Journal stimmt, entscheidet `oeffnen`.
+    ///
+    /// # Errors
+    /// `Halt`, wenn das Journal fehlt, aber der Vermerk da ist, bei einem Link im Pfad und wenn
+    /// sich nicht feststellen laesst, ob die Dateien da sind.
+    pub fn eingerichtet(pfad: &Path) -> Result<bool, JournalFehler> {
+        kein_link_im_pfad(pfad)?;
+        if datei_da(pfad)? {
+            return Ok(true);
+        }
+        if datei_da(&vermerk_pfad(pfad))? {
+            return Err(halt(
+                "Journal fehlt, der Vermerk ist da: Datenbestand unvollstaendig",
+            ));
+        }
+        Ok(false)
+    }
+
     /// Oeffnet exklusiv, prueft die ganze Kette gegen den Vermerk, behandelt einen vermerkten
     /// Anhang und rechnet den Stand nach. Jede Unstimmigkeit ist Halt.
     ///
     /// # Errors
     /// `Belegt`, wenn ein anderer Lauf es offen hat; sonst `Halt`.
     pub fn oeffnen(pfad: &Path) -> Result<Journal, JournalFehler> {
-        kein_link_im_pfad(pfad)?;
-        let vermerk = vermerk_pfad(pfad);
-        if !datei_da(pfad)? {
-            return Err(halt(if datei_da(&vermerk)? {
-                "Journal fehlt"
-            } else {
-                "nicht eingerichtet: Journal und Vermerk fehlen"
-            }));
+        if !Journal::eingerichtet(pfad)? {
+            return Err(halt("nicht eingerichtet: Journal und Vermerk fehlen"));
         }
+        let vermerk = vermerk_pfad(pfad);
         // Erst sperren, dann alles Weitere lesen: Die Sperre gilt der Datei, nicht dem Namen.
         let mut datei = OpenOptions::new()
             .read(true)

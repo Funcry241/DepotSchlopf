@@ -11,7 +11,8 @@ use depot_kern::liste::{als_universum, beobachtungsliste};
 use depot_kern::{BeraterId, Cent, Datum, Herkunft, Kurs, Preis, Topf, TopfId, Zeitpunkt};
 use depot_ki::{Buchung, KiDeckel, KiGrenzen};
 use depot_lage::{
-    Abhilfe, Ampel, BudgetStatus, Hinterlegt, Lagebild, Umgebung, Zugang, html, ki_budget, lagebild,
+    Abhilfe, Ampel, BudgetStatus, Hinterlegt, Lagebild, PAPIERKONTO, Umgebung, Zugang, html,
+    ki_budget, lagebild, mit_journal,
 };
 use depot_sim::{Ausgang, Papierdatei, Stumm, papiertag};
 
@@ -422,5 +423,68 @@ fn zeiten_stehen_in_frankfurter_ortszeit() -> Result<(), String> {
     )?;
     let l = lagebild(&umgebung(sommer, Zugang::NichtEingerichtet));
     assert!(html::seite(&l).contains("01.07.2026 09:30 MESZ"));
+    Ok(())
+}
+
+/// Das Lagebild, wie `run.cmd lage` es ueber `mit_journal` liest.
+fn lage_aus(dir: &std::path::Path, t: u8) -> Result<Lagebild, String> {
+    let jetzt = abends(t)?;
+    Ok(mit_journal(dir, |z| lagebild(&umgebung(jetzt, z))))
+}
+
+/// K26-01 (Maus' Gegenprobe): Journal geloescht, Vermerk noch da. Das ist kein neuer,
+/// sondern ein unvollstaendiger Datenbestand: Halt, nie „einrichten“.
+#[test]
+fn geloeschtes_journal_mit_vermerk_ist_halt() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    vorbedingung(fs::remove_file(&ort.journal), "Journal loeschen")?;
+    let l = lage_aus(&ort.dir, 5)?;
+    let j = punkt(&l, "Journal")?;
+    assert_eq!(j.ampel, Ampel::Halt, "{j:?}");
+    assert_ne!(j.abhilfe, Some(Abhilfe::JournalEinrichten));
+    assert_eq!(l.gesamt, Ampel::Halt);
+    assert!(
+        l.naechster_schritt.starts_with("Halt"),
+        "{}",
+        l.naechster_schritt
+    );
+    // Einrichten ginge auch nicht: Der Vermerk ist da.
+    assert!(Journal::einrichten(&ort.journal).is_err());
+    Ok(())
+}
+
+/// Ein Papierkonto ohne Journal und Vermerk ist ebenfalls ein unvollstaendiger Bestand.
+#[test]
+fn papierkonto_ohne_journal_ist_halt() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    vorbedingung(fs::remove_file(&ort.journal), "Journal loeschen")?;
+    vorbedingung(
+        fs::remove_file(ort.journal.with_extension("vermerk")),
+        "Vermerk loeschen",
+    )?;
+    vorbedingung(fs::write(ort.dir.join(PAPIERKONTO), "x"), "Papierkonto")?;
+    let l = lage_aus(&ort.dir, 5)?;
+    assert_eq!(punkt(&l, "Journal")?.ampel, Ampel::Halt);
+    Ok(())
+}
+
+/// Ohne jede Spur ist der Bestand neu; mit eingerichtetem Journal ist er offen; hat ein Lauf
+/// das Journal, ist er belegt.
+#[test]
+fn neu_offen_und_belegt_ueber_mit_journal() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let leer = ort.dir.join("leer");
+    vorbedingung(fs::create_dir_all(&leer), "leerer Ordner")?;
+    let l = lage_aus(&leer, 5)?;
+    assert_eq!(
+        punkt(&l, "Journal")?.abhilfe,
+        Some(Abhilfe::JournalEinrichten)
+    );
+    let l = lage_aus(&ort.dir, 5)?;
+    assert_eq!(punkt(&l, "Journal")?.ampel, Ampel::Gut);
+    let offen = ort.oeffnen()?;
+    let l = lage_aus(&ort.dir, 5)?;
+    assert_eq!(punkt(&l, "Journal")?.abhilfe, Some(Abhilfe::Warten));
+    drop(offen);
     Ok(())
 }

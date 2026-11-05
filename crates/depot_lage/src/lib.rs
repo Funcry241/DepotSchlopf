@@ -6,6 +6,8 @@
 //! Funktionen, mit denen Papiertag und Kostenschutz entscheiden (`depot_sim::kurse_von_heute`,
 //! `depot_sim::tageslage`, `depot_ki::pruefe`). Anzeige und Schutz sehen so denselben Stand
 //! (D16). Grenzen und Budgets werden nur angezeigt; sie aendern sich nur ueber die Freigabe.
+//! Lesen ist nur `mit_journal`: Es oeffnet das Journal wie jeder Lauf und entscheidet, ob ein
+//! Datenbestand neu, belegt oder unvollstaendig ist.
 
 #![forbid(
     unsafe_code,
@@ -22,9 +24,11 @@
 mod budget;
 mod depot;
 pub mod html;
+mod zugang;
 
 pub use budget::{BudgetStatus, KiBudget, ki_budget};
 pub use depot::{AuftragZeile, DepotLage, Position, TopfLage};
+pub use zugang::{PAPIERKONTO, mit_journal};
 
 use depot_journal::Stand;
 use depot_kern::liste::{Wert, als_universum, beobachtungsliste};
@@ -36,7 +40,7 @@ use depot_sim::{LaufFehler, Tageslage, kurse_von_heute, tageskurse, tageslage};
 /// Wie das Journal zu erreichen war.
 #[derive(Clone, Copy, Debug)]
 pub enum Zugang<'a> {
-    /// Journal und Vermerk fehlen: noch nicht eingerichtet.
+    /// Keine Spur eines Datenbestands: weder Journal noch Vermerk noch Papierkonto.
     NichtEingerichtet,
     /// Ein Lauf hat das Journal gerade offen.
     Belegt,

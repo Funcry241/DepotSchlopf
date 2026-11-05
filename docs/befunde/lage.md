@@ -28,9 +28,17 @@ Das Lagebild rechnet nichts selbst nach, was ein Lauf entscheidet. Es ruft diese
 
 Die Schlüssel selbst erreichen das Lagebild nie, nur „hinterlegt ja/nein/nicht prüfbar“. `run.cmd lage` prüft noch keine Schlüssel und zeigt „nicht prüfbar“; das übernimmt der Dienst.
 
+## Fassung 2 nach Maus' Prüfung (K26-01)
+
+**Befund:** Ein gelöschtes Journal bei vorhandenem Vermerk erschien als „Noch nicht eingerichtet“. `run.cmd lage` sah nur nach, ob die Journaldatei da ist, und bot damit einen Neubeginn an, wo ein unvollständiger Datenbestand lag.
+
+**Regel:** Neu ist nur ein Datenbestand ohne jede Spur. Ob ein Journal eingerichtet ist, entscheidet allein `Journal::eingerichtet`: `false` nur ohne Journal und ohne Vermerk; fehlt nur das Journal, ist es Halt („Datenbestand unvollständig“). `Journal::oeffnen` beginnt mit derselben Prüfung, `Journal::einrichten` lehnt in diesem Fall ohnehin ab. Das Lagebild liest nur über `depot_lage::mit_journal`: kein Journal, kein Vermerk, kein Papierkonto heißt neu; ein Papierkonto ohne Journal und Vermerk ist ebenfalls Halt; sonst wird das Journal wie bei jedem Lauf geöffnet, und jeder Fehler daraus ist Halt.
+
+**Gegenprobe:** Mit der alten Prüfung (nur „Journaldatei da?“) in `mit_journal` werden `geloeschtes_journal_mit_vermerk_ist_halt` und `papierkonto_ohne_journal_ist_halt` rot, mit der neuen grün. `k26_01_fehlendes_journal_bei_vermerk_ist_halt` in `crates/depot_journal/tests/befunde.rs` zeigt, dass `eingerichtet` und `oeffnen` mit demselben Grund halten.
+
 ## `run.cmd lage`
 
-Öffnet das Journal `daten/journal.txt` wie jeder Lauf (geprüft, exklusiv) und schreibt die Seite `daten/lage.html`, erst als Nebendatei, dann an ihren Platz. Hat ein anderer Lauf das Journal offen, zeigt die Seite „belegt“. Die Seite hat kein Skript und lädt nichts von außen; jeder Text ist maskiert.
+Öffnet das Journal `daten/journal.txt` über `mit_journal` wie jeder Lauf (geprüft, exklusiv) und schreibt die Seite `daten/lage.html`, erst als Nebendatei, dann an ihren Platz. Hat ein anderer Lauf das Journal offen, zeigt die Seite „belegt“. Die Seite hat kein Skript und lädt nichts von außen; jeder Text ist maskiert.
 
 Kein Netz, keine Schlüssel, keine neuen fremden Abhängigkeiten, keine neuen Grenzen, kein echtes Geld.
 
@@ -50,3 +58,6 @@ Kein Netz, keine Schlüssel, keine neuen fremden Abhängigkeiten, keine neuen Gr
 - Budget: Monat voll pausiert bis Monatsanfang, Uhr vor der letzten Buchung sperrt, neuer Monat wieder bereit und das Jahr zählt weiter
 - die Seite maskiert jeden Text (`<script>` aus einer Begründung erscheint nur maskiert)
 - Zeiten in Frankfurter Ortszeit, im Winter MEZ und im Sommer MESZ
+- K26-01: gelöschtes Journal bei vorhandenem Vermerk ist Halt, nie „einrichten“ (Maus' Gegenprobe)
+- Papierkonto ohne Journal und Vermerk ist Halt
+- ohne jede Spur neu, eingerichtet offen, während eines Laufs belegt, alles über `mit_journal`

@@ -21,9 +21,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use depot_journal::{Journal, JournalFehler};
 use depot_kern::{BeraterId, Zeitpunkt};
-use depot_lage::{Hinterlegt, Umgebung, Zugang, html, lagebild};
+use depot_lage::{Hinterlegt, Umgebung, html, lagebild, mit_journal};
 
 fn wurzel() -> Option<PathBuf> {
     let start = std::env::current_dir().ok()?;
@@ -69,34 +68,20 @@ fn schreibe(pfad: &Path, text: &str) -> Result<(), String> {
 
 fn lauf(wurzel: &Path) -> Result<PathBuf, String> {
     let daten = wurzel.join("daten");
-    let pfad = daten.join("journal.txt");
     let jetzt = jetzt().ok_or("Uhr liefert keinen Zeitpunkt")?;
-    let geoeffnet = if pfad.exists() {
-        Some(Journal::oeffnen(&pfad))
-    } else {
-        None
-    };
-    let fehler_text;
-    let journal = match &geoeffnet {
-        None => Zugang::NichtEingerichtet,
-        Some(Ok(j)) => Zugang::Offen(j.stand()),
-        Some(Err(JournalFehler::Belegt)) => Zugang::Belegt,
-        Some(Err(e)) => {
-            fehler_text = format!("{e:?}");
-            Zugang::Fehler(&fehler_text)
-        }
-    };
-    let u = Umgebung {
-        jetzt,
-        journal,
-        kursquelle: Hinterlegt::Unbekannt,
-        berater: [
-            (BeraterId::Dachs, Hinterlegt::Unbekannt),
-            (BeraterId::Maus, Hinterlegt::Unbekannt),
-        ],
-        sperren: sperren(&daten),
-    };
-    let l = lagebild(&u);
+    let sperren = sperren(&daten);
+    let l = mit_journal(&daten, |journal| {
+        lagebild(&Umgebung {
+            jetzt,
+            journal,
+            kursquelle: Hinterlegt::Unbekannt,
+            berater: [
+                (BeraterId::Dachs, Hinterlegt::Unbekannt),
+                (BeraterId::Maus, Hinterlegt::Unbekannt),
+            ],
+            sperren,
+        })
+    });
     fs::create_dir_all(&daten).map_err(|e| format!("{}: {e}", daten.display()))?;
     let ziel = daten.join("lage.html");
     schreibe(&ziel, &html::seite(&l))?;
