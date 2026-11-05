@@ -119,4 +119,6 @@ Den Schutz der Seite gegen Aufrufe fremder Webseiten (Host- und Origin-Prüfung,
 
 Gegenproben, jeweils neu übersetzt: Ohne den Eintrag in `NETZ_LOKAL` scheitern die erlaubten Fälle; ohne die Prüfung von `bind` gehen `UNSPECIFIED`, Zeichenkette und Variable durch; ohne `NETZ_LOKAL` in der Abhängigkeitsprüfung geht „ueber den Dienst“ durch.
 
+Der Starter `DepotSchlopf.cmd` im Projektordner zählt wie `run.cmd` als Werkzeug: Ein Doppelklick startet den Dienst ohne Konsole. Test `rollen`: `DepotSchlopf.cmd` ist Werkzeug, jede andere neue `.cmd`-Datei bleibt unbekannt und wird abgelehnt.
+
 Grenze wie beim Sammler: Ein Programmstart über `std::process` bleibt außerhalb der reinen Crates erlaubt und wird in der Durchsicht geprüft.
