@@ -146,7 +146,10 @@ fn jeder_aufruf_ist_gebucht() -> Result<(), String> {
         gesamt,
         "jede Frage ist gebucht"
     );
-    assert_eq!(gesamt, 12, "je 4 am 25. und 26.11., je 2 am 27.11. und 01.12.");
+    assert_eq!(
+        gesamt, 12,
+        "je 4 am 25. und 26.11., je 2 am 27.11. und 01.12."
+    );
     assert_eq!(buchungen_am(&j, datum(27, 11)?), 2, "nur Vorschlaege");
     assert!(
         j.stand()

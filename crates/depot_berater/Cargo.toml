@@ -1,0 +1,28 @@
+[package]
+name = "depot_berater"
+description = "DepotSchlopf: Dachs (Claude) und Maus (GPT) als Berater im Papierhandel, mit Websuche und Kostenpruefung nach jedem Aufruf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+depot_kern.workspace = true
+depot_journal.workspace = true
+depot_ki.workspace = true
+depot_sim.workspace = true
+ureq.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+keyring-core.workspace = true
+windows-native-keyring-store.workspace = true
+
+[lints]
+workspace = true

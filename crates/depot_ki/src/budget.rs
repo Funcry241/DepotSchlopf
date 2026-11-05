@@ -394,13 +394,18 @@ mod tests {
         let g = KiGrenzen::standard();
         let mut summe = 0;
         for b in [BeraterId::Dachs, MAUS] {
-            let h = KiDeckel::standard(b).hoechstkosten().map_or(i64::MAX, |c| c.0);
+            let h = KiDeckel::standard(b)
+                .hoechstkosten()
+                .map_or(i64::MAX, |c| c.0);
             let monat = h.saturating_mul(i64::from(g.aufrufe_je_monat));
             assert!(monat <= g.kosten_je_monat.0, "{b:?}: {monat}");
             summe += g.kosten_je_monat.0;
         }
         assert!(summe <= 2_000);
-        assert_eq!(KiDeckel::standard(BeraterId::Dachs).hoechstkosten(), Some(Cent(16)));
+        assert_eq!(
+            KiDeckel::standard(BeraterId::Dachs).hoechstkosten(),
+            Some(Cent(16))
+        );
         assert_eq!(KiDeckel::standard(MAUS).hoechstkosten(), Some(Cent(21)));
     }
 

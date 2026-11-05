@@ -1,7 +1,18 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: KodexAenderung
-zweck: Netzzugang fuer depot_berater (Fragen an Dachs und Maus mit Websuche fuer den Papierhandel, Wolfgang 05.11.2026). Die allgemeine Regel bleibt: kein anderes Crate haengt von einem Netz-Crate, vom Sammler oder vom Berater ab. Kein Produktivcode, keine Grenzen, keine Abhaengigkeiten.
+klasse: FestschreibungAenderung
+zweck: Papierhandel mit Dachs und Maus (Wolfgang 05.11.2026). Neues Crate depot_berater (Claude und GPT mit Websuche, Schluessel nur in der Windows-Anmeldeverwaltung, Kostenpruefung nach jedem Aufruf, Sperre bei Ueberschreitung); run.cmd papier fragt beide. KI-Deckel 20 EUR im Monat fuer beide zusammen (je KI 46 Aufrufe und 10 EUR), hoechstens 2 Websuchen je Aufruf. Grenzen fuer konzentriertes Handeln: 4 Werte, 40 % je Wert, Umschlag 100 %, ETFs frei. Braucht die Grenzfreigabe von Wolfgang.
 pfade:
-crates/depot_kodex/
-docs/befunde/kodex.md
+Cargo.toml
+Cargo.lock
+run.cmd
+kodex/festschreibung.txt
+crates/depot_berater/
+crates/depot_ki/
+crates/depot_kern/src/grenzen.rs
+crates/depot_journal/tests/
+crates/depot_regelwerk/tests/
+crates/depot_sim/
+crates/depot_lauf/src/main.rs
+docs/
 CHANGELOG.md
+README.md
