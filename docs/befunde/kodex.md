@@ -101,3 +101,26 @@ Wolfgang hat am 05.11.2026 freigegeben, dass Dachs (Claude) und Maus (GPT) über
 | --- | --- | --- |
 | `netz_nur_im_sammler_und_berater` | `crates/depot_kodex/src/quellscan.rs` | Netz in Sammler und Berater erlaubt, in Simulation, Journal und Lauf abgelehnt |
 | `netz_bleibt_im_blatt`, Fall „ueber den Berater“ | `crates/depot_kodex/tests/befunde.rs` | Abhängigkeit vom Berater: abgelehnt |
+
+## Nur lokal lauschen: der Dienst (Oberfläche)
+
+Wolfgang hat am 05.11.2026 freigegeben, dass DepotSchlopf als Dienst mit einer lokalen Weboberfläche läuft, erreichbar nur vom eigenen Rechner („Ja, nur 127.0.0.1“). Das übernimmt das kommende Crate `depot_dienst`. Es steht nicht auf `NETZ_ERLAUBT`, sondern auf einer eigenen, engeren Liste `NETZ_LOKAL`:
+
+- Die Adresse muss sich aus dem Quelltext allein als 127.0.0.1 belegen lassen, ohne dass ein Name des Crates sie umlenken kann. Jedes Wort `bind` ist ein direkter Aufruf `bind(`, und sein einziges Argument ist genau `(::std::net::Ipv4Addr::LOCALHOST, PORT)` oder `::std::net::SocketAddrV4::new(::std::net::Ipv4Addr::LOCALHOST, PORT)`. Der volle Pfad mit `::` vorn meint immer die Standardbibliothek; kein Alias, kein eigener Typ, kein Glob-Import und kein Modul namens `std` kann ihn ersetzen. Nach der Adresse folgt nur der Port, danach schließt der Aufruf. `extern crate` ist verboten, damit nichts anderes `std` heißt; die Abhängigkeiten stehen ohnehin in der Festschreibung.
+- Angenommene Verbindungen (`TcpStream` aus `accept`) sind erlaubt. Verboten sind `connect`, `connect_timeout`, `UdpSocket`, Unix-Sockets, `ToSocketAddrs`/`to_socket_addrs`, `lookup_host` und jedes Netz-Crate.
+- Kein anderes Crate hängt von `depot_dienst` ab. Jedes andere Crate darf auch lokal nicht lauschen.
+
+Den Schutz der Seite gegen Aufrufe fremder Webseiten (Host- und Origin-Prüfung, Token) bringt `depot_dienst` selbst mit; der Kodex sichert nur, dass nichts von außen den Dienst erreicht und der Dienst nicht hinaus kann.
+
+| Test | Datei | zeigt |
+| --- | --- | --- |
+| `dienst_lauscht_nur_lokal` | `crates/depot_kodex/src/quellscan.rs` | erlaubt: Tupel und `SocketAddrV4::new` mit vollem Pfad, Port als Ausdruck, angenommene Verbindung; abgelehnt: Maus' Gegenprobe `bind::<&str>("0.0.0.0:47410")`, `bind` als Funktionswert, `Ipv4Addr` ohne vollen Pfad, Alias, eigener Typ `Ipv4Addr`, `extern crate … as std`, Methodenaufruf nach Adresse oder Tupel, zweites Argument, `UNSPECIFIED`, Zeichenkette, Variable, `connect`, `UdpSocket`, `to_socket_addrs`, Netz-Crate; lokales Lauschen in `depot_lage` abgelehnt |
+| `netz_bleibt_im_blatt`, Fall „ueber den Dienst“ | `crates/depot_kodex/tests/befunde.rs` | Abhängigkeit vom Dienst: abgelehnt |
+
+**Befund K27-01 (Maus, Stand `0d1ac01`):** `std::net::TcpListener::bind::<&str>("0.0.0.0:47410")` übersetzt und ging durch, weil der Scanner die Adresse nur prüfte, wenn direkt nach `bind` eine Klammer folgte. Regel jetzt: Jedes `bind` muss belegt lokal sein, sonst Ablehnung; dazu der volle Pfad, damit kein Name umlenkt. Gegenprobe: Mit der alten Bedingung (nur bei `bind(` prüfen) wird `dienst_lauscht_nur_lokal` rot.
+
+Gegenproben, jeweils neu übersetzt: Ohne den Eintrag in `NETZ_LOKAL` scheitern die erlaubten Fälle; ohne die Prüfung von `bind` gehen `UNSPECIFIED`, Zeichenkette und Variable durch; ohne `NETZ_LOKAL` in der Abhängigkeitsprüfung geht „ueber den Dienst“ durch.
+
+Der Starter `DepotSchlopf.cmd` im Projektordner zählt wie `run.cmd` als Werkzeug: Ein Doppelklick startet den Dienst ohne Konsole. Test `rollen`: `DepotSchlopf.cmd` ist Werkzeug, jede andere neue `.cmd`-Datei bleibt unbekannt und wird abgelehnt.
+
+Grenze wie beim Sammler: Ein Programmstart über `std::process` bleibt außerhalb der reinen Crates erlaubt und wird in der Durchsicht geprüft.
