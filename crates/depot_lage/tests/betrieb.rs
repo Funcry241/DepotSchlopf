@@ -235,6 +235,7 @@ fn umgebung(jetzt: Zeitpunkt) -> Umgebung<'static> {
         jetzt,
         journal: Zugang::NichtEingerichtet,
         kursquelle: Hinterlegt::Ja,
+        kursquelle_us: Hinterlegt::Ja,
         berater: [
             (BeraterId::Dachs, Hinterlegt::Ja),
             (BeraterId::Maus, Hinterlegt::Ja),

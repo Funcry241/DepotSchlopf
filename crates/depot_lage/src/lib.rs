@@ -74,8 +74,11 @@ pub struct Umgebung<'a> {
     /// Uhr des Rechners.
     pub jetzt: Zeitpunkt,
     pub journal: Zugang<'a>,
-    /// Schluessel der Kursquelle (Alpha Vantage).
+    /// Schluessel der Kursquelle (Alpha Vantage, Xetra).
     pub kursquelle: Hinterlegt,
+    /// Schluessel der Kursquelle fuer die NYSE (Tiingo). Das Lagebild zeigt ihn nur, wenn die
+    /// Liste einen Wert dieser Quelle hat.
+    pub kursquelle_us: Hinterlegt,
     /// Schluessel je Berater; ohne Schluessel wird der Berater nicht gefragt.
     pub berater: [(BeraterId, Hinterlegt); 2],
     /// Liegengebliebene Sperrdateien unter `daten/` (abgebrochener frueherer Lauf).
@@ -104,6 +107,8 @@ pub enum Ampel {
 pub enum Abhilfe {
     JournalEinrichten,
     SchluesselKursquelle,
+    /// Schluessel der Kursquelle fuer die NYSE (Tiingo).
+    SchluesselKursquelleUs,
     SchluesselBerater(BeraterId),
     /// Die Sperre des Kostenschutzes (`daten/ki.halt`) pruefen und gefuehrt aufheben.
     KostenschutzPruefen,
@@ -127,6 +132,7 @@ impl Abhilfe {
         match self {
             Abhilfe::JournalEinrichten
             | Abhilfe::SchluesselKursquelle
+            | Abhilfe::SchluesselKursquelleUs
             | Abhilfe::KostenschutzPruefen
             | Abhilfe::KurssperrePruefen
             | Abhilfe::Pruefen => true,
@@ -548,6 +554,7 @@ fn naechster_schritt(punkte: &[Punkt]) -> String {
     for a in [
         Abhilfe::JournalEinrichten,
         Abhilfe::SchluesselKursquelle,
+        Abhilfe::SchluesselKursquelleUs,
         Abhilfe::KurseAbrufen,
         Abhilfe::PapiertagStarten,
         Abhilfe::Warten,
@@ -623,6 +630,19 @@ fn schluessel_punkte(
         kursquelle,
         Abhilfe::SchluesselKursquelle,
     ));
+    let braucht_us = beobachtungsliste().is_ok_and(|l| {
+        l.iter()
+            .any(|w| liste::quelle(w.boerse) == liste::QUELLE_US)
+    });
+    if braucht_us {
+        let st = betrieb::schluessel_stand(u.kursquelle_us, &u.anbieter, Wer::Tiingo);
+        schluessel.push((Wer::Tiingo, st));
+        punkte.push(schluessel_punkt(
+            "Kursquelle Tiingo (NYSE)",
+            st,
+            Abhilfe::SchluesselKursquelleUs,
+        ));
+    }
     let mut hinweise = Vec::new();
     for (b, h) in u.berater {
         let wer = betrieb::wer_fuer(b);

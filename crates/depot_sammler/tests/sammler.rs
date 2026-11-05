@@ -13,7 +13,7 @@ use std::time::Duration;
 use depot_journal::{Journal, JournalFehler, anbieter};
 use depot_kern::{Boerse, Cent, Datum, Herkunft, Preis, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::DatenFehler;
-use depot_sammler::liste::pruefe_liste;
+use depot_sammler::liste::{QUELLE_US, hoechstens_werte, pruefe_liste, quelle};
 use depot_sammler::sammeln::adresse;
 use depot_sammler::{
     Ergebnis, Netz, QUELLE, SammelFehler, Schluessel, Wert, Zugang, beobachtungsliste, sammle,
@@ -158,12 +158,34 @@ fn sha256_hex(b: &[u8]) -> String {
     })
 }
 
-/// Die festgelegte Liste ist gueltig und passt in das Tageskontingent der kostenlosen Stufe.
-/// Fehlerhafte Listen werden abgelehnt.
+/// Eine gueltige ISIN `DE00000000<nn><p>` mit passender Pruefziffer.
+fn isin_mit_pruefziffer(n: u8) -> String {
+    (0..10_u8)
+        .map(|p| format!("DE0000000{n:02}{p}"))
+        .find(|t| depot_kern::Isin::neu(t).is_ok())
+        .unwrap_or_default()
+}
+
+/// Die festgelegte Liste ist gueltig und passt je Quelle in das Tageskontingent der kostenlosen
+/// Stufe. Fehlerhafte Listen werden abgelehnt, auch eine, die das Kontingent einer Quelle
+/// ueberschreitet.
 #[test]
 fn beobachtungsliste_gueltig() -> Result<(), String> {
     let l = beobachtungsliste()?;
-    assert!(!l.is_empty() && l.len() <= 25, "{}", l.len());
+    for q in [QUELLE, QUELLE_US] {
+        let n = l.iter().filter(|w| quelle(w.boerse) == q).count();
+        assert!(n > 0 && n <= hoechstens_werte(q), "{q}: {n}");
+    }
+    let isins: Vec<String> = (0..26_u8).map(isin_mit_pruefziffer).collect();
+    let kuerzel: Vec<String> = (0..26_u8).map(|i| format!("X{i}.DEX")).collect();
+    let zu_viele: Vec<(&str, Boerse, &str, &str)> = isins
+        .iter()
+        .zip(&kuerzel)
+        .map(|(i, k)| (i.as_str(), Boerse::Xetra, k.as_str(), "x"))
+        .collect();
+    let fehler = pruefe_liste(&zu_viele).err().unwrap_or_default();
+    assert!(fehler.contains("hoechstens 25"), "{fehler}");
+    assert!(pruefe_liste(zu_viele.get(..25).unwrap_or_default()).is_ok());
     assert!(pruefe_liste(&[("DE0007164601", Boerse::Xetra, "SAP.DEX", "x")]).is_err());
     assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP.DE", "x")]).is_err());
     assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP&X.DEX", "x")]).is_err());

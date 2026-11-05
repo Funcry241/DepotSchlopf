@@ -95,6 +95,7 @@ pub fn lagerechner(token: String, umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerec
                 jetzt,
                 journal,
                 kursquelle: umwelt.schluessel(Wer::Kursquelle),
+                kursquelle_us: umwelt.schluessel(Wer::KursquelleUs),
                 berater: [
                     (
                         BeraterId::Dachs,

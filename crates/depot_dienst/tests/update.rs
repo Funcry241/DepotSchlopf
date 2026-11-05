@@ -61,6 +61,7 @@ fn leeres_lagebild() -> Lagerechner {
             jetzt,
             journal: Zugang::NichtEingerichtet,
             kursquelle: Hinterlegt::Nein,
+            kursquelle_us: Hinterlegt::Nein,
             berater: [
                 (BeraterId::Dachs, Hinterlegt::Nein),
                 (BeraterId::Maus, Hinterlegt::Nein),
