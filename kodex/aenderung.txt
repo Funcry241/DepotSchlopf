@@ -1,19 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Papierhandel mit Dachs und Maus (Wolfgang 05.11.2026). Neues Crate depot_berater (Claude Sonnet 5.5 und GPT-6.1 Terra ohne Werkzeuge des Anbieters, Anfrage vorher auf den Deckel begrenzt, Schluessel nur in der Windows-Anmeldeverwaltung, Kostenpruefung nach jedem Aufruf, Sperre bei Ueberschreitung); run.cmd papier fragt beide. KI-Deckel 20 EUR im Monat je KI (46 Aufrufe), Denktiefe mittel. Grenzen fuer konzentriertes Handeln: 4 Werte, 40 % je Wert, Umschlag 100 %, ETFs frei. Braucht die Grenzfreigabe von Wolfgang.
+klasse: KodexAenderung
+zweck: Nur lokales Lauschen fuer depot_dienst (Dienst mit lokaler Weboberflaeche und Config-Seite, Wolfgang 05.11.2026: "Ja, nur 127.0.0.1"). Neue Liste NETZ_LOKAL: TcpListener::bind nur woertlich auf Ipv4Addr::LOCALHOST (auch als Tupel oder in SocketAddrV4::new), angenommene Verbindungen erlaubt; verboten bleiben Verbindungsaufbau (connect), UDP, Unix-Sockets, Namensaufloesung und jedes Netz-Crate. Kein anderes Crate haengt von depot_dienst ab; jedes andere Crate darf auch lokal nicht lauschen. Dazu der Starter DepotSchlopf.cmd im Projektordner als Werkzeug (Doppelklick startet den Dienst ohne Konsole). Kein Produktivcode, keine Grenzen, keine Abhaengigkeiten. Fassung 2 nach Maus K27-01 (bind::<&str>("0.0.0.0:47410") ging durch): jedes Wort bind muss ein direkter Aufruf mit genau (::std::net::Ipv4Addr::LOCALHOST, PORT) oder ::std::net::SocketAddrV4::new(::std::net::Ipv4Addr::LOCALHOST, PORT) sein, voller Pfad, damit kein Alias, eigener Typ oder Glob umlenkt; extern crate verboten.
 pfade:
-Cargo.toml
-Cargo.lock
-run.cmd
-kodex/festschreibung.txt
-kodex/freigabe.txt
-crates/depot_berater/
-crates/depot_ki/
-crates/depot_kern/src/grenzen.rs
-crates/depot_journal/tests/
-crates/depot_regelwerk/tests/
-crates/depot_sim/
-crates/depot_lauf/src/main.rs
-docs/
+crates/depot_kodex/
+docs/befunde/kodex.md
 CHANGELOG.md
-README.md
