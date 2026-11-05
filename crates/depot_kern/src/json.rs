@@ -325,6 +325,46 @@ pub fn erstes_objekt(text: &str) -> Result<Json, String> {
     l.wert(0)
 }
 
+/// Hoechstens so viele Schichten Zeichenkette in Zeichenkette loest `alle_texte` auf.
+pub const MAX_SCHICHTEN: usize = 4;
+
+/// Die JSON-Zeichenketten in einem beliebigen Text, die ein Escape enthalten, dekodiert. Gesucht
+/// wird ab jedem Anfuehrungszeichen, nicht nur in gueltigem JSON: So findet sich auch eine
+/// Zeichenkette in einem Codeblock oder in einer kaputten Antwort.
+fn escapte_zeichenketten(text: &str) -> Vec<String> {
+    let b = text.as_bytes();
+    let mut aus = Vec::new();
+    for (i, z) in b.iter().enumerate() {
+        if *z != b'"' {
+            continue;
+        }
+        let mut l = Leser { b, pos: i };
+        if let Ok(s) = l.zeichenkette()
+            && b.get(i..l.pos).is_some_and(|roh| roh.contains(&b'\\'))
+        {
+            aus.push(s);
+        }
+    }
+    aus
+}
+
+/// Jeder Text, der in `text` steckt: der Text selbst und jede JSON-Zeichenkette darin mit
+/// Escape, dekodiert, auch Zeichenketten in Zeichenketten bis `MAX_SCHICHTEN` tief. Wer ein
+/// Geheimnis sucht, sucht in allen; ein Escape wie `\u0054` verbirgt es so nicht (K28-01).
+pub fn alle_texte(text: &str) -> Vec<String> {
+    let mut aus = Vec::new();
+    let mut offen = vec![(text.to_string(), 0usize)];
+    while let Some((t, schicht)) = offen.pop() {
+        if schicht < MAX_SCHICHTEN {
+            for s in escapte_zeichenketten(&t) {
+                offen.push((s, schicht.saturating_add(1)));
+            }
+        }
+        aus.push(t);
+    }
+    aus
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +402,21 @@ mod tests {
         }
         let tief = "[".repeat(100);
         assert!(lies(&tief).is_err());
+    }
+
+    #[test]
+    fn alle_texte_dekodiert_auch_verschachtelt() {
+        let roh = r#"{"a": "\u0054ext", "b": "{\"c\": \"\\u004bEY\"}", "x": "kein Escape"}"#;
+        let t = alle_texte(roh);
+        assert!(t.iter().any(|s| s == "Text"), "{t:?}");
+        assert!(t.iter().any(|s| s == "KEY"), "{t:?}");
+        assert!(
+            !t.iter().any(|s| s == "kein Escape"),
+            "ohne Escape steht er schon roh da"
+        );
+        // Auch ausserhalb von gueltigem JSON.
+        let t = alle_texte("Einleitung \"\\u0041B\" Rest {kaputt");
+        assert!(t.iter().any(|s| s == "AB"), "{t:?}");
     }
 
     #[test]

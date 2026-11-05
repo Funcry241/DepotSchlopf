@@ -261,3 +261,33 @@ fn schluessel_in_der_antwort_wird_nicht_abgelegt() -> Result<(), String> {
     assert!(dateien(&roh).is_empty());
     Ok(())
 }
+
+/// Gegenprobe von Maus (K28-01): Gibt die Quelle den Schluessel als Unicode-Escapes zurueck,
+/// etwa `\u0054` fuer `T`, wird die Antwort weder abgelegt noch belegt. Ebenso, wenn erst eine
+/// zweite Schicht Escapes ihn verbirgt.
+#[test]
+fn schluessel_hinter_escapes_wird_nicht_abgelegt() -> Result<(), String> {
+    let maskiert: String = SCHLUESSEL
+        .chars()
+        .map(|c| format!("\\u{:04x}", u32::from(c)))
+        .collect();
+    let einfach = antwort(&[]).replace("\"feed\":[]", &format!(
+        "\"feed\":[{{\"title\":\"Leck {maskiert}\",\"time_published\":\"20261105T150000\",\"source\":\"X\",\"summary\":\"\"}}]"
+    ));
+    let doppelt = einfach.replace(&maskiert, &maskiert.replace('\\', "\\\\"));
+    for (fall, text) in [("einfach", &einfach), ("doppelt", &doppelt)] {
+        let (journal, roh) = ordner()?;
+        assert!(
+            !text.contains(SCHLUESSEL),
+            "{fall}: Vorbedingung, roh verborgen"
+        );
+        let b = lauf(&journal, &roh, Ok(text), um(5, 17, 40)?)?.map_err(|e| format!("{e:?}"))?;
+        assert!(b.fehler.is_some(), "{fall}: {b:?}");
+        assert_eq!(b.rohdatei, None, "{fall}");
+        assert!(dateien(&roh).is_empty(), "{fall}");
+        assert!(belegt(&journal)?.is_empty(), "{fall}");
+        let j = vorbedingung(fs::read_to_string(&journal), "Journal")?;
+        assert!(!j.contains(SCHLUESSEL), "{fall}");
+    }
+    Ok(())
+}
