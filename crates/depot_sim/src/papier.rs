@@ -35,6 +35,11 @@ pub trait Broker: Konto {
     fn sende(&mut self, auftrag: &GenehmigterAuftrag) -> Sendeantwort;
     /// Der Markt laeuft bis zum Schluss dieses Handelstags.
     fn markt(&mut self, kurse: &Kurse);
+    /// Eine Stoerung des Kontos: Sein Stand ist nicht gesichert. Dann haelt der Lauf an, bevor
+    /// das Journal noch etwas vom Konto bestaetigt (K23-01).
+    fn stoerung(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Was das Konto von einem Auftrag festhaelt.

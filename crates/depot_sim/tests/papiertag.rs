@@ -255,9 +255,13 @@ fn papierkonto_datei_passt_nur_zum_depot() -> Result<(), String> {
     let ort = Ort::neu()?;
     // Depot im Journal, aber keine Datei: Halt.
     assert!(Papierdatei::oeffnen(&ort.konto, true, &start()?).is_err());
-    // Neues Konto ohne Depot: wird angelegt; danach ohne Depot im Journal: Halt.
+    // Neues Konto ohne Depot: wird angelegt; unveraendert ohne Depot ist es eine angefangene
+    // Einrichtung und wird fortgesetzt (K23-03).
     Papierdatei::oeffnen(&ort.konto, false, &start()?)?;
-    assert!(Papierdatei::oeffnen(&ort.konto, false, &start()?).is_err());
+    Papierdatei::oeffnen(&ort.konto, false, &start()?)?;
+    // Zu anderen Starttoepfen passt es nicht.
+    let anders = [vorbedingung(Topf::neu(TopfId::A, Cent(1)), "Topf")?];
+    assert!(Papierdatei::oeffnen(&ort.konto, false, &anders).is_err());
     Ok(())
 }
 
@@ -379,7 +383,11 @@ fn schreibfehler_des_kontos_haelt_vor_jeder_bestaetigung() -> Result<(), String>
     let ort = Ort::neu()?;
     let sap = sap()?;
     let mut j = ort.oeffnen()?;
-    belege(&mut j, 5, &[(&sap, "230", "231"), (&allianz()?, "350", "351")])?;
+    belege(
+        &mut j,
+        5,
+        &[(&sap, "230", "231"), (&allianz()?, "350", "351")],
+    )?;
     let mut k = konto(&ort, &j)?;
     let vorher = vorbedingung(fs::read_to_string(&ort.konto), "Konto lesen")?;
     // Die Nebendatei ist ein Ordner: Jedes Schreiben des Kontos scheitert.
@@ -389,11 +397,22 @@ fn schreibfehler_des_kontos_haelt_vor_jeder_bestaetigung() -> Result<(), String>
     )?;
     let d = tag(5)?;
     let (mut dachs, mut maus) = kaeufer(d, &sap);
-    let aus = papiertag(&mut j, d, &universum()?, &start()?, &mut dachs, &mut maus, &mut k);
+    let aus = papiertag(
+        &mut j,
+        d,
+        &universum()?,
+        &start()?,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
     assert!(matches!(aus, Err(LaufFehler::Halt(_))), "{aus:?}");
     assert!(j.stand().abschluss().is_none(), "kein Abschluss");
     assert!(
-        j.stand().auftraege().iter().all(|l| l.ausfuehrungen.is_empty()),
+        j.stand()
+            .auftraege()
+            .iter()
+            .all(|l| l.ausfuehrungen.is_empty()),
         "keine bestaetigte Ausfuehrung"
     );
     assert_eq!(
@@ -408,7 +427,11 @@ fn schreibfehler_des_kontos_haelt_vor_jeder_bestaetigung() -> Result<(), String>
 fn schon_abgeschlossen_erst_nach_dem_abgleich() -> Result<(), String> {
     let ort = Ort::neu()?;
     let mut j = ort.oeffnen()?;
-    belege(&mut j, 5, &[(&sap()?, "230", "231"), (&allianz()?, "350", "351")])?;
+    belege(
+        &mut j,
+        5,
+        &[(&sap()?, "230", "231"), (&allianz()?, "350", "351")],
+    )?;
     drop(j);
     stumm_tag(&ort, 5)?.map_err(|e| format!("Tag 1: {e:?}"))?;
     let text = vorbedingung(fs::read_to_string(&ort.konto), "Konto lesen")?;
@@ -432,7 +455,11 @@ fn erststart_ohne_kurse_ist_wiederholbar() -> Result<(), String> {
     assert!(matches!(aus, Err(LaufFehler::Halt(_))), "{aus:?}");
     let mut j = ort.oeffnen()?;
     assert!(j.stand().toepfe().is_empty(), "Vorbedingung: kein Depot");
-    belege(&mut j, 5, &[(&sap()?, "230", "231"), (&allianz()?, "350", "351")])?;
+    belege(
+        &mut j,
+        5,
+        &[(&sap()?, "230", "231"), (&allianz()?, "350", "351")],
+    )?;
     drop(j);
     let aus = stumm_tag(&ort, 5)?;
     assert!(

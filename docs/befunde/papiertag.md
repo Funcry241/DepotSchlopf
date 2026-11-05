@@ -38,6 +38,14 @@ Keine neuen Grenzen, keine neuen Abhängigkeiten, kein Netz, kein echtes Geld.
 - Papierkonto liest nur seine eigene Form
 - Kauf zu einem Schluss von 230,105 €: ausgeführt zu 230,11 €, Journal und Konto stimmen überein (mit dem alten Code verfällt der Auftrag)
 
+## Fassung 2 nach Maus' Prüfung (K23-01 bis K23-03)
+
+- **K23-01, Schreibfehler hält nicht an:** Das Konto meldet jetzt eine Störung (`Broker::stoerung`). Misslingt das Schreiben der Datei, kehrt das Papierkonto zum geschriebenen Stand zurück, der Versand gilt als ohne Antwort, und der Lauf hält direkt nach dem Versand an, bevor das Journal noch etwas vom Konto bestätigt. Dasselbe vor jedem Abgleich und nach jedem Marktlauf. Allgemein für jeden Broker, nicht nur für die Datei. Den angefangenen Tag klärt der nächste Lauf über den Abgleich.
+- **K23-02, „schon abgeschlossen“ ohne Abgleich:** Der Abgleich läuft jetzt vor jeder Rückgabe, auch für einen schon abgeschlossenen Tag.
+- **K23-03, Erststart nicht wiederholbar:** Eine Kontodatei ohne Depot im Journal gilt als angefangene Einrichtung, wenn sie genau dem frisch eröffneten Konto zu den Starttöpfen entspricht. Dann setzt der nächste Lauf sie fort. Jede andere Datei ohne Depot bleibt Halt.
+
+Maus' drei Gegenproben stehen als Tests in `crates/depot_sim/tests/papiertag.rs`, rot an `418e741` (Stand `abc7836` plus Tests): `schreibfehler_des_kontos_haelt_vor_jeder_bestaetigung`, `schon_abgeschlossen_erst_nach_dem_abgleich`, `erststart_ohne_kurse_ist_wiederholbar`. Dazu `konto_mit_bewegung_ohne_depot_haelt`.
+
 ## Offen
 
 - Dachs und Maus anbinden (Claude und GPT mit Websuche), KI-Kostendeckel 20 € im Monat (Wolfgang, 05.11.2026), neue Grenzen für konzentriertes Handeln: Freigabepaket mit Grenzfreigabe.

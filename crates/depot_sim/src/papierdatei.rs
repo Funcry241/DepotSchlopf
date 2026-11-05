@@ -1,9 +1,15 @@
 //! Das Papierkonto als Datei (`daten/papierkonto.txt`), unabhaengig vom Journal.
 //!
 //! Nach jedem Versand und jedem Marktlauf wird die ganze Datei neu geschrieben: erst in eine
-//! Nebendatei, auf den Datentraeger, dann an ihren Platz. Misslingt das, gilt der Versand als
-//! ohne Antwort, und der Fehler bleibt stehen; beim naechsten Lauf findet der Kontowaechter die
-//! Abweichung und haelt an. Kein Automatismus gleicht etwas aus.
+//! Nebendatei, auf den Datentraeger, dann an ihren Platz. Misslingt das, gilt die Aenderung als
+//! nicht geschehen: Das Konto kehrt zum geschriebenen Stand zurueck, der Versand gilt als ohne
+//! Antwort, und das Konto meldet eine Stoerung. Der Lauf haelt dann an, bevor das Journal noch
+//! etwas bestaetigt (K23-01). Kein Automatismus gleicht etwas aus.
+//!
+//! **Einrichtung:** Die Datei entsteht vor dem Depot im Journal. Haelt der erste Lauf
+//! dazwischen an, liegt eine Datei ohne Depot vor. Sie gilt als angefangene Einrichtung, wenn
+//! sie genau dem frisch eroeffneten Konto zu den Starttoepfen entspricht; dann setzt der naechste
+//! Lauf sie fort (K23-03). Jede andere Datei ohne Depot ist Halt.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -38,6 +44,11 @@ fn schreibe(pfad: &Path, text: &str) -> Result<(), String> {
     fs::rename(&neben, pfad).map_err(|e| format!("{}: {e}", pfad.display()))
 }
 
+fn lies(pfad: &Path) -> Result<Papierkonto, String> {
+    let text = fs::read_to_string(pfad).map_err(|e| format!("{}: {e}", pfad.display()))?;
+    Papierkonto::aus_text(&text)
+}
+
 impl Papierdatei {
     /// Oeffnet das Papierkonto. Gibt es noch keine Datei und hat das Journal noch kein Depot,
     /// wird das Konto mit den Starttoepfen eroeffnet und sofort geschrieben. Sonst muessen
@@ -50,10 +61,19 @@ impl Papierdatei {
             .try_exists()
             .map_err(|e| format!("{}: {e}", pfad.display()))?;
         let konto = match (da, depot_im_journal) {
-            (true, true) => {
-                let text =
-                    fs::read_to_string(pfad).map_err(|e| format!("{}: {e}", pfad.display()))?;
-                Papierkonto::aus_text(&text)?
+            (true, true) => lies(pfad)?,
+            (true, false) => {
+                let k = lies(pfad)?;
+                let frisch =
+                    Papierkonto::eroeffne(start).ok_or("Papierkonto: Startwerte ungueltig")?;
+                if k != frisch {
+                    return Err(format!(
+                        "{} liegt mit Bewegungen vor, aber das Journal fuehrt kein Papierdepot. \
+                         Halt bis zur Pruefung",
+                        pfad.display()
+                    ));
+                }
+                k
             }
             (false, false) => {
                 let k = Papierkonto::eroeffne(start).ok_or("Papierkonto: Startwerte ungueltig")?;
@@ -63,12 +83,6 @@ impl Papierdatei {
             (false, true) => {
                 return Err(format!(
                     "{} fehlt, aber das Journal fuehrt ein Papierdepot. Halt bis zur Pruefung",
-                    pfad.display()
-                ));
-            }
-            (true, false) => {
-                return Err(format!(
-                    "{} liegt vor, aber das Journal fuehrt kein Papierdepot. Halt bis zur Pruefung",
                     pfad.display()
                 ));
             }
@@ -90,13 +104,17 @@ impl Papierdatei {
         self.fehler.as_deref()
     }
 
-    fn sichere(&mut self) -> bool {
+    /// Schreibt den neuen Stand. Misslingt es, kehrt das Konto zu `vorher` zurueck, dem
+    /// zuletzt geschriebenen Stand, und die Stoerung bleibt stehen.
+    fn sichere(&mut self, vorher: Papierkonto) -> bool {
         if self.fehler.is_some() {
+            self.konto = vorher;
             return false;
         }
         match schreibe(&self.pfad, &self.konto.als_text()) {
             Ok(()) => true,
             Err(e) => {
+                self.konto = vorher;
                 self.fehler = Some(e);
                 false
             }
@@ -116,8 +134,9 @@ impl Konto for Papierdatei {
 
 impl Broker for Papierdatei {
     fn sende(&mut self, auftrag: &GenehmigterAuftrag) -> Sendeantwort {
+        let vorher = self.konto.clone();
         let antwort = self.konto.sende(auftrag);
-        if self.sichere() {
+        if self.sichere(vorher) {
             antwort
         } else {
             Sendeantwort::KeineAntwort
@@ -125,7 +144,14 @@ impl Broker for Papierdatei {
     }
 
     fn markt(&mut self, kurse: &Kurse) {
+        let vorher = self.konto.clone();
         self.konto.markt(kurse);
-        self.sichere();
+        self.sichere(vorher);
+    }
+
+    fn stoerung(&self) -> Option<String> {
+        self.fehler
+            .as_ref()
+            .map(|e| format!("Papierkonto nicht geschrieben: {e}"))
     }
 }

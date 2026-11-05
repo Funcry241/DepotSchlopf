@@ -184,6 +184,7 @@ pub fn lauf(
     if !neu {
         // Wiederanlauf: zuerst der Abgleich (Kap. 11). Er belegt, was aus offenen Auftraegen
         // geworden ist, und sendet nichts.
+        pruefe_stoerung(&*konto)?;
         let abweichungen = j.gleiche_ab(&*konto).map_err(journal)?;
         if !abweichungen.is_empty() {
             return Err(halt(format!(
@@ -239,6 +240,17 @@ pub fn lauf(
     Ok(())
 }
 
+/// Halt bei einer Stoerung des Kontos, ohne weiteren Eintrag im Journal (K23-01). Was das
+/// Journal bis dahin hat, klaert der naechste Lauf ueber den Abgleich.
+pub(crate) fn pruefe_stoerung(konto: &dyn Broker) -> Result<(), LaufFehler> {
+    match konto.stoerung() {
+        Some(s) => Err(halt(format!(
+            "Konto gestoert: {s}. Halt; nichts wird mehr bestaetigt"
+        ))),
+        None => Ok(()),
+    }
+}
+
 /// Der Kontowaechter: Abgleich mit dem Konto. Jede Abweichung steht im Journal und haelt den
 /// Lauf an; nichts wird verkauft oder ausgeglichen.
 pub(crate) fn kontowaechter(
@@ -246,6 +258,7 @@ pub(crate) fn kontowaechter(
     tag: &Tag,
     konto: &dyn Broker,
 ) -> Result<(), LaufFehler> {
+    pruefe_stoerung(konto)?;
     let abweichungen = j.gleiche_ab(konto).map_err(journal)?;
     if abweichungen.is_empty() {
         return Ok(());
@@ -564,7 +577,10 @@ fn fuehre_aus(
             Err(e) => return Err(journal(e)),
         }
         j.melde(nr, &Meldung::Gesendet).map_err(journal)?;
-        match konto.sende(a) {
+        let antwort = konto.sende(a);
+        // Ist das Konto nicht gesichert, bestaetigt das Journal nichts mehr davon (K23-01).
+        pruefe_stoerung(&*konto)?;
+        match antwort {
             Sendeantwort::Angenommen => j.melde(nr, &Meldung::Angenommen).map_err(journal)?,
             Sendeantwort::Abgelehnt(grund) => {
                 j.melde(nr, &Meldung::Abgelehnt).map_err(journal)?;

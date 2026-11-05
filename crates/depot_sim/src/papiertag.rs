@@ -11,9 +11,10 @@
 //! der zuletzt belegte Kurs des juengsten Tages davor. Gepruefte wie im Sammler
 //! (`pruefe_kurse`): Faellt die Pruefung durch, faellt der Zyklus aus, und niemand wird gefragt.
 //!
-//! **Einmal je Tag:** Ist der Handelstag schon abgeschlossen, geschieht nichts. Ein angefangener
-//! Tag haelt an wie in der Simulation; niemand wird neu gefragt. Vor allem anderen gleicht der
-//! Kontowaechter Journal und Papierkonto ab; jede Abweichung ist Halt.
+//! **Einmal je Tag:** Vor allem anderen gleicht der Kontowaechter Journal und Papierkonto ab;
+//! jede Abweichung ist Halt, auch fuer einen schon abgeschlossenen Tag (K23-02). Ist der
+//! Handelstag danach schon abgeschlossen, geschieht nichts. Ein angefangener Tag haelt an wie in
+//! der Simulation; niemand wird neu gefragt.
 //!
 //! **Ausfuehrung:** Das Papierkonto fuehrt zum Schlusskurs des Entscheidungstags aus (feine
 //! Kurse zur sicheren Seite gerundet). Das ist eine Vereinfachung: Wirklich ginge ein Auftrag
@@ -29,7 +30,9 @@ use depot_kern::{
 use depot_regelwerk::pruefe_kurse;
 use sha2::{Digest, Sha256};
 
-use crate::lauf::{Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal, rechnung};
+use crate::lauf::{
+    Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal, pruefe_stoerung, rechnung,
+};
 use crate::papier::Broker;
 use crate::szenario::{Berater, Tag};
 
@@ -210,6 +213,19 @@ pub fn papiertag(
             datum_text(heute)
         )));
     }
+    let neu = j.stand().toepfe().is_empty();
+    if !neu {
+        // Wiederanlauf: zuerst der Abgleich, auch wenn der Tag schon abgeschlossen ist
+        // (K23-02). Er belegt, was aus offenen Auftraegen geworden ist, und sendet nichts.
+        pruefe_stoerung(&*konto)?;
+        let abweichungen = j.gleiche_ab(&*konto).map_err(journal)?;
+        if !abweichungen.is_empty() {
+            return Err(halt(format!(
+                "Kontowaechter: {abweichungen:?}. Halt bis zur Pruefung; niemand wird gefragt, \
+                 nichts gesendet"
+            )));
+        }
+    }
     let letzter = j.stand().abschluss().cloned();
     if let Some(a) = &letzter {
         if a.datum == k.handelstag {
@@ -220,18 +236,6 @@ pub fn papiertag(
                 "Letzter Abschluss am {} liegt nach dem Handelstag {}",
                 datum_text(a.datum),
                 datum_text(k.handelstag)
-            )));
-        }
-    }
-    let neu = j.stand().toepfe().is_empty();
-    if !neu {
-        // Wiederanlauf: zuerst der Abgleich. Er belegt, was aus offenen Auftraegen geworden
-        // ist, und sendet nichts.
-        let abweichungen = j.gleiche_ab(&*konto).map_err(journal)?;
-        if !abweichungen.is_empty() {
-            return Err(halt(format!(
-                "Kontowaechter: {abweichungen:?}. Halt bis zur Pruefung; niemand wird gefragt, \
-                 nichts gesendet"
             )));
         }
     }
