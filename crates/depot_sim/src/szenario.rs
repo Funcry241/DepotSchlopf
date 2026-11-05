@@ -43,6 +43,9 @@ pub struct Lage<'a> {
 /// Vorschlag. Die Kaufentscheidung trifft der Berater; das Journal haelt seine Begruendung fest.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Antwort {
+    /// Die Antwort kam und ist verwertbar. Nur dann gilt sie im Journal als verwendet; eine
+    /// verworfene (unlesbar, Fehler, Kosten) steht dort ausdruecklich als verworfen.
+    pub verwertbar: bool,
     pub einschaetzung: String,
     pub vorschlag: Option<Vorschlag>,
 }
@@ -50,6 +53,8 @@ pub struct Antwort {
 /// Die Zweitmeinung zu einem Vorschlag. Nur eine ausdrueckliche Zustimmung laesst ihn weiter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Urteil {
+    /// Wie bei `Antwort`: Nur ein verwertbares Urteil ist Zustimmung oder Veto des Pruefers.
+    pub verwertbar: bool,
     pub zustimmung: bool,
     pub begruendung: String,
 }
@@ -88,6 +93,7 @@ impl Berater for Stumm {
 
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            verwertbar: false,
             einschaetzung: "nicht angebunden".into(),
             vorschlag: None,
         }
@@ -100,6 +106,7 @@ impl Berater for Stumm {
         _vorschlag: &Vorschlag,
     ) -> Urteil {
         Urteil {
+            verwertbar: false,
             zustimmung: false,
             begruendung: "nicht angebunden".into(),
         }
@@ -123,6 +130,7 @@ impl Berater for Drehbuch {
             .get(&lage.datum)
             .cloned()
             .unwrap_or_else(|| Antwort {
+                verwertbar: true,
                 einschaetzung: "nichts Neues, keine Aenderung".into(),
                 vorschlag: None,
             })
@@ -139,6 +147,7 @@ impl Berater for Drehbuch {
             .get(&lage.datum)
             .cloned()
             .unwrap_or_else(|| Urteil {
+                verwertbar: false,
                 zustimmung: false,
                 begruendung: "keine Antwort".into(),
             })
@@ -184,6 +193,7 @@ fn vorschlag(berater: BeraterId, ziele: &[(&Isin, i64, &str)]) -> Vorschlag {
 
 fn antwort(einschaetzung: &str, v: Option<Vorschlag>) -> Antwort {
     Antwort {
+        verwertbar: true,
         einschaetzung: einschaetzung.into(),
         vorschlag: v,
     }
@@ -191,6 +201,7 @@ fn antwort(einschaetzung: &str, v: Option<Vorschlag>) -> Antwort {
 
 fn urteil(zustimmung: bool, begruendung: &str) -> Urteil {
     Urteil {
+        verwertbar: true,
         zustimmung,
         begruendung: begruendung.into(),
     }

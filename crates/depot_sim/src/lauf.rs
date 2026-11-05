@@ -71,8 +71,8 @@ pub(crate) fn rechnung(was: &str) -> LaufFehler {
 /// „nicht angebunden“, mit dem Grund des Beraters, wenn er einen nennt.
 fn nicht_angebunden(b: &dyn Berater) -> String {
     b.warum_nicht().map_or_else(
-        || "nicht angebunden".to_string(),
-        |g| format!("nicht angebunden ({})", sauber(&g)),
+        || NICHT_ANGEBUNDEN.to_string(),
+        |g| format!("{NICHT_ANGEBUNDEN} ({})", sauber(&g)),
     )
 }
 
@@ -88,6 +88,47 @@ fn andere(b: BeraterId) -> BeraterId {
         BeraterId::Dachs => BeraterId::Maus,
         BeraterId::Maus => BeraterId::Dachs,
     }
+}
+
+/// So steht im Journal, was ein Berater in einem Topf beigetragen hat. Die Anzeige liest es mit
+/// `gefragt` zurueck; dieselben Worte fuer Schreiben und Lesen.
+const ANTWORT_VERWENDET: &str = "Antwort verwendet";
+const ANTWORT_VERWORFEN: &str = "Antwort verworfen";
+const ZUSTIMMUNG: &str = "Zustimmung";
+const VETO: &str = "Veto";
+const URTEIL_VERWORFEN: &str = "Antwort verworfen, kein Urteil";
+const NICHT_ANGEBUNDEN: &str = "nicht angebunden";
+
+/// Was eine Begruendung eines Beraters ueber seine Mitwirkung sagt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Gefragt {
+    /// Gefragt, und der Papiertag hat die Antwort verwendet (Vorschlag, Zustimmung oder Veto).
+    Verwendet,
+    /// Gefragt, aber die Antwort wurde verworfen.
+    Verworfen,
+    /// Nicht gefragt, mit dem Grund, falls der Berater ihn nannte.
+    NichtAngebunden(Option<String>),
+}
+
+/// Liest eine Begruendung, wie `frage` und `topf_zyklus` sie schreiben (`Topf A: …`). Andere
+/// Begruendungen (etwa Zielgewichte) sagen nichts ueber die Mitwirkung: `None`.
+pub fn gefragt(text: &str) -> Option<Gefragt> {
+    let rest = [TopfId::A, TopfId::B]
+        .into_iter()
+        .find_map(|t| text.strip_prefix(topf_name(t))?.strip_prefix(": "))?;
+    let nach = |wort: &str| rest.strip_prefix(wort).is_some_and(|r| r.starts_with(": "));
+    if nach(URTEIL_VERWORFEN) || nach(ANTWORT_VERWORFEN) {
+        return Some(Gefragt::Verworfen);
+    }
+    if nach(ANTWORT_VERWENDET) || nach(ZUSTIMMUNG) || nach(VETO) {
+        return Some(Gefragt::Verwendet);
+    }
+    let r = rest.strip_prefix(NICHT_ANGEBUNDEN)?;
+    let grund = r
+        .strip_prefix(" (")
+        .and_then(|g| g.split_once("), nicht gefragt"))
+        .map(|(g, _)| g.to_string());
+    (grund.is_some() || r.starts_with(", nicht gefragt")).then_some(Gefragt::NichtAngebunden(grund))
 }
 
 fn topf_name(t: TopfId) -> &'static str {
@@ -431,12 +472,19 @@ fn frage(
             ),
         )?;
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag")? {
-        let antwort = frager.vorschlagen(e, lage);
+        let mut antwort = frager.vorschlagen(e, lage);
+        let wie = if antwort.verwertbar {
+            ANTWORT_VERWENDET
+        } else {
+            // Eine verworfene Antwort traegt nie einen Vorschlag weiter.
+            antwort.vorschlag = None;
+            ANTWORT_VERWORFEN
+        };
         begruende(
             j,
             tag,
             name(wer),
-            &format!("{t}: {}", antwort.einschaetzung),
+            &format!("{t}: {wie}: {}", antwort.einschaetzung),
         )?;
         if let Some(v) = &antwort.vorschlag {
             for (isin, bp) in &v.zielgewichte_bp {
@@ -498,10 +546,10 @@ fn topf_zyklus(
         )?
     {
         let urteil = pruefer.pruefen(e, &lage, &v);
-        let wort = if urteil.zustimmung {
-            "Zustimmung"
-        } else {
-            "Veto"
+        let wort = match (urteil.verwertbar, urteil.zustimmung) {
+            (true, true) => ZUSTIMMUNG,
+            (true, false) => VETO,
+            (false, _) => URTEIL_VERWORFEN,
         };
         begruende(
             j,
@@ -509,7 +557,7 @@ fn topf_zyklus(
             name(zweiter),
             &format!("{t}: {wort}: {}", urteil.begruendung),
         )?;
-        if urteil.zustimmung {
+        if urteil.verwertbar && urteil.zustimmung {
             vorschlag = Some(v);
         }
     }

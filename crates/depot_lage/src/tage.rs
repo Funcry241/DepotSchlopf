@@ -11,7 +11,9 @@ use std::fmt::Write as _;
 
 use depot_journal::Stand;
 use depot_journal::anbieter::{Eintrag, Ergebnis, Wer};
-use depot_kern::{BeraterId, Datum, Zeitpunkt};
+use depot_kern::{BeraterId, Datum, Grenzen, Universum, Zeitpunkt};
+use depot_regelwerk::pruefe_kurse;
+use depot_sim::{Gefragt, gefragt, tageskurse_am};
 
 use crate::betrieb::wer_fuer;
 use crate::ortszeit;
@@ -153,63 +155,71 @@ fn ergebnis_text(e: Ergebnis) -> &'static str {
     }
 }
 
-/// Was eine KI an einem Tag beigetragen hat: aus ihren Begruendungen im Journal und ihren
-/// Aufrufen im Anbieterprotokoll.
+/// Was eine KI an einem Tag beigetragen hat. Ob sie beigetragen hat, sagt allein das Journal:
+/// nur eine Antwort, die der Papiertag verwendet hat (`depot_sim::gefragt`), zaehlt. Das
+/// Anbieterprotokoll erklaert nur, warum eine Antwort fehlte; ein erfolgreicher Aufruf dort
+/// macht nichts gruen, denn er kann aus einem anderen Lauf stammen oder spaeter verworfen worden
+/// sein (Maus, Befund 2 zu PR #33).
 fn beitrag(begruendungen: &[&str], aufrufe: &[&Eintrag]) -> KiBeitrag {
-    let ok = aufrufe
-        .iter()
-        .filter(|e| e.ergebnis == Ergebnis::Ok)
-        .count();
-    let fehl: Vec<&str> = aufrufe
-        .iter()
-        .filter(|e| e.ergebnis != Ergebnis::Ok && e.ergebnis != Ergebnis::Neu)
-        .map(|e| ergebnis_text(e.ergebnis))
-        .collect();
-    let fehl_text = || {
-        let mut f: Vec<&str> = Vec::new();
-        for t in &fehl {
-            if !f.contains(t) {
-                f.push(t);
+    let gefragt: Vec<Gefragt> = begruendungen.iter().filter_map(|t| gefragt(t)).collect();
+    let verwendet = gefragt.iter().filter(|g| **g == Gefragt::Verwendet).count();
+    let verworfen = gefragt.iter().filter(|g| **g == Gefragt::Verworfen).count();
+    let mut fehl: Vec<&str> = Vec::new();
+    for e in aufrufe {
+        if e.ergebnis != Ergebnis::Ok && e.ergebnis != Ergebnis::Neu {
+            let t = ergebnis_text(e.ergebnis);
+            if !fehl.contains(&t) {
+                fehl.push(t);
             }
         }
-        f.join(", ")
+    }
+    let grund = || {
+        if fehl.is_empty() {
+            "Antwort verworfen (unlesbar oder nicht in der verlangten Form)".to_string()
+        } else {
+            fehl.join(", ")
+        }
     };
-    if ok > 0 {
+    if verwendet > 0 {
         let mut text = format!(
-            "hat beigetragen ({ok} {})",
-            if ok == 1 { "Antwort" } else { "Antworten" }
+            "hat beigetragen ({verwendet} {} verwendet)",
+            if verwendet == 1 {
+                "Antwort"
+            } else {
+                "Antworten"
+            }
         );
-        if !fehl.is_empty() {
-            let _ = write!(text, "; außerdem: {}", fehl_text());
+        if verworfen > 0 {
+            let _ = write!(text, "; {verworfen} verworfen: {}", grund());
         }
         return KiBeitrag {
             klasse: "gut",
             text,
         };
     }
-    if let Some(n) = begruendungen
-        .iter()
-        .find(|t| t.contains("nicht angebunden"))
-    {
-        let grund = n
-            .split_once("nicht angebunden (")
-            .and_then(|(_, r)| r.split_once(')'))
-            .map_or("kein Schlüssel, Sperre oder Anbieterpause", |(g, _)| g);
+    if verworfen > 0 {
         return KiBeitrag {
             klasse: "halt",
-            text: format!("ausgefallen, nicht gefragt: {grund}"),
+            text: format!("ausgefallen, gefragt ohne verwendbare Antwort: {}", grund()),
         };
     }
-    if !fehl.is_empty() {
+    if let Some(g) = gefragt.iter().find_map(|g| match g {
+        Gefragt::NichtAngebunden(g) => Some(g),
+        _ => None,
+    }) {
         return KiBeitrag {
             klasse: "halt",
-            text: format!("ausgefallen: {}", fehl_text()),
+            text: format!(
+                "ausgefallen, nicht gefragt: {}",
+                g.as_deref()
+                    .unwrap_or("kein Schlüssel, Sperre oder Anbieterpause")
+            ),
         };
     }
     match begruendungen.first() {
         Some(t) => KiBeitrag {
             klasse: "offen",
-            text: format!("ohne verwertbare Antwort: {t}"),
+            text: format!("kein verwendeter Beitrag im Journal: {t}"),
         },
         None => KiBeitrag {
             klasse: "offen",
@@ -218,8 +228,26 @@ fn beitrag(begruendungen: &[&str], aufrufe: &[&Eintrag]) -> KiBeitrag {
     }
 }
 
+/// Die Befunde der Kurspruefung, wie ein Papiertag am Tag `d` sie mit den bis dahin
+/// abgerufenen Kursen gehabt haette, in Worten. `None` ohne Kurse dieses Tages oder ohne
+/// Befund.
+fn kurspruefung_am(stand: &Stand, universum: &Universum, d: Datum) -> Option<Vec<String>> {
+    let k = tageskurse_am(stand, universum, d).ok()?;
+    let befunde = pruefe_kurse(&Grenzen::standard(), universum, d, &k.heute, &k.vortag);
+    if befunde.is_empty() {
+        return None;
+    }
+    let roh: Vec<String> = befunde.iter().map(|b| format!("{b:?}")).collect();
+    Some(befunde_text(roh.iter().map(String::as_str)))
+}
+
 /// Die letzten Handelstage seit dem ersten Papiertag, neueste zuerst.
-pub fn tage(stand: &Stand, protokoll: &[Eintrag], heute: Datum) -> Vec<TagErgebnis> {
+pub fn tage(
+    stand: &Stand,
+    universum: &Universum,
+    protokoll: &[Eintrag],
+    heute: Datum,
+) -> Vec<TagErgebnis> {
     let begr = stand.begruendungen();
     let gelaufen: BTreeSet<Datum> = begr
         .iter()
@@ -229,19 +257,11 @@ pub fn tage(stand: &Stand, protokoll: &[Eintrag], heute: Datum) -> Vec<TagErgebn
     let Some(erster) = gelaufen.first().copied() else {
         return Vec::new();
     };
-    let kurse_da: BTreeSet<Datum> = stand
-        .kurse()
-        .iter()
-        .map(|k| k.kurs().handelstag())
-        .collect();
-    let abschluss = stand.abschluss().map(|a| a.datum);
     let mut tage = Vec::new();
     let mut d = heute;
     while d >= erster && tage.len() < TAGE_MAX {
         if handelstag(d) {
-            tage.push(ein_tag(
-                stand, protokoll, d, heute, &gelaufen, &kurse_da, abschluss,
-            ));
+            tage.push(ein_tag(stand, universum, protokoll, d, heute));
         }
         let Some(v) = tag_davor(d) else {
             break;
@@ -253,12 +273,10 @@ pub fn tage(stand: &Stand, protokoll: &[Eintrag], heute: Datum) -> Vec<TagErgebn
 
 fn ein_tag(
     stand: &Stand,
+    universum: &Universum,
     protokoll: &[Eintrag],
     d: Datum,
     heute: Datum,
-    gelaufen: &BTreeSet<Datum>,
-    kurse_da: &BTreeSet<Datum>,
-    abschluss: Option<Datum>,
 ) -> TagErgebnis {
     let begr: Vec<(&str, &str)> = stand
         .begruendungen()
@@ -266,10 +284,16 @@ fn ein_tag(
         .filter(|(datum, _, _)| *datum == d)
         .map(|(_, wer, text)| (wer.as_str(), text.as_str()))
         .collect();
-    if !gelaufen.contains(&d) {
+    let abschluss = stand.abschluss().map(|a| a.datum);
+    if !begr.iter().any(|(wer, _)| *wer == PAPIERTAG) {
         let stand = if d == heute {
             TagStand::Offen
-        } else if kurse_da.contains(&d) {
+        } else if let Some(befunde) = kurspruefung_am(stand, universum, d) {
+            TagStand::Ausgefallen(format!(
+                "Die Kursprüfung ließ den Tag ausfallen, darum lief kein Papiertag: {}",
+                befunde.join("; ")
+            ))
+        } else if stand.kurse().iter().any(|k| k.kurs().handelstag() == d) {
             TagStand::Ausgefallen(
                 "Schlusskurse liegen vor, aber der Papiertag lief an dem Tag nicht (Rechner \
                  aus, Zeitplan aus oder Lauf gescheitert, siehe Tätigkeit). Nachholen geht \
@@ -320,7 +344,7 @@ fn ein_tag(
                 .iter()
                 .filter(|e| e.wer == wer && ortsdatum(e.zeit) == Some(d))
                 .collect();
-            let beitrag = if matches!(stand_tag, TagStand::OhneHandel(_)) && aufrufe.is_empty() {
+            let beitrag = if matches!(stand_tag, TagStand::OhneHandel(_)) && texte.is_empty() {
                 KiBeitrag {
                     klasse: "offen",
                     text: "nicht gefragt: Die Kursprüfung ließ den Tag ausfallen".into(),

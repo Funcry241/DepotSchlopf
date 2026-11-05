@@ -21,15 +21,16 @@ Maus' Praxistest am 05.11.2026: Wolfgang soll ohne Konsole und ohne Journal sehe
 | Abgeschlossen ohne Handel | Die Kursprüfung ließ den Tag ausfallen. Die Befunde stehen in Worten da, etwa „Kurse zu alt“, je Art einmal mit Anzahl. |
 | Angefangen | Begonnen, nicht abgeschlossen. Den Halt zeigt die Bereitschaft. |
 | Ausgefallen: keine Schlusskurse | Kein Papiertag und keine Kurse. Rechner oder Zeitplan zur Abrufzeit aus, Abruf gescheitert oder Börsenfeiertag. |
+| Ausgefallen: Kursprüfung | Kein Papiertag, und die Kursprüfung mit den Kursen, die bis zum Ende dieses Tages abgerufen waren, meldet Befunde, etwa „Kurse zu alt“. Spätere Abrufe zählen für diesen Tag nicht. |
 | Ausgefallen: Kurse da, kein Papiertag | Der Papiertag lief nicht. Nachholen geht nicht, denn ein Tag wird nur mit seinen eigenen Kursen am selben Tag entschieden. |
 | Heute noch nicht gelaufen | Der heutige Tag ohne Papiertag. |
 
-Je Tag stehen Dachs und Maus mit ihrem Beitrag. Die Reihenfolge der Prüfung:
+Je Tag stehen Dachs und Maus mit ihrem Beitrag. Ob eine KI beigetragen hat, sagt allein das Journal (Fassung 2, siehe unten). Die Reihenfolge der Prüfung:
 
-1. **Hat beigetragen:** Mindestens ein angenommener Aufruf an diesem Tag (Frankfurter Datum) im Anbieterprotokoll. Weitere Fehlschläge stehen dahinter.
-2. **Ausgefallen, nicht gefragt:** Das Journal sagt „nicht angebunden“. Der Grund steht seit diesem Schritt mit im Journal (siehe unten).
-3. **Ausgefallen:** Gefragt, aber jeder Aufruf scheiterte. Der Grund kommt aus dem Protokoll: Limit, Guthaben, abgelehnter Schlüssel, überlastet, Netz, Antwort fehlte, Kosten über der Reservierung.
-4. **Ohne verwertbare Antwort:** Eine Begründung im Journal, aber kein angenommener Aufruf im Protokoll.
+1. **Hat beigetragen:** Der Papiertag hat mindestens eine Antwort der KI verwendet (Vorschlag, Zustimmung oder Veto). Verworfene Antworten desselben Tages stehen dahinter.
+2. **Ausgefallen, gefragt ohne verwendbare Antwort:** Jede Antwort wurde verworfen. Den Grund liefert das Anbieterprotokoll dieses Tages (Limit, Guthaben, abgelehnter Schlüssel, überlastet, Netz, Antwort fehlte, Kosten über der Reservierung), sonst „Antwort verworfen“.
+3. **Ausgefallen, nicht gefragt:** Das Journal sagt „nicht angebunden“, mit dem Grund (siehe unten).
+4. **Kein verwendeter Beitrag im Journal:** Eine andere Begründung, etwa aus einem Journal vor Fassung 2.
 5. **Nicht gefragt:** sonst. An einem Tag ohne Handel heißt das ausdrücklich „Die Kursprüfung ließ den Tag ausfallen“.
 
 Ein grüner Abschluss allein sagt also nicht mehr, wer mitgewirkt hat. Das steht in derselben Zeile.
@@ -53,15 +54,45 @@ Ob ein später Abruf am selben Abend trotzdem zählen soll, ist eine Grenze und 
 
 Das Papierdepot beginnt mit: „Nur Papiergeld, simuliert: Jeder Auftrag gilt als zum Schlusskurs des Entscheidungstags ausgeführt. Ob eine echte Order zu diesem Preis ausgeführt worden wäre, bleibt offen; ein Plus hier ist ein Simulationsergebnis.“
 
+## Fassung 2 nach Maus' Prüfung
+
+**Befund 1:** Holte der Rechner die Kurse um 20 Uhr nach, startete wegen der Kursprüfung kein Papiertag. Am nächsten Morgen stand nur „Kurse liegen vor, aber der Papiertag lief nicht“.
+
+**Regel:** Für einen Tag ohne Papiertag wiederholt die Anzeige die Kursprüfung genau so, wie ein Papiertag an diesem Tag sie gesehen hätte. Dafür gibt es `depot_sim::tageskurse_am`: nur Belege, die bis zum Ende dieses Tages (Frankfurt) abgerufen waren, und nur Kurse dieses Handelstags. Befunde stehen in Worten in derselben Zeile.
+
+**Befund 2:** „Hat beigetragen“ zählte erfolgreiche Aufrufe im Anbieterprotokoll nach Datum. So konnte die Zeile grün sein, obwohl der Papiertag die KI nicht gefragt oder ihre Antwort verworfen hatte.
+
+**Regel:** Der Papiertag schreibt ausdrücklich ins Journal, was er verwendet hat, und nur das zählt.
+- `Antwort` und `Urteil` tragen `verwertbar`. `depot_berater` setzt es nur bei einer gelesenen, geprüften Antwort.
+- Der Lauf schreibt „Antwort verwendet“ oder „Antwort verworfen“, beim Urteil „Zustimmung“, „Veto“ oder „Antwort verworfen, kein Urteil“.
+- Eine verworfene Antwort trägt nie einen Vorschlag weiter. Ein verworfenes Urteil ist keine Zustimmung (R31).
+- `depot_sim::gefragt` liest diese Worte zurück. Schreiben und Lesen nutzen dieselben Festwerte.
+- Das Anbieterprotokoll erklärt nur noch den Grund eines Ausfalls und macht nie etwas grün.
+
+**Gegenproben** (jeweils rot):
+- Keine Kursprüfung für verpasste Tage.
+- Spätere Abrufe zählen für einen vergangenen Tag mit.
+- Ein erfolgreicher Aufruf im Protokoll macht grün.
+- Eine verworfene Antwort steht als verwendet.
+- Ein verworfenes Urteil gilt als Zustimmung.
+- Eine verworfene Antwort trägt ihren Vorschlag weiter.
+
 ## Tests
 
 - **`crates/depot_lage/tests/lage.rs`:**
-  - `tagesergebnis_zeigt_ausfall_und_beitrag_je_ki`: heute offen, ein Tag mit Kursen ohne Papiertag, ein Tag ohne Kurse, ein abgeschlossener Tag. Dachs hat beigetragen, Maus fiel aus mit „kein Schlüssel hinterlegt“ aus dem Journal. Alles steht auf der Seite.
-  - `tagesergebnis_nennt_den_fehler_des_anbieters`: Ein Limit im Protokoll heißt „ausgefallen: Anbieterlimit“. Ohne Protokoll zählt eine Antwort im Journal nicht als Beitrag.
+  - `tagesergebnis_zeigt_ausfall_und_beitrag_je_ki`:
+    - heute offen;
+    - ein Tag mit Kursen ohne Papiertag;
+    - ein Tag mit nachgeholtem Abruf: „Kursprüfung … Kurse zu alt“, obwohl der nächste Abruf den Tag noch einmal belegt;
+    - ein Tag ohne Kurse;
+    - ein abgeschlossener Tag. Dachs hat beigetragen. Maus fiel aus mit „kein Schlüssel hinterlegt“ aus dem Journal, trotz eines erfolgreichen Aufrufs im Protokoll.
+  - `tagesergebnis_nennt_den_fehler_des_anbieters`: Eine verworfene Antwort heißt „gefragt ohne verwendbare Antwort: Anbieterlimit“, auch neben einem erfolgreichen Aufruf. Ohne Protokoll bleibt sie rot mit „Antwort verworfen“.
   - `nachgeholter_abruf_heisst_kurse_zu_alt`: Abruf um 20:00 Uhr, „Kurse zu alt“ ohne Knopf, der Tag danach „abgeschlossen ohne Handel“, beide KIs nicht gefragt.
   - `papierdepot_nennt_die_simulation`.
 - **`crates/depot_berater/tests/berater.rs`:** `warum_nicht` für fehlenden Schlüssel, Sperre und Anbieterpause, `None` mit Schlüssel.
-- **`crates/depot_sim/tests/papiertag.rs`:** `Stumm` schreibt keinen erfundenen Grund.
+- **`crates/depot_sim/tests/papiertag.rs`:**
+  - `Stumm` schreibt keinen erfundenen Grund.
+  - `verworfene_antwort_und_urteil_stehen_als_verworfen`: Nur verwendbare Antwort und verwendbares Urteil führen zum Kauf, alles steht so im Journal, und `gefragt` liest nur die eigenen Worte nach dem Topf.
 
 **Gegenproben** (jeweils rot):
 - Ein angenommener Aufruf zählt nicht als Beitrag.
@@ -74,5 +105,5 @@ Das Papierdepot beginnt mit: „Nur Papiergeld, simuliert: Jeder Auftrag gilt al
 
 ## Grenzen
 
-- Der Beitrag einer KI ist so genau wie das Anbieterprotokoll. Ein Lauf vor dem Protokoll (vor `fehlerfaelle.md`) zeigt „ohne verwertbare Antwort“.
+- Ein Journal vor Fassung 2 kennt „Antwort verwendet“ noch nicht. Solche Tage zeigen „kein verwendeter Beitrag im Journal“, außer bei Zustimmung oder Veto.
 - Börsenfeiertage kennt die Anzeige nicht. Sie erscheinen als „keine Schlusskurse“ mit dem Feiertag als einem der genannten Gründe.

@@ -620,7 +620,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
                 .collect();
             punkte.extend(budget.iter().filter_map(budget_punkt));
             depot_lage = Some(depot::depot_lage(s, werte));
-            tage = tage::tage(s, &u.anbieter, heute);
+            tage = tage::tage(s, &als_universum(werte), &u.anbieter, heute);
             gespraech = s
                 .begruendungen()
                 .iter()

@@ -418,6 +418,7 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a
             }
             Err(grund) => Antwort {
+                verwertbar: false,
                 einschaetzung: format!(
                     "keine verwertbare Antwort: {} [{}]",
                     sauber(&grund),
@@ -448,6 +449,7 @@ impl<N: Netz> Berater for KiBerater<N> {
             }
             // Ohne verwertbare Antwort keine Zustimmung (R31).
             Err(grund) => Urteil {
+                verwertbar: false,
                 zustimmung: false,
                 begruendung: format!(
                     "keine verwertbare Antwort: {} [{}]",

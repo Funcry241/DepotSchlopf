@@ -561,6 +561,7 @@ struct Antwortet;
 impl Berater for Antwortet {
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            verwertbar: true,
             einschaetzung: "Heute nichts kaufen.".into(),
             vorschlag: None,
         }
@@ -573,8 +574,35 @@ impl Berater for Antwortet {
         _vorschlag: &Vorschlag,
     ) -> Urteil {
         Urteil {
+            verwertbar: true,
             zustimmung: false,
             begruendung: "nein".into(),
+        }
+    }
+}
+
+/// Ein angebundener Berater, dessen Antwort nicht verwertbar ist (etwa unlesbar).
+struct Verwirft;
+
+impl Berater for Verwirft {
+    fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
+        Antwort {
+            verwertbar: false,
+            einschaetzung: "keine verwertbare Antwort: Limit".into(),
+            vorschlag: None,
+        }
+    }
+
+    fn pruefen(
+        &mut self,
+        _erlaubnis: AufrufErlaubnis,
+        _lage: &Lage<'_>,
+        _vorschlag: &Vorschlag,
+    ) -> Urteil {
+        Urteil {
+            verwertbar: false,
+            zustimmung: false,
+            begruendung: "keine verwertbare Antwort: Limit".into(),
         }
     }
 }
@@ -593,6 +621,7 @@ impl Berater for OhneSchluessel {
 
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            verwertbar: false,
             einschaetzung: "nicht angebunden".into(),
             vorschlag: None,
         }
@@ -605,6 +634,7 @@ impl Berater for OhneSchluessel {
         _vorschlag: &Vorschlag,
     ) -> Urteil {
         Urteil {
+            verwertbar: false,
             zustimmung: false,
             begruendung: "nicht angebunden".into(),
         }
@@ -648,42 +678,43 @@ fn tagesergebnis_zeigt_ausfall_und_beitrag_je_ki() -> Result<(), String> {
         "Papiertag",
     )?;
     assert!(matches!(aus, Ausgang::Abgeschlossen { .. }), "{aus:?}");
-    // Freitag, der 6., ohne Kurse; Montag, der 9., mit Kursen, aber ohne Papiertag.
-    belege_alle(&mut jr, 9)?;
-    let mut umg = umgebung(abends(10)?, Zugang::Offen(jr.stand()));
+    // Freitag, der 6., ohne Kurse; Montag, der 9., mit einem nachgeholten Abruf um 20 Uhr:
+    // Kurse zu alt, darum kein Papiertag; Dienstag, der 10., mit Kursen, aber ohne Papiertag.
+    belege_um(&mut jr, 9, 20, 0)?;
+    belege_alle(&mut jr, 10)?;
+    let mut umg = umgebung(abends(11)?, Zugang::Offen(jr.stand()));
+    // Maus' Befund 2: Ein erfolgreicher Aufruf im Protokoll macht Maus nicht gruen, wenn der
+    // Papiertag sie laut Journal gar nicht gefragt hat.
     let zeit = some(Zeitpunkt::frankfurt(tag(5)?, 17, 50, 0), "Zeit")?;
-    umg.anbieter = vec![
-        Eintrag::neu(zeit, Wer::Dachs, Ergebnis::Ok, Some(200)),
-        Eintrag::neu(zeit, Wer::Maus, Ergebnis::Ok, Some(200)),
-    ];
+    umg.anbieter = vec![Eintrag::neu(zeit, Wer::Maus, Ergebnis::Ok, Some(200))];
     let l = lagebild(&umg);
     let tage: Vec<(Datum, &TagStand)> = l.tage.iter().map(|t| (t.datum, &t.stand)).collect();
-    assert_eq!(l.tage.len(), 4, "{tage:?}");
+    assert_eq!(l.tage.len(), 5, "{tage:?}");
     assert_eq!(tag_nr(&l, 0)?.stand, TagStand::Offen);
     assert!(
         matches!(&tag_nr(&l, 1)?.stand, TagStand::Ausgefallen(g) if g.contains("Schlusskurse liegen vor")),
         "{tage:?}"
     );
+    // Maus' Befund 1: Der konkrete Grund steht in der Zeile des verpassten Tages. Der Abruf
+    // vom 10. belegt den 9. noch einmal; fuer den 9. zaehlt nur, was am 9. abgerufen war.
     assert!(
-        matches!(&tag_nr(&l, 2)?.stand, TagStand::Ausgefallen(g) if g.contains("keine Schlusskurse")),
+        matches!(&tag_nr(&l, 2)?.stand, TagStand::Ausgefallen(g)
+            if g.contains("Kursprüfung") && g.contains("Kurse zu alt")),
         "{tage:?}"
     );
-    let fuenf = tag_nr(&l, 3)?;
+    assert!(
+        matches!(&tag_nr(&l, 3)?.stand, TagStand::Ausgefallen(g) if g.contains("keine Schlusskurse")),
+        "{tage:?}"
+    );
+    let fuenf = tag_nr(&l, 4)?;
     assert_eq!(fuenf.datum, tag(5)?);
     assert_eq!(fuenf.stand, TagStand::Abgeschlossen);
     let dachs = ki_nr(fuenf, 0)?;
     assert_eq!(dachs.0, BeraterId::Dachs);
     assert_eq!(dachs.1.klasse, "gut", "{dachs:?}");
     assert!(dachs.1.text.contains("hat beigetragen"), "{dachs:?}");
-    // Maus wurde nicht gefragt; ein Protokolleintrag fremder Herkunft aendert das nicht, der
-    // Grund aus dem Journal steht da.
     let maus = ki_nr(fuenf, 1)?;
     assert_eq!(maus.0, BeraterId::Maus);
-    assert_eq!(maus.1.klasse, "gut", "{maus:?}");
-    drop(l);
-    umg.anbieter.truncate(1);
-    let l = lagebild(&umg);
-    let maus = ki_nr(tag_nr(&l, 3)?, 1)?;
     assert_eq!(maus.1.klasse, "halt", "{maus:?}");
     assert!(
         maus.1
@@ -695,10 +726,13 @@ fn tagesergebnis_zeigt_ausfall_und_beitrag_je_ki() -> Result<(), String> {
     assert!(s.contains("Tagesergebnis"), "{s}");
     assert!(s.contains("kein Schlüssel hinterlegt"), "{s}");
     assert!(s.contains("Schlusskurse liegen vor"), "{s}");
+    assert!(s.contains("Kurse zu alt"), "{s}");
     Ok(())
 }
 
-/// Gefragt, aber der Aufruf scheiterte: Das Tagesergebnis nennt den Grund aus dem Protokoll.
+/// Gefragt, aber die Antwort wurde verworfen: rot, mit dem Grund aus dem Protokoll. Ein
+/// erfolgreicher Aufruf im Protokoll aendert daran nichts (Maus' Befund 2: Die Antwort kann
+/// nach dem Aufruf verworfen worden sein).
 #[test]
 fn tagesergebnis_nennt_den_fehler_des_anbieters() -> Result<(), String> {
     let ort = Ort::neu()?;
@@ -714,7 +748,7 @@ fn tagesergebnis_nennt_den_fehler_des_anbieters() -> Result<(), String> {
             &universum,
             &start,
             &mut Antwortet,
-            &mut Antwortet,
+            &mut Verwirft,
             &mut konto,
         ),
         "Papiertag",
@@ -722,26 +756,30 @@ fn tagesergebnis_nennt_den_fehler_des_anbieters() -> Result<(), String> {
     let mut umg = umgebung(abends(5)?, Zugang::Offen(jr.stand()));
     let zeit = some(Zeitpunkt::frankfurt(tag(5)?, 17, 50, 0), "Zeit")?;
     umg.anbieter = vec![
-        Eintrag::neu(zeit, Wer::Dachs, Ergebnis::Ok, Some(200)),
+        Eintrag::neu(zeit, Wer::Maus, Ergebnis::Ok, Some(200)),
         Eintrag::neu(zeit, Wer::Maus, Ergebnis::Limit, Some(429)),
     ];
     let l = lagebild(&umg);
     let t = some(l.tage.first(), "Tag")?;
     assert_eq!(t.stand, TagStand::Abgeschlossen);
+    // Dachs' Antwort hat der Papiertag verwendet; das Protokoll braucht es dafuer nicht.
     assert_eq!(ki_nr(t, 0)?.1.klasse, "gut", "{:?}", t.ki);
     assert_eq!(ki_nr(t, 1)?.1.klasse, "halt", "{:?}", t.ki);
     assert!(
-        ki_nr(t, 1)?.1.text.contains("ausgefallen: Anbieterlimit"),
+        ki_nr(t, 1)?
+            .1
+            .text
+            .contains("gefragt ohne verwendbare Antwort: Anbieterlimit"),
         "{:?}",
         t.ki
     );
-    // Ohne Eintrag im Protokoll zaehlt eine Antwort im Journal nicht als Beitrag.
+    // Ohne Protokoll bleibt Maus rot, mit allgemeinem Grund.
     umg.anbieter.clear();
     let l = lagebild(&umg);
     let t = some(l.tage.first(), "Tag")?;
+    assert_eq!(ki_nr(t, 1)?.1.klasse, "halt", "{:?}", t.ki);
     assert!(
-        t.ki.iter()
-            .all(|(_, b)| b.klasse == "offen" && b.text.starts_with("ohne verwertbare Antwort")),
+        ki_nr(t, 1)?.1.text.contains("Antwort verworfen"),
         "{:?}",
         t.ki
     );
