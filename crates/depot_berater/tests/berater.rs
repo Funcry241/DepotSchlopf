@@ -562,7 +562,10 @@ fn zurueckgegebener_schluessel_gelangt_nie_ins_ergebnis() -> Result<(), String> 
 /// Ohne Werkzeuge fuegt der Anbieter nichts ein; eine Anfrage ueber dem Deckel wird gar nicht
 /// gesendet, und meldet der Anbieter trotzdem mehr Eingabe-Token, sperrt der Berater.
 #[test]
-#[allow(clippy::many_single_char_names, reason = "kurze Namen wie in den uebrigen Tests")]
+#[allow(
+    clippy::many_single_char_names,
+    reason = "kurze Namen wie in den uebrigen Tests"
+)]
 fn reservierung_ist_eine_gesicherte_obergrenze() -> Result<(), String> {
     // Termine und Nachrichten kuerzt die Frage selbst (`MAX_EREIGNISSE_BYTES`); zu gross wird
     // die Anfrage hier ueber eine ueberlange Begruendung im Vorschlag des anderen Beraters.
