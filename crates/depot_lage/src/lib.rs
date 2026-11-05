@@ -113,6 +113,26 @@ pub enum Abhilfe {
     Warten,
 }
 
+impl Abhilfe {
+    /// Muss ein Mensch etwas einrichten oder pruefen, bevor der Betrieb vollstaendig ist?
+    /// Nein nur fuer das, was Zeitplan oder Knopf ohnehin tun (Abrufe, Papiertag, Warten),
+    /// und fuer die Schluessel der KIs: Ohne sie laeuft der Betrieb ohne KI weiter, das zeigt
+    /// der Gesamtstatus eigens.
+    pub fn braucht_menschen(self) -> bool {
+        match self {
+            Abhilfe::JournalEinrichten
+            | Abhilfe::SchluesselKursquelle
+            | Abhilfe::KostenschutzPruefen
+            | Abhilfe::Pruefen => true,
+            Abhilfe::SchluesselBerater(_)
+            | Abhilfe::KurseAbrufen
+            | Abhilfe::TermineAbrufen
+            | Abhilfe::PapiertagStarten
+            | Abhilfe::Warten => false,
+        }
+    }
+}
+
 /// Ein Punkt der Einrichtung oder Bereitschaft.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Punkt {
@@ -607,9 +627,14 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         _ => {}
     }
     let gesamt = punkte.iter().map(|p| p.ampel).max().unwrap_or(Ampel::Gut);
+    // Eingriff: jeder Halt und jede offene Voraussetzung, die nur ein Mensch erfuellen kann
+    // (Maus zu #31: kein „vollständig bereit“ ohne Journal).
     let halt = punkte
         .iter()
-        .filter(|p| p.ampel == Ampel::Halt)
+        .filter(|p| {
+            p.ampel == Ampel::Halt
+                || (p.ampel == Ampel::Offen && p.abhilfe.is_some_and(Abhilfe::braucht_menschen))
+        })
         .map(|p| format!("{}: {}", p.name, p.text))
         .collect();
     let kis: Vec<betrieb::KiLage> = hinweise

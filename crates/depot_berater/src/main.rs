@@ -81,6 +81,11 @@ fn lauf(wurzel: &Path) -> Result<(), String> {
         sperre.clone(),
     )
     .mit_protokoll(protokoll, jetzt);
+    for (name, b) in [("Dachs", &dachs), ("Maus", &maus)] {
+        if let Some(p) = b.pause() {
+            eprintln!("[Papier] {name} pausiert ({p}): wird nicht gefragt, nichts reserviert.");
+        }
+    }
     let ergebnis = papier(wurzel, heute, &universum, &mut dachs, &mut maus);
     if dachs.gesperrt() || maus.gesperrt() {
         eprintln!(

@@ -38,6 +38,9 @@ pub struct KiBerater<N: Netz> {
     gesperrt: bool,
     /// Anbieterprotokoll und Uhr; ohne beides wird nichts vermerkt.
     protokoll: Option<Protokoll>,
+    /// Der Anbieter hat in diesem Lauf ein Limit gemeldet; bis zum Ende des Laufs pausiert,
+    /// auch wenn das Protokoll nicht geschrieben werden konnte.
+    limit_im_lauf: bool,
 }
 
 impl<N: Netz> fmt::Debug for KiBerater<N> {
@@ -77,6 +80,7 @@ impl<N: Netz> KiBerater<N> {
             sperre,
             gesperrt: false,
             protokoll: None,
+            limit_im_lauf: false,
         }
     }
 
@@ -103,10 +107,7 @@ impl<N: Netz> KiBerater<N> {
         let Some(zeit) = uhr() else {
             return;
         };
-        let wer = match self.wer {
-            BeraterId::Dachs => anbieter::Wer::Dachs,
-            BeraterId::Maus => anbieter::Wer::Maus,
-        };
+        let wer = self.protokoll_wer();
         let warten_bis = warten
             .and_then(|w| i64::try_from(w).ok())
             .and_then(|w| zeit.sekunden().checked_add(w))
@@ -125,6 +126,34 @@ impl<N: Netz> KiBerater<N> {
     /// Das Netz, fuer Tests mit einem erfundenen Anbieter.
     pub fn netz(&self) -> &N {
         &self.netz
+    }
+
+    /// Muss dieser Berater gerade pausieren? Ja, wenn der Anbieter ein Limit gemeldet hat, das
+    /// nach `depot_journal::anbieter::pausiert` noch gilt, in diesem Lauf ein Limit kam, oder
+    /// das Protokoll nicht lesbar ist (dann im Zweifel kein Aufruf). Ohne Protokoll: nein.
+    pub fn pause(&self) -> Option<String> {
+        if self.limit_im_lauf {
+            return Some("Anbieterlimit in diesem Lauf".into());
+        }
+        let (pfad, uhr) = self.protokoll.as_ref()?;
+        let Some(jetzt) = uhr() else {
+            return Some("Uhr liefert keine Zeit".into());
+        };
+        let text = match fs::read_to_string(pfad) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(e) => return Some(format!("{} nicht lesbar: {e}", pfad.display())),
+        };
+        let (eintraege, _) = anbieter::lies_alle(&text);
+        anbieter::pausiert(&eintraege, self.protokoll_wer(), jetzt)
+            .then(|| "Anbieterlimit, Wartezeit laeuft noch".to_string())
+    }
+
+    fn protokoll_wer(&self) -> anbieter::Wer {
+        match self.wer {
+            BeraterId::Dachs => anbieter::Wer::Dachs,
+            BeraterId::Maus => anbieter::Wer::Maus,
+        }
     }
 
     /// Liegt die Sperrdatei, oder hat dieser Lauf gesperrt?
@@ -163,10 +192,13 @@ impl<N: Netz> KiBerater<N> {
     }
 
     /// Eine Ablehnung des Anbieters: einordnen, vermerken, ohne Schluessel beschreiben.
-    fn ablehnung(&self, antwort: &crate::netz::Rueckmeldung, reserviert: Cent) -> String {
+    fn ablehnung(&mut self, antwort: &crate::netz::Rueckmeldung, reserviert: Cent) -> String {
         let roh = String::from_utf8_lossy(&antwort.inhalt);
         let kurz: String = roh.chars().take(300).collect();
         let art = anbieter::einordnen(antwort.status, &kurz);
+        if art == Ausgang::Limit {
+            self.limit_im_lauf = true;
+        }
         self.vermerke(
             art,
             Some(antwort.status),
@@ -192,6 +224,11 @@ impl<N: Netz> KiBerater<N> {
         };
         if self.gesperrt() {
             return ohne("KI gesperrt".into());
+        }
+        // Auch wer mit Erlaubnis fragt, wartet eine Pause des Anbieters ab (zweite Pruefung
+        // direkt vor dem Senden; die erste ist `angebunden`, vor der Reservierung).
+        if let Some(p) = self.pause() {
+            return ohne(format!("pausiert: {p}"));
         }
         let deckel = *erlaubnis.deckel();
         let reserviert = erlaubnis.buchung().reserviert;
@@ -354,7 +391,7 @@ impl<N: Netz> KiBerater<N> {
 
 impl<N: Netz> Berater for KiBerater<N> {
     fn angebunden(&self) -> bool {
-        self.schluessel.is_some() && !self.gesperrt()
+        self.schluessel.is_some() && !self.gesperrt() && self.pause().is_none()
     }
 
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {

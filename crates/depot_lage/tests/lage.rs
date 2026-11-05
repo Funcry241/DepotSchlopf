@@ -11,8 +11,8 @@ use depot_kern::liste::{als_universum, beobachtungsliste};
 use depot_kern::{BeraterId, Cent, Datum, Herkunft, Kurs, Preis, Topf, TopfId, Zeitpunkt};
 use depot_ki::{Buchung, KiDeckel, KiGrenzen};
 use depot_lage::{
-    Abhilfe, Ampel, BudgetStatus, Hinterlegt, Lagebild, PAPIERKONTO, Umgebung, Zugang, html,
-    ki_budget, lagebild, mit_journal,
+    Abhilfe, Ampel, Betrieb, BudgetStatus, Hinterlegt, Lagebild, PAPIERKONTO, Umgebung, Zugang,
+    html, ki_budget, lagebild, mit_journal,
 };
 use depot_sim::{Ausgang, Papierdatei, Stumm, papiertag};
 
@@ -510,5 +510,38 @@ fn sperrdateien_sperre_und_halt() -> Result<(), String> {
         depot_lage::sperrdateien(&ort.dir),
         vec!["X.HALT".to_string(), "ki.halt".into(), "lauf.sperre".into()]
     );
+    Ok(())
+}
+
+/// Maus zu #31: „Vollständig bereit“ nur, wenn auch die Einrichtung fertig ist. Mit beiden
+/// KI-Schluesseln, aber ohne Journal oder ohne Schluessel der Kursquelle, ist ein Eingriff
+/// noetig; mit Journal und Kursen ist der Betrieb bereit.
+#[test]
+fn vollstaendig_bereit_nur_mit_fertiger_einrichtung() -> Result<(), String> {
+    let mit_kis = |journal| {
+        let mut u = umgebung(abends(5)?, journal);
+        u.berater = [
+            (BeraterId::Dachs, Hinterlegt::Ja),
+            (BeraterId::Maus, Hinterlegt::Ja),
+        ];
+        Ok::<_, String>(u)
+    };
+    let l = lagebild(&mit_kis(Zugang::NichtEingerichtet)?);
+    assert!(
+        matches!(&l.betrieb, Betrieb::EingriffNoetig(g) if g.iter().any(|t| t.starts_with("Journal"))),
+        "{:?}",
+        l.betrieb
+    );
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    belege_alle(&mut j, 5)?;
+    let l = lagebild(&mit_kis(Zugang::Offen(j.stand()))?);
+    assert_eq!(l.betrieb, Betrieb::Bereit, "{:?}", l.punkte);
+    let mut ohne_quelle = mit_kis(Zugang::Offen(j.stand()))?;
+    ohne_quelle.kursquelle = Hinterlegt::Nein;
+    assert!(matches!(
+        lagebild(&ohne_quelle).betrieb,
+        Betrieb::EingriffNoetig(_)
+    ));
     Ok(())
 }

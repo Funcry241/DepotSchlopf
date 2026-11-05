@@ -668,7 +668,6 @@ fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
     let protokoll = ablage.dir.join("anbieter.txt");
     let antworten = vec![
         claude(VORSCHLAG, 20_000, 1_500, 0),
-        abgelehnt(429, "{\"type\":\"rate_limit_error\"}", Some(90)),
         abgelehnt(400, "Your credit balance is too low", None),
         abgelehnt(
             401,
@@ -676,6 +675,8 @@ fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
             None,
         ),
         Err(NetzFehler::NichtGesendet("host not found".into())),
+        // Zuletzt: Nach einem Limit pausiert der Berater (eigener Test unten).
+        abgelehnt(429, "{\"type\":\"rate_limit_error\"}", Some(90)),
     ];
     let mut texte = Vec::new();
     for antwort in antworten {
@@ -698,10 +699,10 @@ fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
         art,
         vec![
             Ergebnis::Ok,
-            Ergebnis::Limit,
             Ergebnis::Guthaben,
             Ergebnis::Abgelehnt,
-            Ergebnis::Netz
+            Ergebnis::Netz,
+            Ergebnis::Limit
         ]
     );
     assert!(
@@ -711,24 +712,24 @@ fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
     assert!(matches!(e.first().map(|x| x.ist), Some(Kosten::Betrag(_))));
     let t = some(uhr(), "Uhr")?;
     assert_eq!(
-        e.get(1).and_then(|x| x.warten_bis),
+        e.get(4).and_then(|x| x.warten_bis),
         Zeitpunkt::aus_sekunden(t.sekunden().saturating_add(90))
     );
     // Die Meldungen sagen in Worten, was los ist.
     assert!(
         texte
-            .get(1)
+            .get(4)
             .is_some_and(|t| t.contains("Anbieterlimit erreicht")),
         "{texte:?}"
     );
     assert!(
         texte
-            .get(2)
+            .get(1)
             .is_some_and(|t| t.contains("Guthaben beim Anbieter fehlt"))
     );
     assert!(
         texte
-            .get(3)
+            .get(2)
             .is_some_and(|t| t.contains("lehnt den Schluessel ab"))
     );
     Ok(())
@@ -751,5 +752,64 @@ fn fehlende_antwort_steht_als_unklar_im_protokoll() -> Result<(), String> {
         e.iter().map(|x| (x.ergebnis, x.ist)).collect::<Vec<_>>(),
         vec![(Ergebnis::Unklar, Kosten::Unbekannt)]
     );
+    Ok(())
+}
+
+/// Maus' Befund zu #31: Eine angezeigte Pause muss auch eingehalten werden. Nennt der Anbieter
+/// eine Wartezeit (hier 48 Stunden), wird bis dahin nichts gesendet und nichts reserviert.
+#[test]
+fn pause_des_anbieters_wird_vor_dem_aufruf_eingehalten() -> Result<(), String> {
+    use depot_journal::anbieter::{Eintrag, Ergebnis, Wer, anhaengen};
+    let mut ort = Ort::neu()?;
+    let protokoll = ort.dir.join("anbieter.txt");
+    let jetzt = some(uhr(), "Uhr")?;
+    let mut limit = Eintrag::neu(
+        some(
+            Zeitpunkt::aus_sekunden(jetzt.sekunden().saturating_sub(3600)),
+            "Zeit",
+        )?,
+        Wer::Dachs,
+        Ergebnis::Limit,
+        Some(429),
+    );
+    limit.warten_bis = Zeitpunkt::aus_sekunden(jetzt.sekunden().saturating_add(48 * 3600));
+    anhaengen(&protokoll, &limit)?;
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(claude(VORSCHLAG, 20_000, 1_500, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?.mit_protokoll(protokoll.clone(), uhr);
+    // Nicht angebunden: Der Papiertag reserviert fuer ihn nichts.
+    assert!(!dachs.angebunden());
+    assert!(dachs.pause().is_some());
+    // Auch mit Erlaubnis wird nichts gesendet.
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.einschaetzung.contains("pausiert"), "{a:?}");
+    assert!(dachs.netz().gesendet.is_empty(), "nichts gesendet");
+    // Maus betrifft Dachs' Limit nicht.
+    let maus =
+        berater(&ort, BeraterId::Maus, Attrappe::default())?.mit_protokoll(protokoll.clone(), uhr);
+    assert!(maus.pause().is_none());
+    // Nach der Wartezeit, oder nach einem erfolgreichen Aufruf, geht es weiter.
+    let mut ok = Eintrag::neu(jetzt, Wer::Dachs, Ergebnis::Ok, Some(200));
+    ok.reserviert = Some(Cent(1));
+    anhaengen(&protokoll, &ok)?;
+    assert!(dachs.pause().is_none());
+    Ok(())
+}
+
+/// Ein Limit in diesem Lauf pausiert bis zum Ende des Laufs, auch ohne Protokoll.
+#[test]
+fn limit_im_lauf_pausiert_auch_ohne_protokoll() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(abgelehnt(429, "{\"type\":\"rate_limit_error\"}", None));
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?;
+    assert!(maus.angebunden());
+    let e = ort.erlaubnis(BeraterId::Maus, 1)?;
+    let _ = mit_lage(|l| maus.vorschlagen(e, l))?;
+    assert!(!maus.angebunden());
+    assert!(maus.pause().is_some());
     Ok(())
 }

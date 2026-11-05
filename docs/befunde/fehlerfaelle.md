@@ -29,7 +29,7 @@ anbieter-v1;<sekunden>;<wer>;<ergebnis>;<http>;<ist>;<reserviert>;<warten_bis>
 - **Kursquelle:** Der Sammler ordnet seinen Bericht ein (`depot_sammler::einordnen`). Ein Hinweis zum Kontingent ist ein Limit. Ein Fehler zum Schlüssel bei jedem Wert heißt abgelehnt.
 - **Lesen:** Eine Zeile wird nur gelesen, wenn sie beim Neuschreiben genau gleich herauskommt. Unlesbare Zeilen zählt die Anzeige nicht mit, meldet sie aber.
 
-Das Protokoll ist nur Anzeige. Der Kostenschutz entscheidet weiter allein aus dem Kassenbuch im Journal. Ein Schreibfehler am Protokoll ändert keinen Aufruf. Es enthält weder Schlüssel noch Antworttexte.
+Der Kostenschutz entscheidet weiter allein aus dem Kassenbuch im Journal. Das Protokoll kann seit Fassung 2 einen Aufruf nur verhindern (Pause des Anbieters), nie erlauben. Es enthält weder Schlüssel noch Antworttexte.
 
 ## Schlüsselstatus ohne Testaufrufe
 
@@ -48,8 +48,8 @@ Geprüft wird nur bei echten Läufen. Eigene Testaufrufe würden Geld kosten und
 
 Es gibt keinen automatischen neuen Versuch. Jeder Aufruf ist vorher im Kassenbuch reserviert, und ein Wiederholen würde neu reservieren. Der nächste Versuch ist der nächste Papiertag.
 
-- Nennt der Anbieter eine Wartezeit, steht dort „frühestens …, sonst beim nächsten Papiertag“.
-- Ein Limit gilt als aktiv, solange die Wartezeit läuft. Ohne Wartezeit gilt es am selben Tag.
+- Nennt der Anbieter eine Wartezeit, steht dort „beim ersten Papiertag nach …“.
+- Ein Limit gilt, solange die Wartezeit läuft. Ohne Wartezeit gilt es am selben Tag. Solange es gilt, wird die KI nicht gefragt (Fassung 2).
 - Fehlendes Guthaben ist ein Eingriff: Wolfgang muss im Konto des Anbieters aufladen.
 - Ein erfolgreicher Aufruf löscht den Hinweis. Ein Netzfehler löscht ihn nicht.
 
@@ -121,6 +121,30 @@ Der Status (bereit oder pausiert) kommt weiter aus `depot_ki::pruefe`.
 - „Pausiert“ schon bei einer KI.
 - Ein Limit ohne Wartezeit läuft nicht ab.
 - Ein Zeitplanfehler ist kein Eingriff.
+
+## Fassung 2 nach Maus' Prüfung
+
+**Befund 1:** Mit beiden KI-Schlüsseln konnte „Vollständig bereit“ erscheinen, obwohl das Journal fehlte.
+
+**Regel:** Ein Eingriff ist jeder Halt und jede offene Voraussetzung, die nur ein Mensch erfüllen kann (`Abhilfe::braucht_menschen`): Journal einrichten, Schlüssel der Kursquelle, Prüfen, Kostenschutz. Nicht dazu zählen, was Zeitplan oder Knopf ohnehin tun (Abrufe, Papiertag, Warten), und die KI-Schlüssel, die „läuft ohne KI“ eigens zeigt. Bei einem Eingriff stehen die übrigen Gründe (ohne KI, pausiert) dahinter.
+
+**Befund 2:** Die Pause des Anbieters wurde angezeigt, aber nicht eingehalten. Trotz protokollierter Wartezeit von 48 Stunden ging ein weiterer Aufruf hinaus.
+
+**Regel:** Eine Regel für Anzeige und Verhalten, `depot_journal::anbieter::pausiert`. Der Berater prüft sie zweimal:
+- in `angebunden`, vor der Reservierung: Ein pausierter Berater wird nicht gefragt, und für ihn wird nichts reserviert;
+- direkt vor dem Senden.
+
+Dazu kommen zwei Fälle, in denen er im Zweifel pausiert:
+- Kam in diesem Lauf ein Limit, pausiert er bis zum Ende des Laufs, auch wenn das Protokoll nicht geschrieben werden konnte.
+- Ist das Protokoll nicht lesbar, fragt er nicht.
+
+`run.cmd papier` nennt die Pause.
+
+**Gegenproben** (jeweils rot):
+- Offene Einrichtung zählt nicht als Eingriff.
+- `angebunden` ohne Pausenprüfung.
+- Senden ohne Pausenprüfung.
+- Limit im Lauf vergessen.
 
 ## Grenzen und nächster Schritt
 

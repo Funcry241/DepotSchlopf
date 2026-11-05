@@ -113,7 +113,12 @@ fn anbieterlimit_nennt_den_naechsten_versuch_und_laeuft_ab() -> Result<(), Strin
     w.warten_bis = Some(spaeter);
     let h = some(anbieter_hinweis(&[w], Wer::Maus, heute), "Hinweis")?;
     assert!(matches!(h, AnbieterHinweis::Limit { aktiv: true, .. }));
-    assert!(h.text().contains("frühestens"), "{}", h.text());
+    assert!(
+        h.text()
+            .contains("beim ersten Papiertag nach 05.11.2026 20:00"),
+        "{}",
+        h.text()
+    );
     // Ein erfolgreicher Aufruf danach loescht den Hinweis; Netzfehler nicht.
     let wieder = [
         e(gestern, Wer::Maus, Ergebnis::Guthaben),
@@ -288,11 +293,15 @@ fn abgelehnter_schluessel_und_limit_im_lagebild() -> Result<(), String> {
         gruende.contains("Maus (GPT): Schlüssel vom Anbieter abgelehnt"),
         "{gruende}"
     );
-    // Ohne Ablehnung: Dachs wartet auf das Limit, Maus ist frei, also ohne KI.
+    // Ohne Ablehnung bleibt der Eingriff fuer das fehlende Journal; das Limit steht dahinter.
     u.anbieter.retain(|x| x.wer != Wer::Maus);
     let l = lagebild(&u);
     let gruende = l.betrieb.gruende().join("\n");
-    assert!(matches!(l.betrieb, Betrieb::OhneKi(_)), "{gruende}");
+    assert!(matches!(l.betrieb, Betrieb::EingriffNoetig(_)), "{gruende}");
+    assert!(
+        gruende.contains("Journal: Noch nicht eingerichtet"),
+        "{gruende}"
+    );
     assert!(gruende.contains("Anbieterlimit erreicht"), "{gruende}");
     // Eine abgelehnte Kursquelle ist Halt.
     u.anbieter = vec![e(jetzt, Wer::Kursquelle, Ergebnis::Abgelehnt)];

@@ -737,9 +737,12 @@ fn neuer_schluessel_ist_wieder_nur_hinterlegt() -> Result<(), String> {
     Ok(())
 }
 
-fn bereites_lagebild() -> Lagerechner {
-    Box::new(|_wurzel: &Path, jetzt: Zeitpunkt| {
-        let l = lagebild(&Umgebung {
+/// Ein Lagebild mit allen Schluesseln, aber ohne Journal (also Eingriff noetig). Mit
+/// `als_bereit` setzt es den Gesamtstatus danach auf bereit, damit der Test den Zeitplan-Teil
+/// fuer sich pruefen kann.
+fn lagebild_mit_schluesseln(als_bereit: bool) -> Lagerechner {
+    Box::new(move |_wurzel: &Path, jetzt: Zeitpunkt| {
+        let mut l = lagebild(&Umgebung {
             jetzt,
             journal: Zugang::NichtEingerichtet,
             kursquelle: Hinterlegt::Ja,
@@ -752,22 +755,39 @@ fn bereites_lagebild() -> Lagerechner {
             anbieter_unlesbar: 0,
             ki_halt: None,
         });
+        if als_bereit {
+            l.betrieb = depot_lage::Betrieb::Bereit;
+        }
         (l, "<section>LAGEBILD</section>".to_string())
     })
 }
 
 #[test]
 fn gesamtstatus_ergaenzt_den_zeitplan() -> Result<(), String> {
-    let d = Arc::new(Dienst::neu(
-        ordner()?,
-        TOKEN.into(),
-        echo_starter(true),
-        bereites_lagebild(),
-    ));
+    let mit = |als_bereit| {
+        Ok::<_, String>(Arc::new(Dienst::neu(
+            ordner()?,
+            TOKEN.into(),
+            echo_starter(true),
+            lagebild_mit_schluesseln(als_bereit),
+        )))
+    };
     let t = donnerstag(12, 0)?;
     let heute = t.datum();
-    assert!(d.schritt(t).is_none());
     let live = |d: &Dienst| seiten::live("s", &d.sperre(), heute);
+    // Maus zu #31: Alle Schluessel da, aber kein Journal: nie „vollständig bereit“, auch mit
+    // eingeschaltetem Zeitplan.
+    let d = mit(false)?;
+    assert!(d.schritt(t).is_none());
+    d.sperre().zeitplan.an = true;
+    let s = live(&d);
+    assert!(
+        s.contains("Eingriff nötig") && s.contains("Journal: Noch nicht eingerichtet"),
+        "{s}"
+    );
+    assert!(!s.contains("Vollständig bereit"), "{s}");
+    let d = mit(true)?;
+    assert!(d.schritt(t).is_none());
     // Ab Werk ist der Zeitplan aus: Nichts laeuft von selbst.
     assert!(!d.sperre().zeitplan.an);
     assert!(live(&d).contains(">Pausiert<"), "{}", live(&d));
@@ -785,10 +805,14 @@ fn gesamtstatus_ergaenzt_den_zeitplan() -> Result<(), String> {
         s.contains("Eingriff nötig") && s.contains("Kopfzeile fehlt"),
         "{s}"
     );
-    // Ohne Schluessel laeuft der Betrieb ohne KI.
+    // Ohne Schluessel: Die Kursquelle braucht einen Eingriff, die KIs stehen dahinter.
     let d = dienst(ordner()?, true);
     assert!(d.schritt(t).is_none());
-    assert!(live(&d).contains("Läuft ohne KI"), "{}", live(&d));
+    let s = live(&d);
+    assert!(
+        s.contains("Eingriff nötig") && s.contains("kein Schlüssel, wird nicht gefragt"),
+        "{s}"
+    );
     Ok(())
 }
 

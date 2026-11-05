@@ -1,7 +1,9 @@
 //! Das Anbieterprotokoll `daten/anbieter.txt`: je Aufruf einer Quelle oder KI eine Zeile, was
-//! dabei herauskam. Es ist kein Teil der Hash-Kette und entscheidet nichts: Der Kostenschutz
-//! rechnet weiter nur mit den Reservierungen im Kassenbuch. Das Protokoll dient der Anzeige
-//! (Schluesselstatus, Anbieterlimit, tatsaechliche Kosten).
+//! dabei herauskam. Es ist kein Teil der Hash-Kette. Der Kostenschutz rechnet weiter nur mit den
+//! Reservierungen im Kassenbuch. Das Protokoll dient der Anzeige (Schluesselstatus, tatsaechliche
+//! Kosten) und haelt eine Pause des Anbieters ein: `pausiert` entscheidet fuer Anzeige und
+//! Berater gleich, ob eine KI gerade warten muss. Es kann einen Aufruf nur verhindern, nie
+//! erlauben.
 //!
 //! Zeile: `anbieter-v1;<sekunden>;<wer>;<ergebnis>;<http>;<ist>;<reserviert>;<warten_bis>`.
 //! Felder ohne Wert stehen als `-`, unbekannte Kosten als `?`. Kein Feld enthaelt Text von
@@ -231,6 +233,30 @@ pub fn lies_alle(text: &str) -> (Vec<Eintrag>, usize) {
         }
     }
     (gut, schlecht)
+}
+
+/// Der letzte Eintrag von `wer`, der etwas ueber die Lage beim Anbieter sagt. Netzfehler und
+/// ein neu hinterlegter Schluessel sagen nichts darueber.
+pub fn letzte_meldung(protokoll: &[Eintrag], wer: Wer) -> Option<&Eintrag> {
+    protokoll
+        .iter()
+        .rev()
+        .filter(|e| e.wer == wer)
+        .find(|e| e.ergebnis != Ergebnis::Netz && e.ergebnis != Ergebnis::Neu)
+}
+
+/// Ob ein Limit noch gilt: bis zur genannten Wartezeit, ohne Wartezeit bis zum Ende seines
+/// Tages (UTC; der Papiertag laeuft einmal am Tag am Abend).
+pub fn limit_gilt(e: &Eintrag, jetzt: Zeitpunkt) -> bool {
+    e.ergebnis == Ergebnis::Limit
+        && e.warten_bis
+            .map_or_else(|| e.zeit.datum() == jetzt.datum(), |w| w > jetzt)
+}
+
+/// Ob `wer` gerade pausieren muss, weil der Anbieter zuletzt ein Limit gemeldet hat, das noch
+/// gilt. Dieselbe Regel fuer die Anzeige und vor jedem Aufruf.
+pub fn pausiert(protokoll: &[Eintrag], wer: Wer, jetzt: Zeitpunkt) -> bool {
+    letzte_meldung(protokoll, wer).is_some_and(|e| limit_gilt(e, jetzt))
 }
 
 /// Haengt einen Eintrag an `pfad` an und schreibt ihn auf den Datentraeger.

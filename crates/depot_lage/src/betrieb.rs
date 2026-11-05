@@ -4,7 +4,7 @@
 //! dem Budget. Nichts davon entscheidet, ob eine KI gefragt wird; das tun weiter nur
 //! Kostenschutz und Kassenbuch. Die Anzeige sagt nur in Worten, was gerade gilt.
 
-use depot_journal::anbieter::{Eintrag, Ergebnis, Wer};
+use depot_journal::anbieter::{self, Eintrag, Ergebnis, Wer};
 use depot_kern::{BeraterId, Zeitpunkt};
 
 use crate::{BudgetStatus, Hinterlegt, KiBudget, zeit_text};
@@ -92,7 +92,7 @@ impl AnbieterHinweis {
             } => {
                 let naechster = warten_bis.map_or_else(
                     || "beim nächsten Papiertag".to_string(),
-                    |w| format!("frühestens {}, sonst beim nächsten Papiertag", zeit_text(w)),
+                    |w| format!("beim ersten Papiertag nach {}", zeit_text(w)),
                 );
                 format!(
                     "Anbieterlimit erreicht ({}). Nächster Versuch: {naechster}.",
@@ -119,18 +119,13 @@ pub fn anbieter_hinweis(
     wer: Wer,
     jetzt: Zeitpunkt,
 ) -> Option<AnbieterHinweis> {
-    let e = protokoll
-        .iter()
-        .rev()
-        .filter(|e| e.wer == wer)
-        .find(|e| e.ergebnis != Ergebnis::Netz && e.ergebnis != Ergebnis::Neu)?;
+    let e = anbieter::letzte_meldung(protokoll, wer)?;
     match e.ergebnis {
         Ergebnis::Limit => Some(AnbieterHinweis::Limit {
             zeit: e.zeit,
             warten_bis: e.warten_bis,
-            aktiv: e
-                .warten_bis
-                .map_or_else(|| e.zeit.datum() == jetzt.datum(), |w| w > jetzt),
+            // Dieselbe Regel, nach der der Berater vor dem Aufruf pausiert.
+            aktiv: anbieter::limit_gilt(e, jetzt),
         }),
         Ergebnis::Guthaben => Some(AnbieterHinweis::Guthaben(e.zeit)),
         Ergebnis::Ueberlastet => Some(AnbieterHinweis::Ueberlastet(e.zeit)),
@@ -186,7 +181,8 @@ pub struct KiLage {
     pub budget: Option<BudgetStatus>,
 }
 
-/// Rechnet den Gesamtstatus. `halt` sind die Punkte mit Ampel Halt (Name: Text).
+/// Rechnet den Gesamtstatus. `halt` sind die Punkte, bei denen ein Mensch etwas tun muss:
+/// jeder Halt und jede offene Voraussetzung der Einrichtung (Name: Text).
 pub fn betrieb(halt: Vec<String>, kis: &[KiLage]) -> Betrieb {
     let mut eingriff = halt;
     let mut pause = Vec::new();
@@ -221,6 +217,9 @@ pub fn betrieb(halt: Vec<String>, kis: &[KiLage]) -> Betrieb {
         }
     }
     if !eingriff.is_empty() {
+        // Was sonst noch gilt, steht dahinter: Nach dem Eingriff soll nichts ueberraschen.
+        eingriff.extend(ohne);
+        eingriff.extend(pause);
         return Betrieb::EingriffNoetig(eingriff);
     }
     let pausiert = kis.iter().filter(|k| {
