@@ -69,6 +69,7 @@ fn ok(inhalt: &str) -> Result<Rueckmeldung, NetzFehler> {
     Ok(Rueckmeldung {
         status: 200,
         inhalt: inhalt.as_bytes().to_vec(),
+        warten: None,
     })
 }
 
@@ -329,6 +330,7 @@ fn fehlende_antwort_sperrt_abgewiesene_nicht() -> Result<(), String> {
     netz.antworten.push_back(Ok(Rueckmeldung {
         status: 401,
         inhalt: format!("{{\"error\":\"falscher Schluessel {SCHLUESSEL}\"}}").into_bytes(),
+        warten: None,
     }));
     let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
     for _ in 0..2 {
@@ -645,4 +647,109 @@ fn verworfene_antwort_wird_trotzdem_auf_kosten_geprueft() -> Result<(), String> 
 
 fn fs_enthaelt(pfad: &std::path::Path, was: &str) -> bool {
     std::fs::read_to_string(pfad).is_ok_and(|t| t.contains(was))
+}
+
+fn uhr() -> Option<Zeitpunkt> {
+    Zeitpunkt::aus_sekunden(1_793_980_000)
+}
+
+fn abgelehnt(status: u16, inhalt: &str, warten: Option<u64>) -> Result<Rueckmeldung, NetzFehler> {
+    Ok(Rueckmeldung {
+        status,
+        inhalt: inhalt.as_bytes().to_vec(),
+        warten,
+    })
+}
+
+#[test]
+fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
+    use depot_journal::anbieter::{Ergebnis, Kosten, Wer, lies_alle};
+    let ablage = Ort::neu()?;
+    let protokoll = ablage.dir.join("anbieter.txt");
+    let antworten = vec![
+        claude(VORSCHLAG, 20_000, 1_500, 0),
+        abgelehnt(429, "{\"type\":\"rate_limit_error\"}", Some(90)),
+        abgelehnt(400, "Your credit balance is too low", None),
+        abgelehnt(
+            401,
+            &format!("{{\"error\":\"invalid x-api-key {SCHLUESSEL}\"}}"),
+            None,
+        ),
+        Err(NetzFehler::NichtGesendet("host not found".into())),
+    ];
+    let mut texte = Vec::new();
+    for antwort in antworten {
+        // Je Aufruf ein eigenes Journal: Das Tageskontingent gilt hier nicht.
+        let mut ort = Ort::neu()?;
+        let mut netz = Attrappe::default();
+        netz.antworten.push_back(antwort);
+        let mut dachs =
+            berater(&ort, BeraterId::Dachs, netz)?.mit_protokoll(protokoll.clone(), uhr);
+        let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+        texte.push(mit_lage(|l| dachs.vorschlagen(e, l))?.einschaetzung);
+        assert!(!ort.sperre().exists());
+    }
+    let text = vorbedingung(fs::read_to_string(&protokoll), "Protokoll")?;
+    assert!(!text.contains(SCHLUESSEL));
+    let (e, schlecht) = lies_alle(&text);
+    assert_eq!(schlecht, 0);
+    let art: Vec<Ergebnis> = e.iter().map(|x| x.ergebnis).collect();
+    assert_eq!(
+        art,
+        vec![
+            Ergebnis::Ok,
+            Ergebnis::Limit,
+            Ergebnis::Guthaben,
+            Ergebnis::Abgelehnt,
+            Ergebnis::Netz
+        ]
+    );
+    assert!(
+        e.iter()
+            .all(|x| x.wer == Wer::Dachs && x.reserviert.is_some())
+    );
+    assert!(matches!(e.first().map(|x| x.ist), Some(Kosten::Betrag(_))));
+    let t = some(uhr(), "Uhr")?;
+    assert_eq!(
+        e.get(1).and_then(|x| x.warten_bis),
+        Zeitpunkt::aus_sekunden(t.sekunden().saturating_add(90))
+    );
+    // Die Meldungen sagen in Worten, was los ist.
+    assert!(
+        texte
+            .get(1)
+            .is_some_and(|t| t.contains("Anbieterlimit erreicht")),
+        "{texte:?}"
+    );
+    assert!(
+        texte
+            .get(2)
+            .is_some_and(|t| t.contains("Guthaben beim Anbieter fehlt"))
+    );
+    assert!(
+        texte
+            .get(3)
+            .is_some_and(|t| t.contains("lehnt den Schluessel ab"))
+    );
+    Ok(())
+}
+
+#[test]
+fn fehlende_antwort_steht_als_unklar_im_protokoll() -> Result<(), String> {
+    use depot_journal::anbieter::{Ergebnis, Kosten, lies_alle};
+    let mut ort = Ort::neu()?;
+    let protokoll = ort.dir.join("anbieter.txt");
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(Err(NetzFehler::Unklar("timeout".into())));
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?.mit_protokoll(protokoll.clone(), uhr);
+    let e = ort.erlaubnis(BeraterId::Maus, 1)?;
+    let _ = mit_lage(|l| maus.vorschlagen(e, l))?;
+    assert!(ort.sperre().exists());
+    let (e, _) = lies_alle(&vorbedingung(fs::read_to_string(&protokoll), "Protokoll")?);
+    assert_eq!(
+        e.iter().map(|x| (x.ergebnis, x.ist)).collect::<Vec<_>>(),
+        vec![(Ergebnis::Unklar, Kosten::Unbekannt)]
+    );
+    Ok(())
 }

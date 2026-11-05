@@ -21,16 +21,21 @@
     clippy::cast_sign_loss
 )]
 
+pub mod betrieb;
+/// Das Anbieterprotokoll, fuer die Oberflaeche.
+pub use depot_journal::anbieter;
 mod budget;
 mod depot;
 pub mod html;
 mod zugang;
 
-pub use budget::{BudgetStatus, KiBudget, ki_budget};
+pub use betrieb::{AnbieterHinweis, Betrieb, SchluesselStand};
+pub use budget::{BudgetStatus, KiBudget, ki_budget, mit_verbrauch};
 pub use depot::{AuftragZeile, DepotLage, Position, TopfLage};
-pub use zugang::{PAPIERKONTO, mit_journal, sperrdateien};
+pub use zugang::{PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien};
 
 use depot_journal::Stand;
+use depot_journal::anbieter::{Eintrag, Wer};
 use depot_kern::liste::{Wert, als_universum, beobachtungsliste};
 use depot_kern::{BeraterId, Datum, Grenzen, Zeitpunkt};
 use depot_ki::KiGrenzen;
@@ -72,6 +77,11 @@ pub struct Umgebung<'a> {
     pub berater: [(BeraterId, Hinterlegt); 2],
     /// Liegengebliebene Sperrdateien unter `daten/` (abgebrochener frueherer Lauf).
     pub sperren: Vec<String>,
+    /// Das Anbieterprotokoll (`daten/anbieter.txt`) und wie viele Zeilen unlesbar waren.
+    pub anbieter: Vec<Eintrag>,
+    pub anbieter_unlesbar: usize,
+    /// Inhalt von `daten/ki.halt`, wenn die Datei liegt und lesbar ist.
+    pub ki_halt: Option<String>,
 }
 
 /// Ampel eines Punktes.
@@ -92,6 +102,8 @@ pub enum Abhilfe {
     JournalEinrichten,
     SchluesselKursquelle,
     SchluesselBerater(BeraterId),
+    /// Die Sperre des Kostenschutzes (`daten/ki.halt`) pruefen und gefuehrt aufheben.
+    KostenschutzPruefen,
     KurseAbrufen,
     TermineAbrufen,
     PapiertagStarten,
@@ -140,6 +152,10 @@ pub struct Lagebild {
     /// Neueste zuerst.
     pub gespraech: Vec<Beitrag>,
     pub grenzen: Vec<Grenzwert>,
+    /// Gesamtstatus: bereit, ohne KI, pausiert oder Eingriff noetig.
+    pub betrieb: Betrieb,
+    /// Stand jedes Schluessels.
+    pub schluessel: Vec<(Wer, SchluesselStand)>,
 }
 
 /// So viele Beitraege zeigt das Lagebild hoechstens.
@@ -228,11 +244,24 @@ fn journal_punkt(z: Zugang<'_>) -> Punkt {
     }
 }
 
-fn schluessel_punkt(name: &'static str, h: Hinterlegt, abhilfe: Abhilfe) -> Punkt {
-    match h {
-        Hinterlegt::Ja => punkt(name, Ampel::Gut, "Schlüssel hinterlegt.".into(), None),
-        Hinterlegt::Nein => punkt(name, Ampel::Offen, "Schlüssel fehlt.".into(), Some(abhilfe)),
-        Hinterlegt::Unbekannt => punkt(
+fn schluessel_punkt(name: &'static str, st: SchluesselStand, abhilfe: Abhilfe) -> Punkt {
+    match st {
+        SchluesselStand::Geprueft(_) | SchluesselStand::Hinterlegt => {
+            punkt(name, Ampel::Gut, format!("Schlüssel {}.", st.text()), None)
+        }
+        SchluesselStand::Fehlt => {
+            punkt(name, Ampel::Offen, "Schlüssel fehlt.".into(), Some(abhilfe))
+        }
+        SchluesselStand::Abgelehnt(_) => punkt(
+            name,
+            Ampel::Halt,
+            format!(
+                "Schlüssel {}: Die Quelle nimmt ihn nicht an. Bitte neu hinterlegen.",
+                st.text()
+            ),
+            Some(abhilfe),
+        ),
+        SchluesselStand::Unbekannt => punkt(
             name,
             Ampel::Offen,
             "Hier nicht prüfbar (nur unter Windows).".into(),
@@ -248,23 +277,41 @@ fn berater_name(b: BeraterId) -> &'static str {
     }
 }
 
-fn berater_punkt(b: BeraterId, h: Hinterlegt) -> Punkt {
+fn berater_punkt(b: BeraterId, st: SchluesselStand, hinweis: Option<AnbieterHinweis>) -> Punkt {
     let name = berater_name(b);
-    match h {
-        Hinterlegt::Ja => punkt(name, Ampel::Gut, "Schlüssel hinterlegt.".into(), None),
-        Hinterlegt::Nein => punkt(
+    let abhilfe = Some(Abhilfe::SchluesselBerater(b));
+    let mut p = match st {
+        SchluesselStand::Geprueft(_) | SchluesselStand::Hinterlegt => {
+            punkt(name, Ampel::Gut, format!("Schlüssel {}.", st.text()), None)
+        }
+        SchluesselStand::Fehlt => punkt(
             name,
             Ampel::Offen,
             "Nicht angebunden: wird nicht gefragt, der Papiertag läuft ohne ihn.".into(),
-            Some(Abhilfe::SchluesselBerater(b)),
+            abhilfe,
         ),
-        Hinterlegt::Unbekannt => punkt(
+        SchluesselStand::Abgelehnt(_) => punkt(
+            name,
+            Ampel::Offen,
+            format!(
+                "Schlüssel {}: Der Anbieter nimmt ihn nicht an; der Papiertag läuft ohne ihn. \
+                 Bitte neu hinterlegen.",
+                st.text()
+            ),
+            abhilfe,
+        ),
+        SchluesselStand::Unbekannt => punkt(
             name,
             Ampel::Offen,
             "Hier nicht prüfbar (nur unter Windows).".into(),
             None,
         ),
+    };
+    if let Some(h) = hinweis {
+        p.ampel = p.ampel.max(Ampel::Offen);
+        p.text = format!("{} {}", p.text, h.text());
     }
+    p
 }
 
 /// Kurse, Termine und Tageslage aus dem Journal, genau wie der Papiertag sie prueft.
@@ -461,10 +508,53 @@ pub fn grenzwerte() -> Vec<Grenzwert> {
     ]
 }
 
+/// Ein Berater mit Schluesselstand und letztem Hinweis des Anbieters.
+type BeraterLage = (BeraterId, SchluesselStand, Option<AnbieterHinweis>);
+
+/// Punkte zu Schluesseln und Anbietern; dazu der Stand je Schluessel und je Berater.
+fn schluessel_punkte(
+    u: &Umgebung<'_>,
+    punkte: &mut Vec<Punkt>,
+) -> (Vec<(Wer, SchluesselStand)>, Vec<BeraterLage>) {
+    let kursquelle = betrieb::schluessel_stand(u.kursquelle, &u.anbieter, Wer::Kursquelle);
+    let mut schluessel = vec![(Wer::Kursquelle, kursquelle)];
+    punkte.push(schluessel_punkt(
+        "Kursquelle Alpha Vantage",
+        kursquelle,
+        Abhilfe::SchluesselKursquelle,
+    ));
+    let mut hinweise = Vec::new();
+    for (b, h) in u.berater {
+        let wer = betrieb::wer_fuer(b);
+        let st = betrieb::schluessel_stand(h, &u.anbieter, wer);
+        let hinweis = betrieb::anbieter_hinweis(&u.anbieter, wer, u.jetzt);
+        schluessel.push((wer, st));
+        hinweise.push((b, st, hinweis));
+        punkte.push(berater_punkt(b, st, hinweis));
+    }
+    if u.anbieter_unlesbar > 0 {
+        punkte.push(punkt(
+            "Anbieterprotokoll",
+            Ampel::Offen,
+            format!(
+                "{} Zeilen in daten/anbieter.txt unlesbar; sie zählen in der Anzeige nicht. \
+                 Der Kostenschutz hängt nicht daran.",
+                u.anbieter_unlesbar
+            ),
+            None,
+        ));
+    }
+    (schluessel, hinweise)
+}
+
 /// Rechnet das Lagebild.
 pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut punkte = vec![journal_punkt(u.journal)];
     for s in &u.sperren {
+        if s == "ki.halt" {
+            punkte.push(kostenschutz_punkt(u.ki_halt.as_deref()));
+            continue;
+        }
         punkte.push(punkt(
             "Sperrdatei",
             Ampel::Halt,
@@ -475,14 +565,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
             Some(Abhilfe::Pruefen),
         ));
     }
-    punkte.push(schluessel_punkt(
-        "Kursquelle Alpha Vantage",
-        u.kursquelle,
-        Abhilfe::SchluesselKursquelle,
-    ));
-    for (b, h) in u.berater {
-        punkte.push(berater_punkt(b, h));
-    }
+    let (schluessel, hinweise) = schluessel_punkte(u, &mut punkte);
     let heute = u.jetzt.datum();
     let werte = beobachtungsliste();
     let mut budget = Vec::new();
@@ -493,7 +576,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
             tag_punkte(s, heute, werte, &mut punkte);
             budget = [BeraterId::Dachs, BeraterId::Maus]
                 .into_iter()
-                .map(|b| ki_budget(s.ki().buchungen(), b, heute))
+                .map(|b| mit_verbrauch(ki_budget(s.ki().buchungen(), b, heute), &u.anbieter, heute))
                 .collect();
             punkte.extend(budget.iter().filter_map(budget_punkt));
             depot_lage = Some(depot::depot_lage(s, werte));
@@ -524,6 +607,21 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         _ => {}
     }
     let gesamt = punkte.iter().map(|p| p.ampel).max().unwrap_or(Ampel::Gut);
+    let halt = punkte
+        .iter()
+        .filter(|p| p.ampel == Ampel::Halt)
+        .map(|p| format!("{}: {}", p.name, p.text))
+        .collect();
+    let kis: Vec<betrieb::KiLage> = hinweise
+        .into_iter()
+        .map(|(b, st, hinweis)| betrieb::KiLage {
+            name: berater_name(b),
+            schluessel: st,
+            hinweis,
+            budget: betrieb::budget_status(&budget, b),
+        })
+        .collect();
+    let betrieb = betrieb::betrieb(halt, &kis);
     Lagebild {
         jetzt: u.jetzt,
         gesamt,
@@ -533,5 +631,23 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         depot: depot_lage,
         gespraech,
         grenzen: grenzwerte(),
+        betrieb,
+        schluessel,
     }
+}
+
+/// Die Sperre des Kostenschutzes: Halt mit dem Grund aus der Datei.
+fn kostenschutz_punkt(inhalt: Option<&str>) -> Punkt {
+    let grund = inhalt
+        .and_then(|t| t.lines().next())
+        .map_or_else(|| "Grund nicht lesbar".to_string(), str::to_string);
+    punkt(
+        "KI-Kostenschutz",
+        Ampel::Halt,
+        format!(
+            "Beide KIs gesperrt: {grund}. Unter Einrichtung prüfen und die Sperre aufheben; \
+             die Kostenprüfung gilt danach weiter für jeden Aufruf."
+        ),
+        Some(Abhilfe::KostenschutzPruefen),
+    )
 }

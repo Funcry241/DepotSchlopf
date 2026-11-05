@@ -46,6 +46,7 @@
     clippy::cast_sign_loss
 )]
 
+pub mod anbieter;
 pub mod auftrag;
 pub mod datei;
 pub mod kasse;

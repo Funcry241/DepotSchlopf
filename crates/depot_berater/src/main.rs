@@ -34,9 +34,13 @@ fn wurzel() -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-fn heute() -> Option<Datum> {
+fn jetzt() -> Option<Zeitpunkt> {
     let s = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    Zeitpunkt::aus_sekunden(i64::try_from(s).ok()?)?.datum()
+    Zeitpunkt::aus_sekunden(i64::try_from(s).ok()?)
+}
+
+fn heute() -> Option<Datum> {
+    jetzt()?.datum()
 }
 
 fn schluessel(wer: BeraterId) -> Option<Schluessel> {
@@ -54,6 +58,7 @@ fn lauf(wurzel: &Path) -> Result<(), String> {
     let universum = als_universum(&werte);
     let heute = heute().ok_or("Uhr liefert kein Datum")?;
     let sperre = wurzel.join("daten").join(SPERRDATEI);
+    let protokoll = wurzel.join("daten").join(depot_journal::anbieter::DATEI);
     if sperre.exists() {
         eprintln!(
             "[Papier] {} liegt: KIs gesperrt, niemand wird gefragt. Grund in der Datei; nach der Pruefung loeschen.",
@@ -66,14 +71,16 @@ fn lauf(wurzel: &Path) -> Result<(), String> {
         Https::neu(),
         universum.clone(),
         sperre.clone(),
-    );
+    )
+    .mit_protokoll(protokoll.clone(), jetzt);
     let mut maus = KiBerater::neu(
         BeraterId::Maus,
         schluessel(BeraterId::Maus),
         Https::neu(),
         universum.clone(),
         sperre.clone(),
-    );
+    )
+    .mit_protokoll(protokoll, jetzt);
     let ergebnis = papier(wurzel, heute, &universum, &mut dachs, &mut maus);
     if dachs.gesperrt() || maus.gesperrt() {
         eprintln!(

@@ -66,6 +66,9 @@ fn leeres_lagebild() -> Lagerechner {
                 (BeraterId::Maus, Hinterlegt::Nein),
             ],
             sperren: Vec::new(),
+            anbieter: Vec::new(),
+            anbieter_unlesbar: 0,
+            ki_halt: None,
         });
         (l, "<section>LAGEBILD</section>".to_string())
     })

@@ -84,6 +84,44 @@ pub fn adresse(wert: &Wert, schluessel: &Schluessel) -> String {
     )
 }
 
+/// Was ein Lauf ueber den Schluessel und die Quelle sagt, fuer das Anbieterprotokoll. `None`,
+/// wenn nichts abgerufen wurde.
+pub fn einordnen(b: &Bericht) -> Option<depot_journal::anbieter::Ergebnis> {
+    use depot_journal::anbieter::Ergebnis as E;
+    let fehler: Vec<String> = b
+        .werte
+        .iter()
+        .filter_map(|(_, e)| match e {
+            Ergebnis::Fehler(t) => Some(t.to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect();
+    if b.werte
+        .iter()
+        .any(|(_, e)| matches!(e, Ergebnis::Belegt { .. }))
+    {
+        return Some(E::Ok);
+    }
+    let abbruch = b
+        .abbruch
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if abbruch.contains("rate limit") || abbruch.contains("requests per") {
+        return Some(E::Limit);
+    }
+    if fehler.is_empty() {
+        return None;
+    }
+    if fehler.iter().all(|t| t.contains("apikey")) {
+        return Some(E::Abgelehnt);
+    }
+    if fehler.iter().all(|t| t.starts_with("abruf:")) {
+        return Some(E::Netz);
+    }
+    Some(E::Fehler)
+}
+
 /// Ein Hinweis der Quelle statt Kursen: eine JSON-Antwort. `Some((betrifft_nur_den_wert, text))`.
 fn hinweis(roh: &[u8]) -> Option<(bool, String)> {
     let text = String::from_utf8_lossy(roh);

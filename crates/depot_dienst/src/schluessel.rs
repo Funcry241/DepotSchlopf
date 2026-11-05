@@ -54,6 +54,15 @@ impl Wer {
         }
     }
 
+    /// Name im Anbieterprotokoll.
+    pub fn protokoll(self) -> depot_lage::anbieter::Wer {
+        match self {
+            Wer::Kursquelle => depot_lage::anbieter::Wer::Kursquelle,
+            Wer::Berater(BeraterId::Dachs) => depot_lage::anbieter::Wer::Dachs,
+            Wer::Berater(BeraterId::Maus) => depot_lage::anbieter::Wer::Maus,
+        }
+    }
+
     /// Kurzname fuer Formulare.
     pub fn kurz(self) -> &'static str {
         self.dienst()

@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use depot_kern::Zeitpunkt;
-use depot_lage::{Ampel, Lagebild, ortszeit};
+use depot_lage::{Ampel, Betrieb, Lagebild, ortszeit};
 
 use crate::zeitplan::{Erledigt, Zeitplan, faellig};
 
@@ -112,6 +112,8 @@ pub struct Lage {
     pub stand: Zeitpunkt,
     pub gesamt: Ampel,
     pub naechster_schritt: String,
+    /// Gesamtstatus aus dem Lagebild; die Oberflaeche ergaenzt den Zeitplan.
+    pub betrieb: Betrieb,
     pub html: String,
 }
 
@@ -374,6 +376,7 @@ impl Dienst {
                 stand: jetzt,
                 gesamt: bild.gesamt,
                 naechster_schritt: bild.naechster_schritt,
+                betrieb: bild.betrieb,
                 html,
             });
             z.lage_veraltet = false;

@@ -89,7 +89,7 @@ cmdkey /generic:DepotSchlopf/anthropic /user:depotschlopf /pass
 cmdkey /generic:DepotSchlopf/openai /user:depotschlopf /pass
 ```
 
-Fehlt ein Schlüssel, wird dieser Berater nicht gefragt. Die KI-Kosten sind auf 20 € im Monat je KI begrenzt. Überschreitet ein Aufruf seine Reservierung, liegt danach `daten/ki.halt` mit dem Grund, und keine KI wird mehr gefragt, bis die Datei nach der Prüfung gelöscht ist.
+Fehlt ein Schlüssel, wird dieser Berater nicht gefragt. Die KI-Kosten sind auf 20 € im Monat je KI begrenzt. Überschreitet ein Aufruf seine Reservierung, liegt danach `daten/ki.halt` mit dem Grund, und keine KI wird mehr gefragt, bis sie nach der Prüfung aufgehoben ist (Einrichtung, Abschnitt „Sperre des Kostenschutzes“). Das Aufheben ändert nichts am Kassenbuch; jeder weitere Aufruf durchläuft wieder die Kostenprüfung.
 
 `run.cmd lage` schreibt das Lagebild nach `daten/lage.html` (im Browser öffnen): was für den nächsten Papiertag bereit ist oder fehlt, KI-Budget, Papierdepot, Begründungen und Grenzen. Es liest nur.
 
@@ -97,8 +97,9 @@ Fehlt ein Schlüssel, wird dieser Berater nicht gefragt. Die KI-Kosten sind auf 
 
 Doppelklick auf `DepotSchlopf.cmd` startet den Dienst und öffnet http://127.0.0.1:47410/. Läuft er schon, öffnet sich nur die Seite. Der Dienst lauscht nur auf diesem Rechner und schreibt selbst nie ins Journal; jede Arbeit ist ein eigener Lauf wie `run.cmd kurse`.
 
+- **Gesamtstatus** oben auf jeder Seite: vollständig bereit, läuft ohne KI, pausiert oder Eingriff nötig, jeweils mit Gründen (Schlüssel abgelehnt, Anbieterlimit mit nächstem Versuch, fehlendes Guthaben, Budget, Zeitplan aus).
 - **Live:** was gerade läuft (mit Protokoll), was wartet, der nächste geplante Lauf, dazu das Lagebild mit KI-Budget je KI, Papierdepot und dem Gespräch von Dachs und Maus. Die Seite frischt sich selbst auf und zeigt, wenn der Dienst nicht antwortet.
-- **Einrichtung:** die eine Config-Seite. Schlüssel gehen direkt in die Windows-Anmeldeinformationsverwaltung (die Seite zeigt nur „hinterlegt“), Verbindungstest der Quellen, Zeitplan (Mo–Fr, Termine 17:40, Kurse 17:45, danach Papiertag; jeder Lauf höchstens einmal am Tag), Autostart mit Windows. Grenzen und Budgets stehen nur zur Ansicht; sie ändern sich nur über eine Grenzfreigabe.
+- **Einrichtung:** die eine Config-Seite. Schlüssel gehen direkt in die Windows-Anmeldeinformationsverwaltung; die Seite zeigt keinen Schlüssel, nur seinen Stand (fehlt, hinterlegt, geprüft, abgelehnt) nach dem letzten echten Aufruf (`daten/anbieter.txt`). Verbindungstest der Quellen, Zeitplan (Mo–Fr, Termine 17:40, Kurse 17:45, danach Papiertag; jeder Lauf höchstens einmal am Tag; **ab Werk aus**, er läuft erst, wenn er hier eingeschaltet und gespeichert ist), Autostart mit Windows, geführte Aufhebung der Sperre des Kostenschutzes. Grenzen und Budgets stehen nur zur Ansicht; sie ändern sich nur über eine Grenzfreigabe.
 
 - **Update:** „Nach Update suchen“ nennt die neuen Stände auf `main`. „Update einspielen“ prüft den neuen Stand zuerst mit dem ganzen Gate in einem eigenen Ordner und rückt den Projektordner nur dann vorwärts, ohne Lokales zu überschreiben. Danach startet der Dienst neu und die Seite lädt sich selbst neu; kommt der neue Stand nicht hoch, setzt `DepotSchlopf.cmd` den alten zurück. Dasselbe ohne Oberfläche: `run.cmd update pruefen` und `run.cmd update`.
 

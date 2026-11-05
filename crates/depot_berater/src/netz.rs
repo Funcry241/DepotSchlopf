@@ -24,6 +24,8 @@ pub enum NetzFehler {
 pub struct Rueckmeldung {
     pub status: u16,
     pub inhalt: Vec<u8>,
+    /// `Retry-After` in Sekunden, wenn der Anbieter ihn als Zahl nennt.
+    pub warten: Option<u64>,
 }
 
 /// Sendet eine Anfrage. In Tests ersetzt ein erfundener Anbieter das Netz.
@@ -83,12 +85,23 @@ impl Netz for Https {
             anders => NetzFehler::Unklar(anders.to_string()),
         })?;
         let status = antwort.status().as_u16();
+        let warten = antwort
+            .headers()
+            .get("retry-after")
+            .and_then(|w| w.to_str().ok())
+            .and_then(|w| w.trim().parse::<u64>().ok())
+            // Hoechstens einen Tag: Mehr waere keine Wartezeit, sondern ein Fehler.
+            .filter(|w| *w <= 86_400);
         let inhalt = antwort
             .body_mut()
             .with_config()
             .limit(MAX_ANTWORT)
             .read_to_vec()
             .map_err(|e| NetzFehler::Unklar(e.to_string()))?;
-        Ok(Rueckmeldung { status, inhalt })
+        Ok(Rueckmeldung {
+            status,
+            inhalt,
+            warten,
+        })
     }
 }

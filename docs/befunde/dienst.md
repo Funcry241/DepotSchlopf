@@ -17,7 +17,7 @@ Jede Arbeit ist ein eigener Lauf wie `run.cmd kurse`, `run.cmd termine` oder `ru
 Montag bis Freitag, Frankfurter Zeit: Termine 17:40, Kurse 17:45 (nach dem Xetra-Schluss um 17:35), nach erfolgreichem Kursabruf der Papiertag. Uhrzeiten und Schalter stehen in `daten/zeitplan.txt`.
 
 - Bevor der Zeitplan einen Auftrag einreiht, steht der Tag in `daten/dienst_erledigt.txt` (Nebendatei, auf den Datenträger, dann umbenennen). Ein Neustart startet an diesem Tag nichts noch einmal. Lässt sich die Datei nicht schreiben, schaltet sich der Zeitplan aus und zeigt den Grund.
-- Nur eine **fehlende** Datei heißt Erststart mit Voreinstellung. Ist `zeitplan.txt` oder `dienst_erledigt.txt` da, aber nicht lesbar (Rechte, kein UTF-8, Gerätefehler) oder nicht genau in der eigenen Form, ist der Zeitplan aus und die Seite nennt den Grund. Nichts startet dann von selbst. Ist `dienst_erledigt.txt` nicht lesbar, startet der Zeitplan auch nach neuem Speichern nichts, bis die Datei geprüft und der Dienst neu gestartet ist: Sonst könnte ein erledigter Abruf ein zweites Mal laufen.
+- Nur eine **fehlende** Datei heißt Erststart mit Voreinstellung (seit `docs/befunde/fehlerfaelle.md`: Zeitplan aus, bis er eingeschaltet ist). Ist `zeitplan.txt` oder `dienst_erledigt.txt` da, aber nicht lesbar (Rechte, kein UTF-8, Gerätefehler) oder nicht genau in der eigenen Form, ist der Zeitplan aus und die Seite nennt den Grund. Nichts startet dann von selbst. Ist `dienst_erledigt.txt` nicht lesbar, startet der Zeitplan auch nach neuem Speichern nichts, bis die Datei geprüft und der Dienst neu gestartet ist: Sonst könnte ein erledigter Abruf ein zweites Mal laufen.
 - Der Papiertag folgt nur auf einen erfolgreichen Kursabruf des Zeitplans; er selbst läuft ohnehin nur einmal je Handelstag (Journal).
 
 ## Schutz gegen fremde Webseiten
@@ -51,7 +51,7 @@ Der Dienst liest nie einen Schlüssel aus. Für den Stand fragt er nur die Merkm
 | Einstellung | Gespeichert | Aktiv | Änderung |
 |---|---|---|---|
 | Schlüssel | Anmeldeinformationsverwaltung | ab dem nächsten Lauf | Config-Seite |
-| Zeitplan | `daten/zeitplan.txt` | sofort beim Speichern; die Seite zeigt „gespeichert und aktiv“, „Voreinstellung, nicht gespeichert“ oder dass die Datei abweicht | Config-Seite |
+| Zeitplan | `daten/zeitplan.txt` | sofort beim Speichern; die Seite zeigt „gespeichert und aktiv“, „noch nicht gespeichert: aus“ oder dass die Datei abweicht | Config-Seite |
 | Autostart | Autostart-Ordner des Benutzers | ab dem nächsten Windows-Start | Config-Seite |
 | Grenzen und Budgets | Festschreibung | immer | nur über Grenzfreigabe, nie über die Seite |
 

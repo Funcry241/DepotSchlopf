@@ -78,3 +78,18 @@ pub fn sperrdateien(daten: &Path) -> Vec<String> {
     aus.sort();
     aus
 }
+
+/// Das Anbieterprotokoll im Datenordner: lesbare Eintraege und Zahl unlesbarer Zeilen. Fehlt es,
+/// ist es leer; ist es unlesbar, zaehlt es als eine unlesbare Zeile.
+pub fn anbieterprotokoll(daten: &Path) -> (Vec<depot_journal::anbieter::Eintrag>, usize) {
+    match fs::read_to_string(daten.join(depot_journal::anbieter::DATEI)) {
+        Ok(t) => depot_journal::anbieter::lies_alle(&t),
+        Err(e) if e.kind() == ErrorKind::NotFound => (Vec::new(), 0),
+        Err(_) => (Vec::new(), 1),
+    }
+}
+
+/// Der Inhalt von `daten/ki.halt`, wenn die Datei liegt und lesbar ist.
+pub fn ki_halt(daten: &Path) -> Option<String> {
+    fs::read_to_string(daten.join("ki.halt")).ok()
+}

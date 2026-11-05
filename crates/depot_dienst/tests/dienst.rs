@@ -7,12 +7,12 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use depot_dienst::autostart;
 use depot_dienst::http::{self, Anfrage, LeseFehler};
 use depot_dienst::schluessel::Wer;
 use depot_dienst::werkbank::{Anlass, Art, Dienst, Lagerechner, Starter};
 use depot_dienst::zeitplan::{Erledigt, Zeitplan, faellig, naechster};
 use depot_dienst::{Umwelt, behandle};
+use depot_dienst::{autostart, kostenschutz, seiten};
 use depot_kern::{BeraterId, Datum, Zeitpunkt};
 use depot_lage::{Hinterlegt, Umgebung, Zugang, lagebild};
 
@@ -72,9 +72,23 @@ fn leeres_lagebild() -> Lagerechner {
                 (BeraterId::Maus, Hinterlegt::Nein),
             ],
             sperren: Vec::new(),
+            anbieter: Vec::new(),
+            anbieter_unlesbar: 0,
+            ki_halt: None,
         });
         (l, "<section>LAGEBILD</section>".to_string())
     })
+}
+
+/// Schaltet den Zeitplan ein, wie es der Mensch in der Einrichtung tut (ab Werk ist er aus).
+fn eingeschaltet(wurzel: PathBuf) -> Result<PathBuf, String> {
+    let p = Zeitplan {
+        an: true,
+        ..Zeitplan::default()
+    };
+    fs::write(wurzel.join("daten").join("zeitplan.txt"), p.als_text())
+        .map_err(|e| format!("Vorbedingung Zeitplan: {e}"))?;
+    Ok(wurzel)
 }
 
 fn dienst(wurzel: PathBuf, erfolg: bool) -> Arc<Dienst> {
@@ -416,7 +430,10 @@ fn zeitplan_text_streng() -> Result<(), String> {
 
 #[test]
 fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
-    let p = Zeitplan::default();
+    let p = Zeitplan {
+        an: true,
+        ..Zeitplan::default()
+    };
     let do_ = some(Datum::neu(2026, 11, 5), "Donnerstag")?;
     let sa = some(Datum::neu(2026, 11, 7), "Samstag")?;
     let mo = some(Datum::neu(2026, 11, 9), "Montag")?;
@@ -493,7 +510,7 @@ fn auftrag_laeuft_mit_protokoll_und_eindeutiger_kennung() -> Result<(), String> 
 
 #[test]
 fn zeitplan_startet_termine_kurse_und_danach_papier() -> Result<(), String> {
-    let wurzel = ordner()?;
+    let wurzel = eingeschaltet(ordner()?)?;
     let d = dienst(wurzel.clone(), true);
     // 17:46: beide faellig, Termine zuerst.
     let t = donnerstag(17, 46)?;
@@ -524,7 +541,7 @@ fn zeitplan_startet_termine_kurse_und_danach_papier() -> Result<(), String> {
 
 #[test]
 fn kein_papiertag_nach_gescheitertem_kursabruf() -> Result<(), String> {
-    let d = dienst(ordner()?, false);
+    let d = dienst(eingeschaltet(ordner()?)?, false);
     let t = donnerstag(17, 46)?;
     let (nr, kind) = some(d.schritt(t), "Termine")?;
     d.verfolge(nr, kind, || donnerstag(17, 46).ok());
@@ -603,10 +620,14 @@ fn k29_01_lesefehler_halten_den_zeitplan_an() -> Result<(), String> {
         wartend(&d2).is_empty(),
         "ohne gesichertes Erledigt startet nichts"
     );
-    // Fehlen beide Dateien, gilt die Voreinstellung (Erststart).
+    // Fehlen beide Dateien, gilt die Voreinstellung (Erststart): Zeitplan aus, ohne Fehler.
+    // Ein erster neugieriger Start loest nichts aus, auch keinen KI-Aufruf.
     let d3 = dienst(ordner()?, true);
-    assert!(d3.sperre().zeitplan.an);
+    assert!(!d3.sperre().zeitplan.an);
     assert!(d3.sperre().zeitplan_fehler.is_none());
+    assert!(d3.schritt(donnerstag(18, 0)?).is_none());
+    assert!(wartend(&d3).is_empty());
+    assert!(d3.sperre().verlauf.is_empty());
     Ok(())
 }
 
@@ -664,5 +685,178 @@ fn autostart_nur_mit_harmlosem_pfad() -> Result<(), String> {
         *umw.autostart.lock().unwrap_or_else(PoisonError::into_inner),
         Some(true)
     );
+    Ok(())
+}
+
+// --- Fehlerfaelle: Schluesselstatus, Gesamtstatus, Sperre des Kostenschutzes ---
+
+fn protokoll_text(wurzel: &Path) -> String {
+    fs::read_to_string(wurzel.join("daten").join(depot_lage::anbieter::DATEI)).unwrap_or_default()
+}
+
+#[test]
+fn neuer_schluessel_ist_wieder_nur_hinterlegt() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let umw = Attrappe::default();
+    let t = donnerstag(12, 0)?;
+    // Der Anbieter hat Maus' alten Schluessel abgelehnt.
+    let alt = depot_lage::anbieter::Eintrag::neu(
+        donnerstag(11, 0)?,
+        depot_lage::anbieter::Wer::Maus,
+        depot_lage::anbieter::Ergebnis::Abgelehnt,
+        Some(401),
+    );
+    let datei = wurzel.join("daten").join(depot_lage::anbieter::DATEI);
+    depot_lage::anbieter::anhaengen(&datei, &alt)?;
+    let seite = anfrage("GET", "/einrichtung", &[("Host", HOST)], "");
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(s.contains("abgelehnt (05.11.2026 11:00"), "{s}");
+    let neu = formular_post(
+        "/schluessel",
+        &format!("t={TOKEN}&wer=openai&wert=Attrappe_Maus-0123456789_ABCDEFGHIJ"),
+    );
+    let r = text(&behandle(&d, &umw, &neu, t));
+    assert!(
+        r.contains("Location: /einrichtung?m=schluessel#schluessel"),
+        "{r}"
+    );
+    let zeilen = protokoll_text(&wurzel);
+    assert_eq!(zeilen.lines().count(), 2, "{zeilen}");
+    assert!(
+        zeilen
+            .lines()
+            .last()
+            .is_some_and(|z| z.contains(";maus;neu;")),
+        "{zeilen}"
+    );
+    assert!(!zeilen.contains("Attrappe"), "kein Schluessel im Protokoll");
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(!s.contains("abgelehnt (05.11.2026 11:00"), "{s}");
+    assert!(s.contains("hinterlegt, noch nicht benutzt"), "{s}");
+    Ok(())
+}
+
+fn bereites_lagebild() -> Lagerechner {
+    Box::new(|_wurzel: &Path, jetzt: Zeitpunkt| {
+        let l = lagebild(&Umgebung {
+            jetzt,
+            journal: Zugang::NichtEingerichtet,
+            kursquelle: Hinterlegt::Ja,
+            berater: [
+                (BeraterId::Dachs, Hinterlegt::Ja),
+                (BeraterId::Maus, Hinterlegt::Ja),
+            ],
+            sperren: Vec::new(),
+            anbieter: Vec::new(),
+            anbieter_unlesbar: 0,
+            ki_halt: None,
+        });
+        (l, "<section>LAGEBILD</section>".to_string())
+    })
+}
+
+#[test]
+fn gesamtstatus_ergaenzt_den_zeitplan() -> Result<(), String> {
+    let d = Arc::new(Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        echo_starter(true),
+        bereites_lagebild(),
+    ));
+    let t = donnerstag(12, 0)?;
+    let heute = t.datum();
+    assert!(d.schritt(t).is_none());
+    let live = |d: &Dienst| seiten::live("s", &d.sperre(), heute);
+    // Ab Werk ist der Zeitplan aus: Nichts laeuft von selbst.
+    assert!(!d.sperre().zeitplan.an);
+    assert!(live(&d).contains(">Pausiert<"), "{}", live(&d));
+    d.sperre().zeitplan.an = true;
+    assert!(live(&d).contains("Vollständig bereit"), "{}", live(&d));
+    d.sperre().zeitplan.an = false;
+    let s = live(&d);
+    assert!(
+        s.contains(">Pausiert<") && s.contains("Zeitplan aus"),
+        "{s}"
+    );
+    d.sperre().zeitplan_fehler = Some("Zeitplan: Kopfzeile fehlt".into());
+    let s = seiten::status("s", &d.sperre(), heute);
+    assert!(
+        s.contains("Eingriff nötig") && s.contains("Kopfzeile fehlt"),
+        "{s}"
+    );
+    // Ohne Schluessel laeuft der Betrieb ohne KI.
+    let d = dienst(ordner()?, true);
+    assert!(d.schritt(t).is_none());
+    assert!(live(&d).contains("Läuft ohne KI"), "{}", live(&d));
+    Ok(())
+}
+
+fn aufheben(abdruck: &str, geprueft: bool) -> Anfrage {
+    let haken = if geprueft { "&geprueft=ja" } else { "" };
+    formular_post(
+        "/kostenschutz",
+        &format!("t={TOKEN}&abdruck={abdruck}{haken}"),
+    )
+}
+
+#[test]
+fn sperre_des_kostenschutzes_gefuehrt_aufheben() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let umw = Attrappe::default();
+    let t = donnerstag(18, 0)?;
+    let halt = kostenschutz::pfad(&wurzel);
+    let grund = "Kosten unbekannt: Antwort fehlte (Dachs) <b>\nreserviert 40 Cent\n";
+    fs::write(&halt, grund).map_err(|e| format!("Vorbedingung ki.halt: {e}"))?;
+    let journal = wurzel.join("daten").join("journal.txt");
+    fs::write(&journal, "unberuehrt").map_err(|e| format!("Vorbedingung Journal: {e}"))?;
+    let abdruck = kostenschutz::abdruck(grund);
+
+    let seite = anfrage("GET", "/einrichtung", &[("Host", HOST)], "");
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(s.contains("id=\"kostenschutz\""), "{s}");
+    assert!(
+        s.contains("Antwort fehlte (Dachs) &lt;b&gt;"),
+        "maskiert: {s}"
+    );
+    assert!(s.contains(&format!("name=\"abdruck\" value=\"{abdruck}\"")));
+    assert!(s.contains("name=\"geprueft\" value=\"ja\" required"));
+
+    // Ohne Bestaetigung, mit fremdem Abdruck oder waehrend ein Auftrag wartet: nichts.
+    let r = text(&behandle(&d, &umw, &aufheben(&abdruck, false), t));
+    assert!(r.contains("m=kostenschutz_unbestaetigt"), "{r}");
+    let r = text(&behandle(&d, &umw, &aufheben("0000000000000000", true), t));
+    assert!(r.contains("m=kostenschutz_geaendert"), "{r}");
+    d.einreihen(Art::Papier, Anlass::Hand)
+        .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
+    let r = text(&behandle(&d, &umw, &aufheben(&abdruck, true), t));
+    assert!(r.contains("m=kostenschutz_belegt"), "{r}");
+    assert!(halt.exists(), "die Sperre bleibt");
+    d.sperre().warteschlange.clear();
+    // Ohne Token wie jedes Formular abgelehnt.
+    let fremd = formular_post(
+        "/kostenschutz",
+        &format!("t=falsch&abdruck={abdruck}&geprueft=ja"),
+    );
+    assert_eq!(status(&behandle(&d, &umw, &fremd, t))?, 403);
+    assert!(halt.exists());
+
+    let r = text(&behandle(&d, &umw, &aufheben(&abdruck, true), t));
+    assert!(r.contains("m=kostenschutz_aufgehoben"), "{r}");
+    assert!(!halt.exists());
+    let festgehalten = fs::read_to_string(kostenschutz::protokoll_pfad(&wurzel))
+        .map_err(|e| format!("Protokoll: {e}"))?;
+    assert!(festgehalten.contains(grund), "{festgehalten}");
+    assert_eq!(
+        fs::read_to_string(&journal).map_err(|e| format!("Journal: {e}"))?,
+        "unberuehrt",
+        "Kassenbuch und Journal bleiben, wie sie sind"
+    );
+    assert!(d.sperre().lage_veraltet);
+    let r = text(&behandle(&d, &umw, &aufheben(&abdruck, true), t));
+    assert!(r.contains("m=kostenschutz_frei"), "{r}");
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(s.contains("Keine Sperre"), "{s}");
     Ok(())
 }

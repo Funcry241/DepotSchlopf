@@ -30,6 +30,6 @@ pub mod termine;
 
 pub use liste::{QUELLE, Wert, beobachtungsliste};
 pub use netz::{Https, Netz};
-pub use sammeln::{Bericht, Ergebnis, SammelFehler, sammle};
+pub use sammeln::{Bericht, Ergebnis, SammelFehler, einordnen, sammle};
 pub use schluessel::Schluessel;
 pub use termine::{TerminBericht, sammle_termine};

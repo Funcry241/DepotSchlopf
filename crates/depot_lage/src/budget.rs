@@ -8,6 +8,7 @@
 //! tatsaechlichen Kosten im Journal stehen, ist „gebucht“ immer die Obergrenze dessen, was
 //! verbraucht sein kann.
 
+use depot_journal::anbieter::{Eintrag, Kosten};
 use depot_kern::{BeraterId, Cent, Datum, Preis};
 use depot_ki::{Buchung, KiDeckel, KiGrenzen, Sperre, pruefe};
 use depot_sim::tagnummer;
@@ -57,6 +58,13 @@ pub struct KiBudget {
     /// Was der naechste Aufruf reserviert; `None`, wenn es sich nicht berechnen laesst.
     pub je_aufruf: Option<Cent>,
     pub status: BudgetStatus,
+    /// Tatsaechlich verbraucht in diesem Monat, wie der Anbieter es gemeldet hat
+    /// (Anbieterprotokoll). Der Kostenschutz rechnet weiter mit dem Gebuchten.
+    pub monat_verbraucht: Cent,
+    /// Aufrufe dieses Monats mit bekannten Kosten.
+    pub monat_abgerechnet: usize,
+    /// Aufrufe dieses Monats, deren Kosten unbekannt sind (Antwort fehlte).
+    pub monat_unbekannt: usize,
 }
 
 pub(crate) fn euro(c: Cent) -> String {
@@ -129,5 +137,30 @@ pub fn ki_budget(buchungen: &[Buchung], berater: BeraterId, heute: Datum) -> KiB
         jahr_rest: rest(g.kosten_je_jahr(), jahr_gebucht),
         je_aufruf: deckel.hoechstkosten(),
         status: st,
+        monat_verbraucht: Cent::NULL,
+        monat_abgerechnet: 0,
+        monat_unbekannt: 0,
     }
+}
+
+/// Ergaenzt das Budget um den tatsaechlichen Verbrauch des Monats aus dem Anbieterprotokoll.
+pub fn mit_verbrauch(mut b: KiBudget, protokoll: &[Eintrag], heute: Datum) -> KiBudget {
+    let wer = crate::betrieb::wer_fuer(b.berater);
+    for e in protokoll.iter().filter(|e| e.wer == wer) {
+        let Some(d) = e.zeit.datum() else {
+            continue;
+        };
+        if d.jahr() != heute.jahr() || d.monat() != heute.monat() {
+            continue;
+        }
+        match e.ist {
+            Kosten::Betrag(c) => {
+                b.monat_verbraucht = b.monat_verbraucht.checked_add(c).unwrap_or(Cent(i64::MAX));
+                b.monat_abgerechnet = b.monat_abgerechnet.saturating_add(1);
+            }
+            Kosten::Unbekannt => b.monat_unbekannt = b.monat_unbekannt.saturating_add(1),
+            Kosten::Keine => {}
+        }
+    }
+    b
 }

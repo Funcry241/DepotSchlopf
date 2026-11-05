@@ -21,6 +21,7 @@
 
 pub mod autostart;
 pub mod http;
+pub mod kostenschutz;
 pub mod rueckfall;
 pub mod schluessel;
 pub mod seiten;
@@ -31,7 +32,11 @@ pub mod zeitplan;
 use std::path::Path;
 
 use depot_kern::{BeraterId, Zeitpunkt};
-use depot_lage::{Hinterlegt, Umgebung, grenzwerte, lagebild, mit_journal, ortszeit, sperrdateien};
+use depot_lage::betrieb::schluessel_stand;
+use depot_lage::{
+    Hinterlegt, Umgebung, anbieter, anbieterprotokoll, grenzwerte, ki_halt, lagebild, mit_journal,
+    ortszeit, sperrdateien,
+};
 
 use crate::http::{Anfrage, antwort, feld, formular, gleich, herkunft_erlaubt, host_erlaubt};
 use crate::schluessel::Wer;
@@ -83,6 +88,7 @@ pub fn lagerechner(token: String, umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerec
     Box::new(move |wurzel: &Path, jetzt: Zeitpunkt| {
         let daten = wurzel.join("daten");
         let sperren = sperrdateien(&daten);
+        let (anbieter, anbieter_unlesbar) = anbieterprotokoll(&daten);
         let l = mit_journal(&daten, |journal| {
             lagebild(&Umgebung {
                 jetzt,
@@ -99,9 +105,12 @@ pub fn lagerechner(token: String, umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerec
                     ),
                 ],
                 sperren,
+                anbieter,
+                anbieter_unlesbar,
+                ki_halt: ki_halt(&daten),
             })
         });
-        let html = depot_lage::html::inhalt(&l, &|a| seiten::abhilfe_knopf(&token, a));
+        let html = depot_lage::html::inhalt_mit(&l, &|a| seiten::abhilfe_knopf(&token, a), false);
         (l, html)
     })
 }
@@ -155,11 +164,18 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/einrichtung" => {
             // Erst ausserhalb der Sperre nachsehen, was gespeichert ist.
             let datei = werkbank::lies_falls_da(&d.wurzel.join("daten").join("zeitplan.txt"));
+            let (protokoll, _) = anbieterprotokoll(&d.wurzel.join("daten"));
             let gespeichert = seiten::Einrichtung {
                 schluessel: schluessel::ALLE
                     .into_iter()
-                    .map(|w| (w, u.schluessel(w)))
+                    .map(|w| {
+                        (
+                            w,
+                            schluessel_stand(u.schluessel(w), &protokoll, w.protokoll()),
+                        )
+                    })
                     .collect(),
+                ki_halt: werkbank::lies_falls_da(&kostenschutz::pfad(&d.wurzel)),
                 zeitplan_gespeichert: None,
                 autostart: u.autostart(&d.wurzel),
                 wurzel: d.wurzel.display().to_string(),
@@ -211,13 +227,13 @@ fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
     })
 }
 
-fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage) -> Vec<u8> {
+fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     if !herkunft_erlaubt(a.kopf("origin")) {
         return http::text(403, "Abgelehnt: fremde Herkunft");
     }
-    let typ_passt = a.kopf("content-type").is_some_and(|t| {
-        t.split(';').next().is_some_and(|t| {
-            t.trim()
+    let typ_passt = a.kopf("content-type").is_some_and(|typ| {
+        typ.split(';').next().is_some_and(|teil| {
+            teil.trim()
                 .eq_ignore_ascii_case("application/x-www-form-urlencoded")
         })
     });
@@ -227,7 +243,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage) -> Vec<u8> {
     let Some(f) = formular(&a.rumpf) else {
         return http::text(400, "Abgelehnt: Formular unlesbar");
     };
-    if !feld(&f, "t").is_some_and(|t| gleich(t, &d.token)) {
+    if !feld(&f, "t").is_some_and(|token| gleich(token, &d.token)) {
         return http::text(
             403,
             "Abgelehnt: Seite veraltet oder fremd. Bitte neu laden.",
@@ -257,8 +273,21 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage) -> Vec<u8> {
             }
             match u.schluessel_ablegen(wer, wert) {
                 Ok(()) => {
+                    // Der neue Schluessel ist nur hinterlegt, bis ein Aufruf ihn bestaetigt.
+                    let neu = anbieter::Eintrag::neu(
+                        jetzt,
+                        wer.protokoll(),
+                        anbieter::Ergebnis::Neu,
+                        None,
+                    );
+                    let datei = d.wurzel.join("daten").join(anbieter::DATEI);
+                    let vermerkt = anbieter::anhaengen(&datei, &neu).is_ok();
                     d.sperre().lage_veraltet = true;
-                    http::umleitung("/einrichtung?m=schluessel#schluessel")
+                    if vermerkt {
+                        http::umleitung("/einrichtung?m=schluessel#schluessel")
+                    } else {
+                        http::umleitung("/einrichtung?m=schluessel_protokoll#schluessel")
+                    }
                 }
                 Err(_) => http::umleitung("/einrichtung?m=schluessel_fehler#schluessel"),
             }
@@ -272,6 +301,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage) -> Vec<u8> {
                 Err(_) => http::umleitung("/einrichtung?m=zeitplan_fehler#zeitplan"),
             }
         }
+        "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt),
         "/autostart" => {
             let an = match feld(&f, "an") {
                 Some("an") => true,
@@ -288,6 +318,31 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage) -> Vec<u8> {
     }
 }
 
+/// Hebt die Sperre des Kostenschutzes gefuehrt auf (siehe `kostenschutz`).
+fn kostenschutz_aufheben(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {
+    let ziel = |m: &str| http::umleitung(&format!("/einrichtung?m={m}#kostenschutz"));
+    if feld(f, "geprueft") != Some("ja") {
+        return ziel("kostenschutz_unbestaetigt");
+    }
+    let Some(gesehen) = feld(f, "abdruck") else {
+        return http::text(400, "Abgelehnt: Abdruck fehlt");
+    };
+    // Unter der Sperre des Zustands: Waehrenddessen startet kein Auftrag.
+    let mut z = d.sperre();
+    if z.laufend.is_some() || !z.warteschlange.is_empty() {
+        return ziel("kostenschutz_belegt");
+    }
+    match kostenschutz::aufheben(&d.wurzel, gesehen, jetzt) {
+        Ok(kostenschutz::Aufheben::Aufgehoben) => {
+            z.lage_veraltet = true;
+            ziel("kostenschutz_aufgehoben")
+        }
+        Ok(kostenschutz::Aufheben::Frei) => ziel("kostenschutz_frei"),
+        Ok(kostenschutz::Aufheben::Geaendert) => ziel("kostenschutz_geaendert"),
+        Err(_) => ziel("kostenschutz_fehler"),
+    }
+}
+
 /// Beantwortet eine gelesene Anfrage. Erst der Host, dann je nach Methode.
 pub fn behandle(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     if !host_erlaubt(a.kopf("host")) {
@@ -295,7 +350,7 @@ pub fn behandle(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Ve
     }
     match a.methode.as_str() {
         "GET" => get(d, u, a, jetzt),
-        "POST" => post(d, u, a),
+        "POST" => post(d, u, a, jetzt),
         _ => http::text(405, "Nur GET und POST"),
     }
 }

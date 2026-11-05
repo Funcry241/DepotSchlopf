@@ -21,10 +21,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use depot_journal::Journal;
+use depot_journal::{Journal, anbieter};
 use depot_kern::{Datum, Preis, Zeitpunkt};
 use depot_sammler::{
-    Ergebnis, Https, Schluessel, beobachtungsliste, ezb::ADRESSE_EZB, sammle, sammle_termine,
+    Ergebnis, Https, Schluessel, beobachtungsliste, einordnen, ezb::ADRESSE_EZB, sammle,
+    sammle_termine,
 };
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
@@ -77,6 +78,16 @@ fn einrichten(journal: &Path) -> ExitCode {
     }
 }
 
+/// Haelt im Anbieterprotokoll fest, was der Lauf ueber Schluessel und Quelle sagt.
+fn vermerke(wurzel: &Path, bericht: &depot_sammler::Bericht) {
+    if let (Some(ergebnis), Some(zeit)) = (einordnen(bericht), jetzt()) {
+        let e = anbieter::Eintrag::neu(zeit, anbieter::Wer::Kursquelle, ergebnis, None);
+        if let Err(f) = anbieter::anhaengen(&wurzel.join("daten").join(anbieter::DATEI), &e) {
+            eprintln!("[Sammler] Anbieterprotokoll nicht geschrieben: {f}");
+        }
+    }
+}
+
 fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
     let werte = match beobachtungsliste() {
         Ok(w) => w,
@@ -125,6 +136,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         }
     };
     let verwendbar = bericht.verwendbar();
+    vermerke(wurzel, &bericht);
     for (w, e) in &bericht.werte {
         match e {
             Ergebnis::Belegt { heute, vortag, .. } => println!(
