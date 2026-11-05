@@ -173,7 +173,8 @@ fn berater(ort: &Ort, wer: BeraterId, netz: Attrappe) -> Result<KiBerater<Attrap
         netz,
         universum()?,
         ort.sperre(),
-    ))
+    )
+    .mit_warten(|_| {}))
 }
 
 const VORSCHLAG: &str = "Nach den Zahlen:\n```json\n{\"einschaetzung\": \"SAP nach Zahlen fest\", \"ziele\": [{\"isin\": \"DE0007164600\", \"gewicht_bp\": 3000, \"begruendung\": \"Zahlen ueber Erwartung\"}]}\n```";
@@ -481,14 +482,16 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
         netz_dachs,
         universum()?,
         sperre.clone(),
-    );
+    )
+    .mit_warten(|_| {});
     let mut maus = KiBerater::neu(
         BeraterId::Maus,
         schluessel()?,
         netz_maus,
         universum()?,
         sperre.clone(),
-    );
+    )
+    .mit_warten(|_| {});
     let start = vec![
         vorbedingung(Topf::neu(TopfId::A, Cent(500_000)), "Topf A")?,
         vorbedingung(Topf::neu(TopfId::B, Cent(500_000)), "Topf B")?,
@@ -712,6 +715,9 @@ fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
             Ergebnis::Ok,
             Ergebnis::Guthaben,
             Ergebnis::Abgelehnt,
+            // Sicher nicht gesendet: dreimal versucht, jedes Mal ohne Kosten.
+            Ergebnis::Netz,
+            Ergebnis::Netz,
             Ergebnis::Netz,
             Ergebnis::Limit
         ]
@@ -723,7 +729,7 @@ fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
     assert!(matches!(e.first().map(|x| x.ist), Some(Kosten::Betrag(_))));
     let t = some(uhr(), "Uhr")?;
     assert_eq!(
-        e.get(4).and_then(|x| x.warten_bis),
+        e.get(6).and_then(|x| x.warten_bis),
         Zeitpunkt::aus_sekunden(t.sekunden().saturating_add(90))
     );
     // Die Meldungen sagen in Worten, was los ist.
@@ -829,5 +835,72 @@ fn limit_im_lauf_pausiert_auch_ohne_protokoll() -> Result<(), String> {
     let _ = mit_lage(|l| maus.vorschlagen(e, l))?;
     assert!(!maus.angebunden());
     assert!(maus.pause().is_some());
+    Ok(())
+}
+
+/// Maus zu KI-Aufrufen (05.11.2026): Hat die Anfrage den Anbieter sicher nicht erreicht, wird sie
+/// unter derselben Reservierung erneut gesendet, hoechstens dreimal. Sie kostet nichts, und
+/// hoechstens eine Anfrage je Reservierung kann den Anbieter erreichen.
+#[test]
+fn sicher_nicht_gesendet_wird_unter_derselben_reservierung_wiederholt() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(Err(NetzFehler::NichtGesendet("host not found".into())));
+    netz.antworten
+        .push_back(Err(NetzFehler::NichtGesendet("connection failed".into())));
+    netz.antworten
+        .push_back(claude(VORSCHLAG, 20_000, 1_500, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.verwertbar && a.vorschlag.is_some(), "{a:?}");
+    assert!(!ort.sperre().exists());
+    let gesendet = &dachs.netz().gesendet;
+    assert_eq!(gesendet.len(), 3);
+    assert!(
+        gesendet.windows(2).all(|w| w.first() == w.last()),
+        "dieselbe Anfrage"
+    );
+    Ok(())
+}
+
+/// Nach drei Versuchen ohne Verbindung: kein Vorschlag, keine Sperre, nichts gekostet.
+#[test]
+fn ohne_verbindung_nach_drei_versuchen_aufgegeben() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut dachs = berater(&ort, BeraterId::Dachs, Attrappe::default())?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(!a.verwertbar && a.vorschlag.is_none(), "{a:?}");
+    assert!(a.einschaetzung.contains("nicht gesendet"), "{a:?}");
+    assert!(!ort.sperre().exists());
+    assert_eq!(dachs.netz().gesendet.len(), 3);
+    Ok(())
+}
+
+/// Abnahmefall 3: Verbindung nach dem Absenden einer KI-Anfrage kappen. Die Anfrage kann
+/// angekommen sein und gekostet haben: kein zweiter Versand, Kostensperre fuer beide KIs, und
+/// die Sperrdatei sagt in Worten, warum.
+#[test]
+fn verbindung_nach_dem_absenden_gekappt_sperrt_ohne_zweiten_versand() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(Err(NetzFehler::Unklar("connection reset by peer".into())));
+    netz.antworten
+        .push_back(claude(VORSCHLAG, 20_000, 1_500, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.vorschlag.is_none(), "{a:?}");
+    assert_eq!(dachs.netz().gesendet.len(), 1, "nie ein zweiter Versand");
+    assert_eq!(dachs.netz().antworten.len(), 1);
+    let text = vorbedingung(fs::read_to_string(ort.sperre()), "Sperrdatei")?;
+    assert!(text.contains("nach dem Absenden abgebrochen"), "{text}");
+    assert!(text.contains("kann angekommen sein"), "{text}");
+    // Auch der andere Berater ist gesperrt.
+    let maus = berater(&ort, BeraterId::Maus, Attrappe::default())?;
+    assert!(!maus.angebunden());
     Ok(())
 }
