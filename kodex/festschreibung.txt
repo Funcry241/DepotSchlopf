@@ -1,5 +1,6 @@
 # DepotSchlopf – Festschreibung. Aendern nur mit Grenzfreigabe des Eigentuemers in
 # kodex/freigabe.txt (R30). Neu erzeugen: run.cmd festschreibung
+abhaengigkeiten.depot_berater: dependencies.depot_journal={"workspace"=true};dependencies.depot_kern={"workspace"=true};dependencies.depot_ki={"workspace"=true};dependencies.depot_sim={"workspace"=true};dependencies.ureq={"workspace"=true};target.cfg(windows).dependencies.keyring-core={"workspace"=true};target.cfg(windows).dependencies.windows-native-keyring-store={"workspace"=true}
 abhaengigkeiten.depot_journal: dependencies.depot_kern={"workspace"=true};dependencies.depot_ki={"workspace"=true};dependencies.depot_regelwerk={"workspace"=true};dependencies.sha2={"workspace"=true}
 abhaengigkeiten.depot_kern: dependencies.sha2={"workspace"=true}
 abhaengigkeiten.depot_ki: dependencies.depot_kern={"workspace"=true};dependencies.sha2={"workspace"=true}
@@ -10,9 +11,9 @@ abhaengigkeiten.depot_regelwerk: dependencies.depot_kern={"workspace"=true}
 abhaengigkeiten.depot_sammler: dependencies.depot_journal={"workspace"=true};dependencies.depot_kern={"workspace"=true};dependencies.depot_regelwerk={"workspace"=true};dependencies.ureq={"workspace"=true};dev-dependencies.sha2={"workspace"=true};target.cfg(windows).dependencies.keyring-core={"workspace"=true};target.cfg(windows).dependencies.windows-native-keyring-store={"workspace"=true}
 abhaengigkeiten.depot_sim: dependencies.depot_journal={"workspace"=true};dependencies.depot_kern={"workspace"=true};dependencies.depot_ki={"workspace"=true};dependencies.depot_regelwerk={"workspace"=true};dependencies.sha2={"workspace"=true}
 abhaengigkeiten.workspace: workspace.dependencies.depot_journal={"path"="crates/depot_journal"};workspace.dependencies.depot_kern={"path"="crates/depot_kern"};workspace.dependencies.depot_ki={"path"="crates/depot_ki"};workspace.dependencies.depot_kodex={"path"="crates/depot_kodex"};workspace.dependencies.depot_regelwerk={"path"="crates/depot_regelwerk"};workspace.dependencies.depot_sim={"path"="crates/depot_sim"};workspace.dependencies.keyring-core="1.0";workspace.dependencies.sha2="0.10";workspace.dependencies.ureq={"default-features"=false,"features"=["rustls"],"version"="3.5"};workspace.dependencies.windows-native-keyring-store={"default-features"=false,"version"="1.1"}
-cargo_lock: 5ece5d151958fe478ab83dbab5ea3d5e1bc9dd6c5758fa51096d87c621b83457
-crates: depot_journal,depot_kern,depot_ki,depot_kodex,depot_lage,depot_lauf,depot_regelwerk,depot_sammler,depot_sim
-grenzen: ecdc99b85c76654c8b9dcfed6e75e6da7c430cdb42642b5f175ea6b8d52f0452
-ki_budget: cf5279025ff7094044bbe70c988011e0e0c1175f8c2d818cb36f80fde49f0785
+cargo_lock: fed7f37036cc5e556befd2a37cebc855a01aa117f9a67f07397a6b1fd9f44242
+crates: depot_berater,depot_journal,depot_kern,depot_ki,depot_kodex,depot_lage,depot_lauf,depot_regelwerk,depot_sammler,depot_sim
+grenzen: 4d27d4417668d33ecc404e0d9d1dcb1e496f464994c4b1734121e03a9796b05a
+ki_budget: 2e323d930a556308633f0852d1fbfa91cab3f2fff91bf4096e62b07767aeb1ca
 lints: 920e5415b5ec05b278ec52b7a41d7779c20a6d6c8f9c3b0820fed4307dbff6cd
 produktarten: Aktie,EtfPhysischUcits

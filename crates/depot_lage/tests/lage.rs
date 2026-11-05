@@ -368,14 +368,21 @@ fn budget_zeigt_verbrauch_rest_und_pause() -> Result<(), String> {
 #[test]
 fn budget_monat_voll_und_uhr_rueckwaerts() -> Result<(), String> {
     let grenzen = KiGrenzen::standard();
+    // Den Monat mit so vielen Aufrufen je Tag fuellen, wie ein Zyklus erlaubt; die Zahl der
+    // Tage folgt aus den Grenzen und nicht aus einer Annahme im Test.
     let mut b = Vec::new();
     let mut t = 2;
-    while b.len() < usize::try_from(grenzen.aufrufe_je_monat()).unwrap_or(0) {
+    let voll = usize::try_from(grenzen.aufrufe_je_monat()).unwrap_or(0);
+    while b.len() < voll {
         let d = tag(t)?;
-        b.push(buchung(BeraterId::Maus, d, zyklus(d)?)?);
+        for _ in 0..grenzen.aufrufe_je_zyklus() {
+            if b.len() < voll {
+                b.push(buchung(BeraterId::Maus, d, zyklus(d)?)?);
+            }
+        }
         t = t.saturating_add(1);
     }
-    let maus = ki_budget(&b, BeraterId::Maus, tag(20)?);
+    let maus = ki_budget(&b, BeraterId::Maus, tag(t)?);
     assert_eq!(maus.status, BudgetStatus::PausiertBisMonatsanfang);
     let maus = ki_budget(&b, BeraterId::Maus, tag(1)?);
     assert!(
