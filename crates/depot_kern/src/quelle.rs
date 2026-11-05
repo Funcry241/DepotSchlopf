@@ -15,6 +15,7 @@
 
 use crate::boerse::Boerse;
 pub use crate::boerse::XETRA_SCHLUSS;
+use crate::devisen::Devisen;
 use crate::instrument::Isin;
 use crate::kurs::{Herkunft, Kurs, KursFehler, Kurse};
 use crate::preis::Preis;
@@ -45,6 +46,10 @@ pub enum QuellenFehler {
     /// Feiertag nach `Boerse::handelstag`). Die Quelle widerspricht dem Kalender; der Wert ergibt
     /// keinen Kurs, statt dass die Zeile als Schlusskurs gilt.
     KeinHandelstag(Datum),
+    /// Ein Schluss in Dollar fuer einen Tag, fuer den die EZB keinen Referenzkurs nennt
+    /// (`Devisen::in_euro`). Der Wert ergibt keinen Kurs; ein aelterer Referenzkurs ersetzt den
+    /// des Tages nie.
+    KeinDevisenkurs(Datum),
 }
 
 /// Der Schlusskurs eines Handelstags.
@@ -156,7 +161,8 @@ pub fn xetra_schluss(datum: Datum) -> Option<Zeitpunkt> {
 /// Die Schlusskurse eines Abrufs: je Wert der letzte Tag, dessen Handel an der Boerse des Werts
 /// beim Abruf beendet war (`heute`), und der Tag davor (`vortag`), beide mit Stand `abruf`.
 /// Fehlt der Vortag eines Werts, fehlt er in `vortag`; das Regelwerk fuehrt das als eigenen
-/// Fall. Notiert die Boerse nicht in Euro, ergibt der Wert keinen Kurs (`KursFehler::Waehrung`).
+/// Fall. Notiert die Boerse nicht in Euro, ergibt der Wert keinen Kurs (`KursFehler::Waehrung`);
+/// umgerechnet wird nur mit `schlusskurse_in_euro`.
 ///
 /// # Errors
 /// Ein Wert kommt doppelt vor, seine Tage steigen nicht streng (`Reihenfolge` mit der Stelle in
@@ -166,6 +172,49 @@ pub fn xetra_schluss(datum: Datum) -> Option<Zeitpunkt> {
 pub fn schlusskurse(
     abruf: Zeitpunkt,
     werte: Vec<(Isin, Boerse, Vec<Tageskurs>)>,
+) -> Result<(Kurse, Kurse), QuellenFehler> {
+    schlusskurse_mit(abruf, werte, None)
+}
+
+/// Wie `schlusskurse`, aber ein Schluss in Dollar wird mit dem Referenzkurs der EZB desselben
+/// Tages in Euro umgerechnet (`Devisen::in_euro`, abgerundet auf sechs Nachkommastellen).
+/// Umgerechnet werden nur die beiden Tage, die als `heute` und `vortag` zaehlen.
+///
+/// # Errors
+/// Wie `schlusskurse`; dazu `KeinDevisenkurs`, wenn die EZB fuer einen dieser Tage keinen
+/// Dollarkurs nennt. Ein aelterer Referenzkurs ersetzt ihn nie.
+pub fn schlusskurse_in_euro(
+    abruf: Zeitpunkt,
+    werte: Vec<(Isin, Boerse, Vec<Tageskurs>)>,
+    devisen: &Devisen,
+) -> Result<(Kurse, Kurse), QuellenFehler> {
+    schlusskurse_mit(abruf, werte, Some(devisen))
+}
+
+/// Ein beendeter Tag als Kurs in Euro: unveraendert, wenn die Boerse in Euro notiert, mit
+/// `devisen` umgerechnet, wenn sie in Dollar notiert. Ohne `devisen` bleibt die Waehrung der
+/// Boerse und `Kurs::exakt` lehnt sie ab.
+fn kurs_in_euro(
+    boerse: Boerse,
+    tag: Tageskurs,
+    zeit: Zeitpunkt,
+    devisen: Option<&Devisen>,
+) -> Result<Kurs, QuellenFehler> {
+    let (preis, waehrung) = match (boerse.waehrung(), devisen) {
+        ("USD", Some(d)) => (
+            d.in_euro(tag.schluss, tag.datum)
+                .ok_or(QuellenFehler::KeinDevisenkurs(tag.datum))?,
+            "EUR",
+        ),
+        (w, _) => (tag.schluss, w),
+    };
+    Kurs::exakt(preis, waehrung, tag.datum, zeit, Herkunft::Quelle).map_err(QuellenFehler::Kurs)
+}
+
+fn schlusskurse_mit(
+    abruf: Zeitpunkt,
+    werte: Vec<(Isin, Boerse, Vec<Tageskurs>)>,
+    devisen: Option<&Devisen>,
 ) -> Result<(Kurse, Kurse), QuellenFehler> {
     let mut heute = Vec::new();
     let mut vortag = Vec::new();
@@ -190,23 +239,15 @@ pub fn schlusskurse(
                 .schluss(t.datum)
                 .ok_or(QuellenFehler::Kurs(KursFehler::Handelstag))?;
             if zeit <= abruf {
-                let kurs = Kurs::exakt(
-                    t.schluss,
-                    boerse.waehrung(),
-                    t.datum,
-                    zeit,
-                    Herkunft::Quelle,
-                )
-                .map_err(QuellenFehler::Kurs)?;
-                beendet.push(kurs);
+                beendet.push((t, zeit));
             }
         }
         let mut letzte = beendet.into_iter().rev();
-        if let Some(k) = letzte.next() {
-            heute.push((isin.clone(), k));
+        if let Some((t, zeit)) = letzte.next() {
+            heute.push((isin.clone(), kurs_in_euro(boerse, t, zeit, devisen)?));
         }
-        if let Some(k) = letzte.next() {
-            vortag.push((isin, k));
+        if let Some((t, zeit)) = letzte.next() {
+            vortag.push((isin, kurs_in_euro(boerse, t, zeit, devisen)?));
         }
     }
     Ok((
