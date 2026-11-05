@@ -108,6 +108,7 @@ fn umgebung(jetzt: Zeitpunkt, journal: Zugang<'_>) -> Umgebung<'_> {
         jetzt,
         journal,
         kursquelle: Hinterlegt::Ja,
+        kursquelle_us: Hinterlegt::Ja,
         berater: [
             (BeraterId::Dachs, Hinterlegt::Nein),
             (BeraterId::Maus, Hinterlegt::Nein),
@@ -184,6 +185,32 @@ fn sperrdatei_ist_halt() -> Result<(), String> {
     assert_eq!(l.gesamt, Ampel::Halt);
     assert!(
         l.naechster_schritt.contains("ki.sperre"),
+        "{}",
+        l.naechster_schritt
+    );
+    Ok(())
+}
+
+/// Die Liste hat NYSE-Werte: Der Tiingo-Schluessel ist ein eigener Punkt. Fehlt er, ist er der
+/// naechste Schritt nach dem Schluessel von Alpha Vantage und braucht einen Menschen.
+#[test]
+fn fehlender_schluessel_von_tiingo_ist_offen() -> Result<(), String> {
+    let mut u = umgebung(abends(5)?, Zugang::NichtEingerichtet);
+    let l = lagebild(&u);
+    let p = punkt(&l, "Kursquelle Tiingo (NYSE)")?;
+    assert_eq!((p.ampel, p.abhilfe), (Ampel::Gut, None), "{p:?}");
+    u.kursquelle_us = Hinterlegt::Nein;
+    let l = lagebild(&u);
+    let p = punkt(&l, "Kursquelle Tiingo (NYSE)")?;
+    assert_eq!(
+        (p.ampel, p.abhilfe),
+        (Ampel::Offen, Some(Abhilfe::SchluesselKursquelleUs))
+    );
+    assert!(Abhilfe::SchluesselKursquelleUs.braucht_menschen());
+    u.journal = Zugang::Belegt;
+    let l = lagebild(&u);
+    assert!(
+        l.naechster_schritt.starts_with("Kursquelle Tiingo (NYSE)"),
         "{}",
         l.naechster_schritt
     );
@@ -904,9 +931,10 @@ fn belege_ohne(j: &mut Journal, heute: Datum, vortag: Datum, ohne: usize) -> Res
     Ok(())
 }
 
-/// Ein Boersenfeiertag ist geschlossen, nicht verpasst; ein Tag, an dem einzelne Kandidaten
-/// ohne Kurs ausgelassen wurden, ist abgeschlossen und nennt sie. An einem Feiertag verlangt
-/// die Bereitschaft keinen Abruf.
+/// Ein Feiertag aller Boersen der Liste ist geschlossen, nicht verpasst; ein Tag, an dem nur
+/// eine Boerse schliesst (Heiligabend: Xetra zu, NYSE offen), ist ein Handelstag. Ein Tag, an dem
+/// einzelne Kandidaten ohne Kurs ausgelassen wurden, ist abgeschlossen und nennt sie. An einem
+/// Feiertag verlangt die Bereitschaft keinen Abruf.
 #[test]
 fn feiertag_ist_geschlossen_und_auslassung_sichtbar() -> Result<(), String> {
     let d = |t| some(Datum::neu(2026, 12, t), "Datum");
@@ -935,23 +963,26 @@ fn feiertag_ist_geschlossen_und_auslassung_sichtbar() -> Result<(), String> {
     let tage: Vec<(Datum, &TagStand)> = l.tage.iter().map(|t| (t.datum, &t.stand)).collect();
     assert_eq!(l.tage.len(), 4, "{tage:?}");
     assert_eq!(tag_nr(&l, 0)?.stand, TagStand::Offen);
-    for (i, grund) in [(1, "1. Weihnachtstag"), (2, "Heiligabend")] {
-        assert!(
-            matches!(&tag_nr(&l, i)?.stand, TagStand::Geschlossen(g) if g.contains(grund)),
-            "{tage:?}"
-        );
-        assert_eq!(tag_nr(&l, i)?.stand.klasse(), "offen");
-    }
+    assert!(
+        matches!(&tag_nr(&l, 1)?.stand, TagStand::Geschlossen(g)
+            if g.contains("Xetra: 1. Weihnachtstag") && g.contains("NYSE: Christmas Day")),
+        "{tage:?}"
+    );
+    assert_eq!(tag_nr(&l, 1)?.stand.klasse(), "offen");
+    assert!(
+        matches!(&tag_nr(&l, 2)?.stand, TagStand::Ausgefallen(_)),
+        "Heiligabend handelt die NYSE: {tage:?}"
+    );
     assert!(
         matches!(&tag_nr(&l, 3)?.stand, TagStand::MitAuslassung(b) if b.iter().any(|x| x.contains("2× Kurs fehlt"))),
         "{tage:?}"
     );
     assert_eq!(tag_nr(&l, 3)?.stand.klasse(), "gut");
 
-    let heiligabend = some(Zeitpunkt::frankfurt(d(24)?, 18, 0, 0), "Zeit")?;
-    let l = lagebild(&umgebung(heiligabend, Zugang::Offen(jr.stand())));
+    let weihnachten = some(Zeitpunkt::frankfurt(d(25)?, 18, 0, 0), "Zeit")?;
+    let l = lagebild(&umgebung(weihnachten, Zugang::Offen(jr.stand())));
     let k = punkt(&l, "Schlusskurse")?;
-    assert!(k.text.contains("Heiligabend"), "{k:?}");
+    assert!(k.text.contains("Weihnachtstag"), "{k:?}");
     assert_eq!(k.abhilfe, None, "{k:?}");
     let p = punkt(&l, "Papiertag")?;
     assert!(p.text.contains("Börse geschlossen"), "{p:?}");

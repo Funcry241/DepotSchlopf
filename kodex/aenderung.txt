@@ -1,8 +1,11 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Abruf je Boerse, Schritt 4 (Wolfgang 05.11.2026, Vorschlag von Maus): Der Zeitplan ruft jede Boerse der Liste kurz nach ihrem eigenen Schluss ab (Xetra zur eingestellten Uhrzeit, andere 10 Minuten nach ihrem Schluss in Frankfurter Zeit; Art::KurseVon, run.cmd kurse xetra|nyse). Der Papiertag folgt nach dem letzten Abruf des Tages, wenn ein Abruf dieses Tages erfolgreich war. dienst_erledigt.txt in Form erledigt-v2, alte Form wird gelesen. Keine Grenze geaendert, keine neue Abhaengigkeit, kein Netz im Dienst.
+zweck: Abruf je Boerse, Schritt 5 (Tiingo-Plan, Wolfgang 05.11.2026): fuenf erste NYSE-Werte in der Beobachtungsliste (JPM, KO, JNJ, XOM, V), Kontingent je Quelle als Regel in pruefe_liste (Alpha Vantage 25, Tiingo 500), Tiingo-Schluessel DepotSchlopf/tiingo in der Einrichtung und als Punkt im Lagebild. Keine Grenze geaendert, keine neue Abhaengigkeit, Netz wie bisher nur im Sammler.
 pfade:
+crates/depot_kern/
+crates/depot_lage/
 crates/depot_dienst/
+crates/depot_sammler/
 docs/
 CHANGELOG.md
 kodex/aenderung.txt

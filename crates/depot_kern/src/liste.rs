@@ -4,8 +4,8 @@
 //! handelt nur Werte dieser Liste (`als_universum`): Was keinen geprueften Schlusskurs hat, kann
 //! nicht gehandelt werden. Reine Daten ohne Netz; den Abruf macht `depot_sammler`.
 //! Xetra-Werte kommen von Alpha Vantage mit der Endung `.DEX`, Werte der NYSE von Tiingo, im
-//! Kuerzel ohne Endung (`quelle`). Die kostenlose Stufe von Alpha Vantage erlaubt 25 Abrufe am Tag; ein Lauf braucht
-//! einen Abruf je Wert.
+//! Kuerzel ohne Endung (`quelle`). Ein Lauf braucht einen Abruf je Wert; je Quelle passt die
+//! Liste in das Kontingent der kostenlosen Stufe (`hoechstens_werte`).
 //!
 //! Jeder Wert gehoert zu einer Boerse; ihr Schluss bestimmt, ab wann sein Schlusskurs gilt, und
 //! ihr Kalender, an welchen Tagen er gehandelt wird (`handelstag`).
@@ -29,10 +29,21 @@ pub fn quelle(boerse: Boerse) -> &'static str {
     }
 }
 
+/// Wie viele Werte eine Quelle je Lauf hoechstens bekommt: ein Abruf je Wert, und ein Lauf muss
+/// in das Tageskontingent der kostenlosen Stufe passen. Alpha Vantage erlaubt 25 Abrufe am Tag;
+/// Tiingo 1000 am Tag, aber nur 500 verschiedene Kuerzel im Monat, das ist die engere Grenze.
+pub fn hoechstens_werte(quelle_name: &str) -> usize {
+    match quelle_name {
+        QUELLE => 25,
+        QUELLE_US => 500,
+        _ => 0,
+    }
+}
+
 /// Ein Eintrag der Liste: ISIN, Boerse, Kuerzel bei der Quelle, Name.
 pub type Eintrag<'a> = (&'a str, Boerse, &'a str, &'a str);
 
-const WERTE: [Eintrag<'static>; 10] = [
+const WERTE: [Eintrag<'static>; 15] = [
     ("DE0007164600", Boerse::Xetra, "SAP.DEX", "SAP"),
     ("DE0007236101", Boerse::Xetra, "SIE.DEX", "Siemens"),
     ("DE0008404005", Boerse::Xetra, "ALV.DEX", "Allianz"),
@@ -53,6 +64,11 @@ const WERTE: [Eintrag<'static>; 10] = [
     ("DE0005810055", Boerse::Xetra, "DB1.DEX", "Deutsche Boerse"),
     ("DE0006231004", Boerse::Xetra, "IFX.DEX", "Infineon"),
     ("DE0005190003", Boerse::Xetra, "BMW.DEX", "BMW"),
+    ("US46625H1005", Boerse::Nyse, "JPM", "JPMorgan Chase"),
+    ("US1912161007", Boerse::Nyse, "KO", "Coca-Cola"),
+    ("US4781601046", Boerse::Nyse, "JNJ", "Johnson & Johnson"),
+    ("US30231G1022", Boerse::Nyse, "XOM", "Exxon Mobil"),
+    ("US92826C8394", Boerse::Nyse, "V", "Visa"),
 ];
 
 /// Ein beobachteter Wert.
@@ -84,7 +100,8 @@ fn kuerzel_gueltig(boerse: Boerse, k: &str) -> bool {
 }
 
 /// Prueft eine Liste: gueltige ISIN, Kuerzel in der Form der Quelle fuer die Boerse, keine ISIN
-/// und kein Kuerzel doppelt.
+/// und kein Kuerzel doppelt, und je Quelle nicht mehr Werte, als ein Lauf abrufen darf
+/// (`hoechstens_werte`).
 ///
 /// # Errors
 /// Nennt den ersten fehlerhaften Eintrag.
@@ -110,6 +127,15 @@ pub fn pruefe_liste(eintraege: &[Eintrag<'_>]) -> Result<Vec<Wert>, String> {
     }
     if werte.is_empty() {
         return Err("Liste: leer".into());
+    }
+    for q in [QUELLE, QUELLE_US] {
+        let n = werte.iter().filter(|w| quelle(w.boerse) == q).count();
+        if n > hoechstens_werte(q) {
+            return Err(format!(
+                "Liste: {n} Werte fuer {q}, hoechstens {} je Lauf",
+                hoechstens_werte(q)
+            ));
+        }
     }
     Ok(werte)
 }
