@@ -73,7 +73,7 @@ Ließ sich die Kurssperre nicht schreiben, lief ein Papiertag von Hand weiter mi
 
 ## Nicht in diesem Schritt
 
-- **Abrufzeit:** Mit nur Xetra-Werten bleibt der Abruf kurz nach 17:35 Uhr richtig. Wolfgang hat am 05.11.2026 entschieden, Maus' Vorschlag zu folgen: Kurse je Börse kurz nach ihrem Schluss abrufen, die Altersprüfung je Abrufzeitpunkt, danach ein gemeinsamer Papiertag. Kein gemeinsamer Abruf um 22:30 Uhr. Das kommt in einem eigenen Schritt.
+- **Abrufzeit:** Mit nur Xetra-Werten bleibt der Abruf kurz nach 17:35 Uhr richtig. Wolfgang hat am 05.11.2026 entschieden, Maus' Vorschlag zu folgen: Kurse je Börse kurz nach ihrem Schluss abrufen, die Altersprüfung je Abrufzeitpunkt, danach ein gemeinsamer Papiertag. Kein gemeinsamer Abruf um 22:30 Uhr. Schritt 1 ist umgesetzt: Das Alter eines Kurses misst sich an seinem eigenen Abruf (`Kurse::mit_abrufen`), Test `alter_je_abruf_nicht_je_spaetestem_abruf`. Zeitplan je Börse und Papiertag nach dem letzten Abruf kommen mit Tiingo, wenn die ersten US-Werte in der Liste stehen.
 - **Rotation der Kandidaten und Tiingo als US-Quelle:** eigener PR, freigegeben am 05.11.2026.
 - **Umrechnung in Euro** für Werte in Dollar: Voraussetzung für den ersten NYSE-Wert.
 

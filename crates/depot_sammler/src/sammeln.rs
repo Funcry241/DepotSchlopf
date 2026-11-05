@@ -212,7 +212,7 @@ pub fn sammle(
         pruefung: Vec::new(),
         ausgelassen: Vec::new(),
     };
-    let mut heute: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
+    let mut heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)> = Vec::new();
     let mut vortag: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
     let mut letzter_abruf: Option<Zeitpunkt> = None;
     let mut offen: Vec<KursBeleg> = Vec::new();
@@ -280,7 +280,7 @@ pub fn sammle(
             offen.push(beleg);
         }
         if let Some(k) = h.eintrag(&wert.isin) {
-            heute.push((wert.isin.clone(), k.clone()));
+            heute.push((wert.isin.clone(), k.clone(), abruf));
         }
         if let Some(k) = v.eintrag(&wert.isin) {
             vortag.push((wert.isin.clone(), k.clone()));
@@ -309,7 +309,7 @@ pub fn sammle(
 struct Gelesen {
     offen: Vec<KursBeleg>,
     letzter_abruf: Option<Zeitpunkt>,
-    heute: Vec<(depot_kern::Isin, Kurs)>,
+    heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)>,
     vortag: Vec<(depot_kern::Isin, Kurs)>,
 }
 
@@ -341,19 +341,20 @@ fn abschliessen(
     Ok(bericht)
 }
 
-/// Prueft wie der Papiertag (`waehle_tageswerte`). Das Alter misst gegen den letzten Abruf;
-/// fuer frueher abgerufene Werte ist das strenger, nie milder.
+/// Prueft wie der Papiertag (`waehle_tageswerte`). Das Alter misst je Wert an seinem eigenen
+/// Abruf, wie im Papiertag.
 fn pruefe(
     bericht: &mut Bericht,
     journal: &Journal,
     werte: &[Wert],
     stand: Zeitpunkt,
-    heute: Vec<(depot_kern::Isin, Kurs)>,
+    heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)>,
     vortag: Vec<(depot_kern::Isin, Kurs)>,
 ) -> Result<(), SammelFehler> {
-    let handelstag = heute.iter().map(|(_, k)| k.handelstag()).max();
+    let handelstag = heute.iter().map(|(_, k, _)| k.handelstag()).max();
     bericht.handelstag = handelstag;
-    let heute = Kurse::neu(stand, heute).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
+    let heute =
+        Kurse::mit_abrufen(stand, heute).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
     let vortag = Kurse::neu(stand, vortag).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
     if let Some(tag) = handelstag {
         let wahl = waehle_tageswerte(

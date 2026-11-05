@@ -8,7 +8,9 @@
 //! **Kurse:** Nur Belege mit Herkunft `Quelle` zaehlen. Der Handelstag ist der juengste belegte
 //! Tag; er muss der heutige sein, sonst Halt: Ein Tag wird nie mit Kursen eines anderen Tages
 //! entschieden. Je Wert gilt der zuletzt belegte Kurs des Handelstags; der Vergleichskurs ist
-//! der zuletzt belegte Kurs des juengsten Tages davor. Geprueft wie im Sammler
+//! der zuletzt belegte Kurs des juengsten Tages davor. Das Alter eines Kurses misst sich an
+//! seinem eigenen Abruf, denn Werte verschiedener Boersen werden je kurz nach ihrem Schluss
+//! abgerufen (Wolfgang, 05.11.2026). Geprueft wie im Sammler
 //! (`waehle_tageswerte`): Pflicht sind nur die gehaltenen Werte. Ein Kandidat ohne gueltigen
 //! Kurs ist heute nicht handelbar; er faellt aus dem Universum des Tages, und der Grund steht
 //! unter `Auswahl` im Journal. Faellt die Pruefung eines gehaltenen Werts oder des Abrufs durch,
@@ -140,17 +142,18 @@ fn tageskurse_bis(
             vortag.insert(b.isin(), b);
         }
     }
+    // Je Wert mit seinem eigenen Abruf: Das Alter misst sich daran (Abruf je Boerse).
     let kurse = |m: &BTreeMap<&Isin, &KursBeleg>| -> Result<Kurse, LaufFehler> {
         let stand = m
             .values()
             .map(|b| b.abruf())
             .max()
             .ok_or_else(|| halt("Kein Kurs fuer den Vergleich belegt"))?;
-        let eintraege: Vec<(Isin, Kurs)> = m
+        let eintraege: Vec<(Isin, Kurs, Zeitpunkt)> = m
             .iter()
-            .map(|(i, b)| ((*i).clone(), b.kurs().clone()))
+            .map(|(i, b)| ((*i).clone(), b.kurs().clone(), b.abruf()))
             .collect();
-        Kurse::neu(stand, eintraege).map_err(|e| halt(format!("Kurse: {e:?}")))
+        Kurse::mit_abrufen(stand, eintraege).map_err(|e| halt(format!("Kurse: {e:?}")))
     };
     Ok(Tageskurse {
         handelstag,

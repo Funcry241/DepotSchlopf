@@ -115,7 +115,7 @@ fn befund_text(roh: &str) -> &'static str {
     let art = roh.split(['(', ' ', '{']).next().unwrap_or_default();
     match art {
         "KursZuAlt" => {
-            "Kurse zu alt: mehr als 20 Minuten zwischen Xetra-Schluss und Abruf (etwa ein \
+            "Kurse zu alt: mehr als 20 Minuten zwischen dem Schluss der Börse und dem Abruf (etwa ein \
              nachgeholter Abruf, weil der Rechner zur Abrufzeit schlief)"
         }
         "KursFehlt" => "Kurs fehlt",
