@@ -242,7 +242,7 @@ pub fn sammle(
             .map_err(|_| "Antwort ist kein UTF-8".to_string())
             .and_then(|t| lies_tageskurse(&t).map_err(|e| format!("Antwort unlesbar: {e:?}")))
             .and_then(|tage| {
-                schlusskurse(abruf, vec![(wert.isin.clone(), tage)])
+                schlusskurse(abruf, vec![(wert.isin.clone(), wert.boerse, tage)])
                     .map_err(|e| format!("Schlusskurse: {e:?}"))
             });
         let (h, v) = match gelesen {

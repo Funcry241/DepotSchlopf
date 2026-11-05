@@ -20,6 +20,7 @@
     clippy::cast_sign_loss
 )]
 
+pub mod boerse;
 pub mod depot;
 pub mod geld;
 pub mod grenzen;
@@ -31,6 +32,7 @@ pub mod quelle;
 pub mod termin;
 pub mod zeit;
 
+pub use boerse::Boerse;
 pub use depot::{BeraterId, Topf, TopfFehler, TopfId, Vorschlag};
 pub use geld::{BP_GANZ, Cent};
 pub use grenzen::{Gebuehren, Grenzen, Universum};

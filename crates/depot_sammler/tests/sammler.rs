@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use depot_journal::{Journal, JournalFehler, anbieter};
-use depot_kern::{Cent, Datum, Herkunft, Preis, Zeitpunkt};
+use depot_kern::{Boerse, Cent, Datum, Herkunft, Preis, Zeitpunkt};
 use depot_regelwerk::DatenFehler;
 use depot_sammler::liste::pruefe_liste;
 use depot_sammler::sammeln::adresse;
@@ -58,8 +58,13 @@ fn schluessel() -> Result<Schluessel, String> {
 fn zwei_werte() -> Result<Vec<Wert>, String> {
     vorbedingung(
         pruefe_liste(&[
-            ("DE0007164600", "SAP.DEX", "SAP"),
-            ("DE0007100000", "MBG.DEX", "Mercedes-Benz Group"),
+            ("DE0007164600", Boerse::Xetra, "SAP.DEX", "SAP"),
+            (
+                "DE0007100000",
+                Boerse::Xetra,
+                "MBG.DEX",
+                "Mercedes-Benz Group",
+            ),
         ]),
         "Liste",
     )
@@ -159,25 +164,31 @@ fn sha256_hex(b: &[u8]) -> String {
 fn beobachtungsliste_gueltig() -> Result<(), String> {
     let l = beobachtungsliste()?;
     assert!(!l.is_empty() && l.len() <= 25, "{}", l.len());
-    assert!(pruefe_liste(&[("DE0007164601", "SAP.DEX", "x")]).is_err());
-    assert!(pruefe_liste(&[("DE0007164600", "SAP.DE", "x")]).is_err());
-    assert!(pruefe_liste(&[("DE0007164600", "SAP&X.DEX", "x")]).is_err());
-    assert!(pruefe_liste(&[("DE0007164600", "sap.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164601", Boerse::Xetra, "SAP.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP.DE", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP&X.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "sap.DEX", "x")]).is_err());
     assert!(
         pruefe_liste(&[
-            ("DE0007164600", "SAP.DEX", "x"),
-            ("DE0007100000", "SAP.DEX", "y")
+            ("DE0007164600", Boerse::Xetra, "SAP.DEX", "x"),
+            ("DE0007100000", Boerse::Xetra, "SAP.DEX", "y")
         ])
         .is_err()
     );
     assert!(
         pruefe_liste(&[
-            ("DE0007164600", "SAP.DEX", "x"),
-            ("DE0007164600", "MBG.DEX", "y")
+            ("DE0007164600", Boerse::Xetra, "SAP.DEX", "x"),
+            ("DE0007164600", Boerse::Xetra, "MBG.DEX", "y")
         ])
         .is_err()
     );
     assert!(pruefe_liste(&[]).is_err());
+    // NYSE: ohne Endung, hoechstens eine Klasse; eine Xetra-Endung gilt dort nicht.
+    assert!(pruefe_liste(&[("US0378331005", Boerse::Nyse, "AAPL", "x")]).is_ok());
+    assert!(pruefe_liste(&[("US0846707026", Boerse::Nyse, "BRK.B", "x")]).is_ok());
+    assert!(pruefe_liste(&[("US0378331005", Boerse::Nyse, "AAPL.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("US0378331005", Boerse::Nyse, "AAPLXY", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP", "x")]).is_err());
     Ok(())
 }
 
