@@ -479,6 +479,35 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
     Ok(())
 }
 
+/// An Feiertagen aller Boersen der Liste laeuft nichts; der naechste Lauf ist der naechste Tag,
+/// an dem gehandelt wird.
+#[test]
+fn zeitplan_ruht_an_boersenfeiertagen() -> Result<(), String> {
+    let p = Zeitplan {
+        an: true,
+        ..Zeitplan::default()
+    };
+    let leer = Erledigt::default();
+    let heiligabend = some(Datum::neu(2026, 12, 24), "Heiligabend")?;
+    assert_eq!(faellig(&p, &leer, heiligabend, (18, 0)), None);
+    let karfreitag = some(Datum::neu(2026, 4, 3), "Karfreitag")?;
+    assert_eq!(faellig(&p, &leer, karfreitag, (18, 0)), None);
+    let d23 = some(Datum::neu(2026, 12, 23), "23.12.")?;
+    let fertig = Erledigt {
+        termine: Some(d23),
+        kurse: Some(d23),
+    };
+    assert_eq!(
+        naechster(&p, &fertig, d23),
+        Some((
+            Art::Termine,
+            some(Datum::neu(2026, 12, 28), "28.12.")?,
+            (17, 40)
+        ))
+    );
+    Ok(())
+}
+
 // --- Werkbank ---
 
 #[test]
@@ -889,6 +918,57 @@ fn sperre_des_kostenschutzes_gefuehrt_aufheben() -> Result<(), String> {
     assert!(r.contains("m=kostenschutz_frei"), "{r}");
     let s = text(&behandle(&d, &umw, &seite, t));
     assert!(s.contains("Keine Sperre"), "{s}");
+    Ok(())
+}
+
+/// Die Kurssperre nach einem Sicherheitsabbruch wird wie die Sperre des Kostenschutzes gefuehrt
+/// aufgehoben, nie von Hand geloescht (Hinweis zu #34).
+#[test]
+fn kurssperre_gefuehrt_aufheben() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let umw = Attrappe::default();
+    let t = donnerstag(18, 0)?;
+    let seite = anfrage("GET", "/einrichtung", &[("Host", HOST)], "");
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(
+        !s.contains("id=\"kurssperre\""),
+        "ohne Sperre kein Abschnitt"
+    );
+
+    let halt = kostenschutz::kurse_pfad(&wurzel);
+    assert!(halt.ends_with("kurse.halt"));
+    let grund = "Sicherheitsabbruch: Die Kursquelle gab den Schluessel zurueck <i>\n";
+    fs::write(&halt, grund).map_err(|e| format!("Vorbedingung kurse.halt: {e}"))?;
+    let abdruck = kostenschutz::abdruck(grund);
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(s.contains("id=\"kurssperre\""), "{s}");
+    assert!(s.contains("zurueck &lt;i&gt;"), "maskiert: {s}");
+    assert!(s.contains("action=\"/kurssperre\""), "{s}");
+
+    let post = |abdruck: &str, haken: bool| {
+        let h = if haken { "&geprueft=ja" } else { "" };
+        formular_post("/kurssperre", &format!("t={TOKEN}&abdruck={abdruck}{h}"))
+    };
+    let r = text(&behandle(&d, &umw, &post(&abdruck, false), t));
+    assert!(r.contains("m=kurssperre_unbestaetigt"), "{r}");
+    let r = text(&behandle(&d, &umw, &post("0000000000000000", true), t));
+    assert!(r.contains("m=kurssperre_geaendert"), "{r}");
+    d.einreihen(Art::Kurse, Anlass::Hand)
+        .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
+    let r = text(&behandle(&d, &umw, &post(&abdruck, true), t));
+    assert!(r.contains("m=kurssperre_belegt"), "{r}");
+    assert!(halt.exists(), "die Sperre bleibt");
+    d.sperre().warteschlange.clear();
+
+    let r = text(&behandle(&d, &umw, &post(&abdruck, true), t));
+    assert!(r.contains("m=kurssperre_aufgehoben"), "{r}");
+    assert!(!halt.exists());
+    let festgehalten = fs::read_to_string(kostenschutz::kurse_protokoll_pfad(&wurzel))
+        .map_err(|e| format!("Protokoll: {e}"))?;
+    assert!(festgehalten.contains(grund), "{festgehalten}");
+    let r = text(&behandle(&d, &umw, &post(&abdruck, true), t));
+    assert!(r.contains("m=kurssperre_frei"), "{r}");
     Ok(())
 }
 

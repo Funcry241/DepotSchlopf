@@ -81,6 +81,7 @@ fn abruf(zeit: Zeitpunkt) -> Result<(Kurse, Kurse, Vec<KursBeleg>), String> {
     for (wert, roh) in [(A, ROH_A), (B, ROH_B)] {
         werte.push((
             isin(wert)?,
+            depot_kern::Boerse::Xetra,
             vorbedingung(lies_tageskurse(roh), "Kursdatei")?,
         ));
     }

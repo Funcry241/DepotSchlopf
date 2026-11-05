@@ -8,8 +8,11 @@
 //! **Kurse:** Nur Belege mit Herkunft `Quelle` zaehlen. Der Handelstag ist der juengste belegte
 //! Tag; er muss der heutige sein, sonst Halt: Ein Tag wird nie mit Kursen eines anderen Tages
 //! entschieden. Je Wert gilt der zuletzt belegte Kurs des Handelstags; der Vergleichskurs ist
-//! der zuletzt belegte Kurs des juengsten Tages davor. Gepruefte wie im Sammler
-//! (`pruefe_kurse`): Faellt die Pruefung durch, faellt der Zyklus aus, und niemand wird gefragt.
+//! der zuletzt belegte Kurs des juengsten Tages davor. Geprueft wie im Sammler
+//! (`waehle_tageswerte`): Pflicht sind nur die gehaltenen Werte. Ein Kandidat ohne gueltigen
+//! Kurs ist heute nicht handelbar; er faellt aus dem Universum des Tages, und der Grund steht
+//! unter `Auswahl` im Journal. Faellt die Pruefung eines gehaltenen Werts oder des Abrufs durch,
+//! oder bleibt kein Wert handelbar, faellt der Zyklus aus, und niemand wird gefragt.
 //!
 //! **Einmal je Tag:** Vor allem anderen gleicht der Kontowaechter Journal und Papierkonto ab;
 //! jede Abweichung ist Halt, auch fuer einen schon abgeschlossenen Tag (K23-02). Ist der
@@ -27,7 +30,7 @@ use depot_journal::{Journal, KursBeleg, Stand};
 use depot_kern::{
     Cent, Datum, Grenzen, Herkunft, Isin, Kurs, Kurse, Rundung, Topf, Universum, Zeitpunkt,
 };
-use depot_regelwerk::pruefe_kurse;
+use depot_regelwerk::waehle_tageswerte;
 use sha2::{Digest, Sha256};
 
 use crate::lauf::{
@@ -38,6 +41,8 @@ use crate::szenario::{Berater, Tag};
 
 const FASSUNG: &str = "depot_sim-papiertag-v1";
 const PAPIERTAG: &str = "Papiertag";
+/// Unter diesem Namen stehen Kandidaten, die heute nicht handelbar sind.
+pub const AUSWAHL: &str = "Auswahl";
 /// Termine so viele Tage voraus gehen als Ereignisse an die Berater.
 const TERMINE_VORAUS_TAGE: i64 = 30;
 const SEKUNDEN_JE_TAG: i64 = 86_400;
@@ -339,7 +344,18 @@ pub fn papiertag(
         "Papiergeld; Ausfuehrung zum Schlusskurs des Entscheidungstags (Vereinfachung)",
     )
     .map_err(journal)?;
-    let fehler = pruefe_kurse(&grenzen, universum, tag.datum, &tag.kurse, &k.vortag);
+    let wahl = waehle_tageswerte(
+        &grenzen,
+        universum,
+        &j.stand().gehalten(),
+        tag.datum,
+        &tag.kurse,
+        &k.vortag,
+    );
+    for f in &wahl.ausgelassen {
+        j.begruende(tag.datum, AUSWAHL, &format!("heute nicht handelbar: {f:?}"))
+            .map_err(journal)?;
+    }
     let ab = abdruck(
         letzter.as_ref().map(|a| a.abdruck.as_str()),
         &tag,
@@ -348,14 +364,14 @@ pub fn papiertag(
     let nr = tagnummer(tag.datum).ok_or_else(|| rechnung("Tagnummer"))?;
     let z = Zyklus {
         grenzen: &grenzen,
-        universum,
+        universum: &wahl.universum,
         tag: &tag,
         vortag: &k.vortag,
         nr,
         abdruck: &ab,
     };
     let mut beteiligte = Beteiligte { dachs, maus, konto };
-    let hoechststand = ein_tag(j, &z, hoch, &fehler, &mut beteiligte)?;
+    let hoechststand = ein_tag(j, &z, hoch, &wahl.fehler, &mut beteiligte)?;
     Ok(Ausgang::Abgeschlossen {
         datum: tag.datum,
         hoechststand,

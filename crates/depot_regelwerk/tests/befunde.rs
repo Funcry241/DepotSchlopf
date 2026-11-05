@@ -17,7 +17,7 @@ use depot_kern::{
 };
 use depot_regelwerk::{
     Anlass, AuftragsKennung, DatenFehler, Eingabe, Entscheidung, GenehmigterAuftrag,
-    Kennungsvergabe, Richtung, entscheide, notbremse_auftraege, pruefe_kurse,
+    Kennungsvergabe, Richtung, entscheide, notbremse_auftraege, pruefe_kurse, waehle_tageswerte,
 };
 
 const ISINS: [&str; 11] = [
@@ -1189,4 +1189,59 @@ fn befund_k15_03_vergleichsabruf_liegt_nicht_nach_dem_abruf() {
         fehler.contains(&DatenFehler::VergleichsabrufNachAbruf),
         "Vergleich aus der Zukunft: {fehler:?}"
     );
+}
+
+/// Nur gehaltene Werte sind Pflicht (Wolfgang, 05.11.2026): Fehlt einem Kandidaten der Kurs
+/// oder springt er unplausibel, ist er heute nur nicht handelbar; der Zyklus laeuft ohne ihn.
+/// Ein Befund zu einem gehaltenen Wert oder zum Abruf laesst den Zyklus ausfallen, und ohne
+/// jeden handelbaren Wert wird niemand gefragt.
+#[test]
+fn nur_gehaltene_werte_sind_pflicht() {
+    let g = Grenzen::standard();
+    let vortag = vortagskurse(&preise_alle(10_000));
+    let mut preise = preise_alle(10_000);
+    preise.remove(&isin(3));
+    preise.insert(isin(4), 20_000);
+    let heute = kurse(&preise);
+    let gehalten: BTreeSet<Isin> = [isin(0)].into_iter().collect();
+
+    let t = waehle_tageswerte(&g, &universum(), &gehalten, handelstag(), &heute, &vortag);
+    assert!(t.fehler.is_empty(), "{:?}", t.fehler);
+    assert_eq!(t.ausgelassen.len(), 2, "{:?}", t.ausgelassen);
+    assert!(t.ausgelassen.contains(&DatenFehler::KursFehlt(isin(3))));
+    assert!(
+        t.ausgelassen
+            .iter()
+            .any(|f| matches!(f, DatenFehler::Kurssprung { isin: i, .. } if *i == isin(4)))
+    );
+    let rest = t.universum.isins();
+    assert_eq!(rest.len(), 8);
+    assert!(!rest.contains(&isin(3)) && !rest.contains(&isin(4)) && rest.contains(&isin(0)));
+
+    // Derselbe Befund an einem gehaltenen Wert: Der Zyklus faellt aus.
+    let gehalten: BTreeSet<Isin> = [isin(0), isin(3)].into_iter().collect();
+    let t = waehle_tageswerte(&g, &universum(), &gehalten, handelstag(), &heute, &vortag);
+    assert_eq!(t.fehler, vec![DatenFehler::KursFehlt(isin(3))]);
+
+    // Ein Befund zum Abruf trifft alle: Der Zyklus faellt aus.
+    let morgen = Datum::neu(2026, 11, 3).unwrap_or_else(|| unreachable!("Datum"));
+    let t = waehle_tageswerte(&g, &universum(), &BTreeSet::new(), morgen, &heute, &vortag);
+    assert!(
+        t.fehler.contains(&DatenFehler::AbrufNichtAmHandelstag),
+        "{:?}",
+        t.fehler
+    );
+
+    // Kein Kandidat mit Kurs und nichts gehalten: niemand wird gefragt.
+    let leer = kurse(&Preise::new());
+    let t = waehle_tageswerte(
+        &g,
+        &universum(),
+        &BTreeSet::new(),
+        handelstag(),
+        &leer,
+        &vortag,
+    );
+    assert_eq!(t.fehler, vec![DatenFehler::KeinWertHandelbar]);
+    assert!(t.universum.instrumente().is_empty());
 }

@@ -1,11 +1,14 @@
 //! Ein Lauf des Sammlers: je Wert abrufen, roh ablegen, lesen, belegen; danach pruefen.
 //!
-//! Reihenfolge je Wert (R12): Erst liegt die rohe Antwort unter `daten/roh/`, dann steht jeder
-//! Kurs daraus im Journal, erst dann wird er verwendet. Was nicht gelesen werden kann, wird nicht
-//! belegt; die rohe Antwort bleibt zur Durchsicht liegen.
+//! Reihenfolge (R12): Erst liegt die rohe Antwort unter `daten/roh/`, dann steht jeder Kurs
+//! daraus im Journal, erst dann wird er verwendet. Was nicht gelesen werden kann, wird nicht
+//! belegt; die rohe Antwort bleibt zur Durchsicht liegen. Ins Journal kommen die Kurse erst,
+//! wenn der Lauf ohne Sicherheitsabbruch zu Ende ist, in der Reihenfolge ihres Abrufs.
 //!
 //! Enthaelt eine Antwort den Schluessel, gleich in welcher Schreibweise, wird sie weder abgelegt
-//! noch gelesen, und der Lauf endet (K19-01).
+//! noch gelesen, und der Lauf endet (K19-01). Dann wird auch kein schon gelesener Kurs dieses
+//! Laufs belegt: Ein Papiertag, auch von Hand gestartet, findet keine Teilkurse (Maus,
+//! Restbefund zu #34), selbst wenn die Kurssperre sich nicht schreiben laesst.
 //!
 //! Meldet die Quelle statt Kursen einen Hinweis, gilt: Ein Fehler zu genau diesem Kuerzel
 //! (`Error Message`) betrifft nur diesen Wert. Jeder andere Hinweis, etwa das erreichte
@@ -18,7 +21,7 @@ use std::time::Duration;
 
 use depot_journal::{Journal, JournalFehler, KursBeleg};
 use depot_kern::{Datum, Grenzen, Kurs, Kurse, Preis, Zeitpunkt, lies_tageskurse, schlusskurse};
-use depot_regelwerk::{DatenFehler, pruefe_kurse};
+use depot_regelwerk::{DatenFehler, waehle_tageswerte};
 
 use crate::liste::{QUELLE, Wert, als_universum};
 use crate::netz::Netz;
@@ -46,19 +49,28 @@ pub struct Bericht {
     pub werte: Vec<(Wert, Ergebnis)>,
     /// Warum der Lauf vor dem letzten Wert endete.
     pub abbruch: Option<String>,
+    /// Der Lauf endete aus einem Schutzgrund, etwa weil die Quelle den Schluessel zurueckgab.
+    /// Dann ist nichts aus diesem Lauf verwendbar, auch nicht, was vorher belegt wurde (Maus,
+    /// Gegenprobe 1 zu #34).
+    pub sicherheitsabbruch: bool,
     /// Der juengste Handelstag unter den belegten Schlusskursen.
     pub handelstag: Option<Datum>,
-    /// Ergebnis von `pruefe_kurse` fuer alle Werte der Liste; leer = alles in Ordnung.
+    /// Befunde, an denen der Papiertag ausfiele (`waehle_tageswerte`): zum Abruf, zu einem
+    /// gehaltenen Wert, oder kein Wert handelbar. Leer = in Ordnung.
     pub pruefung: Vec<DatenFehler>,
+    /// Kandidaten, die heute nicht handelbar sind, mit Grund. Der Papiertag laeuft ohne sie.
+    pub ausgelassen: Vec<DatenFehler>,
 }
 
 impl Bericht {
-    /// Sind die Kurse dieses Laufs verwendbar? Nur wenn Schlusskurse belegt sind und
-    /// `pruefe_kurse` fuer alle Werte der Liste nichts meldet (K19-02). Ein Wert mit Fehler oder
-    /// ohne Abruf fehlt dort als `KursFehlt`. Belegt bleibt alles, was abgerufen wurde;
-    /// verwendbar ist es damit noch nicht.
+    /// Sind die Kurse dieses Laufs verwendbar? Nie nach einem Sicherheitsabbruch. Sonst nur, wenn
+    /// Schlusskurse belegt sind und die
+    /// Pruefung wie im Papiertag nichts meldet, was den Zyklus ausfallen liesse (K19-02): Pflicht
+    /// sind die gehaltenen Werte; ein Kandidat mit Fehler oder ohne Abruf faellt nur aus der
+    /// Auswahl des Tages. Belegt bleibt alles, was abgerufen wurde; verwendbar ist es damit
+    /// noch nicht.
     pub fn verwendbar(&self) -> bool {
-        self.handelstag.is_some() && self.pruefung.is_empty()
+        !self.sicherheitsabbruch && self.handelstag.is_some() && self.pruefung.is_empty()
     }
 }
 
@@ -181,7 +193,8 @@ fn tag_und_preis(k: Option<&Kurs>) -> Option<(Datum, Preis)> {
 /// zwischen zwei Abrufen.
 ///
 /// # Errors
-/// Journal, Ablage oder Uhr versagen. Was bis dahin belegt ist, bleibt belegt.
+/// Journal, Ablage oder Uhr versagen. Was bis dahin belegt ist, bleibt belegt; vor dem Ende
+/// der Abrufe ist das nichts.
 pub fn sammle(
     journal: &mut Journal,
     netz: &mut dyn Netz,
@@ -194,12 +207,15 @@ pub fn sammle(
     let mut bericht = Bericht {
         werte: Vec::new(),
         abbruch: None,
+        sicherheitsabbruch: false,
         handelstag: None,
         pruefung: Vec::new(),
+        ausgelassen: Vec::new(),
     };
     let mut heute: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
     let mut vortag: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
     let mut letzter_abruf: Option<Zeitpunkt> = None;
+    let mut offen: Vec<KursBeleg> = Vec::new();
 
     for (i, wert) in werte.iter().enumerate() {
         if bericht.abbruch.is_some() {
@@ -224,6 +240,7 @@ pub fn sammle(
                 "Die Antwort enthaelt den Schluessel: nicht abgelegt, nicht belegt, Lauf beendet"
                     .to_string();
             bericht.abbruch = Some(text.clone());
+            bericht.sicherheitsabbruch = true;
             bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
             continue;
         }
@@ -242,7 +259,7 @@ pub fn sammle(
             .map_err(|_| "Antwort ist kein UTF-8".to_string())
             .and_then(|t| lies_tageskurse(&t).map_err(|e| format!("Antwort unlesbar: {e:?}")))
             .and_then(|tage| {
-                schlusskurse(abruf, vec![(wert.isin.clone(), tage)])
+                schlusskurse(abruf, vec![(wert.isin.clone(), wert.boerse, tage)])
                     .map_err(|e| format!("Schlusskurse: {e:?}"))
             });
         let (h, v) = match gelesen {
@@ -252,14 +269,15 @@ pub fn sammle(
                 continue;
             }
         };
-        // Belegen, bevor irgendetwas die Kurse verwendet (R12): erst der Vortag, dann heute.
+        // Belegt wird nach dem Lauf, bevor irgendetwas die Kurse verwendet (R12): je Wert erst
+        // der Vortag, dann heute.
         for kurs in [v.eintrag(&wert.isin), h.eintrag(&wert.isin)]
             .into_iter()
             .flatten()
         {
             let beleg = KursBeleg::neu(QUELLE, abruf, &roh, wert.isin.clone(), kurs.clone())
                 .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
-            journal.belege_kurs(&beleg).map_err(SammelFehler::Journal)?;
+            offen.push(beleg);
         }
         if let Some(k) = h.eintrag(&wert.isin) {
             heute.push((wert.isin.clone(), k.clone()));
@@ -278,23 +296,76 @@ pub fn sammle(
         ));
     }
 
-    // Pruefen wie jeden Kurs. Das Alter misst gegen den letzten Abruf; fuer frueher abgerufene
-    // Werte ist das strenger, nie milder.
-    if let Some(stand) = letzter_abruf {
-        let handelstag = heute.iter().map(|(_, k)| k.handelstag()).max();
-        bericht.handelstag = handelstag;
-        let heute = Kurse::neu(stand, heute).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
-        let vortag =
-            Kurse::neu(stand, vortag).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
-        if let Some(tag) = handelstag {
-            bericht.pruefung = pruefe_kurse(
-                &Grenzen::standard(),
-                &als_universum(werte),
-                tag,
-                &heute,
-                &vortag,
-            );
+    let gelesen = Gelesen {
+        offen,
+        letzter_abruf,
+        heute,
+        vortag,
+    };
+    abschliessen(bericht, journal, werte, gelesen)
+}
+
+/// Was ein Lauf gelesen, aber noch nicht belegt hat.
+struct Gelesen {
+    offen: Vec<KursBeleg>,
+    letzter_abruf: Option<Zeitpunkt>,
+    heute: Vec<(depot_kern::Isin, Kurs)>,
+    vortag: Vec<(depot_kern::Isin, Kurs)>,
+}
+
+/// Nach den Abrufen: ohne Sicherheitsabbruch alles in Abrufreihenfolge belegen und pruefen;
+/// nach einem Sicherheitsabbruch nichts belegen.
+fn abschliessen(
+    mut bericht: Bericht,
+    journal: &mut Journal,
+    werte: &[Wert],
+    g: Gelesen,
+) -> Result<Bericht, SammelFehler> {
+    if bericht.sicherheitsabbruch {
+        for (_, e) in &mut bericht.werte {
+            if matches!(e, Ergebnis::Belegt { .. }) {
+                *e = Ergebnis::Fehler(
+                    "Nicht belegt: Sicherheitsabbruch des Laufs, kein Kurs dieses Abrufs zaehlt"
+                        .into(),
+                );
+            }
         }
+        return Ok(bericht);
+    }
+    for beleg in &g.offen {
+        journal.belege_kurs(beleg).map_err(SammelFehler::Journal)?;
+    }
+    if let Some(stand) = g.letzter_abruf {
+        pruefe(&mut bericht, journal, werte, stand, g.heute, g.vortag)?;
     }
     Ok(bericht)
+}
+
+/// Prueft wie der Papiertag (`waehle_tageswerte`). Das Alter misst gegen den letzten Abruf;
+/// fuer frueher abgerufene Werte ist das strenger, nie milder.
+fn pruefe(
+    bericht: &mut Bericht,
+    journal: &Journal,
+    werte: &[Wert],
+    stand: Zeitpunkt,
+    heute: Vec<(depot_kern::Isin, Kurs)>,
+    vortag: Vec<(depot_kern::Isin, Kurs)>,
+) -> Result<(), SammelFehler> {
+    let handelstag = heute.iter().map(|(_, k)| k.handelstag()).max();
+    bericht.handelstag = handelstag;
+    let heute = Kurse::neu(stand, heute).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
+    let vortag = Kurse::neu(stand, vortag).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
+    if let Some(tag) = handelstag {
+        let wahl = waehle_tageswerte(
+            &Grenzen::standard(),
+            &als_universum(werte),
+            &journal.stand().gehalten(),
+            tag,
+            &heute,
+            &vortag,
+        );
+        bericht.pruefung = wahl.fehler;
+        bericht.ausgelassen = wahl.ausgelassen;
+    }
+    Ok(())
 }

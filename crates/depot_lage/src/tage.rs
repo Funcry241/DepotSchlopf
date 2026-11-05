@@ -11,9 +11,10 @@ use std::fmt::Write as _;
 
 use depot_journal::Stand;
 use depot_journal::anbieter::{Eintrag, Ergebnis, Wer};
+use depot_kern::liste;
 use depot_kern::{BeraterId, Datum, Grenzen, Universum, Zeitpunkt};
-use depot_regelwerk::pruefe_kurse;
-use depot_sim::{Gefragt, gefragt, tageskurse_am};
+use depot_regelwerk::waehle_tageswerte;
+use depot_sim::{AUSWAHL, Gefragt, gefragt, tageskurse_am};
 
 use crate::betrieb::wer_fuer;
 use crate::ortszeit;
@@ -26,6 +27,9 @@ pub const TAGE_MAX: usize = 10;
 pub enum TagStand {
     /// Der Papiertag lief und ist abgeschlossen.
     Abgeschlossen,
+    /// Abgeschlossen; einige Kandidaten waren ohne gueltigen Kurs und heute nicht handelbar.
+    /// Mit den Gruenden in Worten.
+    MitAuslassung(Vec<String>),
     /// Abgeschlossen, aber die Kursprüfung liess den Zyklus ausfallen: niemand gefragt, kein
     /// Auftrag. Mit den Befunden in Worten.
     OhneHandel(Vec<String>),
@@ -35,13 +39,15 @@ pub enum TagStand {
     Ausgefallen(String),
     /// Heute, noch nicht gelaufen.
     Offen,
+    /// Keine Boerse der Liste hat gehandelt (Feiertag), mit Grund: nichts verpasst.
+    Geschlossen(String),
 }
 
 impl TagStand {
     pub fn klasse(&self) -> &'static str {
         match self {
-            TagStand::Abgeschlossen => "gut",
-            TagStand::OhneHandel(_) | TagStand::Offen => "offen",
+            TagStand::Abgeschlossen | TagStand::MitAuslassung(_) => "gut",
+            TagStand::OhneHandel(_) | TagStand::Offen | TagStand::Geschlossen(_) => "offen",
             TagStand::Angefangen | TagStand::Ausgefallen(_) => "halt",
         }
     }
@@ -49,6 +55,10 @@ impl TagStand {
     pub fn text(&self) -> String {
         match self {
             TagStand::Abgeschlossen => "Papiertag abgeschlossen".into(),
+            TagStand::MitAuslassung(b) => format!(
+                "Papiertag abgeschlossen; heute nicht handelbar und ausgelassen: {}",
+                b.join("; ")
+            ),
             TagStand::OhneHandel(b) => format!(
                 "Abgeschlossen ohne Handel: Die Kursprüfung ließ den Tag ausfallen, niemand \
                  wurde gefragt ({})",
@@ -59,6 +69,7 @@ impl TagStand {
             }
             TagStand::Ausgefallen(g) => format!("Ausgefallen: {g}"),
             TagStand::Offen => "Heute noch nicht gelaufen".into(),
+            TagStand::Geschlossen(g) => format!("Börse geschlossen ({g}): kein Papiertag nötig"),
         }
     }
 }
@@ -84,7 +95,8 @@ pub struct TagErgebnis {
 const PAPIERTAG: &str = "Papiertag";
 const DATEN: &str = "Daten";
 
-fn handelstag(d: Datum) -> bool {
+/// Montag bis Freitag. Ob dort eine Boerse handelte, sagt `liste::handelstag`.
+fn werktag(d: Datum) -> bool {
     d.wochentag().is_some_and(|w| (1..=5).contains(&w))
 }
 
@@ -114,6 +126,7 @@ fn befund_text(roh: &str) -> &'static str {
         "KursNichtAmHandelstag" => "Kurs nicht vom Handelstag",
         "VergleichskursNichtVorher" => "Vergleichskurs nicht von einem früheren Tag",
         "VergleichsabrufNachAbruf" => "Vergleichsabruf nach dem Abruf",
+        "KeinWertHandelbar" => "kein Wert mit gültigem Kurs",
         _ => "sonstiger Befund",
     }
 }
@@ -228,12 +241,28 @@ fn beitrag(begruendungen: &[&str], aufrufe: &[&Eintrag]) -> KiBeitrag {
     }
 }
 
-/// Die Befunde der Kurspruefung, wie ein Papiertag am Tag `d` sie mit den bis dahin
-/// abgerufenen Kursen gehabt haette, in Worten. `None` ohne Kurse dieses Tages oder ohne
-/// Befund.
+/// Die Befunde der Kurspruefung, an denen ein Papiertag am Tag `d` mit den bis dahin
+/// abgerufenen Kursen ausgefallen waere, in Worten. Pflicht sind die Werte, die heute gehalten
+/// werden. `None` ohne Kurse dieses Tages oder ohne Befund.
 fn kurspruefung_am(stand: &Stand, universum: &Universum, d: Datum) -> Option<Vec<String>> {
     let k = tageskurse_am(stand, universum, d).ok()?;
-    let befunde = pruefe_kurse(&Grenzen::standard(), universum, d, &k.heute, &k.vortag);
+    let wahl = waehle_tageswerte(
+        &Grenzen::standard(),
+        universum,
+        &stand.gehalten(),
+        d,
+        &k.heute,
+        &k.vortag,
+    );
+    if wahl.fehler.is_empty() {
+        return None;
+    }
+    let befunde: Vec<_> = wahl
+        .fehler
+        .iter()
+        .chain(&wahl.ausgelassen)
+        .filter(|b| **b != depot_regelwerk::DatenFehler::KeinWertHandelbar)
+        .collect();
     if befunde.is_empty() {
         return None;
     }
@@ -260,8 +289,15 @@ pub fn tage(
     let mut tage = Vec::new();
     let mut d = heute;
     while d >= erster && tage.len() < TAGE_MAX {
-        if handelstag(d) {
-            tage.push(ein_tag(stand, universum, protokoll, d, heute));
+        if werktag(d) {
+            tage.push(match liste::feiertag(d) {
+                Some(grund) => TagErgebnis {
+                    datum: d,
+                    stand: TagStand::Geschlossen(grund),
+                    ki: Vec::new(),
+                },
+                None => ein_tag(stand, universum, protokoll, d, heute),
+            });
         }
         let Some(v) = tag_davor(d) else {
             break;
@@ -303,7 +339,7 @@ fn ein_tag(
         } else {
             TagStand::Ausgefallen(
                 "keine Schlusskurse für diesen Tag (Rechner aus oder Zeitplan aus zur \
-                 Abrufzeit, Abruf gescheitert, oder Börsenfeiertag)"
+                 Abrufzeit, oder Abruf gescheitert)"
                     .into(),
             )
         };
@@ -318,9 +354,19 @@ fn ein_tag(
         .filter(|(wer, text)| *wer == DATEN && !text.starts_with("Zyklus faellt aus"))
         .map(|(_, text)| *text)
         .collect();
+    let ausgelassen: Vec<&str> = begr
+        .iter()
+        .filter(|(wer, _)| *wer == AUSWAHL)
+        .map(|(_, text)| text.strip_prefix("heute nicht handelbar: ").unwrap_or(text))
+        .collect();
     let stand_tag = if abschluss.is_some_and(|a| a >= d) {
-        if daten.is_empty() {
+        if daten.is_empty() && ausgelassen.is_empty() {
             TagStand::Abgeschlossen
+        } else if daten.is_empty() {
+            TagStand::MitAuslassung(befunde_text(ausgelassen.into_iter()))
+        } else if daten.iter().all(|t| t.starts_with("KeinWertHandelbar")) {
+            // Kein Kandidat handelbar: Die Gruende stehen bei den ausgelassenen.
+            TagStand::OhneHandel(befunde_text(ausgelassen.into_iter()))
         } else {
             TagStand::OhneHandel(befunde_text(daten.into_iter()))
         }

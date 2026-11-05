@@ -54,8 +54,56 @@ pub fn abhilfe_knopf(token: &str, a: Abhilfe) -> Option<String> {
         Abhilfe::KostenschutzPruefen => {
             Some("<a href=\"/einrichtung#kostenschutz\">Zur Prüfung</a>".into())
         }
+        Abhilfe::KurssperrePruefen => {
+            Some("<a href=\"/einrichtung#kurssperre\">Zur Prüfung</a>".into())
+        }
         Abhilfe::Pruefen | Abhilfe::Warten => None,
     }
+}
+
+/// Meldungen nach dem gefuehrten Aufheben einer Sperre: `kostenschutz_…` oder `kurssperre_…`.
+fn sperr_meldung(code: &str) -> Option<(&'static str, &'static str)> {
+    let (sperre, ausgang) = code.split_once('_')?;
+    let kurse = match sperre {
+        "kostenschutz" => false,
+        "kurssperre" => true,
+        _ => return None,
+    };
+    Some(match (ausgang, kurse) {
+        ("aufgehoben", false) => (
+            "gut",
+            "Sperre aufgehoben, Grund festgehalten. Die Reservierung bleibt gebucht; jeder \
+             weitere Aufruf durchläuft wieder die Kostenprüfung.",
+        ),
+        ("aufgehoben", true) => (
+            "gut",
+            "Kurssperre aufgehoben, Grund festgehalten. Der nächste Abruf holt alle Kurse neu.",
+        ),
+        ("unbestaetigt", false) => (
+            "offen",
+            "Nicht aufgehoben: Bitte zuerst bestätigen, dass Sie die Kosten beim Anbieter geprüft haben.",
+        ),
+        ("unbestaetigt", true) => (
+            "offen",
+            "Nicht aufgehoben: Bitte zuerst bestätigen, dass Sie den Schlüssel der Kursquelle \
+             geprüft und bei Bedarf erneuert haben.",
+        ),
+        ("belegt", _) => (
+            "offen",
+            "Nicht aufgehoben: Es läuft oder wartet ein Auftrag. Danach erneut versuchen.",
+        ),
+        ("geaendert", _) => (
+            "halt",
+            "Nicht aufgehoben: Die Sperre hat sich inzwischen geändert. Bitte den neuen Grund prüfen.",
+        ),
+        ("frei", false) => ("gut", "Es liegt keine Sperre des Kostenschutzes vor."),
+        ("frei", true) => ("gut", "Es liegt keine Kurssperre vor."),
+        ("fehler", _) => (
+            "halt",
+            "Nicht aufgehoben: Datei nicht les- oder schreibbar. Die Sperre gilt weiter.",
+        ),
+        _ => return None,
+    })
 }
 
 /// Feste Meldungen nach einem Formular; nur bekannte Kennungen erscheinen.
@@ -64,6 +112,9 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         .split('&')
         .find_map(|p| p.strip_prefix("m="))
         .unwrap_or_default();
+    if let Some(m) = sperr_meldung(code) {
+        return Some(m);
+    }
     Some(match code {
         "auftrag" => ("gut", "Auftrag eingereiht. Er steht unter Tätigkeit."),
         "auftrag_belegt" => (
@@ -126,28 +177,6 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "update_belegt" => (
             "offen",
             "Update nicht eingereiht: Es geht nur, wenn kein anderer Auftrag läuft oder wartet.",
-        ),
-        "kostenschutz_aufgehoben" => (
-            "gut",
-            "Sperre aufgehoben, Grund festgehalten. Die Reservierung bleibt gebucht; jeder \
-             weitere Aufruf durchläuft wieder die Kostenprüfung.",
-        ),
-        "kostenschutz_unbestaetigt" => (
-            "offen",
-            "Nicht aufgehoben: Bitte zuerst bestätigen, dass Sie die Kosten beim Anbieter geprüft haben.",
-        ),
-        "kostenschutz_belegt" => (
-            "offen",
-            "Nicht aufgehoben: Es läuft oder wartet ein Auftrag. Danach erneut versuchen.",
-        ),
-        "kostenschutz_geaendert" => (
-            "halt",
-            "Nicht aufgehoben: Die Sperre hat sich inzwischen geändert. Bitte den neuen Grund prüfen.",
-        ),
-        "kostenschutz_frei" => ("gut", "Es liegt keine Sperre des Kostenschutzes vor."),
-        "kostenschutz_fehler" => (
-            "halt",
-            "Nicht aufgehoben: Datei nicht les- oder schreibbar. Die Sperre gilt weiter.",
         ),
         _ => return None,
     })
@@ -489,6 +518,8 @@ pub struct Einrichtung {
     pub schluessel: Vec<(Wer, SchluesselStand)>,
     /// Inhalt von `daten/ki.halt`, falls die Sperre des Kostenschutzes liegt.
     pub ki_halt: Result<Option<String>, String>,
+    /// Inhalt von `daten/kurse.halt`, falls die Kurssperre liegt.
+    pub kurse_halt: Result<Option<String>, String>,
     /// `Some(true)`: Datei stimmt mit dem aktiven Zeitplan ueberein; `Some(false)`: weicht ab
     /// oder ist unlesbar; `None`: keine Datei (Voreinstellung).
     pub zeitplan_gespeichert: Option<bool>,
@@ -569,6 +600,43 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
          <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
          Ich habe die Kosten beim Anbieter geprüft.</label>\
          <button type=\"submit\">Sperre aufheben</button></form></section>",
+        maskiere(inhalt),
+        maskiere(token),
+        kostenschutz::abdruck(inhalt)
+    );
+}
+
+fn kurssperre_teil(token: &str, e: &Einrichtung, s: &mut String) {
+    let inhalt = match &e.kurse_halt {
+        // Ohne Kurssperre kein eigener Abschnitt: Sie kommt nur nach einem Sicherheitsabbruch vor.
+        Ok(None) => return,
+        Ok(Some(t)) => t,
+        Err(f) => {
+            let _ = write!(
+                s,
+                "<section id=\"kurssperre\"><h2>Kurssperre</h2><p class=\"halt\">{}. Kein \
+                 Abruf und kein Papiertag, bis die Datei lesbar ist.</p></section>",
+                maskiere(f)
+            );
+            return;
+        }
+    };
+    let _ = write!(
+        s,
+        "<section id=\"kurssperre\"><h2>Kurssperre</h2>\
+         <p><span class=\"halt\">gesperrt</span>: Ein Kursabruf endete aus Sicherheitsgründen, \
+         weil die Kursquelle den Schlüssel zurückgab. Bis zur Prüfung ruft der Sammler nichts ab, \
+         und kein Papiertag beginnt, auch nicht von Hand.</p><pre>{}</pre>\
+         <p class=\"leise\">So prüfen: Beim Anbieter nachsehen, ob der Schlüssel noch gilt, und \
+         ihn bei Zweifel neu ausstellen und unter Schlüssel neu hinterlegen. Aufheben ändert nichts \
+         am Journal. Der nächste Abruf holt alle Kurse neu und prüft sie wie immer. Der Grund \
+         bleibt in daten/kurse_halt_aufgehoben.txt.</p>\
+         <form method=\"post\" action=\"/kurssperre\">\
+         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
+         <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
+         Ich habe den Schlüssel der Kursquelle geprüft und bei Bedarf erneuert.</label>\
+         <button type=\"submit\">Kurssperre aufheben</button></form></section>",
         maskiere(inhalt),
         maskiere(token),
         kostenschutz::abdruck(inhalt)
@@ -790,6 +858,7 @@ pub fn einrichtung(
     );
     schluessel_teil(token, e, &mut s);
     kostenschutz_teil(token, e, &mut s);
+    kurssperre_teil(token, e, &mut s);
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);
     autostart_teil(token, e, &mut s);

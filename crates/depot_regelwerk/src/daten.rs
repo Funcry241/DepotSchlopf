@@ -1,10 +1,18 @@
-//! Plausibilitaetspruefung der Kurse. Bei jedem Fehler faellt der Zyklus aus.
+//! Plausibilitaetspruefung der Kurse.
+//!
+//! `pruefe_kurse` prueft jeden Wert eines Universums; bei jedem Fehler faellt der Zyklus aus.
+//! `waehle_tageswerte` teilt das fuer den Papiertag: Pflicht sind nur die gehaltenen Werte,
+//! denn ohne ihren Kurs ist das Depot nicht zu bewerten. Ein Kandidat ohne gueltigen Kurs ist an
+//! diesem Tag nur nicht handelbar; er faellt aus dem Universum des Tages, und der Grund steht im
+//! Journal. Faellt der Abruf selbst durch, faellt der Zyklus aus.
 //!
 //! Jeder Wert des Universums braucht einen Kurs vom Handelstag des Zyklus, der nicht aelter
 //! als das Hoechstalter ist, und einen Vergleichskurs von einem frueheren Handelstag. Auch der
 //! Abruf liegt am Handelstag; sonst gaelte ein alter Kurssatz an seinem eigenen Zeitstempel als
 //! frisch (K15-02). Fehlt der Vergleichskurs, ist der Sprungtest nicht
 //! bestanden, sondern ein eigener Fehler (R20, 1·F08).
+
+use std::collections::BTreeSet;
 
 use depot_kern::{Datum, Grenzen, Isin, Kurse, Universum};
 
@@ -29,6 +37,80 @@ pub enum DatenFehler {
     /// Der Vergleichsabruf liegt nach dem Abruf des Zyklus: Seine Kurse lagen damals noch
     /// nicht vor (K15-03).
     VergleichsabrufNachAbruf,
+    /// Kein Wert hat einen gueltigen Kurs, und nichts wird gehalten: Es gibt nichts zu
+    /// entscheiden, niemand wird gefragt.
+    KeinWertHandelbar,
+}
+
+impl DatenFehler {
+    /// Der Wert, den der Befund betrifft; `None` fuer einen Befund zum ganzen Abruf.
+    pub fn isin(&self) -> Option<&Isin> {
+        match self {
+            DatenFehler::KursFehlt(i)
+            | DatenFehler::KursNichtPositiv(i)
+            | DatenFehler::Kurssprung { isin: i, .. }
+            | DatenFehler::KeinVergleichskurs(i)
+            | DatenFehler::KursZuAlt(i)
+            | DatenFehler::KursNichtAmHandelstag(i)
+            | DatenFehler::VergleichskursNichtVorher(i) => Some(i),
+            DatenFehler::AbrufNichtAmHandelstag
+            | DatenFehler::VergleichsabrufNachAbruf
+            | DatenFehler::KeinWertHandelbar => None,
+        }
+    }
+}
+
+/// Die Werte eines Tages nach der Kurspruefung.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tageswerte {
+    /// Die handelbaren Werte des Tages: alle mit gueltigem Kurs, in der Reihenfolge des
+    /// Universums.
+    pub universum: Universum,
+    /// Kandidaten, die heute nicht handelbar sind, mit Grund. Der Zyklus laeuft ohne sie.
+    pub ausgelassen: Vec<DatenFehler>,
+    /// Befunde, an denen der Zyklus ausfaellt: zum Abruf, zu einem gehaltenen Wert, oder kein
+    /// Wert handelbar. Leer = der Zyklus laeuft.
+    pub fehler: Vec<DatenFehler>,
+}
+
+/// Prueft die Kurse eines Tages wie `pruefe_kurse` und teilt die Befunde: Ein Befund zu einem
+/// gehaltenen Wert oder zum Abruf laesst den Zyklus ausfallen; ein Befund zu einem Kandidaten
+/// nimmt nur diesen aus dem Universum des Tages. Ein gehaltener Wert ausserhalb des Universums
+/// (zwingender Ausstieg) wird wie bisher nicht hier geprueft; ohne seinen Kurs ist das Depot
+/// nicht zu bewerten, und der Waechter haelt an.
+pub fn waehle_tageswerte(
+    grenzen: &Grenzen,
+    universum: &Universum,
+    gehalten: &BTreeSet<Isin>,
+    handelstag: Datum,
+    heute: &Kurse,
+    vortag: &Kurse,
+) -> Tageswerte {
+    let mut fehler = Vec::new();
+    let mut ausgelassen = Vec::new();
+    for befund in pruefe_kurse(grenzen, universum, handelstag, heute, vortag) {
+        match befund.isin() {
+            Some(i) if !gehalten.contains(i) => ausgelassen.push(befund),
+            _ => fehler.push(befund),
+        }
+    }
+    let raus: BTreeSet<&Isin> = ausgelassen.iter().filter_map(DatenFehler::isin).collect();
+    let tageswerte = Universum::neu(
+        universum
+            .instrumente()
+            .iter()
+            .filter(|i| !raus.contains(&i.isin))
+            .cloned()
+            .collect(),
+    );
+    if fehler.is_empty() && tageswerte.instrumente().is_empty() {
+        fehler.push(DatenFehler::KeinWertHandelbar);
+    }
+    Tageswerte {
+        universum: tageswerte,
+        ausgelassen,
+        fehler,
+    }
 }
 
 /// Prueft alle Werte des Universums. Leere Liste = alles in Ordnung.

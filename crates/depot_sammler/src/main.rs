@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use depot_journal::{Journal, anbieter};
+use depot_journal::{Journal, anbieter, kurssperre};
 use depot_kern::{Datum, Preis, Zeitpunkt};
 use depot_sammler::{
     Ergebnis, Https, Schluessel, beobachtungsliste, einordnen, ezb::ADRESSE_EZB, sammle,
@@ -88,7 +88,39 @@ fn vermerke(wurzel: &Path, bericht: &depot_sammler::Bericht) {
     }
 }
 
+/// Liegt die Kurssperre, wird nichts abgerufen.
+fn gesperrt(wurzel: &Path) -> bool {
+    let Some(grund) = kurssperre::kurssperre(&wurzel.join("daten")) else {
+        return false;
+    };
+    eprintln!(
+        "[Sammler] HALT: daten/{} liegt ({grund}). Kein Abruf und kein Papiertag, bis ein Mensch \
+         den Schluessel geprueft und die Sperre in der Einrichtung aufgehoben hat.",
+        kurssperre::KURSSPERRE
+    );
+    true
+}
+
+/// Nach einem Sicherheitsabbruch: Kurssperre anlegen, damit auch ein Papiertag von Hand die
+/// Teilkurse dieses Abrufs nie verwendet.
+fn sperre(wurzel: &Path) {
+    let grund = "Sicherheitsabbruch: Die Kursquelle gab den Schluessel zurueck. Teilkurse dieses \
+                 Abrufs nicht verwenden; Schluessel pruefen und bei Bedarf erneuern";
+    match kurssperre::sperre_kurse(&wurzel.join("daten"), grund) {
+        Ok(()) => eprintln!(
+            "[Sammler] Kurssperre daten/{} angelegt.",
+            kurssperre::KURSSPERRE
+        ),
+        Err(e) => eprintln!(
+            "[Sammler] FEHLER: Kurssperre nicht angelegt ({e}). KEINEN Papiertag starten."
+        ),
+    }
+}
+
 fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
+    if gesperrt(wurzel) {
+        return ExitCode::FAILURE;
+    }
     let werte = match beobachtungsliste() {
         Ok(w) => w,
         Err(e) => {
@@ -136,6 +168,9 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         }
     };
     let verwendbar = bericht.verwendbar();
+    if bericht.sicherheitsabbruch {
+        sperre(wurzel);
+    }
     vermerke(wurzel, &bericht);
     for (w, e) in &bericht.werte {
         match e {
@@ -157,22 +192,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
     if let Some(a) = &bericht.abbruch {
         println!("[Sammler] Lauf vorzeitig beendet: {a}");
     }
-    match bericht.handelstag {
-        None => println!("[Sammler] Keine Schlusskurse belegt."),
-        Some(t) if bericht.pruefung.is_empty() => println!(
-            "[Sammler] Pruefung fuer den Handelstag {}: in Ordnung.",
-            datum(t)
-        ),
-        Some(t) => {
-            println!(
-                "[Sammler] Pruefung fuer den Handelstag {} (Hoechstalter 20 Minuten: Schlusskurse sind nur kurz nach 17:35 Uhr frisch):",
-                datum(t)
-            );
-            for f in &bericht.pruefung {
-                println!("  {f:?}");
-            }
-        }
-    }
+    zeige_pruefung(&bericht);
     println!(
         "[Sammler] Belegt im Journal {}, rohe Antworten unter daten/roh/.",
         journal_pfad.display()
@@ -187,6 +207,31 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
             "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Pruefung nicht bestanden)."
         );
         ExitCode::FAILURE
+    }
+}
+
+/// Was die Pruefung sagt, wie der Papiertag sie ansetzt.
+fn zeige_pruefung(bericht: &depot_sammler::Bericht) {
+    match bericht.handelstag {
+        None => println!("[Sammler] Keine Schlusskurse belegt."),
+        Some(t) if bericht.pruefung.is_empty() => {
+            println!(
+                "[Sammler] Pruefung fuer den Handelstag {}: in Ordnung.",
+                datum(t)
+            );
+            for f in &bericht.ausgelassen {
+                println!("  heute nicht handelbar: {f:?}");
+            }
+        }
+        Some(t) => {
+            println!(
+                "[Sammler] Pruefung fuer den Handelstag {} (Hoechstalter 20 Minuten: Schlusskurse sind nur kurz nach 17:35 Uhr frisch):",
+                datum(t)
+            );
+            for f in &bericht.pruefung {
+                println!("  {f:?}");
+            }
+        }
     }
 }
 

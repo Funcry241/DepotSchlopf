@@ -25,6 +25,6 @@ pub mod waechter;
 pub use auftrag::{
     Anlass, Auftrag, AuftragsKennung, GenehmigterAuftrag, Kennungsvergabe, RegelBeleg, Richtung,
 };
-pub use daten::{DatenFehler, pruefe_kurse};
+pub use daten::{DatenFehler, Tageswerte, pruefe_kurse, waehle_tageswerte};
 pub use entscheidung::{Befund, Eingabe, Entscheidung, VerwerfGrund, entscheide};
 pub use waechter::{WaechterBefund, notbremse_auftraege, waechter};

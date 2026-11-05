@@ -177,6 +177,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                     })
                     .collect(),
                 ki_halt: werkbank::lies_falls_da(&kostenschutz::pfad(&d.wurzel)),
+                kurse_halt: werkbank::lies_falls_da(&kostenschutz::kurse_pfad(&d.wurzel)),
                 zeitplan_gespeichert: None,
                 entwurf: formular(a.abfrage.as_bytes())
                     .map(|f| seiten::Entwurf::aus_formular(&f))
@@ -314,7 +315,8 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => zurueck("zeitplan_fehler"),
             }
         }
-        "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt),
+        "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),
+        "/kurssperre" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kurse),
         "/autostart" => {
             let an = match feld(&f, "an") {
                 Some("an") => true,
@@ -331,11 +333,28 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     }
 }
 
-/// Hebt die Sperre des Kostenschutzes gefuehrt auf (siehe `kostenschutz`).
-fn kostenschutz_aufheben(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {
-    let ziel = |m: &str| http::umleitung(&format!("/einrichtung?m={m}#kostenschutz"));
+/// Welche Sperrdatei ein Formular aufhebt.
+#[derive(Clone, Copy)]
+enum Sperre {
+    Kostenschutz,
+    Kurse,
+}
+
+/// Hebt eine Sperre gefuehrt auf (siehe `kostenschutz`): die des Kostenschutzes oder die
+/// Kurssperre.
+fn kostenschutz_aufheben(
+    d: &Dienst,
+    f: &[(String, String)],
+    jetzt: Zeitpunkt,
+    sperre: Sperre,
+) -> Vec<u8> {
+    let (name, anker) = match sperre {
+        Sperre::Kostenschutz => ("kostenschutz", "kostenschutz"),
+        Sperre::Kurse => ("kurssperre", "kurssperre"),
+    };
+    let ziel = |m: &str| http::umleitung(&format!("/einrichtung?m={name}_{m}#{anker}"));
     if feld(f, "geprueft") != Some("ja") {
-        return ziel("kostenschutz_unbestaetigt");
+        return ziel("unbestaetigt");
     }
     let Some(gesehen) = feld(f, "abdruck") else {
         return http::text(400, "Abgelehnt: Abdruck fehlt");
@@ -343,16 +362,20 @@ fn kostenschutz_aufheben(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -
     // Unter der Sperre des Zustands: Waehrenddessen startet kein Auftrag.
     let mut z = d.sperre();
     if z.laufend.is_some() || !z.warteschlange.is_empty() {
-        return ziel("kostenschutz_belegt");
+        return ziel("belegt");
     }
-    match kostenschutz::aufheben(&d.wurzel, gesehen, jetzt) {
+    let ausgang = match sperre {
+        Sperre::Kostenschutz => kostenschutz::aufheben(&d.wurzel, gesehen, jetzt),
+        Sperre::Kurse => kostenschutz::kurse_aufheben(&d.wurzel, gesehen, jetzt),
+    };
+    match ausgang {
         Ok(kostenschutz::Aufheben::Aufgehoben) => {
             z.lage_veraltet = true;
-            ziel("kostenschutz_aufgehoben")
+            ziel("aufgehoben")
         }
-        Ok(kostenschutz::Aufheben::Frei) => ziel("kostenschutz_frei"),
-        Ok(kostenschutz::Aufheben::Geaendert) => ziel("kostenschutz_geaendert"),
-        Err(_) => ziel("kostenschutz_fehler"),
+        Ok(kostenschutz::Aufheben::Frei) => ziel("frei"),
+        Ok(kostenschutz::Aufheben::Geaendert) => ziel("geaendert"),
+        Err(_) => ziel("fehler"),
     }
 }
 

@@ -20,7 +20,7 @@ Maus' Praxistest am 05.11.2026: Wolfgang soll ohne Konsole und ohne Journal sehe
 | Papiertag abgeschlossen | Der Tag hat seinen Vermerk und ist abgeschlossen. |
 | Abgeschlossen ohne Handel | Die Kursprüfung ließ den Tag ausfallen. Die Befunde stehen in Worten da, etwa „Kurse zu alt“, je Art einmal mit Anzahl. |
 | Angefangen | Begonnen, nicht abgeschlossen. Den Halt zeigt die Bereitschaft. |
-| Ausgefallen: keine Schlusskurse | Kein Papiertag und keine Kurse. Rechner oder Zeitplan zur Abrufzeit aus, Abruf gescheitert oder Börsenfeiertag. |
+| Ausgefallen: keine Schlusskurse | Kein Papiertag und keine Kurse. Rechner oder Zeitplan zur Abrufzeit aus, oder Abruf gescheitert. Ein Börsenfeiertag steht als „Börse geschlossen“ (`boersen.md`). |
 | Ausgefallen: Kursprüfung | Kein Papiertag, und die Kursprüfung mit den Kursen, die bis zum Ende dieses Tages abgerufen waren, meldet Befunde, etwa „Kurse zu alt“. Spätere Abrufe zählen für diesen Tag nicht. |
 | Ausgefallen: Kurse da, kein Papiertag | Der Papiertag lief nicht. Nachholen geht nicht, denn ein Tag wird nur mit seinen eigenen Kursen am selben Tag entschieden. |
 | Heute noch nicht gelaufen | Der heutige Tag ohne Papiertag. |

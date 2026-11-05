@@ -3,21 +3,22 @@
 //! mit Datum und Schlusskurs. Netz und Datei kennt der Kern nicht; der Aufrufer reicht den Text
 //! und den Zeitpunkt des Abrufs herein.
 //!
-//! **Was als Schlusskurs gilt:** Der Kurs eines Handelstags zum Ende des Xetra-Handels um
-//! 17:35 Uhr in Frankfurt (Schlussauktion). Eine Zeile fuer einen Tag, dessen Handel beim Abruf
-//! nicht beendet ist, ist kein Schlusskurs und zaehlt nicht.
+//! **Was als Schlusskurs gilt:** Der Kurs eines Handelstags zum Schluss der Boerse des Werts
+//! (`Boerse::schluss`): Xetra um 17:35 Uhr in Frankfurt, NYSE um 16:00 Uhr in New York, an
+//! verkuerzten Tagen frueher. Eine Zeile fuer einen Tag, dessen Handel beim Abruf nicht beendet
+//! ist, ist kein Schlusskurs und zaehlt nicht. Ein Abruf um 17:40 Uhr in Frankfurt sieht damit
+//! fuer einen Wert der NYSE den Schluss des Vortags, nie einen laufenden Kurs.
 //!
 //! Geprueft wird alles, was die Zeile selbst sagt: Datum im Kalender, Tage streng steigend,
 //! Preise positiv und exakt, Schluss zwischen Tief und Hoch. Ob ein Kurs frisch genug
 //! und plausibel zum Vortag ist, prueft danach das Regelwerk wie bei jedem anderen Kurs.
 
+use crate::boerse::Boerse;
+pub use crate::boerse::XETRA_SCHLUSS;
 use crate::instrument::Isin;
 use crate::kurs::{Herkunft, Kurs, KursFehler, Kurse};
 use crate::preis::Preis;
 use crate::zeit::{Datum, Zeitpunkt};
-
-/// Stunde und Minute des Xetra-Schlusses in Frankfurt.
-pub const XETRA_SCHLUSS: (u8, u8) = (17, 35);
 
 /// Warum ein Text keine Tageskurse ergibt. Zeilen zaehlen ab 1, die Kopfzeile ist Zeile 1.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,6 +41,10 @@ pub enum QuellenFehler {
     Doppelt(Isin),
     /// Der Kurs ergibt keinen gueltigen `Kurs`.
     Kurs(KursFehler),
+    /// Eine Zeile fuer einen Tag, an dem die Boerse des Werts nicht handelte (Wochenende oder
+    /// Feiertag nach `Boerse::handelstag`). Die Quelle widerspricht dem Kalender; der Wert ergibt
+    /// keinen Kurs, statt dass die Zeile als Schlusskurs gilt.
+    KeinHandelstag(Datum),
 }
 
 /// Der Schlusskurs eines Handelstags.
@@ -145,26 +150,27 @@ fn lies_datum(text: &str) -> Option<Datum> {
 
 /// Zeitpunkt des Xetra-Schlusses an einem Tag.
 pub fn xetra_schluss(datum: Datum) -> Option<Zeitpunkt> {
-    let (stunde, minute) = XETRA_SCHLUSS;
-    Zeitpunkt::frankfurt(datum, stunde, minute, 0)
+    Boerse::Xetra.schluss(datum)
 }
 
-/// Die Schlusskurse eines Abrufs: je Wert der letzte Tag, dessen Handel beim Abruf beendet
-/// war (`heute`), und der Tag davor (`vortag`), beide mit Stand `abruf`. Fehlt der Vortag eines
-/// Werts, fehlt er in `vortag`; das Regelwerk fuehrt das als eigenen Fall.
+/// Die Schlusskurse eines Abrufs: je Wert der letzte Tag, dessen Handel an der Boerse des Werts
+/// beim Abruf beendet war (`heute`), und der Tag davor (`vortag`), beide mit Stand `abruf`.
+/// Fehlt der Vortag eines Werts, fehlt er in `vortag`; das Regelwerk fuehrt das als eigenen
+/// Fall. Notiert die Boerse nicht in Euro, ergibt der Wert keinen Kurs (`KursFehler::Waehrung`).
 ///
 /// # Errors
 /// Ein Wert kommt doppelt vor, seine Tage steigen nicht streng (`Reihenfolge` mit der Stelle in
-/// der Liste, ab 1), oder ein Kurs ist ungueltig. Ein Wert ohne beendeten Tag fehlt in beiden
+/// der Liste, ab 1), eine Zeile faellt auf einen Tag ohne Handel seiner Boerse
+/// (`KeinHandelstag`), oder ein Kurs ist ungueltig. Ein Wert ohne beendeten Tag fehlt in beiden
 /// Kursen.
 pub fn schlusskurse(
     abruf: Zeitpunkt,
-    werte: Vec<(Isin, Vec<Tageskurs>)>,
+    werte: Vec<(Isin, Boerse, Vec<Tageskurs>)>,
 ) -> Result<(Kurse, Kurse), QuellenFehler> {
     let mut heute = Vec::new();
     let mut vortag = Vec::new();
     let mut gesehen = std::collections::BTreeSet::new();
-    for (isin, tage) in werte {
+    for (isin, boerse, tage) in werte {
         if !gesehen.insert(isin.clone()) {
             return Err(QuellenFehler::Doppelt(isin));
         }
@@ -175,12 +181,23 @@ pub fn schlusskurse(
         }) {
             return Err(QuellenFehler::Reihenfolge(i.saturating_add(2)));
         }
+        if let Some(t) = tage.iter().find(|t| !boerse.handelstag(t.datum)) {
+            return Err(QuellenFehler::KeinHandelstag(t.datum));
+        }
         let mut beendet = Vec::new();
         for t in tage {
-            let zeit = xetra_schluss(t.datum).ok_or(QuellenFehler::Kurs(KursFehler::Handelstag))?;
+            let zeit = boerse
+                .schluss(t.datum)
+                .ok_or(QuellenFehler::Kurs(KursFehler::Handelstag))?;
             if zeit <= abruf {
-                let kurs = Kurs::exakt(t.schluss, "EUR", t.datum, zeit, Herkunft::Quelle)
-                    .map_err(QuellenFehler::Kurs)?;
+                let kurs = Kurs::exakt(
+                    t.schluss,
+                    boerse.waehrung(),
+                    t.datum,
+                    zeit,
+                    Herkunft::Quelle,
+                )
+                .map_err(QuellenFehler::Kurs)?;
                 beendet.push(kurs);
             }
         }

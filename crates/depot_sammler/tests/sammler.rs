@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use depot_journal::{Journal, JournalFehler, anbieter};
-use depot_kern::{Cent, Datum, Herkunft, Preis, Zeitpunkt};
+use depot_kern::{Boerse, Cent, Datum, Herkunft, Preis, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::DatenFehler;
 use depot_sammler::liste::pruefe_liste;
 use depot_sammler::sammeln::adresse;
@@ -58,8 +58,13 @@ fn schluessel() -> Result<Schluessel, String> {
 fn zwei_werte() -> Result<Vec<Wert>, String> {
     vorbedingung(
         pruefe_liste(&[
-            ("DE0007164600", "SAP.DEX", "SAP"),
-            ("DE0007100000", "MBG.DEX", "Mercedes-Benz Group"),
+            ("DE0007164600", Boerse::Xetra, "SAP.DEX", "SAP"),
+            (
+                "DE0007100000",
+                Boerse::Xetra,
+                "MBG.DEX",
+                "Mercedes-Benz Group",
+            ),
         ]),
         "Liste",
     )
@@ -159,25 +164,31 @@ fn sha256_hex(b: &[u8]) -> String {
 fn beobachtungsliste_gueltig() -> Result<(), String> {
     let l = beobachtungsliste()?;
     assert!(!l.is_empty() && l.len() <= 25, "{}", l.len());
-    assert!(pruefe_liste(&[("DE0007164601", "SAP.DEX", "x")]).is_err());
-    assert!(pruefe_liste(&[("DE0007164600", "SAP.DE", "x")]).is_err());
-    assert!(pruefe_liste(&[("DE0007164600", "SAP&X.DEX", "x")]).is_err());
-    assert!(pruefe_liste(&[("DE0007164600", "sap.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164601", Boerse::Xetra, "SAP.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP.DE", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP&X.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "sap.DEX", "x")]).is_err());
     assert!(
         pruefe_liste(&[
-            ("DE0007164600", "SAP.DEX", "x"),
-            ("DE0007100000", "SAP.DEX", "y")
+            ("DE0007164600", Boerse::Xetra, "SAP.DEX", "x"),
+            ("DE0007100000", Boerse::Xetra, "SAP.DEX", "y")
         ])
         .is_err()
     );
     assert!(
         pruefe_liste(&[
-            ("DE0007164600", "SAP.DEX", "x"),
-            ("DE0007164600", "MBG.DEX", "y")
+            ("DE0007164600", Boerse::Xetra, "SAP.DEX", "x"),
+            ("DE0007164600", Boerse::Xetra, "MBG.DEX", "y")
         ])
         .is_err()
     );
     assert!(pruefe_liste(&[]).is_err());
+    // NYSE: ohne Endung, hoechstens eine Klasse; eine Xetra-Endung gilt dort nicht.
+    assert!(pruefe_liste(&[("US0378331005", Boerse::Nyse, "AAPL", "x")]).is_ok());
+    assert!(pruefe_liste(&[("US0846707026", Boerse::Nyse, "BRK.B", "x")]).is_ok());
+    assert!(pruefe_liste(&[("US0378331005", Boerse::Nyse, "AAPL.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("US0378331005", Boerse::Nyse, "AAPLXY", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP", "x")]).is_err());
     Ok(())
 }
 
@@ -304,7 +315,7 @@ fn am_naechsten_morgen_zu_alt() -> Result<(), String> {
     // Zu alte Kurse sind belegt, aber nicht verwendbar: Der Lauf meldet keinen Erfolg (K19-02).
     assert!(!b.verwendbar());
     assert!(
-        b.pruefung
+        b.ausgelassen
             .iter()
             .any(|f| matches!(f, DatenFehler::KursZuAlt(_)))
     );
@@ -349,8 +360,9 @@ fn hinweis_beendet_den_lauf() -> Result<(), String> {
     Ok(())
 }
 
-/// Ein falsches Kuerzel betrifft nur seinen Wert; die anderen werden weiter abgerufen. Die
-/// Pruefung nennt den fehlenden Kurs.
+/// Ein falsches Kuerzel betrifft nur seinen Wert; die anderen werden weiter abgerufen. Pflicht
+/// sind nur gehaltene Werte: Ein Kandidat ohne Kurs ist heute nur nicht handelbar, die Kurse
+/// sind verwendbar, und der Bericht nennt ihn. Wird er gehalten, sind sie es nicht.
 #[test]
 fn falsches_kuerzel_nur_fuer_seinen_wert() -> Result<(), String> {
     let (journal, roh) = ordner()?;
@@ -374,12 +386,33 @@ fn falsches_kuerzel_nur_fuer_seinen_wert() -> Result<(), String> {
         .first()
         .map(|w| w.isin.clone())
         .ok_or("Vorbedingung")?;
-    assert!(b.pruefung.contains(&DatenFehler::KursFehlt(sap)));
-    assert!(!b.verwendbar());
+    assert_eq!(b.ausgelassen, vec![DatenFehler::KursFehlt(sap.clone())]);
+    assert!(b.pruefung.is_empty(), "{:?}", b.pruefung);
+    assert!(b.verwendbar());
     // Ein Kurs kam an: Der Schluessel gilt.
     assert_eq!(depot_sammler::einordnen(&b), Some(anbieter::Ergebnis::Ok));
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert_eq!(j.stand().kurse().len(), 2);
+    drop(j);
+
+    // Dasselbe, waehrend SAP im Depot liegt: nicht verwendbar.
+    let (journal, roh) = ordner()?;
+    let mut j = vorbedingung(Journal::oeffnen(&journal), "Journal oeffnen")?;
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
+    topf.setze_bestand(sap.clone(), 10);
+    vorbedingung(j.setze_topf(&topf), "Topf belegen")?;
+    drop(j);
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(FALSCHES_KUERZEL)), ("MBG.DEX", Ok(ROH_MBG))]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        vec![utc(11, 4, 16, 40)?, utc(11, 4, 16, 41)?],
+        &werte,
+    )?
+    .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert_eq!(b.pruefung, vec![DatenFehler::KursFehlt(sap)]);
+    assert!(!b.verwendbar());
     Ok(())
 }
 
@@ -476,6 +509,38 @@ fn schluessel_erscheint_nirgends() -> Result<(), String> {
         assert!(b.abbruch.is_some(), "{fall}: Lauf nicht beendet");
         assert!(!b.verwendbar(), "{fall}");
     }
+    Ok(())
+}
+
+/// Maus' Gegenprobe 1 zu #34: Kommt erst ein gueltiger Kurs und danach eine Antwort mit dem
+/// Schluessel, endet der Lauf. Die bis dahin belegten Kurse sind dann nicht verwendbar, auch
+/// wenn sonst nur Kandidaten fehlen: Ein Sicherheitsabbruch laesst den ganzen Abruf scheitern,
+/// damit kein Zeitplan danach einen Papiertag startet.
+#[test]
+fn schluesselabbruch_macht_den_ganzen_abruf_unbrauchbar() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    let werte = zwei_werte()?;
+    let zurueck = format!("{{\"Information\": \"key {SCHLUESSEL} unknown\"}}");
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(ROH_SAP)), ("MBG.DEX", Ok(&zurueck))]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        vec![utc(11, 4, 16, 40)?, utc(11, 4, 16, 41)?],
+        &werte,
+    )?
+    .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert!(b.abbruch.is_some());
+    assert!(!b.verwendbar(), "{b:?}");
+    // Maus' Restbefund (3f0240b): Auch wenn die Kurssperre sich nicht schreiben laesst, darf
+    // kein Teilkurs eines solchen Abrufs im Journal stehen. Belegt wird erst, wenn der Abruf
+    // ohne Sicherheitsabbruch endet.
+    let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
+    assert!(j.stand().kurse().is_empty(), "{:?}", j.stand().kurse());
+    assert!(
+        matches!(b.werte.first(), Some((_, Ergebnis::Fehler(t))) if t.contains("Sicherheitsabbruch")),
+        "{b:?}"
+    );
     Ok(())
 }
 

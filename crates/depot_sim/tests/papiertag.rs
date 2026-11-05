@@ -674,3 +674,104 @@ fn verworfene_antwort_und_urteil_stehen_als_verworfen() -> Result<(), String> {
     assert_eq!(gefragt("Antwort verwendet: x"), None);
     Ok(())
 }
+
+/// Nur gehaltene Werte sind Pflicht: Fehlt einem Kandidaten der Kurs von heute, laeuft der Tag
+/// ohne ihn, und der Grund steht unter `Auswahl`. Fehlt er einem gehaltenen Wert, faellt der
+/// Zyklus aus, und niemand wird gefragt.
+#[test]
+fn kandidat_ohne_kurs_faellt_aus_gehaltener_wert_haelt_den_zyklus() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut j = ort.oeffnen()?;
+    // Am 05.11. hat nur SAP einen Kurs; Allianz ist heute nicht handelbar.
+    belege(&mut j, 5, &[(&sap, "230", "231")])?;
+    let d = tag(5)?;
+    let (mut dachs, mut maus) = kaeufer(d, &sap);
+    let mut k = konto(&ort, &j)?;
+    let aus = papiertag(
+        &mut j,
+        d,
+        &universum()?,
+        &start()?,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    assert!(
+        matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
+        "Ausgang: {aus:?}"
+    );
+    let begr = j.stand().begruendungen().to_vec();
+    let auswahl: Vec<&str> = begr
+        .iter()
+        .filter(|(_, wer, _)| wer == depot_sim::AUSWAHL)
+        .map(|(_, _, t)| t.as_str())
+        .collect();
+    assert_eq!(auswahl.len(), 1, "{auswahl:?}");
+    assert!(
+        auswahl.iter().all(|t| t.contains("KursFehlt")),
+        "{auswahl:?}"
+    );
+    assert!(
+        !begr.iter().any(|(_, wer, _)| wer == "Daten"),
+        "kein Ausfall: {begr:?}"
+    );
+    assert!(
+        some(j.stand().toepfe().get(&TopfId::A), "Topf A")?.stueck(&sap) > 0,
+        "SAP gekauft"
+    );
+
+    // Am 06.11. fehlt der Kurs von SAP, das gehalten wird: Der Zyklus faellt aus.
+    belege(&mut j, 6, &[(&allianz, "350", "351")])?;
+    drop(j);
+    let aus = stumm_tag(&ort, 6)?;
+    assert!(
+        matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
+        "Ausgang: {aus:?}"
+    );
+    let j = ort.oeffnen()?;
+    let daten: Vec<&str> = j
+        .stand()
+        .begruendungen()
+        .iter()
+        .filter(|(tag, wer, _)| *tag == d.plus_tage(1).unwrap_or(d) && wer == "Daten")
+        .map(|(_, _, t)| t.as_str())
+        .collect();
+    assert!(
+        daten.iter().any(|t| t.contains("KursFehlt")),
+        "gehaltener Wert ohne Kurs: {daten:?}"
+    );
+    assert!(
+        daten.iter().any(|t| t.starts_with("Zyklus faellt aus")),
+        "{daten:?}"
+    );
+    Ok(())
+}
+
+/// Maus' Restbefund zu #34: Ein Sicherheitsabbruch des Sammlers (die Quelle gab den Schluessel
+/// zurueck) hinterlaesst `daten/kurse.halt`. Solange sie liegt, beginnt auch ein von Hand
+/// gestarteter Papiertag nicht; die schon belegten Teilkurse werden nicht verwendet.
+#[test]
+fn kurssperre_haelt_auch_den_handstart() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let daten = ort.dir.join("daten");
+    vorbedingung(fs::create_dir_all(&daten), "daten")?;
+    let pfad = daten.join("journal.txt");
+    vorbedingung(Journal::einrichten(&pfad), "Einrichtung")?;
+    let mut j = vorbedingung(Journal::oeffnen(&pfad), "Journal")?;
+    belege(&mut j, 5, &[(&sap()?, "230", "231")])?;
+    drop(j);
+    vorbedingung(
+        fs::write(daten.join("kurse.halt"), "Sicherheitsabbruch\n"),
+        "Sperre",
+    )?;
+    let vorher = vorbedingung(fs::read(&pfad), "Journal lesen")?;
+    let r = depot_sim::papierlauf::papier(&ort.dir, tag(5)?, &universum()?, &mut Stumm, &mut Stumm);
+    assert!(
+        r.as_ref().is_err_and(|e| e.contains("kurse.halt")),
+        "Papiertag trotz Kurssperre: {r:?}"
+    );
+    assert_eq!(vorbedingung(fs::read(&pfad), "Journal lesen")?, vorher);
+    assert!(!daten.join("papierkonto.txt").exists());
+    Ok(())
+}
