@@ -300,7 +300,7 @@ impl<N: Netz> KiBerater<N> {
                     let frei = !self.gesperrt() && self.pause().is_none();
                     let Some(pause) = warten.next().filter(|_| frei) else {
                         self.hinweis(&format!(
- "Anfrage hat den Anbieter auch nach {versuch} Versuchen nicht erreicht (keine Verbindung). Sie hat nichts gekostet. Heute ohne diese KI; der nächste Papiertag fragt wieder von selbst."
+ "Anfrage hat den Anbieter auch nach {versuch} Versuchen nicht erreicht (keine Verbindung). Sie hat nichts gekostet. Dieser Papiertag läuft ohne diese KI weiter."
  ));
                         return Err(format!("nicht gesendet: {e}"));
                     };
@@ -310,6 +310,14 @@ impl<N: Netz> KiBerater<N> {
  self.um(*pause)
  ));
                     (self.schlafe)(*pause);
+                    if self.gesperrt() {
+                        self.hinweis("Kein weiterer Versuch: Der Kostenschutz ist gesperrt.");
+                        return Err("nicht gesendet: KI gesperrt".into());
+                    }
+                    if let Some(p) = self.pause() {
+                        self.hinweis("Kein weiterer Versuch: Der Anbieter pausiert.");
+                        return Err(format!("nicht gesendet: pausiert: {p}"));
+                    }
                 }
                 Err(NetzFehler::Unklar(e)) => {
                     self.vermerke(Ausgang::Unklar, None, Kosten::Unbekannt, reserviert, None);

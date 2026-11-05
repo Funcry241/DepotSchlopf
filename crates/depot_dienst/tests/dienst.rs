@@ -1342,24 +1342,41 @@ fn einrichtung_erklaert_abgebrochene_ki_anfragen() -> Result<(), String> {
 
 /// Maus, Befund 3 zu #38: Ob es nach einem Ausfall von selbst weitergeht, sagt der Dienst aus
 /// seinem tatsaechlichen Zeitplan, nicht der Sammler. Ohne Zeitplan: nichts von selbst; mit
-/// Zeitplan: der naechste geplante Lauf.
+/// Zeitplan: der naechste geplante Lauf. Bei unlesbarem Erledigt-Stand bleibt der Zeitplan
+/// auch nach dem Einschalten angehalten.
 #[test]
 fn nach_einem_ausfall_sagt_der_zeitplan_wie_es_weitergeht() -> Result<(), String> {
     let zeilen: &'static [&'static str] =
         &["[Hinweis] Papiertag heute ausgefallen. Die Verbindung kam bis 17:54 Uhr nicht wieder."];
     let t = donnerstag(17, 45)?;
-    for an in [false, true] {
+    for (an, angehalten) in [(false, false), (true, false), (true, true)] {
         let wurzel = if an {
             eingeschaltet(ordner()?)?
         } else {
             ordner()?
         };
+        if angehalten {
+            fs::write(
+                wurzel.join("daten").join("dienst_erledigt.txt"),
+                b"unlesbar",
+            )
+            .map_err(|e| format!("Vorbedingung Erledigt-Stand: {e}"))?;
+        }
         let d = Arc::new(Dienst::neu(
             wurzel,
             TOKEN.into(),
             zeilen_starter(zeilen),
-            leeres_lagebild(),
+            lagebild_mit_schluesseln(true),
         ));
+        if angehalten {
+            assert!(d.schritt(t).is_none());
+            d.setze_zeitplan(Zeitplan {
+                an: true,
+                ..Zeitplan::default()
+            })
+            .map_err(|e| format!("Vorbedingung Zeitplan: {e:?}"))?;
+            assert!(d.sperre().zeitplan.an);
+        }
         d.einreihen(Art::Kurse, Anlass::Hand)
             .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
         let (nr, kind) = some(d.schritt(t), "Start")?;
@@ -1367,7 +1384,11 @@ fn nach_einem_ausfall_sagt_der_zeitplan_wie_es_weitergeht() -> Result<(), String
         let seite = seiten::live("s", &d.sperre(), t.datum());
         let (_, rest) = some(seite.split_once("id=\"hinweis\">"), "Hinweis")?;
         let (hinweis, _) = some(rest.split_once("</p>"), "Ende")?;
-        if an {
+        if angehalten {
+            assert!(hinweis.contains("Zeitplan angehalten"), "{hinweis}");
+            assert!(hinweis.contains("Dienst neu starten"), "{hinweis}");
+            assert!(!hinweis.contains("geht es von selbst"), "{hinweis}");
+        } else if an {
             assert!(
                 hinweis.contains("Nach Zeitplan geht es von selbst weiter"),
                 "{hinweis}"
