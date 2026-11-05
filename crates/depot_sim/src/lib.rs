@@ -1,11 +1,14 @@
-//! DepotSchlopf – simulierter Lauf mit erfundenen Daten und Papiergeld.
+//! DepotSchlopf – simulierter Lauf mit erfundenen Daten und Papiertag mit echten Kursen, beides
+//! nur mit Papiergeld.
 //!
 //! Dachs und Maus beobachten ein erfundenes Bild aus Nachrichten, Terminen und Kursen,
 //! schreiben ihre Einschaetzung und Begruendung ins Journal und treffen Papierentscheidungen.
 //! Der Rahmen haelt nur den Schutz: Kostenschutz, Zweitmeinung, Regelwerk, Datenpruefung,
 //! Waechter, Kontowaechter und Kodex. Ausgefuehrt wird ueber ein erfundenes Papierkonto, mit
-//! dem der Kontowaechter abgleicht. Echte Schnittstellen, echte Kurse und echtes Geld gibt es hier nicht;
-//! ein Kurs, der nicht als erfunden markiert ist, haelt den Lauf an.
+//! dem der Kontowaechter abgleicht. Im simulierten Lauf haelt ein Kurs, der nicht als erfunden
+//! markiert ist, den Lauf an. Der Papiertag (`papiertag`) nimmt nur die vom Sammler belegten
+//! Schlusskurse des heutigen Tages. Einen Broker ausser dem Papierkonto und echtes Geld gibt es
+//! hier nicht.
 
 #![forbid(
     unsafe_code,
@@ -22,8 +25,12 @@
 mod abdruck;
 pub mod lauf;
 pub mod papier;
+pub mod papierdatei;
+pub mod papiertag;
 pub mod szenario;
 
 pub use lauf::{LaufFehler, lauf};
 pub use papier::{Broker, Papierkonto, Sendeantwort};
-pub use szenario::{Antwort, Berater, Drehbuch, Lage, Szenario, Tag, Urteil};
+pub use papierdatei::Papierdatei;
+pub use papiertag::{Ausgang, Tageskurse, papiertag, tageskurse};
+pub use szenario::{Antwort, Berater, Drehbuch, Lage, Stumm, Szenario, Tag, Urteil};
