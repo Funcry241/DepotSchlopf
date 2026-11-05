@@ -28,6 +28,7 @@ pub mod geld;
 pub mod grenzen;
 pub mod hinweis;
 pub mod instrument;
+pub mod json;
 pub mod kurs;
 pub mod liste;
 pub mod preis;

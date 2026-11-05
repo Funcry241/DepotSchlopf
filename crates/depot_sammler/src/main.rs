@@ -2,7 +2,7 @@
 //!
 //! Aufruf ueber `run.cmd kurse` (alle Werte), `run.cmd kurse xetra` oder `run.cmd kurse nyse`
 //! (nur die Werte einer Boerse, kurz nach ihrem Schluss), `run.cmd kurse einrichten` beim
-//! ersten Mal und `run.cmd termine`. Das Journal
+//! ersten Mal `run.cmd nachrichten` und `run.cmd termine`. Das Journal
 //! liegt unter `daten/journal.txt`, die rohen Antworten unter `daten/roh/`; beides bleibt auf dem
 //! eigenen Rechner (`.gitignore`, Export ohne `daten/`).
 
@@ -26,7 +26,7 @@ use depot_journal::{Journal, anbieter, kurssperre};
 use depot_kern::{Boerse, Datum, Grenzen, Preis, Zeitpunkt, hinweis};
 use depot_sammler::{
     Anbieter, Ergebnis, Https, Schluessel, Zugang, beobachtungsliste, einordnen, ezb::ADRESSE_EZB,
-    netz, sammle, sammle_termine, zugang_laden,
+    netz, sammle, sammle_nachrichten, sammle_termine, zugang_laden,
 };
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
@@ -211,7 +211,51 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         sperre(wurzel);
     }
     vermerke(wurzel, &bericht);
-    for (w, e) in &bericht.werte {
+    zeige_werte(&bericht.werte);
+    if let Some(a) = &bericht.abbruch {
+        println!("[Sammler] Lauf vorzeitig beendet: {a}");
+    }
+    zeige_pruefung(&bericht);
+    if let Some(a) = &bericht.verbindung {
+        println!(
+            "{}",
+            hinweis::zeile(&netz::ausfall_text(a, verwendbar, &Grenzen::standard()))
+        );
+    }
+    println!(
+        "[Sammler] Belegt im Journal {}, rohe Antworten unter daten/roh/.",
+        journal_pfad.display()
+    );
+    // Danach die Nachrichten mit demselben Schluessel. Sie aendern den Ausgang nicht: Ohne
+    // Nachrichten entscheiden die Berater aus Kursen und Terminen.
+    if boerse != Some(Boerse::Nyse)
+        && bericht.abbruch.is_none()
+        && bericht.verbindung.is_none()
+        && schluessel.von(Anbieter::AlphaVantage).is_some()
+    {
+        std::thread::sleep(PAUSE);
+        if nachrichten_holen(&mut journal, &schluessel, wurzel)
+            == NachrichtenAusgang::Sicherheitsabbruch
+        {
+            return ExitCode::FAILURE;
+        }
+    }
+    // Erfolg nur mit verwendbaren Kursen: Ein spaeterer Lauf darf sich auf den Ausgang
+    // verlassen (K19-02).
+    if verwendbar {
+        println!("[Sammler] Kurse verwendbar.");
+        ExitCode::SUCCESS
+    } else {
+        eprintln!(
+            "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Pruefung nicht bestanden)."
+        );
+        ExitCode::FAILURE
+    }
+}
+
+/// Je Wert eine Zeile mit Schlusskursen oder dem Grund, warum sie fehlen.
+fn zeige_werte(werte: &[(depot_sammler::Wert, Ergebnis)]) {
+    for (w, e) in werte {
         match e {
             Ergebnis::Belegt { heute, vortag, .. } => println!(
                 "  {:<20} {}  Schluss {}  Vortag {}",
@@ -230,31 +274,6 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
                 println!("  {:<20} {}  nicht abgerufen", w.name, w.isin);
             }
         }
-    }
-    if let Some(a) = &bericht.abbruch {
-        println!("[Sammler] Lauf vorzeitig beendet: {a}");
-    }
-    zeige_pruefung(&bericht);
-    if let Some(a) = &bericht.verbindung {
-        println!(
-            "{}",
-            hinweis::zeile(&netz::ausfall_text(a, verwendbar, &Grenzen::standard()))
-        );
-    }
-    println!(
-        "[Sammler] Belegt im Journal {}, rohe Antworten unter daten/roh/.",
-        journal_pfad.display()
-    );
-    // Erfolg nur mit verwendbaren Kursen: Ein spaeterer Lauf darf sich auf den Ausgang
-    // verlassen (K19-02).
-    if verwendbar {
-        println!("[Sammler] Kurse verwendbar.");
-        ExitCode::SUCCESS
-    } else {
-        eprintln!(
-            "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Pruefung nicht bestanden)."
-        );
-        ExitCode::FAILURE
     }
 }
 
@@ -280,6 +299,73 @@ fn zeige_pruefung(bericht: &depot_sammler::Bericht) {
                 println!("  {f:?}");
             }
         }
+    }
+}
+
+#[derive(PartialEq, Eq)]
+enum NachrichtenAusgang {
+    Ok,
+    Fehler,
+    Sicherheitsabbruch,
+}
+
+fn nachrichten_holen(
+    journal: &mut Journal,
+    schluessel: &Zugang,
+    wurzel: &Path,
+) -> NachrichtenAusgang {
+    println!("[Sammler] Hole die Nachrichten von Alpha Vantage ...");
+    match sammle_nachrichten(
+        journal,
+        &mut Https::neu(),
+        schluessel,
+        &mut jetzt,
+        &wurzel.join("daten").join("roh"),
+    ) {
+        Ok(b) => {
+            if b.sicherheitsabbruch {
+                sperre(wurzel);
+                return NachrichtenAusgang::Sicherheitsabbruch;
+            }
+            if let Some(d) = &b.rohdatei {
+                println!("[Sammler] Rohe Antwort: {}", d.display());
+            }
+            if let Some(f) = &b.fehler {
+                eprintln!("[Sammler] Nachrichten: nichts belegt: {f}");
+                return NachrichtenAusgang::Fehler;
+            }
+            println!(
+                "[Sammler] Nachrichten: {} neu, {} schon belegt.",
+                b.neu, b.bekannt
+            );
+            NachrichtenAusgang::Ok
+        }
+        Err(e) => {
+            eprintln!("[Sammler] FEHLER bei den Nachrichten, angehalten: {e:?}");
+            NachrichtenAusgang::Fehler
+        }
+    }
+}
+
+fn nachrichten(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
+    if gesperrt(wurzel) {
+        return ExitCode::FAILURE;
+    }
+    let (schluessel, _) = zugang_laden(&[], Schluessel::aus_anmeldeverwaltung);
+    let mut journal = match Journal::oeffnen(journal_pfad) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!(
+                "[Sammler] FEHLER: Journal {}: {e:?}. Beim ersten Mal: run.cmd kurse einrichten",
+                journal_pfad.display()
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    if nachrichten_holen(&mut journal, &schluessel, wurzel) == NachrichtenAusgang::Ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
     }
 }
 
@@ -349,9 +435,10 @@ fn main() -> ExitCode {
         ["kurse", "nyse"] => kurse(&wurzel, &journal, Some(Boerse::Nyse)),
         ["einrichten"] | ["kurse", "einrichten"] => einrichten(&journal),
         ["termine"] => termine(&wurzel, &journal),
+        ["nachrichten"] => nachrichten(&wurzel, &journal),
         _ => {
             eprintln!(
-                "Aufruf: run.cmd kurse [xetra|nyse] | run.cmd kurse einrichten | run.cmd termine"
+                "Aufruf: run.cmd kurse [xetra|nyse] | run.cmd kurse einrichten | run.cmd nachrichten | run.cmd termine"
             );
             ExitCode::from(2)
         }

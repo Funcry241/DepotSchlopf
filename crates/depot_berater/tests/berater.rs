@@ -578,24 +578,27 @@ fn zurueckgegebener_schluessel_gelangt_nie_ins_ergebnis() -> Result<(), String> 
 /// Ohne Werkzeuge fuegt der Anbieter nichts ein; eine Anfrage ueber dem Deckel wird gar nicht
 /// gesendet, und meldet der Anbieter trotzdem mehr Eingabe-Token, sperrt der Berater.
 #[test]
+#[allow(
+    clippy::many_single_char_names,
+    reason = "kurze Namen wie in den uebrigen Tests"
+)]
 fn reservierung_ist_eine_gesicherte_obergrenze() -> Result<(), String> {
+    // Termine und Nachrichten kuerzt die Frage selbst (`MAX_EREIGNISSE_BYTES`); zu gross wird
+    // die Anfrage hier ueber eine ueberlange Begruendung im Vorschlag des anderen Beraters.
     let mut ort = Ort::neu()?;
-    let mut dachs = berater(&ort, BeraterId::Dachs, Attrappe::default())?;
-    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let mut maus = berater(&ort, BeraterId::Maus, Attrappe::default())?;
+    let e = ort.erlaubnis(BeraterId::Maus, 1)?;
     let max = e.deckel().max_token_ein();
-    let lang = vec!["x".repeat(usize::try_from(max).map_err(|e| e.to_string())?)];
-    let topf = vorbedingung(Topf::neu(TopfId::A, Cent(500_000)), "Topf")?;
-    let kurse = kurse()?;
-    let lage = Lage {
-        datum: tag()?,
-        topf: &topf,
-        kurse: &kurse,
-        ereignisse: &lang,
+    let lang = "x".repeat(usize::try_from(max).map_err(|e| e.to_string())?);
+    let v = Vorschlag {
+        berater: BeraterId::Dachs,
+        zielgewichte_bp: [(sap()?, 1_000)].into_iter().collect(),
+        begruendung: [(sap()?, lang)].into_iter().collect(),
     };
-    let a = dachs.vorschlagen(e, &lage);
-    assert!(a.vorschlag.is_none());
-    assert!(a.einschaetzung.contains("nicht gesendet"), "{a:?}");
-    assert!(dachs.netz().gesendet.is_empty(), "nichts gesendet");
+    let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
+    assert!(!u.zustimmung);
+    assert!(u.begruendung.contains("nicht gesendet"), "{u:?}");
+    assert!(maus.netz().gesendet.is_empty(), "nichts gesendet");
     assert!(!ort.sperre().exists());
 
     // Meldet der Anbieter mehr Eingabe-Token als erlaubt, sperrt der Berater, auch wenn die
@@ -923,5 +926,131 @@ fn verbindung_nach_dem_absenden_gekappt_sperrt_ohne_zweiten_versand() -> Result<
     // Auch der andere Berater ist gesperrt.
     let maus = berater(&ort, BeraterId::Maus, Attrappe::default())?;
     assert!(!maus.angebunden());
+    Ok(())
+}
+
+/// Die groesste Lage passt unter den Deckel der Eingabe (40.000 Bytes, K25-01): alle Werte der
+/// Beobachtungsliste mit Kurs, vier Positionen, 30 Termine und 30 Nachrichten in der laengsten
+/// Form, mit Zeichen aus vier Bytes und Anfuehrungszeichen. Was nicht passt, wird ausgelassen
+/// und gezaehlt; gesendet wird trotzdem, und zwar fuer Vorschlag und Zweitmeinung.
+#[test]
+#[allow(
+    clippy::many_single_char_names,
+    reason = "kurze Namen wie in den uebrigen Tests"
+)]
+fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
+    let werte = vorbedingung(depot_kern::liste::beobachtungsliste(), "Liste")?;
+    let universum = depot_kern::liste::als_universum(&werte);
+    let d = tag()?;
+    let zeit = some(Zeitpunkt::neu(d, 17, 30, 0), "Zeit")?;
+    let mut eintraege = Vec::new();
+    for w in &werte {
+        let k = vorbedingung(
+            Kurs::neu(Cent(123_456), "EUR", d, zeit, Herkunft::Quelle),
+            "Kurs",
+        )?;
+        eintraege.push((w.isin.clone(), k));
+    }
+    let kurse = vorbedingung(Kurse::neu(zeit, eintraege), "Kurse")?;
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(500_000)), "Topf")?;
+    for w in werte.iter().take(4) {
+        topf.setze_bestand(w.isin.clone(), 1_000_000);
+    }
+    let lang = "\"𝄞\" ".repeat(200);
+    let ereignisse: Vec<String> = (0..30)
+        .map(|i| format!("Termin {i:02}: {lang}"))
+        .chain((0..30).map(|i| format!("Nachricht {i:02}: {lang}")))
+        .collect();
+    let lage = Lage {
+        datum: d,
+        topf: &topf,
+        kurse: &kurse,
+        ereignisse: &ereignisse,
+    };
+    let v = Vorschlag {
+        berater: BeraterId::Dachs,
+        zielgewichte_bp: werte
+            .iter()
+            .take(4)
+            .map(|w| (w.isin.clone(), 2_500))
+            .collect(),
+        begruendung: werte
+            .iter()
+            .take(4)
+            .map(|w| (w.isin.clone(), lang.clone()))
+            .collect(),
+    };
+    for wer in [BeraterId::Dachs, BeraterId::Maus] {
+        let mut ort = Ort::neu()?;
+        let netz = Attrappe {
+            antworten: [abgelehnt(400, "Test", None), abgelehnt(400, "Test", None)].into(),
+            ..Attrappe::default()
+        };
+        let mut b = KiBerater::neu(
+            wer,
+            Some(vorbedingung(Schluessel::neu(SCHLUESSEL), "Schluessel")?),
+            netz,
+            universum.clone(),
+            ort.sperre(),
+        );
+        let e = ort.erlaubnis(wer, 1)?;
+        let max = e.deckel().max_token_ein();
+        let a = b.vorschlagen(e, &lage);
+        let e = ort.erlaubnis(wer, 1)?;
+        let _ = b.pruefen(e, &lage, &v);
+        assert_eq!(b.netz().gesendet.len(), 2, "{wer:?}: beide gesendet; {a:?}");
+        for (_, _, inhalt) in &b.netz().gesendet {
+            assert!(
+                inhalt.len() <= usize::try_from(max).unwrap_or(0),
+                "{wer:?}: {} Bytes",
+                inhalt.len()
+            );
+            assert!(inhalt.contains("weitere ausgelassen, Platz erschoepft"));
+            assert!(inhalt.contains("Termin 00"), "die ersten bleiben");
+        }
+    }
+    Ok(())
+}
+
+/// K28-01 fuer den Berater: Steht der Schluessel nur hinter Escapes in der Antwort, etwa in
+/// einem Feld, dessen Fehler ihn sonst in die Meldung truege, wird nichts davon verwendet. Die
+/// Kosten werden trotzdem geprueft.
+#[test]
+fn schluessel_hinter_escapes_gelangt_nie_ins_ergebnis() -> Result<(), String> {
+    let maskiert = SCHLUESSEL.chars().fold(String::new(), |mut m, c| {
+        let _ = write!(m, "\\u{:04x}", u32::from(c));
+        m
+    });
+    let texte = [
+        // Ungueltige ISIN: Ihr Fehler naennte sie.
+        format!(
+            "{{\"einschaetzung\": \"x\", \"ziele\": [{{\"isin\": \"{maskiert}\", \"gewicht_bp\": 1000, \"begruendung\": \"y\"}}]}}"
+        ),
+        // Unbekanntes Feld, nie gelesen, aber Teil der Antwort.
+        format!("{{\"einschaetzung\": \"x\", \"ziele\": null, \"notiz\": \"{maskiert}\"}}"),
+        // Ausserhalb des JSON-Objekts.
+        format!("Vorab {maskiert}\n{{\"einschaetzung\": \"x\", \"ziele\": null}}"),
+    ];
+    for text in &texte {
+        let mut ort = Ort::neu()?;
+        let mut netz = Attrappe::default();
+        netz.antworten.push_back(claude(text, 1_000, 100, 0));
+        let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+        let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+        let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+        assert!(a.vorschlag.is_none(), "{a:?}");
+        let alles = format!("{a:?}");
+        assert!(
+            !depot_berater::json::alle_texte(&alles)
+                .iter()
+                .any(|t| t.contains(SCHLUESSEL)),
+            "{a:?}"
+        );
+        assert!(
+            a.einschaetzung.contains("Schluessel des Anbieters"),
+            "{a:?}"
+        );
+        assert!(a.einschaetzung.contains("Kosten 1 von 24"), "{a:?}");
+    }
     Ok(())
 }

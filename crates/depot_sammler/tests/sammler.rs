@@ -5,6 +5,7 @@
 //! Jede Vorbereitung prueft ihren Erfolg ausdruecklich und endet sonst mit „Vorbedingung …“.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -496,16 +497,25 @@ fn dateien(ordner: &Path) -> Result<Vec<(String, Vec<u8>)>, String> {
     Ok(aus)
 }
 
-/// Enthaelt der Text den Schluessel, gleich in welcher Schreibweise?
+/// Enthaelt der Text den Schluessel, gleich in welcher Schreibweise, auch hinter einem Escape?
 fn mit_schluessel(b: &[u8]) -> bool {
-    String::from_utf8_lossy(b)
-        .to_ascii_uppercase()
-        .contains(SCHLUESSEL)
+    depot_kern::json::alle_texte(&String::from_utf8_lossy(b))
+        .iter()
+        .any(|t| t.to_ascii_uppercase().contains(SCHLUESSEL))
+}
+
+/// Der Schluessel als JSON-Escapes, Zeichen fuer Zeichen (`\u0045…`).
+fn maskiert() -> String {
+    SCHLUESSEL.chars().fold(String::new(), |mut m, c| {
+        let _ = write!(m, "\\u{:04x}", u32::from(c));
+        m
+    })
 }
 
 /// Der Schluessel erscheint nirgends: nicht in einer Meldung, auch wenn der Abruf die Adresse
 /// nennt oder die Quelle ihn zurueckgibt, nicht im Journal, nicht im Namen und nicht im Inhalt
-/// einer abgelegten Datei, in keiner Schreibweise (K19-01). Gibt die Quelle den Schluessel
+/// einer abgelegten Datei, in keiner Schreibweise und auch nicht hinter JSON-Escapes (K19-01,
+/// K28-01). Gibt die Quelle den Schluessel
 /// zurueck, wird die Antwort nicht abgelegt, und der Lauf endet.
 #[test]
 fn schluessel_erscheint_nirgends() -> Result<(), String> {
@@ -523,7 +533,14 @@ fn schluessel_erscheint_nirgends() -> Result<(), String> {
         SCHLUESSEL.to_ascii_lowercase()
     );
     let in_csv = format!("{ROH_MBG}# {SCHLUESSEL}\r\n");
-    for (fall, antwort) in [("gross", &gross), ("klein", &klein), ("in CSV", &in_csv)] {
+    // K28-01: hinter Unicode-Escapes verborgen.
+    let escapes = format!("{{\"Information\": \"key {} unknown\"}}", maskiert());
+    for (fall, antwort) in [
+        ("gross", &gross),
+        ("klein", &klein),
+        ("in CSV", &in_csv),
+        ("Escapes", &escapes),
+    ] {
         let (journal, roh) = ordner()?;
         let mut netz = Erfunden::neu(&[("SAP.DEX", Err(&netzfehler)), ("MBG.DEX", Ok(antwort))]);
         let b = lauf(&journal, &roh, &mut netz, vec![utc(11, 4, 16, 40)?], &werte)?

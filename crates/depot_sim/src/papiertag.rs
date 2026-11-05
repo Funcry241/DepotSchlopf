@@ -28,7 +28,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use depot_journal::{Journal, KursBeleg, Stand};
+use depot_journal::{Journal, KursBeleg, NachrichtBeleg, Stand};
 use depot_kern::{
     Cent, Datum, Grenzen, Herkunft, Isin, Kurs, Kurse, Rundung, Topf, Universum, Zeitpunkt,
 };
@@ -48,6 +48,9 @@ pub const AUSWAHL: &str = "Auswahl";
 /// Termine so viele Tage voraus gehen als Ereignisse an die Berater.
 const TERMINE_VORAUS_TAGE: i64 = 30;
 const SEKUNDEN_JE_TAG: i64 = 86_400;
+/// Hoechstens so viele belegte Nachrichten gehen in die Lage, die neuesten. So bleibt die Frage
+/// an die Berater unter ihrem Deckel.
+pub const MAX_NACHRICHTEN_LAGE: usize = 30;
 
 /// Wie der Papiertag ausging.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,7 +169,8 @@ fn datum_text(d: Datum) -> String {
     format!("{:02}.{:02}.{}", d.tag(), d.monat(), d.jahr())
 }
 
-/// Die belegten Termine vom Handelstag bis `TERMINE_VORAUS_TAGE` voraus, nach Datum.
+/// Die belegten Termine vom Handelstag bis `TERMINE_VORAUS_TAGE` voraus, nach Datum; danach die
+/// belegten Nachrichten (`nachrichten`).
 fn ereignisse(stand: &Stand, handelstag: Datum) -> Vec<String> {
     let Some(von) = tagesbeginn(handelstag) else {
         return Vec::new();
@@ -195,7 +199,42 @@ fn ereignisse(stand: &Stand, handelstag: Datum) -> Vec<String> {
         })
         .collect();
     aus.sort();
-    aus.into_iter().map(|(_, t)| t).collect()
+    let mut aus: Vec<String> = aus.into_iter().map(|(_, t)| t).collect();
+    aus.extend(nachrichten(stand, handelstag));
+    aus
+}
+
+/// Die belegten Nachrichten (R40), veroeffentlicht vom Beginn des Vortags bis zum Ende des
+/// Handelstags (UTC): hoechstens `MAX_NACHRICHTEN_LAGE`, die neueste zuerst. Wird es dem
+/// Berater zu viel, faellt so die aelteste weg.
+fn nachrichten(stand: &Stand, handelstag: Datum) -> Vec<String> {
+    let Some(beginn) = tagesbeginn(handelstag) else {
+        return Vec::new();
+    };
+    let von = beginn.checked_sub(SEKUNDEN_JE_TAG);
+    let bis = beginn.checked_add(SEKUNDEN_JE_TAG);
+    let mut aus: Vec<&NachrichtBeleg> = stand
+        .nachrichten()
+        .iter()
+        .filter(|n| {
+            let s = n.zeit().sekunden();
+            von.is_some_and(|von| s >= von) && bis.is_some_and(|bis| s < bis)
+        })
+        .collect();
+    aus.sort_by(|a, b| b.zeit().cmp(&a.zeit()).then_with(|| a.text().cmp(b.text())));
+    aus.truncate(MAX_NACHRICHTEN_LAGE);
+    aus.into_iter()
+        .filter_map(|n| {
+            let (h, m, _) = n.zeit().uhrzeit()?;
+            let d = n.zeit().datum()?;
+            Some(format!(
+                "Nachricht {} {h:02}:{m:02} UTC ({}): {}",
+                datum_text(d),
+                n.quelle(),
+                n.text()
+            ))
+        })
+        .collect()
 }
 
 fn feld(h: &mut Sha256, text: &str) {

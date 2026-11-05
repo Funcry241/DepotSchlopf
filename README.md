@@ -37,7 +37,7 @@ Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 | `depot_journal` | Das Journal als einzige dauerhafte Datei: Hash-Kette mit Anhangsvermerk, geprüfte Wiederherstellung; Papierdepot, Aufträge mit Zustand, belegte Kurse mit Quelle und Abrufzeit, Beobachtungen und KI-Buchungen. Dazu der Kontowächter: Deckung vor jeder Reservierung, Abgleich mit dem Konto, Halt bei jeder Abweichung |
 | `depot_ki` | Regeln des KI-Budgets ohne Datei; das Kassenbuch steht im Journal, eine Erlaubnis gibt es nur nach Buchung der Höchstkosten dort |
 | `depot_sim` | Simulierter Lauf mit erfundenen Daten und Papiergeld: Dachs und Maus beobachten, begründen im Journal und entscheiden im Schutzrahmen; ausgeführt wird über ein erfundenes Papierkonto, mit dem der Kontowächter abgleicht; echte Kurse halten den Lauf an |
-| `depot_sammler` | Holt Xetra-Schlusskurse lesend von Alpha Vantage und die Termine der EZB von ihrer Seite, legt jede Antwort roh unter `daten/roh/` ab, belegt jeden Kurs und Termin im Journal und prüft die Kurse. Mit Netz |
+| `depot_sammler` | Holt Xetra-Schlusskurse und Marktnachrichten lesend von Alpha Vantage und die Termine der EZB von ihrer Seite, legt jede Antwort roh unter `daten/roh/` ab, belegt jeden Kurs, Termin und jede Nachricht im Journal und prüft die Kurse. Mit Netz |
 | `depot_berater` | Dachs (Claude Sonnet 5.5) und Maus (GPT-6.1 Terra) als Berater im Papierhandel: fragt nur mit gebuchter Erlaubnis, rechnet nach jedem Aufruf die Kosten nach und sperrt bei jeder Überschreitung. Mit Netz; `run.cmd papier` |
 | `depot_lage` | Das Lagebild ohne Netz: Bereitschaft für den nächsten Papiertag mit Ampel und nächstem Schritt, KI-Budget je KI direkt aus dem Kassenbuch, Papierdepot, Aufträge, Tagesergebnis der letzten Handelstage (gelaufen, ohne Handel oder ausgefallen, mit Grund, und welche KI beigetragen hat), Begründungen von Dachs und Maus, festgeschriebene Grenzen. Rechnet mit denselben Prüfungen wie Papiertag und Kostenschutz |
 | `depot_dienst` | Der Dienst mit Oberfläche nur auf 127.0.0.1: Live-Ansicht, eine Config-Seite, Zeitplan, Aufträge als eigene Läufe. Kleiner eigener HTTP-Server aus der Standardbibliothek mit Host-, Herkunfts- und Token-Prüfung |
@@ -74,7 +74,7 @@ cmdkey /generic:DepotSchlopf/alphavantage /user:depotschlopf /pass
 run.cmd kurse einrichten
 ```
 
-Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je Wert, 15 Sekunden Abstand), belegt sie in `daten/journal.txt` und zeigt das Ergebnis der Kursprüfung. Es entstehen keine Aufträge und keine KI-Anfragen. Der Schlüssel steht nie im Journal, in einer Meldung oder im Export.
+Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je Wert, 15 Sekunden Abstand), belegt sie in `daten/journal.txt` und zeigt das Ergebnis der Kursprüfung. Bei einem Gesamtabruf oder einem Xetra-Abruf holt er nach den Kursen mit einem weiteren Abruf die neuesten Marktnachrichten und belegt höchstens 15 davon; `run.cmd nachrichten` holt nur sie, etwa nach einem Fehler. Bei fehlenden Nachrichten können verwendbare Kurse weiter genutzt werden. Gibt eine Antwort einen Schlüssel zurück, greift die Kurssperre. Es entstehen keine Aufträge und keine KI-Anfragen. Der Schlüssel steht nie im Journal, in einer Meldung oder im Export.
 
 ### Termine der EZB (nur lesend)
 

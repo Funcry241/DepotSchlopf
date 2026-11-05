@@ -1,8 +1,15 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Nach einem Neustart den Papiertag nachholen oder schuetzen (Maus 05.11.2026, Punkt 2, Teil 2): dienst_erledigt.txt (erledigt-v3) merkt sich den Tag eines erfolgreichen Kursabrufs des Zeitplans (kurse_ok) und den Tag, fuer den der Papiertag gestartet wurde (papier, unmittelbar vor dem Start). Der Papiertag ist faellig als Zustand statt als Ereignis: alle Abrufe des Tages gestartet, einer heute erfolgreich, Papiertag heute noch nicht gestartet. So holt ein neu gestarteter Dienst einen nicht begonnenen Papiertag mit den Kursen von heute nach und startet einen begonnenen nie zweimal. Die Live-Ansicht sagt nach einem Neustart, wo der Tag steht. Keine Grenze geaendert, keine neue Abhaengigkeit. Gestapelt auf #40 und Zeitplan je Boerse (#41); Pfade gegen die Basis-PR #40.
+zweck: Nachrichten ueber den Sammler (Wolfgang 05.11.2026): run.cmd kurse holt einmal am Tag Marktnachrichten von Alpha Vantage und belegt sie als neue Journalart nachricht (beginnt keinen Tag); der Papiertag gibt sie Dachs und Maus mit; Termine und Nachrichten in der Frage auf 24.000 Bytes begrenzt, damit jede Anfrage unter dem Deckel bleibt; JSON-Leser nach depot_kern. Keine neuen Grenzen, keine neuen Abhaengigkeiten, Festschreibung unveraendert. Baut auf #25 auf.
 pfade:
-crates/depot_dienst/
+run.cmd
+crates/depot_berater/
+crates/depot_journal/
+crates/depot_kern/src/json.rs
+crates/depot_kern/src/lib.rs
+crates/depot_lauf/src/main.rs
+crates/depot_sammler/
+crates/depot_sim/
 docs/
 CHANGELOG.md
-kodex/aenderung.txt
+README.md

@@ -131,8 +131,20 @@ impl Schluessel {
         &self.0
     }
 
-    /// Steht der Schluessel in diesen Bytes, gleich in welcher Schreibweise?
+    /// Steht der Schluessel in diesen Bytes, gleich in welcher Schreibweise? Geprueft wird roh
+    /// und in jeder JSON-Zeichenkette darin nach dem Dekodieren (`json::alle_texte`), damit ein
+    /// Escape wie `\u0054` ihn nicht verbirgt (K28-01). Jede Antwort jeder Quelle wird so
+    /// geprueft, bevor sie abgelegt oder gelesen wird.
     pub fn steht_in(&self, bytes: &[u8]) -> bool {
+        if self.steht_roh_in(bytes) {
+            return true;
+        }
+        depot_kern::json::alle_texte(&String::from_utf8_lossy(bytes))
+            .iter()
+            .any(|t| self.steht_roh_in(t.as_bytes()))
+    }
+
+    fn steht_roh_in(&self, bytes: &[u8]) -> bool {
         let k = self.0.as_bytes();
         bytes.windows(k.len()).any(|w| w.eq_ignore_ascii_case(k))
     }
