@@ -95,6 +95,14 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "halt",
             "Autostart nicht geändert (Ordner oder Pfad ungeeignet).",
         ),
+        "update" => (
+            "gut",
+            "Auftrag eingereiht. Sein Protokoll steht auf Live unter Tätigkeit.",
+        ),
+        "update_belegt" => (
+            "offen",
+            "Update nicht eingereiht: Es geht nur, wenn kein anderer Auftrag läuft oder wartet.",
+        ),
         _ => return None,
     })
 }
@@ -117,8 +125,8 @@ pub fn rahmen(
         "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
          <title>DepotSchlopf</title><style>{STIL}{STIL_DIENST}</style></head><body>\
-         <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt. \
-         Die Seite verbindet sich von selbst neu.</div><main>\
+         <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt, etwa \
+         beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu.</div><main>\
          <nav><h1>DepotSchlopf</h1>{}{}<span class=\"leise\">Nur Papiergeld.</span></nav>",
         nav("/", "Live"),
         nav("/einrichtung", "Einrichtung")
@@ -275,9 +283,29 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
     s
 }
 
+/// Die Kennung des Starts im Inhalt; `/app.js` laedt die Seite neu, wenn sie wechselt (neue
+/// Formulare nach einem Neustart).
+pub fn marke(start: &str) -> String {
+    format!("<span hidden data-start=\"{}\"></span>", maskiere(start))
+}
+
+/// Hinweis zum Update, falls es einen gibt.
+fn update_hinweis(z: &Zustand) -> String {
+    match &z.update_meldung {
+        Some((fehler, text)) => format!(
+            "<p class=\"kopf {}\">{}</p>",
+            if *fehler { "halt" } else { "offen" },
+            maskiere(text)
+        ),
+        None => String::new(),
+    }
+}
+
 /// Der Inhalt der Live-Seite (auch `/teil/live`).
-pub fn live(z: &Zustand, heute: Option<Datum>) -> String {
-    let mut s = taetigkeit(z, heute);
+pub fn live(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
+    let mut s = marke(start);
+    s.push_str(&update_hinweis(z));
+    s.push_str(&taetigkeit(z, heute));
     match &z.lage {
         Some(l) => s.push_str(&l.html),
         None => s.push_str("<section><p class=\"leise\">Lagebild wird berechnet …</p></section>"),
@@ -286,7 +314,7 @@ pub fn live(z: &Zustand, heute: Option<Datum>) -> String {
 }
 
 /// Kurzer Stand fuer die Einrichtung (auch `/teil/status`).
-pub fn status(z: &Zustand, heute: Option<Datum>) -> String {
+pub fn status(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
     let jetzt = match &z.laufend {
         Some(a) => format!("Läuft: {} ({}).", a.art.name(), anlass_text(a.anlass)),
         None => "Gerade läuft nichts.".into(),
@@ -297,8 +325,10 @@ pub fn status(z: &Zustand, heute: Option<Datum>) -> String {
         .map(|l| l.naechster_schritt.clone())
         .unwrap_or_default();
     format!(
-        "<section><div class=\"kopf\">{}</div><div>{}</div>\
+        "{}<section>{}<div class=\"kopf\">{}</div><div>{}</div>\
          <div class=\"leise\">Nächster geplanter Lauf: {}</div></section>",
+        marke(start),
+        update_hinweis(z),
         maskiere(&jetzt),
         maskiere(&lage),
         maskiere(&naechster_text(z, heute))
@@ -330,6 +360,9 @@ pub struct Einrichtung {
     pub autostart: bool,
     pub wurzel: String,
     pub grenzen: Vec<Grenzwert>,
+    /// Staende, die nach einem Update zurueckgesetzt wurden (`daten/update_abgelehnt.txt`),
+    /// oder warum die Datei nicht lesbar ist.
+    pub abgelehnt: Result<Vec<String>, String>,
 }
 
 fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
@@ -467,6 +500,48 @@ fn autostart_teil(token: &str, e: &Einrichtung, s: &mut String) {
     );
 }
 
+fn update_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
+    s.push_str(
+        "<section id=\"update\"><h2>Update</h2><p class=\"leise\">Das Update folgt nur \
+         <code>main</code> auf GitHub. Einspielen prüft den neuen Stand zuerst mit dem ganzen Gate \
+         in einem eigenen Ordner; nur wenn er besteht, rückt der Projektordner vorwärts, ohne \
+         Lokales zu überschreiben. Danach startet der Dienst neu. Kommt er nicht hoch, setzt \
+         DepotSchlopf.cmd den alten Stand zurück. Das Gate dauert einige Minuten.</p>",
+    );
+    s.push_str(&update_hinweis(z));
+    for art in [Art::UpdatePruefen, Art::Update] {
+        let zuletzt = z.verlauf.iter().find(|a| a.art == art).map_or_else(
+            || "seit Dienststart nicht".to_string(),
+            |a| {
+                let (klasse, text) = ergebnis(a);
+                format!(
+                    "<span class=\"{klasse}\">{text}</span> {}",
+                    maskiere(&zeit_text(a.start))
+                )
+            },
+        );
+        let _ = write!(
+            s,
+            "<p>{} <span class=\"leise\">Zuletzt: {zuletzt}</span></p>",
+            auftrag_knopf(token, art, art.name())
+        );
+    }
+    match &e.abgelehnt {
+        Ok(l) if l.is_empty() => {}
+        Ok(l) => {
+            let _ = write!(
+                s,
+                "<p class=\"leise\">Zurückgesetzt und nicht mehr angeboten: {}</p>",
+                maskiere(&l.join(", "))
+            );
+        }
+        Err(f) => {
+            let _ = write!(s, "<p class=\"halt\">{}</p>", maskiere(f));
+        }
+    }
+    s.push_str("</section>");
+}
+
 fn grenzen_teil(e: &Einrichtung, s: &mut String) {
     s.push_str(
         "<section id=\"grenzen\"><h2>Grenzen und Budgets</h2><p class=\"leise\">Nur zur Ansicht. \
@@ -485,17 +560,24 @@ fn grenzen_teil(e: &Einrichtung, s: &mut String) {
 }
 
 /// Der Inhalt der Einrichtung.
-pub fn einrichtung(token: &str, z: &Zustand, heute: Option<Datum>, e: &Einrichtung) -> String {
+pub fn einrichtung(
+    token: &str,
+    start: &str,
+    z: &Zustand,
+    heute: Option<Datum>,
+    e: &Einrichtung,
+) -> String {
     let mut s = String::with_capacity(16_384);
     let _ = write!(
         s,
         "<div id=\"stand\" data-teil=\"/teil/status\">{}</div>",
-        status(z, heute)
+        status(start, z, heute)
     );
     schluessel_teil(token, e, &mut s);
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);
     autostart_teil(token, e, &mut s);
+    update_teil(token, z, e, &mut s);
     grenzen_teil(e, &mut s);
     let _ = write!(
         s,
@@ -508,13 +590,17 @@ pub fn einrichtung(token: &str, z: &Zustand, heute: Option<Datum>, e: &Einrichtu
 }
 
 /// Das einzige Skript: laedt den Bereich mit `data-teil` alle zwei Sekunden neu, laesst
-/// aufgeklappte Protokolle offen und zeigt, wenn der Dienst nicht antwortet.
+/// aufgeklappte Protokolle offen und zeigt, wenn der Dienst nicht antwortet. Antwortet ein neu
+/// gestarteter Dienst (andere `data-start`), laedt es die ganze Seite neu: Ihre Formulare
+/// tragen dann das Token des neuen Starts.
 pub const APP_JS: &str = r#""use strict";
 (function () {
   var ziel = document.querySelector("[data-teil]");
   var banner = document.getElementById("getrennt");
   if (!ziel) { return; }
   var url = ziel.getAttribute("data-teil");
+  var marke = document.querySelector("[data-start]");
+  var start = marke ? marke.getAttribute("data-start") : null;
   var zuletzt = null;
   var fehler = 0;
   function offen() {
@@ -526,6 +612,11 @@ pub const APP_JS: &str = r#""use strict";
     fetch(url, { cache: "no-store", credentials: "same-origin" })
       .then(function (r) { if (!r.ok) { throw new Error(String(r.status)); } return r.text(); })
       .then(function (t) {
+        var m = /data-start="([^"]*)"/.exec(t);
+        if (start && m && m[1] !== start) {
+          window.location.replace(window.location.pathname);
+          return;
+        }
         if (t !== zuletzt) {
           var s = offen();
           ziel.innerHTML = t;

@@ -29,7 +29,20 @@ pub enum Art {
     Kurse,
     Termine,
     Papier,
+    /// Neue Staende auf `main` nennen (`run.cmd update pruefen`).
+    UpdatePruefen,
+    /// Neuen Stand pruefen und vorwaerts einspielen (`run.cmd update`).
+    Update,
 }
+
+const ALLE_ARTEN: [Art; 6] = [
+    Art::Einrichten,
+    Art::Kurse,
+    Art::Termine,
+    Art::Papier,
+    Art::UpdatePruefen,
+    Art::Update,
+];
 
 impl Art {
     pub fn name(self) -> &'static str {
@@ -38,6 +51,8 @@ impl Art {
             Art::Kurse => "Kurse abrufen",
             Art::Termine => "Termine abrufen",
             Art::Papier => "Papiertag",
+            Art::UpdatePruefen => "Nach Update suchen",
+            Art::Update => "Update einspielen",
         }
     }
 
@@ -48,13 +63,13 @@ impl Art {
             Art::Kurse => "kurse",
             Art::Termine => "termine",
             Art::Papier => "papier",
+            Art::UpdatePruefen => "update_pruefen",
+            Art::Update => "update",
         }
     }
 
     pub fn aus_kurz(k: &str) -> Option<Art> {
-        [Art::Einrichten, Art::Kurse, Art::Termine, Art::Papier]
-            .into_iter()
-            .find(|a| a.kurz() == k)
+        ALLE_ARTEN.into_iter().find(|a| a.kurz() == k)
     }
 
     /// Argumente fuer `depotschlopf` (wie hinter `run.cmd`).
@@ -64,6 +79,8 @@ impl Art {
             Art::Kurse => &["kurse"],
             Art::Termine => &["termine"],
             Art::Papier => &["papier"],
+            Art::UpdatePruefen => &["update", "pruefen"],
+            Art::Update => &["update"],
         }
     }
 }
@@ -124,6 +141,10 @@ pub struct Zustand {
     pub erledigt_fehler: Option<String>,
     pub lage: Option<Lage>,
     pub lage_veraltet: bool,
+    /// Ein Update ist eingespielt: Der Dienst endet, sobald nichts mehr laeuft oder wartet.
+    pub neustart: bool,
+    /// Stand des letzten Updates fuer die Seite; `true` heisst Fehler.
+    pub update_meldung: Option<(bool, String)>,
 }
 
 /// Wie ein Auftrag gestartet wird. Im Betrieb `depotschlopf` ueber Cargo, in Tests ein
@@ -138,6 +159,8 @@ pub struct Dienst {
     pub wurzel: PathBuf,
     /// Zufallswert dieses Starts; jedes Formular muss ihn tragen.
     pub token: String,
+    /// Kennung dieses Starts, nicht geheim. Die Seite laedt sich neu, wenn sie wechselt.
+    pub start: String,
     pub zustand: Mutex<Zustand>,
     starter: Starter,
     lagerechner: Lagerechner,
@@ -244,9 +267,11 @@ impl Dienst {
             an: zeitplan.an && zeitplan_fehler.is_none() && erledigt_fehler.is_none(),
             ..zeitplan
         };
+        let start: String = crate::neues_token().chars().take(16).collect();
         Dienst {
             wurzel,
             token,
+            start,
             zustand: Mutex::new(Zustand {
                 naechste_nr: 1,
                 laufend: None,
@@ -258,6 +283,8 @@ impl Dienst {
                 erledigt_fehler,
                 lage: None,
                 lage_veraltet: true,
+                neustart: false,
+                update_meldung: None,
             }),
             starter,
             lagerechner,
@@ -414,11 +441,24 @@ impl Dienst {
             && a.art == Art::Kurse
             && a.anlass == Anlass::Zeitplan
             && z.zeitplan.papier_danach;
+        let eingespielt =
+            erfolg && a.art == Art::Update && crate::rueckfall::offen_pfad(&self.wurzel).exists();
         ablegen(&mut z, a);
         z.lage_veraltet = true;
+        if eingespielt {
+            z.neustart = true;
+            z.update_meldung = Some((false, "Update eingespielt. Der Dienst startet neu.".into()));
+        }
         if papier_danach {
             let _ = einreihen(&mut z, Art::Papier, Anlass::Zeitplan);
         }
+    }
+
+    /// Darf der Dienst fuer das Update jetzt enden? Nur wenn eins eingespielt ist und nichts
+    /// laeuft oder wartet: Kein eingereihter Lauf geht verloren.
+    pub fn neustart_bereit(&self) -> bool {
+        let z = self.sperre();
+        z.neustart && z.laufend.is_none() && z.warteschlange.is_empty()
     }
 
     fn protokolliere(&self, nr: u64, zeile: String) {
@@ -432,6 +472,10 @@ impl Dienst {
 }
 
 fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static str> {
+    // Das Update laeuft nur allein und nur einmal je Start: Danach startet der Dienst neu.
+    if art == Art::Update && (z.laufend.is_some() || !z.warteschlange.is_empty() || z.neustart) {
+        return Err("Update nur, wenn nichts laeuft oder wartet");
+    }
     if z.laufend.as_ref().is_some_and(|a| a.art == art)
         || z.warteschlange.iter().any(|(a, _)| *a == art)
     {

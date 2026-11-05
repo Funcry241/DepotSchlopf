@@ -2,7 +2,7 @@
 
 Wolfgang am 05.11.2026: DepotSchlopf läuft dauerhaft, startet mit Windows und wird über eine lokale Weboberfläche mit genau einer Config-Seite eingerichtet, ohne Konsole. Maus: Einrichtung, Live-Status und Updateablauf zusammen benutzbar; Speichern und Aktivieren sichtbar unterscheiden; Schlüssel, Konfiguration und Updates gegen Aufrufe fremder Webseiten schützen (Host- und Herkunftsprüfung, Token gegen CSRF und DNS-Rebinding). Freigabe Wolfgang: „Ja, nur 127.0.0.1“, eigener kleiner Server aus der Standardbibliothek.
 
-Dieser Schritt liefert Dienst, Live-Seite, Config-Seite, Zeitplan, Starter und Autostart. Das Update mit Rückfall folgt als eigener Schritt.
+Dieser Schritt liefert Dienst, Live-Seite, Config-Seite, Zeitplan, Starter und Autostart. Das Update mit Rückfall steht in `docs/befunde/update.md`.
 
 ## Grundsatz: Der Dienst schreibt nie ins Journal
 
@@ -57,7 +57,7 @@ Der Dienst liest nie einen Schlüssel aus. Für den Stand fragt er nur die Merkm
 
 ## Start und Autostart
 
-- `DepotSchlopf.cmd` (Doppelklick) startet den Dienst und öffnet die Seite. Ist der Port belegt, läuft der Dienst schon: Dann öffnet sich nur die Seite.
+- `DepotSchlopf.cmd` (Doppelklick) startet über den Wächter `depot_waechter` den Dienst und öffnet die Seite. Ist der Port belegt, läuft der Dienst schon: Dann öffnet sich nur die Seite. Nach einem Update startet der Wächter den Dienst neu oder setzt den alten Stand zurück (`docs/befunde/update.md`).
 - Autostart legt `DepotSchlopf.cmd` im Autostart-Ordner des Benutzers an, die den Starter im Projektordner mit `--ohne-browser` in kleinem Fenster ruft. Keine Registry, keine Adminrechte. Ein Projektordner mit `" % ! ^ & | < >` oder Steuerzeichen wird abgelehnt, damit die Befehlsdatei nichts anderes tun kann.
 
 ## Live-Seite

@@ -17,43 +17,24 @@
 
 use std::io::{ErrorKind, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use depot_dienst::rueckfall::{self, NEUSTART};
 use depot_dienst::werkbank::{Dienst, cargo_starter};
-use depot_dienst::{System, Umwelt, behandle, http, lagerechner, neues_token};
+use depot_dienst::{
+    System, Umwelt, behandle, finde_wurzel, http, lagerechner, neues_token, oeffne_browser,
+};
 use depot_kern::Zeitpunkt;
 
 /// So viele Verbindungen werden hoechstens zugleich bedient; weitere werden geschlossen.
 const VERBINDUNGEN_MAX: usize = 32;
-const ADRESSE: &str = "http://127.0.0.1:47410/";
-
-fn wurzel() -> Option<PathBuf> {
-    let start = std::env::current_dir().ok()?;
-    start
-        .ancestors()
-        .find(|d| d.join("kodex").join("festschreibung.txt").is_file())
-        .map(Path::to_path_buf)
-}
-
 fn jetzt() -> Option<Zeitpunkt> {
     let s = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
     Zeitpunkt::aus_sekunden(i64::try_from(s).ok()?)
-}
-
-/// Oeffnet die Seite im Standardbrowser.
-fn browser() {
-    #[cfg(windows)]
-    {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", ADRESSE])
-            .spawn();
-    }
-    println!("[Dienst] Oberflaeche: {ADRESSE}");
 }
 
 fn bediene(d: &Dienst, u: &dyn Umwelt, mut strom: TcpStream) {
@@ -73,6 +54,8 @@ fn bediene(d: &Dienst, u: &dyn Umwelt, mut strom: TcpStream) {
 }
 
 /// Der Arbeiter: jede Sekunde ein Schritt; ein gestarteter Auftrag wird in eigenem Faden verfolgt.
+/// Nach einem eingespielten Update endet der Dienst, sobald nichts mehr laeuft oder wartet, mit
+/// `NEUSTART`; der Waechter startet dann den neuen Stand.
 fn arbeiter(d: &Arc<Dienst>) {
     loop {
         if let Some(t) = jetzt()
@@ -81,7 +64,40 @@ fn arbeiter(d: &Arc<Dienst>) {
             let d2 = Arc::clone(d);
             thread::spawn(move || d2.verfolge(nr, kind, jetzt));
         }
+        if d.neustart_bereit() {
+            println!("[Dienst] Update eingespielt: Neustart.");
+            // Die Seite soll den Hinweis noch einmal abholen koennen.
+            thread::sleep(Duration::from_secs(3));
+            std::process::exit(i32::from(NEUSTART));
+        }
         thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// Ein offenes Update gilt als bestaetigt, wenn dieser Dienst eine Weile laeuft.
+fn bestaetigen(d: &Arc<Dienst>) {
+    match rueckfall::offen(&d.wurzel) {
+        Ok(None) => {}
+        Ok(Some(o)) => {
+            d.sperre().update_meldung = Some((
+                false,
+                format!("Update auf {} läuft zur Probe.", rueckfall::kurz(&o.neu)),
+            ));
+            let d = Arc::clone(d);
+            thread::spawn(move || {
+                thread::sleep(rueckfall::BESTAETIGEN_NACH);
+                let m = match rueckfall::bestaetige(&d.wurzel) {
+                    Ok(Some(o)) => (
+                        false,
+                        format!("Update auf {} bestätigt.", rueckfall::kurz(&o.neu)),
+                    ),
+                    Ok(None) => (false, "Kein Update offen.".to_string()),
+                    Err(e) => (true, e),
+                };
+                d.sperre().update_meldung = Some(m);
+            });
+        }
+        Err(e) => d.sperre().update_meldung = Some((true, e)),
     }
 }
 
@@ -95,7 +111,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    let Some(wurzel) = wurzel() else {
+    let Some(wurzel) = finde_wurzel() else {
         eprintln!("[Dienst] FEHLER: Projektordner nicht gefunden. DepotSchlopf.cmd dort starten.");
         return ExitCode::FAILURE;
     };
@@ -104,7 +120,7 @@ fn main() -> ExitCode {
         Err(e) if e.kind() == ErrorKind::AddrInUse => {
             println!("[Dienst] Laeuft schon.");
             if !ohne_browser {
-                browser();
+                oeffne_browser();
             }
             return ExitCode::SUCCESS;
         }
@@ -124,13 +140,14 @@ fn main() -> ExitCode {
         cargo_starter(),
         lagerechner(token, Arc::clone(&umwelt)),
     ));
+    bestaetigen(&dienst);
     {
         let d = Arc::clone(&dienst);
         thread::spawn(move || arbeiter(&d));
     }
     println!("[Dienst] Bereit. Fenster offen lassen; Schliessen beendet den Dienst.");
     if !ohne_browser {
-        browser();
+        oeffne_browser();
     }
     let offen = Arc::new(AtomicUsize::new(0));
     for verbindung in lauscher.incoming() {
