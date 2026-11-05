@@ -431,6 +431,7 @@ fn zeitplan_text_streng() -> Result<(), String> {
         termine: Some(tag),
         kurse: None,
         kurse_nyse: None,
+        ..Erledigt::default()
     };
     assert_eq!(Erledigt::lies(&e.als_text()), Ok(e));
     assert!(Erledigt::lies("erledigt-v1\ntermine=2026-13-01\nkurse=\n").is_err());
@@ -454,6 +455,7 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
         termine: Some(do_),
         kurse: None,
         kurse_nyse: None,
+        ..Erledigt::default()
     };
     assert_eq!(faellig(&p, &termine, do_, (17, 44)), None);
     assert_eq!(
@@ -464,6 +466,7 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
         termine: Some(do_),
         kurse: Some(do_),
         kurse_nyse: None,
+        ..Erledigt::default()
     };
     assert_eq!(faellig(&p, &beide, do_, (23, 59)), None);
     assert_eq!(faellig(&p, &leer, sa, (18, 0)), None);
@@ -482,6 +485,7 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
         termine: some(Datum::neu(2026, 11, 6), "Freitag")?.into(),
         kurse: some(Datum::neu(2026, 11, 6), "Freitag")?.into(),
         kurse_nyse: None,
+        ..Erledigt::default()
     };
     assert_eq!(
         naechster(
@@ -512,6 +516,7 @@ fn zeitplan_ruht_an_boersenfeiertagen() -> Result<(), String> {
         termine: Some(d23),
         kurse: Some(d23),
         kurse_nyse: None,
+        ..Erledigt::default()
     };
     assert_eq!(
         naechster(&p, &fertig, d23),
@@ -576,7 +581,7 @@ fn zeitplan_startet_termine_kurse_und_danach_papier() -> Result<(), String> {
         .map_err(|e| format!("Erledigt fehlt: {e}"))?;
     assert_eq!(
         erledigt,
-        "erledigt-v2\ntermine=2026-11-05\nkurse=2026-11-05\nkurse_nyse=\n"
+        "erledigt-v3\ntermine=2026-11-05\nkurse=2026-11-05\nkurse_nyse=\nkurse_ok=2026-11-05\npapier=2026-11-05\n"
     );
     let neu = dienst(wurzel, true);
     assert!(neu.schritt(donnerstag(20, 0)?).is_none());
@@ -1442,14 +1447,19 @@ fn erledigt_frueherer_form() -> Result<(), String> {
             termine: Some(tag),
             kurse: Some(tag),
             kurse_nyse: None,
+            ..Erledigt::default()
         }
     );
     assert_eq!(
         alt.als_text(),
-        "erledigt-v2\ntermine=2026-11-05\nkurse=2026-11-05\nkurse_nyse=\n"
+        "erledigt-v3\ntermine=2026-11-05\nkurse=2026-11-05\nkurse_nyse=\nkurse_ok=\npapier=\n"
     );
     assert!(Erledigt::lies("erledigt-v1\ntermine=\nkurse=\nkurse_nyse=\n").is_err());
     assert!(Erledigt::lies("erledigt-v2\ntermine=\nkurse=\n").is_err());
+    // Aus der Form ohne Erfolg folgt kein Papiertag: kurse_ok bleibt leer.
+    let v2 = Erledigt::lies("erledigt-v2\ntermine=\nkurse=2026-11-05\nkurse_nyse=\n")?;
+    assert_eq!(v2.kurse_ok, None);
+    assert!(Erledigt::lies("erledigt-v3\ntermine=\nkurse=\nkurse_nyse=\nkurse_ok=\n").is_err());
     Ok(())
 }
 
@@ -1503,5 +1513,102 @@ fn papiertag_nach_dem_letzten_abruf_des_tages() -> Result<(), String> {
         };
         assert_eq!(wartend(&d), erwartet, "Xetra {xetra_ok}, NYSE {nyse_ok}");
     }
+    Ok(())
+}
+
+/// Die Live-Ansicht nach einem Neustart: der Satz mit `id="neustart"`.
+fn neustart_satz(d: &Dienst, t: Zeitpunkt) -> Option<String> {
+    let seite = seiten::live("s", &d.sperre(), t.datum());
+    let (_, rest) = seite.split_once("id=\"neustart\">")?;
+    rest.split_once("</p>").map(|(s, _)| s.to_string())
+}
+
+/// Maus' Abnahmefall 2: Windows startet zwischen Kursabruf und Papiertag neu. Der neue Dienst
+/// holt den nicht begonnenen Papiertag mit den Kursen von heute nach und sagt das; danach
+/// startet nichts mehr. Ohne Neustart steht kein solcher Satz da.
+#[test]
+fn neustart_zwischen_kursabruf_und_papiertag_holt_ihn_nach() -> Result<(), String> {
+    let wurzel = eingeschaltet(ordner()?)?;
+    let t = donnerstag(17, 46)?;
+    {
+        let d = dienst(wurzel.clone(), true);
+        let (nr, kind) = some(d.schritt(t), "Termine")?;
+        d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+        let (nr, kind) = some(d.schritt(t), "Kurse")?;
+        d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+        assert_eq!(wartend(&d), vec![(Art::Papier, Anlass::Zeitplan)]);
+        assert_eq!(neustart_satz(&d, t), None, "kein Neustart");
+        // Hier endet der Dienst, bevor der Papiertag beginnt.
+    }
+    let spaeter = donnerstag(18, 20)?;
+    let d = dienst(wurzel.clone(), true);
+    let (nr, kind) = some(d.schritt(spaeter), "Papiertag nachgeholt")?;
+    assert_eq!(
+        d.sperre().laufend.as_ref().map(|a| (a.art, a.anlass)),
+        Some((Art::Papier, Anlass::Zeitplan))
+    );
+    let satz = some(neustart_satz(&d, spaeter), "Satz")?;
+    assert!(satz.contains("holt DepotSchlopf den Papiertag"), "{satz}");
+    assert!(satz.contains("Du musst nichts tun"), "{satz}");
+    d.verfolge(nr, kind, || donnerstag(18, 21).ok());
+    let satz = some(neustart_satz(&d, spaeter), "Satz")?;
+    assert!(satz.contains("nachgeholt"), "{satz}");
+    assert!(d.schritt(spaeter).is_none(), "heute nichts mehr");
+    // Ein weiterer Neustart startet ihn nicht ein zweites Mal.
+    let wieder = dienst(wurzel, true);
+    assert!(wieder.schritt(donnerstag(19, 0)?).is_none());
+    assert!(wartend(&wieder).is_empty());
+    Ok(())
+}
+
+/// Lief der Papiertag schon, als der Dienst endete, bleibt der heutige Schutz: Kein neuer
+/// Start von selbst, und die Ansicht sagt, wo es stehen blieb und wo es weitergeht.
+#[test]
+fn neustart_waehrend_des_papiertags_startet_ihn_nicht_neu() -> Result<(), String> {
+    let wurzel = eingeschaltet(ordner()?)?;
+    let t = donnerstag(17, 46)?;
+    {
+        let d = dienst(wurzel.clone(), true);
+        let (nr, kind) = some(d.schritt(t), "Termine")?;
+        d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+        let (nr, kind) = some(d.schritt(t), "Kurse")?;
+        d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+        let (_, mut kind) = some(d.schritt(t), "Papier")?;
+        let _ = kind.wait();
+        // Der Dienst endet, waehrend der Papiertag laeuft: Sein Ende steht nie im Verlauf.
+    }
+    let spaeter = donnerstag(18, 20)?;
+    let d = dienst(wurzel, true);
+    assert!(d.schritt(spaeter).is_none(), "kein zweiter Papiertag");
+    assert!(wartend(&d).is_empty());
+    let satz = some(neustart_satz(&d, spaeter), "Satz")?;
+    assert!(satz.contains("Der Papiertag lief schon"), "{satz}");
+    assert!(satz.contains("heutige Schutz bleibt"), "{satz}");
+    assert!(
+        seiten::live("s", &d.sperre(), spaeter.datum()).contains("kopf halt\" id=\"neustart\"")
+    );
+    Ok(())
+}
+
+/// Endet der Dienst waehrend des Kursabrufs, gibt es heute keinen Papiertag von selbst: Die
+/// Kurse fehlen. Die Ansicht sagt das; der Abruf startet nicht doppelt.
+#[test]
+fn neustart_waehrend_des_kursabrufs_ohne_papiertag() -> Result<(), String> {
+    let wurzel = eingeschaltet(ordner()?)?;
+    let t = donnerstag(17, 46)?;
+    {
+        let d = dienst(wurzel.clone(), true);
+        let (nr, kind) = some(d.schritt(t), "Termine")?;
+        d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+        let (_, mut kind) = some(d.schritt(t), "Kurse")?;
+        let _ = kind.wait();
+    }
+    let spaeter = donnerstag(18, 20)?;
+    let d = dienst(wurzel, true);
+    assert!(d.schritt(spaeter).is_none());
+    assert!(wartend(&d).is_empty());
+    let satz = some(neustart_satz(&d, spaeter), "Satz")?;
+    assert!(satz.contains("Der Kursabruf lief"), "{satz}");
+    assert!(satz.contains("kein Papiertag"), "{satz}");
     Ok(())
 }

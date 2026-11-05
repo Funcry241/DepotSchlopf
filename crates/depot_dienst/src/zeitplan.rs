@@ -49,7 +49,9 @@ impl Default for Zeitplan {
 }
 
 const KOPF: &str = "zeitplan-v1";
-const KOPF_ERLEDIGT: &str = "erledigt-v2";
+const KOPF_ERLEDIGT: &str = "erledigt-v3";
+/// Die fruehere Form ohne `kurse_ok` und `papier`.
+const KOPF_ERLEDIGT_V2: &str = "erledigt-v2";
 /// Die fruehere Form ohne Abruf je Boerse; `kurse` war der Abruf von Xetra.
 const KOPF_ERLEDIGT_V1: &str = "erledigt-v1";
 
@@ -136,6 +138,13 @@ pub struct Erledigt {
     pub kurse: Option<Datum>,
     /// Abruf der NYSE-Kurse.
     pub kurse_nyse: Option<Datum>,
+    /// Der Tag, an dem zuletzt ein Kursabruf des Zeitplans erfolgreich endete. Steht hier
+    /// heute und sind alle Abrufe des Tages gestartet, folgt der Papiertag, auch nach einem
+    /// Neustart des Dienstes.
+    pub kurse_ok: Option<Datum>,
+    /// Der Tag, fuer den der Zeitplan den Papiertag gestartet hat. Ein angefangener Papiertag
+    /// startet so nie ein zweites Mal von selbst.
+    pub papier: Option<Datum>,
 }
 
 fn datum_feld(d: Option<Datum>) -> String {
@@ -145,22 +154,27 @@ fn datum_feld(d: Option<Datum>) -> String {
 impl Erledigt {
     pub fn als_text(&self) -> String {
         format!(
-            "{KOPF_ERLEDIGT}\ntermine={}\nkurse={}\nkurse_nyse={}\n",
+            "{KOPF_ERLEDIGT}\ntermine={}\nkurse={}\nkurse_nyse={}\nkurse_ok={}\npapier={}\n",
             datum_feld(self.termine),
             datum_feld(self.kurse),
-            datum_feld(self.kurse_nyse)
+            datum_feld(self.kurse_nyse),
+            datum_feld(self.kurse_ok),
+            datum_feld(self.papier)
         )
     }
 
-    /// Liest genau die eigene Form, auch die fruehere ohne `kurse_nyse` (`erledigt-v1`).
+    /// Liest genau die eigene Form, auch die frueheren: ohne `kurse_nyse` (`erledigt-v1`), ohne
+    /// `kurse_ok` und `papier` (`erledigt-v2`). Aus einer frueheren Form folgt heute kein
+    /// Papiertag von selbst: Ob ein Abruf erfolgreich war, stand dort nicht.
     ///
     /// # Errors
     /// Jede Abweichung.
     pub fn lies(text: &str) -> Result<Erledigt, String> {
         let mut z = text.lines();
-        let v1 = match z.next() {
-            Some(KOPF_ERLEDIGT) => false,
-            Some(KOPF_ERLEDIGT_V1) => true,
+        let form = match z.next() {
+            Some(KOPF_ERLEDIGT) => 3,
+            Some(KOPF_ERLEDIGT_V2) => 2,
+            Some(KOPF_ERLEDIGT_V1) => 1,
             _ => return Err("Erledigt: Kopfzeile fehlt".into()),
         };
         let mut datum = |name: &str| -> Result<Option<Datum>, String> {
@@ -179,20 +193,36 @@ impl Erledigt {
         };
         let termine = datum("termine")?;
         let kurse = datum("kurse")?;
-        let kurse_nyse = if v1 { None } else { datum("kurse_nyse")? };
+        let kurse_nyse = if form >= 2 {
+            datum("kurse_nyse")?
+        } else {
+            None
+        };
+        let (kurse_ok, papier) = if form >= 3 {
+            (datum("kurse_ok")?, datum("papier")?)
+        } else {
+            (None, None)
+        };
         let e = Erledigt {
             termine,
             kurse,
             kurse_nyse,
+            kurse_ok,
+            papier,
         };
-        let eigen = if v1 {
-            format!(
+        let eigen = match form {
+            1 => format!(
                 "{KOPF_ERLEDIGT_V1}\ntermine={}\nkurse={}\n",
                 datum_feld(termine),
                 datum_feld(kurse)
-            )
-        } else {
-            e.als_text()
+            ),
+            2 => format!(
+                "{KOPF_ERLEDIGT_V2}\ntermine={}\nkurse={}\nkurse_nyse={}\n",
+                datum_feld(termine),
+                datum_feld(kurse),
+                datum_feld(kurse_nyse)
+            ),
+            _ => e.als_text(),
         };
         if eigen != text {
             return Err("Erledigt: nicht in eigener Form".into());
@@ -213,7 +243,8 @@ impl Erledigt {
             Art::Termine => self.termine = Some(tag),
             Art::KurseVon(Boerse::Xetra) => self.kurse = Some(tag),
             Art::KurseVon(Boerse::Nyse) => self.kurse_nyse = Some(tag),
-            Art::Einrichten | Art::Kurse | Art::Papier | Art::UpdatePruefen | Art::Update => {}
+            Art::Papier => self.papier = Some(tag),
+            Art::Einrichten | Art::Kurse | Art::UpdatePruefen | Art::Update => {}
         }
     }
 }
@@ -283,10 +314,32 @@ pub fn faellig_fuer(
     if zeit >= plan.termine && erledigt.termine != Some(tag) {
         return Some(Art::Termine);
     }
-    abrufe_fuer(plan, tag, boersen)
-        .into_iter()
+    let abrufe = abrufe_fuer(plan, tag, boersen);
+    if let Some((b, _)) = abrufe
+        .iter()
         .find(|(b, u)| zeit >= *u && erledigt.kurse_von(*b) != Some(tag))
-        .map(|(b, _)| Art::KurseVon(b))
+    {
+        return Some(Art::KurseVon(*b));
+    }
+    papier_faellig(plan.papier_danach, erledigt, tag, &abrufe).then_some(Art::Papier)
+}
+
+/// Der Papiertag ist faellig, wenn er eingestellt ist, alle Abrufe des Tages gestartet sind,
+/// einer davon heute erfolgreich war und der Zeitplan ihn heute noch nicht gestartet hat. Das
+/// gilt auch nach einem Neustart des Dienstes: Ein nicht begonnener Papiertag wird mit den
+/// Kursen von heute nachgeholt, ein begonnener nie ein zweites Mal gestartet.
+fn papier_faellig(
+    papier_danach: bool,
+    erledigt: &Erledigt,
+    tag: Datum,
+    abrufe: &[(Boerse, (u8, u8))],
+) -> bool {
+    papier_danach
+        && erledigt.kurse_ok == Some(tag)
+        && erledigt.papier != Some(tag)
+        && abrufe
+            .iter()
+            .all(|(b, _)| erledigt.kurse_von(*b) == Some(tag))
 }
 
 fn tag_danach(d: Datum) -> Option<Datum> {
