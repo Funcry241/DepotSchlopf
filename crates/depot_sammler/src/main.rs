@@ -157,22 +157,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
     if let Some(a) = &bericht.abbruch {
         println!("[Sammler] Lauf vorzeitig beendet: {a}");
     }
-    match bericht.handelstag {
-        None => println!("[Sammler] Keine Schlusskurse belegt."),
-        Some(t) if bericht.pruefung.is_empty() => println!(
-            "[Sammler] Pruefung fuer den Handelstag {}: in Ordnung.",
-            datum(t)
-        ),
-        Some(t) => {
-            println!(
-                "[Sammler] Pruefung fuer den Handelstag {} (Hoechstalter 20 Minuten: Schlusskurse sind nur kurz nach 17:35 Uhr frisch):",
-                datum(t)
-            );
-            for f in &bericht.pruefung {
-                println!("  {f:?}");
-            }
-        }
-    }
+    zeige_pruefung(&bericht);
     println!(
         "[Sammler] Belegt im Journal {}, rohe Antworten unter daten/roh/.",
         journal_pfad.display()
@@ -187,6 +172,31 @@ fn kurse(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
             "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Pruefung nicht bestanden)."
         );
         ExitCode::FAILURE
+    }
+}
+
+/// Was die Pruefung sagt, wie der Papiertag sie ansetzt.
+fn zeige_pruefung(bericht: &depot_sammler::Bericht) {
+    match bericht.handelstag {
+        None => println!("[Sammler] Keine Schlusskurse belegt."),
+        Some(t) if bericht.pruefung.is_empty() => {
+            println!(
+                "[Sammler] Pruefung fuer den Handelstag {}: in Ordnung.",
+                datum(t)
+            );
+            for f in &bericht.ausgelassen {
+                println!("  heute nicht handelbar: {f:?}");
+            }
+        }
+        Some(t) => {
+            println!(
+                "[Sammler] Pruefung fuer den Handelstag {} (Hoechstalter 20 Minuten: Schlusskurse sind nur kurz nach 17:35 Uhr frisch):",
+                datum(t)
+            );
+            for f in &bericht.pruefung {
+                println!("  {f:?}");
+            }
+        }
     }
 }
 

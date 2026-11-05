@@ -82,7 +82,7 @@ Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je
 
 ### Papierhandel mit Dachs und Maus
 
-`run.cmd papier` führt nach `run.cmd kurse` einen Papiertag mit den heute belegten Schlusskursen: Dachs und Maus schlagen vor und prüfen sich gegenseitig, dann Kontowächter, Regelwerk und Papierkonto `daten/papierkonto.txt`, nur Papiergeld, einmal je Handelstag. Ohne Kurse von heute hält er an. Die Schlüssel legt Wolfgang einmal in der Windows-Anmeldeinformationsverwaltung an:
+`run.cmd papier` führt nach `run.cmd kurse` einen Papiertag mit den heute belegten Schlusskursen: Dachs und Maus schlagen vor und prüfen sich gegenseitig, dann Kontowächter, Regelwerk und Papierkonto `daten/papierkonto.txt`, nur Papiergeld, einmal je Handelstag. Ohne Kurse von heute hält er an. Pflicht sind nur die Kurse der gehaltenen Werte: Ein Kandidat ohne gültigen Kurs ist an dem Tag nicht handelbar und steht so im Lagebild. Jeder Wert gehört zu einer Börse, deren Schluss und Feiertage gelten (Xetra, NYSE). An einem Tag, an dem keine Börse der Liste handelt, läuft nichts, und nichts ist verpasst. Die Schlüssel legt Wolfgang einmal in der Windows-Anmeldeinformationsverwaltung an:
 
 ```text
 cmdkey /generic:DepotSchlopf/anthropic /user:depotschlopf /pass

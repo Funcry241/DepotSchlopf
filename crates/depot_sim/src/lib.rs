@@ -34,7 +34,7 @@ pub use lauf::{Gefragt, LaufFehler, gefragt, lauf};
 pub use papier::{Broker, Papierkonto, Sendeantwort};
 pub use papierdatei::Papierdatei;
 pub use papiertag::{
-    Ausgang, Tageskurse, Tageslage, kurse_von_heute, papiertag, tageskurse, tageskurse_am,
+    AUSWAHL, Ausgang, Tageskurse, Tageslage, kurse_von_heute, papiertag, tageskurse, tageskurse_am,
     tageslage, tagnummer,
 };
 pub use szenario::{

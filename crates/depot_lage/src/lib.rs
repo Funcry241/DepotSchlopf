@@ -38,11 +38,12 @@ pub use zugang::{PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdate
 
 use depot_journal::Stand;
 use depot_journal::anbieter::{Eintrag, Wer};
-use depot_kern::liste::{Wert, als_universum, beobachtungsliste};
+use depot_kern::liste::{self, Wert, als_universum, beobachtungsliste};
 use depot_kern::{BeraterId, Datum, Grenzen, Zeitpunkt};
 use depot_ki::KiGrenzen;
-use depot_regelwerk::pruefe_kurse;
+use depot_regelwerk::waehle_tageswerte;
 use depot_sim::{LaufFehler, Tageslage, kurse_von_heute, tageskurse, tageslage};
+use std::fmt::Write as _;
 
 /// Wie das Journal zu erreichen war.
 #[derive(Clone, Copy, Debug)]
@@ -340,27 +341,48 @@ fn berater_punkt(b: BeraterId, st: SchluesselStand, hinweis: Option<AnbieterHinw
 
 /// Kurse, Termine und Tageslage aus dem Journal, genau wie der Papiertag sie prueft.
 fn tag_punkte(s: &Stand, heute: Datum, werte: &[Wert], punkte: &mut Vec<Punkt>) {
+    if geschlossen(s, heute, punkte) {
+        return;
+    }
     let universum = als_universum(werte);
     let kurse_heute = match kurse_von_heute(s, &universum, heute) {
         Ok(k) => {
-            let befunde = pruefe_kurse(
+            let wahl = waehle_tageswerte(
                 &Grenzen::standard(),
                 &universum,
+                &s.gehalten(),
                 k.handelstag,
                 &k.heute,
                 &k.vortag,
             );
-            if befunde.is_empty() {
-                punkte.push(punkt(
-                    "Schlusskurse",
-                    Ampel::Gut,
-                    format!(
-                        "Vom {} belegt und geprüft, Abruf {}.",
-                        datum_text(k.handelstag),
-                        zeit_text(k.heute.stand())
-                    ),
-                    None,
-                ));
+            // Faellt der Zyklus aus, zaehlen auch die Gruende der ausgelassenen Kandidaten:
+            // Ohne sie hiesse es nur „kein Wert mit gültigem Kurs“.
+            let befunde: Vec<_> = if wahl.fehler.is_empty() {
+                Vec::new()
+            } else {
+                wahl.fehler
+                    .iter()
+                    .chain(&wahl.ausgelassen)
+                    .filter(|b| **b != depot_regelwerk::DatenFehler::KeinWertHandelbar)
+                    .cloned()
+                    .collect()
+            };
+            if wahl.fehler.is_empty() {
+                let mut text = format!(
+                    "Vom {} belegt und geprüft, Abruf {}.",
+                    datum_text(k.handelstag),
+                    zeit_text(k.heute.stand())
+                );
+                if !wahl.ausgelassen.is_empty() {
+                    let roh: Vec<String> =
+                        wahl.ausgelassen.iter().map(|b| format!("{b:?}")).collect();
+                    let _ = write!(
+                        text,
+                        " Heute nicht handelbar, der Papiertag läuft ohne sie: {}.",
+                        tage::befunde_text(roh.iter().map(String::as_str)).join("; ")
+                    );
+                }
+                punkte.push(punkt("Schlusskurse", Ampel::Gut, text, None));
             } else {
                 let roh: Vec<String> = befunde.iter().map(|b| format!("{b:?}")).collect();
                 // Zu alte Kurse heilt kein neuer Abruf am selben Abend: Er laege noch spaeter.
@@ -410,11 +432,41 @@ fn tag_punkte(s: &Stand, heute: Datum, werte: &[Wert], punkte: &mut Vec<Punkt>) 
             false
         }
     };
-    termin_und_tag(s, heute, kurse_heute, punkte);
+    let heute_ist = if kurse_heute {
+        Heute::Kurse
+    } else {
+        Heute::OhneKurse
+    };
+    termin_und_tag(s, heute, &heute_ist, punkte);
+}
+
+/// Handelt heute keine Boerse der Liste, sagen Schlusskurse und Papiertag das, und es wird
+/// nichts verlangt. `true` in diesem Fall.
+fn geschlossen(s: &Stand, heute: Datum, punkte: &mut Vec<Punkt>) -> bool {
+    if liste::handelstag(heute) {
+        return false;
+    }
+    let grund = liste::feiertag(heute).unwrap_or_else(|| "Wochenende".into());
+    punkte.push(punkt(
+        "Schlusskurse",
+        Ampel::Gut,
+        format!("Heute handelt keine Börse der Liste ({grund}): kein Abruf nötig."),
+        None,
+    ));
+    termin_und_tag(s, heute, &Heute::Geschlossen(grund), punkte);
+    true
+}
+
+/// Was heute fuer den Papiertag vorliegt.
+enum Heute {
+    Kurse,
+    OhneKurse,
+    /// Keine Boerse der Liste handelt, mit Grund.
+    Geschlossen(String),
 }
 
 /// Termine und Tageslage.
-fn termin_und_tag(s: &Stand, heute: Datum, kurse_heute: bool, punkte: &mut Vec<Punkt>) {
+fn termin_und_tag(s: &Stand, heute: Datum, kurse_heute: &Heute, punkte: &mut Vec<Punkt>) {
     let termine = s.aktuelle_termine();
     let letzter = termine.values().map(|t| t.abruf()).max();
     punkte.push(match letzter {
@@ -435,14 +487,20 @@ fn termin_und_tag(s: &Stand, heute: Datum, kurse_heute: bool, punkte: &mut Vec<P
             Some(Abhilfe::TermineAbrufen),
         ),
     });
-    punkte.push(match tageslage(s, heute) {
-        Ok(Tageslage::Abgeschlossen(d)) => punkt(
+    punkte.push(match (tageslage(s, heute), kurse_heute) {
+        (Ok(Tageslage::Abgeschlossen(d)), _) => punkt(
             "Papiertag",
             Ampel::Gut,
             format!("Der Papiertag {} ist abgeschlossen.", datum_text(d)),
             None,
         ),
-        Ok(Tageslage::Offen) if kurse_heute => punkt(
+        (Ok(Tageslage::Offen), Heute::Geschlossen(g)) => punkt(
+            "Papiertag",
+            Ampel::Gut,
+            format!("Heute kein Papiertag: Börse geschlossen ({g})."),
+            None,
+        ),
+        (Ok(Tageslage::Offen), Heute::Kurse) => punkt(
             "Papiertag",
             Ampel::Offen,
             format!(
@@ -452,13 +510,13 @@ fn termin_und_tag(s: &Stand, heute: Datum, kurse_heute: bool, punkte: &mut Vec<P
             ),
             Some(Abhilfe::PapiertagStarten),
         ),
-        Ok(Tageslage::Offen) => punkt(
+        (Ok(Tageslage::Offen), Heute::OhneKurse) => punkt(
             "Papiertag",
             Ampel::Offen,
             "Wartet auf die Kurse von heute.".into(),
             Some(Abhilfe::Warten),
         ),
-        Err(e) => punkt(
+        (Err(e), _) => punkt(
             "Papiertag",
             Ampel::Halt,
             halt_text(e),

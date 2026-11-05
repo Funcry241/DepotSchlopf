@@ -479,6 +479,35 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
     Ok(())
 }
 
+/// An Feiertagen aller Boersen der Liste laeuft nichts; der naechste Lauf ist der naechste Tag,
+/// an dem gehandelt wird.
+#[test]
+fn zeitplan_ruht_an_boersenfeiertagen() -> Result<(), String> {
+    let p = Zeitplan {
+        an: true,
+        ..Zeitplan::default()
+    };
+    let leer = Erledigt::default();
+    let heiligabend = some(Datum::neu(2026, 12, 24), "Heiligabend")?;
+    assert_eq!(faellig(&p, &leer, heiligabend, (18, 0)), None);
+    let karfreitag = some(Datum::neu(2026, 4, 3), "Karfreitag")?;
+    assert_eq!(faellig(&p, &leer, karfreitag, (18, 0)), None);
+    let d23 = some(Datum::neu(2026, 12, 23), "23.12.")?;
+    let fertig = Erledigt {
+        termine: Some(d23),
+        kurse: Some(d23),
+    };
+    assert_eq!(
+        naechster(&p, &fertig, d23),
+        Some((
+            Art::Termine,
+            some(Datum::neu(2026, 12, 28), "28.12.")?,
+            (17, 40)
+        ))
+    );
+    Ok(())
+}
+
 // --- Werkbank ---
 
 #[test]

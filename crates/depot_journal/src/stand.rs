@@ -5,7 +5,7 @@
 //! dabei genau derselbe Text entsteht, gilt er. Anhaengen und Oeffnen gehen durch dieselbe
 //! Pruefung. Was das Journal beim Anhaengen ablehnt, fuehrt in der Datei zu Halt.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use depot_kern::{Cent, Datum, Isin, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
@@ -150,6 +150,14 @@ impl Stand {
     /// Der zuletzt belegte Stand je Topf des Papierdepots.
     pub fn toepfe(&self) -> &BTreeMap<TopfId, Topf> {
         &self.toepfe
+    }
+
+    /// Die Werte, die irgendein Topf haelt. Ihre Kurse sind Pflicht (`waehle_tageswerte`).
+    pub fn gehalten(&self) -> BTreeSet<Isin> {
+        self.toepfe
+            .values()
+            .flat_map(|t| t.positionen().keys().cloned())
+            .collect()
     }
 
     /// Alle Auftraege mit ihrem Zustand, in der Reihenfolge ihrer Kennungen.

@@ -882,3 +882,78 @@ fn papierdepot_nennt_die_simulation() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// Belegt wie der Sammler die Werte der Liste ausser den ersten `ohne`: Vortag 100 €, Tag 101 €.
+fn belege_ohne(j: &mut Journal, heute: Datum, vortag: Datum, ohne: usize) -> Result<(), String> {
+    let abruf = some(Zeitpunkt::frankfurt(heute, 17, 40, 0), "Abruf")?;
+    for w in vorbedingung(beobachtungsliste(), "Liste")?
+        .into_iter()
+        .skip(ohne)
+    {
+        for (d, p) in [(vortag, "100"), (heute, "101")] {
+            let zeit = some(Zeitpunkt::frankfurt(d, 17, 35, 0), "Schluss")?;
+            let preis = some(Preis::lies_euro(p), "Preis")?;
+            let kurs = vorbedingung(Kurs::exakt(preis, "EUR", d, zeit, Herkunft::Quelle), "Kurs")?;
+            let beleg = vorbedingung(
+                KursBeleg::neu("alphavantage", abruf, p.as_bytes(), w.isin.clone(), kurs),
+                "Beleg",
+            )?;
+            vorbedingung(j.belege_kurs(&beleg), "Beleg schreiben")?;
+        }
+    }
+    Ok(())
+}
+
+/// Ein Boersenfeiertag ist geschlossen, nicht verpasst; ein Tag, an dem einzelne Kandidaten
+/// ohne Kurs ausgelassen wurden, ist abgeschlossen und nennt sie. An einem Feiertag verlangt
+/// die Bereitschaft keinen Abruf.
+#[test]
+fn feiertag_ist_geschlossen_und_auslassung_sichtbar() -> Result<(), String> {
+    let d = |t| some(Datum::neu(2026, 12, t), "Datum");
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_ohne(&mut jr, d(23)?, d(22)?, 2)?;
+    let start = start()?;
+    let mut konto = Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    let universum = als_universum(&vorbedingung(beobachtungsliste(), "Liste")?);
+    let aus = vorbedingung(
+        papiertag(
+            &mut jr,
+            d(23)?,
+            &universum,
+            &start,
+            &mut Stumm,
+            &mut Stumm,
+            &mut konto,
+        ),
+        "Papiertag",
+    )?;
+    assert!(matches!(aus, Ausgang::Abgeschlossen { .. }), "{aus:?}");
+
+    let montag = some(Zeitpunkt::frankfurt(d(28)?, 18, 0, 0), "Zeit")?;
+    let l = lagebild(&umgebung(montag, Zugang::Offen(jr.stand())));
+    let tage: Vec<(Datum, &TagStand)> = l.tage.iter().map(|t| (t.datum, &t.stand)).collect();
+    assert_eq!(l.tage.len(), 4, "{tage:?}");
+    assert_eq!(tag_nr(&l, 0)?.stand, TagStand::Offen);
+    for (i, grund) in [(1, "1. Weihnachtstag"), (2, "Heiligabend")] {
+        assert!(
+            matches!(&tag_nr(&l, i)?.stand, TagStand::Geschlossen(g) if g.contains(grund)),
+            "{tage:?}"
+        );
+        assert_eq!(tag_nr(&l, i)?.stand.klasse(), "offen");
+    }
+    assert!(
+        matches!(&tag_nr(&l, 3)?.stand, TagStand::MitAuslassung(b) if b.iter().any(|x| x.contains("2× Kurs fehlt"))),
+        "{tage:?}"
+    );
+    assert_eq!(tag_nr(&l, 3)?.stand.klasse(), "gut");
+
+    let heiligabend = some(Zeitpunkt::frankfurt(d(24)?, 18, 0, 0), "Zeit")?;
+    let l = lagebild(&umgebung(heiligabend, Zugang::Offen(jr.stand())));
+    let k = punkt(&l, "Schlusskurse")?;
+    assert!(k.text.contains("Heiligabend"), "{k:?}");
+    assert_eq!(k.abhilfe, None, "{k:?}");
+    let p = punkt(&l, "Papiertag")?;
+    assert!(p.text.contains("Börse geschlossen"), "{p:?}");
+    Ok(())
+}

@@ -175,9 +175,10 @@ impl Erledigt {
     }
 }
 
-/// Ein Handelstag des Zeitplans: Montag bis Freitag.
+/// Ein Handelstag des Zeitplans: ein Tag, an dem wenigstens eine Boerse der Liste handelt.
+/// An Wochenenden und Feiertagen aller Boersen der Liste laeuft nichts, und nichts ist verpasst.
 pub fn handelstag(d: Datum) -> bool {
-    d.wochentag().is_some_and(|w| (1..=5).contains(&w))
+    depot_kern::liste::handelstag(d)
 }
 
 /// Was der Zeitplan jetzt starten soll: `Termine` vor `Kurse`, jeweils einmal je Tag und erst ab
