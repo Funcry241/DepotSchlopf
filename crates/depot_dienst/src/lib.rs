@@ -309,7 +309,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             };
             match d.setze_zeitplan(plan) {
                 Ok(()) => http::umleitung("/einrichtung?m=zeitplan#zeitplan"),
-                Err(werkbank::ZeitplanAbgelehnt::Einrichtung) => zurueck("zeitplan_einrichtung"),
+                Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => zurueck("zeitplan_einrichtung"),
                 Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => zurueck("zeitplan_lage"),
                 Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => zurueck("zeitplan_fehler"),
             }

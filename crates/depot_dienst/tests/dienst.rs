@@ -1090,3 +1090,81 @@ fn verlauf_liest_streng() {
             .is_some_and(|a| a.erfolg == Some(true) && a.frueher == Frueher::Beendet)
     );
 }
+
+/// Maus zu #32: „Läuft ohne KI“ reicht zum Einschalten nicht; jeder Schluessel wird
+/// ausdruecklich geprueft, und die Seite nennt, was fehlt.
+#[test]
+fn einschalten_verlangt_jeden_schluessel() -> Result<(), String> {
+    let ohne_maus: Lagerechner = Box::new(|_wurzel: &Path, jetzt: Zeitpunkt| {
+        let mut l = lagebild(&Umgebung {
+            jetzt,
+            journal: Zugang::NichtEingerichtet,
+            kursquelle: Hinterlegt::Ja,
+            berater: [
+                (BeraterId::Dachs, Hinterlegt::Ja),
+                (BeraterId::Maus, Hinterlegt::Nein),
+            ],
+            sperren: Vec::new(),
+            anbieter: Vec::new(),
+            anbieter_unlesbar: 0,
+            ki_halt: None,
+        });
+        // Wie mit eingerichtetem Journal: nur Maus fehlt.
+        l.betrieb = depot_lage::Betrieb::OhneKi(vec!["Maus (GPT): kein Schlüssel".into()]);
+        (l, String::new())
+    });
+    let d = Arc::new(Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        echo_starter(true),
+        ohne_maus,
+    ));
+    let t = donnerstag(12, 0)?;
+    assert!(d.schritt(t).is_none());
+    let an = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&an=ja&termine=17%3A40&kurse=17%3A45&papier_danach=ja"),
+    );
+    let r = text(&behandle(&d, &Attrappe::default(), &an, t));
+    assert!(r.contains("m=zeitplan_einrichtung"), "{r}");
+    assert!(!d.sperre().zeitplan.an);
+    let seite = get(&d, "/einrichtung", t);
+    assert!(
+        seite.contains("<li>Maus (GPT): Schlüssel fehlt</li>"),
+        "{seite}"
+    );
+    assert!(!seite.contains("<li>Dachs (Claude)"), "{seite}");
+    Ok(())
+}
+
+/// Maus zu #32: Erst dauerhaft vermerken, dann starten. Laesst sich der Verlauf nicht
+/// schreiben, startet nichts, und die Oberflaeche zeigt es sofort.
+#[test]
+fn ohne_schreibbaren_verlauf_startet_nichts() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let datei = depot_dienst::verlauf::pfad(&wurzel);
+    fs::create_dir_all(&datei).map_err(|e| format!("Vorbedingung: {e}"))?;
+    let d = dienst(wurzel, true);
+    let t = donnerstag(12, 0)?;
+    d.einreihen(Art::Termine, Anlass::Hand)
+        .map_err(|e| format!("Vorbedingung: {e}"))?;
+    assert!(d.schritt(t).is_none(), "nichts gestartet");
+    let z = d.sperre();
+    assert!(z.laufend.is_none());
+    let a = some(z.verlauf.front(), "Verlauf")?;
+    assert_eq!(a.erfolg, Some(false));
+    assert!(a.protokoll.iter().any(|p| p.starts_with("Nicht gestartet")));
+    let seite = seiten::live("s", &z, t.datum());
+    drop(z);
+    assert!(seite.contains("Verlauf nicht schreibbar"), "{seite}");
+    // Wieder schreibbar: Der naechste Auftrag startet.
+    fs::remove_dir(&datei).map_err(|e| format!("Vorbedingung: {e}"))?;
+    d.einreihen(Art::Kurse, Anlass::Hand)
+        .map_err(|e| format!("Vorbedingung: {e}"))?;
+    let (nr, kind) = some(d.schritt(t), "Start")?;
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+    let text = fs::read_to_string(&datei).map_err(|e| format!("Verlauf: {e}"))?;
+    assert!(text.starts_with("verlauf-v1;start;"), "{text}");
+    assert!(d.sperre().verlauf_fehler.is_none(), "Fehler verschwindet");
+    Ok(())
+}

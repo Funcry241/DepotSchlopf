@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use depot_kern::Zeitpunkt;
-use depot_lage::{Ampel, Betrieb, Lagebild, ortszeit};
+use depot_lage::anbieter::Wer as Quelle;
+use depot_lage::{Ampel, Betrieb, Lagebild, SchluesselStand, ortszeit};
 
 use crate::zeitplan::{Erledigt, Zeitplan, faellig};
 
@@ -126,6 +127,8 @@ pub struct Lage {
     pub naechster_schritt: String,
     /// Gesamtstatus aus dem Lagebild; die Oberflaeche ergaenzt den Zeitplan.
     pub betrieb: Betrieb,
+    /// Stand jedes Schluessels aus dem Lagebild.
+    pub schluessel: Vec<(Quelle, SchluesselStand)>,
     pub html: String,
 }
 
@@ -161,17 +164,27 @@ pub struct Zustand {
     pub update_meldung: Option<(bool, String)>,
     /// Warum der Verlauf frueherer Starts nicht vollstaendig gezeigt wird.
     pub verlauf_hinweis: Option<String>,
+    /// Der Verlauf liess sich zuletzt nicht schreiben; bis das wieder geht, startet nichts.
+    pub verlauf_fehler: Option<String>,
 }
 
 /// Warum ein Zeitplan nicht gespeichert wurde.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ZeitplanAbgelehnt {
-    /// Einschalten erst, wenn die Einrichtung vollstaendig ist (kein Eingriff noetig).
-    Einrichtung,
+    /// Einschalten erst, wenn die Einrichtung vollstaendig ist: was fehlt.
+    Einrichtung(Vec<String>),
     /// Das Lagebild ist noch nicht berechnet; gleich noch einmal.
     LageFehlt,
     /// Datei nicht schreibbar; der alte Zeitplan gilt weiter.
     Datei(String),
+}
+
+fn quelle_name(w: Quelle) -> &'static str {
+    match w {
+        Quelle::Kursquelle => "Kursquelle Alpha Vantage",
+        Quelle::Dachs => "Dachs (Claude)",
+        Quelle::Maus => "Maus (GPT)",
+    }
 }
 
 /// Ein Auftrag von Hand, der so kurz nach dem Ende desselben Auftrags kommt, gilt als
@@ -210,11 +223,32 @@ impl Zustand {
     /// # Errors
     /// Warum nicht.
     pub fn einschalten_erlaubt(&self) -> Result<(), ZeitplanAbgelehnt> {
-        match self.lage.as_ref().map(|l| &l.betrieb) {
-            None => Err(ZeitplanAbgelehnt::LageFehlt),
-            Some(_) if self.lage_veraltet => Err(ZeitplanAbgelehnt::LageFehlt),
-            Some(Betrieb::EingriffNoetig(_)) => Err(ZeitplanAbgelehnt::Einrichtung),
-            Some(_) => Ok(()),
+        let Some(l) = self.lage.as_ref().filter(|_| !self.lage_veraltet) else {
+            return Err(ZeitplanAbgelehnt::LageFehlt);
+        };
+        // Ausdruecklich jede noetige Einstellung (Maus zu #32): jeder Schluessel hinterlegt und
+        // nicht abgelehnt, dazu kein Eingriff. „Läuft ohne KI“ reicht nicht.
+        let mut fehlt: Vec<String> = l
+            .schluessel
+            .iter()
+            .filter(|(_, st)| {
+                !matches!(
+                    st,
+                    SchluesselStand::Hinterlegt | SchluesselStand::Geprueft(_)
+                )
+            })
+            .map(|(w, st)| format!("{}: Schlüssel {}", quelle_name(*w), st.text()))
+            .collect();
+        if l.schluessel.is_empty() {
+            fehlt.push("Stand der Schlüssel unbekannt".into());
+        }
+        if let Betrieb::EingriffNoetig(g) = &l.betrieb {
+            fehlt.extend(g.iter().cloned());
+        }
+        if fehlt.is_empty() {
+            Ok(())
+        } else {
+            Err(ZeitplanAbgelehnt::Einrichtung(fehlt))
         }
     }
 }
@@ -373,6 +407,7 @@ impl Dienst {
                 neustart: false,
                 update_meldung: None,
                 verlauf_hinweis,
+                verlauf_fehler: None,
             }),
             starter,
             lagerechner,
@@ -453,6 +488,24 @@ impl Dienst {
                 protokoll: Vec::new(),
                 frueher: Frueher::Nein,
             };
+            // Erst dauerhaft vermerken, dann starten (Maus zu #32): Ein Lauf, der nicht im
+            // Verlauf steht, startet nicht, und die Oberflaeche zeigt den Grund.
+            if let Err(e) =
+                crate::verlauf::vermerke(&self.wurzel, &crate::verlauf::start_zeile(&auftrag))
+            {
+                auftrag
+                    .protokoll
+                    .push(format!("Nicht gestartet: Verlauf nicht schreibbar ({e})."));
+                auftrag.ende = Some(jetzt);
+                auftrag.erfolg = Some(false);
+                z.verlauf_fehler = Some(format!(
+                    "Verlauf nicht schreibbar ({e}). Aufträge starten erst wieder, wenn \
+                     daten/dienst_verlauf.txt geschrieben werden kann."
+                ));
+                ablegen(&mut z, auftrag);
+                return None;
+            }
+            z.verlauf_fehler = None;
             let mut befehl = (self.starter)(art, &self.wurzel);
             befehl
                 .stdin(Stdio::null())
@@ -460,7 +513,6 @@ impl Dienst {
                 .stderr(Stdio::piped());
             match befehl.spawn() {
                 Ok(kind) => {
-                    crate::verlauf::vermerke(&self.wurzel, &crate::verlauf::start_zeile(&auftrag));
                     z.laufend = Some(auftrag);
                     return Some((nr, kind));
                 }
@@ -468,7 +520,7 @@ impl Dienst {
                     auftrag.protokoll.push(format!("Start fehlgeschlagen: {e}"));
                     auftrag.ende = Some(jetzt);
                     auftrag.erfolg = Some(false);
-                    crate::verlauf::vermerke(&self.wurzel, &crate::verlauf::ende_zeile(&auftrag));
+                    ende_vermerken(&self.wurzel, &mut z, &auftrag);
                     ablegen(&mut z, auftrag);
                 }
             }
@@ -493,6 +545,7 @@ impl Dienst {
                 gesamt: bild.gesamt,
                 naechster_schritt: bild.naechster_schritt,
                 betrieb: bild.betrieb,
+                schluessel: bild.schluessel,
                 html,
             });
             z.lage_veraltet = false;
@@ -562,7 +615,7 @@ impl Dienst {
             && z.zeitplan.papier_danach;
         let eingespielt =
             erfolg && a.art == Art::Update && crate::rueckfall::offen_pfad(&self.wurzel).exists();
-        crate::verlauf::vermerke(&self.wurzel, &crate::verlauf::ende_zeile(&a));
+        ende_vermerken(&self.wurzel, &mut z, &a);
         ablegen(&mut z, a);
         z.lage_veraltet = true;
         if eingespielt {
@@ -606,6 +659,17 @@ fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static s
     }
     z.warteschlange.push_back((art, anlass));
     Ok(())
+}
+
+/// Vermerkt das Ende; ein Schreibfehler steht sofort unter Taetigkeit.
+fn ende_vermerken(wurzel: &Path, z: &mut Zustand, a: &Auftrag) {
+    if let Err(e) = crate::verlauf::vermerke(wurzel, &crate::verlauf::ende_zeile(a)) {
+        z.verlauf_fehler = Some(format!(
+            "Ende von {} nicht im Verlauf vermerkt ({e}); nach einem Neustart erschiene der Lauf \
+             als unterbrochen.",
+            a.kennung
+        ));
+    }
 }
 
 fn ablegen(z: &mut Zustand, a: Auftrag) {

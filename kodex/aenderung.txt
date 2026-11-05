@@ -1,6 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Fehlbedienung abfangen (Maus 05.11.2026). depot_dienst: Zeitplan einschalten nur mit aktuellem Lagebild und ohne Eingriff (Zustand::einschalten_erlaubt), Ausschalten und Aendern immer; abgelehnte Zeitplan-Eingaben bleiben im Formular (nur gepruefte Werte, Entwurf); Auftrag von Hand nicht erneut binnen 30 s nach dem Ende desselben (Dienst::von_hand), app.js sperrt abgesendete Knoepfe; daten/dienst_verlauf.txt haelt Start und Ende jedes Auftrags, nach Neustart sichtbar, unterbrochene Laeufe als solche. Keine neue Abhaengigkeit, keine Grenze, kein Netz.
+zweck: Fehlbedienung abfangen (Maus 05.11.2026). depot_dienst: Zeitplan einschalten nur mit aktuellem Lagebild und ohne Eingriff (Zustand::einschalten_erlaubt), Ausschalten und Aendern immer; abgelehnte Zeitplan-Eingaben bleiben im Formular (nur gepruefte Werte, Entwurf); Auftrag von Hand nicht erneut binnen 30 s nach dem Ende desselben (Dienst::von_hand), app.js sperrt abgesendete Knoepfe; daten/dienst_verlauf.txt haelt Start und Ende jedes Auftrags, nach Neustart sichtbar, unterbrochene Laeufe als solche. Fassung 2 nach Maus: Einschalten prueft jeden Schluessel ausdruecklich (hinterlegt oder geprueft) und nennt, was fehlt; Start erst nach dauerhaft vermerkter Startzeile, Schreibfehler sofort sichtbar. Keine neue Abhaengigkeit, keine Grenze, kein Netz.
 pfade:
 crates/depot_dienst/
 docs/

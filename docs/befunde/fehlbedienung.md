@@ -55,3 +55,21 @@ Beim Start wird die Datei auf die gezeigten Aufträge gekürzt. Unlesbare Zeilen
 - Ohne Doppelklick-Schutz.
 - Eingaben verworfen.
 - Start nicht vermerkt.
+
+## Fassung 2 nach Maus' Prüfung
+
+**Befund 1:** Der Zeitplan ließ sich mit fehlendem KI-Schlüssel einschalten, weil „Läuft ohne KI“ als ausreichende Einrichtung galt.
+
+**Regel:** `Zustand::einschalten_erlaubt` prüft jede nötige Einstellung ausdrücklich:
+- Jeder Schlüssel (Kursquelle, Dachs, Maus) ist hinterlegt oder geprüft. Fehlt, abgelehnt oder unbekannt genügt nicht.
+- Kein Eingriff ist nötig.
+
+Die Ablehnung liefert die Liste dessen, was fehlt. Die Einrichtung zeigt diese Liste beim Zeitplan.
+
+**Befund 2:** Der Dienst startete einen Auftrag, bevor er den Start vermerkte. Ein Schreibfehler blieb unbemerkt, und der Lauf fehlte nach einem Neustart im Verlauf.
+
+**Regel:** Erst wird die Startzeile dauerhaft geschrieben (mit `sync`), dann gestartet. Lässt sie sich nicht schreiben, startet der Auftrag nicht. Er steht als „Nicht gestartet: Verlauf nicht schreibbar“ im Verlauf, und Tätigkeit zeigt den Fehler sofort und rot. Ein Schreibfehler beim Ende wird ebenso gezeigt. Der Fehler verschwindet, sobald wieder ein Start vermerkt ist.
+
+**Gegenproben** (jeweils rot):
+- Schlüssel nicht ausdrücklich geprüft (`einschalten_verlangt_jeden_schluessel`).
+- Start trotz Schreibfehler (`ohne_schreibbaren_verlauf_startet_nichts`).

@@ -213,18 +213,20 @@ pub fn laden(wurzel: &Path) -> Result<Geladen, String> {
     Ok(g)
 }
 
-/// Haengt eine Zeile an. Fehler gehen nur ins Fehlerprotokoll: Der Verlauf ist Anzeige.
-pub fn vermerke(wurzel: &Path, zeile: &str) {
+/// Haengt eine Zeile an und schreibt sie auf den Datentraeger.
+///
+/// # Errors
+/// Die Datei laesst sich nicht oeffnen oder schreiben. Die Werkbank startet dann keinen
+/// Auftrag (Startzeile) oder zeigt den Fehler an (Endzeile).
+pub fn vermerke(wurzel: &Path, zeile: &str) -> Result<(), String> {
     let p = pfad(wurzel);
-    let r = OpenOptions::new()
+    OpenOptions::new()
         .create(true)
         .append(true)
         .open(&p)
         .and_then(|mut f| {
             writeln!(f, "{zeile}")?;
             f.sync_all()
-        });
-    if let Err(e) = r {
-        eprintln!("[Dienst] Verlauf nicht geschrieben ({}): {e}", p.display());
-    }
+        })
+        .map_err(|e| format!("{}: {e}", p.display()))
 }

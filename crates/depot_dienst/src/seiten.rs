@@ -11,7 +11,7 @@ use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, zeit_text};
 use crate::http::feld;
 use crate::kostenschutz;
 use crate::schluessel::Wer;
-use crate::werkbank::{Anlass, Art, Auftrag, Frueher, Zustand};
+use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand};
 use crate::zeitplan::{Zeitplan, lies_uhrzeit, naechster, uhrzeit_text};
 
 const STIL_DIENST: &str = "\
@@ -98,7 +98,7 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "zeitplan_einrichtung" => (
             "halt",
             "Zeitplan nicht eingeschaltet: Erst muss die Einrichtung vollständig sein. Was fehlt, \
-             steht oben unter dem Gesamtstatus. Ihre Eingaben stehen noch im Formular.",
+             steht beim Zeitplan. Ihre Eingaben stehen noch im Formular.",
         ),
         "zeitplan_lage" => (
             "offen",
@@ -336,6 +336,9 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
             );
         }
         s.push_str("</table></div>");
+    }
+    if let Some(f) = &z.verlauf_fehler {
+        let _ = write!(s, "<p class=\"kopf halt\">{}</p>", maskiere(f));
     }
     if let Some(h) = &z.verlauf_hinweis {
         let _ = write!(s, "<p class=\"offen\">{}</p>", maskiere(h));
@@ -654,8 +657,20 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
     let voraussetzung = match zustand.einschalten_erlaubt() {
         Ok(()) => String::new(),
         Err(_) if p.an => String::new(),
-        Err(_) => "<p class=\"leise\">Einschalten geht erst, wenn oben beim Gesamtstatus kein \
-                   Eingriff mehr nötig ist. Ausschalten und Uhrzeiten ändern geht immer.</p>"
+        Err(ZeitplanAbgelehnt::Einrichtung(fehlt)) => {
+            let mut liste = String::from(
+                "<p class=\"leise\">Einschalten geht erst, wenn alles eingerichtet ist. Es fehlt:</p><ul>",
+            );
+            for punkt in &fehlt {
+                let _ = write!(liste, "<li>{}</li>", maskiere(punkt));
+            }
+            liste.push_str(
+                "</ul><p class=\"leise\">Ausschalten und Uhrzeiten ändern geht immer.</p>",
+            );
+            liste
+        }
+        Err(_) => "<p class=\"leise\">Einschalten geht, sobald der Stand geprüft ist (wenige \
+                   Sekunden). Ausschalten und Uhrzeiten ändern geht immer.</p>"
             .to_string(),
     };
     let _ = write!(
