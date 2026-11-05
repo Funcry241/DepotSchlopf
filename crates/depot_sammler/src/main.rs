@@ -23,10 +23,10 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use depot_journal::{Journal, anbieter, kurssperre};
-use depot_kern::{Boerse, Datum, Preis, Zeitpunkt};
+use depot_kern::{Boerse, Datum, Grenzen, Preis, Zeitpunkt, hinweis};
 use depot_sammler::{
     Anbieter, Ergebnis, Https, Schluessel, Zugang, beobachtungsliste, einordnen, ezb::ADRESSE_EZB,
-    sammle, sammle_termine,
+    netz, sammle, sammle_termine,
 };
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
@@ -136,6 +136,35 @@ fn zugang(werte: &[depot_sammler::Wert]) -> Zugang {
     )
 }
 
+/// Ein Lauf mit echtem Netz, echter Uhr und echtem Warten; jede Wiederholung steht als
+/// Hinweiszeile in der Ausgabe.
+fn echt_sammeln(
+    journal: &mut Journal,
+    zugang: &Zugang,
+    ablage: &Path,
+    werte: &[depot_sammler::Wert],
+) -> Result<depot_sammler::Bericht, depot_sammler::SammelFehler> {
+    let mut uhr = jetzt;
+    let mut schlafe = std::thread::sleep;
+    let mut melde = |v: &netz::Verlauf| {
+        println!("{}", hinweis::zeile(&netz::verlauf_text(v)));
+    };
+    let mut takt = netz::Takt {
+        uhr: &mut uhr,
+        schlafe: &mut schlafe,
+        melde: &mut melde,
+    };
+    sammle(
+        journal,
+        &mut Https::neu(),
+        zugang,
+        &mut takt,
+        ablage,
+        PAUSE,
+        werte,
+    )
+}
+
 fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode {
     if gesperrt(wurzel) {
         return ExitCode::FAILURE;
@@ -170,15 +199,10 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         werte.len(),
         PAUSE.as_secs()
     );
-    let mut netz = Https::neu();
-    let mut uhr = jetzt;
-    let bericht = match sammle(
+    let bericht = match echt_sammeln(
         &mut journal,
-        &mut netz,
         &schluessel,
-        &mut uhr,
         &wurzel.join("daten").join("roh"),
-        PAUSE,
         &werte,
     ) {
         Ok(b) => b,
@@ -213,6 +237,12 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         println!("[Sammler] Lauf vorzeitig beendet: {a}");
     }
     zeige_pruefung(&bericht);
+    if let Some(a) = &bericht.verbindung {
+        println!(
+            "{}",
+            hinweis::zeile(&netz::ausfall_text(a, verwendbar, &Grenzen::standard()))
+        );
+    }
     println!(
         "[Sammler] Belegt im Journal {}, rohe Antworten unter daten/roh/.",
         journal_pfad.display()

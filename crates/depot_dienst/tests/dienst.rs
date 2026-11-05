@@ -1248,3 +1248,66 @@ fn ohne_schreibbaren_verlauf_startet_nichts() -> Result<(), String> {
     assert!(d.sperre().verlauf_fehler.is_none(), "Fehler verschwindet");
     Ok(())
 }
+
+/// Ein Starter, der diese Zeilen ausgibt und dann scheitert.
+fn zeilen_starter(zeilen: &'static [&'static str]) -> Starter {
+    Box::new(move |_art: Art, _wurzel: &Path| {
+        #[cfg(windows)]
+        {
+            let mut c = Command::new("cmd");
+            let echo: Vec<String> = zeilen.iter().map(|z| format!("echo {z}")).collect();
+            c.args(["/C", &format!("{}& exit /b 1", echo.join("& "))]);
+            c
+        }
+        #[cfg(not(windows))]
+        {
+            let mut c = Command::new("sh");
+            let echo: Vec<String> = zeilen.iter().map(|z| format!("echo '{z}'")).collect();
+            c.args(["-c", &format!("{}; exit 1", echo.join("; "))]);
+            c
+        }
+    })
+}
+
+/// Maus zu den Netzausfaellen: Die Live-Ansicht zeigt gross, was der Lauf zuletzt als Hinweis
+/// sagte, auch nach seinem Ende: etwa warum der Papiertag heute ausfiel. Der Hinweis steht auch
+/// in der Zeile des Verlaufs.
+#[test]
+fn hinweis_des_laufs_steht_gross_in_der_live_ansicht() -> Result<(), String> {
+    let d = Arc::new(Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        zeilen_starter(&[
+            "[Sammler] Hole 2 Werte",
+            "[Hinweis] Verbindung weg. Naechster Versuch um 17:48 Uhr (Versuch 2 von 4).",
+            "[Hinweis] Papiertag heute ausgefallen. Die Verbindung kam bis 17:54 Uhr nicht wieder.",
+            "[Sammler] Kurse NICHT verwendbar",
+        ]),
+        leeres_lagebild(),
+    ));
+    let t = donnerstag(17, 45)?;
+    d.einreihen(Art::Kurse, Anlass::Zeitplan)
+        .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
+    let (nr, kind) = some(d.schritt(t), "Start")?;
+    d.verfolge(nr, kind, || donnerstag(17, 55).ok());
+    let z = d.sperre();
+    let a = some(z.verlauf.front(), "Verlauf")?;
+    assert_eq!(
+        a.hinweis.as_deref(),
+        Some("Papiertag heute ausgefallen. Die Verbindung kam bis 17:54 Uhr nicht wieder.")
+    );
+    assert_eq!(a.protokoll.len(), 4, "Hinweise bleiben im Protokoll");
+    let seite = seiten::live("s", &z, t.datum());
+    assert!(
+        seite.contains(
+            "<p class=\"kopf halt\" id=\"hinweis\">Kurse abrufen: Papiertag heute ausgefallen."
+        ),
+        "{seite}"
+    );
+    // Am naechsten Tag steht der alte Hinweis nicht mehr oben, nur im Verlauf.
+    let morgen = some(t.datum().and_then(|d| d.plus_tage(1)), "morgen")?;
+    let seite = seiten::live("s", &z, Some(morgen));
+    assert!(!seite.contains("id=\"hinweis\""), "{seite}");
+    assert!(seite.contains("Papiertag heute ausgefallen"), "{seite}");
+    Ok(())
+}

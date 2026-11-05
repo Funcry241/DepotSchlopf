@@ -25,6 +25,7 @@ pub mod depot;
 pub mod devisen;
 pub mod geld;
 pub mod grenzen;
+pub mod hinweis;
 pub mod instrument;
 pub mod kurs;
 pub mod liste;

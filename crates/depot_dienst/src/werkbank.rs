@@ -116,6 +116,9 @@ pub struct Auftrag {
     pub ende: Option<Zeitpunkt>,
     pub erfolg: Option<bool>,
     pub protokoll: Vec<String>,
+    /// Die juengste Hinweiszeile des Laufs (`depot_kern::hinweis`): was los ist und ob der
+    /// Mensch etwas tun muss. Die Oberflaeche zeigt sie gross.
+    pub hinweis: Option<String>,
     pub frueher: Frueher,
 }
 
@@ -486,6 +489,7 @@ impl Dienst {
                 ende: None,
                 erfolg: None,
                 protokoll: Vec::new(),
+                hinweis: None,
                 frueher: Frueher::Nein,
             };
             // Erst dauerhaft vermerken, dann starten (Maus zu #32): Ein Lauf, der nicht im
@@ -636,9 +640,14 @@ impl Dienst {
 
     fn protokolliere(&self, nr: u64, zeile: String) {
         let mut z = self.sperre();
-        if let Some(a) = z.laufend.as_mut().filter(|a| a.nr == nr)
-            && a.protokoll.len() < PROTOKOLL_ZEILEN
-        {
+        let Some(a) = z.laufend.as_mut().filter(|a| a.nr == nr) else {
+            return;
+        };
+        // Ein Hinweis zaehlt auch, wenn das Protokoll schon voll ist: Er sagt, was jetzt gilt.
+        if let Some(h) = depot_kern::hinweis::lies(&zeile) {
+            a.hinweis = Some(kuerze(h.to_string()));
+        }
+        if a.protokoll.len() < PROTOKOLL_ZEILEN {
             a.protokoll.push(kuerze(zeile));
         }
     }
