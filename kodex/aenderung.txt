@@ -1,21 +1,15 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Papierhandel mit Dachs und Maus (Wolfgang 05.11.2026). Neues Crate depot_berater (Claude Sonnet 5.5 und GPT-6.1 Terra ohne Werkzeuge des Anbieters, Anfrage vorher auf den Deckel begrenzt, Schluessel nur in der Windows-Anmeldeverwaltung, Kostenpruefung nach jedem Aufruf, Sperre bei Ueberschreitung); run.cmd papier fragt beide. KI-Deckel 20 EUR im Monat je KI (46 Aufrufe), Denktiefe mittel. Grenzen fuer konzentriertes Handeln: 4 Werte, 40 % je Wert, Umschlag 100 %, ETFs frei. Dazu Nachrichten ueber den Sammler (Wolfgang 05.11.2026): run.cmd kurse holt einmal am Tag Marktnachrichten von Alpha Vantage, neue Journalart nachricht, der Papiertag gibt sie den Beratern mit, Termine und Nachrichten in der Frage auf 24.000 Bytes begrenzt; JSON-Leser nach depot_kern. Braucht die Grenzfreigabe von Wolfgang.
+klasse: Funktion
+zweck: Nachrichten ueber den Sammler (Wolfgang 05.11.2026): run.cmd kurse holt einmal am Tag Marktnachrichten von Alpha Vantage und belegt sie als neue Journalart nachricht (beginnt keinen Tag); der Papiertag gibt sie Dachs und Maus mit; Termine und Nachrichten in der Frage auf 24.000 Bytes begrenzt, damit jede Anfrage unter dem Deckel bleibt; JSON-Leser nach depot_kern. Keine neuen Grenzen, keine neuen Abhaengigkeiten, Festschreibung unveraendert. Baut auf #25 auf.
 pfade:
-Cargo.toml
-Cargo.lock
 run.cmd
-kodex/festschreibung.txt
 crates/depot_berater/
-crates/depot_ki/
-crates/depot_kern/src/grenzen.rs
+crates/depot_journal/
 crates/depot_kern/src/json.rs
 crates/depot_kern/src/lib.rs
-crates/depot_journal/
-crates/depot_sammler/
-crates/depot_regelwerk/tests/
-crates/depot_sim/
 crates/depot_lauf/src/main.rs
+crates/depot_sammler/
+crates/depot_sim/
 docs/
 CHANGELOG.md
 README.md
