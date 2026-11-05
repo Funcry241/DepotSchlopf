@@ -16,8 +16,10 @@
 //! `gesmes:Envelope`, jedes Element geschlossen, und zwar in der Reihenfolge, in der es geoeffnet
 //! wurde; nach der Huelle nichts mehr. Darin genau ein `Cube` ohne Attribute, darin nur Tage
 //! (`Cube` mit genau `time`), darin nur Waehrungen (`Cube` mit genau `currency` und `rate`, ohne
-//! Inhalt). Ein abgeschnittener Text oder ein Dollarkurs ausserhalb seines Tagesblocks verwirft
-//! den ganzen Text; ein Kurs wird nie einem anderen Tag zugeschlagen.
+//! Inhalt). Attribute werden vollstaendig gelesen; ein Name zweimal, gleich in welcher
+//! Schreibweise, oder ein Rest, der kein Attribut ist, verwirft den Text. Ein abgeschnittener
+//! Text oder ein Dollarkurs ausserhalb seines Tagesblocks verwirft den ganzen Text; ein Kurs
+//! wird nie einem anderen Tag zugeschlagen.
 //!
 //! **Rundung:** Der Referenzkurs nennt Dollar je Euro. Der Euro-Preis ist Dollar-Preis durch
 //! Referenzkurs, exakt gerechnet und auf sechs Nachkommastellen abgeschnitten (abgerundet). Der
@@ -62,21 +64,75 @@ fn skala() -> i128 {
     s
 }
 
-/// Der Wert eines Attributs in einem Tag (`name="wert"`), wenn es genau einmal vorkommt.
-fn attribut<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-    let muster = format!(" {name}=\"");
-    let mut teile = tag.split(muster.as_str());
-    teile.next()?;
-    let wert = teile.next()?;
-    if teile.next().is_some() {
-        return None;
-    }
-    wert.split_once('"').map(|(w, _)| w)
+/// Ein Element, wie es im Tag steht: Name und alle Attribute in ihrer Reihenfolge.
+struct Element<'a> {
+    name: &'a str,
+    attribute: Vec<(&'a str, &'a str)>,
 }
 
-/// Wie viele Attribute ein Tag nennt.
-fn attribute(tag: &str) -> usize {
-    tag.matches("=\"").count()
+impl<'a> Element<'a> {
+    /// Liest den Inhalt eines Tags vollstaendig: Name, dann jedes Attribut als
+    /// `name="wert"` oder `name='wert'`, mit Leerraum davor und erlaubtem Leerraum um `=`.
+    /// Ein Rest, der kein Attribut ist, oder ein Name zweimal (ohne Ruecksicht auf Gross- und
+    /// Kleinschreibung) ist ein Fehler im Aufbau. Werte mit `<` oder `&` werden nicht gelesen.
+    fn lies(tag: &'a str) -> Result<Element<'a>, DevisenFehler> {
+        let leer = |c: char| matches!(c, ' ' | '\t' | '\r' | '\n');
+        let namenszeichen =
+            |c: char| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '-' | '.');
+        let name_von = |t: &'a str| -> Result<(&'a str, &'a str), DevisenFehler> {
+            let ende = t.find(|c: char| !namenszeichen(c)).unwrap_or(t.len());
+            let (name, rest) = t.split_at_checked(ende).ok_or(DevisenFehler::Aufbau)?;
+            if name.is_empty() {
+                return Err(DevisenFehler::Aufbau);
+            }
+            Ok((name, rest))
+        };
+        let (name, mut rest) = name_von(tag)?;
+        let mut attribute: Vec<(&'a str, &'a str)> = Vec::new();
+        loop {
+            let ohne = rest.trim_start_matches(leer);
+            if ohne.is_empty() {
+                break;
+            }
+            if ohne.len() == rest.len() {
+                return Err(DevisenFehler::Aufbau);
+            }
+            let (a, nach_name) = name_von(ohne)?;
+            let nach_gleich = nach_name
+                .trim_start_matches(leer)
+                .strip_prefix('=')
+                .ok_or(DevisenFehler::Aufbau)?
+                .trim_start_matches(leer);
+            let zeichen = nach_gleich.chars().next().ok_or(DevisenFehler::Aufbau)?;
+            if !matches!(zeichen, '"' | '\'') {
+                return Err(DevisenFehler::Aufbau);
+            }
+            let (wert, danach) = nach_gleich
+                .get(1..)
+                .and_then(|w| w.split_once(zeichen))
+                .ok_or(DevisenFehler::Aufbau)?;
+            if wert.contains(['<', '&']) || attribute.iter().any(|(n, _)| n.eq_ignore_ascii_case(a))
+            {
+                return Err(DevisenFehler::Aufbau);
+            }
+            attribute.push((a, wert));
+            rest = danach;
+        }
+        Ok(Element { name, attribute })
+    }
+
+    /// Der Wert eines Attributs.
+    fn wert(&self, name: &str) -> Option<&'a str> {
+        self.attribute
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, w)| *w)
+    }
+
+    /// Hat das Element genau diese Attribute, keines mehr und keines weniger?
+    fn hat_genau(&self, namen: &[&str]) -> bool {
+        self.attribute.len() == namen.len() && namen.iter().all(|n| self.wert(n).is_some())
+    }
 }
 
 /// Ein offenes Element und, fuer `Cube`, seine Stelle im Aufbau.
@@ -127,24 +183,25 @@ impl<'a> Leser<'a> {
         }
     }
 
-    /// Ein `Cube`: Huelle, Tag oder Waehrung, je nach Attributen, nur an seiner Stelle.
-    fn wuerfel(&mut self, tag: &'a str, leer: bool) -> Result<(), DevisenFehler> {
+    /// Ein `Cube`: Huelle, Tag oder Waehrung, je nach Attributen, nur an seiner Stelle und nur
+    /// mit genau seinen Attributen.
+    fn wuerfel(&mut self, e: &Element<'a>, leer: bool) -> Result<(), DevisenFehler> {
         let oben = self.oben();
-        let zahl = attribute(tag);
-        if attribut(tag, "currency").is_some() {
+        if let Some(waehrung) = e.wert("currency") {
             let Some(Ebene::Tag(datum)) = oben else {
-                return Err(if attribut(tag, "currency") == Some("USD") {
+                return Err(if waehrung == "USD" {
                     DevisenFehler::OhneTag
                 } else {
                     DevisenFehler::Aufbau
                 });
             };
-            if zahl != 2 || !leer {
+            if !e.hat_genau(&["currency", "rate"]) || !leer {
                 return Err(DevisenFehler::Aufbau);
             }
-            let kurs = attribut(tag, "rate").ok_or(DevisenFehler::Aufbau)?;
-            if attribut(tag, "currency") == Some("USD") {
-                let kurs = Preis::lies_euro(kurs)
+            if waehrung == "USD" {
+                let kurs = e
+                    .wert("rate")
+                    .and_then(Preis::lies_euro)
                     .filter(|p| p.fein() > 0)
                     .ok_or(DevisenFehler::Kurs(datum))?;
                 if self.usd_je_eur.insert(datum, kurs).is_some() {
@@ -153,8 +210,8 @@ impl<'a> Leser<'a> {
             }
             return Ok(());
         }
-        if let Some(zeit) = attribut(tag, "time") {
-            if oben != Some(Ebene::Wuerfel) || zahl != 1 || leer {
+        if let Some(zeit) = e.wert("time") {
+            if oben != Some(Ebene::Wuerfel) || !e.hat_genau(&["time"]) || leer {
                 return Err(DevisenFehler::Aufbau);
             }
             let datum = Datum::lies(zeit).ok_or_else(|| DevisenFehler::Datum(zeit.into()))?;
@@ -164,7 +221,7 @@ impl<'a> Leser<'a> {
             self.offen.push(Ebene::Tag(datum));
             return Ok(());
         }
-        if tag != "Cube" || oben != Some(Ebene::Huelle) || self.wuerfel_gesehen {
+        if !e.hat_genau(&[]) || oben != Some(Ebene::Huelle) || self.wuerfel_gesehen {
             return Err(DevisenFehler::Aufbau);
         }
         self.wuerfel_gesehen = true;
@@ -175,9 +232,8 @@ impl<'a> Leser<'a> {
     }
 
     /// Ein oeffnendes oder leeres Element ausser `Cube`.
-    fn element(&mut self, tag: &'a str, leer: bool) -> Result<(), DevisenFehler> {
-        let name = tag.split([' ', '\t', '\r', '\n']).next().unwrap_or("");
-        if name == "gesmes:Envelope" {
+    fn element(&mut self, e: &Element<'a>, leer: bool) -> Result<(), DevisenFehler> {
+        if e.name == "gesmes:Envelope" {
             if !self.offen.is_empty() || self.huelle_gesehen || leer {
                 return Err(DevisenFehler::Aufbau);
             }
@@ -186,11 +242,11 @@ impl<'a> Leser<'a> {
             return Ok(());
         }
         // Andere Elemente nur in der Huelle und nie zwischen Tagen und Waehrungen.
-        if !matches!(self.oben(), Some(Ebene::Huelle | Ebene::Sonst(_))) || name.is_empty() {
+        if !matches!(self.oben(), Some(Ebene::Huelle | Ebene::Sonst(_))) {
             return Err(DevisenFehler::Aufbau);
         }
         if !leer {
-            self.offen.push(Ebene::Sonst(name));
+            self.offen.push(Ebene::Sonst(e.name));
         }
         Ok(())
     }
@@ -233,10 +289,11 @@ impl Devisen {
                 stand.schliesse(name)?;
             } else {
                 let (inhalt, leer) = tag.strip_suffix('/').map_or((tag, false), |t| (t, true));
-                if inhalt == "Cube" || inhalt.starts_with("Cube ") {
-                    stand.wuerfel(inhalt, leer)?;
+                let e = Element::lies(inhalt)?;
+                if e.name == "Cube" {
+                    stand.wuerfel(&e, leer)?;
                 } else {
-                    stand.element(inhalt, leer)?;
+                    stand.element(&e, leer)?;
                 }
             }
             // Text zwischen Elementen nur in der Huelle, nie in Tagen und Waehrungen.
