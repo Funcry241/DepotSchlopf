@@ -775,3 +775,44 @@ fn kurssperre_haelt_auch_den_handstart() -> Result<(), String> {
     assert!(!daten.join("papierkonto.txt").exists());
     Ok(())
 }
+
+/// Abruf je Boerse (Wolfgang, 05.11.2026): Werte verschiedener Boersen werden je kurz nach
+/// ihrem Schluss abgerufen. Das Alter eines Kurses misst sich an seinem eigenen Abruf, nicht am
+/// spaetesten Abruf des Tages: Der Xetra-Kurs von 17:40 Uhr ist nicht zu alt, nur weil ein
+/// anderer Wert um 22:00 Uhr abgerufen wurde.
+#[test]
+fn alter_je_abruf_nicht_je_spaetestem_abruf() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    belege(&mut j, 5, &[(&sap()?, "230", "231")])?;
+    // Allianz hier als Wert einer spaeteren Boerse: Schluss 21:50, Abruf 22:00 Uhr.
+    let heute = tag(5)?;
+    let vortag = tag(4)?;
+    let abruf = some(Zeitpunkt::frankfurt(heute, 22, 0, 0), "Abruf")?;
+    for (d, p, h, m) in [(vortag, "350", 21, 50), (heute, "351", 21, 50)] {
+        let zeit = some(Zeitpunkt::frankfurt(d, h, m, 0), "Schluss")?;
+        let preis = some(Preis::lies_euro(p), "Preis")?;
+        let kurs = vorbedingung(Kurs::exakt(preis, "EUR", d, zeit, Herkunft::Quelle), "Kurs")?;
+        let beleg = vorbedingung(
+            KursBeleg::neu("alphavantage", abruf, p.as_bytes(), allianz()?, kurs),
+            "Beleg",
+        )?;
+        vorbedingung(j.belege_kurs(&beleg), "Beleg schreiben")?;
+    }
+    drop(j);
+    let aus = stumm_tag(&ort, 5)?;
+    assert!(
+        matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
+        "Ausgang: {aus:?}"
+    );
+    let j = ort.oeffnen()?;
+    let begr = j.stand().begruendungen();
+    assert!(
+        !begr
+            .iter()
+            .any(|(_, wer, t)| (wer == "Daten" || wer == depot_sim::AUSWAHL)
+                && t.contains("KursZuAlt")),
+        "{begr:?}"
+    );
+    Ok(())
+}
