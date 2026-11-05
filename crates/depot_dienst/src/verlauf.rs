@@ -179,6 +179,7 @@ pub fn lies(text: &str) -> Geladen {
                 ende,
                 erfolg: Some(erfolg),
                 protokoll: vec![protokoll.to_string()],
+                hinweis: None,
                 frueher,
             }
         })

@@ -16,7 +16,7 @@ use depot_kern::{
 use depot_sammler::ezb::{
     ADRESSE_EZB, EzbFehler, QUELLE_EZB, lies_ezb_seite, lies_ezb_termine, ordne_zu,
 };
-use depot_sammler::{Netz, SammelFehler, TerminBericht, sammle_termine};
+use depot_sammler::{Netz, NetzFehler, SammelFehler, TerminBericht, sammle_termine};
 
 const SEITE: &str = r#"<!DOCTYPE html>
 <html lang="en"><head><title>ECB</title></head><body>
@@ -502,9 +502,9 @@ struct Erfunden {
 }
 
 impl Netz for Erfunden {
-    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, String> {
+    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler> {
         self.abgerufen.push(adresse.to_string());
-        self.antwort.clone()
+        self.antwort.clone().map_err(NetzFehler::endgueltig)
     }
 }
 

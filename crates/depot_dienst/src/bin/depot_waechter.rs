@@ -11,6 +11,10 @@
 //!   Code des neuen Stands.
 //! - Sonst endet er mit dem Ergebnis des Dienstes.
 //!
+//! - **Ohne Cargo** (Maus, 05.11.2026): Ist ein gesicherter Programmstand startklar
+//!   (`programmstand`), startet er dessen Dienst direkt, ohne zu bauen. Sonst baut er mit Cargo
+//!   und sagt dem Dienst, aus welchem Baum; laeuft der eine Weile, sichert er sich als Stand.
+//!
 //! Der Waechter selbst wird erst beim naechsten Start von `DepotSchlopf.cmd` neu gebaut.
 
 #![forbid(
@@ -30,6 +34,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
+use depot_dienst::programmstand;
 use depot_dienst::rueckfall::{self, NEUSTART};
 use depot_dienst::waechter::{Ausgang, FRIST, TAKT, begleite, programm_aus_bau};
 use depot_dienst::{finde_wurzel, http, oeffne_browser};
@@ -47,8 +52,11 @@ fn baue(wurzel: &Path) -> Option<PathBuf> {
             "--quiet",
             "-p",
             "depot_dienst",
-            "--bin",
-            "depot_dienst",
+            "-p",
+            "depot_sammler",
+            "-p",
+            "depot_berater",
+            "--bins",
             "--message-format=json-render-diagnostics",
         ])
         .stderr(Stdio::inherit())
@@ -69,11 +77,26 @@ fn baue(wurzel: &Path) -> Option<PathBuf> {
     }
 }
 
-fn starte(wurzel: &Path, programm: &Path, ohne_browser: bool) -> Ausgang {
+/// Wie der Dienst gestartet wird: aus dem gesicherten Stand oder frisch gebaut aus einem Baum.
+enum Quelle {
+    Stand,
+    Gebaut(Option<String>),
+}
+
+fn starte(wurzel: &Path, programm: &Path, ohne_browser: bool, quelle: &Quelle) -> Ausgang {
     let mut c = Command::new(programm);
     c.current_dir(wurzel);
     if ohne_browser {
         c.arg("--ohne-browser");
+    }
+    match quelle {
+        Quelle::Stand => {
+            c.arg("--stand");
+        }
+        Quelle::Gebaut(Some(baum)) => {
+            c.args(["--baum", baum]);
+        }
+        Quelle::Gebaut(None) => {}
     }
     match c.spawn() {
         Ok(mut kind) => begleite(&mut kind, &rueckfall::offen_pfad(wurzel), FRIST, TAKT),
@@ -137,6 +160,41 @@ fn main() -> ExitCode {
     }
     let mut neustarts = 0_u32;
     loop {
+        // Erst der gesicherte Stand: Er braucht kein Cargo.
+        match programmstand::startklar(&wurzel) {
+            Ok(stand) => {
+                println!(
+                    "[Waechter] Starte den gesicherten Programmstand {} ohne Cargo.",
+                    stand.kurz()
+                );
+                match starte(
+                    &wurzel,
+                    &stand.programm("depot_dienst"),
+                    ohne_browser,
+                    &Quelle::Stand,
+                ) {
+                    Ausgang::Ende(Some(0)) => return ExitCode::SUCCESS,
+                    Ausgang::Ende(Some(c))
+                        if c == i32::from(NEUSTART) && rueckfall::offen_pfad(&wurzel).exists() =>
+                    {
+                        println!("[Waechter] Update eingespielt, Dienst startet neu.");
+                        ohne_browser = true;
+                        continue;
+                    }
+                    Ausgang::Ende(code) => {
+                        eprintln!("[Waechter] Dienst endete mit Fehler ({code:?}).");
+                        return ExitCode::FAILURE;
+                    }
+                    Ausgang::Rueckfall(warum) => {
+                        eprintln!("[Waechter] {warum}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            Err(grund) => println!("[Waechter] Kein Start ohne Cargo: {grund}. Baue mit Cargo."),
+        }
+        // Der Baum vor dem Bau: Nur wenn er danach noch derselbe ist, wird gesichert.
+        let baum = programmstand::sauberer_baum(&wurzel).ok();
         let gebaut = baue(&wurzel).or_else(|| {
             zuruecksetzen(&wurzel, "Bau des neuen Stands gescheitert")
                 .then(|| baue(&wurzel))
@@ -146,7 +204,7 @@ fn main() -> ExitCode {
             eprintln!("[Waechter] FEHLER: Dienst laesst sich nicht bauen.");
             return ExitCode::FAILURE;
         };
-        match starte(&wurzel, &programm, ohne_browser) {
+        match starte(&wurzel, &programm, ohne_browser, &Quelle::Gebaut(baum)) {
             Ausgang::Rueckfall(warum) => {
                 if !zuruecksetzen(&wurzel, &warum) {
                     return ExitCode::FAILURE;

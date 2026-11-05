@@ -82,6 +82,10 @@ impl Netz for Https {
             ureq::Error::Io(ref io) if io.kind() == std::io::ErrorKind::ConnectionRefused => {
                 NetzFehler::NichtGesendet(e.to_string())
             }
+            // Name oder Verbindungsaufbau samt TLS liefen ab: Die Anfrage ging nie hinaus.
+            ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect) => {
+                NetzFehler::NichtGesendet(e.to_string())
+            }
             anders => NetzFehler::Unklar(anders.to_string()),
         })?;
         let status = antwort.status().as_u16();

@@ -186,6 +186,29 @@ fn offen_schreiben(wurzel: &Path, text: &str) -> Result<(), String> {
     fs::rename(&neben, &p).map_err(|e| format!("{}: {e}", p.display()))
 }
 
+/// Haelt fest, dass dieser Baum das ganze Gate bestanden hat: `daten/geprueft.txt`, eine Zeile
+/// `geprueft-v1;<baum>` (gelesen von `depot_dienst::programmstand`). Nur ein so vermerkter Stand
+/// wird fuer den Start ohne Cargo gesichert. Ein Schreibfehler aendert nichts am Gate; der
+/// Stand wird dann nur nicht gesichert.
+pub fn vermerke_geprueft(wurzel: &Path, baum: &str) {
+    let p = wurzel.join("daten").join("geprueft.txt");
+    let schon = fs::read_to_string(&p).is_ok_and(|t| {
+        t.lines()
+            .any(|z| z.strip_prefix("geprueft-v1;") == Some(baum))
+    });
+    if schon || !ist_commit(baum) {
+        return;
+    }
+    let ergebnis = fs::create_dir_all(wurzel.join("daten")).and_then(|()| {
+        let mut f = OpenOptions::new().create(true).append(true).open(&p)?;
+        writeln!(f, "geprueft-v1;{baum}")?;
+        f.sync_all()
+    });
+    if let Err(e) = ergebnis {
+        eprintln!("[DepotSchlopf] {} nicht geschrieben: {e}", p.display());
+    }
+}
+
 /// Prueft den neuen Stand in seiner Kopie mit dem ganzen Gate.
 fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
     let ablage = abbild::ablage(wurzel);
@@ -211,6 +234,7 @@ fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
             probleme.join("\n")
         ));
     }
+    vermerke_geprueft(wurzel, &abbild.baum);
     Ok(())
 }
 

@@ -16,7 +16,8 @@ use depot_regelwerk::DatenFehler;
 use depot_sammler::liste::{QUELLE_US, hoechstens_werte, pruefe_liste, quelle};
 use depot_sammler::sammeln::adresse;
 use depot_sammler::{
-    Ergebnis, Netz, QUELLE, SammelFehler, Schluessel, Wert, Zugang, beobachtungsliste, sammle,
+    Ergebnis, Netz, NetzFehler, QUELLE, SammelFehler, Schluessel, Takt, Verlauf, Wert, Zugang,
+    beobachtungsliste, sammle,
 };
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
@@ -110,7 +111,7 @@ impl Erfunden {
 }
 
 impl Netz for Erfunden {
-    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, String> {
+    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler> {
         self.abgerufen.push(adresse.to_string());
         let kuerzel = adresse
             .split('&')
@@ -120,6 +121,7 @@ impl Netz for Erfunden {
             .get(kuerzel)
             .cloned()
             .unwrap_or_else(|| Err("unbekannt".into()))
+            .map_err(NetzFehler::endgueltig)
     }
 }
 
@@ -138,11 +140,17 @@ fn lauf(
 ) -> Result<Result<depot_sammler::Bericht, SammelFehler>, String> {
     let mut j = vorbedingung(Journal::oeffnen(journal), "Journal oeffnen")?;
     let mut u = uhr(zeiten);
+    let (mut schlafe, mut melde) = (|_| {}, |_: &Verlauf| {});
+    let mut takt = Takt {
+        uhr: &mut u,
+        schlafe: &mut schlafe,
+        melde: &mut melde,
+    };
     Ok(sammle(
         &mut j,
         netz,
         &Zugang::alpha_vantage(schluessel()?),
-        &mut u,
+        &mut takt,
         roh,
         Duration::ZERO,
         werte,

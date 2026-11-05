@@ -26,19 +26,27 @@ pub fn ordner() -> Option<PathBuf> {
 /// # Errors
 /// Der Pfad enthaelt Zeichen, die in einer Befehlsdatei etwas anderes bedeuten koennten.
 pub fn inhalt(wurzel: &Path) -> Result<String, String> {
-    let w = wurzel
-        .to_str()
-        .ok_or("Projektordner: Pfad ist kein gueltiger Text")?;
-    if w.is_empty()
-        || w.chars()
-            .any(|c| c.is_control() || matches!(c, '"' | '%' | '!' | '^' | '&' | '|' | '<' | '>'))
-    {
-        return Err("Projektordner: Pfad enthaelt Sonderzeichen (\" % ! ^ & | < >)".into());
-    }
+    let w = sicherer_pfad(wurzel)?;
     Ok(format!(
         "@echo off\r\nrem Autostart von DepotSchlopf. Entfernen ueber die Einrichtung.\r\n\
          start \"DepotSchlopf\" /min \"{w}\\{DATEI}\" --ohne-browser\r\n"
     ))
+}
+
+/// Ein Pfad als Text, der in einer Befehlsdatei zwischen Anfuehrungszeichen nichts anderes
+/// bedeuten kann.
+///
+/// # Errors
+/// Kein gueltiger Text, leer, oder mit Sonderzeichen.
+pub fn sicherer_pfad(p: &Path) -> Result<&str, String> {
+    let w = p.to_str().ok_or("Pfad ist kein gueltiger Text")?;
+    if w.is_empty()
+        || w.chars()
+            .any(|c| c.is_control() || matches!(c, '"' | '%' | '!' | '^' | '&' | '|' | '<' | '>'))
+    {
+        return Err("Pfad enthaelt Sonderzeichen (\" % ! ^ & | < >)".into());
+    }
+    Ok(w)
 }
 
 /// Ist der Autostart fuer diesen Projektordner eingerichtet?

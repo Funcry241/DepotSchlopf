@@ -15,8 +15,8 @@ use depot_regelwerk::DatenFehler;
 use depot_sammler::liste::pruefe_liste;
 use depot_sammler::sammeln::{ABLAGE_DEVISEN, adresse};
 use depot_sammler::{
-    ADRESSE_DEVISEN, Anbieter, Bericht, Ergebnis, Netz, QUELLE, QUELLE_US, SammelFehler,
-    Schluessel, Wert, Zugang, sammle,
+    ADRESSE_DEVISEN, Anbieter, Bericht, Ergebnis, Netz, NetzFehler, QUELLE, QUELLE_US,
+    SammelFehler, Schluessel, Takt, Verlauf, Wert, Zugang, sammle,
 };
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
@@ -123,7 +123,7 @@ impl Erfunden {
 }
 
 impl Netz for Erfunden {
-    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, String> {
+    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler> {
         self.abgerufen.push(adresse.to_string());
         let schluessel = if adresse == ADRESSE_DEVISEN {
             "ezb".to_string()
@@ -140,6 +140,11 @@ impl Netz for Erfunden {
             .get(&schluessel)
             .cloned()
             .unwrap_or_else(|| Err("unbekannt".into()))
+            // „weg: …“ ist ein voruebergehender Fehler (Verbindung, Status 5xx).
+            .map_err(|e| match e.strip_prefix("weg: ") {
+                Some(w) => NetzFehler::voruebergehend(w),
+                None => NetzFehler::endgueltig(e),
+            })
     }
 }
 
@@ -154,11 +159,17 @@ fn lauf(
     let mut j = vorbedingung(Journal::oeffnen(journal), "Journal oeffnen")?;
     let mut i = zeiten.into_iter();
     let mut u = move || i.next();
+    let (mut schlafe, mut melde) = (|_| {}, |_: &Verlauf| {});
+    let mut takt = Takt {
+        uhr: &mut u,
+        schlafe: &mut schlafe,
+        melde: &mut melde,
+    };
     Ok(sammle(
         &mut j,
         netz,
         zugang,
-        &mut u,
+        &mut takt,
         roh,
         Duration::ZERO,
         werte,
@@ -342,7 +353,13 @@ fn ohne_tiingo_schluessel_nur_xetra() -> Result<(), String> {
 #[test]
 fn ohne_referenzkurse_kein_dollarwert() -> Result<(), String> {
     let alle = werte()?;
-    for ezb_antwort in [Err("Netz"), Ok("<gesmes:Envelope><Cube>".to_string())] {
+    // Auch eine EZB, die voruebergehend nicht antwortet (Status 503), haelt Xetra nicht auf:
+    // Werte in Euro brauchen keine Referenzkurse (Maus, Befund 1 zu #38).
+    for ezb_antwort in [
+        Err("Netz"),
+        Err("weg: Status 503"),
+        Ok("<gesmes:Envelope><Cube>".to_string()),
+    ] {
         let (journal, roh) = ordner()?;
         let mut netz = Erfunden::neu(&[
             ("ezb", ezb_antwort),
@@ -354,7 +371,11 @@ fn ohne_referenzkurse_kein_dollarwert() -> Result<(), String> {
             &roh,
             &mut netz,
             &zugang()?,
-            vec![utc(11, 4, 16, 39)?, utc(11, 4, 16, 40)?],
+            vec![
+                utc(11, 4, 16, 39)?,
+                utc(11, 4, 16, 40)?,
+                utc(11, 4, 16, 41)?,
+            ],
             &alle,
         )?
         .map_err(|e| format!("Lauf: {e:?}"))?;
@@ -529,5 +550,36 @@ fn anbieterprotokoll_je_quelle() -> Result<(), String> {
     assert_eq!(Anbieter::Tiingo.protokoll(), Wer::Tiingo);
     assert_eq!(Anbieter::AlphaVantage.protokoll(), Wer::Kursquelle);
     assert_eq!(Wer::aus_kurz(Wer::Tiingo.kurz()), Some(Wer::Tiingo));
+    Ok(())
+}
+
+#[test]
+fn tiingo_protokoll_unterscheidet_ablehnung_und_limit() -> Result<(), String> {
+    use depot_journal::anbieter::Ergebnis as E;
+    let nyse = nur(&werte()?, Boerse::Nyse);
+    for (fehler, erwartet) in [
+        ("http status: 401", E::Abgelehnt),
+        ("http status: 429", E::Limit),
+    ] {
+        let (journal, roh) = ordner()?;
+        let mut netz = Erfunden::neu(&[
+            ("ezb", Ok(ezb(&[("2026-11-04", "1.1224")]))),
+            ("aapl", Err(fehler)),
+        ]);
+        let b = lauf(
+            &journal,
+            &roh,
+            &mut netz,
+            &zugang()?,
+            vec![utc(11, 4, 21, 4)?],
+            &nyse,
+        )?
+        .map_err(|e| format!("Lauf: {e:?}"))?;
+        assert_eq!(
+            depot_sammler::einordnen(&b, Anbieter::Tiingo),
+            Some(erwartet)
+        );
+        assert_eq!(depot_sammler::einordnen(&b, Anbieter::AlphaVantage), None);
+    }
     Ok(())
 }

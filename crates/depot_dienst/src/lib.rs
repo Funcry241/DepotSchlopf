@@ -22,6 +22,7 @@
 pub mod autostart;
 pub mod http;
 pub mod kostenschutz;
+pub mod programmstand;
 pub mod rueckfall;
 pub mod schluessel;
 pub mod seiten;
