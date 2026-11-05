@@ -1,11 +1,8 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Nach einem Neustart ohne Cargo starten (Maus 05.11.2026, Punkt 2, Teil 1): run.cmd und run.cmd update vermerken gepruefte Baeume in daten/geprueft.txt; ein mit Cargo gebauter Dienst sichert nach einer Weile seine Programme mit SHA-256-Abdruck nach daten/programm/<baum>/ (nur gepruefter Baum, sauberer Projektordner); DepotSchlopf.cmd startet daten/programm/starte.cmd, der Waechter nimmt den Stand nur, wenn er genau passt, sonst baut er mit Cargo. Auftraege laufen aus dem Stand ohne Cargo, das Update weiter mit Gate. Keine Grenze geaendert, keine neue Abhaengigkeit. Gestapelt; Pfade gegen die Basis-PR.
+zweck: Nach einem Neustart den Papiertag nachholen oder schuetzen (Maus 05.11.2026, Punkt 2, Teil 2): dienst_erledigt.txt (erledigt-v3) merkt sich den Tag eines erfolgreichen Kursabrufs des Zeitplans (kurse_ok) und den Tag, fuer den der Papiertag gestartet wurde (papier, unmittelbar vor dem Start). Der Papiertag ist faellig als Zustand statt als Ereignis: alle Abrufe des Tages gestartet, einer heute erfolgreich, Papiertag heute noch nicht gestartet. So holt ein neu gestarteter Dienst einen nicht begonnenen Papiertag mit den Kursen von heute nach und startet einen begonnenen nie zweimal. Die Live-Ansicht sagt nach einem Neustart, wo der Tag steht. Keine Grenze geaendert, keine neue Abhaengigkeit. Gestapelt auf #40 und Zeitplan je Boerse (#41); Pfade gegen die Basis-PR #40.
 pfade:
-crates/depot_kern/
 crates/depot_dienst/
-crates/depot_lauf/
 docs/
 CHANGELOG.md
-DepotSchlopf.cmd
 kodex/aenderung.txt

@@ -1,6 +1,6 @@
 # Nach einem Neustart: geprüften Stand ohne Cargo starten
 
-Maus' zweiter von drei Punkten am 05.11.2026. Erster Teil: Nach einem PC-Neustart soll der letzte geprüfte Programmstand direkt starten, ohne dass Cargo beim Start gebraucht wird. Der zweite Teil kommt in einem eigenen PR, nach dem Zeitplan je Börse: einen noch nicht begonnenen Papiertag mit weiterhin gültigen Kursen nachholen und zeigen, wo der Dienst stehen blieb.
+Maus' zweiter von drei Punkten am 05.11.2026. Erster Teil: Nach einem PC-Neustart soll der letzte geprüfte Programmstand direkt starten, ohne dass Cargo beim Start gebraucht wird. Der zweite Teil, einen noch nicht begonnenen Papiertag nachholen und zeigen, wo der Dienst stehen blieb, steht in `nachholen.md`.
 
 ## Befund vorher
 

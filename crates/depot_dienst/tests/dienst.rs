@@ -1516,6 +1516,14 @@ fn papiertag_nach_dem_letzten_abruf_des_tages() -> Result<(), String> {
     Ok(())
 }
 
+/// Ein Dienst, dessen Liste nur Xetra-Werte hat: Der Papiertag folgt dem Xetra-Abruf, gleich
+/// welche Boersen die echte Liste hat.
+fn nur_xetra(wurzel: PathBuf) -> Arc<Dienst> {
+    let d = dienst(wurzel, true);
+    d.sperre().boersen = vec![Boerse::Xetra];
+    d
+}
+
 /// Die Live-Ansicht nach einem Neustart: der Satz mit `id="neustart"`.
 fn neustart_satz(d: &Dienst, t: Zeitpunkt) -> Option<String> {
     let seite = seiten::live("s", &d.sperre(), t.datum());
@@ -1531,7 +1539,7 @@ fn neustart_zwischen_kursabruf_und_papiertag_holt_ihn_nach() -> Result<(), Strin
     let wurzel = eingeschaltet(ordner()?)?;
     let t = donnerstag(17, 46)?;
     {
-        let d = dienst(wurzel.clone(), true);
+        let d = nur_xetra(wurzel.clone());
         let (nr, kind) = some(d.schritt(t), "Termine")?;
         d.verfolge(nr, kind, || donnerstag(17, 46).ok());
         let (nr, kind) = some(d.schritt(t), "Kurse")?;
@@ -1541,7 +1549,7 @@ fn neustart_zwischen_kursabruf_und_papiertag_holt_ihn_nach() -> Result<(), Strin
         // Hier endet der Dienst, bevor der Papiertag beginnt.
     }
     let spaeter = donnerstag(18, 20)?;
-    let d = dienst(wurzel.clone(), true);
+    let d = nur_xetra(wurzel.clone());
     let (nr, kind) = some(d.schritt(spaeter), "Papiertag nachgeholt")?;
     assert_eq!(
         d.sperre().laufend.as_ref().map(|a| (a.art, a.anlass)),
@@ -1555,7 +1563,7 @@ fn neustart_zwischen_kursabruf_und_papiertag_holt_ihn_nach() -> Result<(), Strin
     assert!(satz.contains("nachgeholt"), "{satz}");
     assert!(d.schritt(spaeter).is_none(), "heute nichts mehr");
     // Ein weiterer Neustart startet ihn nicht ein zweites Mal.
-    let wieder = dienst(wurzel, true);
+    let wieder = nur_xetra(wurzel);
     assert!(wieder.schritt(donnerstag(19, 0)?).is_none());
     assert!(wartend(&wieder).is_empty());
     Ok(())
@@ -1568,7 +1576,7 @@ fn neustart_waehrend_des_papiertags_startet_ihn_nicht_neu() -> Result<(), String
     let wurzel = eingeschaltet(ordner()?)?;
     let t = donnerstag(17, 46)?;
     {
-        let d = dienst(wurzel.clone(), true);
+        let d = nur_xetra(wurzel.clone());
         let (nr, kind) = some(d.schritt(t), "Termine")?;
         d.verfolge(nr, kind, || donnerstag(17, 46).ok());
         let (nr, kind) = some(d.schritt(t), "Kurse")?;
@@ -1578,7 +1586,7 @@ fn neustart_waehrend_des_papiertags_startet_ihn_nicht_neu() -> Result<(), String
         // Der Dienst endet, waehrend der Papiertag laeuft: Sein Ende steht nie im Verlauf.
     }
     let spaeter = donnerstag(18, 20)?;
-    let d = dienst(wurzel, true);
+    let d = nur_xetra(wurzel);
     assert!(d.schritt(spaeter).is_none(), "kein zweiter Papiertag");
     assert!(wartend(&d).is_empty());
     let satz = some(neustart_satz(&d, spaeter), "Satz")?;
@@ -1597,14 +1605,14 @@ fn neustart_waehrend_des_kursabrufs_ohne_papiertag() -> Result<(), String> {
     let wurzel = eingeschaltet(ordner()?)?;
     let t = donnerstag(17, 46)?;
     {
-        let d = dienst(wurzel.clone(), true);
+        let d = nur_xetra(wurzel.clone());
         let (nr, kind) = some(d.schritt(t), "Termine")?;
         d.verfolge(nr, kind, || donnerstag(17, 46).ok());
         let (_, mut kind) = some(d.schritt(t), "Kurse")?;
         let _ = kind.wait();
     }
     let spaeter = donnerstag(18, 20)?;
-    let d = dienst(wurzel, true);
+    let d = nur_xetra(wurzel);
     assert!(d.schritt(spaeter).is_none());
     assert!(wartend(&d).is_empty());
     let satz = some(neustart_satz(&d, spaeter), "Satz")?;
