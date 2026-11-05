@@ -86,21 +86,23 @@ versiegelt! {
 }
 
 impl Grenzen {
-    /// Die Startwerte aus dem Architekturentwurf v1. Ihr Fingerabdruck steht in der
+    /// Die Werte fuer den Papierhandel ab 05.11.2026: wenige, konzentrierte Positionen
+    /// (hoechstens 4 Werte, je Wert hoechstens 40 %), Umschlag bis 100 % am Tag, ETFs frei.
+    /// Alle anderen Werte aus dem Architekturentwurf v1. Ihr Fingerabdruck steht in der
     /// Festschreibung; jede Aenderung braucht die Grenzfreigabe des Eigentuemers (R30).
     pub fn standard() -> Grenzen {
         Grenzen {
-            max_anteil_bp: 2_500,
-            max_werte: 8,
+            max_anteil_bp: 4_000,
+            max_werte: 4,
             max_orders_je_topf: 4,
             min_order: Cent(50_000),
             min_aenderung_bp: 500,
-            max_umschlag_bp: 5_000,
+            max_umschlag_bp: 10_000,
             limit_abstand_bp: 100,
             max_kurssprung_bp: 1_500,
             tagesverlust_bp: 500,
             notbremse_bp: 2_000,
-            etf_freigegeben: false,
+            etf_freigegeben: true,
             gebuehren: Gebuehren {
                 prozent_bp: 5,
                 minimum: Cent(125),

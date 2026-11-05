@@ -260,7 +260,7 @@ fn dachs(w: &Werte) -> Option<Drehbuch> {
                     Some(vorschlag(
                         BeraterId::Dachs,
                         &[
-                            (alpha, 4_000, "bestaetigte Reaktion auf die Zahlen"),
+                            (alpha, 5_000, "bestaetigte Reaktion auf die Zahlen"),
                             (beta, 2_000, "unveraendert"),
                             (gamma, 1_500, "unveraendert"),
                         ],
@@ -344,8 +344,9 @@ fn maus(w: &Werte) -> Option<Drehbuch> {
 impl Szenario {
     /// Ein erfundener Zeitraum vom 25.11. bis 01.12.2026 mit drei erfundenen Werten und zwei
     /// Toepfen zu je 10.000 Euro Papiergeld. Er zeigt: angekuendigte Termine, Beobachtung nach
-    /// dem Ereignis, eine Kuerzung durch das Regelwerk, ein Veto, den vollen Monat beim
-    /// Kostenschutz, unplausible Kurse und den neuen Monat. Dazu die Drehbuecher von Dachs und
+    /// dem Ereignis, eine Kuerzung durch das Regelwerk, ein Veto, unplausible Kurse und den
+    /// neuen Monat. Jeder Aufruf ist gebucht; den vollen Monat beim Kostenschutz zeigt der
+    /// Papiertag (`tests/papiertag.rs`), denn 46 Aufrufe im Monat fuellt dieser Zeitraum nicht. Dazu die Drehbuecher von Dachs und
     /// Maus. `None` nur, wenn die erfundenen Daten selbst ungueltig waeren.
     pub fn beispiel() -> Option<(Szenario, Drehbuch, Drehbuch)> {
         let w = Werte {

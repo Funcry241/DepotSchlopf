@@ -482,3 +482,72 @@ fn konto_mit_bewegung_ohne_depot_haelt() -> Result<(), String> {
     assert!(Papierdatei::oeffnen(&ort.konto, false, &start()?).is_err());
     Ok(())
 }
+
+/// Kostenschutz im Papiertag: Nach 23 Papiertagen mit Vorschlag und Zweitmeinung ist der
+/// Monat beider KIs voll gebucht (46 Aufrufe). Am 24. Tag fragt der Papiertag niemanden, bucht
+/// nichts und schreibt den Grund ins Journal. Der Tag schliesst trotzdem ab.
+#[test]
+fn voller_monat_fragt_niemanden() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut dachs = Drehbuch::default();
+    let mut maus = Drehbuch::default();
+    for t in 2..=25_u8 {
+        let d = tag(t)?;
+        for (buch, wer) in [(&mut dachs, BeraterId::Dachs), (&mut maus, BeraterId::Maus)] {
+            buch.antworten.insert(
+                d,
+                Antwort {
+                    einschaetzung: "SAP".into(),
+                    vorschlag: Some(Vorschlag {
+                        berater: wer,
+                        zielgewichte_bp: [(sap.clone(), 2_000)].into_iter().collect(),
+                        begruendung: [(sap.clone(), "beobachtet".to_string())]
+                            .into_iter()
+                            .collect(),
+                    }),
+                },
+            );
+            buch.urteile.insert(
+                d,
+                Urteil {
+                    zustimmung: false,
+                    begruendung: "abwarten".into(),
+                },
+            );
+        }
+    }
+    for t in 2..=25_u8 {
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, t, &[(&sap, "230", "231"), (&allianz, "350", "351")])?;
+        let mut k = konto(&ort, &j)?;
+        let aus = papiertag(
+            &mut j,
+            tag(t)?,
+            &universum()?,
+            &start()?,
+            &mut dachs,
+            &mut maus,
+            &mut k,
+        );
+        assert!(
+            matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
+            "Tag {t}: {aus:?}"
+        );
+    }
+    assert_eq!(dachs.aufrufe, 46, "Dachs: 23 Tage zu je 2 Aufrufen");
+    assert_eq!(maus.aufrufe, 46, "Maus: 23 Tage zu je 2 Aufrufen");
+    let j = ort.oeffnen()?;
+    assert_eq!(j.stand().ki().buchungen().len(), 92, "jede Frage gebucht");
+    let t25 = tag(25)?;
+    let schutz: Vec<&str> = j
+        .stand()
+        .begruendungen()
+        .iter()
+        .filter(|(d, wer, _)| *d == t25 && wer == "Kostenschutz")
+        .map(|(_, _, t)| t.as_str())
+        .collect();
+    assert_eq!(schutz.len(), 2, "{schutz:?}");
+    assert!(schutz.iter().all(|t| t.contains("MonatVoll")), "{schutz:?}");
+    Ok(())
+}

@@ -472,18 +472,18 @@ fn befund_1_f04_kauf_erzeugt_keine_neunte_position() {
 // 1·F05 – Umschlaggrenze am Limit
 // ---------------------------------------------------------------------------------------------
 
-/// Vier Kaeufe zu je 12,5 % (20 Stueck zu 100 € in 16.000 €) fuellen die Umschlaggrenze
-/// (50 %) am Schlusskurs genau aus.
-/// Am Limit (+1 %) liegt der Umschlag darueber und muss gekuerzt werden. Die Kaeufe bleiben
-/// klein, damit weder die Kaufgrenze (25 %) noch die Orderzahl (4) vorher greift: Begrenzen
-/// darf hier allein die Umschlaggrenze.
+/// Vier Kaeufe zu je 25 % (40 Stueck zu 100 € in 16.000 €) fuellen die Umschlaggrenze
+/// (100 %) am Schlusskurs genau aus.
+/// Am Limit (+1 %) liegt der Umschlag darueber und muss gekuerzt werden. Weder die Kaufgrenze
+/// (40 %) noch die Orderzahl (4) greift vorher: Begrenzen darf hier allein die Umschlaggrenze
+/// (und mit ihr das Bargeld).
 #[test]
 fn befund_1_f05_umschlag_am_limit_ueber_der_grenze_wird_gekuerzt() {
     let g = Grenzen::standard();
     let topf = topf_neu(TopfId::A, Cent(1_600_000));
     let v = vorschlag(
         BeraterId::Dachs,
-        &[(0, 1_250), (1, 1_250), (2, 1_250), (3, 1_250)],
+        &[(0, 2_500), (1, 2_500), (2, 2_500), (3, 2_500)],
     );
     let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&v), false);
     assert_eq!(ent.kaeufe.len(), 4, "Vorbedingung: {:?}", ent.befunde);
@@ -817,20 +817,20 @@ fn grenzfall_mindestorder_kauf_am_limit() {
 }
 
 /// Deckung: Kauf am Limit plus Gebuehr uebersteigt nie das Bargeld, auch knapp an der Grenze.
-/// Der Topf haelt vier Werte zu je 25 Stueck (2.500 €), Ziel je 20 %. Das Ziel von Wert 0
-/// (20 %, rund 2.100 €) liegt weit ueber dem Bargeld. Hoechstanteil (am Limit, 1·T01) und
+/// Der Topf haelt drei Werte zu je 25 Stueck (2.500 €), Ziel je 26,66 %, also unter der
+/// Mindestaenderung. Das Ziel von Wert 0 (20 %, rund 1.600 €) liegt weit ueber dem Bargeld. Hoechstanteil (am Limit, 1·T01) und
 /// Umschlaggrenze lassen den Kauf zu; begrenzt wird allein die Deckung.
 #[test]
 fn grenzfall_deckung_mit_gebuehr_am_limit() {
     let g = Grenzen::standard();
     for bargeld in [50_649_i64, 50_650, 50_651, 101_000, 101_150, 101_151] {
         let mut topf = topf_neu(TopfId::A, Cent(bargeld));
-        for i in 1..5 {
+        for i in 1..4 {
             topf.setze_bestand(isin(i), 25);
         }
         let v = vorschlag(
             BeraterId::Dachs,
-            &[(0, 2_000), (1, 2_000), (2, 2_000), (3, 2_000), (4, 2_000)],
+            &[(0, 2_000), (1, 2_666), (2, 2_666), (3, 2_666)],
         );
         let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&v), false);
         let mut kosten = Cent::NULL;
@@ -864,7 +864,7 @@ fn grenzfall_deckung_mit_gebuehr_am_limit() {
     }
 }
 
-/// Deckung kauft, was passt: Das Ziel (20 % = 2.100 €) liegt weit ueber dem Bargeld. Gekauft
+/// Deckung kauft, was passt: Das Ziel (20 % = rund 1.600 €) liegt weit ueber dem Bargeld. Gekauft
 /// wird die groesste Stueckzahl, die samt Gebuehr ins Bargeld passt: bei 506,50 € und bei
 /// 600 € je 5 Stueck zu 101 € (506,50 €), bei 1.011,50 € 10 Stueck. Beobachtung aus dem
 /// Umbau von PR #8: Die Schaetzung lag eine Stueckzahl zu niedrig und zaehlte nur abwaerts.
@@ -873,12 +873,12 @@ fn grenzfall_deckung_kauft_was_passt() {
     let g = Grenzen::standard();
     for (bargeld, erwartet) in [(50_650_i64, 5_u64), (60_000, 5), (101_150, 10)] {
         let mut topf = topf_neu(TopfId::A, Cent(bargeld));
-        for i in 1..5 {
+        for i in 1..4 {
             topf.setze_bestand(isin(i), 25);
         }
         let v = vorschlag(
             BeraterId::Dachs,
-            &[(0, 2_000), (1, 2_000), (2, 2_000), (3, 2_000), (4, 2_000)],
+            &[(0, 2_000), (1, 2_666), (2, 2_666), (3, 2_666)],
         );
         let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&v), false);
         let gekauft = ent.kaeufe.first().map(|a| a.auftrag().stueck);
@@ -901,12 +901,11 @@ fn grenzfall_orderzahl_genau_an_der_grenze() {
         &[(0, 1_000), (1, 1_000), (2, 1_000), (3, 1_000)],
     );
     let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&vier), false);
-    assert_eq!(alle(&ent).count(), 4);
-    let fuenf = vorschlag(
-        BeraterId::Dachs,
-        &[(0, 1_000), (1, 1_000), (2, 1_000), (3, 1_000), (4, 1_000)],
-    );
-    let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&fuenf), false);
+    assert_eq!(alle(&ent).count(), 4, "{ent:?}");
+    // Fuenf Auftraege bei hoechstens vier Werten: Wert 4 wird ganz verkauft, vier gekauft.
+    let mut topf = topf;
+    topf.setze_bestand(isin(4), 1_000);
+    let ent = lauf(&g, &topf, &kurse_alle(10_000), Some(&vier), false);
     assert_eq!(alle(&ent).count(), g.max_orders_je_topf());
 }
 
@@ -1024,15 +1023,15 @@ fn befund_k9_02_gemeinsamer_abbau_haelt_den_hoechstanteil() {
     let g = Grenzen::standard();
     let kurse = kurse_alle(100);
     let faelle: [(&str, i64, u64, Option<Vorschlag>, bool); 3] = [
-        ("zwei Abbauorders, Halt", 440_000, 0, None, true),
-        ("dazu Ausstieg Positivliste, Halt", 390_000, 500, None, true),
+        ("zwei Abbauorders, Halt", 140_000, 0, None, true),
+        ("dazu Ausstieg Positivliste, Halt", 90_000, 500, None, true),
         (
             "dazu freiwillige Auftraege",
-            390_000,
+            90_000,
             500,
             Some(vorschlag(
                 BeraterId::Dachs,
-                &[(0, 2_500), (1, 2_500), (2, 2_000), (3, 1_500)],
+                &[(0, 4_000), (1, 4_000), (2, 1_500)],
             )),
             false,
         ),
@@ -1040,8 +1039,8 @@ fn befund_k9_02_gemeinsamer_abbau_haelt_den_hoechstanteil() {
     let mut fehler = Vec::new();
     for (fall, bargeld, raus, v, halt) in faelle {
         let mut topf = topf_neu(TopfId::A, Cent(bargeld));
-        topf.setze_bestand(isin(0), 2_800);
-        topf.setze_bestand(isin(1), 2_800);
+        topf.setze_bestand(isin(0), 4_300);
+        topf.setze_bestand(isin(1), 4_300);
         if raus > 0 {
             topf.setze_bestand(isin(10), raus);
         }

@@ -65,6 +65,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "depot_berater"
+version = "0.1.0"
+dependencies = [
+ "depot_journal",
+ "depot_kern",
+ "depot_ki",
+ "depot_sim",
+ "keyring-core",
+ "ureq",
+ "windows-native-keyring-store",
+]
+
+[[package]]
 name = "depot_journal"
 version = "0.1.0"
 dependencies = [

@@ -26,6 +26,7 @@ mod abdruck;
 pub mod lauf;
 pub mod papier;
 pub mod papierdatei;
+pub mod papierlauf;
 pub mod papiertag;
 pub mod szenario;
 

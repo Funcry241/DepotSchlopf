@@ -92,3 +92,12 @@ Wolfgang hat am 04.11.2026 die lesende Datenversorgung freigegeben. Den Abruf ü
 Gegenproben, jeweils neu übersetzt: ohne die neue Regel scheitern alle drei Fälle von `netz_bleibt_im_blatt`; ohne das umbenannte Paket in zielsystemabhängigen Abschnitten scheitert der zweite Fall.
 
 Grenze: Ein Crate, das ein anderes Programm startet (`std::process`), könnte darüber ins Netz. Außerhalb der reinen Crates ist `std::process` erlaubt, weil `depot_lauf` Git und Cargo startet. Diese Grenze sichert weiter die Durchsicht jeder Änderung.
+
+## Netzzugang für die Berater (Papierhandel)
+
+Wolfgang hat am 05.11.2026 freigegeben, dass Dachs (Claude) und Maus (GPT) über das Netz gefragt werden, mit Websuche („Ja, mit Websuche“). Das übernimmt das neue Crate `depot_berater`; es steht als zweites auf der Liste `NETZ_ERLAUBT`. Die allgemeine Regel bleibt: Kein Crate außerhalb der Liste hängt von einem Netz-Crate oder einem Crate der Liste ab. `depot_berater` darf also von `depot_sim` abhängen, nie umgekehrt; Journal, Regelwerk und Simulation bleiben ohne Netz. Das Crate selbst folgt mit einer eigenen Änderung (Festschreibung, Grenzfreigabe).
+
+| Test | Datei | zeigt |
+| --- | --- | --- |
+| `netz_nur_im_sammler_und_berater` | `crates/depot_kodex/src/quellscan.rs` | Netz in Sammler und Berater erlaubt, in Simulation, Journal und Lauf abgelehnt |
+| `netz_bleibt_im_blatt`, Fall „ueber den Berater“ | `crates/depot_kodex/tests/befunde.rs` | Abhängigkeit vom Berater: abgelehnt |
