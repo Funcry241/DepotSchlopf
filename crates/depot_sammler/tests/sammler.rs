@@ -16,7 +16,7 @@ use depot_regelwerk::DatenFehler;
 use depot_sammler::liste::pruefe_liste;
 use depot_sammler::sammeln::adresse;
 use depot_sammler::{
-    Ergebnis, Netz, QUELLE, SammelFehler, Schluessel, Wert, beobachtungsliste, sammle,
+    Ergebnis, Netz, QUELLE, SammelFehler, Schluessel, Wert, Zugang, beobachtungsliste, sammle,
 };
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
@@ -141,7 +141,7 @@ fn lauf(
     Ok(sammle(
         &mut j,
         netz,
-        &schluessel()?,
+        &Zugang::alpha_vantage(schluessel()?),
         &mut u,
         roh,
         Duration::ZERO,
@@ -221,7 +221,7 @@ fn schluessel_ohne_textform() -> Result<(), String> {
 fn abrufadresse() -> Result<(), String> {
     let werte = zwei_werte()?;
     let w = werte.first().ok_or("Vorbedingung: Wert")?;
-    let a = adresse(w, &schluessel()?);
+    let a = adresse(w, &schluessel()?, None);
     assert!(a.starts_with("https://www.alphavantage.co/query?"), "{a}");
     for teil in [
         "function=TIME_SERIES_DAILY",
@@ -352,7 +352,7 @@ fn hinweis_beendet_den_lauf() -> Result<(), String> {
     assert_eq!(b.handelstag, None);
     assert!(!b.verwendbar());
     assert_eq!(
-        depot_sammler::einordnen(&b),
+        depot_sammler::einordnen(&b, depot_sammler::Anbieter::AlphaVantage),
         Some(anbieter::Ergebnis::Limit)
     );
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
@@ -390,7 +390,10 @@ fn falsches_kuerzel_nur_fuer_seinen_wert() -> Result<(), String> {
     assert!(b.pruefung.is_empty(), "{:?}", b.pruefung);
     assert!(b.verwendbar());
     // Ein Kurs kam an: Der Schluessel gilt.
-    assert_eq!(depot_sammler::einordnen(&b), Some(anbieter::Ergebnis::Ok));
+    assert_eq!(
+        depot_sammler::einordnen(&b, depot_sammler::Anbieter::AlphaVantage),
+        Some(anbieter::Ergebnis::Ok)
+    );
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert_eq!(j.stand().kurse().len(), 2);
     drop(j);
@@ -479,7 +482,7 @@ fn schluessel_erscheint_nirgends() -> Result<(), String> {
     let s = schluessel()?;
     let werte = zwei_werte()?;
     let w = werte.first().ok_or("Vorbedingung: Wert")?;
-    let a = adresse(w, &s);
+    let a = adresse(w, &s, None);
     let netzfehler = format!(
         "Verbindung zu {a} fehlgeschlagen ({})",
         a.to_ascii_lowercase()
@@ -619,7 +622,7 @@ fn ungueltiger_schluessel_wird_als_abgelehnt_erkannt() -> Result<(), String> {
     )?
     .map_err(|e| format!("Lauf: {e:?}"))?;
     assert_eq!(
-        depot_sammler::einordnen(&b),
+        depot_sammler::einordnen(&b, depot_sammler::Anbieter::AlphaVantage),
         Some(anbieter::Ergebnis::Abgelehnt)
     );
     Ok(())

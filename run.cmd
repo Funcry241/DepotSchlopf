@@ -4,7 +4,7 @@ cd /d "%~dp0"
 rem DepotSchlopf – einziger Einstieg (ein Befehl).
 rem   run.cmd                  alles: Gate pruefen, danach Assistenten-Export assistant_export_latest.zip
 rem   run.cmd festschreibung   Festschreibung neu schreiben (nur fuer FestschreibungAenderung)
-rem   run.cmd kurse            Schlusskurse holen, im Journal belegen und pruefen (nur lesend)
+rem   run.cmd kurse [xetra|nyse]  Schlusskurse holen (alle oder nur einer Boerse), im Journal belegen und pruefen (nur lesend)
 rem   run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)
 rem   run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)
 rem   run.cmd lage             Lagebild nach daten/lage.html (Bereitschaft, KI-Budget, Depot)
