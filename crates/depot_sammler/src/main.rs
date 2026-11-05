@@ -211,26 +211,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         sperre(wurzel);
     }
     vermerke(wurzel, &bericht);
-    for (w, e) in &bericht.werte {
-        match e {
-            Ergebnis::Belegt { heute, vortag, .. } => println!(
-                "  {:<20} {}  Schluss {}  Vortag {}",
-                w.name,
-                w.isin,
-                tag_preis(*heute),
-                tag_preis(*vortag)
-            ),
-            Ergebnis::Fehler(t) => {
-                println!("  {:<20} {}  FEHLER: {t}", w.name, w.isin);
-            }
-            Ergebnis::Uebersprungen(t) => {
-                println!("  {:<20} {}  nicht abgerufen: {t}", w.name, w.isin);
-            }
-            Ergebnis::NichtAbgerufen => {
-                println!("  {:<20} {}  nicht abgerufen", w.name, w.isin);
-            }
-        }
-    }
+    zeige_werte(&bericht.werte);
     if let Some(a) = &bericht.abbruch {
         println!("[Sammler] Lauf vorzeitig beendet: {a}");
     }
@@ -269,6 +250,30 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
             "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Pruefung nicht bestanden)."
         );
         ExitCode::FAILURE
+    }
+}
+
+/// Je Wert eine Zeile mit Schlusskursen oder dem Grund, warum sie fehlen.
+fn zeige_werte(werte: &[(depot_sammler::Wert, Ergebnis)]) {
+    for (w, e) in werte {
+        match e {
+            Ergebnis::Belegt { heute, vortag, .. } => println!(
+                "  {:<20} {}  Schluss {}  Vortag {}",
+                w.name,
+                w.isin,
+                tag_preis(*heute),
+                tag_preis(*vortag)
+            ),
+            Ergebnis::Fehler(t) => {
+                println!("  {:<20} {}  FEHLER: {t}", w.name, w.isin);
+            }
+            Ergebnis::Uebersprungen(t) => {
+                println!("  {:<20} {}  nicht abgerufen: {t}", w.name, w.isin);
+            }
+            Ergebnis::NichtAbgerufen => {
+                println!("  {:<20} {}  nicht abgerufen", w.name, w.isin);
+            }
+        }
     }
 }
 
