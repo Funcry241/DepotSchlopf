@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use depot_journal::AufrufErlaubnis;
 use depot_journal::anbieter::{self, Eintrag, Ergebnis as Ausgang, Kosten};
 use depot_kern::{BeraterId, Cent, Grenzen, Universum, Vorschlag, Zeitpunkt};
-use depot_sim::{Antwort, Berater, Lage, Urteil};
+use depot_sim::{Antwort, Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Urteil};
 
 use crate::anbieter::{Anbieter, Verbrauch};
 use crate::frage::{self, sauber};
@@ -394,6 +394,16 @@ impl<N: Netz> Berater for KiBerater<N> {
         self.schluessel.is_some() && !self.gesperrt() && self.pause().is_none()
     }
 
+    fn warum_nicht(&self) -> Option<String> {
+        if self.schluessel.is_none() {
+            return Some("kein Schlüssel hinterlegt".into());
+        }
+        if self.gesperrt() {
+            return Some("Kostenschutz gesperrt, daten/ki.halt".into());
+        }
+        self.pause().map(|p| format!("Anbieterpause: {p}"))
+    }
+
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::vorschlag_frage(lage, &self.universum);
@@ -408,8 +418,9 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a
             }
             Err(grund) => Antwort {
+                verwertbar: false,
                 einschaetzung: format!(
-                    "keine verwertbare Antwort: {} [{}]",
+                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
                     sauber(&grund),
                     e.kosten
                 ),
@@ -438,9 +449,10 @@ impl<N: Netz> Berater for KiBerater<N> {
             }
             // Ohne verwertbare Antwort keine Zustimmung (R31).
             Err(grund) => Urteil {
+                verwertbar: false,
                 zustimmung: false,
                 begruendung: format!(
-                    "keine verwertbare Antwort: {} [{}]",
+                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
                     sauber(&grund),
                     e.kosten
                 ),

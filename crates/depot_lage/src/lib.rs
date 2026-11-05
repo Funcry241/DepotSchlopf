@@ -27,11 +27,13 @@ pub use depot_journal::anbieter;
 mod budget;
 mod depot;
 pub mod html;
+pub mod tage;
 mod zugang;
 
 pub use betrieb::{AnbieterHinweis, Betrieb, SchluesselStand};
 pub use budget::{BudgetStatus, KiBudget, ki_budget, mit_verbrauch};
 pub use depot::{AuftragZeile, DepotLage, Position, TopfLage};
+pub use tage::{KiBeitrag, TagErgebnis, TagStand};
 pub use zugang::{PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien};
 
 use depot_journal::Stand;
@@ -176,6 +178,8 @@ pub struct Lagebild {
     pub betrieb: Betrieb,
     /// Stand jedes Schluessels.
     pub schluessel: Vec<(Wer, SchluesselStand)>,
+    /// Die letzten Handelstage seit dem ersten Papiertag, neueste zuerst.
+    pub tage: Vec<TagErgebnis>,
 }
 
 /// So viele Beitraege zeigt das Lagebild hoechstens.
@@ -358,16 +362,31 @@ fn tag_punkte(s: &Stand, heute: Datum, werte: &[Wert], punkte: &mut Vec<Punkt>) 
                     None,
                 ));
             } else {
+                let roh: Vec<String> = befunde.iter().map(|b| format!("{b:?}")).collect();
+                // Zu alte Kurse heilt kein neuer Abruf am selben Abend: Er laege noch spaeter.
+                let nur_zu_alt = befunde
+                    .iter()
+                    .all(|b| matches!(b, depot_regelwerk::DatenFehler::KursZuAlt(_)));
+                let (rat, abhilfe) = if nur_zu_alt {
+                    (
+                        " Ein neuer Abruf hilft heute nicht, er läge noch später. Morgen \
+                         rechtzeitig nach 17:35 abrufen (Zeitplan an, Rechner wach).",
+                        None,
+                    )
+                } else {
+                    ("", Some(Abhilfe::KurseAbrufen))
+                };
                 punkte.push(punkt(
                     "Schlusskurse",
                     Ampel::Offen,
                     format!(
-                        "Vom {} belegt, die Prüfung meldet {} Befunde: Der Papiertag liefe \
-                         ohne Fragen an die Berater. {befunde:?}",
+                        "Vom {} belegt, Abruf {}. Die Prüfung meldet: {}. Der Papiertag liefe \
+                         ohne Fragen an die Berater und ohne Handel.{rat}",
                         datum_text(k.handelstag),
-                        befunde.len()
+                        zeit_text(k.heute.stand()),
+                        tage::befunde_text(roh.iter().map(String::as_str)).join("; ")
                     ),
-                    Some(Abhilfe::KurseAbrufen),
+                    abhilfe,
                 ));
             }
             true
@@ -591,6 +610,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut budget = Vec::new();
     let mut depot_lage = None;
     let mut gespraech = Vec::new();
+    let mut tage = Vec::new();
     match (u.journal, heute, &werte) {
         (Zugang::Offen(s), Some(heute), Ok(werte)) => {
             tag_punkte(s, heute, werte, &mut punkte);
@@ -600,6 +620,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
                 .collect();
             punkte.extend(budget.iter().filter_map(budget_punkt));
             depot_lage = Some(depot::depot_lage(s, werte));
+            tage = tage::tage(s, &als_universum(werte), &u.anbieter, heute);
             gespraech = s
                 .begruendungen()
                 .iter()
@@ -658,6 +679,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         grenzen: grenzwerte(),
         betrieb,
         schluessel,
+        tage,
     }
 }
 

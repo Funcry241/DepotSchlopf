@@ -12,7 +12,8 @@ use depot_kern::{
     Universum, Vorschlag, Zeitpunkt,
 };
 use depot_sim::{
-    Antwort, Ausgang, Drehbuch, LaufFehler, Papierdatei, Papierkonto, Stumm, Urteil, papiertag,
+    Antwort, Ausgang, Drehbuch, Gefragt, LaufFehler, Papierdatei, Papierkonto, Stumm, Urteil,
+    gefragt, papiertag,
 };
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
@@ -160,6 +161,11 @@ fn erster_papiertag_eroeffnet_depot_und_schliesst_ab() -> Result<(), String> {
         texte.iter().any(|t| t.contains("nicht angebunden")),
         "{texte:?}"
     );
+    // Stumm nennt keinen Grund; im Journal steht dann keine Klammer.
+    assert!(
+        !texte.iter().any(|t| t.contains("nicht angebunden (")),
+        "{texte:?}"
+    );
     assert!(ort.konto.is_file(), "Papierkonto als Datei");
     drop(j);
     // Derselbe Tag noch einmal: nichts geschieht.
@@ -293,6 +299,7 @@ fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
     dachs.antworten.insert(
         d,
         Antwort {
+            verwertbar: true,
             einschaetzung: "SAP nach Zahlen".into(),
             vorschlag: Some(Vorschlag {
                 berater: BeraterId::Dachs,
@@ -307,6 +314,7 @@ fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
     maus.urteile.insert(
         d,
         Urteil {
+            verwertbar: true,
             zustimmung: true,
             begruendung: "passt".into(),
         },
@@ -355,6 +363,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
     dachs.antworten.insert(
         d,
         Antwort {
+            verwertbar: true,
             einschaetzung: "SAP".into(),
             vorschlag: Some(Vorschlag {
                 berater: BeraterId::Dachs,
@@ -369,6 +378,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
     maus.urteile.insert(
         d,
         Urteil {
+            verwertbar: true,
             zustimmung: true,
             begruendung: "passt".into(),
         },
@@ -498,6 +508,7 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
             buch.antworten.insert(
                 d,
                 Antwort {
+                    verwertbar: true,
                     einschaetzung: "SAP".into(),
                     vorschlag: Some(Vorschlag {
                         berater: wer,
@@ -511,6 +522,7 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
             buch.urteile.insert(
                 d,
                 Urteil {
+                    verwertbar: true,
                     zustimmung: false,
                     begruendung: "abwarten".into(),
                 },
@@ -549,5 +561,116 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
         .collect();
     assert_eq!(schutz.len(), 2, "{schutz:?}");
     assert!(schutz.iter().all(|t| t.contains("MonatVoll")), "{schutz:?}");
+    Ok(())
+}
+
+/// Maus' Befund 2 zu PR #33: Was der Papiertag verwendet, steht im Journal, und nur das zaehlt.
+/// Eine verworfene Antwort traegt keinen Vorschlag weiter, ein verworfenes Urteil ist keine
+/// Zustimmung; beides steht ausdruecklich als verworfen da.
+#[test]
+fn verworfene_antwort_und_urteil_stehen_als_verworfen() -> Result<(), String> {
+    let (sap, allianz) = (sap()?, allianz()?);
+    let d = tag(5)?;
+    for (antwort_gut, urteil_gut) in [(false, true), (true, false), (true, true)] {
+        let ort = Ort::neu()?;
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, 5, &[(&sap, "230", "231"), (&allianz, "350", "351")])?;
+        let (mut dachs, mut maus) = kaeufer(d, &sap);
+        for a in dachs.antworten.values_mut() {
+            a.verwertbar = antwort_gut;
+        }
+        for u in maus.urteile.values_mut() {
+            u.verwertbar = urteil_gut;
+        }
+        let mut k = konto(&ort, &j)?;
+        let aus = papiertag(
+            &mut j,
+            d,
+            &universum()?,
+            &start()?,
+            &mut dachs,
+            &mut maus,
+            &mut k,
+        );
+        assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+        let gekauft = !j.stand().auftraege().is_empty();
+        assert_eq!(
+            gekauft,
+            antwort_gut && urteil_gut,
+            "{antwort_gut} {urteil_gut}"
+        );
+        let mit = |wer: &str| -> Vec<Gefragt> {
+            j.stand()
+                .begruendungen()
+                .iter()
+                .filter(|(_, w, _)| w == wer)
+                .filter_map(|(_, _, t)| gefragt(t))
+                .collect()
+        };
+        let erwartet = |gut: bool| {
+            if gut {
+                Gefragt::Verwendet
+            } else {
+                Gefragt::Verworfen
+            }
+        };
+        assert!(
+            mit("Dachs").contains(&erwartet(antwort_gut)),
+            "{:?}",
+            mit("Dachs")
+        );
+        if antwort_gut {
+            assert!(
+                mit("Maus").contains(&erwartet(urteil_gut)),
+                "{:?}",
+                mit("Maus")
+            );
+        } else {
+            // Maus prueft nichts (kein Vorschlag); als Fragerin von Topf B antwortet sie.
+            assert!(
+                !mit("Maus").contains(&Gefragt::Verworfen),
+                "{:?}",
+                mit("Maus")
+            );
+        }
+    }
+    // Lesen: nur die eigenen Worte nach dem Topf zaehlen.
+    assert_eq!(
+        gefragt("Topf A: Antwort verwendet: x"),
+        Some(Gefragt::Verwendet)
+    );
+    assert_eq!(gefragt("Topf B: Veto: x"), Some(Gefragt::Verwendet));
+    assert_eq!(
+        gefragt("Topf B: Antwort verworfen, kein Urteil: x"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(
+        gefragt("Topf A: nicht angebunden (kein Schlüssel), nicht gefragt; kein Vorschlag"),
+        Some(Gefragt::NichtAngebunden(Some("kein Schlüssel".into())))
+    );
+    assert_eq!(
+        gefragt("Topf A: nicht angebunden, nicht gefragt; kein Vorschlag"),
+        Some(Gefragt::NichtAngebunden(None))
+    );
+    // Alte Journale (vor `verwertbar`): verworfene Antworten und Urteile sind kein Beitrag,
+    // ein echtes Veto schon (Maus' Restbefund zu PR #33).
+    assert_eq!(
+        gefragt("Topf B: Veto: keine verwertbare Antwort: Limit [Kosten 0 von 24 Cent]"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(
+        gefragt("Topf A: keine verwertbare Antwort: unlesbar [Kosten 3 von 24 Cent]"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(
+        gefragt("Topf B: Veto: zu konzentriert [Kosten 3 von 24 Cent]"),
+        Some(Gefragt::Verwendet)
+    );
+    assert_eq!(
+        gefragt("Topf A: Antwort verwendet: keine verwertbare Antwort: x"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(gefragt("Topf A: SAP 2000 bp: Antwort verwendet: x"), None);
+    assert_eq!(gefragt("Antwort verwendet: x"), None);
     Ok(())
 }

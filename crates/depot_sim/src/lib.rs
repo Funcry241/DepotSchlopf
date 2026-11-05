@@ -30,10 +30,13 @@ pub mod papierlauf;
 pub mod papiertag;
 pub mod szenario;
 
-pub use lauf::{LaufFehler, lauf};
+pub use lauf::{Gefragt, LaufFehler, gefragt, lauf};
 pub use papier::{Broker, Papierkonto, Sendeantwort};
 pub use papierdatei::Papierdatei;
 pub use papiertag::{
-    Ausgang, Tageskurse, Tageslage, kurse_von_heute, papiertag, tageskurse, tageslage, tagnummer,
+    Ausgang, Tageskurse, Tageslage, kurse_von_heute, papiertag, tageskurse, tageskurse_am,
+    tageslage, tagnummer,
 };
-pub use szenario::{Antwort, Berater, Drehbuch, Lage, Stumm, Szenario, Tag, Urteil};
+pub use szenario::{
+    Antwort, Berater, Drehbuch, KEINE_VERWERTBARE_ANTWORT, Lage, Stumm, Szenario, Tag, Urteil,
+};

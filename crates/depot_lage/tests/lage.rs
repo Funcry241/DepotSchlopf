@@ -6,15 +6,19 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use depot_journal::AufrufErlaubnis;
+use depot_journal::anbieter::{Eintrag, Ergebnis, Wer};
 use depot_journal::{Journal, KursBeleg};
+use depot_kern::Vorschlag;
 use depot_kern::liste::{als_universum, beobachtungsliste};
 use depot_kern::{BeraterId, Cent, Datum, Herkunft, Kurs, Preis, Topf, TopfId, Zeitpunkt};
 use depot_ki::{Buchung, KiDeckel, KiGrenzen};
+use depot_lage::TagStand;
 use depot_lage::{
     Abhilfe, Ampel, Betrieb, BudgetStatus, Hinterlegt, Lagebild, PAPIERKONTO, Umgebung, Zugang,
     html, ki_budget, lagebild, mit_journal,
 };
-use depot_sim::{Ausgang, Papierdatei, Stumm, papiertag};
+use depot_sim::{Antwort, Ausgang, Berater, Lage, Papierdatei, Stumm, Urteil, papiertag};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 
@@ -76,9 +80,14 @@ fn start() -> Result<Vec<Topf>, String> {
 
 /// Belegt wie der Sammler alle Werte der Beobachtungsliste: Vortag 100 €, Tag 101 €.
 fn belege_alle(j: &mut Journal, t: u8) -> Result<(), String> {
+    belege_um(j, t, 17, 40)
+}
+
+/// Wie `belege_alle`, mit dem Abruf zur angegebenen Uhrzeit (Frankfurt).
+fn belege_um(j: &mut Journal, t: u8, stunde: u8, minute: u8) -> Result<(), String> {
     let heute = tag(t)?;
     let vortag = tag(t.saturating_sub(1))?;
-    let abruf = some(Zeitpunkt::frankfurt(heute, 17, 40, 0), "Abruf")?;
+    let abruf = some(Zeitpunkt::frankfurt(heute, stunde, minute, 0), "Abruf")?;
     for w in vorbedingung(beobachtungsliste(), "Liste")? {
         for (d, p) in [(vortag, "100"), (heute, "101")] {
             let zeit = some(Zeitpunkt::frankfurt(d, 17, 35, 0), "Schluss")?;
@@ -543,5 +552,333 @@ fn vollstaendig_bereit_nur_mit_fertiger_einrichtung() -> Result<(), String> {
         lagebild(&ohne_quelle).betrieb,
         Betrieb::EingriffNoetig(_)
     ));
+    Ok(())
+}
+
+/// Ein angebundener Berater, der antwortet, aber nichts vorschlaegt.
+struct Antwortet;
+
+impl Berater for Antwortet {
+    fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
+        Antwort {
+            verwertbar: true,
+            einschaetzung: "Heute nichts kaufen.".into(),
+            vorschlag: None,
+        }
+    }
+
+    fn pruefen(
+        &mut self,
+        _erlaubnis: AufrufErlaubnis,
+        _lage: &Lage<'_>,
+        _vorschlag: &Vorschlag,
+    ) -> Urteil {
+        Urteil {
+            verwertbar: true,
+            zustimmung: false,
+            begruendung: "nein".into(),
+        }
+    }
+}
+
+/// Ein angebundener Berater, dessen Antwort nicht verwertbar ist (etwa unlesbar).
+struct Verwirft;
+
+impl Berater for Verwirft {
+    fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
+        Antwort {
+            verwertbar: false,
+            einschaetzung: "keine verwertbare Antwort: Limit".into(),
+            vorschlag: None,
+        }
+    }
+
+    fn pruefen(
+        &mut self,
+        _erlaubnis: AufrufErlaubnis,
+        _lage: &Lage<'_>,
+        _vorschlag: &Vorschlag,
+    ) -> Urteil {
+        Urteil {
+            verwertbar: false,
+            zustimmung: false,
+            begruendung: "keine verwertbare Antwort: Limit".into(),
+        }
+    }
+}
+
+/// Ein Berater ohne Schluessel, der seinen Grund nennt.
+struct OhneSchluessel;
+
+impl Berater for OhneSchluessel {
+    fn angebunden(&self) -> bool {
+        false
+    }
+
+    fn warum_nicht(&self) -> Option<String> {
+        Some("kein Schlüssel hinterlegt".into())
+    }
+
+    fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
+        Antwort {
+            verwertbar: false,
+            einschaetzung: "nicht angebunden".into(),
+            vorschlag: None,
+        }
+    }
+
+    fn pruefen(
+        &mut self,
+        _erlaubnis: AufrufErlaubnis,
+        _lage: &Lage<'_>,
+        _vorschlag: &Vorschlag,
+    ) -> Urteil {
+        Urteil {
+            verwertbar: false,
+            zustimmung: false,
+            begruendung: "nicht angebunden".into(),
+        }
+    }
+}
+
+fn tag_nr(l: &Lagebild, i: usize) -> Result<&depot_lage::TagErgebnis, String> {
+    l.tage
+        .get(i)
+        .ok_or_else(|| format!("Tag {i} fehlt: {:?}", l.tage))
+}
+
+fn ki_nr(
+    t: &depot_lage::TagErgebnis,
+    i: usize,
+) -> Result<&(BeraterId, depot_lage::KiBeitrag), String> {
+    t.ki.get(i)
+        .ok_or_else(|| format!("KI {i} fehlt: {:?}", t.ki))
+}
+
+/// Maus' Praxistest: Das Tagesergebnis zeigt ohne Journal und Konsole, welche Tage liefen,
+/// welche ausfielen und warum, und welche KI tatsaechlich beigetragen hat.
+#[test]
+fn tagesergebnis_zeigt_ausfall_und_beitrag_je_ki() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 5)?;
+    let start = start()?;
+    let mut konto = Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    let universum = als_universum(&vorbedingung(beobachtungsliste(), "Liste")?);
+    let aus = vorbedingung(
+        papiertag(
+            &mut jr,
+            tag(5)?,
+            &universum,
+            &start,
+            &mut Antwortet,
+            &mut OhneSchluessel,
+            &mut konto,
+        ),
+        "Papiertag",
+    )?;
+    assert!(matches!(aus, Ausgang::Abgeschlossen { .. }), "{aus:?}");
+    // Freitag, der 6., ohne Kurse; Montag, der 9., mit einem nachgeholten Abruf um 20 Uhr:
+    // Kurse zu alt, darum kein Papiertag; Dienstag, der 10., mit Kursen, aber ohne Papiertag.
+    belege_um(&mut jr, 9, 20, 0)?;
+    belege_alle(&mut jr, 10)?;
+    let mut umg = umgebung(abends(11)?, Zugang::Offen(jr.stand()));
+    // Maus' Befund 2: Ein erfolgreicher Aufruf im Protokoll macht Maus nicht gruen, wenn der
+    // Papiertag sie laut Journal gar nicht gefragt hat.
+    let zeit = some(Zeitpunkt::frankfurt(tag(5)?, 17, 50, 0), "Zeit")?;
+    umg.anbieter = vec![Eintrag::neu(zeit, Wer::Maus, Ergebnis::Ok, Some(200))];
+    let l = lagebild(&umg);
+    let tage: Vec<(Datum, &TagStand)> = l.tage.iter().map(|t| (t.datum, &t.stand)).collect();
+    assert_eq!(l.tage.len(), 5, "{tage:?}");
+    assert_eq!(tag_nr(&l, 0)?.stand, TagStand::Offen);
+    assert!(
+        matches!(&tag_nr(&l, 1)?.stand, TagStand::Ausgefallen(g) if g.contains("Schlusskurse liegen vor")),
+        "{tage:?}"
+    );
+    // Maus' Befund 1: Der konkrete Grund steht in der Zeile des verpassten Tages. Der Abruf
+    // vom 10. belegt den 9. noch einmal; fuer den 9. zaehlt nur, was am 9. abgerufen war.
+    assert!(
+        matches!(&tag_nr(&l, 2)?.stand, TagStand::Ausgefallen(g)
+            if g.contains("Kursprüfung") && g.contains("Kurse zu alt")),
+        "{tage:?}"
+    );
+    assert!(
+        matches!(&tag_nr(&l, 3)?.stand, TagStand::Ausgefallen(g) if g.contains("keine Schlusskurse")),
+        "{tage:?}"
+    );
+    let fuenf = tag_nr(&l, 4)?;
+    assert_eq!(fuenf.datum, tag(5)?);
+    assert_eq!(fuenf.stand, TagStand::Abgeschlossen);
+    let dachs = ki_nr(fuenf, 0)?;
+    assert_eq!(dachs.0, BeraterId::Dachs);
+    assert_eq!(dachs.1.klasse, "gut", "{dachs:?}");
+    assert!(dachs.1.text.contains("hat beigetragen"), "{dachs:?}");
+    let maus = ki_nr(fuenf, 1)?;
+    assert_eq!(maus.0, BeraterId::Maus);
+    assert_eq!(maus.1.klasse, "halt", "{maus:?}");
+    assert!(
+        maus.1
+            .text
+            .contains("ausgefallen, nicht gefragt: kein Schlüssel hinterlegt"),
+        "{maus:?}"
+    );
+    let s = html::seite(&l);
+    assert!(s.contains("Tagesergebnis"), "{s}");
+    assert!(s.contains("kein Schlüssel hinterlegt"), "{s}");
+    assert!(s.contains("Schlusskurse liegen vor"), "{s}");
+    assert!(s.contains("Kurse zu alt"), "{s}");
+    Ok(())
+}
+
+/// Gefragt, aber die Antwort wurde verworfen: rot, mit dem Grund aus dem Protokoll. Ein
+/// erfolgreicher Aufruf im Protokoll aendert daran nichts (Maus' Befund 2: Die Antwort kann
+/// nach dem Aufruf verworfen worden sein).
+#[test]
+fn tagesergebnis_nennt_den_fehler_des_anbieters() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 5)?;
+    let start = start()?;
+    let mut konto = Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    let universum = als_universum(&vorbedingung(beobachtungsliste(), "Liste")?);
+    vorbedingung(
+        papiertag(
+            &mut jr,
+            tag(5)?,
+            &universum,
+            &start,
+            &mut Antwortet,
+            &mut Verwirft,
+            &mut konto,
+        ),
+        "Papiertag",
+    )?;
+    let mut umg = umgebung(abends(5)?, Zugang::Offen(jr.stand()));
+    let zeit = some(Zeitpunkt::frankfurt(tag(5)?, 17, 50, 0), "Zeit")?;
+    umg.anbieter = vec![
+        Eintrag::neu(zeit, Wer::Maus, Ergebnis::Ok, Some(200)),
+        Eintrag::neu(zeit, Wer::Maus, Ergebnis::Limit, Some(429)),
+    ];
+    let l = lagebild(&umg);
+    let t = some(l.tage.first(), "Tag")?;
+    assert_eq!(t.stand, TagStand::Abgeschlossen);
+    // Dachs' Antwort hat der Papiertag verwendet; das Protokoll braucht es dafuer nicht.
+    assert_eq!(ki_nr(t, 0)?.1.klasse, "gut", "{:?}", t.ki);
+    assert_eq!(ki_nr(t, 1)?.1.klasse, "halt", "{:?}", t.ki);
+    assert!(
+        ki_nr(t, 1)?
+            .1
+            .text
+            .contains("gefragt ohne verwendbare Antwort: Anbieterlimit"),
+        "{:?}",
+        t.ki
+    );
+    // Ohne Protokoll bleibt Maus rot, mit allgemeinem Grund.
+    umg.anbieter.clear();
+    let l = lagebild(&umg);
+    let t = some(l.tage.first(), "Tag")?;
+    assert_eq!(ki_nr(t, 1)?.1.klasse, "halt", "{:?}", t.ki);
+    assert!(
+        ki_nr(t, 1)?.1.text.contains("Antwort verworfen"),
+        "{:?}",
+        t.ki
+    );
+    Ok(())
+}
+
+/// Maus' Restbefund zu PR #33: Ein altes Journal schrieb ein verworfenes Urteil als „Veto:
+/// keine verwertbare Antwort“. Das ist kein Beitrag; ein echtes Veto schon.
+#[test]
+fn altes_veto_ohne_verwertbare_antwort_ist_kein_beitrag() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 5)?;
+    drop(jr);
+    stummer_tag(&ort, 5)?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 6)?;
+    for (wer, text) in [
+        ("Papiertag", "Papiergeld; Ausfuehrung zum Schlusskurs"),
+        ("Dachs", "Topf A: SAP gefaellt [Kosten 3 von 24 Cent]"),
+        (
+            "Maus",
+            "Topf A: Veto: keine verwertbare Antwort: Limit [Kosten 0 von 24 Cent]",
+        ),
+        (
+            "Maus",
+            "Topf B: keine verwertbare Antwort: unlesbar [Kosten 0 von 24 Cent]",
+        ),
+    ] {
+        vorbedingung(jr.begruende(tag(6)?, wer, text), "Begruendung")?;
+    }
+    let l = lagebild(&umgebung(abends(6)?, Zugang::Offen(jr.stand())));
+    let t = tag_nr(&l, 0)?;
+    assert_eq!(t.datum, tag(6)?);
+    let maus = ki_nr(t, 1)?;
+    assert_eq!(maus.1.klasse, "halt", "{maus:?}");
+    assert!(maus.1.text.contains("ohne verwendbare Antwort"), "{maus:?}");
+    // Dachs' alter Eintrag ohne Kennwort ist weder gruen noch rot.
+    assert_eq!(ki_nr(t, 0)?.1.klasse, "offen", "{:?}", t.ki);
+    drop(l);
+    vorbedingung(
+        jr.begruende(tag(6)?, "Maus", "Topf A: Veto: zu konzentriert"),
+        "Begruendung",
+    )?;
+    let l = lagebild(&umgebung(abends(6)?, Zugang::Offen(jr.stand())));
+    let maus = ki_nr(tag_nr(&l, 0)?, 1)?;
+    assert_eq!(maus.1.klasse, "gut", "{maus:?}");
+    assert!(maus.1.text.contains("2 verworfen"), "{maus:?}");
+    Ok(())
+}
+
+/// Ein nachgeholter Abruf (Rechner schlief um 17:35) heisst „Kurse zu alt“, ohne Knopf, der
+/// heute nichts mehr aendert; der Tag laeuft ohne Fragen an die Berater und sagt das.
+#[test]
+fn nachgeholter_abruf_heisst_kurse_zu_alt() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_um(&mut jr, 5, 20, 0)?;
+    let spaet = some(Zeitpunkt::frankfurt(tag(5)?, 21, 0, 0), "Zeit")?;
+    let l = lagebild(&umgebung(spaet, Zugang::Offen(jr.stand())));
+    let p = punkt(&l, "Schlusskurse")?;
+    assert!(p.text.contains("Kurse zu alt"), "{}", p.text);
+    assert!(p.text.contains("Morgen rechtzeitig"), "{}", p.text);
+    assert_eq!(p.abhilfe, None, "{p:?}");
+    drop(jr);
+    let aus = stummer_tag(&ort, 5)?;
+    assert!(matches!(aus, Ausgang::Abgeschlossen { .. }), "{aus:?}");
+    let jr = ort.oeffnen()?;
+    let l = lagebild(&umgebung(spaet, Zugang::Offen(jr.stand())));
+    let t = some(l.tage.first(), "Tag")?;
+    assert!(
+        matches!(&t.stand, TagStand::OhneHandel(b) if b.iter().any(|x| x.contains("Kurse zu alt"))),
+        "{t:?}"
+    );
+    assert!(
+        t.ki.iter()
+            .all(|(_, b)| b.text.contains("Kursprüfung ließ den Tag ausfallen")),
+        "{t:?}"
+    );
+    let s = html::seite(&l);
+    assert!(s.contains("Abgeschlossen ohne Handel"), "{s}");
+    Ok(())
+}
+
+/// Das Papierdepot sagt, dass jedes Ergebnis eine simulierte Ausfuehrung zum Schlusskurs ist.
+#[test]
+fn papierdepot_nennt_die_simulation() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 5)?;
+    drop(jr);
+    stummer_tag(&ort, 5)?;
+    let jr = ort.oeffnen()?;
+    let l = lagebild(&umgebung(abends(5)?, Zugang::Offen(jr.stand())));
+    let s = html::seite(&l);
+    assert!(
+        s.contains("Nur Papiergeld, simuliert")
+            && s.contains("zum Schlusskurs des Entscheidungstags ausgeführt"),
+        "{s}"
+    );
     Ok(())
 }

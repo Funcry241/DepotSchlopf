@@ -77,11 +77,44 @@ pub fn tagnummer(d: Datum) -> Option<u32> {
 /// # Errors
 /// `Halt`, wenn kein Kurs belegt ist oder die Kurse sich nicht zusammenfassen lassen.
 pub fn tageskurse(stand: &Stand, universum: &Universum) -> Result<Tageskurse, LaufFehler> {
+    tageskurse_bis(stand, universum, None)
+}
+
+/// Die Kurse, die ein Papiertag am Tag `tag` gesehen haette: nur Belege, die bis zum Ende dieses
+/// Tages (Frankfurt) abgerufen waren, und nur, wenn ihr juengster Handelstag `tag` ist. So
+/// laesst sich fuer einen vergangenen Tag dieselbe Kurspruefung wiederholen, ohne spaetere
+/// Abrufe mitzuzaehlen.
+///
+/// # Errors
+/// `Halt`, wenn es fuer `tag` keine Kurse gab; sonst wie `tageskurse`.
+pub fn tageskurse_am(
+    stand: &Stand,
+    universum: &Universum,
+    tag: Datum,
+) -> Result<Tageskurse, LaufFehler> {
+    let ende = Zeitpunkt::frankfurt(tag, 23, 59, 59)
+        .ok_or_else(|| halt(format!("Kein Tagesende fuer den {}", datum_text(tag))))?;
+    let k = tageskurse_bis(stand, universum, Some(ende))?;
+    if k.handelstag != tag {
+        return Err(halt(format!(
+            "Am {} lagen keine Schlusskurse dieses Tages vor",
+            datum_text(tag)
+        )));
+    }
+    Ok(k)
+}
+
+fn tageskurse_bis(
+    stand: &Stand,
+    universum: &Universum,
+    bis: Option<Zeitpunkt>,
+) -> Result<Tageskurse, LaufFehler> {
     let isins: Vec<Isin> = universum.isins().into_iter().collect();
     let belege: Vec<&KursBeleg> = stand
         .kurse()
         .iter()
         .filter(|b| b.kurs().herkunft() == Herkunft::Quelle && isins.contains(b.isin()))
+        .filter(|b| bis.is_none_or(|bis| b.abruf() <= bis))
         .collect();
     let handelstag = belege
         .iter()
