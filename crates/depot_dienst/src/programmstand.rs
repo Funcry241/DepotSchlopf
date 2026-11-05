@@ -6,9 +6,9 @@
 //! drei Bedingungen: Der Projektordner ist sauber (`git status` ohne Eintrag), sein Baum ist
 //! der, aus dem gebaut wurde, und genau dieser Baum hat das Gate bestanden
 //! (`daten/geprueft.txt`, geschrieben von `run.cmd` und `run.cmd update`). Danach zeigt
-//! `daten/programm/starte.cmd` auf den neuen Waechter.
+//! `daten/programm/aktuell.txt` auf den neuen Stand.
 //!
-//! **Starten:** `DepotSchlopf.cmd` (und damit der Autostart) ruft `starte.cmd`, wenn es sie gibt.
+//! **Starten:** `DepotSchlopf.cmd` (und damit der Autostart) prueft den Stand vor dem Start.
 //! Der Waechter nimmt den gesicherten Stand nur, wenn er `startklar` ist: Der Projektordner ist
 //! sauber und steht auf genau diesem Baum, kein Update ist auf Probe, und jede Programmdatei hat
 //! ihren Abdruck. Sonst baut er wie bisher mit Cargo. Die Auftraege des Dienstes (Kurse,
@@ -38,10 +38,6 @@ const GEPRUEFT_KOPF: &str = "geprueft-v1;";
 
 pub fn ordner(wurzel: &Path) -> PathBuf {
     wurzel.join("daten").join("programm")
-}
-
-pub fn starter_pfad(wurzel: &Path) -> PathBuf {
-    ordner(wurzel).join("starte.cmd")
 }
 
 fn aktuell_pfad(wurzel: &Path) -> PathBuf {
@@ -209,23 +205,10 @@ pub fn startklar(wurzel: &Path) -> Result<Stand, String> {
             s.kurz()
         ));
     }
+    if !geprueft(wurzel, &baum) {
+        return Err("Dieser Stand hat das Gate hier noch nicht bestanden".into());
+    }
     Ok(s)
-}
-
-/// Inhalt von `starte.cmd`: ruft den Waechter des Stands mit allen Angaben.
-///
-/// # Errors
-/// Der Pfad enthaelt Zeichen, die in einer Befehlsdatei etwas anderes bedeuten koennten.
-pub fn starter_inhalt(stand: &Stand) -> Result<String, String> {
-    let p = stand.programm("depot_waechter");
-    let w = crate::autostart::sicherer_pfad(&p)?;
-    // Aufruf und Ende in einer Zeile: cmd liest eine Befehlsdatei zeilenweise nach. Schreibt
-    // der Dienst sie neu, waehrend der Waechter laeuft, liest cmd danach nichts Neues mehr.
-    Ok(format!(
-        "@rem Geprueften Programmstand {} starten, ohne Cargo. Schreibt der Dienst neu.\r\n\
-         @\"{w}\" %* & exit /b\r\n",
-        stand.kurz()
-    ))
 }
 
 /// Sichert die Programme aus `von` als Stand des Baums `baum`.
@@ -253,8 +236,6 @@ pub fn sichere(wurzel: &Path, baum: &str, von: &Path) -> Result<Stand, String> {
         Ok(Some(s)) if s.baum == baum => s,
         _ => kopiere(baum, von, &ziel)?,
     };
-    // Erst der neue Starter, dann der Zeiger: Beide zeigen danach auf den neuen Stand.
-    schreibe_ganz(&starter_pfad(wurzel), &starter_inhalt(&stand)?)?;
     let alt = lies_falls_da(&aktuell_pfad(wurzel)).ok().flatten();
     schreibe_ganz(&aktuell_pfad(wurzel), &format!("{name}\n"))?;
     aufraeumen(wurzel, &name, alt.as_deref().map(str::trim));

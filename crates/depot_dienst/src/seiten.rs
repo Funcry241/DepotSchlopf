@@ -253,11 +253,13 @@ fn wochentag_text(d: Datum) -> &'static str {
     }
 }
 
-/// Der naechste Lauf des Zeitplans als Satz.
 /// Wie es nach einem gescheiterten Lauf weitergeht, aus dem tatsaechlichen Zeitplan: von selbst
-/// nur, wenn er an ist (Maus, Befund 3 zu #38). Der Lauf selbst kennt den Zeitplan nicht.
+/// nur, wenn er an ist und kein Fehler ihn anhaelt. Der Lauf selbst kennt den Zeitplan nicht.
 fn weiter_text(z: &Zustand, heute: Option<Datum>) -> String {
     let naechster = naechster_text(z, heute);
+    if z.erledigt_fehler.is_some() || z.zeitplan_fehler.is_some() {
+        return naechster;
+    }
     let naechster = naechster.trim_end_matches('.');
     if z.zeitplan.an && heute.is_some() {
         format!("Nach Zeitplan geht es von selbst weiter: {naechster}.")
@@ -269,6 +271,7 @@ fn weiter_text(z: &Zustand, heute: Option<Datum>) -> String {
     }
 }
 
+/// Der naechste Lauf des Zeitplans als Satz.
 pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     if let Some(f) = &z.erledigt_fehler {
         return format!(
