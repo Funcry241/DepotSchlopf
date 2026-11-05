@@ -12,7 +12,7 @@ use crate::http::feld;
 use crate::kostenschutz;
 use crate::schluessel::Wer;
 use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand};
-use crate::zeitplan::{Zeitplan, lies_uhrzeit, naechster, uhrzeit_text};
+use crate::zeitplan::{Zeitplan, lies_uhrzeit, naechster_fuer, uhrzeit_text};
 
 const STIL_DIENST: &str = "\
 nav{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}nav a{color:inherit}\
@@ -269,7 +269,7 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     let Some(heute) = heute else {
         return "Uhrzeit unklar (Zeitumstellung); der Zeitplan wartet.".into();
     };
-    match naechster(&z.zeitplan, &z.erledigt, heute) {
+    match naechster_fuer(&z.zeitplan, &z.erledigt, heute, &z.boersen) {
         Some((art, d, u)) => {
             let mut t = format!(
                 "{} am {} {} um {}",
@@ -278,7 +278,10 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
                 datum_text(d),
                 uhrzeit_text(u)
             );
-            if art == Art::Kurse && z.zeitplan.papier_danach {
+            if let Art::KurseVon(b) = art
+                && z.zeitplan.papier_danach
+                && crate::zeitplan::letzter_abruf_fuer(&z.zeitplan, d, b, &z.boersen)
+            {
                 t.push_str(", danach der Papiertag");
             }
             t
@@ -698,11 +701,14 @@ fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
     for (art, name) in [
         (
             Art::Kurse,
-            "Schlusskurse Xetra (Alpha Vantage, mit Schlüssel)",
+            "Schlusskurse aller Börsen der Liste (Xetra: Alpha Vantage, NYSE: Tiingo mit \
+             EZB-Referenzkursen; je mit Schlüssel)",
         ),
         (Art::Termine, "Termine der EZB (ohne Schlüssel)"),
     ] {
-        let zuletzt = z.verlauf.iter().find(|a| a.art == art).map_or_else(
+        // Ein Kursabruf je Boerse zaehlt fuer die Kursquellen mit.
+        let gleich = |a: Art| a == art || (art == Art::Kurse && matches!(a, Art::KurseVon(_)));
+        let zuletzt = z.verlauf.iter().find(|a| gleich(a.art)).map_or_else(
             || "<span class=\"leise\">seit Dienststart nicht</span>".into(),
             |a| {
                 let (klasse, text) = ergebnis(a);
@@ -741,7 +747,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
     };
     let aktiv = if p.an {
         format!(
-            "an: Termine {}, Kurse {}{}",
+            "an: Termine {}, Kurse Xetra {}{}",
             uhrzeit_text(p.termine),
             uhrzeit_text(p.kurse),
             if p.papier_danach {
@@ -797,9 +803,12 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <label><input type=\"checkbox\" name=\"an\" value=\"ja\"{}> Zeitplan an</label>\
          <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required></label>\
-         <label>Kurse abrufen um <input type=\"time\" name=\"kurse\" value=\"{}\" required></label>\
+         <label>Kurse Xetra abrufen um <input type=\"time\" name=\"kurse\" value=\"{}\" required></label>\
+         <p class=\"leise\">Jede andere Börse der Liste wird zehn Minuten nach ihrem eigenen \
+         Schluss abgerufen (NYSE meist 22:10 Uhr, mit Sommerzeit und verkürzten Tagen).</p>\
          <label><input type=\"checkbox\" name=\"papier_danach\" value=\"ja\"{}> \
-         Nach erfolgreichem Kursabruf den Papiertag starten</label>\
+         Nach dem letzten Kursabruf des Tages den Papiertag starten (wenn ein Abruf des Tages \
+         erfolgreich war)</label>\
          <button type=\"submit\">Speichern und aktivieren</button></form></section>",
         maskiere(&aktiv),
         maskiere(token),
@@ -847,7 +856,9 @@ fn update_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
         );
     }
     for art in [Art::UpdatePruefen, Art::Update] {
-        let zuletzt = z.verlauf.iter().find(|a| a.art == art).map_or_else(
+        // Ein Kursabruf je Boerse zaehlt fuer die Kursquellen mit.
+        let gleich = |a: Art| a == art || (art == Art::Kurse && matches!(a, Art::KurseVon(_)));
+        let zuletzt = z.verlauf.iter().find(|a| gleich(a.art)).map_or_else(
             || "seit Dienststart nicht".to_string(),
             |a| {
                 let (klasse, text) = ergebnis(a);

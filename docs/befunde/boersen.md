@@ -97,11 +97,24 @@ Noch ohne Netz: Den EZB-Text holt im nächsten Schritt der Sammler, zusammen mit
 
 Tests: `depot_sammler/tests/tiingo.rs` (`schluessel_von_tiingo`, `abrufadresse_tiingo`, `nyse_von_tiingo_in_euro`, `ohne_tiingo_schluessel_nur_xetra`, `ohne_referenzkurse_kein_dollarwert`, `schluessel_in_antwort_ist_sicherheitsabbruch`).
 
+## Abruf je Börse, Schritt 4: Zeitplan je Börse
+
+Ab diesem Schritt ruft der Dienst jede Börse der Liste an ihren Handelstagen kurz nach ihrem eigenen Schluss ab, nur mit ihren Werten (`Art::KurseVon`, `run.cmd kurse xetra|nyse`):
+
+- **Xetra:** zur eingestellten Uhrzeit „Kurse Xetra“, wie bisher 17:45 Uhr.
+- **Jede andere Börse:** `NACHLAUF_MIN` = 10 Minuten nach ihrem Schluss an diesem Tag, in Frankfurter Zeit (`zeitplan::abrufe`). Für die NYSE ist das meist 22:10 Uhr. In den Wochen, in denen nur Europa schon Winterzeit hat, ist es 21:10 Uhr, an verkürzten Tagen 19:10 Uhr. Feste Uhrzeiten bleiben so innerhalb des Höchstalters von 20 Minuten.
+- **Feiertage:** Ein Tag, an dem nur eine Börse handelt, hat nur deren Abruf, zum Beispiel Thanksgiving nur Xetra und Heiligabend nur die NYSE.
+- **Papiertag:** Er beginnt nach dem letzten Abruf des Tages, wenn wenigstens ein Abruf dieses Tages erfolgreich war (`werkbank::papier_nach_abruf`). Welche Kurse er verwendet, prüft er selbst. Ein gescheiterter Abruf einer Börse hält ihn nicht auf; ihre Kandidaten fallen aus der Auswahl, ein gehaltener Wert ohne Kurs lässt den Zyklus wie bisher ausfallen.
+- **Einmal je Tag:** `daten/dienst_erledigt.txt` führt jetzt je Börse den Tag ihres Abrufs (`erledigt-v2` mit `kurse_nyse`). Die frühere Form `erledigt-v1` wird gelesen, `kurse` gilt dort für Xetra.
+- **Von Hand:** Der Knopf „Kurse abrufen“ holt weiter alle Werte der Liste.
+
+Solange die Liste nur Xetra-Werte hat, läuft alles wie bisher: Termine 17:40 Uhr, Xetra 17:45 Uhr, danach der Papiertag. Tests: `kurse_je_boerse_nach_ihrem_schluss`, `erledigt_frueherer_form`, `papiertag_nach_dem_letzten_abruf_des_tages` (alle vier Ausgänge von Xetra und NYSE).
+
 ## Nicht in diesem Schritt
 
 - **Abrufzeit:** Mit nur Xetra-Werten bleibt der Abruf kurz nach 17:35 Uhr richtig. Wolfgang hat am 05.11.2026 entschieden, Maus' Vorschlag zu folgen: Kurse je Börse kurz nach ihrem Schluss abrufen, die Altersprüfung je Abrufzeitpunkt, danach ein gemeinsamer Papiertag. Kein gemeinsamer Abruf um 22:30 Uhr. Schritt 1 ist umgesetzt: Das Alter eines Kurses misst sich an seinem eigenen Abruf (`Kurse::mit_abrufen`), Test `alter_je_abruf_nicht_je_spaetestem_abruf`. Zeitplan je Börse und Papiertag nach dem letzten Abruf kommen mit Tiingo, wenn die ersten US-Werte in der Liste stehen.
 - **Rotation der Kandidaten und Tiingo als US-Quelle:** eigener PR, freigegeben am 05.11.2026.
-- **Zeitplan je Börse, Tiingo-Schlüssel in der Einrichtung, erste US-Werte in der Liste:** nächster Schritt im Dienst.
+- **Tiingo-Schlüssel in der Einrichtung, erste US-Werte in der Liste:** nächster Schritt.
 
 ## Tests
 
