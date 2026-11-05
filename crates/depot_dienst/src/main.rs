@@ -16,7 +16,7 @@
 )]
 
 use std::io::{ErrorKind, Write};
-use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -99,7 +99,7 @@ fn main() -> ExitCode {
         eprintln!("[Dienst] FEHLER: Projektordner nicht gefunden. DepotSchlopf.cmd dort starten.");
         return ExitCode::FAILURE;
     };
-    let lauscher = match TcpListener::bind((Ipv4Addr::LOCALHOST, http::PORT)) {
+    let lauscher = match TcpListener::bind((::std::net::Ipv4Addr::LOCALHOST, http::PORT)) {
         Ok(l) => l,
         Err(e) if e.kind() == ErrorKind::AddrInUse => {
             println!("[Dienst] Laeuft schon.");

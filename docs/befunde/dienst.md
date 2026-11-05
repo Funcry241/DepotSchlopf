@@ -22,7 +22,7 @@ Montag bis Freitag, Frankfurter Zeit: Termine 17:40, Kurse 17:45 (nach dem Xetra
 
 ## Schutz gegen fremde Webseiten
 
-Der Dienst lauscht nur auf `127.0.0.1:47410` (Kodex `NETZ_LOKAL`: `bind` nur wörtlich auf `Ipv4Addr::LOCALHOST`, kein Verbindungsaufbau, keine Namensauflösung). Ein Browser kann trotzdem von einer fremden Seite aus Anfragen an 127.0.0.1 schicken. Darum:
+Der Dienst lauscht nur auf `127.0.0.1:47410` (Kodex `NETZ_LOKAL`: jedes `bind` nur als direkter Aufruf mit `(::std::net::Ipv4Addr::LOCALHOST, PORT)`, kein Verbindungsaufbau, keine Namensauflösung). Ein Browser kann trotzdem von einer fremden Seite aus Anfragen an 127.0.0.1 schicken. Darum:
 
 | Angriff | Abwehr |
 |---|---|
