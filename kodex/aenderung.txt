@@ -1,12 +1,9 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: KI-Aufrufe bei abgebrochener Verbindung (Maus 05.11.2026, Punkt 3 von 3): Eine sicher nicht gesendete Anfrage (NetzFehler::NichtGesendet) sendet der Berater nach 30 und 60 Sekunden erneut, hoechstens dreimal, unter derselben Reservierung; eine vielleicht angekommene (Unklar) nie, die Kostensperre greift und nennt den Grund in Worten. Hinweiszeilen fuer die Live-Ansicht, Erklaerung in der Einrichtung. Kassenbuch, Deckel und Grenzen unveraendert, keine neue Abhaengigkeit. Gestapelt auf Punkt 1 (Sammler, Kern, run.cmd aus den Basis-PRs).
+zweck: KI-Aufrufe bei abgebrochener Verbindung (Maus 05.11.2026, Punkt 3 von 3): Eine sicher nicht gesendete Anfrage (NetzFehler::NichtGesendet) sendet der Berater nach 30 und 60 Sekunden erneut, hoechstens dreimal, unter derselben Reservierung; eine vielleicht angekommene (Unklar) nie, die Kostensperre greift und nennt den Grund in Worten. Hinweiszeilen fuer die Live-Ansicht, Erklaerung in der Einrichtung. Kassenbuch, Deckel und Grenzen unveraendert, keine neue Abhaengigkeit. Gestapelt; Pfade gegen die Basis-PR.
 pfade:
-crates/depot_kern/
-crates/depot_sammler/
 crates/depot_berater/
 crates/depot_dienst/
 docs/
 CHANGELOG.md
-run.cmd
 kodex/aenderung.txt
