@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_dienst::rueckfall::{self, Offen};
 use depot_dienst::werkbank::{Anlass, Art, Dienst, Lagerechner, Starter};
-use depot_dienst::{Umwelt, behandle};
+use depot_dienst::{Umwelt, behandle, waechter};
 use depot_kern::{BeraterId, Datum, Zeitpunkt};
 use depot_lage::{Hinterlegt, Umgebung, Zugang, lagebild};
 
@@ -340,4 +340,105 @@ fn bestaetigen_nur_auf_dem_neuen_stand() -> Result<(), String> {
     assert_eq!(rueckfall::bestaetige(&w)?, None);
     assert_eq!(g(&w, &["rev-parse", "HEAD"])?, neu);
     Ok(())
+}
+
+// --- Waechter: Probezeit mit Frist (Maus, Befund zu #30) ---
+
+/// Ein Kindprozess aus einem kleinen Skript; `{offen}` steht fuer den Pfad der Markierung.
+fn kind(
+    skript_unix: &str,
+    skript_windows: &str,
+    offen: &Path,
+) -> Result<std::process::Child, String> {
+    let p = offen.display().to_string();
+    #[cfg(windows)]
+    let mut c = {
+        let _ = skript_unix;
+        let mut c = Command::new("cmd");
+        c.args(["/C", &skript_windows.replace("{offen}", &p)]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut c = {
+        let _ = skript_windows;
+        let mut c = Command::new("sh");
+        c.args(["-c", &skript_unix.replace("{offen}", &p)]);
+        c
+    };
+    c.spawn().map_err(|e| format!("Vorbedingung Kind: {e}"))
+}
+
+fn markierung() -> Result<PathBuf, String> {
+    let w = ordner()?;
+    let p = rueckfall::offen_pfad(&w);
+    offen_schreiben(&w, &"a".repeat(40), &"b".repeat(40))?;
+    Ok(p)
+}
+
+const KURZ: std::time::Duration = std::time::Duration::from_millis(50);
+
+#[test]
+fn ende_vor_der_bestaetigung_faellt_zurueck_auch_mit_code_0() -> Result<(), String> {
+    let offen = markierung()?;
+    for (u, w) in [
+        ("exit 0", "exit /b 0"),
+        ("exit 1", "exit /b 1"),
+        ("exit 3", "exit /b 3"),
+    ] {
+        let mut k = kind(u, w, &offen)?;
+        let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(30), KURZ);
+        assert!(matches!(a, waechter::Ausgang::Rueckfall(_)), "{u}: {a:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn haengender_neuer_stand_wird_nach_der_frist_beendet() -> Result<(), String> {
+    let offen = markierung()?;
+    let start = std::time::Instant::now();
+    let mut k = kind("sleep 30", "ping -n 30 127.0.0.1 >nul", &offen)?;
+    let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(1), KURZ);
+    assert!(matches!(a, waechter::Ausgang::Rueckfall(_)), "{a:?}");
+    assert!(start.elapsed() < std::time::Duration::from_secs(20));
+    assert!(
+        k.try_wait().map_err(|e| e.to_string())?.is_some(),
+        "Dienst beendet"
+    );
+    Ok(())
+}
+
+#[test]
+fn nach_der_bestaetigung_zaehlt_der_code() -> Result<(), String> {
+    let offen = markierung()?;
+    let mut k = kind(
+        "rm -f '{offen}'; sleep 0.3; exit 3",
+        "del /q \"{offen}\" & ping -n 2 127.0.0.1 >nul & exit /b 3",
+        &offen,
+    )?;
+    let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(30), KURZ);
+    assert_eq!(a, waechter::Ausgang::Ende(Some(3)));
+    // Ohne Markierung keine Probezeit: Code 0 ist ein gewoehnliches Ende.
+    let mut k = kind("exit 0", "exit /b 0", &offen)?;
+    let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(30), KURZ);
+    assert_eq!(a, waechter::Ausgang::Ende(Some(0)));
+    Ok(())
+}
+
+#[test]
+fn programmdatei_aus_der_bauausgabe() {
+    let lib = r#"{"reason":"compiler-artifact","target":{"kind":["lib"],"name":"depot_dienst"},"executable":null}"#;
+    let bin = r#"{"reason":"compiler-artifact","target":{"kind":["bin"],"crate_types":["bin"],"name":"depot_dienst"},"filenames":["x"],"executable":"C:\\Users\\W \"M\"\\target\\debug\\depot_dienst.exe","fresh":true}"#;
+    let anderes = r#"{"reason":"compiler-artifact","target":{"kind":["bin"],"name":"depot_waechter"},"executable":"/t/depot_waechter"}"#;
+    assert_eq!(
+        waechter::programm_aus_bau(&format!(
+            "{lib}\n{anderes}\n{bin}\n{{\"reason\":\"build-finished\",\"success\":true}}"
+        )),
+        Some(PathBuf::from(
+            "C:\\Users\\W \"M\"\\target\\debug\\depot_dienst.exe"
+        ))
+    );
+    assert_eq!(
+        waechter::programm_aus_bau(&format!("{lib}\n{anderes}")),
+        None
+    );
 }

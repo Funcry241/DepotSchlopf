@@ -13,9 +13,10 @@ Wolfgang am 05.11.2026: ein geprüfter Update-Ablauf mit Rückfall, ohne Konsole
    - Nur dann: Vorbedingungen und `HEAD` noch einmal prüfen, `daten/update_offen.txt` schreiben (`update-v1`, `vorher=`, `neu=`), `git merge --ff-only`. Scheitert das Vorrücken, verschwindet die Markierung wieder.
 3. **Neustart:** Nach dem erfolgreichen Auftrag endet der Dienst mit Code 3, sobald kein anderer Auftrag mehr läuft oder wartet. Ein eingereihter Lauf geht also nicht verloren.
 4. **Wächter** (`depot_waechter`, gerufen von `DepotSchlopf.cmd`): baut den Dienst, startet ihn und wartet.
-   - Code 3 mit offenem Update: neu bauen, ohne Browser neu starten.
-   - Bau scheitert oder der Dienst endet mit Fehler, solange das Update offen ist: **Rückfall.** `git reset --keep vorher`, den neuen Stand in `daten/update_abgelehnt.txt` vermerken, Markierung löschen, alten Stand bauen und starten. Das braucht nur Git, keinen Code des neuen Stands.
+   - Liegt beim Start `daten/update_offen.txt`, ist der neue Stand **auf Probe**. Er gilt erst als hochgekommen, wenn er die Markierung selbst löscht (Schritt 5).
+   - Bau scheitert, der Dienst endet vor der Bestätigung (mit jedem Code, auch 0) oder bestätigt sich nicht binnen 120 Sekunden: Der Wächter beendet ihn und macht den **Rückfall.** `git reset --keep vorher`, den neuen Stand in `daten/update_abgelehnt.txt` vermerken, Markierung löschen, alten Stand bauen und starten. Das braucht nur Git, keinen Code des neuen Stands.
    - Steht der Projektordner weder auf `vorher` noch auf `neu`, oder ist die Markierung unlesbar, fasst der Rückfall nichts an und meldet es.
+   - Nach der Bestätigung: Code 3 mit neuer Markierung heißt, ein weiteres Update ist eingespielt; neu bauen, ohne Browser neu starten.
 5. **Bestätigen:** Läuft der neue Dienst 15 Sekunden, löscht er die Markierung („Update bestätigt“). Erst dann ist ein weiteres Update möglich.
 6. **Seite:** Jede Antwort trägt eine nicht geheime Kennung des Dienststarts (`data-start`). Antwortet nach der Unterbrechung ein neuer Start, lädt `/app.js` die Seite neu, damit die Formulare das Token des neuen Starts tragen. Während der Pause zeigt der Hinweis „Verbindung getrennt, etwa beim Neustart nach einem Update“.
 
@@ -23,7 +24,7 @@ Das Update läuft nur allein: Es lässt sich nur einreihen, wenn nichts läuft o
 
 ## Warum ein Wächter statt einer Schleife in `DepotSchlopf.cmd`
 
-`cmd` liest eine Befehlsdatei während des Laufs Stück für Stück nach. Ein Update, das `DepotSchlopf.cmd` ändert, könnte eine laufende Schleife mitten in einer Zeile weiterlesen lassen. Deshalb steht in `DepotSchlopf.cmd` und `run.cmd` alles nach der Prüfung auf Rust in einem Klammerblock, den `cmd` einmal ganz liest, und die Schleife liegt im Wächter, einem Rust-Programm mit denselben strengen Lints. Der Wächter baut nur `--bin depot_dienst`; seine eigene, laufende Datei bleibt unberührt und wird erst beim nächsten Start neu gebaut.
+`cmd` liest eine Befehlsdatei während des Laufs Stück für Stück nach. Ein Update, das `DepotSchlopf.cmd` ändert, könnte eine laufende Schleife mitten in einer Zeile weiterlesen lassen. Deshalb steht in `DepotSchlopf.cmd` und `run.cmd` alles nach der Prüfung auf Rust in einem Klammerblock, den `cmd` einmal ganz liest, und die Schleife liegt im Wächter, einem Rust-Programm mit denselben strengen Lints. Der Wächter baut nur `--bin depot_dienst` und startet die gebaute Datei direkt, nicht über `cargo run`; so beendet er bei abgelaufener Frist wirklich den Dienst. Seine eigene, laufende Datei bleibt unberührt und wird erst beim nächsten Start neu gebaut.
 
 ## Netz
 
@@ -32,7 +33,7 @@ Das Update läuft nur allein: Es lässt sich nur einreihen, wenn nichts läuft o
 ## Grenzen
 
 - Das Gate prüft den neuen Stand vollständig und die Grenzfreigabe seines letzten Schritts. Die Freigaben früherer Stände dazwischen hat die Prüfung auf `main` (GitHub) je Stand geprüft; lokal wird sie nicht wiederholt.
-- Ein Fehler, der erst nach den 15 Sekunden auftritt, löst keinen Rückfall mehr aus. Dann bleibt der neue Stand, und der Wächter endet mit Fehler.
+- Ein Fehler, der erst nach der Bestätigung (15 Sekunden) auftritt, löst keinen Rückfall mehr aus. Dann bleibt der neue Stand, und der Wächter endet mit Fehler.
 - Ändert ein Update den Wächter selbst, gilt das ab dem nächsten Start von `DepotSchlopf.cmd`.
 
 ## Tests
@@ -46,3 +47,13 @@ Das Update läuft nur allein: Es lässt sich nur einreihen, wenn nichts läuft o
 - Ein nicht baubarer neuer Stand mit offener Markierung: Der Wächter setzt auf den alten Stand zurück, vermerkt den neuen als abgelehnt und startet den alten Dienst.
 - Ein guter Stand: Der Dienst zeigt „läuft zur Probe“, nach 15 Sekunden „bestätigt“.
 - Ein Klick auf „Update einspielen“ im Browser (Einspielen durch eine Attrappe ersetzt, um das Gate zu sparen): Der Dienst endet mit Code 3, der Wächter startet ihn neu, die Seite lädt sich selbst neu und trägt das neue Token.
+
+## Fassung 2 nach Maus' Prüfung
+
+**Befund:** Hing der neue Dienst beim Start, wartete der Wächter unbegrenzt. Endete er mit Code 0 vor der Bestätigung, meldete der Wächter Erfolg, und der unbestätigte Stand blieb aktiv.
+
+**Regel:** Ein Stand auf Probe muss sich selbst bestätigen. Jedes Ende davor fällt zurück, gleich mit welchem Code, und nach 120 Sekunden (`waechter::FRIST`) beendet der Wächter ihn und fällt ebenso zurück. Die Regel steht in `depot_dienst::waechter::begleite`; der Wächter startet die gebaute Datei direkt, damit das Beenden den Dienst trifft und nicht nur Cargo.
+
+**Gegenproben** (jeweils rot): frühes Ende als gewöhnliches Ende gewertet (`ende_vor_der_bestaetigung_faellt_zurueck_auch_mit_code_0`); ohne Frist (`haengender_neuer_stand_wird_nach_der_frist_beendet`).
+
+**Probelauf unter Linux:** Ein neuer Stand, der sofort mit 0 endet, und einer, der beim Start hängt, wurden beide zurückgesetzt und abgelehnt; danach lief der alte Dienst. Der gewöhnliche Weg (Update, Code 3, Neustart, Bestätigung) läuft unverändert.

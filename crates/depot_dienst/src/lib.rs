@@ -24,6 +24,7 @@ pub mod http;
 pub mod rueckfall;
 pub mod schluessel;
 pub mod seiten;
+pub mod waechter;
 pub mod werkbank;
 pub mod zeitplan;
 
