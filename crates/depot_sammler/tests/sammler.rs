@@ -512,6 +512,33 @@ fn schluessel_erscheint_nirgends() -> Result<(), String> {
     Ok(())
 }
 
+/// Maus' Gegenprobe 1 zu #34: Kommt erst ein gueltiger Kurs und danach eine Antwort mit dem
+/// Schluessel, endet der Lauf. Die bis dahin belegten Kurse sind dann nicht verwendbar, auch
+/// wenn sonst nur Kandidaten fehlen: Ein Sicherheitsabbruch laesst den ganzen Abruf scheitern,
+/// damit kein Zeitplan danach einen Papiertag startet.
+#[test]
+fn schluesselabbruch_macht_den_ganzen_abruf_unbrauchbar() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    let werte = zwei_werte()?;
+    let zurueck = format!("{{\"Information\": \"key {SCHLUESSEL} unknown\"}}");
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(ROH_SAP)), ("MBG.DEX", Ok(&zurueck))]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        vec![utc(11, 4, 16, 40)?, utc(11, 4, 16, 41)?],
+        &werte,
+    )?
+    .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert!(matches!(
+        b.werte.first(),
+        Some((_, Ergebnis::Belegt { .. }))
+    ));
+    assert!(b.abbruch.is_some());
+    assert!(!b.verwendbar(), "{b:?}");
+    Ok(())
+}
+
 /// Geht die Uhr zurueck, nimmt das Journal den Beleg nicht an, und der Lauf haelt. Ohne Uhr
 /// wird nichts abgelegt und nichts belegt.
 #[test]

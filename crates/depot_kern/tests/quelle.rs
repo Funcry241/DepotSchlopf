@@ -350,6 +350,47 @@ fn schluss_der_nyse_erst_nach_new_york() -> Result<(), String> {
     Ok(())
 }
 
+/// Maus' Gegenprobe 2 zu #34: Auch beim Einlesen gilt der Boersenkalender. Eine Zeile fuer einen
+/// Tag, an dem die Boerse des Werts geschlossen war, ist kein Schlusskurs; der Wert ergibt keinen
+/// Kurs, statt dass sie als Kurs eines Handelstags gilt.
+#[test]
+fn zeile_an_einem_boersenfeiertag_ist_kein_schlusskurs() -> Result<(), String> {
+    let a = isin("DE0007164600")?;
+    let t = |d, c| -> Result<Tageskurs, String> {
+        Ok(Tageskurs {
+            datum: d,
+            schluss: cent(c),
+        })
+    };
+    let abruf = Zeitpunkt::neu(some_tag(2027, 1, 4)?, 16, 45, 0).ok_or("Abruf")?;
+    let mit_neujahr = vec![
+        t(some_tag(2026, 12, 30)?, 100)?,
+        t(some_tag(2027, 1, 1)?, 101)?,
+        t(some_tag(2027, 1, 4)?, 102)?,
+    ];
+    let r = schlusskurse(abruf, vec![(a.clone(), Boerse::Xetra, mit_neujahr)]);
+    assert!(r.is_err(), "Neujahr als Kurs angenommen: {r:?}");
+    // Am Wochenende ebenso.
+    let samstag = vec![t(some_tag(2026, 11, 7)?, 100)?];
+    let spaet = utc(2026, 11, 9, 16, 45)?;
+    let r = schlusskurse(spaet, vec![(a.clone(), Boerse::Xetra, samstag)]);
+    assert!(r.is_err(), "Samstag als Kurs angenommen: {r:?}");
+    // Ohne die Feiertagszeile bleibt alles wie gewohnt.
+    let ohne = vec![
+        t(some_tag(2026, 12, 30)?, 100)?,
+        t(some_tag(2027, 1, 4)?, 102)?,
+    ];
+    let (heute, vortag) = schlusskurse(abruf, vec![(a.clone(), Boerse::Xetra, ohne)])
+        .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(heute.kurs_cent(&a), Some(Cent(102)));
+    assert_eq!(vortag.kurs_cent(&a), Some(Cent(100)));
+    Ok(())
+}
+
+fn some_tag(j: u16, m: u8, t: u8) -> Result<Datum, String> {
+    Datum::neu(j, m, t).ok_or_else(|| format!("Vorbedingung: Datum {j}-{m}-{t}"))
+}
+
 /// Ein Wert zweimal oder Tage in falscher Reihenfolge: kein Ergebnis.
 #[test]
 fn schlusskurse_fehler() -> Result<(), String> {
