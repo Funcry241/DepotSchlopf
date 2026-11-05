@@ -16,18 +16,21 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
-use depot_kern::Zeitpunkt;
+use depot_kern::{Boerse, Datum, Zeitpunkt};
 use depot_lage::anbieter::Wer as Quelle;
 use depot_lage::{Ampel, Betrieb, Lagebild, SchluesselStand, ortszeit};
 
-use crate::zeitplan::{Erledigt, Zeitplan, faellig};
+use crate::zeitplan::{Erledigt, Zeitplan, faellig_fuer};
 
 /// Was ein Auftrag tut.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Art {
     /// Journal einmal anlegen (`run.cmd kurse einrichten`).
     Einrichten,
+    /// Alle Werte der Liste (von Hand).
     Kurse,
+    /// Nur die Werte einer Boerse, kurz nach ihrem Schluss (Zeitplan).
+    KurseVon(Boerse),
     Termine,
     Papier,
     /// Neue Staende auf `main` nennen (`run.cmd update pruefen`).
@@ -36,9 +39,11 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 6] = [
+const ALLE_ARTEN: [Art; 8] = [
     Art::Einrichten,
     Art::Kurse,
+    Art::KurseVon(Boerse::Xetra),
+    Art::KurseVon(Boerse::Nyse),
     Art::Termine,
     Art::Papier,
     Art::UpdatePruefen,
@@ -50,6 +55,8 @@ impl Art {
         match self {
             Art::Einrichten => "Journal einrichten",
             Art::Kurse => "Kurse abrufen",
+            Art::KurseVon(Boerse::Xetra) => "Kurse Xetra abrufen",
+            Art::KurseVon(Boerse::Nyse) => "Kurse NYSE abrufen",
             Art::Termine => "Termine abrufen",
             Art::Papier => "Papiertag",
             Art::UpdatePruefen => "Nach Update suchen",
@@ -62,6 +69,8 @@ impl Art {
         match self {
             Art::Einrichten => "einrichten",
             Art::Kurse => "kurse",
+            Art::KurseVon(Boerse::Xetra) => "kurse_xetra",
+            Art::KurseVon(Boerse::Nyse) => "kurse_nyse",
             Art::Termine => "termine",
             Art::Papier => "papier",
             Art::UpdatePruefen => "update_pruefen",
@@ -78,6 +87,8 @@ impl Art {
         match self {
             Art::Einrichten => &["kurse", "einrichten"],
             Art::Kurse => &["kurse"],
+            Art::KurseVon(Boerse::Xetra) => &["kurse", "xetra"],
+            Art::KurseVon(Boerse::Nyse) => &["kurse", "nyse"],
             Art::Termine => &["termine"],
             Art::Papier => &["papier"],
             Art::UpdatePruefen => &["update", "pruefen"],
@@ -166,6 +177,11 @@ pub struct Zustand {
     pub verlauf_hinweis: Option<String>,
     /// Der Verlauf liess sich zuletzt nicht schreiben; bis das wieder geht, startet nichts.
     pub verlauf_fehler: Option<String>,
+    /// Der Tag, an dem zuletzt ein Kursabruf des Zeitplans erfolgreich war. Nach dem letzten
+    /// Abruf dieses Tages folgt der Papiertag nur, wenn hier dieser Tag steht.
+    pub kurse_erfolg: Option<Datum>,
+    /// Die Boersen der Liste (`depot_kern::liste::boersen`), je eine mit eigenem Kursabruf.
+    pub boersen: Vec<Boerse>,
 }
 
 /// Warum ein Zeitplan nicht gespeichert wurde.
@@ -408,6 +424,8 @@ impl Dienst {
                 update_meldung: None,
                 verlauf_hinweis,
                 verlauf_fehler: None,
+                kurse_erfolg: None,
+                boersen: depot_kern::liste::boersen(),
             }),
             starter,
             lagerechner,
@@ -560,7 +578,7 @@ impl Dienst {
         let Some((tag, h, m, _, _)) = ortszeit(jetzt) else {
             return;
         };
-        let Some(art) = faellig(&z.zeitplan, &z.erledigt, tag, (h, m)) else {
+        let Some(art) = faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen) else {
             return;
         };
         // Erst festhalten, dann starten: Ein Neustart startet nichts doppelt.
@@ -609,10 +627,7 @@ impl Dienst {
         };
         a.ende = uhr();
         a.erfolg = Some(erfolg);
-        let papier_danach = erfolg
-            && a.art == Art::Kurse
-            && a.anlass == Anlass::Zeitplan
-            && z.zeitplan.papier_danach;
+        let papier_danach = papier_nach_abruf(&mut z, &a, erfolg);
         let eingespielt =
             erfolg && a.art == Art::Update && crate::rueckfall::offen_pfad(&self.wurzel).exists();
         ende_vermerken(&self.wurzel, &mut z, &a);
@@ -642,6 +657,27 @@ impl Dienst {
             a.protokoll.push(kuerze(zeile));
         }
     }
+}
+
+/// Nach einem Kursabruf des Zeitplans: Ist er erfolgreich, zaehlt sein Tag als Tag mit Kursen.
+/// War es der letzte Abruf dieses Tages und hatte der Tag einen erfolgreichen Abruf, folgt der
+/// Papiertag (wenn eingestellt). Der Tag ist der, an dem der Zeitplan den Abruf gestartet hat.
+fn papier_nach_abruf(z: &mut Zustand, a: &Auftrag, erfolg: bool) -> bool {
+    let Art::KurseVon(boerse) = a.art else {
+        return false;
+    };
+    if a.anlass != Anlass::Zeitplan {
+        return false;
+    }
+    let Some(tag) = z.erledigt.kurse_von(boerse) else {
+        return false;
+    };
+    if erfolg {
+        z.kurse_erfolg = Some(tag);
+    }
+    z.zeitplan.papier_danach
+        && z.kurse_erfolg == Some(tag)
+        && crate::zeitplan::letzter_abruf_fuer(&z.zeitplan, tag, boerse, &z.boersen)
 }
 
 fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static str> {
