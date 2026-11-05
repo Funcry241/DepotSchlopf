@@ -46,7 +46,9 @@ const UNREIN: [&[&str]; 6] = [
 ];
 /// Netzzugang nur in diesen Crates. Erweitern nur ueber eine KodexAenderung.
 /// `depot_sammler`: lesender Abruf freigegebener Quellen (Kap. 6), Wolfgang 04.11.2026.
-const NETZ_ERLAUBT: [&str; 1] = ["depot_sammler"];
+/// `depot_berater`: Fragen an Dachs (Claude) und Maus (GPT) mit Websuche, fuer den Papierhandel,
+/// nur mit vorher gebuchter Erlaubnis aus dem Kassenbuch (R8), Wolfgang 05.11.2026.
+const NETZ_ERLAUBT: [&str; 2] = ["depot_sammler", "depot_berater"];
 const NETZ_CRATES: [&str; 5] = ["reqwest", "ureq", "hyper", "tokio", "socket2"];
 const NETZ_TYPEN: [&str; 3] = ["TcpStream", "UdpSocket", "TcpListener"];
 /// Gruppen, die einen harten Lint enthalten.
@@ -434,9 +436,11 @@ mod tests {
     }
 
     #[test]
-    fn netz_nur_im_sammler() {
+    fn netz_nur_im_sammler_und_berater() {
         let p = "x.rs";
         assert!(pruefe_datei("depot_sammler", true, p, "use ureq::Agent;").is_empty());
+        assert!(pruefe_datei("depot_berater", true, p, "use ureq::Agent;").is_empty());
+        assert!(!pruefe_datei("depot_sim", true, p, "use ureq::Agent;").is_empty());
         assert!(
             pruefe_datei("depot_sammler", true, p, "fn f(s: std::net::TcpStream) {}").is_empty()
         );

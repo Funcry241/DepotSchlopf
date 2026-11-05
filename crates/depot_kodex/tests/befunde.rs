@@ -1437,6 +1437,7 @@ fn netz_bleibt_im_blatt() -> Result<(), String> {
         "\n[target.'cfg(windows)'.dependencies]\nweb = { package = \"ureq\", version = \"3\" }\n",
     );
     let ueber_sammler = abhaengig("depot_sammler = { path = \"../depot_sammler\" }\n");
+    let ueber_berater = abhaengig("depot_berater = { path = \"../depot_berater\" }\n");
     alle_faelle(
         &baum,
         &[
@@ -1449,6 +1450,11 @@ fn netz_bleibt_im_blatt() -> Result<(), String> {
             (
                 "ueber den Sammler",
                 &ueber_sammler,
+                "Netzzugang ohne Erlaubnis",
+            ),
+            (
+                "ueber den Berater",
+                &ueber_berater,
                 "Netzzugang ohne Erlaubnis",
             ),
         ],
