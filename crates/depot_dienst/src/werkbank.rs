@@ -127,6 +127,9 @@ pub struct Auftrag {
     pub ende: Option<Zeitpunkt>,
     pub erfolg: Option<bool>,
     pub protokoll: Vec<String>,
+    /// Die juengste Hinweiszeile des Laufs (`depot_kern::hinweis`): was los ist und ob der
+    /// Mensch etwas tun muss. Die Oberflaeche zeigt sie gross.
+    pub hinweis: Option<String>,
     pub frueher: Frueher,
 }
 
@@ -173,6 +176,9 @@ pub struct Zustand {
     pub neustart: bool,
     /// Stand des letzten Updates fuer die Seite; `true` heisst Fehler.
     pub update_meldung: Option<(bool, String)>,
+    /// Woher die Programme kommen und ob der Stand fuer einen Start ohne Cargo gesichert ist;
+    /// `true` heisst Fehler.
+    pub programm_meldung: Option<(bool, String)>,
     /// Warum der Verlauf frueherer Starts nicht vollstaendig gezeigt wird.
     pub verlauf_hinweis: Option<String>,
     /// Der Verlauf liess sich zuletzt nicht schreiben; bis das wieder geht, startet nichts.
@@ -423,6 +429,7 @@ impl Dienst {
                 lage_veraltet: true,
                 neustart: false,
                 update_meldung: None,
+                programm_meldung: None,
                 verlauf_hinweis,
                 verlauf_fehler: None,
                 kurse_erfolg: None,
@@ -505,6 +512,7 @@ impl Dienst {
                 ende: None,
                 erfolg: None,
                 protokoll: Vec::new(),
+                hinweis: None,
                 frueher: Frueher::Nein,
             };
             // Erst dauerhaft vermerken, dann starten (Maus zu #32): Ein Lauf, der nicht im
@@ -652,9 +660,14 @@ impl Dienst {
 
     fn protokolliere(&self, nr: u64, zeile: String) {
         let mut z = self.sperre();
-        if let Some(a) = z.laufend.as_mut().filter(|a| a.nr == nr)
-            && a.protokoll.len() < PROTOKOLL_ZEILEN
-        {
+        let Some(a) = z.laufend.as_mut().filter(|a| a.nr == nr) else {
+            return;
+        };
+        // Ein Hinweis zaehlt auch, wenn das Protokoll schon voll ist: Er sagt, was jetzt gilt.
+        if let Some(h) = depot_kern::hinweis::lies(&zeile) {
+            a.hinweis = Some(kuerze(h.to_string()));
+        }
+        if a.protokoll.len() < PROTOKOLL_ZEILEN {
             a.protokoll.push(kuerze(zeile));
         }
     }
@@ -676,7 +689,8 @@ fn papier_nach_abruf(z: &mut Zustand, a: &Auftrag, erfolg: bool) -> bool {
     if erfolg {
         z.kurse_erfolg = Some(tag);
     }
-    z.zeitplan.papier_danach
+    z.zeitplan.an
+        && z.zeitplan.papier_danach
         && z.kurse_erfolg == Some(tag)
         && crate::zeitplan::letzter_abruf_fuer(&z.zeitplan, tag, boerse, &z.boersen)
 }

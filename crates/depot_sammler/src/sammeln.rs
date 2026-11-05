@@ -20,6 +20,13 @@
 //! Tages um (`depot_kern::schlusskurse_in_euro`). Lassen sie sich nicht holen oder lesen, wird
 //! kein Wert in Dollar abgerufen; die Werte in Euro bleiben unberuehrt.
 //!
+//! **Kurze Netzausfaelle:** Jeder Abruf von Kursen und Referenzkursen geht ueber
+//! `netz::hole_mit_wiederholung`: Scheitert er voruebergehend, wird er nach kurzer Wartezeit
+//! wiederholt, solange seine Kurse noch frisch genug waeren (`netz::frist`). Bleibt die
+//! Verbindung zu einer Quelle weg (`Bericht::verbindung`), ruft der Lauf bei ihr nichts mehr ab;
+//! die anderen Quellen fragt er weiter. Fallen die Referenzkurse der EZB aus, fehlen nur die
+//! Werte in Dollar; Werte in Euro brauchen sie nicht (Maus, Befund 1 zu #38).
+//!
 //! Meldet die Quelle statt Kursen einen Hinweis, gilt: Ein Fehler zu genau diesem Kuerzel
 //! (`Error Message`) betrifft nur diesen Wert. Jeder andere Hinweis, etwa das erreichte
 //! Tageskontingent, beendet den Lauf, damit kein weiterer Abruf das Kontingent belastet.
@@ -37,7 +44,7 @@ use depot_kern::{
 use depot_regelwerk::{DatenFehler, waehle_tageswerte};
 
 use crate::liste::{Wert, als_universum};
-use crate::netz::Netz;
+use crate::netz::{Ausfall, Netz, Takt, frist, hole_mit_wiederholung};
 use crate::schluessel::{Anbieter, Schluessel, Zugang};
 
 /// Die Referenzkurse der EZB der letzten 90 Tage.
@@ -85,6 +92,9 @@ pub struct Bericht {
     pub pruefung: Vec<DatenFehler>,
     /// Kandidaten, die heute nicht handelbar sind, mit Grund. Der Papiertag laeuft ohne sie.
     pub ausgelassen: Vec<DatenFehler>,
+    /// Die Verbindung zu einer Quelle blieb trotz Wiederholung weg (die erste solche). Bei
+    /// dieser Quelle wurde danach nichts mehr abgerufen, bei den anderen schon.
+    pub verbindung: Option<Ausfall>,
 }
 
 impl Bericht {
@@ -244,6 +254,7 @@ fn hole_devisen(
     zugang: &Zugang,
     beginn: Zeitpunkt,
     ablage: &Path,
+    (werte, takt): (&[Wert], &mut Takt<'_>),
 ) -> Result<Referenz, SammelFehler> {
     let fehlt = |text: String| Referenz {
         devisen: Devisen::keine(),
@@ -251,9 +262,24 @@ fn hole_devisen(
             "Referenzkurse der EZB: {text}; Wert in Dollar nicht abgerufen"
         )),
     };
-    let roh = match netz.hole(ADRESSE_DEVISEN) {
+    // Frist der fruehesten Boerse, deren Werte die Referenzkurse brauchen (nicht in Euro):
+    // Spaeter nuetzten sie keinem Wert. Werte in Euro verkuerzen die Frist nicht.
+    let frist_ab = |jetzt: Zeitpunkt| {
+        werte
+            .iter()
+            .filter(|w| w.boerse.waehrung() != "EUR")
+            .filter_map(|w| frist(w.boerse, &Grenzen::standard(), jetzt))
+            .min()
+    };
+    let roh = match hole_mit_wiederholung(netz, ADRESSE_DEVISEN, &frist_ab, takt) {
         Ok(r) => r,
-        Err(e) => return Ok(fehlt(format!("Abruf: {}", zugang.bereinige(&e)))),
+        Err(a) => {
+            let text = format!("Abruf: {}", zugang.bereinige(a.fehler()));
+            if a.verbindung() && bericht.verbindung.is_none() {
+                bericht.verbindung = Some(a);
+            }
+            return Ok(fehlt(text));
+        }
     };
     if zugang.steht_in(&roh) {
         bericht.abbruch = Some(
@@ -290,7 +316,7 @@ fn vorbereite(
     bericht: &mut Bericht,
     netz: &mut dyn Netz,
     zugang: &Zugang,
-    uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
+    takt: &mut Takt<'_>,
     ablage: &Path,
     werte: &[Wert],
 ) -> Result<Vorbereitung, SammelFehler> {
@@ -305,13 +331,13 @@ fn vorbereite(
     if werte.iter().all(|w| w.boerse == Boerse::Xetra) {
         return Ok(v);
     }
-    let beginn = uhr().ok_or(SammelFehler::Uhr)?;
+    let beginn = (takt.uhr)().ok_or(SammelFehler::Uhr)?;
     v.ab = beginn.datum().and_then(|d| d.plus_tage(-TAGE_ZURUECK));
     if werte
         .iter()
         .any(|w| w.boerse.waehrung() != "EUR" && zugang.von(Anbieter::fuer(w.boerse)).is_some())
     {
-        v.referenz = hole_devisen(bericht, netz, zugang, beginn, ablage)?;
+        v.referenz = hole_devisen(bericht, netz, zugang, beginn, ablage, (werte, takt))?;
         v.abgerufen = true;
     }
     Ok(v)
@@ -319,8 +345,19 @@ fn vorbereite(
 
 /// Der Schluessel fuer einen Wert, oder warum er nicht abgerufen wird: Es fehlt der Schluessel
 /// seiner Quelle, oder er notiert nicht in Euro und die Referenzkurse fehlen.
-fn abrufbar<'a>(zugang: &'a Zugang, r: &Referenz, wert: &Wert) -> Result<&'a Schluessel, String> {
+fn abrufbar<'a>(
+    zugang: &'a Zugang,
+    r: &Referenz,
+    wert: &Wert,
+    weg: &[Anbieter],
+) -> Result<&'a Schluessel, String> {
     let anbieter = Anbieter::fuer(wert.boerse);
+    if weg.contains(&anbieter) {
+        return Err(format!(
+            "Verbindung zu {} weg: nicht abgerufen",
+            anbieter.dienst()
+        ));
+    }
     let schluessel = zugang.von(anbieter).ok_or_else(|| {
         format!(
             "Kein Schluessel fuer {} ({}): nicht abgerufen",
@@ -348,6 +385,9 @@ enum Schritt {
     Fehler(String),
     /// Der Lauf endet; `sicherheit`, wenn die Antwort einen Schluessel enthielt.
     Abbruch { text: String, sicherheit: bool },
+    /// Die Verbindung zur Quelle blieb trotz Wiederholung weg; bei ihr wird nichts mehr
+    /// abgerufen.
+    Verbindung { text: String, ausfall: Ausfall },
 }
 
 /// Holt, prueft, legt ab und liest einen Wert.
@@ -360,13 +400,21 @@ fn lies_wert(
     schluessel: &Schluessel,
     wert: &Wert,
     v: &Vorbereitung,
-    uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
+    takt: &mut Takt<'_>,
     ablage: &Path,
 ) -> Result<Schritt, SammelFehler> {
     let devisen = &v.referenz.devisen;
-    let roh = match netz.hole(&adresse(wert, schluessel, v.ab)) {
+    let frist_ab = |jetzt: Zeitpunkt| frist(wert.boerse, &Grenzen::standard(), jetzt);
+    let roh = match hole_mit_wiederholung(netz, &adresse(wert, schluessel, v.ab), &frist_ab, takt) {
         Ok(r) => r,
-        Err(e) => return Ok(Schritt::Fehler(format!("Abruf: {}", zugang.bereinige(&e)))),
+        Err(a) => {
+            let text = format!("Abruf: {}", zugang.bereinige(a.fehler()));
+            return Ok(if a.verbindung() {
+                Schritt::Verbindung { text, ausfall: a }
+            } else {
+                Schritt::Fehler(text)
+            });
+        }
     };
     // Gibt die Quelle einen Schluessel zurueck, wird die Antwort weder abgelegt noch gelesen,
     // und der Lauf endet: Keine Datei des Rahmens enthaelt ihn (K19-01).
@@ -377,7 +425,7 @@ fn lies_wert(
             sicherheit: true,
         });
     }
-    let abruf = uhr().ok_or(SammelFehler::Uhr)?;
+    let abruf = (takt.uhr)().ok_or(SammelFehler::Uhr)?;
     let quelle = Anbieter::fuer(wert.boerse).dienst();
     let rohdatei = lege_ab(ablage, quelle, abruf, &format!("_{}.csv", wert.isin), &roh)
         .map_err(SammelFehler::Ablage)?;
@@ -411,8 +459,8 @@ fn lies_wert(
     })
 }
 
-/// Ein Lauf ueber alle Werte. `uhr` liefert die Zeit des Rechners in UTC; `pause` liegt
-/// zwischen zwei Abrufen. Enthaelt `werte` einen Wert ausserhalb von Xetra, fragt der Lauf die
+/// Ein Lauf ueber alle Werte. `takt` liefert die Zeit des Rechners in UTC, wartet und meldet
+/// Wiederholungen; `pause` liegt zwischen zwei Abrufen. Enthaelt `werte` einen Wert ausserhalb von Xetra, fragt der Lauf die
 /// Uhr einmal vorher: fuer die Ablage der Referenzkurse und den Beginn der Reihe bei Tiingo.
 ///
 /// # Errors
@@ -422,7 +470,7 @@ pub fn sammle(
     journal: &mut Journal,
     netz: &mut dyn Netz,
     zugang: &Zugang,
-    uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
+    takt: &mut Takt<'_>,
     ablage: &Path,
     pause: Duration,
     werte: &[Wert],
@@ -434,21 +482,24 @@ pub fn sammle(
         handelstag: None,
         pruefung: Vec::new(),
         ausgelassen: Vec::new(),
+        verbindung: None,
     };
     let mut heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)> = Vec::new();
     let mut vortag: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
     let mut letzter_abruf: Option<Zeitpunkt> = None;
     let mut offen: Vec<KursBeleg> = Vec::new();
 
-    let vorbereitung = vorbereite(&mut bericht, netz, zugang, uhr, ablage, werte)?;
+    let vorbereitung = vorbereite(&mut bericht, netz, zugang, takt, ablage, werte)?;
     let mut abgerufen = vorbereitung.abgerufen;
+    // Quellen, zu denen die Verbindung trotz Wiederholung wegblieb.
+    let mut weg: Vec<Anbieter> = Vec::new();
 
     for wert in werte {
         if bericht.abbruch.is_some() {
             bericht.werte.push((wert.clone(), Ergebnis::NichtAbgerufen));
             continue;
         }
-        let schluessel = match abrufbar(zugang, &vorbereitung.referenz, wert) {
+        let schluessel = match abrufbar(zugang, &vorbereitung.referenz, wert, &weg) {
             Ok(s) => s,
             Err(text) => {
                 bericht
@@ -458,11 +509,11 @@ pub fn sammle(
             }
         };
         if abgerufen && !pause.is_zero() {
-            std::thread::sleep(pause);
+            (takt.schlafe)(pause);
         }
         abgerufen = true;
         let (abruf, roh, rohdatei, h, v) =
-            match lies_wert(netz, zugang, schluessel, wert, &vorbereitung, uhr, ablage)? {
+            match lies_wert(netz, zugang, schluessel, wert, &vorbereitung, takt, ablage)? {
                 Schritt::Gelesen {
                     abruf,
                     roh,
@@ -477,6 +528,14 @@ pub fn sammle(
                 Schritt::Abbruch { text, sicherheit } => {
                     bericht.abbruch = Some(text.clone());
                     bericht.sicherheitsabbruch |= sicherheit;
+                    bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+                    continue;
+                }
+                Schritt::Verbindung { text, ausfall } => {
+                    weg.push(Anbieter::fuer(wert.boerse));
+                    if bericht.verbindung.is_none() {
+                        bericht.verbindung = Some(ausfall);
+                    }
                     bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
                     continue;
                 }

@@ -1265,6 +1265,161 @@ fn ohne_schreibbaren_verlauf_startet_nichts() -> Result<(), String> {
     Ok(())
 }
 
+/// Ein Starter, der diese Zeilen ausgibt und dann scheitert.
+fn zeilen_starter(zeilen: &'static [&'static str]) -> Starter {
+    Box::new(move |_art: Art, _wurzel: &Path| {
+        #[cfg(windows)]
+        {
+            let mut c = Command::new("cmd");
+            let echo: Vec<String> = zeilen.iter().map(|z| format!("echo {z}")).collect();
+            c.args(["/C", &format!("{}& exit /b 1", echo.join("& "))]);
+            c
+        }
+        #[cfg(not(windows))]
+        {
+            let mut c = Command::new("sh");
+            let echo: Vec<String> = zeilen.iter().map(|z| format!("echo '{z}'")).collect();
+            c.args(["-c", &format!("{}; exit 1", echo.join("; "))]);
+            c
+        }
+    })
+}
+
+/// Maus zu den Netzausfaellen: Die Live-Ansicht zeigt gross, was der Lauf zuletzt als Hinweis
+/// sagte, auch nach seinem Ende: etwa warum der Papiertag heute ausfiel. Der Hinweis steht auch
+/// in der Zeile des Verlaufs.
+#[test]
+fn hinweis_des_laufs_steht_gross_in_der_live_ansicht() -> Result<(), String> {
+    let d = Arc::new(Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        zeilen_starter(&[
+            "[Sammler] Hole 2 Werte",
+            "[Hinweis] Verbindung weg. Naechster Versuch um 17:48 Uhr (Versuch 2 von 4).",
+            "[Hinweis] Papiertag heute ausgefallen. Die Verbindung kam bis 17:54 Uhr nicht wieder.",
+            "[Sammler] Kurse NICHT verwendbar",
+        ]),
+        leeres_lagebild(),
+    ));
+    let t = donnerstag(17, 45)?;
+    d.einreihen(Art::Kurse, Anlass::Zeitplan)
+        .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
+    let (nr, kind) = some(d.schritt(t), "Start")?;
+    d.verfolge(nr, kind, || donnerstag(17, 55).ok());
+    let z = d.sperre();
+    let a = some(z.verlauf.front(), "Verlauf")?;
+    assert_eq!(
+        a.hinweis.as_deref(),
+        Some("Papiertag heute ausgefallen. Die Verbindung kam bis 17:54 Uhr nicht wieder.")
+    );
+    assert_eq!(a.protokoll.len(), 4, "Hinweise bleiben im Protokoll");
+    let seite = seiten::live("s", &z, t.datum());
+    assert!(
+        seite.contains(
+            "<p class=\"kopf halt\" id=\"hinweis\">Kurse abrufen: Papiertag heute ausgefallen."
+        ),
+        "{seite}"
+    );
+    // Am naechsten Tag steht der alte Hinweis nicht mehr oben, nur im Verlauf.
+    let morgen = some(t.datum().and_then(|d| d.plus_tage(1)), "morgen")?;
+    let seite = seiten::live("s", &z, Some(morgen));
+    assert!(!seite.contains("id=\"hinweis\""), "{seite}");
+    assert!(seite.contains("Papiertag heute ausgefallen"), "{seite}");
+    Ok(())
+}
+
+/// Maus zu KI-Aufrufen: Die Einrichtung erklaert in Alltagssprache den Unterschied zwischen
+/// einer Anfrage, die nie hinausging (wird wiederholt, kostet nichts), und einer, die nach dem
+/// Absenden abbrach (Kostensperre, nie wiederholt). Mit und ohne Sperre.
+#[test]
+fn einrichtung_erklaert_abgebrochene_ki_anfragen() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(18, 0)?;
+    let ohne = get(&d, "/einrichtung", t);
+    assert!(ohne.contains("gar nicht erst hinausgegangen"), "{ohne}");
+    assert!(
+        ohne.contains("Ein zweiter Versuch könnte doppelt kosten"),
+        "{ohne}"
+    );
+    fs::write(
+        kostenschutz::pfad(&wurzel),
+        "Dachs am Kostenschutz gesperrt: Verbindung nach dem Absenden abgebrochen\n",
+    )
+    .map_err(|e| format!("Vorbedingung Sperre: {e}"))?;
+    let mit = get(&d, "/einrichtung", t);
+    assert!(
+        mit.contains("Verbindung nach dem Absenden abgebrochen"),
+        "{mit}"
+    );
+    assert!(mit.contains("id=\"ki-verbindung\""), "{mit}");
+    Ok(())
+}
+
+/// Maus, Befund 3 zu #38: Ob es nach einem Ausfall von selbst weitergeht, sagt der Dienst aus
+/// seinem tatsaechlichen Zeitplan, nicht der Sammler. Ohne Zeitplan: nichts von selbst; mit
+/// Zeitplan: der naechste geplante Lauf. Bei unlesbarem Erledigt-Stand bleibt der Zeitplan
+/// auch nach dem Einschalten angehalten.
+#[test]
+fn nach_einem_ausfall_sagt_der_zeitplan_wie_es_weitergeht() -> Result<(), String> {
+    let zeilen: &'static [&'static str] =
+        &["[Hinweis] Papiertag heute ausgefallen. Die Verbindung kam bis 17:54 Uhr nicht wieder."];
+    let t = donnerstag(17, 45)?;
+    for (an, angehalten) in [(false, false), (true, false), (true, true)] {
+        let wurzel = if an {
+            eingeschaltet(ordner()?)?
+        } else {
+            ordner()?
+        };
+        if angehalten {
+            fs::write(
+                wurzel.join("daten").join("dienst_erledigt.txt"),
+                b"unlesbar",
+            )
+            .map_err(|e| format!("Vorbedingung Erledigt-Stand: {e}"))?;
+        }
+        let d = Arc::new(Dienst::neu(
+            wurzel,
+            TOKEN.into(),
+            zeilen_starter(zeilen),
+            lagebild_mit_schluesseln(true),
+        ));
+        if angehalten {
+            assert!(d.schritt(t).is_none());
+            d.setze_zeitplan(Zeitplan {
+                an: true,
+                ..Zeitplan::default()
+            })
+            .map_err(|e| format!("Vorbedingung Zeitplan: {e:?}"))?;
+            assert!(d.sperre().zeitplan.an);
+        }
+        d.einreihen(Art::Kurse, Anlass::Hand)
+            .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
+        let (nr, kind) = some(d.schritt(t), "Start")?;
+        d.verfolge(nr, kind, || donnerstag(17, 55).ok());
+        let seite = seiten::live("s", &d.sperre(), t.datum());
+        let (_, rest) = some(seite.split_once("id=\"hinweis\">"), "Hinweis")?;
+        let (hinweis, _) = some(rest.split_once("</p>"), "Ende")?;
+        if angehalten {
+            assert!(hinweis.contains("Zeitplan angehalten"), "{hinweis}");
+            assert!(hinweis.contains("Dienst neu starten"), "{hinweis}");
+            assert!(!hinweis.contains("geht es von selbst"), "{hinweis}");
+        } else if an {
+            assert!(
+                hinweis.contains("Nach Zeitplan geht es von selbst weiter"),
+                "{hinweis}"
+            );
+        } else {
+            assert!(
+                hinweis.contains("DepotSchlopf startet nichts von selbst"),
+                "{hinweis}"
+            );
+            assert!(!hinweis.contains("geht es von selbst"), "{hinweis}");
+        }
+    }
+    Ok(())
+}
+
 /// Kurse je Boerse: Xetra zur eingestellten Uhrzeit, die NYSE zehn Minuten nach ihrem eigenen
 /// Schluss in Frankfurter Zeit, mit Sommerzeit und verkuerzten Tagen. An einem Tag, an dem nur
 /// eine Boerse handelt, nur diese. Der letzte Abruf des Tages bestimmt den Papiertag.
@@ -1367,11 +1522,12 @@ fn erledigt_frueherer_form() -> Result<(), String> {
 /// wenn die NYSE gelingt, und umgekehrt.
 #[test]
 fn papiertag_nach_dem_letzten_abruf_des_tages() -> Result<(), String> {
-    for (xetra_ok, nyse_ok, papier) in [
-        (true, true, true),
-        (false, true, true),
-        (true, false, true),
-        (false, false, false),
+    for (xetra_ok, nyse_ok, zeitplan_an, papier) in [
+        (true, true, true, true),
+        (false, true, true, true),
+        (true, false, true, true),
+        (false, false, true, false),
+        (true, true, false, false),
     ] {
         let wurzel = eingeschaltet(ordner()?)?;
         // Ein Starter, der je Auftrag so endet, wie diese Runde es will.
@@ -1404,6 +1560,13 @@ fn papiertag_nach_dem_letzten_abruf_des_tages() -> Result<(), String> {
             d.sperre().laufend.as_ref().map(|a| a.art),
             Some(Art::KurseVon(Boerse::Nyse))
         );
+        if !zeitplan_an {
+            d.setze_zeitplan(Zeitplan {
+                an: false,
+                ..Zeitplan::default()
+            })
+            .map_err(|e| format!("Zeitplan ausschalten: {e:?}"))?;
+        }
         d.verfolge(nr, kind, || donnerstag(22, 11).ok());
         let erwartet = if papier {
             vec![(Art::Papier, Anlass::Zeitplan)]

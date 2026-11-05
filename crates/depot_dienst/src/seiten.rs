@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 
 use depot_kern::Datum;
 use depot_lage::html::{STIL, maskiere};
-use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, zeit_text};
+use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, ortszeit, zeit_text};
 
 use crate::http::feld;
 use crate::kostenschutz;
@@ -253,6 +253,24 @@ fn wochentag_text(d: Datum) -> &'static str {
     }
 }
 
+/// Wie es nach einem gescheiterten Lauf weitergeht, aus dem tatsaechlichen Zeitplan: von selbst
+/// nur, wenn er an ist und kein Fehler ihn anhaelt. Der Lauf selbst kennt den Zeitplan nicht.
+fn weiter_text(z: &Zustand, heute: Option<Datum>) -> String {
+    let naechster = naechster_text(z, heute);
+    if z.erledigt_fehler.is_some() || z.zeitplan_fehler.is_some() {
+        return naechster;
+    }
+    let naechster = naechster.trim_end_matches('.');
+    if z.zeitplan.an && heute.is_some() {
+        format!("Nach Zeitplan geht es von selbst weiter: {naechster}.")
+    } else {
+        format!(
+            "DepotSchlopf startet nichts von selbst: {naechster}. Kurse und Papiertag startest \
+             du von Hand über die Knöpfe im Lagebild."
+        )
+    }
+}
+
 /// Der naechste Lauf des Zeitplans als Satz.
 pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     if let Some(f) = &z.erledigt_fehler {
@@ -321,19 +339,46 @@ fn ergebnis(a: &Auftrag) -> (&'static str, &'static str) {
 /// Was der Dienst tut: laufender Auftrag, Warteschlange, naechster Lauf, Verlauf.
 pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
     let mut s = String::from("<section><h2>Tätigkeit</h2>");
-    match &z.laufend {
-        Some(a) => {
+    if let Some(a) = &z.laufend {
+        let _ = write!(
+            s,
+            "<p class=\"kopf offen\">Läuft: {} ({}) seit {}</p><p class=\"leise\">Kennung {}</p>{}",
+            maskiere(a.art.name()),
+            anlass_text(a.anlass),
+            maskiere(&zeit_text(a.start)),
+            maskiere(&a.kennung),
+            protokoll("l", a, true)
+        );
+        if let Some(h) = &a.hinweis {
             let _ = write!(
                 s,
-                "<p class=\"kopf offen\">Läuft: {} ({}) seit {}</p><p class=\"leise\">Kennung {}</p>{}",
-                maskiere(a.art.name()),
-                anlass_text(a.anlass),
-                maskiere(&zeit_text(a.start)),
-                maskiere(&a.kennung),
-                protokoll("l", a, true)
+                "<p class=\"kopf offen\" id=\"hinweis\">{}</p>",
+                maskiere(h)
             );
         }
-        None => s.push_str("<p class=\"kopf\">Gerade läuft nichts.</p>"),
+    } else {
+        s.push_str("<p class=\"kopf\">Gerade läuft nichts.</p>");
+        // Was der letzte Lauf heute zu sagen hatte, etwa warum der Papiertag ausfiel.
+        if let Some(a) = z.verlauf.front()
+            && let Some(h) = &a.hinweis
+            && heute.is_some_and(|t| {
+                a.ende
+                    .is_some_and(|e| ortszeit(e).is_some_and(|o| o.0 == t))
+            })
+        {
+            let (klasse, weiter) = if a.erfolg == Some(true) {
+                ("gut", String::new())
+            } else {
+                ("halt", format!(" {}", weiter_text(z, heute)))
+            };
+            let _ = write!(
+                s,
+                "<p class=\"kopf {klasse}\" id=\"hinweis\">{}: {}{}</p>",
+                maskiere(a.art.name()),
+                maskiere(h),
+                maskiere(&weiter)
+            );
+        }
     }
     if !z.warteschlange.is_empty() {
         let liste: Vec<String> = z
@@ -358,12 +403,16 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
             let _ = write!(
                 s,
                 "<tr><td>{}<br><span class=\"leise\">{}</span></td><td>{}</td><td>{}</td><td>{}</td>\
-                 <td><span class=\"{klasse}\">{text}</span>{}</td></tr>",
+                 <td><span class=\"{klasse}\">{text}</span>{}{}</td></tr>",
                 maskiere(a.art.name()),
                 maskiere(&a.kennung),
                 maskiere(&anlass_zeile(a)),
                 maskiere(&zeit_text(a.start)),
                 a.ende.map(|e| maskiere(&zeit_text(e))).unwrap_or_default(),
+                a.hinweis
+                    .as_ref()
+                    .map(|h| format!("<br>{}", maskiere(h)))
+                    .unwrap_or_default(),
                 protokoll("v", a, false)
             );
         }
@@ -568,14 +617,29 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
     s.push_str("</table></div></section>");
 }
 
+/// Was bei einer abgebrochenen KI-Anfrage geschieht, in Alltagssprache (Maus, 05.11.2026).
+pub const KI_VERBINDUNG: &str = "<details id=\"ki-verbindung\"><summary>Wenn die Verbindung bei \
+     einer KI-Anfrage wegbricht</summary><ul>\
+     <li><b>Die Anfrage ist gar nicht erst hinausgegangen</b> (kein Internet, Adresse nicht \
+     gefunden, Verbindung abgewiesen): Sie hat nichts gekostet. DepotSchlopf versucht es nach 30 \
+     und nach 60 Sekunden von selbst noch einmal. Klappt es dann nicht, läuft der Papiertag \
+     heute ohne diese KI. Du musst nichts tun.</li>\
+     <li><b>Die Anfrage war schon abgeschickt, dann brach die Verbindung ab</b>: Sie kann beim \
+     Anbieter angekommen sein und Geld gekostet haben, ohne dass DepotSchlopf die Antwort kennt. \
+     Ein zweiter Versuch könnte doppelt kosten. Deshalb fragt DepotSchlopf nicht noch einmal, \
+     sondern sperrt beide KIs. Du siehst im Konto des Anbieters nach, was der Aufruf gekostet \
+     hat, und hebst die Sperre hier auf.</li></ul></details>";
+
 fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
     s.push_str("<section id=\"kostenschutz\"><h2>Sperre des Kostenschutzes</h2>");
     let inhalt = match &e.ki_halt {
         Ok(None) => {
             s.push_str(
                 "<p><span class=\"gut\">frei</span>: Keine Sperre. Jeder KI-Aufruf durchläuft \
-                 trotzdem die Kostenprüfung.</p></section>",
+                 trotzdem die Kostenprüfung.</p>",
             );
+            s.push_str(KI_VERBINDUNG);
+            s.push_str("</section>");
             return;
         }
         Ok(Some(t)) => t,
@@ -591,8 +655,8 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
     let _ = write!(
         s,
         "<p><span class=\"halt\">gesperrt</span>: Ein KI-Aufruf hat mehr gekostet als \
-         reserviert, oder seine Kosten sind unbekannt. Bis zur Prüfung fragt der Papiertag keine \
-         KI.</p><pre>{}</pre>\
+         reserviert, oder seine Kosten sind unbekannt, etwa weil die Verbindung nach dem \
+         Absenden abbrach. Bis zur Prüfung fragt der Papiertag keine KI.</p><pre>{}</pre>{}\
          <p class=\"leise\">So prüfen: im Konto des Anbieters die Kosten des genannten Aufrufs \
          ansehen. Aufheben ändert nichts am Kassenbuch: Die Reservierung bleibt gebucht und zählt \
          im Budget. Jeder weitere Aufruf durchläuft wieder die Kostenprüfung und sperrt bei einer \
@@ -604,6 +668,7 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
          Ich habe die Kosten beim Anbieter geprüft.</label>\
          <button type=\"submit\">Sperre aufheben</button></form></section>",
         maskiere(inhalt),
+        KI_VERBINDUNG,
         maskiere(token),
         kostenschutz::abdruck(inhalt)
     );
@@ -801,6 +866,14 @@ fn update_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
          DepotSchlopf.cmd den alten Stand zurück. Das Gate dauert einige Minuten.</p>",
     );
     s.push_str(&update_hinweis(z));
+    if let Some((fehler, text)) = &z.programm_meldung {
+        let _ = write!(
+            s,
+            "<p id=\"programmstand\"><span class=\"{}\">Start nach einem Neustart:</span> {}</p>",
+            if *fehler { "offen" } else { "gut" },
+            maskiere(text)
+        );
+    }
     for art in [Art::UpdatePruefen, Art::Update] {
         // Ein Kursabruf je Boerse zaehlt fuer die Kursquellen mit.
         let gleich = |a: Art| a == art || (art == Art::Kurse && matches!(a, Art::KurseVon(_)));
