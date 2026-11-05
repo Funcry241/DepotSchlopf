@@ -185,3 +185,77 @@ fn xetra_bleibt_unveraendert() -> Result<(), String> {
     assert_eq!(mit, ohne);
     Ok(())
 }
+
+/// Maus' Gegenprobe zu aba39b0: Ein abgeschnittener Text ergibt keinen Kurs, an welcher
+/// Stelle er auch endet. Nur der vollstaendige Text mit geschlossener Huelle gilt.
+#[test]
+fn abgeschnittener_text_ergibt_keine_kurse() -> Result<(), String> {
+    let voll = ezb(&[("2026-11-05", "1.1224"), ("2026-11-04", "1.1267")]);
+    lies(&voll)?;
+    let enden = voll.char_indices().map(|(i, _)| i).filter(|i| *i > 0);
+    for ende in enden {
+        let teil = voll.get(..ende).ok_or("Vorbedingung: Grenze")?;
+        assert!(
+            Devisen::lies_ezb(teil).is_err(),
+            "abgeschnitten nach {ende} Zeichen angenommen: {teil}"
+        );
+    }
+    Ok(())
+}
+
+/// Maus' Gegenprobe zu aba39b0: Ein Dollarkurs zaehlt nur in seinem eigenen Tagesblock. Steht
+/// er ausserhalb, gehoert er zu keinem Tag, und der ganze Text wird verworfen, statt dass er
+/// dem zuletzt gelesenen Tag zugeschlagen wird. Ebenso jeder andere Aufbau als Huelle, Tag,
+/// Waehrung.
+#[test]
+fn dollar_nur_im_eigenen_tagesblock() -> Result<(), String> {
+    let kopf = "<?xml version=\"1.0\"?><gesmes:Envelope><Cube>";
+    let fuss = "</Cube></gesmes:Envelope>";
+    let usd = "<Cube currency=\"USD\" rate=\"1.2\"/>";
+    let fall = |mitte: &str| format!("{kopf}{mitte}{fuss}");
+    // Nach dem Tagesblock, vor dem naechsten: nicht dem 05.11. zugeschlagen.
+    assert_eq!(
+        Devisen::lies_ezb(&fall(&format!(
+            "<Cube time=\"2026-11-05\"><Cube currency=\"JPY\" rate=\"177\"/></Cube>{usd}"
+        ))),
+        Err(DevisenFehler::OhneTag)
+    );
+    assert_eq!(
+        Devisen::lies_ezb(&fall(&format!(
+            "<Cube time=\"2026-11-05\"></Cube>{usd}<Cube time=\"2026-11-04\">{usd}</Cube>"
+        ))),
+        Err(DevisenFehler::OhneTag)
+    );
+    // Falsch verschachtelt oder falsch geschlossen.
+    for mitte in [
+        format!("<Cube time=\"2026-11-05\"><Cube time=\"2026-11-04\">{usd}</Cube></Cube>"),
+        format!("<Cube time=\"2026-11-05\">{usd}</Cube></Cube><Cube>"),
+        format!("<Cube time=\"2026-11-05\"><Cube currency=\"USD\" rate=\"1.2\"></Cube>"),
+        format!("<Cube time=\"2026-11-05\">{usd}</Cube time>"),
+        format!("<Cube time=\"2026-11-05\">{usd}</Wuerfel></Cube>"),
+        format!("<Cube time=\"2026-11-05\" currency=\"USD\" rate=\"1.2\"/>"),
+        format!("<Cube time=\"2026-11-05\">{usd}<Cube></Cube></Cube>"),
+    ] {
+        assert!(
+            Devisen::lies_ezb(&fall(&mitte)).is_err(),
+            "angenommen: {mitte}"
+        );
+    }
+    // Ohne Huelle `Cube` oder ausserhalb von `gesmes:Envelope`.
+    assert!(
+        Devisen::lies_ezb(&format!(
+            "<gesmes:Envelope><Cube time=\"2026-11-05\">{usd}</Cube></gesmes:Envelope>"
+        ))
+        .is_err()
+    );
+    assert!(
+        Devisen::lies_ezb(&format!(
+            "<Cube><Cube time=\"2026-11-05\">{usd}</Cube></Cube>"
+        ))
+        .is_err()
+    );
+    // Gegenprobe: derselbe Tag richtig aufgebaut gilt.
+    let d = lies(&fall(&format!("<Cube time=\"2026-11-05\">{usd}</Cube>")))?;
+    assert_eq!(d.usd_je_eur(tag(2026, 11, 5)?), Some(euro("1.2")?));
+    Ok(())
+}
