@@ -95,7 +95,7 @@ fn gesperrt(wurzel: &Path) -> bool {
     };
     eprintln!(
         "[Sammler] HALT: daten/{} liegt ({grund}). Kein Abruf und kein Papiertag, bis ein Mensch \
-         geprueft, den Schluessel bei Bedarf erneuert und die Datei geloescht hat.",
+         den Schluessel geprueft und die Sperre in der Einrichtung aufgehoben hat.",
         kurssperre::KURSSPERRE
     );
     true

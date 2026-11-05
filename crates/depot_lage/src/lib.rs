@@ -23,7 +23,7 @@
 
 pub mod betrieb;
 /// Das Anbieterprotokoll, fuer die Oberflaeche.
-pub use depot_journal::anbieter;
+pub use depot_journal::{anbieter, kurssperre};
 mod budget;
 mod depot;
 pub mod html;
@@ -107,6 +107,8 @@ pub enum Abhilfe {
     SchluesselBerater(BeraterId),
     /// Die Sperre des Kostenschutzes (`daten/ki.halt`) pruefen und gefuehrt aufheben.
     KostenschutzPruefen,
+    /// Die Kurssperre (`daten/kurse.halt`) pruefen und gefuehrt aufheben.
+    KurssperrePruefen,
     KurseAbrufen,
     TermineAbrufen,
     PapiertagStarten,
@@ -126,6 +128,7 @@ impl Abhilfe {
             Abhilfe::JournalEinrichten
             | Abhilfe::SchluesselKursquelle
             | Abhilfe::KostenschutzPruefen
+            | Abhilfe::KurssperrePruefen
             | Abhilfe::Pruefen => true,
             Abhilfe::SchluesselBerater(_)
             | Abhilfe::KurseAbrufen
@@ -658,10 +661,10 @@ fn sperr_punkte(u: &Umgebung<'_>, punkte: &mut Vec<Punkt>) {
                 format!(
                     "daten/{s} liegt: Ein Kursabruf endete aus Sicherheitsgründen (die Quelle gab \
                      den Schlüssel zurück). Kein Abruf und kein Papiertag, auch nicht von Hand, \
-                     bis ein Mensch geprüft, den Schlüssel bei Bedarf erneuert und die Datei \
-                     gelöscht hat."
+                     bis ein Mensch den Schlüssel geprüft und die Sperre in der Einrichtung \
+                     aufgehoben hat."
                 ),
-                Some(Abhilfe::Pruefen),
+                Some(Abhilfe::KurssperrePruefen),
             ));
             continue;
         }

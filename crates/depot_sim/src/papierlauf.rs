@@ -36,8 +36,8 @@ pub fn papier(
     // Seine Teilkurse werden nie verwendet (Maus, Restbefund zu #34).
     if let Some(grund) = depot_journal::kurssperre::kurssperre(&wurzel.join("daten")) {
         return Err(format!(
-            "daten/{} liegt ({grund}). Kein Papiertag, bis ein Mensch geprueft und die Datei \
-             geloescht hat",
+            "daten/{} liegt ({grund}). Kein Papiertag, bis ein Mensch geprueft und die Sperre \
+             in der Einrichtung aufgehoben hat",
             depot_journal::kurssperre::KURSSPERRE
         ));
     }

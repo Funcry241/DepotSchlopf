@@ -4,7 +4,8 @@
 //! der Sammler diese Datei an (Maus, Restbefund zu #34). Solange sie liegt, ruft der Sammler
 //! nichts ab und beginnt kein Papiertag, gleich ob der Zeitplan oder ein Mensch ihn startet: Die
 //! schon belegten Teilkurse dieses Abrufs werden nie verwendet. Aufheben heisst: pruefen, den
-//! Schluessel bei Bedarf erneuern, dann die Datei loeschen. Sie enthaelt nur einen festen
+//! Schluessel bei Bedarf erneuern, dann in der Einrichtung aufheben (`depot_dienst`), nicht von
+//! Hand loeschen. Sie enthaelt nur einen festen
 //! Grund, nie den Schluessel.
 
 use std::fs::OpenOptions;

@@ -65,7 +65,7 @@ Der Sicherheitsabbruch griff nur über den Ausgang des Sammlers, also nur im Zei
 - `papierlauf::papier` beginnt keinen Papiertag, gleich ob der Zeitplan oder ein Mensch ihn startet. Beide Wege laufen über `run.cmd papier`.
 - Das Lagebild zeigt „Kurssperre“ als Halt.
 
-Aufheben heißt: prüfen, den Schlüssel bei Bedarf erneuern, dann die Datei löschen. Lässt sich die Sperre nicht schreiben, meldet der Sammler das als Fehler: „KEINEN Papiertag starten“. Tests: `kurssperre_haelt_auch_den_handstart`, `kurssperre::sperre_liegt_bis_sie_geloescht_wird`, `kurssperre_ist_halt`.
+Aufheben heißt: prüfen, den Schlüssel bei Bedarf erneuern, dann in der Einrichtung unter „Kurssperre“ aufheben, wie die Sperre des Kostenschutzes (Abdruck der gesehenen Fassung, ausdrückliche Bestätigung, nur ohne laufenden Auftrag; Grund bleibt in `daten/kurse_halt_aufgehoben.txt`). Nie von Hand löschen. Lässt sich die Sperre nicht schreiben, meldet der Sammler das als Fehler: „KEINEN Papiertag starten“. Tests: `kurssperre_haelt_auch_den_handstart`, `kurssperre::sperre_liegt_bis_sie_geloescht_wird`, `kurssperre_ist_halt`, `kurssperre_gefuehrt_aufheben`.
 
 ## Nicht in diesem Schritt
 
