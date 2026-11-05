@@ -7,6 +7,7 @@
 //! Kein Netz; alle Antworten sind fuer den Test geschrieben.
 
 use std::collections::VecDeque;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -504,5 +505,54 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
         .count();
     assert_eq!(mit_kosten, 3, "jede Antwort mit Kosten im Journal");
     assert!(!sperre.exists());
+    Ok(())
+}
+
+/// Maus' Gegenprobe zu #25: Der Anbieter gibt den Schluessel in einer erfolgreichen Antwort
+/// zurueck. Nichts davon gelangt ins Ergebnis, weder roh noch verschluesselt im JSON des
+/// Modells, weder in der Einschaetzung noch in einer Begruendung noch in einem Urteil.
+#[test]
+fn zurueckgegebener_schluessel_gelangt_nie_ins_ergebnis() -> Result<(), String> {
+    let maskiert = SCHLUESSEL.chars().fold(String::new(), |mut m, c| {
+        let _ = write!(m, "\\u{:04x}", u32::from(c));
+        m
+    });
+    let vorschlaege = [
+        format!("{{\"einschaetzung\": \"Schluessel {SCHLUESSEL}\", \"ziele\": null}}"),
+        format!(
+            "{{\"einschaetzung\": \"x\", \"ziele\": [{{\"isin\": \"DE0007164600\", \"gewicht_bp\": 1000, \"begruendung\": \"{maskiert}\"}}]}}"
+        ),
+    ];
+    for text in &vorschlaege {
+        let mut ort = Ort::neu()?;
+        let mut netz = Attrappe::default();
+        netz.antworten.push_back(claude(text, 1_000, 100, 0));
+        let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+        let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+        let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+        assert!(a.vorschlag.is_none(), "{a:?}");
+        assert!(!format!("{a:?}").contains(SCHLUESSEL), "{a:?}");
+        assert!(
+            a.einschaetzung.contains("Schluessel des Anbieters"),
+            "{a:?}"
+        );
+    }
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(gpt(
+        &format!("{{\"zustimmung\": true, \"begruendung\": \"{maskiert}\"}}"),
+        1_000,
+        100,
+    ));
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?;
+    let v = Vorschlag {
+        berater: BeraterId::Dachs,
+        zielgewichte_bp: [(sap()?, 1_000)].into_iter().collect(),
+        begruendung: [(sap()?, "x".to_string())].into_iter().collect(),
+    };
+    let e = ort.erlaubnis(BeraterId::Maus, 1)?;
+    let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
+    assert!(!u.zustimmung, "{u:?}");
+    assert!(!format!("{u:?}").contains(SCHLUESSEL), "{u:?}");
     Ok(())
 }
