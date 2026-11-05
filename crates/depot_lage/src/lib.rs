@@ -28,7 +28,7 @@ mod zugang;
 
 pub use budget::{BudgetStatus, KiBudget, ki_budget};
 pub use depot::{AuftragZeile, DepotLage, Position, TopfLage};
-pub use zugang::{PAPIERKONTO, mit_journal};
+pub use zugang::{PAPIERKONTO, mit_journal, sperrdateien};
 
 use depot_journal::Stand;
 use depot_kern::liste::{Wert, als_universum, beobachtungsliste};
@@ -145,13 +145,14 @@ pub struct Lagebild {
 /// So viele Beitraege zeigt das Lagebild hoechstens.
 pub const GESPRAECH_MAX: usize = 60;
 
-pub(crate) fn datum_text(d: Datum) -> String {
+/// `TT.MM.JJJJ`.
+pub fn datum_text(d: Datum) -> String {
     format!("{:02}.{:02}.{}", d.tag(), d.monat(), d.jahr())
 }
 
-/// Ortszeit in Frankfurt, wie der Kalender des Kerns sie umrechnet; eine doppelt vorkommende
-/// Stunde steht in UTC.
-pub(crate) fn zeit_text(z: Zeitpunkt) -> String {
+/// Ortszeit in Frankfurt: Tag, Stunde, Minute, Sekunde und Zone, wie der Kalender des Kerns sie
+/// umrechnet. `None` fuer die doppelt vorkommende Stunde im Oktober.
+pub fn ortszeit(z: Zeitpunkt) -> Option<(Datum, u8, u8, u8, &'static str)> {
     for (stunden, zone) in [(1_i64, "MEZ"), (2, "MESZ")] {
         let ort = stunden
             .checked_mul(3_600)
@@ -161,8 +162,16 @@ pub(crate) fn zeit_text(z: Zeitpunkt) -> String {
             && let (Some(d), Some((h, m, s))) = (ort.datum(), ort.uhrzeit())
             && Zeitpunkt::frankfurt(d, h, m, s) == Some(z)
         {
-            return format!("{} {h:02}:{m:02} {zone}", datum_text(d));
+            return Some((d, h, m, s, zone));
         }
+    }
+    None
+}
+
+/// Ortszeit in Frankfurt als Text; eine doppelt vorkommende Stunde steht in UTC.
+pub fn zeit_text(z: Zeitpunkt) -> String {
+    if let Some((d, h, m, _, zone)) = ortszeit(z) {
+        return format!("{} {h:02}:{m:02} {zone}", datum_text(d));
     }
     match (z.datum(), z.uhrzeit()) {
         (Some(d), Some((h, m, _))) => format!("{} {h:02}:{m:02} UTC", datum_text(d)),
@@ -460,8 +469,8 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
             "Sperrdatei",
             Ampel::Halt,
             format!(
-                "daten/{s} liegt noch: früherer Lauf abgebrochen. KI-Aufrufe bleiben gesperrt, \
-                 bis ein Mensch geprüft und die Datei gelöscht hat."
+                "daten/{s} liegt: Ein Lauf hat angehalten oder ist abgebrochen. KI-Aufrufe bleiben \
+                 gesperrt, bis ein Mensch geprüft und die Datei gelöscht hat."
             ),
             Some(Abhilfe::Pruefen),
         ));

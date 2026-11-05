@@ -1,13 +1,11 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: FestschreibungAenderung
-zweck: Lagebild als erster Teil der Oberflaeche (Wolfgang 05.11.2026: Dienst mit lokaler Weboberflaeche und genau einer Config-Seite; Maus: Live-Ansicht und KI-Budget sichtbar). Neues Crate depot_lage ohne Netz: rechnet aus dem Journal, was fuer den naechsten Papiertag bereit ist oder fehlt (Journal, Schluessel, Kurse von heute samt Kurspruefung, Termine, Tageslage, Sperrdateien, KI-Kassenbuch), das KI-Budget je KI (heute, Monat, Jahr, Rest, Status direkt aus depot_ki::pruefe mit dem Zyklus des Papiertags), das Papierdepot, die Auftraege, die Begruendungen von Dachs, Maus und Regelwerk und die festgeschriebenen Grenzen (nur Anzeige, Aenderung nur ueber Grenzfreigabe). run.cmd lage schreibt daten/lage.html. Damit Anzeige und Papiertag dieselbe Pruefung nehmen (D16), legt depot_sim die Pruefungen kurse_von_heute und tageslage offen und der Papiertag ruft sie selbst auf, Verhalten unveraendert; tagnummer wird oeffentlich. Neues Crate depot_lage und depot_sim als Workspace-Abhaengigkeit: Festschreibung, Grenzfreigabe noetig. Fassung 2 nach Maus K26-01 (geloeschtes Journal bei vorhandenem Vermerk erschien als nicht eingerichtet): Neu ist nur ein Datenbestand ohne jede Spur. Journal::eingerichtet entscheidet das fuer Journal und Vermerk, oeffnen beginnt mit derselben Pruefung; fehlt nur ein Teil oder liegt ein Papierkonto ohne Journal, ist es Halt. depot_lage::mit_journal ist der einzige Lesezugang. Keine neuen fremden Abhaengigkeiten, kein Netz, keine Schluessel, keine neuen Grenzen, kein echtes Geld.
+zweck: Dienst mit Oberflaeche nur auf 127.0.0.1 (Wolfgang 05.11.2026: dauerhaft laufen, Autostart, genau eine Config-Seite statt Konsole, Live-Ansicht; Freigabe "Ja, nur 127.0.0.1"; Maus: Speichern und Aktivieren sichtbar, Schutz gegen fremde Webseiten). Neues Crate depot_dienst: kleiner HTTP-Server aus std, lauscht nur auf Ipv4Addr::LOCALHOST (Kodex NETZ_LOKAL), Host-Pruefung fuer jede Anfrage, Origin und Token dieses Starts fuer jede Aenderung, strenges Lesen mit festen Grenzen, Sicherheitskoepfe. Live-Seite (Taetigkeit mit Protokoll, naechster Lauf, Lagebild aus depot_lage) und Config-Seite (Schluessel direkt in die Windows-Anmeldeinformationsverwaltung, nur Stand sichtbar; Verbindungstest; Zeitplan; Autostart; Grenzen nur Ansicht). Der Dienst schreibt nie ins Journal: jede Arbeit ist ein eigener Lauf von depot_lauf, einer zur Zeit, eindeutige Kennung. Zeitplan Mo-Fr, jeder Lauf hoechstens einmal am Tag, vor dem Start in daten/dienst_erledigt.txt festgehalten. Starter DepotSchlopf.cmd. depot_lage legt ortszeit, sperrdateien und inhalt mit Knoepfen offen. Neues Crate in der Festschreibung, Grenzfreigabe noetig; keyring-core und windows-native-keyring-store sind schon festgeschrieben. Keine neuen Grenzen, kein Netz hinaus, kein echtes Geld. Fassung 2 nach Maus K29-01: nur eine fehlende Zeitplan- oder Erledigt-Datei ist Erststart; jeder andere Lesefehler haelt den Zeitplan sichtbar an, ein unlesbares Erledigt auch nach neuem Speichern.
 pfade:
 Cargo.toml
 Cargo.lock
-run.cmd
-crates/depot_sim/
-crates/depot_journal/
-crates/depot_lauf/src/main.rs
+DepotSchlopf.cmd
+crates/depot_dienst/
 crates/depot_lage/
 kodex/festschreibung.txt
 docs/
