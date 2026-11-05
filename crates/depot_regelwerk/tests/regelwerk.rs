@@ -142,8 +142,10 @@ fn volumen(a: &GenehmigterAuftrag) -> Cent {
         .unwrap_or(Cent(i64::MAX))
 }
 
+/// Erstkauf mit dem ganzen Topf: vier Werte zu je 25 %. Am Limit (+1 %) laege der Umschlag
+/// ueber 100 % des Topfs und wird gekuerzt.
 #[test]
-fn erstkauf_wird_auf_halben_topf_begrenzt() {
+fn erstkauf_nutzt_den_ganzen_topf() {
     let g = Grenzen::standard();
     let topf = topf_neu(TopfId::A, Cent(500_000));
     let kurse = kurse_alle(5_000); // 50 € je Stueck
@@ -163,14 +165,14 @@ fn erstkauf_wird_auf_halben_topf_begrenzt() {
         assert_eq!(x.richtung, Richtung::Kauf);
         assert_eq!(x.limit, Cent(5_050), "Limit = Schlusskurs + 1 %");
         assert_eq!(
-            x.stueck, 12,
-            "625 € Ziel je Wert nach Kuerzung, 50 € je Stueck"
+            x.stueck, 24,
+            "1.250 € Ziel je Wert, 50,50 € je Stueck am Limit samt Gebuehr"
         );
         assert_eq!(a.beleg().anlass, Anlass::Umschichtung);
         assert_eq!(a.beleg().grenzen_abdruck, g.fingerabdruck());
         summe = summe.checked_add(volumen(a)).unwrap_or(Cent(i64::MAX));
     }
-    assert!(summe <= Cent(252_500));
+    assert!(summe <= Cent(500_000));
 }
 
 #[test]
@@ -215,7 +217,7 @@ fn unmoegliche_gewichte_werden_verworfen() {
     let faelle = [
         (vorschlag(&neun), VerwerfGrund::ZuVieleWerte(9)),
         (
-            vorschlag(&[(0, 2_500), (1, 2_500), (2, 2_500), (3, 2_500), (4, 100)]),
+            vorschlag(&[(0, 4_000), (1, 4_000), (2, 2_100)]),
             VerwerfGrund::SummeUeber100(10_100),
         ),
         (
@@ -230,23 +232,23 @@ fn unmoegliche_gewichte_werden_verworfen() {
 }
 
 #[test]
-fn zu_grosses_gewicht_wird_auf_25_prozent_gekuerzt() {
+fn zu_grosses_gewicht_wird_auf_40_prozent_gekuerzt() {
     let g = Grenzen::standard();
     let topf = topf_neu(TopfId::A, Cent(500_000));
-    let v = vorschlag(&[(0, 4_000)]);
+    let v = vorschlag(&[(0, 6_000)]);
     let ent = lauf(&g, &topf, &kurse_alle(1_000), Some(&v), false);
     assert!(ent.befunde.contains(&Befund::GewichtGekuerzt {
         isin: isin(0),
-        von_bp: 4_000,
-        auf_bp: 2_500
+        von_bp: 6_000,
+        auf_bp: 4_000
     }));
     let kauf = ent.kaeufe.first().map(GenehmigterAuftrag::auftrag);
-    // 25 % von 5.000 € waeren 125 Stueck zu 10 €. Am Limit (10,10 €) mit Gebuehr bleiben
-    // 123 Stueck unter 25 % des Topfwerts nach dem Kauf (1·T01).
+    // 40 % von 5.000 € waeren 200 Stueck zu 10 €. Am Limit (10,10 €) mit Gebuehr bleiben
+    // 197 Stueck unter 40 % des Topfwerts nach dem Kauf (1·T01).
     assert_eq!(
         kauf.map(|a| a.stueck),
-        Some(123),
-        "25 % von 5.000 € am Limit von 10,10 € je Stueck"
+        Some(197),
+        "40 % von 5.000 € am Limit von 10,10 € je Stueck"
     );
 }
 
@@ -298,13 +300,19 @@ fn wert_ausserhalb_der_positivliste_wird_verkauft() {
 
 #[test]
 fn hoechstens_vier_orders_je_topf() {
-    // Sechs Kaeufe zu je 8 % bleiben zusammen unter der Umschlaggrenze von 50 %; begrenzt
-    // wird allein die Orderzahl.
+    // Zwei Werte ganz verkaufen und vier kaufen, zusammen unter der Umschlaggrenze von 100 %:
+    // sechs Auftraege, begrenzt wird allein die Orderzahl.
     let g = Grenzen::standard();
-    let topf = topf_neu(TopfId::A, Cent(10_000_000));
-    let v = vorschlag(&[(0, 800), (1, 800), (2, 800), (3, 800), (4, 800), (5, 800)]);
+    let mut topf = topf_neu(TopfId::A, Cent(8_000_000));
+    topf.setze_bestand(isin(4), 400);
+    topf.setze_bestand(isin(5), 400);
+    let v = vorschlag(&[(0, 800), (1, 800), (2, 800), (3, 800)]);
     let ent = lauf(&g, &topf, &kurse_alle(5_000), Some(&v), false);
-    assert_eq!(ent.kaeufe.len(), 4);
+    assert_eq!(
+        ent.verkaeufe.len().saturating_add(ent.kaeufe.len()),
+        4,
+        "{ent:?}"
+    );
     assert_eq!(
         ent.befunde
             .iter()
@@ -316,15 +324,16 @@ fn hoechstens_vier_orders_je_topf() {
 
 #[test]
 fn verkaeufe_finanzieren_kaeufe_nur_mit_garantiertem_erloes() {
-    // Kein Bargeld. Fuenf Werte zu je 1.000 € (20 %). Wert 0 wird verkauft; das Ziel von
-    // Wert 1 (25 % = 1.250 €) liegt ueber dem garantierten Erloes. Zusammen bleibt das unter
-    // der Umschlaggrenze von 50 %; begrenzt wird allein der garantierte Erloes.
+    // Kein Bargeld. Wert 0 zu 1.000 € (20 %), Werte 2 und 3 zu je 2.000 € (40 %). Wert 0 wird
+    // verkauft; das Ziel von Wert 1 (20 % = 1.000 €) liegt ueber dem garantierten Erloes am
+    // Limit nach Gebuehr. Zusammen bleibt das unter der Umschlaggrenze von 100 %; begrenzt
+    // wird allein der garantierte Erloes.
     let g = Grenzen::standard();
     let mut topf = topf_neu(TopfId::A, Cent::NULL);
-    for i in [0, 2, 3, 4, 5] {
-        topf.setze_bestand(isin(i), 20);
-    }
-    let v = vorschlag(&[(1, 2_500), (2, 1_875), (3, 1_875), (4, 1_875), (5, 1_875)]);
+    topf.setze_bestand(isin(0), 20);
+    topf.setze_bestand(isin(2), 40);
+    topf.setze_bestand(isin(3), 40);
+    let v = vorschlag(&[(1, 2_000), (2, 4_000), (3, 4_000)]);
     let ent = lauf(&g, &topf, &kurse_alle(5_000), Some(&v), false);
     assert_eq!(ent.verkaeufe.len(), 1, "{ent:?}");
     let erloes = volumen(ent.verkaeufe.first().unwrap_or_else(|| unreachable!()));

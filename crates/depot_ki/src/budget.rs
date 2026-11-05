@@ -46,7 +46,10 @@ impl Preise {
 }
 
 /// Deckel fuer einen einzelnen Aufruf. Der KI-Client muss `max_token_aus` als
-/// Antwortgrenze an den Anbieter senden und Eingaben ueber `max_token_ein` ablehnen.
+/// Antwortgrenze (Denken eingeschlossen) an den Anbieter senden, darf keine Werkzeuge des
+/// Anbieters freigeben (keine Websuche: deren Ergebnisse liessen sich vorher nicht begrenzen)
+/// und muss jede Anfrage ueber `max_token_ein` Bytes ablehnen. Ein Token umfasst mindestens
+/// ein Byte; damit sind die Hoechstkosten vor dem Aufruf eine gesicherte Obergrenze.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KiDeckel {
     max_token_ein: u32,
@@ -55,13 +58,14 @@ pub struct KiDeckel {
 }
 
 impl KiDeckel {
-    /// Dachs = Claude: 40.000 Token rein, 16.000 raus, 4 $ / 20 $ je Mio.
-    /// Maus = GPT: 40.000 Token rein, 10.000 raus, 10 $ / 50 $ je Mio.
-    /// Die Werte gelten bis zum Freigabepaket; erst dieses legt die endgueltigen fest.
+    /// Papierhandel ab 05.11.2026, KI-Kosten hoechstens 20 € im Monat je KI (Wolfgang),
+    /// Denktiefe mittel. Nachrichten bringt der Sammler, die KIs suchen nicht selbst.
+    /// - Dachs = Claude Sonnet 5.5: 40.000 Token rein, 16.000 raus, 2 $ / 10 $ je Mio.
+    /// - Maus = GPT-6.1 Terra: 40.000 Token rein, 16.000 raus, 1 $ / 5 $ je Mio.
     pub fn standard(berater: BeraterId) -> KiDeckel {
         let (max_token_ein, max_token_aus, ein, aus) = match berater {
-            BeraterId::Dachs => (40_000, 16_000, 400, 2_000),
-            BeraterId::Maus => (40_000, 10_000, 1_000, 5_000),
+            BeraterId::Dachs => (40_000, 16_000, 200, 1_000),
+            BeraterId::Maus => (40_000, 16_000, 100, 500),
         };
         KiDeckel {
             max_token_ein,
@@ -89,7 +93,19 @@ impl KiDeckel {
 
     /// Was ein Aufruf schlimmstenfalls kostet, aufgerundet auf ganze Cent.
     pub fn hoechstkosten(&self) -> Option<Cent> {
-        self.preise.kosten(self.max_token_ein, self.max_token_aus)
+        self.kosten_ist(u64::from(self.max_token_ein), u64::from(self.max_token_aus))
+    }
+
+    /// Was ein Aufruf nach Angabe des Anbieters gekostet hat, aufgerundet auf ganze Cent.
+    pub fn kosten_ist(&self, token_ein: u64, token_aus: u64) -> Option<Cent> {
+        let ein = i64::try_from(token_ein)
+            .ok()?
+            .checked_mul(self.preise.cent_je_mio_ein)?;
+        let aus = i64::try_from(token_aus)
+            .ok()?
+            .checked_mul(self.preise.cent_je_mio_aus)?;
+        let mio = ein.checked_add(aus)?;
+        Some(Cent(mio.checked_add(999_999)?.checked_div(1_000_000)?))
     }
 }
 
@@ -104,16 +120,17 @@ pub struct KiGrenzen {
 }
 
 impl KiGrenzen {
-    /// 2 Aufrufe je Zyklus, 1 Zyklus je Tag, 4 Aufrufe und 4 € je Monat,
-    /// 50 € je Jahr. Die Werte gelten bis zum Freigabepaket; erst dieses legt die
-    /// endgueltigen fest.
+    /// Papierhandel ab 05.11.2026, je KI: 2 Aufrufe je Zyklus (eigener Vorschlag und
+    /// Zweitmeinung zum anderen Topf), 1 Zyklus je Tag, 46 Aufrufe und 20 € je Monat,
+    /// 240 € je Jahr (Wolfgang, 05.11.2026: je KI hoechstens 20 € im Monat). 46 Aufrufe
+    /// reichen fuer 23 Handelstage; gebucht werden die Hoechstkosten.
     pub fn standard() -> KiGrenzen {
         KiGrenzen {
             aufrufe_je_zyklus: 2,
             zyklen_je_tag: 1,
-            aufrufe_je_monat: 4,
-            kosten_je_monat: Cent(400),
-            kosten_je_jahr: Cent(5_000),
+            aufrufe_je_monat: 46,
+            kosten_je_monat: Cent(2_000),
+            kosten_je_jahr: Cent(24_000),
         }
     }
 
@@ -315,13 +332,13 @@ mod tests {
     fn budget_vor_dem_aufruf_geprueft() -> Result<(), String> {
         let g = KiGrenzen::standard();
         let mut d = KiDeckel::standard(MAUS);
-        d.max_token_aus = 100_000; // 0,40 € + 5,00 € > 4 €
+        d.max_token_aus = 5_000_000; // 0,04 € + 25,00 € > 20 €
         assert_eq!(
             pruefe(&g, &d, &[], MAUS, tag(5)?, 1),
             Err(Sperre::MonatsbudgetErschoepft)
         );
         let mut klein = KiGrenzen::standard();
-        klein.kosten_je_jahr = Cent(100);
+        klein.kosten_je_jahr = Cent(20);
         let d = KiDeckel::standard(MAUS);
         let reserviert =
             pruefe(&klein, &d, &[], MAUS, tag(5)?, 1).map_err(|e| format!("erster: {e:?}"))?;
@@ -336,5 +353,35 @@ mod tests {
             Err(Sperre::JahresbudgetErschoepft)
         );
         Ok(())
+    }
+
+    /// Die Hoechstkosten jedes Deckels passen 46-mal in das Monatsbudget: je KI hoechstens
+    /// 20 € im Monat (Wolfgang, 05.11.2026).
+    #[test]
+    fn zwanzig_euro_im_monat() {
+        let g = KiGrenzen::standard();
+        for b in [BeraterId::Dachs, MAUS] {
+            let h = KiDeckel::standard(b)
+                .hoechstkosten()
+                .map_or(i64::MAX, |c| c.0);
+            let monat = h.saturating_mul(i64::from(g.aufrufe_je_monat));
+            assert!(monat <= g.kosten_je_monat.0, "{b:?}: {monat}");
+        }
+        assert!(g.kosten_je_monat.0 <= 2_000);
+        assert_eq!(
+            KiDeckel::standard(BeraterId::Dachs).hoechstkosten(),
+            Some(Cent(24))
+        );
+        assert_eq!(KiDeckel::standard(MAUS).hoechstkosten(), Some(Cent(12)));
+    }
+
+    /// Tatsaechliche Kosten: aufgerundet.
+    #[test]
+    fn kosten_ist_rundet_auf() {
+        let d = KiDeckel::standard(BeraterId::Dachs);
+        assert_eq!(d.kosten_ist(0, 0), Some(Cent(0)));
+        assert_eq!(d.kosten_ist(1, 0), Some(Cent(1)));
+        assert_eq!(d.kosten_ist(5_000, 1), Some(Cent(2)));
+        assert_eq!(d.kosten_ist(u64::MAX, u64::MAX), None);
     }
 }
