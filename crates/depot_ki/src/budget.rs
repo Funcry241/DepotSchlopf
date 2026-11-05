@@ -46,32 +46,44 @@ impl Preise {
 }
 
 /// Deckel fuer einen einzelnen Aufruf. Der KI-Client muss `max_token_aus` als
-/// Antwortgrenze an den Anbieter senden und Eingaben ueber `max_token_ein` ablehnen.
+/// Antwortgrenze und `max_suchen` als Grenze der Websuchen an den Anbieter senden und Eingaben
+/// ueber `max_token_ein` ablehnen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KiDeckel {
     max_token_ein: u32,
     max_token_aus: u32,
+    max_suchen: u32,
     preise: Preise,
+    /// Preis einer Websuche in Cent je 1.000 Suchen.
+    cent_je_tausend_suchen: i64,
 }
 
 impl KiDeckel {
-    /// Dachs = Claude: 40.000 Token rein, 16.000 raus, 4 $ / 20 $ je Mio.
-    /// Maus = GPT: 40.000 Token rein, 10.000 raus, 10 $ / 50 $ je Mio.
-    /// Die Werte gelten bis zum Freigabepaket; erst dieses legt die endgueltigen fest.
+    /// Papierhandel ab 05.11.2026, KI-Kosten hoechstens 20 € im Monat fuer beide zusammen:
+    /// - Dachs = Claude Sonnet 5.5: 50.000 Token rein, 4.000 raus, 2 $ / 10 $ je Mio.
+    /// - Maus = GPT-5.4: 50.000 Token rein, 4.000 raus, 2,50 $ / 15 $ je Mio.
+    /// - Beide: hoechstens 2 Websuchen je Aufruf zu 10 $ je 1.000 Suchen.
+    ///
+    /// Die Eingabe-Grenze schliesst die Suchergebnisse ein, die der Anbieter selbst einfuegt.
+    /// Sie laesst sich vorher nicht pruefen; der Client rechnet nach jedem Aufruf die
+    /// tatsaechlichen Kosten (`kosten_ist`) und sperrt die KI, wenn sie die Reservierung
+    /// ueberschreiten.
     pub fn standard(berater: BeraterId) -> KiDeckel {
         let (max_token_ein, max_token_aus, ein, aus) = match berater {
-            BeraterId::Dachs => (40_000, 16_000, 400, 2_000),
-            BeraterId::Maus => (40_000, 10_000, 1_000, 5_000),
+            BeraterId::Dachs => (50_000, 4_000, 200, 1_000),
+            BeraterId::Maus => (50_000, 4_000, 250, 1_500),
         };
         KiDeckel {
             max_token_ein,
             max_token_aus,
+            max_suchen: 2,
             // Ein ungueltiger Festwert sperrt jeden Aufruf: Mit Hoechstpreisen laesst sich keine
             // Reservierung berechnen, `pruefe` meldet `Rechenfehler` (fail-closed).
             preise: Preise::neu(ein, aus).unwrap_or(Preise {
                 cent_je_mio_ein: i64::MAX,
                 cent_je_mio_aus: i64::MAX,
             }),
+            cent_je_tausend_suchen: 1_000,
         }
     }
 
@@ -83,13 +95,48 @@ impl KiDeckel {
         self.max_token_aus
     }
 
+    pub fn max_suchen(&self) -> u32 {
+        self.max_suchen
+    }
+
     pub fn preise(&self) -> Preise {
         self.preise
     }
 
-    /// Was ein Aufruf schlimmstenfalls kostet, aufgerundet auf ganze Cent.
+    pub fn cent_je_tausend_suchen(&self) -> i64 {
+        self.cent_je_tausend_suchen
+    }
+
+    /// Was ein Aufruf schlimmstenfalls kostet, aufgerundet auf ganze Cent: alle Token und
+    /// alle erlaubten Suchen.
     pub fn hoechstkosten(&self) -> Option<Cent> {
-        self.preise.kosten(self.max_token_ein, self.max_token_aus)
+        self.kosten_ist(
+            u64::from(self.max_token_ein),
+            u64::from(self.max_token_aus),
+            u64::from(self.max_suchen),
+        )
+    }
+
+    /// Was ein Aufruf nach Angabe des Anbieters gekostet hat, aufgerundet auf ganze Cent.
+    /// Token und Suchen werden zusammen gerundet; so ist das Ergebnis nie kleiner als die
+    /// Summe der exakten Kosten.
+    pub fn kosten_ist(&self, token_ein: u64, token_aus: u64, suchen: u64) -> Option<Cent> {
+        if self.cent_je_tausend_suchen < 0 {
+            return None;
+        }
+        let ein = i64::try_from(token_ein)
+            .ok()?
+            .checked_mul(self.preise.cent_je_mio_ein)?;
+        let aus = i64::try_from(token_aus)
+            .ok()?
+            .checked_mul(self.preise.cent_je_mio_aus)?;
+        // Suchen in Cent je Million: je 1.000 Suchen mal 1.000.
+        let such = i64::try_from(suchen)
+            .ok()?
+            .checked_mul(self.cent_je_tausend_suchen)?
+            .checked_mul(1_000)?;
+        let mio = ein.checked_add(aus)?.checked_add(such)?;
+        Some(Cent(mio.checked_add(999_999)?.checked_div(1_000_000)?))
     }
 }
 
@@ -104,16 +151,17 @@ pub struct KiGrenzen {
 }
 
 impl KiGrenzen {
-    /// 2 Aufrufe je Zyklus, 1 Zyklus je Tag, 4 Aufrufe und 4 € je Monat,
-    /// 50 € je Jahr. Die Werte gelten bis zum Freigabepaket; erst dieses legt die
-    /// endgueltigen fest.
+    /// Papierhandel ab 05.11.2026, je KI: 2 Aufrufe je Zyklus (eigener Vorschlag und
+    /// Zweitmeinung zum anderen Topf), 1 Zyklus je Tag, 46 Aufrufe und 10 € je Monat,
+    /// 120 € je Jahr. Zusammen hoechstens 20 € im Monat (Wolfgang, 05.11.2026). 46 Aufrufe
+    /// reichen fuer 23 Handelstage; gebucht werden die Hoechstkosten.
     pub fn standard() -> KiGrenzen {
         KiGrenzen {
             aufrufe_je_zyklus: 2,
             zyklen_je_tag: 1,
-            aufrufe_je_monat: 4,
-            kosten_je_monat: Cent(400),
-            kosten_je_jahr: Cent(5_000),
+            aufrufe_je_monat: 46,
+            kosten_je_monat: Cent(1_000),
+            kosten_je_jahr: Cent(12_000),
         }
     }
 
@@ -281,6 +329,7 @@ mod tests {
                 "{b:?}"
             );
             assert!(d.max_token_ein > 0 && d.max_token_aus > 0, "{b:?}");
+            assert!(d.max_suchen > 0 && d.cent_je_tausend_suchen > 0, "{b:?}");
             assert!(d.hoechstkosten().is_some_and(|c| c.0 > 0), "{b:?}");
         }
     }
@@ -315,13 +364,13 @@ mod tests {
     fn budget_vor_dem_aufruf_geprueft() -> Result<(), String> {
         let g = KiGrenzen::standard();
         let mut d = KiDeckel::standard(MAUS);
-        d.max_token_aus = 100_000; // 0,40 € + 5,00 € > 4 €
+        d.max_token_aus = 1_000_000; // 0,13 € + 15,00 € + 0,02 € > 10 €
         assert_eq!(
             pruefe(&g, &d, &[], MAUS, tag(5)?, 1),
             Err(Sperre::MonatsbudgetErschoepft)
         );
         let mut klein = KiGrenzen::standard();
-        klein.kosten_je_jahr = Cent(100);
+        klein.kosten_je_jahr = Cent(30);
         let d = KiDeckel::standard(MAUS);
         let reserviert =
             pruefe(&klein, &d, &[], MAUS, tag(5)?, 1).map_err(|e| format!("erster: {e:?}"))?;
@@ -336,5 +385,33 @@ mod tests {
             Err(Sperre::JahresbudgetErschoepft)
         );
         Ok(())
+    }
+
+    /// Die Hoechstkosten beider Deckel passen 46-mal in das Monatsbudget: 20 € im Monat fuer
+    /// beide zusammen (Wolfgang, 05.11.2026).
+    #[test]
+    fn zwanzig_euro_im_monat() {
+        let g = KiGrenzen::standard();
+        let mut summe = 0;
+        for b in [BeraterId::Dachs, MAUS] {
+            let h = KiDeckel::standard(b).hoechstkosten().map_or(i64::MAX, |c| c.0);
+            let monat = h.saturating_mul(i64::from(g.aufrufe_je_monat));
+            assert!(monat <= g.kosten_je_monat.0, "{b:?}: {monat}");
+            summe += g.kosten_je_monat.0;
+        }
+        assert!(summe <= 2_000);
+        assert_eq!(KiDeckel::standard(BeraterId::Dachs).hoechstkosten(), Some(Cent(16)));
+        assert_eq!(KiDeckel::standard(MAUS).hoechstkosten(), Some(Cent(21)));
+    }
+
+    /// Tatsaechliche Kosten: Token und Suchen zusammen aufgerundet.
+    #[test]
+    fn kosten_ist_rundet_auf() {
+        let d = KiDeckel::standard(BeraterId::Dachs);
+        assert_eq!(d.kosten_ist(0, 0, 0), Some(Cent(0)));
+        assert_eq!(d.kosten_ist(1, 0, 0), Some(Cent(1)));
+        assert_eq!(d.kosten_ist(0, 0, 1), Some(Cent(1)));
+        assert_eq!(d.kosten_ist(5_000, 0, 1), Some(Cent(2)));
+        assert_eq!(d.kosten_ist(u64::MAX, u64::MAX, u64::MAX), None);
     }
 }

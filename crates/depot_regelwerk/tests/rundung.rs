@@ -104,25 +104,26 @@ fn lauf_ohne(topf: &Topf, kurse: &Kurse) -> Entscheidung {
     )
 }
 
-/// Maus' Gegenprobe zu PR #21: 1 BASF zu 49,925 € und 134,98 € Bargeld sind exakt 27,00035 %
-/// Anteil, also ueber 25 % plus 2 Punkte Toleranz. Mit abgerundeten Werten (49,92 € von
-/// 184,90 €) waeren es 26,99838 %, und der Abbau bliebe aus. Grenzen pruefen exakt.
+/// Maus' Gegenprobe zu PR #21, mit den Grenzen des Papierhandels: 1 BASF zu 49,925 € und
+/// 68,94 € Bargeld sind exakt 42,00143 % Anteil, also ueber 40 % plus 2 Punkte Toleranz. Mit
+/// abgerundeten Werten (49,92 € von 118,86 €) waeren es 41,99899 %, und der Abbau bliebe aus.
+/// Grenzen pruefen exakt.
 #[test]
 fn abbau_prueft_den_anteil_exakt() {
     let k = kurse(&[(BASF, 49_925_000), (MBG, 41_480_000)]);
-    let ent = lauf_ohne(&topf(13_498, &[(BASF, 1)]), &k);
+    let ent = lauf_ohne(&topf(6_894, &[(BASF, 1)]), &k);
     let abbau: Vec<_> = ent
         .verkaeufe
         .iter()
         .map(|a| (a.auftrag().stueck, a.beleg().anlass))
         .collect();
     assert_eq!(abbau, vec![(1, Anlass::Abbau)], "{ent:?}");
-    // Knapp darunter (134,99 € Bargeld: exakt 26,99889 %) bleibt der Bestand.
-    let ent = lauf_ohne(&topf(13_499, &[(BASF, 1)]), &k);
+    // Knapp darunter (68,95 € Bargeld: exakt 41,99797 %) bleibt der Bestand.
+    let ent = lauf_ohne(&topf(6_895, &[(BASF, 1)]), &k);
     assert!(ent.verkaeufe.is_empty(), "{ent:?}");
-    // Auch der Topfwert zaehlt exakt: 3 BASF und 404,95 € sind exakt 26,99999 %, kein Abbau.
-    // Mit abgerundetem Topfwert (554,72 € statt 554,725 €) waeren es 27,00024 %.
-    let ent = lauf_ohne(&topf(40_495, &[(BASF, 3)]), &k);
+    // Auch der Topfwert zaehlt exakt: 7 BASF und 482,61 € sind exakt 41,99992 %, kein Abbau.
+    // Mit abgerundetem Topfwert (832,08 € statt 832,085 €) waeren es 42,00017 %.
+    let ent = lauf_ohne(&topf(48_261, &[(BASF, 7)]), &k);
     assert!(ent.verkaeufe.is_empty(), "{ent:?}");
 }
 
