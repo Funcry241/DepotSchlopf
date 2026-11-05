@@ -11,7 +11,7 @@ Maus' zweiter von drei Punkten am 05.11.2026. Erster Teil: Nach einem PC-Neustar
 
 **Geprüft** heißt: Genau dieser Git-Baum hat das ganze Gate bestanden. `run.cmd` vermerkt den Baum des Index nach „Fertig“, `run.cmd update` den Baum des neuen Stands nach dem Gate im Prüfordner. Beides landet als Zeile `geprueft-v1;<baum>` in `daten/geprueft.txt`.
 
-**Sichern** (`depot_dienst::programmstand::sichere`): Der Wächter nennt dem mit Cargo gebauten Dienst den Baum, aus dem gebaut wurde (`--baum`). Läuft der Dienst 17 Sekunden und ist kein Update mehr auf Probe, kopiert er die Programme `depot_waechter`, `depot_dienst`, `depot_sammler` und `depot_berater` nach `daten/programm/<baum>/`. In `stand.txt` steht für jede Datei ein SHA-256-Abdruck. Danach zeigt `daten/programm/starte.cmd` auf den neuen Wächter. Gesichert wird nur, wenn
+**Sichern** (`depot_dienst::programmstand::sichere`): Der Wächter nennt dem mit Cargo gebauten Dienst den Baum, aus dem gebaut wurde (`--baum`). Läuft der Dienst 17 Sekunden und ist kein Update mehr auf Probe, kopiert er die Programme `depot_waechter`, `depot_dienst`, `depot_sammler` und `depot_berater` nach `daten/programm/<baum>/`. In `stand.txt` steht für jede Datei ein SHA-256-Abdruck. Danach zeigt `daten/programm/aktuell.txt` auf den neuen Stand. Gesichert wird nur, wenn
 
 - der Baum in `daten/geprueft.txt` steht,
 - der Projektordner sauber ist (`git status` meldet nichts) und
@@ -19,17 +19,16 @@ Maus' zweiter von drei Punkten am 05.11.2026. Erster Teil: Nach einem PC-Neustar
 
 Der neue und der vorige Stand bleiben, ältere werden gelöscht, soweit sie nicht in Gebrauch sind.
 
-**Starten:** `DepotSchlopf.cmd` ruft `daten\programm\starte.cmd`, wenn es sie gibt, sonst wie bisher Cargo. Der Wächter des Stands nimmt den gesicherten Stand nur, wenn er `startklar` ist:
+**Starten:** Der PowerShell-Aufruf im mitgelieferten Starter prüft Baum, Gate-Nachweis und Abdrücke, bevor es den gesicherten Wächter startet. Bei einer fehlgeschlagenen Prüfung baut `DepotSchlopf.cmd` mit Cargo. Der Wächter prüft den Stand ebenfalls:
 
 | Bedingung | sonst |
 |---|---|
 | kein Update auf Probe (`daten/update_offen.txt`) | mit Cargo bauen, damit der Rückfall greifen kann |
-| jede Programmdatei hat ihren Abdruck | mit Cargo bauen |
+| Gate-Nachweis vorhanden und jede Programmdatei hat ihren Abdruck | mit Cargo bauen |
 | Projektordner sauber und auf genau dem gesicherten Baum | mit Cargo bauen |
 
 Aus dem Stand laufen Kurse, Termine, Papiertag und das Einrichten des Journals direkt mit den Programmen des Stands. Nur das Update braucht weiter Cargo, denn es prüft mit dem ganzen Gate. Der Dienst prüft beim Start noch einmal, ob der Stand startklar ist, sonst nimmt er für die Aufträge Cargo.
 
-`starte.cmd` hat Aufruf und Ende in einer Zeile (`"…\depot_waechter.exe" %* & exit /b`). cmd liest eine Befehlsdatei zeilenweise nach. Schreibt der Dienst sie neu, während der Wächter läuft, liest cmd danach nichts Neues mehr.
 
 ## Anzeige
 

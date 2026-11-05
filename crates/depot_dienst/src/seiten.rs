@@ -48,7 +48,9 @@ pub fn abhilfe_knopf(token: &str, a: Abhilfe) -> Option<String> {
         Abhilfe::KurseAbrufen => Some(auftrag_knopf(token, Art::Kurse, "Kurse abrufen")),
         Abhilfe::TermineAbrufen => Some(auftrag_knopf(token, Art::Termine, "Termine abrufen")),
         Abhilfe::PapiertagStarten => Some(auftrag_knopf(token, Art::Papier, "Papiertag starten")),
-        Abhilfe::SchluesselKursquelle | Abhilfe::SchluesselBerater(_) => {
+        Abhilfe::SchluesselKursquelle
+        | Abhilfe::SchluesselKursquelleUs
+        | Abhilfe::SchluesselBerater(_) => {
             Some("<a href=\"/einrichtung#schluessel\">Zur Einrichtung</a>".into())
         }
         Abhilfe::KostenschutzPruefen => {
@@ -253,11 +255,13 @@ fn wochentag_text(d: Datum) -> &'static str {
     }
 }
 
-/// Der naechste Lauf des Zeitplans als Satz.
 /// Wie es nach einem gescheiterten Lauf weitergeht, aus dem tatsaechlichen Zeitplan: von selbst
-/// nur, wenn er an ist (Maus, Befund 3 zu #38). Der Lauf selbst kennt den Zeitplan nicht.
+/// nur, wenn er an ist und kein Fehler ihn anhaelt. Der Lauf selbst kennt den Zeitplan nicht.
 fn weiter_text(z: &Zustand, heute: Option<Datum>) -> String {
     let naechster = naechster_text(z, heute);
+    if z.erledigt_fehler.is_some() || z.zeitplan_fehler.is_some() {
+        return naechster;
+    }
     let naechster = naechster.trim_end_matches('.');
     if z.zeitplan.an && heute.is_some() {
         format!("Nach Zeitplan geht es von selbst weiter: {naechster}.")
@@ -269,6 +273,7 @@ fn weiter_text(z: &Zustand, heute: Option<Datum>) -> String {
     }
 }
 
+/// Der naechste Lauf des Zeitplans als Satz.
 pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     if let Some(f) = &z.erledigt_fehler {
         return format!(
@@ -511,6 +516,7 @@ pub fn status(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
 fn regel(w: Wer) -> &'static str {
     match w {
         Wer::Kursquelle => "8 bis 64 Großbuchstaben und Ziffern",
+        Wer::KursquelleUs => "20 bis 64 Kleinbuchstaben und Ziffern",
         Wer::Berater(_) => "20 bis 256 Zeichen aus A-Z, a-z, 0-9, _ und -",
     }
 }

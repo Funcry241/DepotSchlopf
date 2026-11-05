@@ -169,13 +169,15 @@ pub fn einordnen(b: &Bericht, quelle: Anbieter) -> Option<depot_journal::anbiete
     if fehler.is_empty() {
         return None;
     }
-    if fehler
-        .iter()
-        .any(|t| t.contains("rate limit") || t.contains("requests per"))
-    {
+    if fehler.iter().any(|t| {
+        t == "abruf: http status: 429" || t.contains("rate limit") || t.contains("requests per")
+    }) {
         return Some(E::Limit);
     }
-    if fehler.iter().all(|t| t.contains("apikey")) {
+    if fehler
+        .iter()
+        .all(|t| t == "abruf: http status: 401" || t.contains("apikey"))
+    {
         return Some(E::Abgelehnt);
     }
     if fehler.iter().all(|t| t.starts_with("abruf:")) {

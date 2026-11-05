@@ -64,6 +64,7 @@ fn lauf(wurzel: &Path) -> Result<PathBuf, String> {
             jetzt,
             journal,
             kursquelle: Hinterlegt::Unbekannt,
+            kursquelle_us: Hinterlegt::Unbekannt,
             berater: [
                 (BeraterId::Dachs, Hinterlegt::Unbekannt),
                 (BeraterId::Maus, Hinterlegt::Unbekannt),

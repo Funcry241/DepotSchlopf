@@ -552,3 +552,34 @@ fn anbieterprotokoll_je_quelle() -> Result<(), String> {
     assert_eq!(Wer::aus_kurz(Wer::Tiingo.kurz()), Some(Wer::Tiingo));
     Ok(())
 }
+
+#[test]
+fn tiingo_protokoll_unterscheidet_ablehnung_und_limit() -> Result<(), String> {
+    use depot_journal::anbieter::Ergebnis as E;
+    let nyse = nur(&werte()?, Boerse::Nyse);
+    for (fehler, erwartet) in [
+        ("http status: 401", E::Abgelehnt),
+        ("http status: 429", E::Limit),
+    ] {
+        let (journal, roh) = ordner()?;
+        let mut netz = Erfunden::neu(&[
+            ("ezb", Ok(ezb(&[("2026-11-04", "1.1224")]))),
+            ("aapl", Err(fehler)),
+        ]);
+        let b = lauf(
+            &journal,
+            &roh,
+            &mut netz,
+            &zugang()?,
+            vec![utc(11, 4, 21, 4)?],
+            &nyse,
+        )?
+        .map_err(|e| format!("Lauf: {e:?}"))?;
+        assert_eq!(
+            depot_sammler::einordnen(&b, Anbieter::Tiingo),
+            Some(erwartet)
+        );
+        assert_eq!(depot_sammler::einordnen(&b, Anbieter::AlphaVantage), None);
+    }
+    Ok(())
+}

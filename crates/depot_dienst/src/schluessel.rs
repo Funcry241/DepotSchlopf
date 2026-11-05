@@ -3,7 +3,9 @@
 //!
 //! Adressen und Regeln sind dieselben wie in den Laeufen, die die Schluessel benutzen:
 //! - Kursquelle `DepotSchlopf/alphavantage`: 8 bis 64 Grossbuchstaben und Ziffern
-//!   (wie `depot_sammler::Schluessel::neu`).
+//!   (wie `depot_sammler::Schluessel::fuer`).
+//! - Kursquelle der NYSE `DepotSchlopf/tiingo`: 20 bis 64 Kleinbuchstaben und Ziffern
+//!   (ebenso).
 //! - Dachs `DepotSchlopf/anthropic`, Maus `DepotSchlopf/openai`: 20 bis 256 Zeichen aus
 //!   `A-Z a-z 0-9 _ -` (wie der Berater sie liest).
 //!
@@ -16,11 +18,14 @@ use depot_lage::Hinterlegt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wer {
     Kursquelle,
+    /// Kursquelle der NYSE (Tiingo).
+    KursquelleUs,
     Berater(BeraterId),
 }
 
-pub const ALLE: [Wer; 3] = [
+pub const ALLE: [Wer; 4] = [
     Wer::Kursquelle,
+    Wer::KursquelleUs,
     Wer::Berater(BeraterId::Dachs),
     Wer::Berater(BeraterId::Maus),
 ];
@@ -32,6 +37,7 @@ impl Wer {
     pub fn dienst(self) -> &'static str {
         match self {
             Wer::Kursquelle => "alphavantage",
+            Wer::KursquelleUs => "tiingo",
             Wer::Berater(BeraterId::Dachs) => "anthropic",
             Wer::Berater(BeraterId::Maus) => "openai",
         }
@@ -41,6 +47,7 @@ impl Wer {
     pub fn adresse(self) -> &'static str {
         match self {
             Wer::Kursquelle => "DepotSchlopf/alphavantage",
+            Wer::KursquelleUs => "DepotSchlopf/tiingo",
             Wer::Berater(BeraterId::Dachs) => "DepotSchlopf/anthropic",
             Wer::Berater(BeraterId::Maus) => "DepotSchlopf/openai",
         }
@@ -49,6 +56,7 @@ impl Wer {
     pub fn name(self) -> &'static str {
         match self {
             Wer::Kursquelle => "Kursquelle (Alpha Vantage)",
+            Wer::KursquelleUs => "Kursquelle NYSE (Tiingo)",
             Wer::Berater(BeraterId::Dachs) => "Dachs (Claude, Anthropic)",
             Wer::Berater(BeraterId::Maus) => "Maus (GPT, OpenAI)",
         }
@@ -58,6 +66,7 @@ impl Wer {
     pub fn protokoll(self) -> depot_lage::anbieter::Wer {
         match self {
             Wer::Kursquelle => depot_lage::anbieter::Wer::Kursquelle,
+            Wer::KursquelleUs => depot_lage::anbieter::Wer::Tiingo,
             Wer::Berater(BeraterId::Dachs) => depot_lage::anbieter::Wer::Dachs,
             Wer::Berater(BeraterId::Maus) => depot_lage::anbieter::Wer::Maus,
         }
@@ -89,6 +98,17 @@ impl Wer {
                     .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
                 {
                     return Err("nur Grossbuchstaben und Ziffern erlaubt");
+                }
+            }
+            Wer::KursquelleUs => {
+                if !(20..=64).contains(&t.len()) {
+                    return Err("20 bis 64 Zeichen erwartet");
+                }
+                if !t
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+                {
+                    return Err("nur Kleinbuchstaben und Ziffern erlaubt");
                 }
             }
             Wer::Berater(_) => {

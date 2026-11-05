@@ -114,11 +114,21 @@ Ab diesem Schritt ruft der Dienst jede Börse der Liste an ihren Handelstagen ku
 
 Solange die Liste nur Xetra-Werte hat, läuft alles wie bisher: Termine 17:40 Uhr, Xetra 17:45 Uhr, danach der Papiertag. Tests: `kurse_je_boerse_nach_ihrem_schluss`, `erledigt_frueherer_form`, `papiertag_nach_dem_letzten_abruf_des_tages` (alle vier Ausgänge von Xetra und NYSE).
 
+## Abruf je Börse, Schritt 5: Tiingo-Schlüssel und erste US-Werte
+
+- **Liste:** fünf Werte der NYSE kommen dazu, neben den zehn von Xetra: JPMorgan Chase (`JPM`, US46625H1005), Coca-Cola (`KO`, US1912161007), Johnson & Johnson (`JNJ`, US4781601046), Exxon Mobil (`XOM`, US30231G1022) und Visa (`V`, US92826C8394). Alle sind an der NYSE notiert, nicht an der Nasdaq, deren Kalender der Kern noch nicht kennt. Die ISIN-Prüfziffern prüft `pruefe_liste`.
+- **Kontingent je Quelle als Regel:** `pruefe_liste` lehnt eine Liste ab, die einer Quelle mehr Werte gibt, als ein Lauf abrufen darf (`liste::hoechstens_werte`): Alpha Vantage 25 (Abrufe am Tag), Tiingo 500 (verschiedene Kürzel im Monat, die engere Grenze der kostenlosen Stufe). Vorher prüfte das nur ein Test, und nur die Gesamtzahl.
+- **Schlüssel in der Einrichtung:** `DepotSchlopf/tiingo` lässt sich wie die anderen dort hinterlegen (`schluessel::Wer::KursquelleUs`, 20 bis 64 Kleinbuchstaben und Ziffern, dieselbe Regel wie im Sammler). Das Lagebild zeigt den Punkt „Kursquelle Tiingo (NYSE)“, sobald die Liste einen Wert dieser Quelle hat; fehlt der Schlüssel, ist der nächste Schritt, ihn zu hinterlegen, gleich nach Alpha Vantage. Ohne ihn läuft Xetra weiter, die NYSE-Kandidaten fallen aus der Auswahl.
+- **Ablauf ab jetzt:** Termine 17:40 Uhr, Xetra 17:45 Uhr, NYSE meist 22:10 Uhr, danach der Papiertag. An Heiligabend handelt die NYSE bis 19:00 Uhr Frankfurt; der Tag ist damit ein Handelstag mit nur dem NYSE-Abruf um 19:10 Uhr und erscheint im Rückblick als verpasst, wenn kein Abruf kam.
+
+Tests: `zeitplan_der_liste_ruft_xetra_und_nyse_ab`, `fehlender_schluessel_von_tiingo_ist_offen`, `schluesselregeln`, `beobachtungsliste_gueltig` (mit 26 Xetra-Werten abgelehnt), `feiertag_ist_geschlossen_und_auslassung_sichtbar` (Heiligabend jetzt Handelstag). Die älteren Zeitplan-Tests prüfen ausdrücklich nur Xetra (`faellig_x`, `naechster_x`).
+
 ## Nicht in diesem Schritt
 
 - **Abrufzeit:** Mit nur Xetra-Werten bleibt der Abruf kurz nach 17:35 Uhr richtig. Wolfgang hat am 05.11.2026 entschieden, Maus' Vorschlag zu folgen: Kurse je Börse kurz nach ihrem Schluss abrufen, die Altersprüfung je Abrufzeitpunkt, danach ein gemeinsamer Papiertag. Kein gemeinsamer Abruf um 22:30 Uhr. Schritt 1 ist umgesetzt: Das Alter eines Kurses misst sich an seinem eigenen Abruf (`Kurse::mit_abrufen`), Test `alter_je_abruf_nicht_je_spaetestem_abruf`. Zeitplan je Börse und Papiertag nach dem letzten Abruf kommen mit Tiingo, wenn die ersten US-Werte in der Liste stehen.
 - **Rotation der Kandidaten und Tiingo als US-Quelle:** eigener PR, freigegeben am 05.11.2026.
-- **Tiingo-Schlüssel in der Einrichtung, erste US-Werte in der Liste:** nächster Schritt.
+- **Rotation der Kandidaten:** Mehr Werte, als das Kontingent von Alpha Vantage an einem Tag erlaubt, brauchen eine Rotation; die kommt in einem eigenen Schritt.
+- **Tiingo-Antwortform:** bestätigt erst der erste echte Lauf (aus der Cloud-Umgebung gesperrt).
 
 ## Tests
 

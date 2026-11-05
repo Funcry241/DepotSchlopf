@@ -865,6 +865,27 @@ fn sicher_nicht_gesendet_wird_unter_derselben_reservierung_wiederholt() -> Resul
     Ok(())
 }
 
+#[test]
+fn sperre_waehrend_des_wartens_verhindert_neuen_versand() -> Result<(), String> {
+    thread_local! {
+        static SPERRE: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+    }
+    let mut ort = Ort::neu()?;
+    SPERRE.with(|s| s.replace(Some(ort.sperre())));
+    let mut dachs = berater(&ort, BeraterId::Dachs, Attrappe::default())?.mit_warten(|_| {
+        SPERRE.with(|s| {
+            if let Some(pfad) = s.take() {
+                assert!(fs::write(pfad, "Kosten unbekannt").is_ok());
+            }
+        });
+    });
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.einschaetzung.contains("KI gesperrt"), "{a:?}");
+    assert_eq!(dachs.netz().gesendet.len(), 1);
+    Ok(())
+}
+
 /// Nach drei Versuchen ohne Verbindung: kein Vorschlag, keine Sperre, nichts gekostet.
 #[test]
 fn ohne_verbindung_nach_drei_versuchen_aufgegeben() -> Result<(), String> {

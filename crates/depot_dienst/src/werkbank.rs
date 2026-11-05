@@ -497,6 +497,15 @@ impl Dienst {
         if z.laufend.is_none()
             && let Some((art, anlass)) = z.warteschlange.pop_front()
         {
+            if art == Art::Papier && anlass == Anlass::Zeitplan {
+                let noch_faellig = ortszeit(jetzt).is_some_and(|(tag, h, m, _, _)| {
+                    faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen)
+                        == Some(Art::Papier)
+                });
+                if z.erledigt_fehler.is_some() || !noch_faellig {
+                    return None;
+                }
+            }
             let nr = z.naechste_nr;
             z.naechste_nr = nr.saturating_add(1);
             let mut auftrag = Auftrag {
@@ -590,7 +599,7 @@ impl Dienst {
     }
 
     fn zeitplan_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
-        if z.erledigt_fehler.is_some() {
+        if z.neustart || z.erledigt_fehler.is_some() {
             return;
         }
         let Some((tag, h, m, _, _)) = ortszeit(jetzt) else {
@@ -605,15 +614,19 @@ impl Dienst {
             let _ = einreihen(z, art, Anlass::Zeitplan);
             return;
         }
-        // Erst festhalten, dann starten: Ein Neustart startet nichts doppelt.
+        // Bei voller Warteschlange bleibt der Abruf faellig. Vor der Ausfuehrung wird
+        // er dauerhaft vermerkt, damit ein Neustart ihn nicht doppelt startet.
+        if einreihen(z, art, Anlass::Zeitplan).is_err() {
+            return;
+        }
         let mut neu = z.erledigt;
         neu.setze(art, tag);
         match schreibe_ganz(&erledigt_pfad(&self.wurzel), &neu.als_text()) {
             Ok(()) => {
                 z.erledigt = neu;
-                let _ = einreihen(z, art, Anlass::Zeitplan);
             }
             Err(e) => {
+                let _ = z.warteschlange.pop_back();
                 z.zeitplan.an = false;
                 z.zeitplan_fehler = Some(format!("Zeitplan angehalten: {e}"));
             }
@@ -794,7 +807,7 @@ pub fn nach_neustart(z: &Zustand, tag: Datum) -> Option<(bool, String)> {
         .filter(|a| a.anlass == Anlass::Zeitplan)
         .map(|a| if a.ende.is_none() { None } else { a.erfolg })
         .or_else(|| {
-            (z.erledigt.papier == Some(tag)
+            (z.erledigt.kurse_ok == Some(tag)
                 && z.warteschlange.contains(&(Art::Papier, Anlass::Zeitplan)))
             .then_some(None)
         });
@@ -841,7 +854,7 @@ pub fn nach_neustart(z: &Zustand, tag: Datum) -> Option<(bool, String)> {
         return Some((
             true,
             "Der Kursabruf lief, als DepotSchlopf endete. Ohne Kurse von heute folgt heute kein \
-             Papiertag von selbst. Du musst nichts tun; morgen geht es nach Zeitplan weiter."
+             Papiertag von selbst. Der aktuelle Zeitplan steht unter Tätigkeit."
                 .into(),
         ));
     }

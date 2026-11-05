@@ -2,7 +2,7 @@
 //! gepruefte Stand ohne Cargo, aber nur, wenn er genau zum Projektordner passt.
 //!
 //! Abnahmefall 2, erster Teil: Windows neu starten. Der Autostart ruft `DepotSchlopf.cmd`, das
-//! `daten/programm/starte.cmd` ruft; der Waechter nimmt den Stand nur, wenn `startklar`.
+//! den gesicherten Stand prueft; der Waechter nimmt ihn nur, wenn `startklar`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_dienst::programmstand::{
-    self, PROGRAMME, datei, geprueft_pfad, sauberer_baum, sichere, starter_pfad, startklar,
+    self, PROGRAMME, datei, geprueft_pfad, sauberer_baum, sichere, startklar,
 };
 use depot_dienst::rueckfall;
 use depot_dienst::werkbank::Art;
@@ -75,7 +75,7 @@ fn nur_ein_gepruefter_sauberer_stand_wird_gesichert() -> Result<(), String> {
     let baum = sauberer_baum(&wurzel)?;
     let e = sichere(&wurzel, &baum, &bau).err().unwrap_or_default();
     assert!(e.contains("Gate"), "{e}");
-    assert!(!starter_pfad(&wurzel).exists());
+    assert!(programmstand::aktuell(&wurzel)?.is_none());
     als_geprueft(&wurzel, &baum)?;
     // Lokale Aenderung: nicht sicher, woraus gebaut wurde.
     fs::write(wurzel.join("a.txt"), "anders\n").map_err(|e| e.to_string())?;
@@ -90,11 +90,6 @@ fn nur_ein_gepruefter_sauberer_stand_wird_gesichert() -> Result<(), String> {
             format!("programm {p}")
         );
     }
-    let start = fs::read_to_string(starter_pfad(&wurzel)).map_err(|e| e.to_string())?;
-    assert!(
-        start.contains(&format!("{}\" %* & exit /b", datei("depot_waechter"))),
-        "{start}"
-    );
     assert_eq!(startklar(&wurzel)?, s);
     Ok(())
 }
@@ -107,6 +102,9 @@ fn startklar_nur_wenn_alles_passt() -> Result<(), String> {
     als_geprueft(&wurzel, &baum)?;
     let s = sichere(&wurzel, &baum, &bau)?;
     assert!(startklar(&wurzel).is_ok());
+    fs::remove_file(geprueft_pfad(&wurzel)).map_err(|e| e.to_string())?;
+    assert!(startklar(&wurzel).is_err(), "Ohne Gate-Nachweis kein Start");
+    als_geprueft(&wurzel, &baum)?;
 
     // Ein Update auf Probe: immer mit Cargo, damit der Rueckfall greifen kann.
     let offen = rueckfall::offen_pfad(&wurzel);
@@ -170,5 +168,39 @@ fn auftraege_starten_die_programme_des_stands() -> Result<(), String> {
     );
     assert_eq!(args(Art::Papier), vec!["papier"]);
     assert_eq!(programm(Art::Update), "cargo");
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_starter_startet_keinen_beschaedigten_waechter() -> Result<(), String> {
+    let (wurzel, bau) = projekt()?;
+    fs::write(
+        wurzel.join("DepotSchlopf.cmd"),
+        include_bytes!("../../../DepotSchlopf.cmd"),
+    )
+    .map_err(|e| e.to_string())?;
+    fs::write(
+        wurzel.join("cargo.cmd"),
+        b"@echo off\r\necho rueckfall > daten\\cargo-aufgerufen.txt\r\nexit /b 0\r\n",
+    )
+    .map_err(|e| e.to_string())?;
+    git(&wurzel, &["add", "-A"])?;
+    git(&wurzel, &["commit", "-q", "-m", "Starter"])?;
+    let baum = sauberer_baum(&wurzel)?;
+    als_geprueft(&wurzel, &baum)?;
+    let s = sichere(&wurzel, &baum, &bau)?;
+    fs::write(s.programm("depot_waechter"), "beschaedigt").map_err(|e| e.to_string())?;
+    let aus = Command::new("cmd.exe")
+        .args(["/D", "/C", "DepotSchlopf.cmd", "--ohne-browser"])
+        .current_dir(&wurzel)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    assert!(aus.status.success(), "{aus:?}");
+    assert!(
+        wurzel.join("daten/cargo-aufgerufen.txt").is_file(),
+        "{aus:?}"
+    );
     Ok(())
 }
