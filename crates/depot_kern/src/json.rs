@@ -348,15 +348,57 @@ fn escapte_zeichenketten(text: &str) -> Vec<String> {
     aus
 }
 
-/// Jeder Text, der in `text` steckt: der Text selbst und jede JSON-Zeichenkette darin mit
-/// Escape, dekodiert, auch Zeichenketten in Zeichenketten bis `MAX_SCHICHTEN` tief. Wer ein
+/// Der Text mit jedem JSON-Escape dekodiert, auch ausserhalb einer Zeichenkette (`\u0054` zu
+/// `T`); ein ungueltiges Escape bleibt stehen. `None` ohne Escape.
+fn ohne_escapes(text: &str) -> Option<String> {
+    if !text.contains('\\') {
+        return None;
+    }
+    let mut aus = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(pos) = rest.find('\\') {
+        aus.push_str(rest.get(..pos)?);
+        let nach = rest.get(pos.saturating_add(1)..)?;
+        let mut zeichen = nach.chars();
+        let (z, laenge) = match zeichen.next() {
+            Some('u') => {
+                let hex = nach.get(1..5);
+                match hex
+                    .and_then(|h| u32::from_str_radix(h, 16).ok())
+                    .and_then(char::from_u32)
+                {
+                    Some(c) => (c, 5),
+                    None => ('\\', 0),
+                }
+            }
+            Some('n') => ('\n', 1),
+            Some('t') => ('\t', 1),
+            Some('r') => ('\r', 1),
+            Some('b') => ('\u{8}', 1),
+            Some('f') => ('\u{c}', 1),
+            Some(c @ ('"' | '\\' | '/')) => (c, 1),
+            _ => ('\\', 0),
+        };
+        aus.push(z);
+        rest = nach.get(laenge..)?;
+    }
+    aus.push_str(rest);
+    Some(aus)
+}
+
+/// Jeder Text, der in `text` steckt: der Text selbst, jede JSON-Zeichenkette darin mit Escape,
+/// dekodiert, und der ganze Text mit dekodierten Escapes, auch geschachtelt bis `MAX_SCHICHTEN`
+/// tief. Wer ein
 /// Geheimnis sucht, sucht in allen; ein Escape wie `\u0054` verbirgt es so nicht (K28-01).
 pub fn alle_texte(text: &str) -> Vec<String> {
     let mut aus = Vec::new();
     let mut offen = vec![(text.to_string(), 0usize)];
     while let Some((t, schicht)) = offen.pop() {
         if schicht < MAX_SCHICHTEN {
-            for s in escapte_zeichenketten(&t) {
+            for s in escapte_zeichenketten(&t)
+                .into_iter()
+                .chain(ohne_escapes(&t))
+            {
                 offen.push((s, schicht.saturating_add(1)));
             }
         }
@@ -417,6 +459,9 @@ mod tests {
         // Auch ausserhalb von gueltigem JSON.
         let t = alle_texte("Einleitung \"\\u0041B\" Rest {kaputt");
         assert!(t.iter().any(|s| s == "AB"), "{t:?}");
+        // Und ohne Anfuehrungszeichen, auch doppelt verschluesselt.
+        let t = alle_texte("Leck \\\\u0041\\\\u0042 \\q");
+        assert!(t.iter().any(|s| s.contains("Leck AB")), "{t:?}");
     }
 
     #[test]

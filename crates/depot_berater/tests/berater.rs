@@ -728,3 +728,46 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// K28-01 fuer den Berater: Steht der Schluessel nur hinter Escapes in der Antwort, etwa in
+/// einem Feld, dessen Fehler ihn sonst in die Meldung truege, wird nichts davon verwendet. Die
+/// Kosten werden trotzdem geprueft.
+#[test]
+fn schluessel_hinter_escapes_gelangt_nie_ins_ergebnis() -> Result<(), String> {
+    let maskiert = SCHLUESSEL.chars().fold(String::new(), |mut m, c| {
+        let _ = write!(m, "\\u{:04x}", u32::from(c));
+        m
+    });
+    let texte = [
+        // Ungueltige ISIN: Ihr Fehler naennte sie.
+        format!(
+            "{{\"einschaetzung\": \"x\", \"ziele\": [{{\"isin\": \"{maskiert}\", \"gewicht_bp\": 1000, \"begruendung\": \"y\"}}]}}"
+        ),
+        // Unbekanntes Feld, nie gelesen, aber Teil der Antwort.
+        format!("{{\"einschaetzung\": \"x\", \"ziele\": null, \"notiz\": \"{maskiert}\"}}"),
+        // Ausserhalb des JSON-Objekts.
+        format!("Vorab {maskiert}\n{{\"einschaetzung\": \"x\", \"ziele\": null}}"),
+    ];
+    for text in &texte {
+        let mut ort = Ort::neu()?;
+        let mut netz = Attrappe::default();
+        netz.antworten.push_back(claude(text, 1_000, 100, 0));
+        let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+        let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+        let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+        assert!(a.vorschlag.is_none(), "{a:?}");
+        let alles = format!("{a:?}");
+        assert!(
+            !depot_berater::json::alle_texte(&alles)
+                .iter()
+                .any(|t| t.contains(SCHLUESSEL)),
+            "{a:?}"
+        );
+        assert!(
+            a.einschaetzung.contains("Schluessel des Anbieters"),
+            "{a:?}"
+        );
+        assert!(a.einschaetzung.contains("Kosten 1 von 24"), "{a:?}");
+    }
+    Ok(())
+}

@@ -7,7 +7,8 @@
 //!
 //! Reihenfolge wie bei den Kursen (R12): Erst liegt die rohe Antwort unter
 //! `daten/roh/alphavantage-news/`, dann steht jede Nachricht daraus im Journal. Enthaelt die
-//! Antwort den Schluessel, wird sie weder abgelegt noch gelesen (K19-01). Der Lauf erfindet
+//! Antwort den Schluessel, roh oder in einer dekodierten Zeichenkette, wird sie weder abgelegt
+//! noch gelesen (K19-01, K28-01). Der Lauf erfindet
 //! nichts: Eine Nachricht ohne Titel oder mit unlesbarer Zeit wird ausgelassen, nicht geraten.
 //! Belegt werden hoechstens `MAX_NACHRICHTEN` Nachrichten der letzten `MAX_ALTER_STUNDEN`
 //! Stunden, jede mit hoechstens `MAX_ZEICHEN` Zeichen; so bleibt die Frage an die Berater klein.
@@ -205,6 +206,15 @@ pub fn sammle_nachrichten(
             return Ok(bericht);
         }
     };
+    // Zweite Pruefung an den fertigen Texten, so wie sie ins Journal gingen, vor dem ersten
+    // Beleg.
+    if nachrichten
+        .iter()
+        .any(|n| schluessel.steht_in(n.text.as_bytes()))
+    {
+        bericht.fehler = Some("Eine Nachricht enthaelt den Schluessel: nichts belegt".into());
+        return Ok(bericht);
+    }
     // Die aelteste zuerst, damit das Journal in der Reihenfolge der Veroeffentlichung steht.
     for n in nachrichten.iter().rev() {
         let beleg = NachrichtBeleg::neu(QUELLE_NACHRICHTEN, abruf, &roh, n.zeit, &n.text)

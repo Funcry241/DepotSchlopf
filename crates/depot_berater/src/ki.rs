@@ -83,17 +83,27 @@ impl<N: Netz> KiBerater<N> {
         self.gesperrt || self.sperre.exists()
     }
 
-    /// Steht der eigene Schluessel in diesem Text?
+    /// Steht der eigene Schluessel in diesem Text, roh oder hinter JSON-Escapes, auch
+    /// geschachtelt (`json::alle_texte`, K28-01)?
     fn enthaelt_schluessel(&self, text: &str) -> bool {
-        self.schluessel
-            .as_ref()
-            .is_some_and(|s| text.contains(s.als_str()))
+        self.schluessel.as_ref().is_some_and(|s| {
+            crate::json::alle_texte(text)
+                .iter()
+                .any(|t| t.contains(s.als_str()))
+        })
     }
 
+    /// Ein Text fuer Meldung und Journal: ohne Schluessel. Steht er nur verborgen darin, etwa
+    /// hinter Escapes, gilt der ganze Text als Geheimnis.
     fn bereinigt(&self, text: &str) -> String {
-        self.schluessel
+        let roh = self
+            .schluessel
             .as_ref()
-            .map_or_else(|| text.to_string(), |s| s.bereinige(text))
+            .map_or_else(|| text.to_string(), |s| s.bereinige(text));
+        if self.enthaelt_schluessel(&roh) {
+            return GEHEIMNIS.into();
+        }
+        roh
     }
 
     /// Sperrt alle KIs: Datei schreiben und im Lauf merken. Misslingt das Schreiben, bleibt
@@ -268,7 +278,7 @@ impl<N: Netz> Berater for KiBerater<N> {
             Err(grund) => Antwort {
                 einschaetzung: format!(
                     "keine verwertbare Antwort: {} [{}]",
-                    sauber(&grund),
+                    sauber(&self.bereinigt(&grund)),
                     e.kosten
                 ),
                 vorschlag: None,
@@ -299,7 +309,7 @@ impl<N: Netz> Berater for KiBerater<N> {
                 zustimmung: false,
                 begruendung: format!(
                     "keine verwertbare Antwort: {} [{}]",
-                    sauber(&grund),
+                    sauber(&self.bereinigt(&grund)),
                     e.kosten
                 ),
             },

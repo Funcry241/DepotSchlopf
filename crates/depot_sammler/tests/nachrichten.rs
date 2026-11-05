@@ -3,6 +3,7 @@
 //! bekommt sie von einer erfundenen Quelle statt aus dem Netz. Jede Vorbereitung prueft ihren
 //! Erfolg ausdruecklich und endet sonst mit „Vorbedingung …“.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -267,10 +268,10 @@ fn schluessel_in_der_antwort_wird_nicht_abgelegt() -> Result<(), String> {
 /// zweite Schicht Escapes ihn verbirgt.
 #[test]
 fn schluessel_hinter_escapes_wird_nicht_abgelegt() -> Result<(), String> {
-    let maskiert: String = SCHLUESSEL
-        .chars()
-        .map(|c| format!("\\u{:04x}", u32::from(c)))
-        .collect();
+    let maskiert: String = SCHLUESSEL.chars().fold(String::new(), |mut m, c| {
+        let _ = write!(m, "\\u{:04x}", u32::from(c));
+        m
+    });
     let einfach = antwort(&[]).replace("\"feed\":[]", &format!(
         "\"feed\":[{{\"title\":\"Leck {maskiert}\",\"time_published\":\"20261105T150000\",\"source\":\"X\",\"summary\":\"\"}}]"
     ));

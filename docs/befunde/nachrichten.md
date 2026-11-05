@@ -5,7 +5,7 @@ Stand 05.11.2026. Wolfgang hat entschieden: Der Sammler holt die Nachrichten vor
 ## Ablauf
 
 1. `run.cmd kurse` holt zuerst die Kurse (10 Abrufe), dann nach 15 Sekunden einmal `NEWS_SENTIMENT` mit `topics=financial_markets&sort=LATEST&limit=50`. Das sind 11 der 25 Abrufe, die Alpha Vantage am Tag erlaubt. `run.cmd nachrichten` holt nur die Nachrichten.
-2. Enthält die Antwort den Schlüssel, gleich in welcher Schreibweise, wird sie weder abgelegt noch gelesen (wie K19-01).
+2. Enthält die Antwort den Schlüssel, gleich in welcher Schreibweise, wird sie weder abgelegt noch gelesen (wie K19-01). Geprüft wird roh und in jedem Text darin nach dem Dekodieren von JSON-Escapes, auch geschachtelt (K28-01, siehe unten).
 3. Sonst liegt sie roh unter `daten/roh/alphavantage-news/<abruf>.json`.
 4. Gelesen wird die Liste `feed`. Fehlt sie, meldet der Lauf den Hinweis der Quelle (etwa das Tageskontingent) und belegt nichts.
 5. Je Nachricht: `time_published` (UTC, `JJJJMMTTTHHMMSS`), `title`, `source`, `summary`, bis zu fünf `ticker_sentiment[].ticker`. Ohne Titel oder mit unlesbarer Zeit wird eine Nachricht ausgelassen, nicht geraten. Steuerzeichen werden zu Leerzeichen, der Text hat höchstens 400 Zeichen.
@@ -38,6 +38,17 @@ Neue Art `nachricht`, wie `kurs` und `termin` ein Beleg von außen:
 | `depot_journal/tests/nachrichten.rs` | Beleg, Wiedereröffnen, kein Doppel, Abruf fällt nicht zurück, nur gültige und kanonische Einträge |
 | `depot_sim/tests/papiertag.rs` `berater_sehen_die_nachrichten_der_letzten_tage` | Berater sehen 30 Nachrichten vom Handelstag und Vortag, die neueste zuerst, ältere nicht |
 | `depot_berater/tests/berater.rs` `groesste_lage_passt_unter_den_deckel` | alle zehn Werte, vier Positionen, 30 Termine und 30 Nachrichten mit Vier-Byte-Zeichen: Vorschlag und Zweitmeinung werden gesendet und bleiben unter 40.000 Bytes |
+
+## K28-01: Schlüssel hinter Escapes
+
+Maus' Gegenprobe (Stand `d41c69e`): Gab die Quelle den Schlüssel als Unicode-Escapes zurück (`\u0054` für `T`), sah die Prüfung der rohen Antwort ihn nicht, und nach dem Dekodieren stand er als Nachricht im Journal.
+
+Allgemeine Lösung für jede Quelle und jeden Berater: `depot_kern::json::alle_texte` liefert zu einem Text den Text selbst, jede JSON-Zeichenkette darin dekodiert (gesucht ab jedem Anführungszeichen, auch außerhalb gültigen JSONs) und den ganzen Text mit dekodierten Escapes, geschachtelt bis vier Schichten tief. Gesucht wird der Schlüssel in allen.
+
+- Sammler (`Schluessel::steht_in`): gilt für Kurse und Nachrichten vor Ablage und Lesen; die Nachrichten werden vor dem ersten Beleg noch einmal am fertigen Text geprüft.
+- Berater (`enthaelt_schluessel`, `bereinigt`): Die rohe Antwort wird so geprüft, ebenso jede Meldung. Dabei fand sich eine zweite Stelle: Der Fehler zu einer ungültigen ISIN nannte den dekodierten Wert und ging ohne Bereinigung ins Journal. Jetzt geht jede Fehlermeldung durch `bereinigt`, und steht der Schlüssel nur verborgen darin, ersetzt sie die Meldung ganz.
+
+Tests: `schluessel_hinter_escapes_wird_nicht_abgelegt` (Nachrichten, einfach und doppelt verschlüsselt), der Fall „Escapes“ in `schluessel_erscheint_nirgends` (Kurse), `schluessel_hinter_escapes_gelangt_nie_ins_ergebnis` (Berater: ISIN-Fehler, unbekanntes Feld, Text vor dem Objekt; die Kosten werden trotzdem geprüft) und `alle_texte_dekodiert_auch_verschachtelt` im Kern.
 
 ## Offen
 

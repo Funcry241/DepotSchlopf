@@ -5,6 +5,7 @@
 //! Jede Vorbereitung prueft ihren Erfolg ausdruecklich und endet sonst mit „Vorbedingung …“.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -433,10 +434,10 @@ fn mit_schluessel(b: &[u8]) -> bool {
 
 /// Der Schluessel als JSON-Escapes, Zeichen fuer Zeichen (`\u0045…`).
 fn maskiert() -> String {
-    SCHLUESSEL
-        .chars()
-        .map(|c| format!("\\u{:04x}", u32::from(c)))
-        .collect()
+    SCHLUESSEL.chars().fold(String::new(), |mut m, c| {
+        let _ = write!(m, "\\u{:04x}", u32::from(c));
+        m
+    })
 }
 
 /// Der Schluessel erscheint nirgends: nicht in einer Meldung, auch wenn der Abruf die Adresse
