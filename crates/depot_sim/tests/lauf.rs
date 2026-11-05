@@ -133,11 +133,12 @@ fn beispiel_laeuft_durch_und_steht_im_journal() -> Result<(), String> {
     Ok(())
 }
 
+/// Jede Frage ist vorher gebucht. Den vollen Monat zeigt der Papiertag
+/// (`papiertag.rs`, `voller_monat_fragt_niemanden`).
 #[test]
-fn kostenschutz_greift_und_jeder_aufruf_ist_gebucht() -> Result<(), String> {
+fn jeder_aufruf_ist_gebucht() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (j, dachs, maus) = ganzer_lauf(&ort)?;
-    let t27 = datum(27, 11)?;
     let gesamt =
         usize::try_from(dachs.aufrufe.saturating_add(maus.aufrufe)).map_err(|e| e.to_string())?;
     assert_eq!(
@@ -145,12 +146,18 @@ fn kostenschutz_greift_und_jeder_aufruf_ist_gebucht() -> Result<(), String> {
         gesamt,
         "jede Frage ist gebucht"
     );
-    assert_eq!(gesamt, 10, "4 + 4 im November, 2 im Dezember");
-    assert_eq!(buchungen_am(&j, t27), 0, "Monat voll: niemand gefragt");
-    let schutz = von(&j, t27, "Kostenschutz");
-    assert_eq!(schutz.len(), 2, "{schutz:?}");
-    assert!(schutz.iter().all(|t| t.contains("MonatVoll")), "{schutz:?}");
-    assert!(von(&j, t27, "Dachs").is_empty() && von(&j, t27, "Maus").is_empty());
+    assert_eq!(
+        gesamt, 12,
+        "je 4 am 25. und 26.11., je 2 am 27.11. und 01.12."
+    );
+    assert_eq!(buchungen_am(&j, datum(27, 11)?), 2, "nur Vorschlaege");
+    assert!(
+        j.stand()
+            .begruendungen()
+            .iter()
+            .all(|(_, wer, _)| wer != "Kostenschutz"),
+        "kein Kostenschutz noetig"
+    );
     assert_eq!(buchungen_am(&j, datum(1, 12)?), 2, "neuer Monat");
     Ok(())
 }
@@ -187,7 +194,7 @@ fn regelwerk_kuerzt_zu_hohes_gewicht() -> Result<(), String> {
         regel.iter().any(|t| t.starts_with("Topf A")
             && t.contains("GewichtGekuerzt")
             && t.contains(alpha.als_str())
-            && t.contains("auf_bp: 2500")),
+            && t.contains("auf_bp: 4000")),
         "{regel:?}"
     );
     Ok(())
@@ -233,7 +240,7 @@ fn wiederanlauf_setzt_nach_dem_letzten_abschluss_fort() -> Result<(), String> {
     assert_eq!(geteilt.bytes()?, ganz.bytes()?, "byte-gleiches Journal");
     assert_eq!(
         dachs.aufrufe.saturating_add(dachs2.aufrufe),
-        5,
+        6,
         "wie im ganzen Lauf"
     );
     // Ein dritter Lauf findet nichts mehr zu tun.

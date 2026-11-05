@@ -124,12 +124,12 @@ fn befund_1_k03_ungueltiges_kalenderdatum_wird_abgelehnt() -> Result<(), String>
 // 2·A12 – Hoechstpreis wird aufgerundet (R21)
 // ---------------------------------------------------------------------------------------------
 
-/// Dachs bei einem Ereignis: 16.000 Token zu 4 $ und 4.000 Token zu 20 $ je Million ergeben
-/// 0,144 €. Reserviert werden 15 Cent, nie 14.
+/// Dachs bei einem Ereignis: 16.000 Token zu 2 $ und 4.000 Token zu 10 $ je Million ergeben
+/// 0,072 €. Reserviert werden 8 Cent, nie 7.
 #[test]
 fn grenzfall_2_a12_hoechstpreis_wird_auf_ganze_cent_aufgerundet() {
     let p = KiDeckel::standard(DACHS).preise();
-    assert_eq!(p.kosten(16_000, 4_000), Some(Cent(15)));
-    assert_eq!(p.kosten(250_000, 0), Some(Cent(100))); // genau 1,00 $
-    assert_eq!(p.kosten(250_001, 0), Some(Cent(101)));
+    assert_eq!(p.kosten(16_000, 4_000), Some(Cent(8)));
+    assert_eq!(p.kosten(500_000, 0), Some(Cent(100))); // genau 1,00 $
+    assert_eq!(p.kosten(500_001, 0), Some(Cent(101)));
 }
