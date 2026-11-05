@@ -1328,8 +1328,11 @@ fn nach_einem_ausfall_sagt_der_zeitplan_wie_es_weitergeht() -> Result<(), String
             ordner()?
         };
         if angehalten {
-            fs::write(wurzel.join("daten").join("dienst_erledigt.txt"), b"unlesbar")
-                .map_err(|e| format!("Vorbedingung Erledigt-Stand: {e}"))?;
+            fs::write(
+                wurzel.join("daten").join("dienst_erledigt.txt"),
+                b"unlesbar",
+            )
+            .map_err(|e| format!("Vorbedingung Erledigt-Stand: {e}"))?;
         }
         let d = Arc::new(Dienst::neu(
             wurzel,
