@@ -41,6 +41,10 @@ pub enum QuellenFehler {
     Doppelt(Isin),
     /// Der Kurs ergibt keinen gueltigen `Kurs`.
     Kurs(KursFehler),
+    /// Eine Zeile fuer einen Tag, an dem die Boerse des Werts nicht handelte (Wochenende oder
+    /// Feiertag nach `Boerse::handelstag`). Die Quelle widerspricht dem Kalender; der Wert ergibt
+    /// keinen Kurs, statt dass die Zeile als Schlusskurs gilt.
+    KeinHandelstag(Datum),
 }
 
 /// Der Schlusskurs eines Handelstags.
@@ -156,7 +160,8 @@ pub fn xetra_schluss(datum: Datum) -> Option<Zeitpunkt> {
 ///
 /// # Errors
 /// Ein Wert kommt doppelt vor, seine Tage steigen nicht streng (`Reihenfolge` mit der Stelle in
-/// der Liste, ab 1), oder ein Kurs ist ungueltig. Ein Wert ohne beendeten Tag fehlt in beiden
+/// der Liste, ab 1), eine Zeile faellt auf einen Tag ohne Handel seiner Boerse
+/// (`KeinHandelstag`), oder ein Kurs ist ungueltig. Ein Wert ohne beendeten Tag fehlt in beiden
 /// Kursen.
 pub fn schlusskurse(
     abruf: Zeitpunkt,
@@ -175,6 +180,9 @@ pub fn schlusskurse(
                 .is_none_or(|(a, b)| a.datum >= b.datum)
         }) {
             return Err(QuellenFehler::Reihenfolge(i.saturating_add(2)));
+        }
+        if let Some(t) = tage.iter().find(|t| !boerse.handelstag(t.datum)) {
+            return Err(QuellenFehler::KeinHandelstag(t.datum));
         }
         let mut beendet = Vec::new();
         for t in tage {

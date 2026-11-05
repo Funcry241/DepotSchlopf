@@ -46,6 +46,10 @@ pub struct Bericht {
     pub werte: Vec<(Wert, Ergebnis)>,
     /// Warum der Lauf vor dem letzten Wert endete.
     pub abbruch: Option<String>,
+    /// Der Lauf endete aus einem Schutzgrund, etwa weil die Quelle den Schluessel zurueckgab.
+    /// Dann ist nichts aus diesem Lauf verwendbar, auch nicht, was vorher belegt wurde (Maus,
+    /// Gegenprobe 1 zu #34).
+    pub sicherheitsabbruch: bool,
     /// Der juengste Handelstag unter den belegten Schlusskursen.
     pub handelstag: Option<Datum>,
     /// Befunde, an denen der Papiertag ausfiele (`waehle_tageswerte`): zum Abruf, zu einem
@@ -56,13 +60,14 @@ pub struct Bericht {
 }
 
 impl Bericht {
-    /// Sind die Kurse dieses Laufs verwendbar? Nur wenn Schlusskurse belegt sind und die
+    /// Sind die Kurse dieses Laufs verwendbar? Nie nach einem Sicherheitsabbruch. Sonst nur, wenn
+    /// Schlusskurse belegt sind und die
     /// Pruefung wie im Papiertag nichts meldet, was den Zyklus ausfallen liesse (K19-02): Pflicht
     /// sind die gehaltenen Werte; ein Kandidat mit Fehler oder ohne Abruf faellt nur aus der
     /// Auswahl des Tages. Belegt bleibt alles, was abgerufen wurde; verwendbar ist es damit
     /// noch nicht.
     pub fn verwendbar(&self) -> bool {
-        self.handelstag.is_some() && self.pruefung.is_empty()
+        !self.sicherheitsabbruch && self.handelstag.is_some() && self.pruefung.is_empty()
     }
 }
 
@@ -198,6 +203,7 @@ pub fn sammle(
     let mut bericht = Bericht {
         werte: Vec::new(),
         abbruch: None,
+        sicherheitsabbruch: false,
         handelstag: None,
         pruefung: Vec::new(),
         ausgelassen: Vec::new(),
@@ -229,6 +235,7 @@ pub fn sammle(
                 "Die Antwort enthaelt den Schluessel: nicht abgelegt, nicht belegt, Lauf beendet"
                     .to_string();
             bericht.abbruch = Some(text.clone());
+            bericht.sicherheitsabbruch = true;
             bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
             continue;
         }
