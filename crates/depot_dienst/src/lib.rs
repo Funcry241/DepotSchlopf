@@ -25,6 +25,7 @@ pub mod kostenschutz;
 pub mod rueckfall;
 pub mod schluessel;
 pub mod seiten;
+pub mod verlauf;
 pub mod waechter;
 pub mod werkbank;
 pub mod zeitplan;
@@ -40,7 +41,7 @@ use depot_lage::{
 
 use crate::http::{Anfrage, antwort, feld, formular, gleich, herkunft_erlaubt, host_erlaubt};
 use crate::schluessel::Wer;
-use crate::werkbank::{Anlass, Art, Dienst, Lagerechner};
+use crate::werkbank::{Art, Dienst, Lagerechner};
 use crate::zeitplan::{Zeitplan, lies_uhrzeit};
 
 /// Was der Dienst ausserhalb des Projektordners anfasst: Schluesselspeicher und Autostart.
@@ -177,6 +178,9 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                     .collect(),
                 ki_halt: werkbank::lies_falls_da(&kostenschutz::pfad(&d.wurzel)),
                 zeitplan_gespeichert: None,
+                entwurf: formular(a.abfrage.as_bytes())
+                    .map(|f| seiten::Entwurf::aus_formular(&f))
+                    .unwrap_or_default(),
                 autostart: u.autostart(&d.wurzel),
                 wurzel: d.wurzel.display().to_string(),
                 grenzen: grenzwerte(),
@@ -255,7 +259,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 return http::text(400, "Abgelehnt: Auftrag unbekannt");
             };
             let update = matches!(art, Art::Update | Art::UpdatePruefen);
-            match (d.einreihen(art, Anlass::Hand), update) {
+            match (d.von_hand(art, jetzt), update) {
                 (Ok(()), false) => http::umleitung("/?m=auftrag"),
                 (Err(_), false) => http::umleitung("/?m=auftrag_belegt"),
                 (Ok(()), true) => http::umleitung("/einrichtung?m=update#update"),
@@ -293,12 +297,21 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             }
         }
         "/zeitplan" => {
+            // Bei jeder Ablehnung bleiben die gueltigen Eingaben im Formular stehen.
+            let zurueck = |m: &str| {
+                http::umleitung(&format!(
+                    "/einrichtung?m={m}{}#zeitplan",
+                    seiten::Entwurf::aus_formular(&f).als_abfrage()
+                ))
+            };
             let Some(plan) = zeitplan_aus_formular(&f) else {
-                return http::umleitung("/einrichtung?m=zeitplan_ungueltig#zeitplan");
+                return zurueck("zeitplan_ungueltig");
             };
             match d.setze_zeitplan(plan) {
                 Ok(()) => http::umleitung("/einrichtung?m=zeitplan#zeitplan"),
-                Err(_) => http::umleitung("/einrichtung?m=zeitplan_fehler#zeitplan"),
+                Err(werkbank::ZeitplanAbgelehnt::Einrichtung) => zurueck("zeitplan_einrichtung"),
+                Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => zurueck("zeitplan_lage"),
+                Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => zurueck("zeitplan_fehler"),
             }
         }
         "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt),
