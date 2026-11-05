@@ -159,17 +159,18 @@ impl<N: Netz> KiBerater<N> {
             ));
         }
         // Geheimnisschutz fuer jede Antwort, nicht nur fuer Fehler: Gibt der Anbieter den
-        // Schluessel zurueck, wird nichts davon verwendet. Geprueft wird hier roh und unten am
-        // fertigen Ergebnis (`ohne_geheimnis`), denn JSON kann ihn verschluesselt enthalten.
-        if self.enthaelt_schluessel(&String::from_utf8_lossy(&antwort.inhalt)) {
-            return Ergebnis {
-                text: Err(GEHEIMNIS.into()),
-                kosten: "Kosten nicht gelesen".into(),
-            };
-        }
+        // Schluessel zurueck, wird kein Text davon verwendet. Geprueft wird hier roh und unten
+        // am fertigen Ergebnis (`ohne_geheimnis`), denn JSON kann ihn verschluesselt enthalten.
+        // Der Verbrauch wird trotzdem gelesen und geprueft: Kostenschutz geht vor.
+        let geheim = self.enthaelt_schluessel(&String::from_utf8_lossy(&antwort.inhalt));
         let gelesen = match self.anbieter.lies(&antwort.inhalt) {
             Ok(g) => g,
             Err(e) => {
+                let e = if geheim {
+                    "verworfen".into()
+                } else {
+                    self.bereinigt(&e)
+                };
                 let m = self.sperre(&format!("Antwort unlesbar, Kosten unbekannt: {e}"));
                 return ohne(m);
             }
@@ -200,6 +201,12 @@ impl<N: Netz> KiBerater<N> {
             let m = self.sperre(&format!("{grund}; {kosten}"));
             return Ergebnis {
                 text: Err(m),
+                kosten,
+            };
+        }
+        if geheim {
+            return Ergebnis {
+                text: Err(GEHEIMNIS.into()),
                 kosten,
             };
         }

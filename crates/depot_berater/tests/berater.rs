@@ -629,13 +629,17 @@ fn verworfene_antwort_wird_trotzdem_auf_kosten_geprueft() -> Result<(), String> 
     // Kein JSON, aber mit Schluessel: Kosten unbekannt, sperren.
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();
-    netz.antworten.push_back(ok(&format!("kaputt {SCHLUESSEL}")));
+    netz.antworten
+        .push_back(ok(&format!("kaputt {SCHLUESSEL}")));
     let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
     let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
     let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
     assert!(!format!("{a:?}").contains(SCHLUESSEL), "{a:?}");
     assert!(ort.sperre().exists(), "{a:?}");
-    assert!(!fs_enthaelt(&ort.sperre(), SCHLUESSEL), "Sperrdatei ohne Schluessel");
+    assert!(
+        !fs_enthaelt(&ort.sperre(), SCHLUESSEL),
+        "Sperrdatei ohne Schluessel"
+    );
     Ok(())
 }
 
