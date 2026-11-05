@@ -186,6 +186,13 @@ fn main() -> ExitCode {
         }
     }
     if lauf.erfolgreich() {
+        if let Some(a) = lauf
+            .abbild
+            .as_ref()
+            .filter(|_| lauf.befehl != "festschreibung")
+        {
+            update::vermerke_geprueft(&wurzel, &a.baum);
+        }
         println!("[DepotSchlopf] Fertig.");
         ExitCode::SUCCESS
     } else {

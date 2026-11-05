@@ -165,6 +165,9 @@ pub struct Zustand {
     pub neustart: bool,
     /// Stand des letzten Updates fuer die Seite; `true` heisst Fehler.
     pub update_meldung: Option<(bool, String)>,
+    /// Woher die Programme kommen und ob der Stand fuer einen Start ohne Cargo gesichert ist;
+    /// `true` heisst Fehler.
+    pub programm_meldung: Option<(bool, String)>,
     /// Warum der Verlauf frueherer Starts nicht vollstaendig gezeigt wird.
     pub verlauf_hinweis: Option<String>,
     /// Der Verlauf liess sich zuletzt nicht schreiben; bis das wieder geht, startet nichts.
@@ -409,6 +412,7 @@ impl Dienst {
                 lage_veraltet: true,
                 neustart: false,
                 update_meldung: None,
+                programm_meldung: None,
                 verlauf_hinweis,
                 verlauf_fehler: None,
             }),

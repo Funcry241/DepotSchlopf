@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use depot_dienst::programmstand;
 use depot_dienst::rueckfall::{self, NEUSTART};
 use depot_dienst::werkbank::{Dienst, cargo_starter};
 use depot_dienst::{
@@ -101,14 +102,112 @@ fn bestaetigen(d: &Arc<Dienst>) {
     }
 }
 
+/// Woher dieses Programm kommt: aus dem gesicherten Stand, oder mit Cargo aus einem Baum.
+enum Herkunft {
+    Unbekannt,
+    Stand,
+    Gebaut(String),
+}
+
+/// Der Starter der Auftraege und was die Einrichtung dazu sagt. Aus dem gesicherten Stand nur,
+/// wenn er hier noch einmal startklar ist; sonst ueber Cargo wie bisher.
+fn starter_fuer(
+    wurzel: &std::path::Path,
+    h: &Herkunft,
+) -> (depot_dienst::werkbank::Starter, (bool, String)) {
+    match h {
+        Herkunft::Stand => match programmstand::startklar(wurzel) {
+            Ok(s) => (
+                programmstand::starter(&s),
+                (
+                    false,
+                    format!(
+                        "Gestartet aus dem geprüften Programmstand {} ohne Cargo. Kurse, Termine und Papiertag laufen ohne Cargo; nur das Update braucht es.",
+                        s.kurz()
+                    ),
+                ),
+            ),
+            Err(e) => (
+                cargo_starter(),
+                (true, format!("Programmstand nicht verwendbar ({e}); Aufträge über Cargo.")),
+            ),
+        },
+        Herkunft::Gebaut(_) => (
+            cargo_starter(),
+            (
+                false,
+                "Mit Cargo gebaut. Läuft der Dienst gleich eine Weile, wird dieser Stand für den nächsten Start gesichert."
+                    .into(),
+            ),
+        ),
+        Herkunft::Unbekannt => (
+            cargo_starter(),
+            (
+                true,
+                "Ohne Wächter gestartet: Kein Programmstand für einen Start ohne Cargo.".into(),
+            ),
+        ),
+    }
+}
+
+/// Sichert nach `BESTAETIGEN_NACH` die gebauten Programme als Stand fuer den naechsten Start.
+fn sichern(d: &Arc<Dienst>, baum: String) {
+    let d = Arc::clone(d);
+    thread::spawn(move || {
+        thread::sleep(rueckfall::BESTAETIGEN_NACH);
+        // Erst nach einer Probezeit: Ein offenes Update muss zuerst bestaetigt sein.
+        thread::sleep(Duration::from_secs(2));
+        let von = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf));
+        let m = match von {
+            _ if rueckfall::offen_pfad(&d.wurzel).exists() => (
+                true,
+                "Update noch nicht bestätigt; Programmstand nicht gesichert.".into(),
+            ),
+            None => (true, "Ort des Programms unbekannt; nicht gesichert.".into()),
+            Some(von) => match programmstand::sichere(&d.wurzel, &baum, &von) {
+                Ok(s) => (
+                    false,
+                    format!(
+                        "Programmstand {} gesichert. Der nächste Start, auch nach einem Windows-Neustart, braucht kein Cargo.",
+                        s.kurz()
+                    ),
+                ),
+                Err(e) => (
+                    true,
+                    format!(
+                        "Programmstand nicht gesichert: {e}. Der nächste Start baut mit Cargo."
+                    ),
+                ),
+            },
+        };
+        d.sperre().programm_meldung = Some(m);
+    });
+}
+
 fn main() -> ExitCode {
     let mut ohne_browser = false;
-    for a in std::env::args().skip(1) {
-        if a == "--ohne-browser" {
-            ohne_browser = true;
-        } else {
-            eprintln!("[Dienst] FEHLER: unbekannte Angabe {a:?}. Erlaubt: --ohne-browser");
-            return ExitCode::FAILURE;
+    let mut herkunft = Herkunft::Unbekannt;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--ohne-browser" => ohne_browser = true,
+            "--stand" => herkunft = Herkunft::Stand,
+            "--baum" => {
+                let Some(b) = args.next() else {
+                    eprintln!("[Dienst] FEHLER: --baum ohne Baum");
+                    return ExitCode::FAILURE;
+                };
+                herkunft = Herkunft::Gebaut(b);
+            }
+            _ => {
+                eprintln!(
+                    "[Dienst] FEHLER: unbekannte Angabe {a:?}. Erlaubt: --ohne-browser, \
+                     --stand, --baum <baum>"
+                );
+                return ExitCode::FAILURE;
+            }
         }
     }
     let Some(wurzel) = finde_wurzel() else {
@@ -134,13 +233,18 @@ fn main() -> ExitCode {
     };
     let token = neues_token();
     let umwelt: Arc<dyn Umwelt> = Arc::new(System);
+    let (starter, meldung) = starter_fuer(&wurzel, &herkunft);
     let dienst = Arc::new(Dienst::neu(
         wurzel,
         token.clone(),
-        cargo_starter(),
+        starter,
         lagerechner(token, Arc::clone(&umwelt)),
     ));
+    dienst.sperre().programm_meldung = Some(meldung);
     bestaetigen(&dienst);
+    if let Herkunft::Gebaut(baum) = herkunft {
+        sichern(&dienst, baum);
+    }
     {
         let d = Arc::clone(&dienst);
         thread::spawn(move || arbeiter(&d));

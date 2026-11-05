@@ -838,6 +838,14 @@ fn update_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
          DepotSchlopf.cmd den alten Stand zurück. Das Gate dauert einige Minuten.</p>",
     );
     s.push_str(&update_hinweis(z));
+    if let Some((fehler, text)) = &z.programm_meldung {
+        let _ = write!(
+            s,
+            "<p id=\"programmstand\"><span class=\"{}\">Start nach einem Neustart:</span> {}</p>",
+            if *fehler { "offen" } else { "gut" },
+            maskiere(text)
+        );
+    }
     for art in [Art::UpdatePruefen, Art::Update] {
         let zuletzt = z.verlauf.iter().find(|a| a.art == art).map_or_else(
             || "seit Dienststart nicht".to_string(),
