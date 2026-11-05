@@ -158,6 +158,9 @@ impl Kurs {
 struct Bestand {
     stand: Zeitpunkt,
     kurse: BTreeMap<Isin, Kurs>,
+    /// Abruf je Wert, wenn die Werte zu verschiedenen Zeiten abgerufen wurden (Abruf je
+    /// Boerse). Fehlt ein Eintrag, gilt der Stand.
+    abrufe: BTreeMap<Isin, Zeitpunkt>,
 }
 
 /// Die Kurse eines Abrufs. Nur ueber `Kurse::neu` zu bauen und danach unveraenderlich.
@@ -180,7 +183,44 @@ impl Kurse {
             }
             kurse.insert(isin, kurs);
         }
-        Ok(Kurse(Bestand { stand, kurse }))
+        Ok(Kurse(Bestand {
+            stand,
+            kurse,
+            abrufe: BTreeMap::new(),
+        }))
+    }
+
+    /// Wie `neu`, mit dem Abruf je Wert: Werte verschiedener Boersen werden je kurz nach ihrem
+    /// Schluss abgerufen. Das Alter eines Kurses misst sich dann an seinem eigenen Abruf. Der
+    /// Stand ist der spaeteste Abruf.
+    ///
+    /// # Errors
+    /// Wie `neu`; ausserdem, wenn ein Kurs nach seinem Abruf liegt (`Zukunft`) oder ein Abruf
+    /// nach dem Stand.
+    pub fn mit_abrufen(
+        stand: Zeitpunkt,
+        eintraege: Vec<(Isin, Kurs, Zeitpunkt)>,
+    ) -> Result<Kurse, KursFehler> {
+        let mut abrufe = BTreeMap::new();
+        let mut paare = Vec::with_capacity(eintraege.len());
+        for (isin, kurs, abruf) in eintraege {
+            if kurs.zeitpunkt > abruf || abruf > stand {
+                return Err(KursFehler::Zukunft(isin));
+            }
+            abrufe.insert(isin.clone(), abruf);
+            paare.push((isin, kurs));
+        }
+        let mut k = Kurse::neu(stand, paare)?;
+        k.0.abrufe = abrufe;
+        Ok(k)
+    }
+
+    /// Der Abruf dieses Werts: sein eigener, sonst der Stand.
+    pub fn abruf(&self, isin: &Isin) -> Option<Zeitpunkt> {
+        self.0
+            .kurse
+            .contains_key(isin)
+            .then(|| self.0.abrufe.get(isin).copied().unwrap_or(self.0.stand))
     }
 
     pub fn stand(&self) -> Zeitpunkt {
@@ -208,11 +248,9 @@ impl Kurse {
         self.0.kurse.iter()
     }
 
-    /// Alter des Kurses in Sekunden, gemessen am Stand.
+    /// Alter des Kurses in Sekunden, gemessen an seinem Abruf (`abruf`).
     pub fn alter_s(&self, isin: &Isin) -> Option<i64> {
-        self.0
-            .kurse
-            .get(isin)
-            .and_then(|k| self.0.stand.sekunden_seit(k.zeitpunkt))
+        let k = self.0.kurse.get(isin)?;
+        self.abruf(isin)?.sekunden_seit(k.zeitpunkt)
     }
 }

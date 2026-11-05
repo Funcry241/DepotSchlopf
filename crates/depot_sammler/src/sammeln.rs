@@ -1,11 +1,31 @@
 //! Ein Lauf des Sammlers: je Wert abrufen, roh ablegen, lesen, belegen; danach pruefen.
 //!
-//! Reihenfolge je Wert (R12): Erst liegt die rohe Antwort unter `daten/roh/`, dann steht jeder
-//! Kurs daraus im Journal, erst dann wird er verwendet. Was nicht gelesen werden kann, wird nicht
-//! belegt; die rohe Antwort bleibt zur Durchsicht liegen.
+//! Reihenfolge (R12): Erst liegt die rohe Antwort unter `daten/roh/`, dann steht jeder Kurs
+//! daraus im Journal, erst dann wird er verwendet. Was nicht gelesen werden kann, wird nicht
+//! belegt; die rohe Antwort bleibt zur Durchsicht liegen. Ins Journal kommen die Kurse erst,
+//! wenn der Lauf ohne Sicherheitsabbruch zu Ende ist, in der Reihenfolge ihres Abrufs.
 //!
 //! Enthaelt eine Antwort den Schluessel, gleich in welcher Schreibweise, wird sie weder abgelegt
-//! noch gelesen, und der Lauf endet (K19-01).
+//! noch gelesen, und der Lauf endet (K19-01). Dann wird auch kein schon gelesener Kurs dieses
+//! Laufs belegt: Ein Papiertag, auch von Hand gestartet, findet keine Teilkurse (Maus,
+//! Restbefund zu #34), selbst wenn die Kurssperre sich nicht schreiben laesst.
+//!
+//! **Quelle je Boerse:** Xetra-Werte kommen von Alpha Vantage, Werte der NYSE von Tiingo, je mit
+//! eigenem Schluessel (`Zugang`). Fehlt der Schluessel einer Quelle, werden nur ihre Werte nicht
+//! abgerufen. Jede Antwort wird gegen alle Schluessel geprueft.
+//!
+//! **Dollar in Euro:** Enthaelt der Lauf einen Wert, der nicht in Euro notiert, holt der Sammler
+//! (und hat er den Schluessel seiner Quelle) vorher einmal die Referenzkurse der EZB (`ADRESSE_DEVISEN`), legt sie roh unter
+//! `daten/roh/ezb-referenzkurse/` ab und rechnet jeden Dollar-Schluss mit dem Kurs desselben
+//! Tages um (`depot_kern::schlusskurse_in_euro`). Lassen sie sich nicht holen oder lesen, wird
+//! kein Wert in Dollar abgerufen; die Werte in Euro bleiben unberuehrt.
+//!
+//! **Kurze Netzausfaelle:** Jeder Abruf von Kursen und Referenzkursen geht ueber
+//! `netz::hole_mit_wiederholung`: Scheitert er voruebergehend, wird er nach kurzer Wartezeit
+//! wiederholt, solange seine Kurse noch frisch genug waeren (`netz::frist`). Bleibt die
+//! Verbindung zu einer Quelle weg (`Bericht::verbindung`), ruft der Lauf bei ihr nichts mehr ab;
+//! die anderen Quellen fragt er weiter. Fallen die Referenzkurse der EZB aus, fehlen nur die
+//! Werte in Dollar; Werte in Euro brauchen sie nicht (Maus, Befund 1 zu #38).
 //!
 //! Meldet die Quelle statt Kursen einen Hinweis, gilt: Ein Fehler zu genau diesem Kuerzel
 //! (`Error Message`) betrifft nur diesen Wert. Jeder andere Hinweis, etwa das erreichte
@@ -17,12 +37,24 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use depot_journal::{Journal, JournalFehler, KursBeleg};
-use depot_kern::{Datum, Grenzen, Kurs, Kurse, Preis, Zeitpunkt, lies_tageskurse, schlusskurse};
-use depot_regelwerk::{DatenFehler, pruefe_kurse};
+use depot_kern::{
+    Boerse, Datum, Devisen, Grenzen, Kurs, Kurse, Preis, Zeitpunkt, lies_tageskurse,
+    schlusskurse_in_euro,
+};
+use depot_regelwerk::{DatenFehler, waehle_tageswerte};
 
-use crate::liste::{QUELLE, Wert, als_universum};
-use crate::netz::Netz;
-use crate::schluessel::Schluessel;
+use crate::liste::{Wert, als_universum};
+use crate::netz::{Ausfall, Netz, Takt, frist, hole_mit_wiederholung};
+use crate::schluessel::{Anbieter, Schluessel, Zugang};
+
+/// Die Referenzkurse der EZB der letzten 90 Tage.
+pub const ADRESSE_DEVISEN: &str =
+    "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml";
+/// Ordner der rohen Referenzkurse unter `daten/roh/`.
+pub const ABLAGE_DEVISEN: &str = "ezb-referenzkurse";
+/// So viele Tage vor dem Abruf beginnt die Reihe bei Tiingo: genug fuer heute und den Vortag
+/// auch ueber Feiertage.
+const TAGE_ZURUECK: i64 = 14;
 
 /// Was ein Wert ergeben hat.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +68,9 @@ pub enum Ergebnis {
     },
     /// Nichts belegt. Die Meldung ist vom Schluessel bereinigt.
     Fehler(String),
+    /// Nicht abgerufen, mit Grund: Der Schluessel seiner Quelle fehlt, oder er notiert nicht in
+    /// Euro und die Referenzkurse fehlen. Zaehlt fuer keine Quelle im Anbieterprotokoll.
+    Uebersprungen(String),
     /// Nicht abgerufen, weil der Lauf vorher beendet wurde.
     NichtAbgerufen,
 }
@@ -46,19 +81,31 @@ pub struct Bericht {
     pub werte: Vec<(Wert, Ergebnis)>,
     /// Warum der Lauf vor dem letzten Wert endete.
     pub abbruch: Option<String>,
+    /// Der Lauf endete aus einem Schutzgrund, etwa weil die Quelle den Schluessel zurueckgab.
+    /// Dann ist nichts aus diesem Lauf verwendbar, auch nicht, was vorher belegt wurde (Maus,
+    /// Gegenprobe 1 zu #34).
+    pub sicherheitsabbruch: bool,
     /// Der juengste Handelstag unter den belegten Schlusskursen.
     pub handelstag: Option<Datum>,
-    /// Ergebnis von `pruefe_kurse` fuer alle Werte der Liste; leer = alles in Ordnung.
+    /// Befunde, an denen der Papiertag ausfiele (`waehle_tageswerte`): zum Abruf, zu einem
+    /// gehaltenen Wert, oder kein Wert handelbar. Leer = in Ordnung.
     pub pruefung: Vec<DatenFehler>,
+    /// Kandidaten, die heute nicht handelbar sind, mit Grund. Der Papiertag laeuft ohne sie.
+    pub ausgelassen: Vec<DatenFehler>,
+    /// Die Verbindung zu einer Quelle blieb trotz Wiederholung weg (die erste solche). Bei
+    /// dieser Quelle wurde danach nichts mehr abgerufen, bei den anderen schon.
+    pub verbindung: Option<Ausfall>,
 }
 
 impl Bericht {
-    /// Sind die Kurse dieses Laufs verwendbar? Nur wenn Schlusskurse belegt sind und
-    /// `pruefe_kurse` fuer alle Werte der Liste nichts meldet (K19-02). Ein Wert mit Fehler oder
-    /// ohne Abruf fehlt dort als `KursFehlt`. Belegt bleibt alles, was abgerufen wurde;
-    /// verwendbar ist es damit noch nicht.
+    /// Sind die Kurse dieses Laufs verwendbar? Nie nach einem Sicherheitsabbruch. Sonst nur, wenn
+    /// Schlusskurse belegt sind und die
+    /// Pruefung wie im Papiertag nichts meldet, was den Zyklus ausfallen liesse (K19-02): Pflicht
+    /// sind die gehaltenen Werte; ein Kandidat mit Fehler oder ohne Abruf faellt nur aus der
+    /// Auswahl des Tages. Belegt bleibt alles, was abgerufen wurde; verwendbar ist es damit
+    /// noch nicht.
     pub fn verwendbar(&self) -> bool {
-        self.handelstag.is_some() && self.pruefung.is_empty()
+        !self.sicherheitsabbruch && self.handelstag.is_some() && self.pruefung.is_empty()
     }
 }
 
@@ -75,13 +122,68 @@ pub enum SammelFehler {
     Kurse(String),
 }
 
-/// Die Abrufadresse eines Werts: Tageskurse der letzten 100 Handelstage als CSV.
-pub fn adresse(wert: &Wert, schluessel: &Schluessel) -> String {
-    format!(
-        "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={}&outputsize=compact&datatype=csv&apikey={}",
-        wert.kuerzel,
-        schluessel.als_str()
-    )
+/// Die Abrufadresse eines Werts bei seiner Quelle (`Anbieter::fuer`), als CSV:
+/// - Alpha Vantage: Tageskurse der letzten 100 Handelstage.
+/// - Tiingo: Tageskurse ab `ab` (bei `None` nur der letzte Tag), nur Datum, Schluss, Tief und
+///   Hoch. Das Kuerzel steht klein, eine Klasse mit Bindestrich (`BRK.B` wird `brk-b`).
+pub fn adresse(wert: &Wert, schluessel: &Schluessel, ab: Option<Datum>) -> String {
+    match Anbieter::fuer(wert.boerse) {
+        Anbieter::AlphaVantage => format!(
+            "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={}&outputsize=compact&datatype=csv&apikey={}",
+            wert.kuerzel,
+            schluessel.als_str()
+        ),
+        Anbieter::Tiingo => {
+            let kuerzel = wert.kuerzel.to_ascii_lowercase().replace('.', "-");
+            let start = ab.map(|d| format!("startDate={d}&")).unwrap_or_default();
+            format!(
+                "https://api.tiingo.com/tiingo/daily/{kuerzel}/prices?{start}format=csv&columns=date,close,high,low&token={}",
+                schluessel.als_str()
+            )
+        }
+    }
+}
+
+/// Was ein Lauf ueber den Schluessel und eine Quelle sagt, fuer das Anbieterprotokoll. Gezaehlt
+/// werden nur die Werte dieser Quelle, die abgerufen wurden (Maus, Befund 2 zu #37): Ein Erfolg
+/// der einen Quelle sagt nichts ueber den Schluessel der anderen. `None`, wenn bei ihr nichts
+/// abgerufen wurde.
+pub fn einordnen(b: &Bericht, quelle: Anbieter) -> Option<depot_journal::anbieter::Ergebnis> {
+    use depot_journal::anbieter::Ergebnis as E;
+    let eigene: Vec<&Ergebnis> = b
+        .werte
+        .iter()
+        .filter(|(w, _)| Anbieter::fuer(w.boerse) == quelle)
+        .map(|(_, e)| e)
+        .collect();
+    if eigene.iter().any(|e| matches!(e, Ergebnis::Belegt { .. })) {
+        return Some(E::Ok);
+    }
+    let fehler: Vec<String> = eigene
+        .iter()
+        .filter_map(|e| match e {
+            Ergebnis::Fehler(t) => Some(t.to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect();
+    if fehler.is_empty() {
+        return None;
+    }
+    if fehler.iter().any(|t| {
+        t == "abruf: http status: 429" || t.contains("rate limit") || t.contains("requests per")
+    }) {
+        return Some(E::Limit);
+    }
+    if fehler
+        .iter()
+        .all(|t| t == "abruf: http status: 401" || t.contains("apikey"))
+    {
+        return Some(E::Abgelehnt);
+    }
+    if fehler.iter().all(|t| t.starts_with("abruf:")) {
+        return Some(E::Netz);
+    }
+    Some(E::Fehler)
 }
 
 /// Ein Hinweis der Quelle statt Kursen: eine JSON-Antwort. `Some((betrifft_nur_den_wert, text))`.
@@ -139,16 +241,238 @@ fn tag_und_preis(k: Option<&Kurs>) -> Option<(Datum, Preis)> {
     k.map(|k| (k.handelstag(), k.preis()))
 }
 
-/// Ein Lauf ueber alle Werte. `uhr` liefert die Zeit des Rechners in UTC; `pause` liegt
-/// zwischen zwei Abrufen.
+/// Die Referenzkurse eines Laufs: gelesen, oder warum nicht.
+struct Referenz {
+    devisen: Devisen,
+    fehler: Option<String>,
+}
+
+/// Holt die Referenzkurse der EZB, wenn ein Wert des Laufs nicht in Euro notiert. `Ok(None)`,
+/// wenn keiner das tut. Gibt die Antwort einen Schluessel zurueck, ist das ein
+/// Sicherheitsabbruch wie bei jeder Quelle.
+fn hole_devisen(
+    bericht: &mut Bericht,
+    netz: &mut dyn Netz,
+    zugang: &Zugang,
+    beginn: Zeitpunkt,
+    ablage: &Path,
+    (werte, takt): (&[Wert], &mut Takt<'_>),
+) -> Result<Referenz, SammelFehler> {
+    let fehlt = |text: String| Referenz {
+        devisen: Devisen::keine(),
+        fehler: Some(format!(
+            "Referenzkurse der EZB: {text}; Wert in Dollar nicht abgerufen"
+        )),
+    };
+    // Frist der fruehesten Boerse, deren Werte die Referenzkurse brauchen (nicht in Euro):
+    // Spaeter nuetzten sie keinem Wert. Werte in Euro verkuerzen die Frist nicht.
+    let frist_ab = |jetzt: Zeitpunkt| {
+        werte
+            .iter()
+            .filter(|w| w.boerse.waehrung() != "EUR")
+            .filter_map(|w| frist(w.boerse, &Grenzen::standard(), jetzt))
+            .min()
+    };
+    let roh = match hole_mit_wiederholung(netz, ADRESSE_DEVISEN, &frist_ab, takt) {
+        Ok(r) => r,
+        Err(a) => {
+            let text = format!("Abruf: {}", zugang.bereinige(a.fehler()));
+            if a.verbindung() && bericht.verbindung.is_none() {
+                bericht.verbindung = Some(a);
+            }
+            return Ok(fehlt(text));
+        }
+    };
+    if zugang.steht_in(&roh) {
+        bericht.abbruch = Some(
+            "Die Antwort der EZB enthaelt einen Schluessel: nicht abgelegt, Lauf beendet".into(),
+        );
+        bericht.sicherheitsabbruch = true;
+        return Ok(fehlt("Sicherheitsabbruch".into()));
+    }
+    lege_ab(ablage, ABLAGE_DEVISEN, beginn, ".xml", &roh).map_err(SammelFehler::Ablage)?;
+    let gelesen = String::from_utf8(roh)
+        .map_err(|_| "Antwort ist kein UTF-8".to_string())
+        .and_then(|t| Devisen::lies_ezb(&t).map_err(|e| format!("unlesbar: {e:?}")));
+    Ok(match gelesen {
+        Ok(devisen) => Referenz {
+            devisen,
+            fehler: None,
+        },
+        Err(text) => fehlt(text),
+    })
+}
+
+/// Was vor dem ersten Wert feststeht: Referenzkurse, Beginn der Reihe bei Tiingo, und ob schon
+/// abgerufen wurde.
+struct Vorbereitung {
+    referenz: Referenz,
+    ab: Option<Datum>,
+    abgerufen: bool,
+}
+
+/// Enthaelt der Lauf einen Wert ausserhalb von Xetra, fragt sie die Uhr einmal: fuer den Beginn
+/// der Reihe bei Tiingo und, wenn ein Wert in Dollar abgerufen werden kann, fuer die Ablage der
+/// Referenzkurse, die sie dann holt.
+fn vorbereite(
+    bericht: &mut Bericht,
+    netz: &mut dyn Netz,
+    zugang: &Zugang,
+    takt: &mut Takt<'_>,
+    ablage: &Path,
+    werte: &[Wert],
+) -> Result<Vorbereitung, SammelFehler> {
+    let mut v = Vorbereitung {
+        referenz: Referenz {
+            devisen: Devisen::keine(),
+            fehler: None,
+        },
+        ab: None,
+        abgerufen: false,
+    };
+    if werte.iter().all(|w| w.boerse == Boerse::Xetra) {
+        return Ok(v);
+    }
+    let beginn = (takt.uhr)().ok_or(SammelFehler::Uhr)?;
+    v.ab = beginn.datum().and_then(|d| d.plus_tage(-TAGE_ZURUECK));
+    if werte
+        .iter()
+        .any(|w| w.boerse.waehrung() != "EUR" && zugang.von(Anbieter::fuer(w.boerse)).is_some())
+    {
+        v.referenz = hole_devisen(bericht, netz, zugang, beginn, ablage, (werte, takt))?;
+        v.abgerufen = true;
+    }
+    Ok(v)
+}
+
+/// Der Schluessel fuer einen Wert, oder warum er nicht abgerufen wird: Es fehlt der Schluessel
+/// seiner Quelle, oder er notiert nicht in Euro und die Referenzkurse fehlen.
+fn abrufbar<'a>(
+    zugang: &'a Zugang,
+    r: &Referenz,
+    wert: &Wert,
+    weg: &[Anbieter],
+) -> Result<&'a Schluessel, String> {
+    let anbieter = Anbieter::fuer(wert.boerse);
+    if weg.contains(&anbieter) {
+        return Err(format!(
+            "Verbindung zu {} weg: nicht abgerufen",
+            anbieter.dienst()
+        ));
+    }
+    let schluessel = zugang.von(anbieter).ok_or_else(|| {
+        format!(
+            "Kein Schluessel fuer {} ({}): nicht abgerufen",
+            anbieter.dienst(),
+            anbieter.adresse()
+        )
+    })?;
+    match &r.fehler {
+        Some(text) if wert.boerse.waehrung() != "EUR" => Err(text.clone()),
+        _ => Ok(schluessel),
+    }
+}
+
+/// Was der Abruf eines Werts ergeben hat.
+enum Schritt {
+    /// Gelesen: Abrufzeit, rohe Antwort, Ablage und die Schlusskurse.
+    Gelesen {
+        abruf: Zeitpunkt,
+        roh: Vec<u8>,
+        rohdatei: PathBuf,
+        heute: Kurse,
+        vortag: Kurse,
+    },
+    /// Nur dieser Wert ergibt nichts.
+    Fehler(String),
+    /// Der Lauf endet; `sicherheit`, wenn die Antwort einen Schluessel enthielt.
+    Abbruch { text: String, sicherheit: bool },
+    /// Die Verbindung zur Quelle blieb trotz Wiederholung weg; bei ihr wird nichts mehr
+    /// abgerufen.
+    Verbindung { text: String, ausfall: Ausfall },
+}
+
+/// Holt, prueft, legt ab und liest einen Wert.
 ///
 /// # Errors
-/// Journal, Ablage oder Uhr versagen. Was bis dahin belegt ist, bleibt belegt.
+/// Uhr oder Ablage versagen.
+fn lies_wert(
+    netz: &mut dyn Netz,
+    zugang: &Zugang,
+    schluessel: &Schluessel,
+    wert: &Wert,
+    v: &Vorbereitung,
+    takt: &mut Takt<'_>,
+    ablage: &Path,
+) -> Result<Schritt, SammelFehler> {
+    let devisen = &v.referenz.devisen;
+    let frist_ab = |jetzt: Zeitpunkt| frist(wert.boerse, &Grenzen::standard(), jetzt);
+    let roh = match hole_mit_wiederholung(netz, &adresse(wert, schluessel, v.ab), &frist_ab, takt) {
+        Ok(r) => r,
+        Err(a) => {
+            let text = format!("Abruf: {}", zugang.bereinige(a.fehler()));
+            return Ok(if a.verbindung() {
+                Schritt::Verbindung { text, ausfall: a }
+            } else {
+                Schritt::Fehler(text)
+            });
+        }
+    };
+    // Gibt die Quelle einen Schluessel zurueck, wird die Antwort weder abgelegt noch gelesen,
+    // und der Lauf endet: Keine Datei des Rahmens enthaelt ihn (K19-01).
+    if zugang.steht_in(&roh) {
+        return Ok(Schritt::Abbruch {
+            text: "Die Antwort enthaelt den Schluessel: nicht abgelegt, nicht belegt, Lauf beendet"
+                .into(),
+            sicherheit: true,
+        });
+    }
+    let abruf = (takt.uhr)().ok_or(SammelFehler::Uhr)?;
+    let quelle = Anbieter::fuer(wert.boerse).dienst();
+    let rohdatei = lege_ab(ablage, quelle, abruf, &format!("_{}.csv", wert.isin), &roh)
+        .map_err(SammelFehler::Ablage)?;
+    if let Some((nur_wert, text)) = hinweis(&roh) {
+        let text = format!("Hinweis der Quelle: {}", zugang.bereinige(&text));
+        return Ok(if nur_wert {
+            Schritt::Fehler(text)
+        } else {
+            Schritt::Abbruch {
+                text,
+                sicherheit: false,
+            }
+        });
+    }
+    let gelesen = String::from_utf8(roh.clone())
+        .map_err(|_| "Antwort ist kein UTF-8".to_string())
+        .and_then(|t| lies_tageskurse(&t).map_err(|e| format!("Antwort unlesbar: {e:?}")))
+        .and_then(|tage| {
+            schlusskurse_in_euro(abruf, vec![(wert.isin.clone(), wert.boerse, tage)], devisen)
+                .map_err(|e| format!("Schlusskurse: {e:?}"))
+        });
+    Ok(match gelesen {
+        Ok((heute, vortag)) => Schritt::Gelesen {
+            abruf,
+            roh,
+            rohdatei,
+            heute,
+            vortag,
+        },
+        Err(text) => Schritt::Fehler(text),
+    })
+}
+
+/// Ein Lauf ueber alle Werte. `takt` liefert die Zeit des Rechners in UTC, wartet und meldet
+/// Wiederholungen; `pause` liegt zwischen zwei Abrufen. Enthaelt `werte` einen Wert ausserhalb von Xetra, fragt der Lauf die
+/// Uhr einmal vorher: fuer die Ablage der Referenzkurse und den Beginn der Reihe bei Tiingo.
+///
+/// # Errors
+/// Journal, Ablage oder Uhr versagen. Was bis dahin belegt ist, bleibt belegt; vor dem Ende
+/// der Abrufe ist das nichts.
 pub fn sammle(
     journal: &mut Journal,
     netz: &mut dyn Netz,
-    schluessel: &Schluessel,
-    uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
+    zugang: &Zugang,
+    takt: &mut Takt<'_>,
     ablage: &Path,
     pause: Duration,
     werte: &[Wert],
@@ -156,75 +480,81 @@ pub fn sammle(
     let mut bericht = Bericht {
         werte: Vec::new(),
         abbruch: None,
+        sicherheitsabbruch: false,
         handelstag: None,
         pruefung: Vec::new(),
+        ausgelassen: Vec::new(),
+        verbindung: None,
     };
-    let mut heute: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
+    let mut heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)> = Vec::new();
     let mut vortag: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
     let mut letzter_abruf: Option<Zeitpunkt> = None;
+    let mut offen: Vec<KursBeleg> = Vec::new();
 
-    for (i, wert) in werte.iter().enumerate() {
+    let vorbereitung = vorbereite(&mut bericht, netz, zugang, takt, ablage, werte)?;
+    let mut abgerufen = vorbereitung.abgerufen;
+    // Quellen, zu denen die Verbindung trotz Wiederholung wegblieb.
+    let mut weg: Vec<Anbieter> = Vec::new();
+
+    for wert in werte {
         if bericht.abbruch.is_some() {
             bericht.werte.push((wert.clone(), Ergebnis::NichtAbgerufen));
             continue;
         }
-        if i > 0 && !pause.is_zero() {
-            std::thread::sleep(pause);
-        }
-        let roh = match netz.hole(&adresse(wert, schluessel)) {
-            Ok(r) => r,
-            Err(e) => {
-                let text = format!("Abruf: {}", schluessel.bereinige(&e));
-                bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
-                continue;
-            }
-        };
-        // Gibt die Quelle den Schluessel zurueck, wird die Antwort weder abgelegt noch gelesen,
-        // und der Lauf endet: Keine Datei des Rahmens enthaelt den Schluessel (K19-01).
-        if schluessel.steht_in(&roh) {
-            let text =
-                "Die Antwort enthaelt den Schluessel: nicht abgelegt, nicht belegt, Lauf beendet"
-                    .to_string();
-            bericht.abbruch = Some(text.clone());
-            bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
-            continue;
-        }
-        let abruf = uhr().ok_or(SammelFehler::Uhr)?;
-        let rohdatei = lege_ab(ablage, QUELLE, abruf, &format!("_{}.csv", wert.isin), &roh)
-            .map_err(SammelFehler::Ablage)?;
-        if let Some((nur_wert, text)) = hinweis(&roh) {
-            let text = format!("Hinweis der Quelle: {}", schluessel.bereinige(&text));
-            if !nur_wert {
-                bericht.abbruch = Some(text.clone());
-            }
-            bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
-            continue;
-        }
-        let gelesen = String::from_utf8(roh.clone())
-            .map_err(|_| "Antwort ist kein UTF-8".to_string())
-            .and_then(|t| lies_tageskurse(&t).map_err(|e| format!("Antwort unlesbar: {e:?}")))
-            .and_then(|tage| {
-                schlusskurse(abruf, vec![(wert.isin.clone(), tage)])
-                    .map_err(|e| format!("Schlusskurse: {e:?}"))
-            });
-        let (h, v) = match gelesen {
-            Ok(k) => k,
+        let schluessel = match abrufbar(zugang, &vorbereitung.referenz, wert, &weg) {
+            Ok(s) => s,
             Err(text) => {
-                bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+                bericht
+                    .werte
+                    .push((wert.clone(), Ergebnis::Uebersprungen(text)));
                 continue;
             }
         };
-        // Belegen, bevor irgendetwas die Kurse verwendet (R12): erst der Vortag, dann heute.
+        if abgerufen && !pause.is_zero() {
+            (takt.schlafe)(pause);
+        }
+        abgerufen = true;
+        let (abruf, roh, rohdatei, h, v) =
+            match lies_wert(netz, zugang, schluessel, wert, &vorbereitung, takt, ablage)? {
+                Schritt::Gelesen {
+                    abruf,
+                    roh,
+                    rohdatei,
+                    heute,
+                    vortag,
+                } => (abruf, roh, rohdatei, heute, vortag),
+                Schritt::Fehler(text) => {
+                    bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+                    continue;
+                }
+                Schritt::Abbruch { text, sicherheit } => {
+                    bericht.abbruch = Some(text.clone());
+                    bericht.sicherheitsabbruch |= sicherheit;
+                    bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+                    continue;
+                }
+                Schritt::Verbindung { text, ausfall } => {
+                    weg.push(Anbieter::fuer(wert.boerse));
+                    if bericht.verbindung.is_none() {
+                        bericht.verbindung = Some(ausfall);
+                    }
+                    bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+                    continue;
+                }
+            };
+        let quelle = Anbieter::fuer(wert.boerse).dienst();
+        // Belegt wird nach dem Lauf, bevor irgendetwas die Kurse verwendet (R12): je Wert erst
+        // der Vortag, dann heute.
         for kurs in [v.eintrag(&wert.isin), h.eintrag(&wert.isin)]
             .into_iter()
             .flatten()
         {
-            let beleg = KursBeleg::neu(QUELLE, abruf, &roh, wert.isin.clone(), kurs.clone())
+            let beleg = KursBeleg::neu(quelle, abruf, &roh, wert.isin.clone(), kurs.clone())
                 .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
-            journal.belege_kurs(&beleg).map_err(SammelFehler::Journal)?;
+            offen.push(beleg);
         }
         if let Some(k) = h.eintrag(&wert.isin) {
-            heute.push((wert.isin.clone(), k.clone()));
+            heute.push((wert.isin.clone(), k.clone(), abruf));
         }
         if let Some(k) = v.eintrag(&wert.isin) {
             vortag.push((wert.isin.clone(), k.clone()));
@@ -240,23 +570,83 @@ pub fn sammle(
         ));
     }
 
-    // Pruefen wie jeden Kurs. Das Alter misst gegen den letzten Abruf; fuer frueher abgerufene
-    // Werte ist das strenger, nie milder.
-    if let Some(stand) = letzter_abruf {
-        let handelstag = heute.iter().map(|(_, k)| k.handelstag()).max();
-        bericht.handelstag = handelstag;
-        let heute = Kurse::neu(stand, heute).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
-        let vortag =
-            Kurse::neu(stand, vortag).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
-        if let Some(tag) = handelstag {
-            bericht.pruefung = pruefe_kurse(
-                &Grenzen::standard(),
-                &als_universum(werte),
-                tag,
-                &heute,
-                &vortag,
-            );
+    let gelesen = Gelesen {
+        offen,
+        letzter_abruf,
+        heute,
+        vortag,
+    };
+    abschliessen(bericht, journal, werte, gelesen)
+}
+
+/// Was ein Lauf gelesen, aber noch nicht belegt hat.
+struct Gelesen {
+    offen: Vec<KursBeleg>,
+    letzter_abruf: Option<Zeitpunkt>,
+    heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)>,
+    vortag: Vec<(depot_kern::Isin, Kurs)>,
+}
+
+/// Nach den Abrufen: ohne Sicherheitsabbruch alles in Abrufreihenfolge belegen und pruefen;
+/// nach einem Sicherheitsabbruch nichts belegen.
+fn abschliessen(
+    mut bericht: Bericht,
+    journal: &mut Journal,
+    werte: &[Wert],
+    g: Gelesen,
+) -> Result<Bericht, SammelFehler> {
+    if bericht.sicherheitsabbruch {
+        for (_, e) in &mut bericht.werte {
+            if matches!(e, Ergebnis::Belegt { .. }) {
+                *e = Ergebnis::Fehler(
+                    "Nicht belegt: Sicherheitsabbruch des Laufs, kein Kurs dieses Abrufs zaehlt"
+                        .into(),
+                );
+            }
         }
+        return Ok(bericht);
+    }
+    for beleg in &g.offen {
+        journal.belege_kurs(beleg).map_err(SammelFehler::Journal)?;
+    }
+    if let Some(stand) = g.letzter_abruf {
+        pruefe(&mut bericht, journal, werte, stand, g.heute, g.vortag)?;
     }
     Ok(bericht)
+}
+
+/// Prueft wie der Papiertag (`waehle_tageswerte`), aber nur die Werte dieses Laufs: Ein Lauf
+/// fuer eine Boerse prueft die gehaltenen Werte dieser Boerse; alle zusammen prueft der
+/// Papiertag. Das Alter misst je Wert an seinem eigenen Abruf, wie im Papiertag.
+fn pruefe(
+    bericht: &mut Bericht,
+    journal: &Journal,
+    werte: &[Wert],
+    stand: Zeitpunkt,
+    heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)>,
+    vortag: Vec<(depot_kern::Isin, Kurs)>,
+) -> Result<(), SammelFehler> {
+    let handelstag = heute.iter().map(|(_, k, _)| k.handelstag()).max();
+    bericht.handelstag = handelstag;
+    let heute =
+        Kurse::mit_abrufen(stand, heute).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
+    let vortag = Kurse::neu(stand, vortag).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
+    if let Some(tag) = handelstag {
+        let wahl = waehle_tageswerte(
+            &Grenzen::standard(),
+            &als_universum(werte),
+            &journal
+                .stand()
+                .gehalten()
+                .into_iter()
+                .filter(|i| werte.iter().any(|w| w.isin == *i))
+                .collect(),
+            tag,
+            &heute,
+            &vortag,
+        );
+        bericht.pruefung = wahl.fehler;
+        bericht.ausgelassen = wahl.ausgelassen;
+    }
+    Ok(())
 }

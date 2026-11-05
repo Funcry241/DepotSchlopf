@@ -4,7 +4,7 @@ Stand 05.11.2026. Wolfgang hat entschieden: Der Sammler holt die Nachrichten vor
 
 ## Ablauf
 
-1. `run.cmd kurse` holt zuerst die Kurse (10 Abrufe), dann nach 15 Sekunden einmal `NEWS_SENTIMENT` mit `topics=financial_markets&sort=LATEST&limit=50`. Das sind 11 der 25 Abrufe, die Alpha Vantage am Tag erlaubt. `run.cmd nachrichten` holt nur die Nachrichten.
+1. `run.cmd kurse` und der geplante Xetra-Abruf holen zuerst die Kurse, dann nach 15 Sekunden einmal `NEWS_SENTIMENT` mit `topics=financial_markets&sort=LATEST&limit=50`. Für die zehn Xetra-Werte und die Nachrichten fallen im Normalfall elf Alpha-Vantage-Abrufe an. `run.cmd nachrichten` holt nur die Nachrichten.
 2. Enthält die Antwort den Schlüssel, gleich in welcher Schreibweise, wird sie weder abgelegt noch gelesen (wie K19-01). Geprüft wird roh und in jedem Text darin nach dem Dekodieren von JSON-Escapes, auch geschachtelt (K28-01, siehe unten).
 3. Sonst liegt sie roh unter `daten/roh/alphavantage-news/<abruf>.json`.
 4. Gelesen wird die Liste `feed`. Fehlt sie, meldet der Lauf den Hinweis der Quelle (etwa das Tageskontingent) und belegt nichts.

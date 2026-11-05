@@ -78,6 +78,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "depot_dienst"
+version = "0.1.0"
+dependencies = [
+ "depot_kern",
+ "depot_lage",
+ "keyring-core",
+ "windows-native-keyring-store",
+]
+
+[[package]]
 name = "depot_journal"
 version = "0.1.0"
 dependencies = [
@@ -109,6 +119,17 @@ dependencies = [
  "depot_kern",
  "depot_ki",
  "sha2",
+]
+
+[[package]]
+name = "depot_lage"
+version = "0.1.0"
+dependencies = [
+ "depot_journal",
+ "depot_kern",
+ "depot_ki",
+ "depot_regelwerk",
+ "depot_sim",
 ]
 
 [[package]]

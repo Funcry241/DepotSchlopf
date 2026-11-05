@@ -1,0 +1,108 @@
+//! Die Regeln des Waechters (`depot_waechter`), hier testbar.
+//!
+//! **Probezeit:** Liegt beim Start `daten/update_offen.txt`, ist der Dienst auf Probe. Er gilt
+//! erst als hochgekommen, wenn er die Markierung selbst loescht (`rueckfall::bestaetige`). Endet
+//! er vorher, gleich mit welchem Code (auch 0), oder vergeht die Frist, faellt der Waechter
+//! zurueck (Maus, Befund zu #30). Bei der Frist beendet er den Dienst zuerst.
+
+use std::path::{Path, PathBuf};
+use std::process::Child;
+use std::thread;
+use std::time::{Duration, Instant};
+
+/// So lange hat ein neuer Stand hoechstens Zeit, sich zu bestaetigen (er tut es nach
+/// `rueckfall::BESTAETIGEN_NACH`).
+pub const FRIST: Duration = Duration::from_secs(120);
+/// So oft sieht der Waechter waehrend der Probezeit nach.
+pub const TAKT: Duration = Duration::from_millis(500);
+
+/// Wie ein Lauf des Dienstes ausging.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ausgang {
+    /// Der Dienst endete (nach einer Probezeit erst nach der Bestaetigung). `None`: ohne Code.
+    Ende(Option<i32>),
+    /// Auf Probe nicht hochgekommen: zuruecksetzen. Der Text sagt warum.
+    Rueckfall(String),
+}
+
+/// Wartet auf den Dienst. Lag `offen` beim Start, gilt die Probezeit mit `frist`.
+pub fn begleite(kind: &mut Child, offen: &Path, frist: Duration, takt: Duration) -> Ausgang {
+    if offen.exists() {
+        let start = Instant::now();
+        loop {
+            if !offen.exists() {
+                break;
+            }
+            match kind.try_wait() {
+                Ok(Some(s)) => {
+                    // Bestaetigung und Ende koennen zusammenfallen: Erst nach dem Ende zaehlt,
+                    // ob die Markierung noch liegt.
+                    if !offen.exists() {
+                        return Ausgang::Ende(s.code());
+                    }
+                    return Ausgang::Rueckfall(format!(
+                        "Neuer Stand endete vor der Bestaetigung (Code {:?})",
+                        s.code()
+                    ));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    let _ = kind.kill();
+                    let _ = kind.wait();
+                    return Ausgang::Rueckfall(format!("Dienst nicht beobachtbar: {e}"));
+                }
+            }
+            if start.elapsed() >= frist {
+                let _ = kind.kill();
+                let _ = kind.wait();
+                if !offen.exists() {
+                    // Im letzten Augenblick bestaetigt, aber schon beendet: neu starten.
+                    return Ausgang::Ende(None);
+                }
+                return Ausgang::Rueckfall(format!(
+                    "Neuer Stand hat sich nicht binnen {} s bestaetigt; Dienst beendet",
+                    frist.as_secs()
+                ));
+            }
+            thread::sleep(takt);
+        }
+    }
+    match kind.wait() {
+        Ok(s) => Ausgang::Ende(s.code()),
+        Err(_) => Ausgang::Ende(None),
+    }
+}
+
+/// Der Pfad des gebauten Dienstes aus der Ausgabe von `cargo build --message-format=json`:
+/// das `executable` des Ziels `depot_dienst`.
+pub fn programm_aus_bau(ausgabe: &str) -> Option<PathBuf> {
+    ausgabe
+        .lines()
+        .filter(|z| z.contains("\"reason\":\"compiler-artifact\""))
+        .filter(|z| z.contains("\"name\":\"depot_dienst\"") && z.contains("\"kind\":[\"bin\"]"))
+        .find_map(|z| json_text_nach(z, "\"executable\":\""))
+        .map(PathBuf::from)
+}
+
+/// Liest einen JSON-Text ab dem Schluessel bis zum schliessenden Anfuehrungszeichen.
+fn json_text_nach(zeile: &str, schluessel: &str) -> Option<String> {
+    let (_, rest) = zeile.split_once(schluessel)?;
+    let mut aus = String::new();
+    let mut z = rest.chars();
+    loop {
+        match z.next()? {
+            '"' => return Some(aus),
+            '\\' => match z.next()? {
+                '"' => aus.push('"'),
+                '\\' => aus.push('\\'),
+                '/' => aus.push('/'),
+                'u' => {
+                    let hex: String = z.by_ref().take(4).collect();
+                    aus.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
+                }
+                _ => return None,
+            },
+            c => aus.push(c),
+        }
+    }
+}

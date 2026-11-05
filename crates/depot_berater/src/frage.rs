@@ -203,6 +203,7 @@ pub fn lies_vorschlag(
     let ziele = match w.feld("ziele") {
         Some(Json::Null) => {
             return Ok(Antwort {
+                verwertbar: true,
                 einschaetzung,
                 vorschlag: None,
             });
@@ -239,6 +240,7 @@ pub fn lies_vorschlag(
         begruendung.insert(isin, grund);
     }
     Ok(Antwort {
+        verwertbar: true,
         einschaetzung,
         vorschlag: Some(Vorschlag {
             berater: wer,
@@ -262,6 +264,7 @@ pub fn lies_urteil(text: &str) -> Result<Urteil, String> {
         .and_then(Json::wahr)
         .ok_or("Feld zustimmung fehlt oder ist nicht true/false")?;
     Ok(Urteil {
+        verwertbar: true,
         zustimmung,
         begruendung: text_feld(&w, "begruendung")?,
     })

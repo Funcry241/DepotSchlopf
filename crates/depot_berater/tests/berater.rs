@@ -69,6 +69,7 @@ fn ok(inhalt: &str) -> Result<Rueckmeldung, NetzFehler> {
     Ok(Rueckmeldung {
         status: 200,
         inhalt: inhalt.as_bytes().to_vec(),
+        warten: None,
     })
 }
 
@@ -172,7 +173,8 @@ fn berater(ort: &Ort, wer: BeraterId, netz: Attrappe) -> Result<KiBerater<Attrap
         netz,
         universum()?,
         ort.sperre(),
-    ))
+    )
+    .mit_warten(|_| {}))
 }
 
 const VORSCHLAG: &str = "Nach den Zahlen:\n```json\n{\"einschaetzung\": \"SAP nach Zahlen fest\", \"ziele\": [{\"isin\": \"DE0007164600\", \"gewicht_bp\": 3000, \"begruendung\": \"Zahlen ueber Erwartung\"}]}\n```";
@@ -329,6 +331,7 @@ fn fehlende_antwort_sperrt_abgewiesene_nicht() -> Result<(), String> {
     netz.antworten.push_back(Ok(Rueckmeldung {
         status: 401,
         inhalt: format!("{{\"error\":\"falscher Schluessel {SCHLUESSEL}\"}}").into_bytes(),
+        warten: None,
     }));
     let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
     for _ in 0..2 {
@@ -403,9 +406,20 @@ fn ohne_schluessel_oder_mit_sperrdatei_nicht_angebunden() -> Result<(), String> 
         ort.sperre(),
     );
     assert!(!ohne.angebunden());
+    assert_eq!(
+        ohne.warum_nicht().as_deref(),
+        Some("kein Schlüssel hinterlegt")
+    );
+    let gut = berater(&ort, BeraterId::Dachs, Attrappe::default())?;
+    assert_eq!(gut.warum_nicht(), None);
     vorbedingung(fs::write(ort.sperre(), "geprueft?"), "Sperrdatei")?;
     let mit = berater(&ort, BeraterId::Dachs, Attrappe::default())?;
     assert!(!mit.angebunden());
+    assert!(
+        mit.warum_nicht().is_some_and(|g| g.contains("ki.halt")),
+        "{:?}",
+        mit.warum_nicht()
+    );
     Ok(())
 }
 
@@ -468,14 +482,16 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
         netz_dachs,
         universum()?,
         sperre.clone(),
-    );
+    )
+    .mit_warten(|_| {});
     let mut maus = KiBerater::neu(
         BeraterId::Maus,
         schluessel()?,
         netz_maus,
         universum()?,
         sperre.clone(),
-    );
+    )
+    .mit_warten(|_| {});
     let start = vec![
         vorbedingung(Topf::neu(TopfId::A, Cent(500_000)), "Topf A")?,
         vorbedingung(Topf::neu(TopfId::B, Cent(500_000)), "Topf B")?,
@@ -650,6 +666,269 @@ fn fs_enthaelt(pfad: &std::path::Path, was: &str) -> bool {
     std::fs::read_to_string(pfad).is_ok_and(|t| t.contains(was))
 }
 
+fn uhr() -> Option<Zeitpunkt> {
+    Zeitpunkt::aus_sekunden(1_793_980_000)
+}
+
+fn abgelehnt(status: u16, inhalt: &str, warten: Option<u64>) -> Result<Rueckmeldung, NetzFehler> {
+    Ok(Rueckmeldung {
+        status,
+        inhalt: inhalt.as_bytes().to_vec(),
+        warten,
+    })
+}
+
+#[test]
+fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
+    use depot_journal::anbieter::{Ergebnis, Kosten, Wer, lies_alle};
+    let ablage = Ort::neu()?;
+    let protokoll = ablage.dir.join("anbieter.txt");
+    let antworten = vec![
+        claude(VORSCHLAG, 20_000, 1_500, 0),
+        abgelehnt(400, "Your credit balance is too low", None),
+        abgelehnt(
+            401,
+            &format!("{{\"error\":\"invalid x-api-key {SCHLUESSEL}\"}}"),
+            None,
+        ),
+        Err(NetzFehler::NichtGesendet("host not found".into())),
+        // Zuletzt: Nach einem Limit pausiert der Berater (eigener Test unten).
+        abgelehnt(429, "{\"type\":\"rate_limit_error\"}", Some(90)),
+    ];
+    let mut texte = Vec::new();
+    for antwort in antworten {
+        // Je Aufruf ein eigenes Journal: Das Tageskontingent gilt hier nicht.
+        let mut ort = Ort::neu()?;
+        let mut netz = Attrappe::default();
+        netz.antworten.push_back(antwort);
+        let mut dachs =
+            berater(&ort, BeraterId::Dachs, netz)?.mit_protokoll(protokoll.clone(), uhr);
+        let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+        texte.push(mit_lage(|l| dachs.vorschlagen(e, l))?.einschaetzung);
+        assert!(!ort.sperre().exists());
+    }
+    let text = vorbedingung(fs::read_to_string(&protokoll), "Protokoll")?;
+    assert!(!text.contains(SCHLUESSEL));
+    let (e, schlecht) = lies_alle(&text);
+    assert_eq!(schlecht, 0);
+    let art: Vec<Ergebnis> = e.iter().map(|x| x.ergebnis).collect();
+    assert_eq!(
+        art,
+        vec![
+            Ergebnis::Ok,
+            Ergebnis::Guthaben,
+            Ergebnis::Abgelehnt,
+            // Sicher nicht gesendet: dreimal versucht, jedes Mal ohne Kosten.
+            Ergebnis::Netz,
+            Ergebnis::Netz,
+            Ergebnis::Netz,
+            Ergebnis::Limit
+        ]
+    );
+    assert!(
+        e.iter()
+            .all(|x| x.wer == Wer::Dachs && x.reserviert.is_some())
+    );
+    assert!(matches!(e.first().map(|x| x.ist), Some(Kosten::Betrag(_))));
+    let t = some(uhr(), "Uhr")?;
+    assert_eq!(
+        e.get(6).and_then(|x| x.warten_bis),
+        Zeitpunkt::aus_sekunden(t.sekunden().saturating_add(90))
+    );
+    // Die Meldungen sagen in Worten, was los ist.
+    assert!(
+        texte
+            .get(4)
+            .is_some_and(|t| t.contains("Anbieterlimit erreicht")),
+        "{texte:?}"
+    );
+    assert!(
+        texte
+            .get(1)
+            .is_some_and(|t| t.contains("Guthaben beim Anbieter fehlt"))
+    );
+    assert!(
+        texte
+            .get(2)
+            .is_some_and(|t| t.contains("lehnt den Schluessel ab"))
+    );
+    Ok(())
+}
+
+#[test]
+fn fehlende_antwort_steht_als_unklar_im_protokoll() -> Result<(), String> {
+    use depot_journal::anbieter::{Ergebnis, Kosten, lies_alle};
+    let mut ort = Ort::neu()?;
+    let protokoll = ort.dir.join("anbieter.txt");
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(Err(NetzFehler::Unklar("timeout".into())));
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?.mit_protokoll(protokoll.clone(), uhr);
+    let e = ort.erlaubnis(BeraterId::Maus, 1)?;
+    let _ = mit_lage(|l| maus.vorschlagen(e, l))?;
+    assert!(ort.sperre().exists());
+    let (e, _) = lies_alle(&vorbedingung(fs::read_to_string(&protokoll), "Protokoll")?);
+    assert_eq!(
+        e.iter().map(|x| (x.ergebnis, x.ist)).collect::<Vec<_>>(),
+        vec![(Ergebnis::Unklar, Kosten::Unbekannt)]
+    );
+    Ok(())
+}
+
+/// Maus' Befund zu #31: Eine angezeigte Pause muss auch eingehalten werden. Nennt der Anbieter
+/// eine Wartezeit (hier 48 Stunden), wird bis dahin nichts gesendet und nichts reserviert.
+#[test]
+fn pause_des_anbieters_wird_vor_dem_aufruf_eingehalten() -> Result<(), String> {
+    use depot_journal::anbieter::{Eintrag, Ergebnis, Wer, anhaengen};
+    let mut ort = Ort::neu()?;
+    let protokoll = ort.dir.join("anbieter.txt");
+    let jetzt = some(uhr(), "Uhr")?;
+    let mut limit = Eintrag::neu(
+        some(
+            Zeitpunkt::aus_sekunden(jetzt.sekunden().saturating_sub(3600)),
+            "Zeit",
+        )?,
+        Wer::Dachs,
+        Ergebnis::Limit,
+        Some(429),
+    );
+    limit.warten_bis = Zeitpunkt::aus_sekunden(jetzt.sekunden().saturating_add(48 * 3600));
+    anhaengen(&protokoll, &limit)?;
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(claude(VORSCHLAG, 20_000, 1_500, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?.mit_protokoll(protokoll.clone(), uhr);
+    // Nicht angebunden: Der Papiertag reserviert fuer ihn nichts.
+    assert!(!dachs.angebunden());
+    assert!(dachs.pause().is_some());
+    assert!(
+        dachs
+            .warum_nicht()
+            .is_some_and(|g| g.starts_with("Anbieterpause")),
+        "{:?}",
+        dachs.warum_nicht()
+    );
+    // Auch mit Erlaubnis wird nichts gesendet.
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.einschaetzung.contains("pausiert"), "{a:?}");
+    assert!(dachs.netz().gesendet.is_empty(), "nichts gesendet");
+    // Maus betrifft Dachs' Limit nicht.
+    let maus =
+        berater(&ort, BeraterId::Maus, Attrappe::default())?.mit_protokoll(protokoll.clone(), uhr);
+    assert!(maus.pause().is_none());
+    // Nach der Wartezeit, oder nach einem erfolgreichen Aufruf, geht es weiter.
+    let mut ok = Eintrag::neu(jetzt, Wer::Dachs, Ergebnis::Ok, Some(200));
+    ok.reserviert = Some(Cent(1));
+    anhaengen(&protokoll, &ok)?;
+    assert!(dachs.pause().is_none());
+    Ok(())
+}
+
+/// Ein Limit in diesem Lauf pausiert bis zum Ende des Laufs, auch ohne Protokoll.
+#[test]
+fn limit_im_lauf_pausiert_auch_ohne_protokoll() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(abgelehnt(429, "{\"type\":\"rate_limit_error\"}", None));
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?;
+    assert!(maus.angebunden());
+    let e = ort.erlaubnis(BeraterId::Maus, 1)?;
+    let _ = mit_lage(|l| maus.vorschlagen(e, l))?;
+    assert!(!maus.angebunden());
+    assert!(maus.pause().is_some());
+    Ok(())
+}
+
+/// Maus zu KI-Aufrufen (05.11.2026): Hat die Anfrage den Anbieter sicher nicht erreicht, wird sie
+/// unter derselben Reservierung erneut gesendet, hoechstens dreimal. Sie kostet nichts, und
+/// hoechstens eine Anfrage je Reservierung kann den Anbieter erreichen.
+#[test]
+fn sicher_nicht_gesendet_wird_unter_derselben_reservierung_wiederholt() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(Err(NetzFehler::NichtGesendet("host not found".into())));
+    netz.antworten
+        .push_back(Err(NetzFehler::NichtGesendet("connection failed".into())));
+    netz.antworten
+        .push_back(claude(VORSCHLAG, 20_000, 1_500, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.verwertbar && a.vorschlag.is_some(), "{a:?}");
+    assert!(!ort.sperre().exists());
+    let gesendet = &dachs.netz().gesendet;
+    assert_eq!(gesendet.len(), 3);
+    assert!(
+        gesendet.windows(2).all(|w| w.first() == w.last()),
+        "dieselbe Anfrage"
+    );
+    Ok(())
+}
+
+#[test]
+fn sperre_waehrend_des_wartens_verhindert_neuen_versand() -> Result<(), String> {
+    thread_local! {
+        static SPERRE: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+    }
+    let mut ort = Ort::neu()?;
+    SPERRE.with(|s| s.replace(Some(ort.sperre())));
+    let mut dachs = berater(&ort, BeraterId::Dachs, Attrappe::default())?.mit_warten(|_| {
+        SPERRE.with(|s| {
+            if let Some(pfad) = s.take() {
+                assert!(fs::write(pfad, "Kosten unbekannt").is_ok());
+            }
+        });
+    });
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.einschaetzung.contains("KI gesperrt"), "{a:?}");
+    assert_eq!(dachs.netz().gesendet.len(), 1);
+    Ok(())
+}
+
+/// Nach drei Versuchen ohne Verbindung: kein Vorschlag, keine Sperre, nichts gekostet.
+#[test]
+fn ohne_verbindung_nach_drei_versuchen_aufgegeben() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut dachs = berater(&ort, BeraterId::Dachs, Attrappe::default())?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(!a.verwertbar && a.vorschlag.is_none(), "{a:?}");
+    assert!(a.einschaetzung.contains("nicht gesendet"), "{a:?}");
+    assert!(!ort.sperre().exists());
+    assert_eq!(dachs.netz().gesendet.len(), 3);
+    Ok(())
+}
+
+/// Abnahmefall 3: Verbindung nach dem Absenden einer KI-Anfrage kappen. Die Anfrage kann
+/// angekommen sein und gekostet haben: kein zweiter Versand, Kostensperre fuer beide KIs, und
+/// die Sperrdatei sagt in Worten, warum.
+#[test]
+fn verbindung_nach_dem_absenden_gekappt_sperrt_ohne_zweiten_versand() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten
+        .push_back(Err(NetzFehler::Unklar("connection reset by peer".into())));
+    netz.antworten
+        .push_back(claude(VORSCHLAG, 20_000, 1_500, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.vorschlag.is_none(), "{a:?}");
+    assert_eq!(dachs.netz().gesendet.len(), 1, "nie ein zweiter Versand");
+    assert_eq!(dachs.netz().antworten.len(), 1);
+    let text = vorbedingung(fs::read_to_string(ort.sperre()), "Sperrdatei")?;
+    assert!(text.contains("nach dem Absenden abgebrochen"), "{text}");
+    assert!(text.contains("kann angekommen sein"), "{text}");
+    // Auch der andere Berater ist gesperrt.
+    let maus = berater(&ort, BeraterId::Maus, Attrappe::default())?;
+    assert!(!maus.angebunden());
+    Ok(())
+}
+
 /// Die groesste Lage passt unter den Deckel der Eingabe (40.000 Bytes, K25-01): alle Werte der
 /// Beobachtungsliste mit Kurs, vier Positionen, 30 Termine und 30 Nachrichten in der laengsten
 /// Form, mit Zeichen aus vier Bytes und Anfuehrungszeichen. Was nicht passt, wird ausgelassen
@@ -703,10 +982,14 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
     };
     for wer in [BeraterId::Dachs, BeraterId::Maus] {
         let mut ort = Ort::neu()?;
+        let netz = Attrappe {
+            antworten: [abgelehnt(400, "Test", None), abgelehnt(400, "Test", None)].into(),
+            ..Attrappe::default()
+        };
         let mut b = KiBerater::neu(
             wer,
             Some(vorbedingung(Schluessel::neu(SCHLUESSEL), "Schluessel")?),
-            Attrappe::default(),
+            netz,
             universum.clone(),
             ort.sperre(),
         );

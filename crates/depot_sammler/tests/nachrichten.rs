@@ -74,13 +74,15 @@ fn antwort(eintraege: &[String]) -> String {
     )
 }
 
+const TIINGO_TEST: &str = "0123456789abcdef0123456789abcdef01234567";
+
 struct Erfunden {
-    antwort: Result<Vec<u8>, String>,
+    antwort: Result<Vec<u8>, depot_sammler::NetzFehler>,
     abgerufen: Vec<String>,
 }
 
 impl Netz for Erfunden {
-    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, String> {
+    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, depot_sammler::NetzFehler> {
         self.abgerufen.push(adresse.to_string());
         self.antwort.clone()
     }
@@ -94,15 +96,21 @@ fn lauf(
 ) -> Result<Result<NachrichtenBericht, SammelFehler>, String> {
     let mut j = vorbedingung(Journal::oeffnen(journal), "Journal oeffnen")?;
     let s = vorbedingung(Schluessel::neu(SCHLUESSEL), "Schluessel")?;
+    let tiingo = vorbedingung(
+        Schluessel::fuer(depot_sammler::Anbieter::Tiingo, TIINGO_TEST),
+        "Tiingo-Schluessel",
+    )?;
+    let zugang =
+        depot_sammler::Zugang::alpha_vantage(s).mit(depot_sammler::Anbieter::Tiingo, tiingo);
     let mut netz = Erfunden {
         antwort: antwort
             .map(|t| t.as_bytes().to_vec())
-            .map_err(str::to_string),
+            .map_err(depot_sammler::NetzFehler::endgueltig),
         abgerufen: Vec::new(),
     };
     let mut zeiten = vec![zeit].into_iter();
     let mut uhr = move || zeiten.next();
-    let b = sammle_nachrichten(&mut j, &mut netz, &s, &mut uhr, roh);
+    let b = sammle_nachrichten(&mut j, &mut netz, &zugang, &mut uhr, roh);
     assert_eq!(netz.abgerufen.len(), 1, "genau ein Abruf");
     let a = netz.abgerufen.first().map_or("", String::as_str);
     assert!(a.starts_with("https://www.alphavantage.co/query?function=NEWS_SENTIMENT&"));
@@ -290,5 +298,16 @@ fn schluessel_hinter_escapes_wird_nicht_abgelegt() -> Result<(), String> {
         let j = vorbedingung(fs::read_to_string(&journal), "Journal")?;
         assert!(!j.contains(SCHLUESSEL), "{fall}");
     }
+    Ok(())
+}
+
+#[test]
+fn nachrichtenantwort_mit_tiingo_schluessel_wird_verworfen() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    let text = antwort(&[eintrag("Leck", "20261105T150000", TIINGO_TEST, &[])]);
+    let b = lauf(&journal, &roh, Ok(&text), um(5, 17, 40)?)?.map_err(|e| format!("{e:?}"))?;
+    assert!(b.sicherheitsabbruch, "{b:?}");
+    assert!(dateien(&roh).is_empty());
+    assert!(belegt(&journal)?.is_empty());
     Ok(())
 }

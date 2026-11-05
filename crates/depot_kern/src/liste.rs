@@ -2,58 +2,114 @@
 //!
 //! Die Liste steht im Code und aendert sich nur mit einer geprueften Aenderung. Der Papiertag
 //! handelt nur Werte dieser Liste (`als_universum`): Was keinen geprueften Schlusskurs hat, kann
-//! nicht gehandelt werden. Reine Daten ohne Netz; den Abruf macht `depot_sammler`. Alpha Vantage
-//! fuehrt Xetra-Werte mit der Endung `.DEX`. Die kostenlose Stufe erlaubt 25 Abrufe am Tag; ein
-//! Lauf braucht einen Abruf je Wert.
+//! nicht gehandelt werden. Reine Daten ohne Netz; den Abruf macht `depot_sammler`.
+//! Xetra-Werte kommen von Alpha Vantage mit der Endung `.DEX`, Werte der NYSE von Tiingo, im
+//! Kuerzel ohne Endung (`quelle`). Ein Lauf braucht einen Abruf je Wert; je Quelle passt die
+//! Liste in das Kontingent der kostenlosen Stufe (`hoechstens_werte`).
+//!
+//! Jeder Wert gehoert zu einer Boerse; ihr Schluss bestimmt, ab wann sein Schlusskurs gilt, und
+//! ihr Kalender, an welchen Tagen er gehandelt wird (`handelstag`).
 
+use crate::boerse::Boerse;
 use crate::grenzen::Universum;
 use crate::instrument::{Instrument, InstrumentArt, Isin};
 
-/// Name der Quelle im Journal (`kurs;quelle;…`).
+/// Name der Quelle fuer Xetra-Werte im Journal (`kurs;quelle;…`).
 pub const QUELLE: &str = "alphavantage";
 
-/// ISIN, Kuerzel bei der Quelle, Name.
-const WERTE: [(&str, &str, &str); 10] = [
-    ("DE0007164600", "SAP.DEX", "SAP"),
-    ("DE0007236101", "SIE.DEX", "Siemens"),
-    ("DE0008404005", "ALV.DEX", "Allianz"),
-    ("DE0005557508", "DTE.DEX", "Deutsche Telekom"),
-    ("DE000BASF111", "BAS.DEX", "BASF"),
-    ("DE0007100000", "MBG.DEX", "Mercedes-Benz Group"),
-    ("DE0008430026", "MUV2.DEX", "Muenchener Rueck"),
-    ("DE0005810055", "DB1.DEX", "Deutsche Boerse"),
-    ("DE0006231004", "IFX.DEX", "Infineon"),
-    ("DE0005190003", "BMW.DEX", "BMW"),
+/// Name der Quelle fuer Werte der NYSE im Journal: Tiingo (freigegeben am 05.11.2026). Die
+/// kostenlose Stufe von Tiingo hat ein eigenes Kontingent, unabhaengig von Alpha Vantage.
+pub const QUELLE_US: &str = "tiingo";
+
+/// Die Quelle, bei der die Werte einer Boerse abgerufen werden.
+pub fn quelle(boerse: Boerse) -> &'static str {
+    match boerse {
+        Boerse::Xetra => QUELLE,
+        Boerse::Nyse => QUELLE_US,
+    }
+}
+
+/// Wie viele Werte eine Quelle je Lauf hoechstens bekommt: ein Abruf je Wert, und ein Lauf muss
+/// in das Tageskontingent der kostenlosen Stufe passen. Alpha Vantage erlaubt 25 Abrufe am Tag;
+/// Tiingo 1000 am Tag, aber nur 500 verschiedene Kuerzel im Monat, das ist die engere Grenze.
+pub fn hoechstens_werte(quelle_name: &str) -> usize {
+    match quelle_name {
+        QUELLE => 25,
+        QUELLE_US => 500,
+        _ => 0,
+    }
+}
+
+/// Ein Eintrag der Liste: ISIN, Boerse, Kuerzel bei der Quelle, Name.
+pub type Eintrag<'a> = (&'a str, Boerse, &'a str, &'a str);
+
+const WERTE: [Eintrag<'static>; 15] = [
+    ("DE0007164600", Boerse::Xetra, "SAP.DEX", "SAP"),
+    ("DE0007236101", Boerse::Xetra, "SIE.DEX", "Siemens"),
+    ("DE0008404005", Boerse::Xetra, "ALV.DEX", "Allianz"),
+    ("DE0005557508", Boerse::Xetra, "DTE.DEX", "Deutsche Telekom"),
+    ("DE000BASF111", Boerse::Xetra, "BAS.DEX", "BASF"),
+    (
+        "DE0007100000",
+        Boerse::Xetra,
+        "MBG.DEX",
+        "Mercedes-Benz Group",
+    ),
+    (
+        "DE0008430026",
+        Boerse::Xetra,
+        "MUV2.DEX",
+        "Muenchener Rueck",
+    ),
+    ("DE0005810055", Boerse::Xetra, "DB1.DEX", "Deutsche Boerse"),
+    ("DE0006231004", Boerse::Xetra, "IFX.DEX", "Infineon"),
+    ("DE0005190003", Boerse::Xetra, "BMW.DEX", "BMW"),
+    ("US46625H1005", Boerse::Nyse, "JPM", "JPMorgan Chase"),
+    ("US1912161007", Boerse::Nyse, "KO", "Coca-Cola"),
+    ("US4781601046", Boerse::Nyse, "JNJ", "Johnson & Johnson"),
+    ("US30231G1022", Boerse::Nyse, "XOM", "Exxon Mobil"),
+    ("US92826C8394", Boerse::Nyse, "V", "Visa"),
 ];
 
 /// Ein beobachteter Wert.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Wert {
     pub isin: Isin,
-    /// Kuerzel bei der Quelle: Grossbuchstaben und Ziffern, dann `.DEX`.
+    pub boerse: Boerse,
+    /// Kuerzel bei der Quelle: fuer Xetra Grossbuchstaben und Ziffern, dann `.DEX`; fuer die
+    /// NYSE ein bis fuenf Grossbuchstaben, hoechstens mit einer Klasse wie `.B`.
     pub kuerzel: String,
     pub name: String,
 }
 
-fn kuerzel_gueltig(k: &str) -> bool {
-    k.strip_suffix(".DEX").is_some_and(|stamm| {
-        !stamm.is_empty()
-            && stamm
-                .bytes()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
-    })
+fn kuerzel_gueltig(boerse: Boerse, k: &str) -> bool {
+    let gross = |t: &str, ziffern: bool| {
+        !t.is_empty()
+            && t.bytes()
+                .all(|b| b.is_ascii_uppercase() || (ziffern && b.is_ascii_digit()))
+    };
+    match boerse {
+        Boerse::Xetra => k
+            .strip_suffix(".DEX")
+            .is_some_and(|stamm| gross(stamm, true)),
+        Boerse::Nyse => {
+            let (stamm, klasse) = k.split_once('.').unwrap_or((k, "A"));
+            stamm.len() <= 5 && gross(stamm, false) && klasse.len() == 1 && gross(klasse, false)
+        }
+    }
 }
 
-/// Prueft eine Liste: gueltige ISIN, Kuerzel in der Form der Quelle, keine ISIN und kein
-/// Kuerzel doppelt.
+/// Prueft eine Liste: gueltige ISIN, Kuerzel in der Form der Quelle fuer die Boerse, keine ISIN
+/// und kein Kuerzel doppelt, und je Quelle nicht mehr Werte, als ein Lauf abrufen darf
+/// (`hoechstens_werte`).
 ///
 /// # Errors
 /// Nennt den ersten fehlerhaften Eintrag.
-pub fn pruefe_liste(eintraege: &[(&str, &str, &str)]) -> Result<Vec<Wert>, String> {
+pub fn pruefe_liste(eintraege: &[Eintrag<'_>]) -> Result<Vec<Wert>, String> {
     let mut werte: Vec<Wert> = Vec::new();
-    for (isin, kuerzel, name) in eintraege {
+    for (isin, boerse, kuerzel, name) in eintraege {
         let isin = Isin::neu(isin).map_err(|e| format!("Liste: ISIN {isin}: {e:?}"))?;
-        if !kuerzel_gueltig(kuerzel) {
+        if !kuerzel_gueltig(*boerse, kuerzel) {
             return Err(format!("Liste: Kuerzel {kuerzel:?} ungueltig"));
         }
         if werte
@@ -64,12 +120,22 @@ pub fn pruefe_liste(eintraege: &[(&str, &str, &str)]) -> Result<Vec<Wert>, Strin
         }
         werte.push(Wert {
             isin,
+            boerse: *boerse,
             kuerzel: (*kuerzel).to_string(),
             name: (*name).to_string(),
         });
     }
     if werte.is_empty() {
         return Err("Liste: leer".into());
+    }
+    for q in [QUELLE, QUELLE_US] {
+        let n = werte.iter().filter(|w| quelle(w.boerse) == q).count();
+        if n > hoechstens_werte(q) {
+            return Err(format!(
+                "Liste: {n} Werte fuer {q}, hoechstens {} je Lauf",
+                hoechstens_werte(q)
+            ));
+        }
     }
     Ok(werte)
 }
@@ -80,6 +146,33 @@ pub fn pruefe_liste(eintraege: &[(&str, &str, &str)]) -> Result<Vec<Wert>, Strin
 /// Wie `pruefe_liste`.
 pub fn beobachtungsliste() -> Result<Vec<Wert>, String> {
     pruefe_liste(&WERTE)
+}
+
+/// Die Boersen der festgelegten Liste.
+pub fn boersen() -> Vec<Boerse> {
+    let mut b: Vec<Boerse> = WERTE.iter().map(|(_, boerse, _, _)| *boerse).collect();
+    b.sort();
+    b.dedup();
+    b
+}
+
+/// Ist an diesem Tag wenigstens eine Boerse der festgelegten Liste offen? Sonst ist der Tag
+/// geschlossen: kein Abruf, kein Papiertag, nichts verpasst.
+pub fn handelstag(datum: crate::zeit::Datum) -> bool {
+    boersen().into_iter().any(|b| b.handelstag(datum))
+}
+
+/// Warum die Boersen der festgelegten Liste an einem Werktag geschlossen sind, etwa
+/// `Xetra: Heiligabend`. `None`, wenn eine offen ist oder der Tag ein Wochenende ist.
+pub fn feiertag(datum: crate::zeit::Datum) -> Option<String> {
+    if handelstag(datum) || !datum.wochentag().is_some_and(|w| (1..=5).contains(&w)) {
+        return None;
+    }
+    let namen: Vec<String> = boersen()
+        .into_iter()
+        .filter_map(|b| b.feiertag(datum).map(|f| format!("{b}: {f}")))
+        .collect();
+    Some(namen.join(", "))
 }
 
 /// Die Werte als Universum, damit `pruefe_kurse` jeden Wert der Liste prueft.

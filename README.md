@@ -39,6 +39,8 @@ Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 | `depot_sim` | Simulierter Lauf mit erfundenen Daten und Papiergeld: Dachs und Maus beobachten, begründen im Journal und entscheiden im Schutzrahmen; ausgeführt wird über ein erfundenes Papierkonto, mit dem der Kontowächter abgleicht; echte Kurse halten den Lauf an |
 | `depot_sammler` | Holt Xetra-Schlusskurse und Marktnachrichten lesend von Alpha Vantage und die Termine der EZB von ihrer Seite, legt jede Antwort roh unter `daten/roh/` ab, belegt jeden Kurs, Termin und jede Nachricht im Journal und prüft die Kurse. Mit Netz |
 | `depot_berater` | Dachs (Claude Sonnet 5.5) und Maus (GPT-6.1 Terra) als Berater im Papierhandel: fragt nur mit gebuchter Erlaubnis, rechnet nach jedem Aufruf die Kosten nach und sperrt bei jeder Überschreitung. Mit Netz; `run.cmd papier` |
+| `depot_lage` | Das Lagebild ohne Netz: Bereitschaft für den nächsten Papiertag mit Ampel und nächstem Schritt, KI-Budget je KI direkt aus dem Kassenbuch, Papierdepot, Aufträge, Tagesergebnis der letzten Handelstage (gelaufen, ohne Handel oder ausgefallen, mit Grund, und welche KI beigetragen hat), Begründungen von Dachs und Maus, festgeschriebene Grenzen. Rechnet mit denselben Prüfungen wie Papiertag und Kostenschutz |
+| `depot_dienst` | Der Dienst mit Oberfläche nur auf 127.0.0.1: Live-Ansicht, eine Config-Seite, Zeitplan, Aufträge als eigene Läufe. Kleiner eigener HTTP-Server aus der Standardbibliothek mit Host-, Herkunfts- und Token-Prüfung |
 | `depot_lauf` | Der Ein-Befehl-Einstieg `run.cmd` mit Assistenten-Export nach jedem Lauf |
 | `depot_kodex` | Das Gate: Deklaration gegen realen Diff, Pfadrollen, Festschreibung, Quellscan, Essenz, Format, Clippy, Tests |
 
@@ -72,7 +74,7 @@ cmdkey /generic:DepotSchlopf/alphavantage /user:depotschlopf /pass
 run.cmd kurse einrichten
 ```
 
-Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je Wert, 15 Sekunden Abstand), belegt sie in `daten/journal.txt` und zeigt das Ergebnis der Kursprüfung. Danach holt er mit einem weiteren Abruf die neuesten Marktnachrichten und belegt höchstens 15 davon; `run.cmd nachrichten` holt nur sie, etwa nach einem Fehler. Fehlende Nachrichten ändern den Ausgang von `run.cmd kurse` nicht. Es entstehen keine Aufträge und keine KI-Anfragen. Der Schlüssel steht nie im Journal, in einer Meldung oder im Export.
+Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je Wert, 15 Sekunden Abstand), belegt sie in `daten/journal.txt` und zeigt das Ergebnis der Kursprüfung. Bei einem Gesamtabruf oder einem Xetra-Abruf holt er nach den Kursen mit einem weiteren Abruf die neuesten Marktnachrichten und belegt höchstens 15 davon; `run.cmd nachrichten` holt nur sie, etwa nach einem Fehler. Bei fehlenden Nachrichten können verwendbare Kurse weiter genutzt werden. Gibt eine Antwort einen Schlüssel zurück, greift die Kurssperre. Es entstehen keine Aufträge und keine KI-Anfragen. Der Schlüssel steht nie im Journal, in einer Meldung oder im Export.
 
 ### Termine der EZB (nur lesend)
 
@@ -80,14 +82,28 @@ Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je
 
 ### Papierhandel mit Dachs und Maus
 
-`run.cmd papier` führt nach `run.cmd kurse` einen Papiertag mit den heute belegten Schlusskursen: Dachs und Maus schlagen vor und prüfen sich gegenseitig, dann Kontowächter, Regelwerk und Papierkonto `daten/papierkonto.txt`, nur Papiergeld, einmal je Handelstag. Ohne Kurse von heute hält er an. Die Schlüssel legt Wolfgang einmal in der Windows-Anmeldeinformationsverwaltung an:
+`run.cmd papier` führt nach `run.cmd kurse` einen Papiertag mit den heute belegten Schlusskursen: Dachs und Maus schlagen vor und prüfen sich gegenseitig, dann Kontowächter, Regelwerk und Papierkonto `daten/papierkonto.txt`, nur Papiergeld, einmal je Handelstag. Ohne Kurse von heute hält er an. Pflicht sind nur die Kurse der gehaltenen Werte: Ein Kandidat ohne gültigen Kurs ist an dem Tag nicht handelbar und steht so im Lagebild. Jeder Wert gehört zu einer Börse, deren Schluss und Feiertage gelten (Xetra, NYSE). An einem Tag, an dem keine Börse der Liste handelt, läuft nichts, und nichts ist verpasst. Die Schlüssel legt Wolfgang einmal in der Windows-Anmeldeinformationsverwaltung an:
 
 ```text
 cmdkey /generic:DepotSchlopf/anthropic /user:depotschlopf /pass
 cmdkey /generic:DepotSchlopf/openai /user:depotschlopf /pass
 ```
 
-Fehlt ein Schlüssel, wird dieser Berater nicht gefragt. Die KI-Kosten sind auf 20 € im Monat je KI begrenzt. Überschreitet ein Aufruf seine Reservierung, liegt danach `daten/ki.halt` mit dem Grund, und keine KI wird mehr gefragt, bis die Datei nach der Prüfung gelöscht ist.
+Fehlt ein Schlüssel, wird dieser Berater nicht gefragt. Die KI-Kosten sind auf 20 € im Monat je KI begrenzt. Überschreitet ein Aufruf seine Reservierung, liegt danach `daten/ki.halt` mit dem Grund, und keine KI wird mehr gefragt, bis sie nach der Prüfung aufgehoben ist (Einrichtung, Abschnitt „Sperre des Kostenschutzes“). Das Aufheben ändert nichts am Kassenbuch; jeder weitere Aufruf durchläuft wieder die Kostenprüfung.
+
+`run.cmd lage` schreibt das Lagebild nach `daten/lage.html` (im Browser öffnen): was für den nächsten Papiertag bereit ist oder fehlt, KI-Budget, Papierdepot, Begründungen und Grenzen. Es liest nur.
+
+### Oberfläche (Dienst auf 127.0.0.1)
+
+Doppelklick auf `DepotSchlopf.cmd` startet den Dienst und öffnet http://127.0.0.1:47410/. Läuft er schon, öffnet sich nur die Seite. Der Dienst lauscht nur auf diesem Rechner und schreibt selbst nie ins Journal; jede Arbeit ist ein eigener Lauf wie `run.cmd kurse`.
+
+- **Gesamtstatus** oben auf jeder Seite: vollständig bereit, läuft ohne KI, pausiert oder Eingriff nötig, jeweils mit Gründen (Schlüssel abgelehnt, Anbieterlimit mit nächstem Versuch, fehlendes Guthaben, Budget, Zeitplan aus).
+- **Live:** was gerade läuft (mit Protokoll), was wartet, der nächste geplante Lauf, dazu das Lagebild mit KI-Budget je KI, Papierdepot und dem Gespräch von Dachs und Maus. Die Seite frischt sich selbst auf und zeigt, wenn der Dienst nicht antwortet. Nach einem Neustart steht unter Tätigkeit, was vorher lief und ob ein Lauf unterbrochen wurde. Doppelklicks und erneutes Absenden starten nichts doppelt. Das **Tagesergebnis** zeigt je Handelstag, ob der Papiertag lief, ohne Handel blieb (etwa weil die Kurse zu alt waren) oder ausfiel, und ob Dachs und Maus tatsächlich beigetragen haben oder warum nicht. Alle Ergebnisse im Papierdepot sind simuliert: ausgeführt zum Schlusskurs des Entscheidungstags.
+- **Einrichtung:** die eine Config-Seite. Schlüssel gehen direkt in die Windows-Anmeldeinformationsverwaltung; die Seite zeigt keinen Schlüssel, nur seinen Stand (fehlt, hinterlegt, geprüft, abgelehnt) nach dem letzten echten Aufruf (`daten/anbieter.txt`). Verbindungstest der Quellen, Zeitplan (Mo–Fr, Termine 17:40, Kurse 17:45, danach Papiertag; jeder Lauf höchstens einmal am Tag; **ab Werk aus**, er läuft erst, wenn er hier eingeschaltet und gespeichert ist, und einschalten lässt er sich erst, wenn jeder Schlüssel hinterlegt und kein Eingriff mehr nötig ist; abgelehnte Eingaben bleiben im Formular), Autostart mit Windows, geführte Aufhebung der Sperre des Kostenschutzes. Grenzen und Budgets stehen nur zur Ansicht; sie ändern sich nur über eine Grenzfreigabe.
+
+- **Update:** „Nach Update suchen“ nennt die neuen Stände auf `main`. „Update einspielen“ prüft den neuen Stand zuerst mit dem ganzen Gate in einem eigenen Ordner und rückt den Projektordner nur dann vorwärts, ohne Lokales zu überschreiben. Danach startet der Dienst neu und die Seite lädt sich selbst neu; kommt der neue Stand nicht hoch, setzt `DepotSchlopf.cmd` den alten zurück. Dasselbe ohne Oberfläche: `run.cmd update pruefen` und `run.cmd update`.
+
+Schutz gegen fremde Webseiten: Jede Anfrage braucht `Host` 127.0.0.1 oder localhost mit dem eigenen Port, jede Änderung zusätzlich die eigene Herkunft und den Zufallswert dieses Dienststarts. Antworten verbieten Einbetten und fremde Skripte.
 
 ## Mitmachen
 

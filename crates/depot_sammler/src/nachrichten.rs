@@ -21,7 +21,7 @@ use depot_kern::{Datum, Zeitpunkt};
 
 use crate::netz::Netz;
 use crate::sammeln::{SammelFehler, lege_ab};
-use crate::schluessel::Schluessel;
+use crate::schluessel::{Anbieter, Schluessel, Zugang};
 
 /// Name der Quelle; Ordner der rohen Antworten.
 pub const QUELLE_NACHRICHTEN: &str = "alphavantage-news";
@@ -51,6 +51,7 @@ pub struct Nachricht {
 /// Der Bericht eines Laufs ueber die Nachrichten.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NachrichtenBericht {
+    pub sicherheitsabbruch: bool,
     /// Die abgelegte rohe Antwort; keine, wenn der Abruf scheiterte oder sie den Schluessel
     /// enthielt.
     pub rohdatei: Option<PathBuf>,
@@ -175,46 +176,52 @@ pub fn lies_nachrichten(text: &str, abruf: Zeitpunkt) -> Result<Vec<Nachricht>, 
 pub fn sammle_nachrichten(
     journal: &mut Journal,
     netz: &mut dyn Netz,
-    schluessel: &Schluessel,
+    zugang: &Zugang,
     uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
     ablage: &Path,
 ) -> Result<NachrichtenBericht, SammelFehler> {
     let mut bericht = NachrichtenBericht::default();
+    let Some(schluessel) = zugang.von(Anbieter::AlphaVantage) else {
+        bericht.fehler = Some("Schluessel fehlt (DepotSchlopf/alphavantage)".into());
+        return Ok(bericht);
+    };
     let roh = match netz.hole(&adresse_nachrichten(schluessel)) {
         Ok(r) => r,
         Err(e) => {
-            bericht.fehler = Some(format!("Abruf: {}", schluessel.bereinige(&e)));
+            bericht.fehler = Some(format!("Abruf: {}", zugang.bereinige(&e.to_string())));
             return Ok(bericht);
         }
     };
-    if schluessel.steht_in(&roh) {
+    if zugang.steht_in(&roh) {
+        bericht.sicherheitsabbruch = true;
         bericht.fehler =
             Some("Die Antwort enthaelt den Schluessel: nicht abgelegt, nicht belegt".into());
         return Ok(bericht);
     }
     let abruf = uhr().ok_or(SammelFehler::Uhr)?;
-    bericht.rohdatei = Some(
-        lege_ab(ablage, QUELLE_NACHRICHTEN, abruf, ".json", &roh).map_err(SammelFehler::Ablage)?,
-    );
     let gelesen = std::str::from_utf8(&roh)
         .map_err(|_| "Antwort ist kein UTF-8".to_string())
         .and_then(|t| lies_nachrichten(t, abruf));
-    let nachrichten = match gelesen {
-        Ok(n) => n,
-        Err(e) => {
-            bericht.fehler = Some(schluessel.bereinige(&e));
-            return Ok(bericht);
-        }
-    };
-    // Zweite Pruefung an den fertigen Texten, so wie sie ins Journal gingen, vor dem ersten
-    // Beleg.
-    if nachrichten
-        .iter()
-        .any(|n| schluessel.steht_in(n.text.as_bytes()))
-    {
+    // Auch die fertig aufbereiteten Texte prüfen, bevor Antwort oder Belege gespeichert werden.
+    if gelesen.as_ref().is_ok_and(|nachrichten| {
+        nachrichten
+            .iter()
+            .any(|n| zugang.steht_in(n.text.as_bytes()))
+    }) {
+        bericht.sicherheitsabbruch = true;
         bericht.fehler = Some("Eine Nachricht enthaelt den Schluessel: nichts belegt".into());
         return Ok(bericht);
     }
+    bericht.rohdatei = Some(
+        lege_ab(ablage, QUELLE_NACHRICHTEN, abruf, ".json", &roh).map_err(SammelFehler::Ablage)?,
+    );
+    let nachrichten = match gelesen {
+        Ok(n) => n,
+        Err(e) => {
+            bericht.fehler = Some(zugang.bereinige(&e));
+            return Ok(bericht);
+        }
+    };
     // Die aelteste zuerst, damit das Journal in der Reihenfolge der Veroeffentlichung steht.
     for n in nachrichten.iter().rev() {
         let beleg = NachrichtBeleg::neu(QUELLE_NACHRICHTEN, abruf, &roh, n.zeit, &n.text)

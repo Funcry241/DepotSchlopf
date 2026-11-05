@@ -11,13 +11,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use depot_journal::{Journal, JournalFehler};
-use depot_kern::{Cent, Datum, Herkunft, Preis, Zeitpunkt};
+use depot_journal::{Journal, JournalFehler, anbieter};
+use depot_kern::{Boerse, Cent, Datum, Herkunft, Preis, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::DatenFehler;
-use depot_sammler::liste::pruefe_liste;
+use depot_sammler::liste::{QUELLE_US, hoechstens_werte, pruefe_liste, quelle};
 use depot_sammler::sammeln::adresse;
 use depot_sammler::{
-    Ergebnis, Netz, QUELLE, SammelFehler, Schluessel, Wert, beobachtungsliste, sammle,
+    Ergebnis, Netz, NetzFehler, QUELLE, SammelFehler, Schluessel, Takt, Verlauf, Wert, Zugang,
+    beobachtungsliste, sammle,
 };
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
@@ -59,8 +60,13 @@ fn schluessel() -> Result<Schluessel, String> {
 fn zwei_werte() -> Result<Vec<Wert>, String> {
     vorbedingung(
         pruefe_liste(&[
-            ("DE0007164600", "SAP.DEX", "SAP"),
-            ("DE0007100000", "MBG.DEX", "Mercedes-Benz Group"),
+            ("DE0007164600", Boerse::Xetra, "SAP.DEX", "SAP"),
+            (
+                "DE0007100000",
+                Boerse::Xetra,
+                "MBG.DEX",
+                "Mercedes-Benz Group",
+            ),
         ]),
         "Liste",
     )
@@ -106,7 +112,7 @@ impl Erfunden {
 }
 
 impl Netz for Erfunden {
-    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, String> {
+    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler> {
         self.abgerufen.push(adresse.to_string());
         let kuerzel = adresse
             .split('&')
@@ -116,6 +122,7 @@ impl Netz for Erfunden {
             .get(kuerzel)
             .cloned()
             .unwrap_or_else(|| Err("unbekannt".into()))
+            .map_err(NetzFehler::endgueltig)
     }
 }
 
@@ -134,11 +141,17 @@ fn lauf(
 ) -> Result<Result<depot_sammler::Bericht, SammelFehler>, String> {
     let mut j = vorbedingung(Journal::oeffnen(journal), "Journal oeffnen")?;
     let mut u = uhr(zeiten);
+    let (mut schlafe, mut melde) = (|_| {}, |_: &Verlauf| {});
+    let mut takt = Takt {
+        uhr: &mut u,
+        schlafe: &mut schlafe,
+        melde: &mut melde,
+    };
     Ok(sammle(
         &mut j,
         netz,
-        &schluessel()?,
-        &mut u,
+        &Zugang::alpha_vantage(schluessel()?),
+        &mut takt,
         roh,
         Duration::ZERO,
         werte,
@@ -154,31 +167,59 @@ fn sha256_hex(b: &[u8]) -> String {
     })
 }
 
-/// Die festgelegte Liste ist gueltig und passt in das Tageskontingent der kostenlosen Stufe.
-/// Fehlerhafte Listen werden abgelehnt.
+/// Eine gueltige ISIN `DE00000000<nn><p>` mit passender Pruefziffer.
+fn isin_mit_pruefziffer(n: u8) -> String {
+    (0..10_u8)
+        .map(|p| format!("DE0000000{n:02}{p}"))
+        .find(|t| depot_kern::Isin::neu(t).is_ok())
+        .unwrap_or_default()
+}
+
+/// Die festgelegte Liste ist gueltig und passt je Quelle in das Tageskontingent der kostenlosen
+/// Stufe. Fehlerhafte Listen werden abgelehnt, auch eine, die das Kontingent einer Quelle
+/// ueberschreitet.
 #[test]
 fn beobachtungsliste_gueltig() -> Result<(), String> {
     let l = beobachtungsliste()?;
-    assert!(!l.is_empty() && l.len() <= 25, "{}", l.len());
-    assert!(pruefe_liste(&[("DE0007164601", "SAP.DEX", "x")]).is_err());
-    assert!(pruefe_liste(&[("DE0007164600", "SAP.DE", "x")]).is_err());
-    assert!(pruefe_liste(&[("DE0007164600", "SAP&X.DEX", "x")]).is_err());
-    assert!(pruefe_liste(&[("DE0007164600", "sap.DEX", "x")]).is_err());
+    for q in [QUELLE, QUELLE_US] {
+        let n = l.iter().filter(|w| quelle(w.boerse) == q).count();
+        assert!(n > 0 && n <= hoechstens_werte(q), "{q}: {n}");
+    }
+    let isins: Vec<String> = (0..26_u8).map(isin_mit_pruefziffer).collect();
+    let kuerzel: Vec<String> = (0..26_u8).map(|i| format!("X{i}.DEX")).collect();
+    let zu_viele: Vec<(&str, Boerse, &str, &str)> = isins
+        .iter()
+        .zip(&kuerzel)
+        .map(|(i, k)| (i.as_str(), Boerse::Xetra, k.as_str(), "x"))
+        .collect();
+    let fehler = pruefe_liste(&zu_viele).err().unwrap_or_default();
+    assert!(fehler.contains("hoechstens 25"), "{fehler}");
+    assert!(pruefe_liste(zu_viele.get(..25).unwrap_or_default()).is_ok());
+    assert!(pruefe_liste(&[("DE0007164601", Boerse::Xetra, "SAP.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP.DE", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP&X.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "sap.DEX", "x")]).is_err());
     assert!(
         pruefe_liste(&[
-            ("DE0007164600", "SAP.DEX", "x"),
-            ("DE0007100000", "SAP.DEX", "y")
+            ("DE0007164600", Boerse::Xetra, "SAP.DEX", "x"),
+            ("DE0007100000", Boerse::Xetra, "SAP.DEX", "y")
         ])
         .is_err()
     );
     assert!(
         pruefe_liste(&[
-            ("DE0007164600", "SAP.DEX", "x"),
-            ("DE0007164600", "MBG.DEX", "y")
+            ("DE0007164600", Boerse::Xetra, "SAP.DEX", "x"),
+            ("DE0007164600", Boerse::Xetra, "MBG.DEX", "y")
         ])
         .is_err()
     );
     assert!(pruefe_liste(&[]).is_err());
+    // NYSE: ohne Endung, hoechstens eine Klasse; eine Xetra-Endung gilt dort nicht.
+    assert!(pruefe_liste(&[("US0378331005", Boerse::Nyse, "AAPL", "x")]).is_ok());
+    assert!(pruefe_liste(&[("US0846707026", Boerse::Nyse, "BRK.B", "x")]).is_ok());
+    assert!(pruefe_liste(&[("US0378331005", Boerse::Nyse, "AAPL.DEX", "x")]).is_err());
+    assert!(pruefe_liste(&[("US0378331005", Boerse::Nyse, "AAPLXY", "x")]).is_err());
+    assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP", "x")]).is_err());
     Ok(())
 }
 
@@ -211,7 +252,7 @@ fn schluessel_ohne_textform() -> Result<(), String> {
 fn abrufadresse() -> Result<(), String> {
     let werte = zwei_werte()?;
     let w = werte.first().ok_or("Vorbedingung: Wert")?;
-    let a = adresse(w, &schluessel()?);
+    let a = adresse(w, &schluessel()?, None);
     assert!(a.starts_with("https://www.alphavantage.co/query?"), "{a}");
     for teil in [
         "function=TIME_SERIES_DAILY",
@@ -305,7 +346,7 @@ fn am_naechsten_morgen_zu_alt() -> Result<(), String> {
     // Zu alte Kurse sind belegt, aber nicht verwendbar: Der Lauf meldet keinen Erfolg (K19-02).
     assert!(!b.verwendbar());
     assert!(
-        b.pruefung
+        b.ausgelassen
             .iter()
             .any(|f| matches!(f, DatenFehler::KursZuAlt(_)))
     );
@@ -341,13 +382,18 @@ fn hinweis_beendet_den_lauf() -> Result<(), String> {
     ));
     assert_eq!(b.handelstag, None);
     assert!(!b.verwendbar());
+    assert_eq!(
+        depot_sammler::einordnen(&b, depot_sammler::Anbieter::AlphaVantage),
+        Some(anbieter::Ergebnis::Limit)
+    );
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert!(j.stand().kurse().is_empty());
     Ok(())
 }
 
-/// Ein falsches Kuerzel betrifft nur seinen Wert; die anderen werden weiter abgerufen. Die
-/// Pruefung nennt den fehlenden Kurs.
+/// Ein falsches Kuerzel betrifft nur seinen Wert; die anderen werden weiter abgerufen. Pflicht
+/// sind nur gehaltene Werte: Ein Kandidat ohne Kurs ist heute nur nicht handelbar, die Kurse
+/// sind verwendbar, und der Bericht nennt ihn. Wird er gehalten, sind sie es nicht.
 #[test]
 fn falsches_kuerzel_nur_fuer_seinen_wert() -> Result<(), String> {
     let (journal, roh) = ordner()?;
@@ -371,10 +417,36 @@ fn falsches_kuerzel_nur_fuer_seinen_wert() -> Result<(), String> {
         .first()
         .map(|w| w.isin.clone())
         .ok_or("Vorbedingung")?;
-    assert!(b.pruefung.contains(&DatenFehler::KursFehlt(sap)));
-    assert!(!b.verwendbar());
+    assert_eq!(b.ausgelassen, vec![DatenFehler::KursFehlt(sap.clone())]);
+    assert!(b.pruefung.is_empty(), "{:?}", b.pruefung);
+    assert!(b.verwendbar());
+    // Ein Kurs kam an: Der Schluessel gilt.
+    assert_eq!(
+        depot_sammler::einordnen(&b, depot_sammler::Anbieter::AlphaVantage),
+        Some(anbieter::Ergebnis::Ok)
+    );
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert_eq!(j.stand().kurse().len(), 2);
+    drop(j);
+
+    // Dasselbe, waehrend SAP im Depot liegt: nicht verwendbar.
+    let (journal, roh) = ordner()?;
+    let mut j = vorbedingung(Journal::oeffnen(&journal), "Journal oeffnen")?;
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
+    topf.setze_bestand(sap.clone(), 10);
+    vorbedingung(j.setze_topf(&topf), "Topf belegen")?;
+    drop(j);
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(FALSCHES_KUERZEL)), ("MBG.DEX", Ok(ROH_MBG))]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        vec![utc(11, 4, 16, 40)?, utc(11, 4, 16, 41)?],
+        &werte,
+    )?
+    .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert_eq!(b.pruefung, vec![DatenFehler::KursFehlt(sap)]);
+    assert!(!b.verwendbar());
     Ok(())
 }
 
@@ -450,7 +522,7 @@ fn schluessel_erscheint_nirgends() -> Result<(), String> {
     let s = schluessel()?;
     let werte = zwei_werte()?;
     let w = werte.first().ok_or("Vorbedingung: Wert")?;
-    let a = adresse(w, &s);
+    let a = adresse(w, &s, None);
     let netzfehler = format!(
         "Verbindung zu {a} fehlgeschlagen ({})",
         a.to_ascii_lowercase()
@@ -487,6 +559,38 @@ fn schluessel_erscheint_nirgends() -> Result<(), String> {
         assert!(b.abbruch.is_some(), "{fall}: Lauf nicht beendet");
         assert!(!b.verwendbar(), "{fall}");
     }
+    Ok(())
+}
+
+/// Maus' Gegenprobe 1 zu #34: Kommt erst ein gueltiger Kurs und danach eine Antwort mit dem
+/// Schluessel, endet der Lauf. Die bis dahin belegten Kurse sind dann nicht verwendbar, auch
+/// wenn sonst nur Kandidaten fehlen: Ein Sicherheitsabbruch laesst den ganzen Abruf scheitern,
+/// damit kein Zeitplan danach einen Papiertag startet.
+#[test]
+fn schluesselabbruch_macht_den_ganzen_abruf_unbrauchbar() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    let werte = zwei_werte()?;
+    let zurueck = format!("{{\"Information\": \"key {SCHLUESSEL} unknown\"}}");
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(ROH_SAP)), ("MBG.DEX", Ok(&zurueck))]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        vec![utc(11, 4, 16, 40)?, utc(11, 4, 16, 41)?],
+        &werte,
+    )?
+    .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert!(b.abbruch.is_some());
+    assert!(!b.verwendbar(), "{b:?}");
+    // Maus' Restbefund (3f0240b): Auch wenn die Kurssperre sich nicht schreiben laesst, darf
+    // kein Teilkurs eines solchen Abrufs im Journal stehen. Belegt wird erst, wenn der Abruf
+    // ohne Sicherheitsabbruch endet.
+    let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
+    assert!(j.stand().kurse().is_empty(), "{:?}", j.stand().kurse());
+    assert!(
+        matches!(b.werte.first(), Some((_, Ergebnis::Fehler(t))) if t.contains("Sicherheitsabbruch")),
+        "{b:?}"
+    );
     Ok(())
 }
 
@@ -546,5 +650,27 @@ fn halber_cent_wird_belegt() -> Result<(), String> {
     let text = vorbedingung(fs::read_to_string(&journal), "Journal lesen")?;
     assert!(text.contains(";4115.5;"), "{text}");
     assert!(text.contains(";4148;"), "{text}");
+    Ok(())
+}
+
+/// Lehnt die Quelle den Schluessel bei jedem Wert ab, steht das als abgelehnt im Protokoll.
+#[test]
+fn ungueltiger_schluessel_wird_als_abgelehnt_erkannt() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    let werte = zwei_werte()?;
+    let falsch = "{\n    \"Error Message\": \"the parameter apikey is invalid or missing. Please claim your free API key.\"\n}";
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(falsch)), ("MBG.DEX", Ok(falsch))]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        vec![utc(11, 4, 16, 40)?, utc(11, 4, 16, 41)?],
+        &werte,
+    )?
+    .map_err(|e| format!("Lauf: {e:?}"))?;
+    assert_eq!(
+        depot_sammler::einordnen(&b, depot_sammler::Anbieter::AlphaVantage),
+        Some(anbieter::Ergebnis::Abgelehnt)
+    );
     Ok(())
 }

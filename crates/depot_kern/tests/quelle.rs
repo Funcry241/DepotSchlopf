@@ -3,8 +3,8 @@
 //! nur die Form der Quellen.
 
 use depot_kern::{
-    Cent, Datum, Herkunft, Isin, Preis, QuellenFehler, Tageskurs, Zeitpunkt, lies_preis,
-    lies_tageskurse, schlusskurse, xetra_schluss,
+    Boerse, Cent, Datum, Herkunft, Isin, KursFehler, Preis, QuellenFehler, Tageskurs, Zeitpunkt,
+    lies_preis, lies_tageskurse, schlusskurse, xetra_schluss,
 };
 
 fn tag(j: u16, m: u8, t: u8) -> Result<Datum, String> {
@@ -269,16 +269,22 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
 
     // Abruf am 03.11. um 17:34 Uhr in Frankfurt: Der 03.11. ist noch nicht geschlossen.
     let frueh = utc(2026, 11, 3, 16, 34)?;
-    let (heute, vortag) =
-        schlusskurse(frueh, vec![(a.clone(), tage.clone())]).map_err(|e| format!("{e:?}"))?;
+    let (heute, vortag) = schlusskurse(frueh, vec![(a.clone(), Boerse::Xetra, tage.clone())])
+        .map_err(|e| format!("{e:?}"))?;
     assert_eq!(heute.stand(), frueh);
     assert_eq!(heute.kurs_cent(&a), Some(Cent(10_300)));
     assert_eq!(vortag.kurs_cent(&a), Some(Cent(10_120)));
 
     // Um 17:45 Uhr ist er es; sein Kurs ist zehn Minuten alt.
     let spaet = utc(2026, 11, 3, 16, 45)?;
-    let (heute, vortag) = schlusskurse(spaet, vec![(a.clone(), tage), (b.clone(), nur_zwei)])
-        .map_err(|e| format!("{e:?}"))?;
+    let (heute, vortag) = schlusskurse(
+        spaet,
+        vec![
+            (a.clone(), Boerse::Xetra, tage),
+            (b.clone(), Boerse::Xetra, nur_zwei),
+        ],
+    )
+    .map_err(|e| format!("{e:?}"))?;
     let k = heute.eintrag(&a).ok_or("Kurs fehlt")?;
     assert_eq!(k.preis_cent(), Some(Cent(10_375)));
     assert_eq!(k.herkunft(), Herkunft::Quelle);
@@ -295,8 +301,8 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
         datum: tag(2026, 11, 3)?,
         schluss: cent(500),
     }];
-    let (heute, vortag) =
-        schlusskurse(spaet, vec![(a.clone(), ein_tag)]).map_err(|e| format!("{e:?}"))?;
+    let (heute, vortag) = schlusskurse(spaet, vec![(a.clone(), Boerse::Xetra, ein_tag)])
+        .map_err(|e| format!("{e:?}"))?;
     assert_eq!(heute.kurs_cent(&a), Some(Cent(500)));
     assert_eq!(vortag.kurs_cent(&a), None);
 
@@ -305,10 +311,84 @@ fn schlusskurse_eines_abrufs() -> Result<(), String> {
         datum: tag(2026, 11, 4)?,
         schluss: cent(500),
     }];
-    let (heute, vortag) =
-        schlusskurse(spaet, vec![(a.clone(), morgen)]).map_err(|e| format!("{e:?}"))?;
+    let (heute, vortag) = schlusskurse(spaet, vec![(a.clone(), Boerse::Xetra, morgen)])
+        .map_err(|e| format!("{e:?}"))?;
     assert_eq!((heute.kurs_cent(&a), vortag.kurs_cent(&a)), (None, None));
     Ok(())
+}
+
+/// Ein Wert der NYSE: Ein Abruf kurz nach dem Xetra-Schluss sieht dort den Schluss des
+/// Vortags, nie einen laufenden Kurs. Erst nach 16:00 Uhr in New York zaehlt der Tag. Weil ein
+/// Kurs nur in Euro gilt, ergibt ein Wert in Dollar ohne Umrechnung keinen Kurs.
+#[test]
+fn schluss_der_nyse_erst_nach_new_york() -> Result<(), String> {
+    let a = isin("US0378331005")?;
+    let t = |d, c| -> Result<Tageskurs, String> {
+        Ok(Tageskurs {
+            datum: d,
+            schluss: cent(c),
+        })
+    };
+    let tage = vec![t(tag(2026, 11, 4)?, 100)?, t(tag(2026, 11, 5)?, 101)?];
+    // 17:40 Uhr in Frankfurt = 16:40 UTC: In New York laeuft der Handel noch.
+    let frueh = utc(2026, 11, 5, 16, 40)?;
+    assert_eq!(
+        schlusskurse(frueh, vec![(a.clone(), Boerse::Nyse, tage.clone())]),
+        Err(QuellenFehler::Kurs(KursFehler::Waehrung))
+    );
+    // Derselbe Abruf fuer einen Wert, der nur den Vortag beendet hat: kein Kurs von heute.
+    let nur_heute = vec![t(tag(2026, 11, 5)?, 101)?];
+    let (heute, vortag) = schlusskurse(frueh, vec![(a.clone(), Boerse::Nyse, nur_heute.clone())])
+        .map_err(|e| format!("{e:?}"))?;
+    assert_eq!((heute.eintrag(&a), vortag.eintrag(&a)), (None, None));
+    // Um 22:05 Uhr in Frankfurt (21:05 UTC) ist der Tag beendet; nur die Waehrung fehlt.
+    let spaet = utc(2026, 11, 5, 21, 5)?;
+    assert_eq!(
+        schlusskurse(spaet, vec![(a, Boerse::Nyse, nur_heute)]),
+        Err(QuellenFehler::Kurs(KursFehler::Waehrung))
+    );
+    Ok(())
+}
+
+/// Maus' Gegenprobe 2 zu #34: Auch beim Einlesen gilt der Boersenkalender. Eine Zeile fuer einen
+/// Tag, an dem die Boerse des Werts geschlossen war, ist kein Schlusskurs; der Wert ergibt keinen
+/// Kurs, statt dass sie als Kurs eines Handelstags gilt.
+#[test]
+fn zeile_an_einem_boersenfeiertag_ist_kein_schlusskurs() -> Result<(), String> {
+    let a = isin("DE0007164600")?;
+    let t = |d, c| -> Result<Tageskurs, String> {
+        Ok(Tageskurs {
+            datum: d,
+            schluss: cent(c),
+        })
+    };
+    let abruf = Zeitpunkt::neu(some_tag(2027, 1, 4)?, 16, 45, 0).ok_or("Abruf")?;
+    let mit_neujahr = vec![
+        t(some_tag(2026, 12, 30)?, 100)?,
+        t(some_tag(2027, 1, 1)?, 101)?,
+        t(some_tag(2027, 1, 4)?, 102)?,
+    ];
+    let r = schlusskurse(abruf, vec![(a.clone(), Boerse::Xetra, mit_neujahr)]);
+    assert!(r.is_err(), "Neujahr als Kurs angenommen: {r:?}");
+    // Am Wochenende ebenso.
+    let samstag = vec![t(some_tag(2026, 11, 7)?, 100)?];
+    let spaet = utc(2026, 11, 9, 16, 45)?;
+    let r = schlusskurse(spaet, vec![(a.clone(), Boerse::Xetra, samstag)]);
+    assert!(r.is_err(), "Samstag als Kurs angenommen: {r:?}");
+    // Ohne die Feiertagszeile bleibt alles wie gewohnt.
+    let ohne = vec![
+        t(some_tag(2026, 12, 30)?, 100)?,
+        t(some_tag(2027, 1, 4)?, 102)?,
+    ];
+    let (heute, vortag) = schlusskurse(abruf, vec![(a.clone(), Boerse::Xetra, ohne)])
+        .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(heute.kurs_cent(&a), Some(Cent(102)));
+    assert_eq!(vortag.kurs_cent(&a), Some(Cent(100)));
+    Ok(())
+}
+
+fn some_tag(j: u16, m: u8, t: u8) -> Result<Datum, String> {
+    Datum::neu(j, m, t).ok_or_else(|| format!("Vorbedingung: Datum {j}-{m}-{t}"))
 }
 
 /// Ein Wert zweimal oder Tage in falscher Reihenfolge: kein Ergebnis.
@@ -324,17 +404,23 @@ fn schlusskurse_fehler() -> Result<(), String> {
     };
     let gut = vec![t(tag(2026, 11, 2)?, 100)?, t(tag(2026, 11, 3)?, 101)?];
     assert_eq!(
-        schlusskurse(spaet, vec![(a.clone(), gut.clone()), (a.clone(), gut)]),
+        schlusskurse(
+            spaet,
+            vec![
+                (a.clone(), Boerse::Xetra, gut.clone()),
+                (a.clone(), Boerse::Xetra, gut)
+            ]
+        ),
         Err(QuellenFehler::Doppelt(a.clone()))
     );
     let verkehrt = vec![t(tag(2026, 11, 3)?, 101)?, t(tag(2026, 11, 2)?, 100)?];
     assert_eq!(
-        schlusskurse(spaet, vec![(a.clone(), verkehrt)]),
+        schlusskurse(spaet, vec![(a.clone(), Boerse::Xetra, verkehrt)]),
         Err(QuellenFehler::Reihenfolge(2))
     );
     let doppelt = vec![t(tag(2026, 11, 3)?, 101)?, t(tag(2026, 11, 3)?, 102)?];
     assert_eq!(
-        schlusskurse(spaet, vec![(a, doppelt)]),
+        schlusskurse(spaet, vec![(a, Boerse::Xetra, doppelt)]),
         Err(QuellenFehler::Reihenfolge(2))
     );
     Ok(())
@@ -383,8 +469,8 @@ fn schluss_mit_bruchteil_eines_cents() -> Result<(), String> {
         // Als Kurs eines Abrufs bleibt er exakt.
         let abruf = utc(j, m, t, 18, 0)?;
         let wert = isin("DE000BASF111")?;
-        let (heute, _) =
-            schlusskurse(abruf, vec![(wert.clone(), k)]).map_err(|e| format!("{e:?}"))?;
+        let (heute, _) = schlusskurse(abruf, vec![(wert.clone(), Boerse::Xetra, k)])
+            .map_err(|e| format!("{e:?}"))?;
         assert_eq!(
             heute.eintrag(&wert).map(depot_kern::Kurs::preis),
             Some(schluss)

@@ -1,0 +1,24 @@
+[package]
+name = "depot_lage"
+description = "DepotSchlopf: Lagebild - was laeuft, was fehlt, Papierdepot, KI-Budget und Gespraech, ohne Netz"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+depot_kern.workspace = true
+depot_ki.workspace = true
+depot_regelwerk.workspace = true
+depot_journal.workspace = true
+depot_sim.workspace = true
+
+[lints]
+workspace = true

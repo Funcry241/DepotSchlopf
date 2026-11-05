@@ -1,6 +1,7 @@
 //! DepotSchlopf – Sammelstelle: Kurse (Kap. 6, R12), Termine (R39) und Nachrichten (R40).
 //!
-//! Der Sammler holt Xetra-Schlusskurse aus der freigegebenen, lesenden Quelle Alpha Vantage,
+//! Der Sammler holt Schlusskurse aus den freigegebenen, lesenden Quellen (Xetra: Alpha Vantage,
+//! NYSE: Tiingo, umgerechnet mit den Referenzkursen der EZB),
 //! legt jede rohe Antwort unter `daten/roh/` ab, belegt jeden Kurs vor seiner Verwendung im
 //! Journal und prueft die Kurse danach wie jeden Kurs (`pruefe_kurse`). Ebenso belegt er Termine
 //! der EZB (`termine`) und einmal am Tag Marktnachrichten (`nachrichten`). Er sendet keine
@@ -30,9 +31,9 @@ pub mod sammeln;
 pub mod schluessel;
 pub mod termine;
 
-pub use liste::{QUELLE, Wert, beobachtungsliste};
+pub use liste::{QUELLE, QUELLE_US, Wert, beobachtungsliste};
 pub use nachrichten::{NachrichtenBericht, sammle_nachrichten};
-pub use netz::{Https, Netz};
-pub use sammeln::{Bericht, Ergebnis, SammelFehler, sammle};
-pub use schluessel::Schluessel;
+pub use netz::{Ausfall, Https, Netz, NetzFehler, Takt, Verlauf};
+pub use sammeln::{ADRESSE_DEVISEN, Bericht, Ergebnis, SammelFehler, einordnen, sammle};
+pub use schluessel::{Anbieter, Schluessel, Zugang, zugang_laden};
 pub use termine::{TerminBericht, sammle_termine};

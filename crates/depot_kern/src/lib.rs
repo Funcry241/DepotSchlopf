@@ -20,9 +20,13 @@
     clippy::cast_sign_loss
 )]
 
+pub mod abdruck;
+pub mod boerse;
 pub mod depot;
+pub mod devisen;
 pub mod geld;
 pub mod grenzen;
+pub mod hinweis;
 pub mod instrument;
 pub mod json;
 pub mod kurs;
@@ -32,14 +36,17 @@ pub mod quelle;
 pub mod termin;
 pub mod zeit;
 
+pub use boerse::Boerse;
 pub use depot::{BeraterId, Topf, TopfFehler, TopfId, Vorschlag};
+pub use devisen::{Devisen, DevisenFehler};
 pub use geld::{BP_GANZ, Cent};
 pub use grenzen::{Gebuehren, Grenzen, Universum};
 pub use instrument::{Instrument, InstrumentArt, Isin, IsinFehler};
 pub use kurs::{Herkunft, Kurs, KursFehler, Kurse, Waehrung};
 pub use preis::{Preis, Rundung};
 pub use quelle::{
-    QuellenFehler, Tageskurs, lies_preis, lies_tageskurse, schlusskurse, xetra_schluss,
+    QuellenFehler, Tageskurs, lies_preis, lies_tageskurse, schlusskurse, schlusskurse_in_euro,
+    xetra_schluss,
 };
 pub use termin::{Betroffen, Termin, TerminFehler, Verlaesslichkeit, Zeitbezug};
 pub use zeit::{Datum, Zeitpunkt};

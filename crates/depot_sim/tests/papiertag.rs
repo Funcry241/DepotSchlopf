@@ -12,7 +12,8 @@ use depot_kern::{
     Universum, Vorschlag, Zeitpunkt,
 };
 use depot_sim::{
-    Antwort, Ausgang, Drehbuch, LaufFehler, Papierdatei, Papierkonto, Stumm, Urteil, papiertag,
+    Antwort, Ausgang, Drehbuch, Gefragt, LaufFehler, Papierdatei, Papierkonto, Stumm, Urteil,
+    gefragt, papiertag,
 };
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
@@ -160,6 +161,11 @@ fn erster_papiertag_eroeffnet_depot_und_schliesst_ab() -> Result<(), String> {
         texte.iter().any(|t| t.contains("nicht angebunden")),
         "{texte:?}"
     );
+    // Stumm nennt keinen Grund; im Journal steht dann keine Klammer.
+    assert!(
+        !texte.iter().any(|t| t.contains("nicht angebunden (")),
+        "{texte:?}"
+    );
     assert!(ort.konto.is_file(), "Papierkonto als Datei");
     drop(j);
     // Derselbe Tag noch einmal: nichts geschieht.
@@ -293,6 +299,7 @@ fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
     dachs.antworten.insert(
         d,
         Antwort {
+            verwertbar: true,
             einschaetzung: "SAP nach Zahlen".into(),
             vorschlag: Some(Vorschlag {
                 berater: BeraterId::Dachs,
@@ -307,6 +314,7 @@ fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
     maus.urteile.insert(
         d,
         Urteil {
+            verwertbar: true,
             zustimmung: true,
             begruendung: "passt".into(),
         },
@@ -355,6 +363,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
     dachs.antworten.insert(
         d,
         Antwort {
+            verwertbar: true,
             einschaetzung: "SAP".into(),
             vorschlag: Some(Vorschlag {
                 berater: BeraterId::Dachs,
@@ -369,6 +378,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
     maus.urteile.insert(
         d,
         Urteil {
+            verwertbar: true,
             zustimmung: true,
             begruendung: "passt".into(),
         },
@@ -498,6 +508,7 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
             buch.antworten.insert(
                 d,
                 Antwort {
+                    verwertbar: true,
                     einschaetzung: "SAP".into(),
                     vorschlag: Some(Vorschlag {
                         berater: wer,
@@ -511,6 +522,7 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
             buch.urteile.insert(
                 d,
                 Urteil {
+                    verwertbar: true,
                     zustimmung: false,
                     begruendung: "abwarten".into(),
                 },
@@ -552,6 +564,259 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
     Ok(())
 }
 
+/// Maus' Befund 2 zu PR #33: Was der Papiertag verwendet, steht im Journal, und nur das zaehlt.
+/// Eine verworfene Antwort traegt keinen Vorschlag weiter, ein verworfenes Urteil ist keine
+/// Zustimmung; beides steht ausdruecklich als verworfen da.
+#[test]
+fn verworfene_antwort_und_urteil_stehen_als_verworfen() -> Result<(), String> {
+    let (sap, allianz) = (sap()?, allianz()?);
+    let d = tag(5)?;
+    for (antwort_gut, urteil_gut) in [(false, true), (true, false), (true, true)] {
+        let ort = Ort::neu()?;
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, 5, &[(&sap, "230", "231"), (&allianz, "350", "351")])?;
+        let (mut dachs, mut maus) = kaeufer(d, &sap);
+        for a in dachs.antworten.values_mut() {
+            a.verwertbar = antwort_gut;
+        }
+        for u in maus.urteile.values_mut() {
+            u.verwertbar = urteil_gut;
+        }
+        let mut k = konto(&ort, &j)?;
+        let aus = papiertag(
+            &mut j,
+            d,
+            &universum()?,
+            &start()?,
+            &mut dachs,
+            &mut maus,
+            &mut k,
+        );
+        assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+        let gekauft = !j.stand().auftraege().is_empty();
+        assert_eq!(
+            gekauft,
+            antwort_gut && urteil_gut,
+            "{antwort_gut} {urteil_gut}"
+        );
+        let mit = |wer: &str| -> Vec<Gefragt> {
+            j.stand()
+                .begruendungen()
+                .iter()
+                .filter(|(_, w, _)| w == wer)
+                .filter_map(|(_, _, t)| gefragt(t))
+                .collect()
+        };
+        let erwartet = |gut: bool| {
+            if gut {
+                Gefragt::Verwendet
+            } else {
+                Gefragt::Verworfen
+            }
+        };
+        assert!(
+            mit("Dachs").contains(&erwartet(antwort_gut)),
+            "{:?}",
+            mit("Dachs")
+        );
+        if antwort_gut {
+            assert!(
+                mit("Maus").contains(&erwartet(urteil_gut)),
+                "{:?}",
+                mit("Maus")
+            );
+        } else {
+            // Maus prueft nichts (kein Vorschlag); als Fragerin von Topf B antwortet sie.
+            assert!(
+                !mit("Maus").contains(&Gefragt::Verworfen),
+                "{:?}",
+                mit("Maus")
+            );
+        }
+    }
+    // Lesen: nur die eigenen Worte nach dem Topf zaehlen.
+    assert_eq!(
+        gefragt("Topf A: Antwort verwendet: x"),
+        Some(Gefragt::Verwendet)
+    );
+    assert_eq!(gefragt("Topf B: Veto: x"), Some(Gefragt::Verwendet));
+    assert_eq!(
+        gefragt("Topf B: Antwort verworfen, kein Urteil: x"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(
+        gefragt("Topf A: nicht angebunden (kein Schlüssel), nicht gefragt; kein Vorschlag"),
+        Some(Gefragt::NichtAngebunden(Some("kein Schlüssel".into())))
+    );
+    assert_eq!(
+        gefragt("Topf A: nicht angebunden, nicht gefragt; kein Vorschlag"),
+        Some(Gefragt::NichtAngebunden(None))
+    );
+    // Alte Journale (vor `verwertbar`): verworfene Antworten und Urteile sind kein Beitrag,
+    // ein echtes Veto schon (Maus' Restbefund zu PR #33).
+    assert_eq!(
+        gefragt("Topf B: Veto: keine verwertbare Antwort: Limit [Kosten 0 von 24 Cent]"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(
+        gefragt("Topf A: keine verwertbare Antwort: unlesbar [Kosten 3 von 24 Cent]"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(
+        gefragt("Topf B: Veto: zu konzentriert [Kosten 3 von 24 Cent]"),
+        Some(Gefragt::Verwendet)
+    );
+    assert_eq!(
+        gefragt("Topf A: Antwort verwendet: keine verwertbare Antwort: x"),
+        Some(Gefragt::Verworfen)
+    );
+    assert_eq!(gefragt("Topf A: SAP 2000 bp: Antwort verwendet: x"), None);
+    assert_eq!(gefragt("Antwort verwendet: x"), None);
+    Ok(())
+}
+
+/// Nur gehaltene Werte sind Pflicht: Fehlt einem Kandidaten der Kurs von heute, laeuft der Tag
+/// ohne ihn, und der Grund steht unter `Auswahl`. Fehlt er einem gehaltenen Wert, faellt der
+/// Zyklus aus, und niemand wird gefragt.
+#[test]
+fn kandidat_ohne_kurs_faellt_aus_gehaltener_wert_haelt_den_zyklus() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut j = ort.oeffnen()?;
+    // Am 05.11. hat nur SAP einen Kurs; Allianz ist heute nicht handelbar.
+    belege(&mut j, 5, &[(&sap, "230", "231")])?;
+    let d = tag(5)?;
+    let (mut dachs, mut maus) = kaeufer(d, &sap);
+    let mut k = konto(&ort, &j)?;
+    let aus = papiertag(
+        &mut j,
+        d,
+        &universum()?,
+        &start()?,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    assert!(
+        matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
+        "Ausgang: {aus:?}"
+    );
+    let begr = j.stand().begruendungen().to_vec();
+    let auswahl: Vec<&str> = begr
+        .iter()
+        .filter(|(_, wer, _)| wer == depot_sim::AUSWAHL)
+        .map(|(_, _, t)| t.as_str())
+        .collect();
+    assert_eq!(auswahl.len(), 1, "{auswahl:?}");
+    assert!(
+        auswahl.iter().all(|t| t.contains("KursFehlt")),
+        "{auswahl:?}"
+    );
+    assert!(
+        !begr.iter().any(|(_, wer, _)| wer == "Daten"),
+        "kein Ausfall: {begr:?}"
+    );
+    assert!(
+        some(j.stand().toepfe().get(&TopfId::A), "Topf A")?.stueck(&sap) > 0,
+        "SAP gekauft"
+    );
+
+    // Am 06.11. fehlt der Kurs von SAP, das gehalten wird: Der Zyklus faellt aus.
+    belege(&mut j, 6, &[(&allianz, "350", "351")])?;
+    drop(j);
+    let aus = stumm_tag(&ort, 6)?;
+    assert!(
+        matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
+        "Ausgang: {aus:?}"
+    );
+    let j = ort.oeffnen()?;
+    let daten: Vec<&str> = j
+        .stand()
+        .begruendungen()
+        .iter()
+        .filter(|(tag, wer, _)| *tag == d.plus_tage(1).unwrap_or(d) && wer == "Daten")
+        .map(|(_, _, t)| t.as_str())
+        .collect();
+    assert!(
+        daten.iter().any(|t| t.contains("KursFehlt")),
+        "gehaltener Wert ohne Kurs: {daten:?}"
+    );
+    assert!(
+        daten.iter().any(|t| t.starts_with("Zyklus faellt aus")),
+        "{daten:?}"
+    );
+    Ok(())
+}
+
+/// Maus' Restbefund zu #34: Ein Sicherheitsabbruch des Sammlers (die Quelle gab den Schluessel
+/// zurueck) hinterlaesst `daten/kurse.halt`. Solange sie liegt, beginnt auch ein von Hand
+/// gestarteter Papiertag nicht; die schon belegten Teilkurse werden nicht verwendet.
+#[test]
+fn kurssperre_haelt_auch_den_handstart() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let daten = ort.dir.join("daten");
+    vorbedingung(fs::create_dir_all(&daten), "daten")?;
+    let pfad = daten.join("journal.txt");
+    vorbedingung(Journal::einrichten(&pfad), "Einrichtung")?;
+    let mut j = vorbedingung(Journal::oeffnen(&pfad), "Journal")?;
+    belege(&mut j, 5, &[(&sap()?, "230", "231")])?;
+    drop(j);
+    vorbedingung(
+        fs::write(daten.join("kurse.halt"), "Sicherheitsabbruch\n"),
+        "Sperre",
+    )?;
+    let vorher = vorbedingung(fs::read(&pfad), "Journal lesen")?;
+    let r = depot_sim::papierlauf::papier(&ort.dir, tag(5)?, &universum()?, &mut Stumm, &mut Stumm);
+    assert!(
+        r.as_ref().is_err_and(|e| e.contains("kurse.halt")),
+        "Papiertag trotz Kurssperre: {r:?}"
+    );
+    assert_eq!(vorbedingung(fs::read(&pfad), "Journal lesen")?, vorher);
+    assert!(!daten.join("papierkonto.txt").exists());
+    Ok(())
+}
+
+/// Abruf je Boerse (Wolfgang, 05.11.2026): Werte verschiedener Boersen werden je kurz nach
+/// ihrem Schluss abgerufen. Das Alter eines Kurses misst sich an seinem eigenen Abruf, nicht am
+/// spaetesten Abruf des Tages: Der Xetra-Kurs von 17:40 Uhr ist nicht zu alt, nur weil ein
+/// anderer Wert um 22:00 Uhr abgerufen wurde.
+#[test]
+fn alter_je_abruf_nicht_je_spaetestem_abruf() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    belege(&mut j, 5, &[(&sap()?, "230", "231")])?;
+    // Allianz hier als Wert einer spaeteren Boerse: Schluss 21:50, Abruf 22:00 Uhr.
+    let heute = tag(5)?;
+    let vortag = tag(4)?;
+    let abruf = some(Zeitpunkt::frankfurt(heute, 22, 0, 0), "Abruf")?;
+    for (d, p, h, m) in [(vortag, "350", 21, 50), (heute, "351", 21, 50)] {
+        let zeit = some(Zeitpunkt::frankfurt(d, h, m, 0), "Schluss")?;
+        let preis = some(Preis::lies_euro(p), "Preis")?;
+        let kurs = vorbedingung(Kurs::exakt(preis, "EUR", d, zeit, Herkunft::Quelle), "Kurs")?;
+        let beleg = vorbedingung(
+            KursBeleg::neu("alphavantage", abruf, p.as_bytes(), allianz()?, kurs),
+            "Beleg",
+        )?;
+        vorbedingung(j.belege_kurs(&beleg), "Beleg schreiben")?;
+    }
+    drop(j);
+    let aus = stumm_tag(&ort, 5)?;
+    assert!(
+        matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
+        "Ausgang: {aus:?}"
+    );
+    let j = ort.oeffnen()?;
+    let begr = j.stand().begruendungen();
+    assert!(
+        !begr
+            .iter()
+            .any(|(_, wer, t)| (wer == "Daten" || wer == depot_sim::AUSWAHL)
+                && t.contains("KursZuAlt")),
+        "{begr:?}"
+    );
+    Ok(())
+}
+
 /// Merkt sich, was er in der Lage gesehen hat; schlaegt nichts vor.
 #[derive(Default)]
 struct Leser {
@@ -566,6 +831,7 @@ impl depot_sim::Berater for Leser {
     ) -> Antwort {
         self.gesehen.extend(lage.ereignisse.iter().cloned());
         Antwort {
+            verwertbar: true,
             einschaetzung: "gelesen".into(),
             vorschlag: None,
         }
@@ -578,6 +844,7 @@ impl depot_sim::Berater for Leser {
         _vorschlag: &Vorschlag,
     ) -> Urteil {
         Urteil {
+            verwertbar: true,
             zustimmung: false,
             begruendung: "nicht gefragt".into(),
         }

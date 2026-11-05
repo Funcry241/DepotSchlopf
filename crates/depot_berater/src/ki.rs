@@ -8,19 +8,39 @@
 //! verbraucht als erlaubt, oder ist der Verbrauch unbekannt, schreibt er die Sperrdatei
 //! (`daten/ki.halt`). Solange sie liegt, ist keine KI angebunden: Niemand wird gefragt, bis
 //! Wolfgang den Grund geprueft und die Datei geloescht hat.
+//!
+//! **Scheitert der Versand** (Maus, 05.11.2026), zaehlt allein, ob die Anfrage den Anbieter
+//! erreicht haben kann (`NetzFehler`):
+//! - Sicher nicht gesendet (Name, Verbindungsaufbau): Sie kostet nichts. Der Berater versucht es
+//!   nach `WARTEZEITEN` erneut, unter derselben Reservierung. So erreicht hoechstens eine
+//!   Anfrage je Reservierung den Anbieter, und die gebuchten Hoechstkosten bleiben die Grenze.
+//! - Vielleicht angekommen (Abbruch nach dem Absenden, Zeitgrenze): Was sie gekostet hat, ist
+//!   unbekannt. Nie wiederholen: Ein zweiter Versuch koennte doppelt kosten. Die Sperre
+//!   `daten/ki.halt` greift, bis Wolfgang die Kosten beim Anbieter geprueft hat.
+//!
+//! Beides steht als Hinweiszeile (`depot_kern::hinweis`) in Alltagssprache in der Ausgabe.
 
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use depot_journal::AufrufErlaubnis;
-use depot_kern::{BeraterId, Grenzen, Universum, Vorschlag};
-use depot_sim::{Antwort, Berater, Lage, Urteil};
+use depot_journal::anbieter::{self, Eintrag, Ergebnis as Ausgang, Kosten};
+use depot_kern::{BeraterId, Cent, Grenzen, Universum, Vorschlag, Zeitpunkt};
+use depot_sim::{Antwort, Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Urteil};
 
 use crate::anbieter::{Anbieter, Verbrauch};
 use crate::frage::{self, sauber};
 use crate::netz::{Netz, NetzFehler};
 use crate::schluessel::Schluessel;
+
+/// Wartezeit vor dem zweiten und dritten Versand einer sicher nicht gesendeten Anfrage. Mehr
+/// Versuche gibt es nicht.
+pub const WARTEZEITEN: [Duration; 2] = [Duration::from_secs(30), Duration::from_secs(60)];
+
+/// Pfad des Anbieterprotokolls und die Uhr fuer seine Eintraege.
+type Protokoll = (PathBuf, fn() -> Option<Zeitpunkt>);
 
 /// Dachs oder Maus mit Anbindung an den Anbieter.
 pub struct KiBerater<N: Netz> {
@@ -32,6 +52,13 @@ pub struct KiBerater<N: Netz> {
     grenzen: Grenzen,
     sperre: PathBuf,
     gesperrt: bool,
+    /// Anbieterprotokoll und Uhr; ohne beides wird nichts vermerkt.
+    protokoll: Option<Protokoll>,
+    /// Der Anbieter hat in diesem Lauf ein Limit gemeldet; bis zum Ende des Laufs pausiert,
+    /// auch wenn das Protokoll nicht geschrieben werden konnte.
+    limit_im_lauf: bool,
+    /// Wartet vor einem neuen Versand; in Tests ohne echtes Warten.
+    schlafe: fn(Duration),
 }
 
 impl<N: Netz> fmt::Debug for KiBerater<N> {
@@ -70,12 +97,122 @@ impl<N: Netz> KiBerater<N> {
             grenzen: Grenzen::standard(),
             sperre,
             gesperrt: false,
+            protokoll: None,
+            limit_im_lauf: false,
+            schlafe: std::thread::sleep,
+        }
+    }
+
+    /// Wartet mit `schlafe` statt echt (fuer Tests).
+    #[must_use]
+    pub fn mit_warten(mut self, schlafe: fn(Duration)) -> Self {
+        self.schlafe = schlafe;
+        self
+    }
+
+    fn name(&self) -> &'static str {
+        match self.wer {
+            BeraterId::Dachs => "Dachs",
+            BeraterId::Maus => "Maus",
+        }
+    }
+
+    /// Gibt eine Hinweiszeile fuer die Oberflaeche aus.
+    fn hinweis(&self, text: &str) {
+        println!(
+            "{}",
+            depot_kern::hinweis::zeile(&format!("{}: {text}", self.name()))
+        );
+    }
+
+    /// Wann der naechste Versuch beginnt, als Uhrzeit, wenn die Uhr des Protokolls sie kennt.
+    fn um(&self, pause: Duration) -> String {
+        self.protokoll
+            .as_ref()
+            .and_then(|(_, uhr)| uhr())
+            .and_then(|j| {
+                Zeitpunkt::aus_sekunden(
+                    j.sekunden()
+                        .checked_add(i64::try_from(pause.as_secs()).ok()?)?,
+                )
+            })
+            .and_then(depot_kern::hinweis::uhr_text)
+            .map_or_else(
+                || format!("in {} Sekunden", pause.as_secs()),
+                |u| format!("um {u}"),
+            )
+    }
+
+    /// Vermerkt jeden Aufruf in `pfad` (`daten/anbieter.txt`): Ergebnis, Kosten, Wartezeit.
+    #[must_use]
+    pub fn mit_protokoll(mut self, pfad: PathBuf, uhr: fn() -> Option<Zeitpunkt>) -> Self {
+        self.protokoll = Some((pfad, uhr));
+        self
+    }
+
+    /// Haengt einen Eintrag an das Protokoll. Ein Schreibfehler aendert nichts am Aufruf; das
+    /// Protokoll dient nur der Anzeige.
+    fn vermerke(
+        &self,
+        ergebnis: Ausgang,
+        http: Option<u16>,
+        ist: Kosten,
+        reserviert: Cent,
+        warten: Option<u64>,
+    ) {
+        let Some((pfad, uhr)) = &self.protokoll else {
+            return;
+        };
+        let Some(zeit) = uhr() else {
+            return;
+        };
+        let wer = self.protokoll_wer();
+        let warten_bis = warten
+            .and_then(|w| i64::try_from(w).ok())
+            .and_then(|w| zeit.sekunden().checked_add(w))
+            .and_then(Zeitpunkt::aus_sekunden);
+        let e = Eintrag {
+            ist,
+            reserviert: Some(reserviert),
+            warten_bis,
+            ..Eintrag::neu(zeit, wer, ergebnis, http)
+        };
+        if let Err(f) = anbieter::anhaengen(pfad, &e) {
+            eprintln!("[Berater] Anbieterprotokoll nicht geschrieben: {f}");
         }
     }
 
     /// Das Netz, fuer Tests mit einem erfundenen Anbieter.
     pub fn netz(&self) -> &N {
         &self.netz
+    }
+
+    /// Muss dieser Berater gerade pausieren? Ja, wenn der Anbieter ein Limit gemeldet hat, das
+    /// nach `depot_journal::anbieter::pausiert` noch gilt, in diesem Lauf ein Limit kam, oder
+    /// das Protokoll nicht lesbar ist (dann im Zweifel kein Aufruf). Ohne Protokoll: nein.
+    pub fn pause(&self) -> Option<String> {
+        if self.limit_im_lauf {
+            return Some("Anbieterlimit in diesem Lauf".into());
+        }
+        let (pfad, uhr) = self.protokoll.as_ref()?;
+        let Some(jetzt) = uhr() else {
+            return Some("Uhr liefert keine Zeit".into());
+        };
+        let text = match fs::read_to_string(pfad) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(e) => return Some(format!("{} nicht lesbar: {e}", pfad.display())),
+        };
+        let (eintraege, _) = anbieter::lies_alle(&text);
+        anbieter::pausiert(&eintraege, self.protokoll_wer(), jetzt)
+            .then(|| "Anbieterlimit, Wartezeit laeuft noch".to_string())
+    }
+
+    fn protokoll_wer(&self) -> anbieter::Wer {
+        match self.wer {
+            BeraterId::Dachs => anbieter::Wer::Dachs,
+            BeraterId::Maus => anbieter::Wer::Maus,
+        }
     }
 
     /// Liegt die Sperrdatei, oder hat dieser Lauf gesperrt?
@@ -123,6 +260,90 @@ impl<N: Netz> KiBerater<N> {
         }
     }
 
+    /// Eine Ablehnung des Anbieters: einordnen, vermerken, ohne Schluessel beschreiben.
+    fn ablehnung(&mut self, antwort: &crate::netz::Rueckmeldung, reserviert: Cent) -> String {
+        let roh = String::from_utf8_lossy(&antwort.inhalt);
+        let kurz: String = roh.chars().take(300).collect();
+        let art = anbieter::einordnen(antwort.status, &kurz);
+        if art == Ausgang::Limit {
+            self.limit_im_lauf = true;
+        }
+        self.vermerke(
+            art,
+            Some(antwort.status),
+            Kosten::Keine,
+            reserviert,
+            antwort.warten,
+        );
+        format!(
+            "{}, Status {}: {}",
+            ablehnung_text(art),
+            antwort.status,
+            sauber(&self.bereinigt(&kurz))
+        )
+    }
+
+    /// Sendet die Anfrage; eine sicher nicht gesendete nach `WARTEZEITEN` erneut, unter
+    /// derselben Reservierung. Eine vielleicht angekommene nie: Dann sperrt der Berater.
+    ///
+    /// # Errors
+    /// Die Meldung fuer den Aufruf: nicht gesendet, oder gesperrt mit Grund.
+    fn sende(
+        &mut self,
+        kopf: &[(&str, &str)],
+        inhalt: &str,
+        reserviert: Cent,
+    ) -> Result<crate::netz::Rueckmeldung, String> {
+        let von = WARTEZEITEN.len().saturating_add(1);
+        let mut warten = WARTEZEITEN.iter();
+        let mut versuch = 1_usize;
+        loop {
+            match self
+                .netz
+                .sende(self.anbieter.url(), kopf, inhalt.as_bytes())
+            {
+                Ok(a) => return Ok(a),
+                Err(NetzFehler::NichtGesendet(e)) => {
+                    self.vermerke(Ausgang::Netz, None, Kosten::Keine, reserviert, None);
+                    let e = self.bereinigt(&e);
+                    // Vor einem neuen Versand noch einmal: keine Sperre, keine Pause.
+                    let frei = !self.gesperrt() && self.pause().is_none();
+                    let Some(pause) = warten.next().filter(|_| frei) else {
+                        self.hinweis(&format!(
+ "Anfrage hat den Anbieter auch nach {versuch} Versuchen nicht erreicht (keine Verbindung). Sie hat nichts gekostet. Dieser Papiertag läuft ohne diese KI weiter."
+ ));
+                        return Err(format!("nicht gesendet: {e}"));
+                    };
+                    versuch = versuch.saturating_add(1);
+                    self.hinweis(&format!(
+ "Anfrage hat den Anbieter nicht erreicht (keine Verbindung) und nichts gekostet. Nächster Versuch {} (Versuch {versuch} von {von}). DepotSchlopf macht von selbst weiter, du musst nichts tun.",
+ self.um(*pause)
+ ));
+                    (self.schlafe)(*pause);
+                    if self.gesperrt() {
+                        self.hinweis("Kein weiterer Versuch: Der Kostenschutz ist gesperrt.");
+                        return Err("nicht gesendet: KI gesperrt".into());
+                    }
+                    if let Some(p) = self.pause() {
+                        self.hinweis("Kein weiterer Versuch: Der Anbieter pausiert.");
+                        return Err(format!("nicht gesendet: pausiert: {p}"));
+                    }
+                }
+                Err(NetzFehler::Unklar(e)) => {
+                    self.vermerke(Ausgang::Unklar, None, Kosten::Unbekannt, reserviert, None);
+                    let e = self.bereinigt(&e);
+                    self.hinweis(
+ "Verbindung nach dem Absenden abgebrochen. Die Anfrage kann beim Anbieter angekommen sein und Geld gekostet haben. Deshalb fragt DepotSchlopf nicht noch einmal, sondern sperrt beide KIs. Bitte im Konto des Anbieters die Kosten ansehen und dann in der Einrichtung die Sperre aufheben.",
+ );
+                    let m = self.sperre(&format!(
+ "Verbindung nach dem Absenden abgebrochen; die Anfrage kann angekommen sein und gekostet haben, Kosten unbekannt: {e}"
+                ));
+                    return Err(m);
+                }
+            }
+        }
+    }
+
     fn fragen(&mut self, erlaubnis: &AufrufErlaubnis, system: &str, frage: &str) -> Ergebnis {
         let ohne = |t: String| Ergebnis {
             text: Err(t),
@@ -134,7 +355,13 @@ impl<N: Netz> KiBerater<N> {
         if self.gesperrt() {
             return ohne("KI gesperrt".into());
         }
+        // Auch wer mit Erlaubnis fragt, wartet eine Pause des Anbieters ab (zweite Pruefung
+        // direkt vor dem Senden; die erste ist `angebunden`, vor der Reservierung).
+        if let Some(p) = self.pause() {
+            return ohne(format!("pausiert: {p}"));
+        }
         let deckel = *erlaubnis.deckel();
+        let reserviert = erlaubnis.buchung().reserviert;
         // Die ganze Anfrage vor dem Senden begrenzen (K25-01). Ein Token umfasst mindestens ein
         // Byte, und ohne Werkzeuge fuegt der Anbieter nichts ein; die Anfrage enthaelt mehr
         // Bytes als ihre Rahmenzeichen Token. So sind die reservierten Hoechstkosten eine
@@ -145,28 +372,12 @@ impl<N: Netz> KiBerater<N> {
         }
         let mut bearer = String::new();
         let kopf = self.anbieter.kopf(schluessel.als_str(), &mut bearer);
-        let r = self
-            .netz
-            .sende(self.anbieter.url(), &kopf, inhalt.as_bytes());
-        let antwort = match r {
-            Err(NetzFehler::NichtGesendet(e)) => {
-                return ohne(format!("nicht gesendet: {}", self.bereinigt(&e)));
-            }
-            Err(NetzFehler::Unklar(e)) => {
-                let e = self.bereinigt(&e);
-                let m = self.sperre(&format!("Antwort fehlt, Kosten unbekannt: {e}"));
-                return ohne(m);
-            }
+        let antwort = match self.sende(&kopf, &inhalt, reserviert) {
             Ok(a) => a,
+            Err(m) => return ohne(m),
         };
         if antwort.status != 200 {
-            let roh = String::from_utf8_lossy(&antwort.inhalt);
-            let kurz: String = roh.chars().take(300).collect();
-            return ohne(format!(
-                "Anbieter lehnt ab, Status {}: {}",
-                antwort.status,
-                sauber(&self.bereinigt(&kurz))
-            ));
+            return ohne(self.ablehnung(&antwort, reserviert));
         }
         // Geheimnisschutz fuer jede Antwort, nicht nur fuer Fehler: Gibt der Anbieter den
         // Schluessel zurueck, wird kein Text davon verwendet. Geprueft wird hier roh und unten
@@ -176,6 +387,13 @@ impl<N: Netz> KiBerater<N> {
         let gelesen = match self.anbieter.lies(&antwort.inhalt) {
             Ok(g) => g,
             Err(e) => {
+                self.vermerke(
+                    Ausgang::Unklar,
+                    Some(antwort.status),
+                    Kosten::Unbekannt,
+                    reserviert,
+                    None,
+                );
                 let e = if geheim {
                     "verworfen".into()
                 } else {
@@ -186,27 +404,21 @@ impl<N: Netz> KiBerater<N> {
             }
         };
         let v = gelesen.verbrauch;
-        let reserviert = erlaubnis.buchung().reserviert;
         let ist = deckel.kosten_ist(v.token_ein, v.token_aus);
         let kosten = kostenzeile(ist.map(|c| c.0), reserviert.0, v);
-        let ueber = match ist {
-            None => Some("Kosten nicht berechenbar".to_string()),
-            Some(c) if c > reserviert => {
-                Some(format!("{} Cent ueber {} reserviert", c.0, reserviert.0))
-            }
-            Some(_) if v.suchen > 0 => Some(format!("{} Suchen, keine erlaubt", v.suchen)),
-            Some(_) if v.token_ein > u64::from(deckel.max_token_ein()) => Some(format!(
-                "{} Eingabe-Token ueber {} erlaubt",
-                v.token_ein,
-                deckel.max_token_ein()
-            )),
-            Some(_) if v.token_aus > u64::from(deckel.max_token_aus()) => Some(format!(
-                "{} Ausgabe-Token ueber {} erlaubt",
-                v.token_aus,
-                deckel.max_token_aus()
-            )),
-            Some(_) => None,
+        let ueber = ueberschreitung(ist, reserviert, v, &deckel);
+        let art = if ueber.is_some() {
+            Ausgang::Kosten
+        } else {
+            Ausgang::Ok
         };
+        self.vermerke(
+            art,
+            Some(antwort.status),
+            ist.map_or(Kosten::Unbekannt, Kosten::Betrag),
+            reserviert,
+            None,
+        );
         if let Some(grund) = ueber {
             let m = self.sperre(&format!("{grund}; {kosten}"));
             return Ergebnis {
@@ -224,6 +436,44 @@ impl<N: Netz> KiBerater<N> {
             text: gelesen.text.map_err(|e| self.bereinigt(&e)),
             kosten,
         }
+    }
+}
+
+/// Was am tatsaechlichen Verbrauch ueber dem Erlaubten liegt; `None`, wenn alles passt.
+fn ueberschreitung(
+    ist: Option<Cent>,
+    reserviert: Cent,
+    v: Verbrauch,
+    deckel: &depot_ki::KiDeckel,
+) -> Option<String> {
+    match ist {
+        None => Some("Kosten nicht berechenbar".to_string()),
+        Some(c) if c > reserviert => {
+            Some(format!("{} Cent ueber {} reserviert", c.0, reserviert.0))
+        }
+        Some(_) if v.suchen > 0 => Some(format!("{} Suchen, keine erlaubt", v.suchen)),
+        Some(_) if v.token_ein > u64::from(deckel.max_token_ein()) => Some(format!(
+            "{} Eingabe-Token ueber {} erlaubt",
+            v.token_ein,
+            deckel.max_token_ein()
+        )),
+        Some(_) if v.token_aus > u64::from(deckel.max_token_aus()) => Some(format!(
+            "{} Ausgabe-Token ueber {} erlaubt",
+            v.token_aus,
+            deckel.max_token_aus()
+        )),
+        Some(_) => None,
+    }
+}
+
+/// Die Ablehnung in Worten fuer Journal und Protokoll.
+fn ablehnung_text(e: Ausgang) -> &'static str {
+    match e {
+        Ausgang::Limit => "Anbieterlimit erreicht, naechster Versuch beim naechsten Papiertag",
+        Ausgang::Guthaben => "Guthaben beim Anbieter fehlt",
+        Ausgang::Abgelehnt => "Anbieter lehnt den Schluessel ab",
+        Ausgang::Ueberlastet => "Anbieter ueberlastet oder gestoert",
+        _ => "Anbieter lehnt ab",
     }
 }
 
@@ -259,7 +509,17 @@ impl<N: Netz> KiBerater<N> {
 
 impl<N: Netz> Berater for KiBerater<N> {
     fn angebunden(&self) -> bool {
-        self.schluessel.is_some() && !self.gesperrt()
+        self.schluessel.is_some() && !self.gesperrt() && self.pause().is_none()
+    }
+
+    fn warum_nicht(&self) -> Option<String> {
+        if self.schluessel.is_none() {
+            return Some("kein Schlüssel hinterlegt".into());
+        }
+        if self.gesperrt() {
+            return Some("Kostenschutz gesperrt, daten/ki.halt".into());
+        }
+        self.pause().map(|p| format!("Anbieterpause: {p}"))
     }
 
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
@@ -276,8 +536,9 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a
             }
             Err(grund) => Antwort {
+                verwertbar: false,
                 einschaetzung: format!(
-                    "keine verwertbare Antwort: {} [{}]",
+                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
                     sauber(&self.bereinigt(&grund)),
                     e.kosten
                 ),
@@ -306,9 +567,10 @@ impl<N: Netz> Berater for KiBerater<N> {
             }
             // Ohne verwertbare Antwort keine Zustimmung (R31).
             Err(grund) => Urteil {
+                verwertbar: false,
                 zustimmung: false,
                 begruendung: format!(
-                    "keine verwertbare Antwort: {} [{}]",
+                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
                     sauber(&self.bereinigt(&grund)),
                     e.kosten
                 ),
