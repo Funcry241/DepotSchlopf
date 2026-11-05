@@ -71,11 +71,27 @@ Aufheben heißt: prüfen, den Schlüssel bei Bedarf erneuern, dann in der Einric
 
 Ließ sich die Kurssperre nicht schreiben, lief ein Papiertag von Hand weiter mit den schon belegten Teilkursen. Die Ursache lag im Sammler: Er belegte jeden Kurs gleich nach seinem Abruf. Jetzt sammelt er die Belege während des Laufs und schreibt sie erst ins Journal, wenn alle Abrufe ohne Sicherheitsabbruch zu Ende sind. Die Reihenfolge bleibt die des Abrufs. Nach einem Sicherheitsabbruch kommt kein Kurs dieses Laufs ins Journal, und der Bericht nennt die schon gelesenen Werte „Nicht belegt: Sicherheitsabbruch“. Die rohen Antworten ohne Schlüssel bleiben zur Durchsicht unter `daten/roh/`. Die Kurssperre bleibt als zweite Schranke, und sie hält den nächsten Abruf an. Test: `schluesselabbruch_macht_den_ganzen_abruf_unbrauchbar` (Journal ohne Kurse).
 
+## Abruf je Börse, Schritt 2: Dollar in Euro über die EZB
+
+Ein Kurs gilt nur in Euro. Ein Wert der NYSE bekommt einen Kurs erst über `schlusskurse_in_euro` mit den Referenzkursen der EZB (`depot_kern::devisen`, gelesen aus `eurofxref-hist-90d.xml`, nur der Dollar). Regeln:
+
+- Umgerechnet wird mit dem Referenzkurs **desselben Tages**. Die EZB veröffentlicht ihn an Geschäftstagen gegen 16:00 Uhr Frankfurt, vor dem Schluss der NYSE. Fehlt er, ergibt der Wert keinen Kurs (`QuellenFehler::KeinDevisenkurs`); ein älterer Tag ersetzt ihn nie. An TARGET-Feiertagen, an denen die NYSE handelt (1. Mai, 26. Dezember), fällt ein NYSE-Wert damit als Kandidat aus und steht unter „Auswahl“.
+- Heute und Vortag werden je mit dem Kurs ihres eigenen Tages umgerechnet.
+- Euro = Dollar durch Referenzkurs, exakt gerechnet und auf sechs Nachkommastellen abgeschnitten. Der Fehler liegt unter 0,000001 € je Stück.
+- Ein kaputter Eintrag im EZB-Text verwirft den ganzen Text (`DevisenFehler`), statt still zu fehlen.
+- `schlusskurse` ohne Referenzkurse lehnt den Dollar weiter ab (`KursFehler::Waehrung`).
+
+**Nach Maus' Gegenproben zu aba39b0:** Ein abgeschnittener Text ergab einen Kurs, und ein Dollarkurs außerhalb seines Tagesblocks wurde dem zuletzt gelesenen Tag zugeschlagen. Jetzt prüft `lies_ezb` den ganzen Aufbau, bevor ein Kurs gilt: genau eine Hülle `gesmes:Envelope`, jedes Element in der Reihenfolge geschlossen, in der es geöffnet wurde, nichts nach der Hülle; darin genau ein `Cube` ohne Attribute, darin nur Tage (`Cube` mit genau `time`), darin nur Währungen (`Cube` mit genau `currency` und `rate`, ohne Inhalt). Ein Dollarkurs gehört nur zu dem Tag, in dessen Block er steht; außerhalb ist er `DevisenFehler::OhneTag`, jeder andere Verstoß `DevisenFehler::Aufbau`, und der ganze Text wird verworfen. Tests: `abgeschnittener_text_ergibt_keine_kurse` (jede Schnittstelle), `dollar_nur_im_eigenen_tagesblock`.
+
+**Nach Maus' Restbefund zu f267b0f:** Bei `rate="1.2" rate='2.4'` galt der erste Wert. Jetzt liest `lies_ezb` jedes Tag vollständig: Name, dann jedes Attribut als `name="wert"` oder `name='wert'` (Leerraum davor, um `=` erlaubt). Ein Name zweimal, ohne Rücksicht auf Anführungszeichen, Leerraum oder Groß- und Kleinschreibung, ein Rest, der kein Attribut ist, ein offenes Anführungszeichen oder ein unbekanntes Attribut an einem `Cube` verwirft den ganzen Text (`Aufbau`). Das gilt für jedes Element, auch für die Hülle. Test: `attribute_vollstaendig_und_eindeutig`.
+
+Noch ohne Netz: Den EZB-Text holt im nächsten Schritt der Sammler, zusammen mit Tiingo und dem Zeitplan je Börse. Tests: `tests/devisen.rs` (`liest_dollar_je_tag`, `kaputter_text_ergibt_keine_kurse`, `umrechnung_nur_am_selben_tag_abgerundet`, `nyse_in_euro`, `xetra_bleibt_unveraendert`); der echte EZB-Text vom 05.11.2026 wurde einmal von Hand gelesen (USD 1,1224).
+
 ## Nicht in diesem Schritt
 
 - **Abrufzeit:** Mit nur Xetra-Werten bleibt der Abruf kurz nach 17:35 Uhr richtig. Wolfgang hat am 05.11.2026 entschieden, Maus' Vorschlag zu folgen: Kurse je Börse kurz nach ihrem Schluss abrufen, die Altersprüfung je Abrufzeitpunkt, danach ein gemeinsamer Papiertag. Kein gemeinsamer Abruf um 22:30 Uhr. Schritt 1 ist umgesetzt: Das Alter eines Kurses misst sich an seinem eigenen Abruf (`Kurse::mit_abrufen`), Test `alter_je_abruf_nicht_je_spaetestem_abruf`. Zeitplan je Börse und Papiertag nach dem letzten Abruf kommen mit Tiingo, wenn die ersten US-Werte in der Liste stehen.
 - **Rotation der Kandidaten und Tiingo als US-Quelle:** eigener PR, freigegeben am 05.11.2026.
-- **Umrechnung in Euro** für Werte in Dollar: Voraussetzung für den ersten NYSE-Wert.
+- **Abruf der EZB-Kurse und von Tiingo, Zeitplan je Börse:** nächster Schritt im Sammler und im Dienst.
 
 ## Tests
 

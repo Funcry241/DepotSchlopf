@@ -1,11 +1,8 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Abruf je Boerse, Schritt 1 (Wolfgang 05.11.2026, Vorschlag von Maus): Das Alter eines Kurses misst sich an seinem eigenen Abruf statt am spaetesten Abruf des Tages (depot_kern::Kurse::mit_abrufen, Kurse::abruf). Papiertag und Sammler bauen die Kurse des Tages je Wert mit seinem Abruf. Ein Xetra-Kurs von 17:40 Uhr bleibt damit gueltig, wenn ein Wert einer spaeteren Boerse um 22:00 Uhr abgerufen wird. Hoechstalter unveraendert 20 Minuten, keine Grenze geaendert, keine neue Abhaengigkeit, kein Netz.
+zweck: Abruf je Boerse, Schritt 2 (Wolfgang 05.11.2026, Tiingo-Plan freigegeben): Umrechnung eines Schlusses in Dollar in Euro mit dem Referenzkurs der EZB desselben Tages (depot_kern::devisen, schlusskurse_in_euro), abgerundet auf sechs Nachkommastellen; fehlt der Kurs des Tages, ergibt der Wert keinen Kurs (KeinDevisenkurs), kein Rueckgriff auf aeltere Tage. Nur Kern, kein Netz, keine Grenze geaendert, keine neue Abhaengigkeit.
 pfade:
 crates/depot_kern/
-crates/depot_sim/
-crates/depot_sammler/
-crates/depot_lage/
 docs/
 CHANGELOG.md
 kodex/aenderung.txt
