@@ -747,3 +747,31 @@ fn kandidat_ohne_kurs_faellt_aus_gehaltener_wert_haelt_den_zyklus() -> Result<()
     );
     Ok(())
 }
+
+/// Maus' Restbefund zu #34: Ein Sicherheitsabbruch des Sammlers (die Quelle gab den Schluessel
+/// zurueck) hinterlaesst `daten/kurse.halt`. Solange sie liegt, beginnt auch ein von Hand
+/// gestarteter Papiertag nicht; die schon belegten Teilkurse werden nicht verwendet.
+#[test]
+fn kurssperre_haelt_auch_den_handstart() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let daten = ort.dir.join("daten");
+    vorbedingung(fs::create_dir_all(&daten), "daten")?;
+    let pfad = daten.join("journal.txt");
+    vorbedingung(Journal::einrichten(&pfad), "Einrichtung")?;
+    let mut j = vorbedingung(Journal::oeffnen(&pfad), "Journal")?;
+    belege(&mut j, 5, &[(&sap()?, "230", "231")])?;
+    drop(j);
+    vorbedingung(
+        fs::write(daten.join("kurse.halt"), "Sicherheitsabbruch\n"),
+        "Sperre",
+    )?;
+    let vorher = vorbedingung(fs::read(&pfad), "Journal lesen")?;
+    let r = depot_sim::papierlauf::papier(&ort.dir, tag(5)?, &universum()?, &mut Stumm, &mut Stumm);
+    assert!(
+        r.as_ref().is_err_and(|e| e.contains("kurse.halt")),
+        "Papiertag trotz Kurssperre: {r:?}"
+    );
+    assert_eq!(vorbedingung(fs::read(&pfad), "Journal lesen")?, vorher);
+    assert!(!daten.join("papierkonto.txt").exists());
+    Ok(())
+}
