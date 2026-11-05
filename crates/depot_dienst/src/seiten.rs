@@ -163,6 +163,11 @@ fn wochentag_text(d: Datum) -> &'static str {
 
 /// Der naechste Lauf des Zeitplans als Satz.
 pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
+    if let Some(f) = &z.erledigt_fehler {
+        return format!(
+            "Zeitplan angehalten: {f}. Datei prüfen oder löschen, dann Dienst neu starten."
+        );
+    }
     if let Some(f) = &z.zeitplan_fehler {
         return format!("Zeitplan aus: {f}");
     }
@@ -392,7 +397,11 @@ fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
 
 fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String) {
     let p: &Zeitplan = &zustand.zeitplan;
-    let gespeichert = match (e.zeitplan_gespeichert, &zustand.zeitplan_fehler) {
+    let fehler = zustand
+        .erledigt_fehler
+        .as_ref()
+        .or(zustand.zeitplan_fehler.as_ref());
+    let gespeichert = match (e.zeitplan_gespeichert, fehler) {
         (_, Some(f)) => format!("<span class=\"halt\">{}</span>", maskiere(f)),
         (Some(true), None) => "<span class=\"gut\">gespeichert und aktiv</span>".into(),
         (Some(false), None) => {

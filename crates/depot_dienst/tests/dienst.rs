@@ -562,6 +562,54 @@ fn unlesbarer_zeitplan_schaltet_ihn_aus() -> Result<(), String> {
     Ok(())
 }
 
+/// Maus K29-01: Ein Lesefehler ist kein Erststart. Nur eine fehlende Datei nimmt die
+/// Voreinstellung; jeder andere Fehler haelt den Zeitplan sichtbar an.
+#[test]
+fn k29_01_lesefehler_halten_den_zeitplan_an() -> Result<(), String> {
+    let umw = Attrappe::default();
+    // Zeitplan nicht lesbar (hier ein Ordner an seiner Stelle): nichts startet, Grund sichtbar.
+    let w1 = ordner()?;
+    fs::create_dir_all(w1.join("daten").join("zeitplan.txt"))
+        .map_err(|e| format!("Vorbedingung: {e}"))?;
+    let d1 = dienst(w1, true);
+    assert!(!d1.sperre().zeitplan.an);
+    assert!(d1.sperre().zeitplan_fehler.is_some());
+    assert!(d1.schritt(donnerstag(18, 0)?).is_none());
+    assert!(wartend(&d1).is_empty());
+    let seite = text(&behandle(
+        &d1,
+        &umw,
+        &anfrage("GET", "/einrichtung", &[("Host", HOST)], ""),
+        donnerstag(18, 0)?,
+    ));
+    assert!(seite.contains("nicht lesbar"), "Grund sichtbar");
+    // Erledigt nicht lesbar (kein UTF-8): nichts startet, auch nicht nach neuem Speichern.
+    let w2 = ordner()?;
+    fs::write(
+        w2.join("daten").join("dienst_erledigt.txt"),
+        [0xff_u8, 0xfe, 0x00],
+    )
+    .map_err(|e| format!("Vorbedingung: {e}"))?;
+    let d2 = dienst(w2, true);
+    assert!(!d2.sperre().zeitplan.an);
+    assert!(d2.sperre().erledigt_fehler.is_some());
+    let an = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&an=ja&termine=17%3A40&kurse=17%3A45&papier_danach=ja"),
+    );
+    assert!(text(&behandle(&d2, &umw, &an, donnerstag(18, 0)?)).contains("m=zeitplan#"));
+    assert!(d2.schritt(donnerstag(18, 0)?).is_none());
+    assert!(
+        wartend(&d2).is_empty(),
+        "ohne gesichertes Erledigt startet nichts"
+    );
+    // Fehlen beide Dateien, gilt die Voreinstellung (Erststart).
+    let d3 = dienst(ordner()?, true);
+    assert!(d3.sperre().zeitplan.an);
+    assert!(d3.sperre().zeitplan_fehler.is_none());
+    Ok(())
+}
+
 #[test]
 fn zeitplan_ueber_die_seite_speichern_und_aktivieren() -> Result<(), String> {
     let wurzel = ordner()?;

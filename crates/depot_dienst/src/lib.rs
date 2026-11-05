@@ -26,7 +26,6 @@ pub mod seiten;
 pub mod werkbank;
 pub mod zeitplan;
 
-use std::fs;
 use std::path::Path;
 
 use depot_kern::{BeraterId, Zeitpunkt};
@@ -124,7 +123,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/teil/status" => antwort(200, HTML, seiten::status(&d.sperre(), tag).as_bytes()),
         "/einrichtung" => {
             // Erst ausserhalb der Sperre nachsehen, was gespeichert ist.
-            let datei = fs::read_to_string(d.wurzel.join("daten").join("zeitplan.txt")).ok();
+            let datei = werkbank::lies_falls_da(&d.wurzel.join("daten").join("zeitplan.txt"));
             let gespeichert = seiten::Einrichtung {
                 schluessel: schluessel::ALLE
                     .into_iter()
@@ -137,7 +136,11 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             };
             let zustand = d.sperre();
             let gespeichert = seiten::Einrichtung {
-                zeitplan_gespeichert: datei.map(|t| t == zustand.zeitplan.als_text()),
+                zeitplan_gespeichert: match datei {
+                    Ok(Some(t)) => Some(t == zustand.zeitplan.als_text()),
+                    Ok(None) => None,
+                    Err(_) => Some(false),
+                },
                 ..gespeichert
             };
             let inhalt = seiten::einrichtung(&d.token, &zustand, tag, &gespeichert);

@@ -17,7 +17,7 @@ Jede Arbeit ist ein eigener Lauf wie `run.cmd kurse`, `run.cmd termine` oder `ru
 Montag bis Freitag, Frankfurter Zeit: Termine 17:40, Kurse 17:45 (nach dem Xetra-Schluss um 17:35), nach erfolgreichem Kursabruf der Papiertag. Uhrzeiten und Schalter stehen in `daten/zeitplan.txt`.
 
 - Bevor der Zeitplan einen Auftrag einreiht, steht der Tag in `daten/dienst_erledigt.txt` (Nebendatei, auf den Datenträger, dann umbenennen). Ein Neustart startet an diesem Tag nichts noch einmal. Lässt sich die Datei nicht schreiben, schaltet sich der Zeitplan aus und zeigt den Grund.
-- Ist `zeitplan.txt` oder `dienst_erledigt.txt` nicht genau in der eigenen Form, ist der Zeitplan aus und die Seite nennt den Grund. Nichts startet dann von selbst.
+- Nur eine **fehlende** Datei heißt Erststart mit Voreinstellung. Ist `zeitplan.txt` oder `dienst_erledigt.txt` da, aber nicht lesbar (Rechte, kein UTF-8, Gerätefehler) oder nicht genau in der eigenen Form, ist der Zeitplan aus und die Seite nennt den Grund. Nichts startet dann von selbst. Ist `dienst_erledigt.txt` nicht lesbar, startet der Zeitplan auch nach neuem Speichern nichts, bis die Datei geprüft und der Dienst neu gestartet ist: Sonst könnte ein erledigter Abruf ein zweites Mal laufen.
 - Der Papiertag folgt nur auf einen erfolgreichen Kursabruf des Zeitplans; er selbst läuft ohnehin nur einmal je Handelstag (Journal).
 
 ## Schutz gegen fremde Webseiten
@@ -68,7 +68,7 @@ Der Verbindungstest der Quellen ist der Abruf selbst (nur lesend); sein Ergebnis
 
 ## Tests
 
-17 Tests in `crates/depot_dienst/tests/dienst.rs`, ohne Netz und ohne echten Schlüsselspeicher (eine Attrappe nimmt Schlüssel und Autostart an):
+18 Tests in `crates/depot_dienst/tests/dienst.rs`, ohne Netz und ohne echten Schlüsselspeicher (eine Attrappe nimmt Schlüssel und Autostart an):
 
 - HTTP: genau eine Anfrage, Ablehnung von `Transfer-Encoding`, doppelter oder falscher Länge, fremdem Ziel, anderer Version, zu großem Kopf oder Rumpf, abgebrochener Verbindung; strenges Formular.
 - Schutz: fremder oder fehlender Host (auch `localhost.boese.example:47410`, falscher Port) → 403; POST ohne oder mit fremder Herkunft (auch `null`), falschem Typ, fehlendem oder falschem Token → abgelehnt, nichts eingereiht; Sicherheitsköpfe; keine gespiegelte Meldung.
@@ -78,6 +78,14 @@ Der Verbindungstest der Quellen ist der Abruf selbst (nur lesend); sein Ergebnis
 - Autostart: nur mit harmlosem Pfad.
 
 Der Server selbst (Lauschen, Fäden, Browser) steht in `main.rs` und ist dünn; er ruft nur `http::lies` und `behandle`. Probelauf unter Linux: Seite 200, fremder Host 403, Auftrag über das Formular eingereiht und gestartet.
+
+## Fassung 2 nach Maus' Prüfung (K29-01)
+
+**Befund:** Ein Lesefehler bei `zeitplan.txt` oder `dienst_erledigt.txt` galt wie ein Erststart. Eine ausgeschaltete Automatik konnte so wieder angehen, ein erledigter Abruf ein zweites Mal starten.
+
+**Regel:** `lies_falls_da` unterscheidet „Datei fehlt“ (Voreinstellung) von jedem anderen Fehler (Zeitplan aus, Grund sichtbar). Ein unlesbares Erledigt hält den Zeitplan an, bis der Dienst mit lesbarer Datei neu startet; Speichern auf der Seite hebt das nicht auf. Die Einrichtung zeigt eine unlesbare Zeitplandatei als Abweichung, nicht als „Voreinstellung“.
+
+**Gegenprobe:** `k29_01_lesefehler_halten_den_zeitplan_an` (Zeitplan als Ordner, Erledigt ohne UTF-8, beide fehlend). Wird jeder Lesefehler wieder als „fehlt“ behandelt, ist der Test rot; ohne die Sperre bei unlesbarem Erledigt ebenso.
 
 ## Gegenproben
 

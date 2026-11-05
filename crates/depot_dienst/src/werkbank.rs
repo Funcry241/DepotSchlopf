@@ -119,6 +119,9 @@ pub struct Zustand {
     /// Warum der Zeitplan nicht gilt (unlesbare Datei); dann ist er aus.
     pub zeitplan_fehler: Option<String>,
     pub erledigt: Erledigt,
+    /// Warum nicht feststeht, was heute schon lief (unlesbares `dienst_erledigt.txt`). Solange
+    /// das gilt, startet der Zeitplan nichts, auch nicht nach neuem Speichern.
+    pub erledigt_fehler: Option<String>,
     pub lage: Option<Lage>,
     pub lage_veraltet: bool,
 }
@@ -189,6 +192,18 @@ pub fn schreibe_ganz(pfad: &Path, text: &str) -> Result<(), String> {
     fs::rename(&neben, pfad).map_err(|e| format!("{}: {e}", pfad.display()))
 }
 
+/// Liest eine Datei. `Ok(None)` nur, wenn sie fehlt; jeder andere Fehler ist ein Fehler.
+///
+/// # Errors
+/// Die Datei ist da, laesst sich aber nicht lesen (Rechte, kein UTF-8, Geraetefehler).
+pub fn lies_falls_da(pfad: &Path) -> Result<Option<String>, String> {
+    match fs::read_to_string(pfad) {
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{} nicht lesbar: {e}", pfad.display())),
+    }
+}
+
 fn kuerze(mut z: String) -> String {
     if z.chars().count() > ZEILE_ZEICHEN {
         z = z.chars().take(ZEILE_ZEICHEN).collect();
@@ -206,36 +221,28 @@ impl Dienst {
         starter: Starter,
         lagerechner: Lagerechner,
     ) -> Dienst {
-        let (zeitplan, zeitplan_fehler) = match fs::read_to_string(zeitplan_pfad(&wurzel)) {
-            Ok(t) => match Zeitplan::lies(&t) {
+        // Nur „Datei fehlt“ heisst Erststart mit Voreinstellung. Jeder andere Lesefehler und
+        // jede fremde Form halten den Zeitplan an (K29-01): Eine ausgeschaltete Automatik darf
+        // nicht wieder angehen, ein erledigter Abruf nicht noch einmal starten.
+        let (zeitplan, zeitplan_fehler) = match lies_falls_da(&zeitplan_pfad(&wurzel)) {
+            Ok(Some(t)) => match Zeitplan::lies(&t) {
                 Ok(z) => (z, None),
-                Err(e) => (
-                    Zeitplan {
-                        an: false,
-                        ..Zeitplan::default()
-                    },
-                    Some(e),
-                ),
+                Err(e) => (Zeitplan::default(), Some(e)),
             },
-            Err(_) => (Zeitplan::default(), None),
+            Ok(None) => (Zeitplan::default(), None),
+            Err(e) => (Zeitplan::default(), Some(e)),
         };
-        let (erledigt, erledigt_fehler) = match fs::read_to_string(erledigt_pfad(&wurzel)) {
-            Ok(t) => match Erledigt::lies(&t) {
+        let (erledigt, erledigt_fehler) = match lies_falls_da(&erledigt_pfad(&wurzel)) {
+            Ok(Some(t)) => match Erledigt::lies(&t) {
                 Ok(e) => (e, None),
                 Err(e) => (Erledigt::default(), Some(e)),
             },
-            Err(_) => (Erledigt::default(), None),
+            Ok(None) => (Erledigt::default(), None),
+            Err(e) => (Erledigt::default(), Some(e)),
         };
-        // Ein unlesbares Erledigt koennte zu einem zweiten Lauf am selben Tag fuehren: Zeitplan aus.
-        let (zeitplan, zeitplan_fehler) = match (zeitplan_fehler, erledigt_fehler) {
-            (None, None) => (zeitplan, None),
-            (a, b) => (
-                Zeitplan {
-                    an: false,
-                    ..zeitplan
-                },
-                a.or(b),
-            ),
+        let zeitplan = Zeitplan {
+            an: zeitplan.an && zeitplan_fehler.is_none() && erledigt_fehler.is_none(),
+            ..zeitplan
         };
         Dienst {
             wurzel,
@@ -248,6 +255,7 @@ impl Dienst {
                 zeitplan,
                 zeitplan_fehler,
                 erledigt,
+                erledigt_fehler,
                 lage: None,
                 lage_veraltet: true,
             }),
@@ -347,6 +355,9 @@ impl Dienst {
     }
 
     fn zeitplan_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
+        if z.erledigt_fehler.is_some() {
+            return;
+        }
         let Some((tag, h, m, _, _)) = ortszeit(jetzt) else {
             return;
         };
