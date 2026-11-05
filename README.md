@@ -39,6 +39,7 @@ Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 | `depot_sim` | Simulierter Lauf mit erfundenen Daten und Papiergeld: Dachs und Maus beobachten, begründen im Journal und entscheiden im Schutzrahmen; ausgeführt wird über ein erfundenes Papierkonto, mit dem der Kontowächter abgleicht; echte Kurse halten den Lauf an |
 | `depot_sammler` | Holt Xetra-Schlusskurse lesend von Alpha Vantage und die Termine der EZB von ihrer Seite, legt jede Antwort roh unter `daten/roh/` ab, belegt jeden Kurs und Termin im Journal und prüft die Kurse. Mit Netz |
 | `depot_berater` | Dachs (Claude Sonnet 5.5) und Maus (GPT-6.1 Terra) als Berater im Papierhandel: fragt nur mit gebuchter Erlaubnis, rechnet nach jedem Aufruf die Kosten nach und sperrt bei jeder Überschreitung. Mit Netz; `run.cmd papier` |
+| `depot_lage` | Das Lagebild ohne Netz: Bereitschaft für den nächsten Papiertag mit Ampel und nächstem Schritt, KI-Budget je KI direkt aus dem Kassenbuch, Papierdepot, Aufträge, Begründungen von Dachs und Maus, festgeschriebene Grenzen. Rechnet mit denselben Prüfungen wie Papiertag und Kostenschutz |
 | `depot_lauf` | Der Ein-Befehl-Einstieg `run.cmd` mit Assistenten-Export nach jedem Lauf |
 | `depot_kodex` | Das Gate: Deklaration gegen realen Diff, Pfadrollen, Festschreibung, Quellscan, Essenz, Format, Clippy, Tests |
 
@@ -88,6 +89,8 @@ cmdkey /generic:DepotSchlopf/openai /user:depotschlopf /pass
 ```
 
 Fehlt ein Schlüssel, wird dieser Berater nicht gefragt. Die KI-Kosten sind auf 20 € im Monat je KI begrenzt. Überschreitet ein Aufruf seine Reservierung, liegt danach `daten/ki.halt` mit dem Grund, und keine KI wird mehr gefragt, bis die Datei nach der Prüfung gelöscht ist.
+
+`run.cmd lage` schreibt das Lagebild nach `daten/lage.html` (im Browser öffnen): was für den nächsten Papiertag bereit ist oder fehlt, KI-Budget, Papierdepot, Begründungen und Grenzen. Es liest nur. Die dauerhafte Oberfläche mit Config-Seite folgt.
 
 ## Mitmachen
 

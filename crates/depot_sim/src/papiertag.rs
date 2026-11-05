@@ -63,8 +63,10 @@ fn tagesbeginn(d: Datum) -> Option<i64> {
     Zeitpunkt::neu(d, 0, 0, 0).map(Zeitpunkt::sekunden)
 }
 
-/// Nummer des Tages seit 1970: steigt von Tag zu Tag, wie der Kostenschutz es verlangt.
-fn tagnummer(d: Datum) -> Option<u32> {
+/// Nummer des Tages seit 1970: steigt von Tag zu Tag, wie der Kostenschutz es verlangt. Der
+/// Papiertag fragt die Berater im Zyklus mit dieser Nummer; die Anzeige des KI-Budgets prueft
+/// mit derselben.
+pub fn tagnummer(d: Datum) -> Option<u32> {
     let s = tagesbeginn(d)?;
     u32::try_from(s.checked_div(SEKUNDEN_JE_TAG)?).ok()
 }
@@ -189,6 +191,64 @@ fn abdruck(vorher: Option<&str>, tag: &Tag, vortag: &Kurse) -> String {
         })
 }
 
+/// Die Kurse eines Papiertags: die belegten Schlusskurse, nur wenn ihr Handelstag `heute` ist.
+///
+/// # Errors
+/// `Halt` ohne Kurse von heute; sonst wie `tageskurse`.
+pub fn kurse_von_heute(
+    stand: &Stand,
+    universum: &Universum,
+    heute: Datum,
+) -> Result<Tageskurse, LaufFehler> {
+    let k = tageskurse(stand, universum)?;
+    if k.handelstag != heute {
+        return Err(halt(format!(
+            "Die neuesten Schlusskurse sind vom {}, heute ist der {}: Ein Tag wird nur mit \
+             seinen eigenen Kursen entschieden. Zuerst run.cmd kurse nach 17:35 Uhr",
+            datum_text(k.handelstag),
+            datum_text(heute)
+        )));
+    }
+    Ok(k)
+}
+
+/// Wo das Journal zu einem Handelstag steht, ohne Konto und ohne etwas zu schreiben.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tageslage {
+    /// Der Tag kann beginnen.
+    Offen,
+    /// Der Tag ist schon abgeschlossen.
+    Abgeschlossen(Datum),
+}
+
+/// Prueft, ob ein Papiertag fuer `handelstag` beginnen kann. Der Papiertag selbst prueft genau
+/// so, nach dem Abgleich mit dem Konto; die Anzeige zeigt damit dieselben Gruende.
+///
+/// # Errors
+/// `Halt`, wenn der letzte Abschluss nach dem Handelstag liegt oder ein Tag angefangen ist.
+pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehler> {
+    if let Some(a) = stand.abschluss() {
+        if a.datum == handelstag {
+            return Ok(Tageslage::Abgeschlossen(a.datum));
+        }
+        if a.datum > handelstag {
+            return Err(halt(format!(
+                "Letzter Abschluss am {} liegt nach dem Handelstag {}",
+                datum_text(a.datum),
+                datum_text(handelstag)
+            )));
+        }
+    }
+    if stand.seit_abschluss() > 0 {
+        return Err(halt(format!(
+            "{} Eintraege nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
+             abgeschlossen. Halt bis zur Pruefung; niemand wird neu gefragt",
+            stand.seit_abschluss()
+        )));
+    }
+    Ok(Tageslage::Offen)
+}
+
 /// Ein Papiertag. `heute` ist das Datum der Uhr; `start` sind die Toepfe, mit denen ein neues
 /// Papierdepot beginnt. `konto` ist das Papierkonto, das unabhaengig vom Journal weiterlebt.
 ///
@@ -204,15 +264,7 @@ pub fn papiertag(
     maus: &mut dyn Berater,
     konto: &mut dyn Broker,
 ) -> Result<Ausgang, LaufFehler> {
-    let k = tageskurse(j.stand(), universum)?;
-    if k.handelstag != heute {
-        return Err(halt(format!(
-            "Die neuesten Schlusskurse sind vom {}, heute ist der {}: Ein Tag wird nur mit \
-             seinen eigenen Kursen entschieden. Zuerst run.cmd kurse nach 17:35 Uhr",
-            datum_text(k.handelstag),
-            datum_text(heute)
-        )));
-    }
+    let k = kurse_von_heute(j.stand(), universum, heute)?;
     let neu = j.stand().toepfe().is_empty();
     if !neu {
         // Wiederanlauf: zuerst der Abgleich, auch wenn der Tag schon abgeschlossen ist
@@ -226,26 +278,10 @@ pub fn papiertag(
             )));
         }
     }
+    if let Tageslage::Abgeschlossen(d) = tageslage(j.stand(), k.handelstag)? {
+        return Ok(Ausgang::SchonAbgeschlossen(d));
+    }
     let letzter = j.stand().abschluss().cloned();
-    if let Some(a) = &letzter {
-        if a.datum == k.handelstag {
-            return Ok(Ausgang::SchonAbgeschlossen(a.datum));
-        }
-        if a.datum > k.handelstag {
-            return Err(halt(format!(
-                "Letzter Abschluss am {} liegt nach dem Handelstag {}",
-                datum_text(a.datum),
-                datum_text(k.handelstag)
-            )));
-        }
-    }
-    if j.stand().seit_abschluss() > 0 {
-        return Err(halt(format!(
-            "{} Eintraege nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
-             abgeschlossen. Halt bis zur Pruefung; niemand wird neu gefragt",
-            j.stand().seit_abschluss()
-        )));
-    }
     j.stelle_um().map_err(journal)?;
     let hoch = if neu {
         for t in start {

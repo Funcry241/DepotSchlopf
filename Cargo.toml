@@ -10,6 +10,7 @@ members = [
     "crates/depot_lauf",
     "crates/depot_sammler",
     "crates/depot_berater",
+    "crates/depot_lage",
 ]
 
 [workspace.package]

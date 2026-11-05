@@ -1,7 +1,16 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: KodexAenderung
-zweck: Nur lokales Lauschen fuer depot_dienst (Dienst mit lokaler Weboberflaeche und Config-Seite, Wolfgang 05.11.2026: "Ja, nur 127.0.0.1"). Neue Liste NETZ_LOKAL: TcpListener::bind nur woertlich auf Ipv4Addr::LOCALHOST (auch als Tupel oder in SocketAddrV4::new), angenommene Verbindungen erlaubt; verboten bleiben Verbindungsaufbau (connect), UDP, Unix-Sockets, Namensaufloesung und jedes Netz-Crate. Kein anderes Crate haengt von depot_dienst ab; jedes andere Crate darf auch lokal nicht lauschen. Dazu der Starter DepotSchlopf.cmd im Projektordner als Werkzeug (Doppelklick startet den Dienst ohne Konsole). Kein Produktivcode, keine Grenzen, keine Abhaengigkeiten. Fassung 2 nach Maus K27-01 (bind::<&str>("0.0.0.0:47410") ging durch): jedes Wort bind muss ein direkter Aufruf mit genau (::std::net::Ipv4Addr::LOCALHOST, PORT) oder ::std::net::SocketAddrV4::new(::std::net::Ipv4Addr::LOCALHOST, PORT) sein, voller Pfad, damit kein Alias, eigener Typ oder Glob umlenkt; extern crate verboten.
+klasse: FestschreibungAenderung
+zweck: Lagebild als erster Teil der Oberflaeche (Wolfgang 05.11.2026: Dienst mit lokaler Weboberflaeche und genau einer Config-Seite; Maus: Live-Ansicht und KI-Budget sichtbar). Neues Crate depot_lage ohne Netz: rechnet aus dem Journal, was fuer den naechsten Papiertag bereit ist oder fehlt (Journal, Schluessel, Kurse von heute samt Kurspruefung, Termine, Tageslage, Sperrdateien, KI-Kassenbuch), das KI-Budget je KI (heute, Monat, Jahr, Rest, Status direkt aus depot_ki::pruefe mit dem Zyklus des Papiertags), das Papierdepot, die Auftraege, die Begruendungen von Dachs, Maus und Regelwerk und die festgeschriebenen Grenzen (nur Anzeige, Aenderung nur ueber Grenzfreigabe). run.cmd lage schreibt daten/lage.html. Damit Anzeige und Papiertag dieselbe Pruefung nehmen (D16), legt depot_sim die Pruefungen kurse_von_heute und tageslage offen und der Papiertag ruft sie selbst auf, Verhalten unveraendert; tagnummer wird oeffentlich. Neues Crate depot_lage und depot_sim als Workspace-Abhaengigkeit: Festschreibung, Grenzfreigabe noetig. Fassung 2 nach Maus K26-01 (geloeschtes Journal bei vorhandenem Vermerk erschien als nicht eingerichtet): Neu ist nur ein Datenbestand ohne jede Spur. Journal::eingerichtet entscheidet das fuer Journal und Vermerk, oeffnen beginnt mit derselben Pruefung; fehlt nur ein Teil oder liegt ein Papierkonto ohne Journal, ist es Halt. depot_lage::mit_journal ist der einzige Lesezugang. Keine neuen fremden Abhaengigkeiten, kein Netz, keine Schluessel, keine neuen Grenzen, kein echtes Geld.
 pfade:
-crates/depot_kodex/
-docs/befunde/kodex.md
+Cargo.toml
+Cargo.lock
+run.cmd
+crates/depot_sim/
+crates/depot_journal/
+crates/depot_lauf/src/main.rs
+crates/depot_lage/
+kodex/festschreibung.txt
+docs/
 CHANGELOG.md
+README.md
+kodex/freigabe.txt

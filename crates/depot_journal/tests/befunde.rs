@@ -1120,3 +1120,22 @@ fn befund_k13_03_ki_eintraege_nur_ueber_reserviere() -> Result<(), String> {
         Err(format!("{offen:#?}"))
     }
 }
+
+/// K26-01: `eingerichtet` ist nur ohne Journal und ohne Vermerk falsch; fehlt nur das Journal,
+/// ist es Halt, und `oeffnen` haelt mit demselben Grund.
+#[test]
+fn k26_01_fehlendes_journal_bei_vermerk_ist_halt() -> Result<(), String> {
+    let p = neuer_pfad()?;
+    assert_eq!(Journal::eingerichtet(&p), Ok(false));
+    Journal::einrichten(&p).map_err(|e| format!("Vorbedingung Einrichtung: {e:?}"))?;
+    assert_eq!(Journal::eingerichtet(&p), Ok(true));
+    fs::remove_file(&p).map_err(|e| format!("Vorbedingung loeschen: {e}"))?;
+    let e = Journal::eingerichtet(&p);
+    assert!(
+        matches!(&e, Err(JournalFehler::Halt(m)) if m.contains("unvollstaendig")),
+        "{e:?}"
+    );
+    let o = Journal::oeffnen(&p).map(|_| ());
+    assert_eq!(o, e.map(|_| ()));
+    Ok(())
+}

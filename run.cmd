@@ -7,6 +7,7 @@ rem   run.cmd festschreibung   Festschreibung neu schreiben (nur fuer Festschrei
 rem   run.cmd kurse            Schlusskurse holen, im Journal belegen und pruefen (nur lesend)
 rem   run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)
 rem   run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)
+rem   run.cmd lage             Lagebild nach daten/lage.html (Bereitschaft, KI-Budget, Depot)
 rem   run.cmd hilfe            Hilfe
 where cargo >nul 2>&1
 if errorlevel 1 (

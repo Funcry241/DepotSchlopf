@@ -112,6 +112,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "depot_lage"
+version = "0.1.0"
+dependencies = [
+ "depot_journal",
+ "depot_kern",
+ "depot_ki",
+ "depot_regelwerk",
+ "depot_sim",
+]
+
+[[package]]
 name = "depot_lauf"
 version = "0.1.0"
 dependencies = [
