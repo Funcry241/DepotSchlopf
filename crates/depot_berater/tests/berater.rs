@@ -596,3 +596,49 @@ fn reservierung_ist_eine_gesicherte_obergrenze() -> Result<(), String> {
     assert!(maus_ort.sperre().exists());
     Ok(())
 }
+
+/// Gegenprobe von Maus (Nachpruefung K25-02): Auch wenn der Text verworfen wird, weil er den
+/// Schluessel enthaelt, wird der Verbrauch geprueft. Kosten ueber der Reservierung sperren,
+/// ein unlesbarer Verbrauch auch.
+#[test]
+fn verworfene_antwort_wird_trotzdem_auf_kosten_geprueft() -> Result<(), String> {
+    let text = format!("{{\"einschaetzung\": \"{SCHLUESSEL}\", \"ziele\": null}}");
+    // Kosten ueber der Reservierung.
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(claude(&text, 200_000, 1_500, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.vorschlag.is_none(), "{a:?}");
+    assert!(!format!("{a:?}").contains(SCHLUESSEL), "{a:?}");
+    assert!(a.einschaetzung.contains("42 Cent ueber 24"), "{a:?}");
+    assert!(ort.sperre().exists(), "Sperrdatei geschrieben");
+    // Verbrauch unlesbar: sperren.
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(ok(&format!(
+        "{{\"content\":[{{\"type\":\"text\",\"text\":\"{SCHLUESSEL}\"}}],\"stop_reason\":\"end_turn\"}}"
+    )));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(a.vorschlag.is_none(), "{a:?}");
+    assert!(!format!("{a:?}").contains(SCHLUESSEL), "{a:?}");
+    assert!(ort.sperre().exists(), "{a:?}");
+    // Kein JSON, aber mit Schluessel: Kosten unbekannt, sperren.
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(ok(&format!("kaputt {SCHLUESSEL}")));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(!format!("{a:?}").contains(SCHLUESSEL), "{a:?}");
+    assert!(ort.sperre().exists(), "{a:?}");
+    assert!(!fs_enthaelt(&ort.sperre(), SCHLUESSEL), "Sperrdatei ohne Schluessel");
+    Ok(())
+}
+
+fn fs_enthaelt(pfad: &std::path::Path, was: &str) -> bool {
+    std::fs::read_to_string(pfad).is_ok_and(|t| t.contains(was))
+}
