@@ -1,12 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Funktion
-zweck: Termine im Ereignisregister, Teil EZB (R39, R12; Wolfgang 04.11.2026). Termin im Kern (Kennung, Titel, Zeitbezug, Betroffene, Verlaesslichkeit), Eintrag termin im Journal mit Quelle, Abrufzeit und Abdruck, Fortschreibung unter der Kennung. run.cmd termine holt die Sitzungstermine von der Seite der EZB, legt sie roh ab, liest genau ihre Form und belegt jeden Termin. Nach Maus K22-01: Kennung haengt nicht an der Reihenfolge der Seite, Zuordnung je Tag zu bekannten Terminen, mehrdeutig wird gemeldet und nichts belegt. K22-02: Fortschreibung nur bei gleichem Gremium und gleichen Betroffenen. Nur lesend, keine Auftraege, keine KI. Keine neuen Grenzen, keine neuen Abhaengigkeiten.
+klasse: KodexAenderung
+zweck: Netzzugang fuer depot_berater (Fragen an Dachs und Maus mit Websuche fuer den Papierhandel, Wolfgang 05.11.2026). Die allgemeine Regel bleibt: kein anderes Crate haengt von einem Netz-Crate, vom Sammler oder vom Berater ab. Kein Produktivcode, keine Grenzen, keine Abhaengigkeiten.
 pfade:
-crates/depot_kern/
-crates/depot_journal/
-crates/depot_sammler/
-crates/depot_lauf/
-docs/
+crates/depot_kodex/
+docs/befunde/kodex.md
 CHANGELOG.md
-README.md
-run.cmd
