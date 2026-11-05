@@ -23,7 +23,9 @@
 //! **Kurze Netzausfaelle:** Jeder Abruf von Kursen und Referenzkursen geht ueber
 //! `netz::hole_mit_wiederholung`: Scheitert er voruebergehend, wird er nach kurzer Wartezeit
 //! wiederholt, solange seine Kurse noch frisch genug waeren (`netz::frist`). Bleibt die
-//! Verbindung weg, endet der Lauf (`Bericht::verbindung`); weitere Abrufe waeren zwecklos.
+//! Verbindung zu einer Quelle weg (`Bericht::verbindung`), ruft der Lauf bei ihr nichts mehr ab;
+//! die anderen Quellen fragt er weiter. Fallen die Referenzkurse der EZB aus, fehlen nur die
+//! Werte in Dollar; Werte in Euro brauchen sie nicht (Maus, Befund 1 zu #38).
 //!
 //! Meldet die Quelle statt Kursen einen Hinweis, gilt: Ein Fehler zu genau diesem Kuerzel
 //! (`Error Message`) betrifft nur diesen Wert. Jeder andere Hinweis, etwa das erreichte
@@ -90,7 +92,8 @@ pub struct Bericht {
     pub pruefung: Vec<DatenFehler>,
     /// Kandidaten, die heute nicht handelbar sind, mit Grund. Der Papiertag laeuft ohne sie.
     pub ausgelassen: Vec<DatenFehler>,
-    /// Die Verbindung blieb trotz Wiederholung weg; daran endete der Lauf.
+    /// Die Verbindung zu einer Quelle blieb trotz Wiederholung weg (die erste solche). Bei
+    /// dieser Quelle wurde danach nichts mehr abgerufen, bei den anderen schon.
     pub verbindung: Option<Ausfall>,
 }
 
@@ -272,8 +275,7 @@ fn hole_devisen(
         Ok(r) => r,
         Err(a) => {
             let text = format!("Abruf: {}", zugang.bereinige(a.fehler()));
-            if a.verbindung() {
-                bericht.abbruch = Some(text.clone());
+            if a.verbindung() && bericht.verbindung.is_none() {
                 bericht.verbindung = Some(a);
             }
             return Ok(fehlt(text));
@@ -343,8 +345,19 @@ fn vorbereite(
 
 /// Der Schluessel fuer einen Wert, oder warum er nicht abgerufen wird: Es fehlt der Schluessel
 /// seiner Quelle, oder er notiert nicht in Euro und die Referenzkurse fehlen.
-fn abrufbar<'a>(zugang: &'a Zugang, r: &Referenz, wert: &Wert) -> Result<&'a Schluessel, String> {
+fn abrufbar<'a>(
+    zugang: &'a Zugang,
+    r: &Referenz,
+    wert: &Wert,
+    weg: &[Anbieter],
+) -> Result<&'a Schluessel, String> {
     let anbieter = Anbieter::fuer(wert.boerse);
+    if weg.contains(&anbieter) {
+        return Err(format!(
+            "Verbindung zu {} weg: nicht abgerufen",
+            anbieter.dienst()
+        ));
+    }
     let schluessel = zugang.von(anbieter).ok_or_else(|| {
         format!(
             "Kein Schluessel fuer {} ({}): nicht abgerufen",
@@ -372,7 +385,8 @@ enum Schritt {
     Fehler(String),
     /// Der Lauf endet; `sicherheit`, wenn die Antwort einen Schluessel enthielt.
     Abbruch { text: String, sicherheit: bool },
-    /// Die Verbindung blieb trotz Wiederholung weg; der Lauf endet.
+    /// Die Verbindung zur Quelle blieb trotz Wiederholung weg; bei ihr wird nichts mehr
+    /// abgerufen.
     Verbindung { text: String, ausfall: Ausfall },
 }
 
@@ -477,13 +491,15 @@ pub fn sammle(
 
     let vorbereitung = vorbereite(&mut bericht, netz, zugang, takt, ablage, werte)?;
     let mut abgerufen = vorbereitung.abgerufen;
+    // Quellen, zu denen die Verbindung trotz Wiederholung wegblieb.
+    let mut weg: Vec<Anbieter> = Vec::new();
 
     for wert in werte {
         if bericht.abbruch.is_some() {
             bericht.werte.push((wert.clone(), Ergebnis::NichtAbgerufen));
             continue;
         }
-        let schluessel = match abrufbar(zugang, &vorbereitung.referenz, wert) {
+        let schluessel = match abrufbar(zugang, &vorbereitung.referenz, wert, &weg) {
             Ok(s) => s,
             Err(text) => {
                 bericht
@@ -516,8 +532,10 @@ pub fn sammle(
                     continue;
                 }
                 Schritt::Verbindung { text, ausfall } => {
-                    bericht.abbruch = Some(format!("Verbindung weg: {text}"));
-                    bericht.verbindung = Some(ausfall);
+                    weg.push(Anbieter::fuer(wert.boerse));
+                    if bericht.verbindung.is_none() {
+                        bericht.verbindung = Some(ausfall);
+                    }
                     bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
                     continue;
                 }

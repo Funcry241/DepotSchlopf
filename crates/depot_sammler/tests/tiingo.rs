@@ -140,7 +140,11 @@ impl Netz for Erfunden {
             .get(&schluessel)
             .cloned()
             .unwrap_or_else(|| Err("unbekannt".into()))
-            .map_err(NetzFehler::endgueltig)
+            // „weg: …“ ist ein voruebergehender Fehler (Verbindung, Status 5xx).
+            .map_err(|e| match e.strip_prefix("weg: ") {
+                Some(w) => NetzFehler::voruebergehend(w),
+                None => NetzFehler::endgueltig(e),
+            })
     }
 }
 
@@ -349,7 +353,13 @@ fn ohne_tiingo_schluessel_nur_xetra() -> Result<(), String> {
 #[test]
 fn ohne_referenzkurse_kein_dollarwert() -> Result<(), String> {
     let alle = werte()?;
-    for ezb_antwort in [Err("Netz"), Ok("<gesmes:Envelope><Cube>".to_string())] {
+    // Auch eine EZB, die voruebergehend nicht antwortet (Status 503), haelt Xetra nicht auf:
+    // Werte in Euro brauchen keine Referenzkurse (Maus, Befund 1 zu #38).
+    for ezb_antwort in [
+        Err("Netz"),
+        Err("weg: Status 503"),
+        Ok("<gesmes:Envelope><Cube>".to_string()),
+    ] {
         let (journal, roh) = ordner()?;
         let mut netz = Erfunden::neu(&[
             ("ezb", ezb_antwort),
@@ -361,7 +371,11 @@ fn ohne_referenzkurse_kein_dollarwert() -> Result<(), String> {
             &roh,
             &mut netz,
             &zugang()?,
-            vec![utc(11, 4, 16, 39)?, utc(11, 4, 16, 40)?],
+            vec![
+                utc(11, 4, 16, 39)?,
+                utc(11, 4, 16, 40)?,
+                utc(11, 4, 16, 41)?,
+            ],
             &alle,
         )?
         .map_err(|e| format!("Lauf: {e:?}"))?;
