@@ -203,7 +203,11 @@ fn text(antwort: &[u8]) -> String {
 }
 
 fn wartend(d: &Dienst) -> Vec<(Art, Anlass)> {
-    d.sperre().warteschlange.iter().copied().collect()
+    d.sperre()
+        .warteschlange
+        .iter()
+        .map(|a| (a.art, a.anlass))
+        .collect()
 }
 
 // --- HTTP lesen ---
@@ -1302,6 +1306,12 @@ fn journal_knopf_zeigt_arbeitsstand() -> Result<(), String> {
     let t = donnerstag(12, 0)?;
     assert!(d.schritt(t).is_none());
     assert!(get(&d, "/", t).contains(">Einrichten</button>"));
+    assert_eq!(
+        get(&d, "/teil/live", t)
+            .matches("Journal: Noch nicht eingerichtet.")
+            .count(),
+        1
+    );
     d.einreihen(Art::Einrichten, Anlass::Hand)?;
     assert!(get(&d, "/teil/live", t).contains("disabled>Einrichten · wartet"));
     let (nr, kind) = some(d.schritt(t), "Start")?;

@@ -75,15 +75,19 @@ fn bestaetigungslink(art: Art, text: &str, sha: Option<&str>) -> String {
 }
 
 pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> String {
-    let (text, ziel) = if sha.is_some() {
+    let (text, ziel, knopf, haken) = if sha.is_some() {
         (
             "Das Update sichert deine Papierdaten und prüft die neue Version. Das dauert ein paar Minuten. Danach startet DepotSchlopf neu.",
             "/einrichtung#update",
+            "Update einspielen",
+            "Ich spiele diese Version ein.",
         )
     } else {
         (
             "Der Papiertag handelt mit Papiergeld. Sind Dachs oder Maus eingerichtet und verfügbar, können ihre Antworten echtes KI-Budget verbrauchen.",
             "/",
+            "Papiertag starten",
+            "Ich starte jetzt den Papiertag.",
         )
     };
     let stand = sha.map_or_else(String::new, |sha| {
@@ -93,12 +97,11 @@ pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> S
         )
     });
     format!(
-        "<section><h2>{0}</h2><p>{text}</p><form method=\"post\" action=\"/ausfuehren\">\
-         <input type=\"hidden\" name=\"t\" value=\"{1}\">\
-         <input type=\"hidden\" name=\"art\" value=\"{2}\">{stand}\
-         <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> Ich möchte fortfahren.</label>\
-         <button type=\"submit\">{0}</button> <a href=\"{ziel}\">Abbrechen</a></form></section>",
-        maskiere(art.name()),
+        "<section><h2>{knopf}</h2><p>{text}</p><form method=\"post\" action=\"/ausfuehren\">\
+         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <input type=\"hidden\" name=\"art\" value=\"{}\">{stand}\
+         <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> {haken}</label>\
+         <button type=\"submit\">{knopf}</button> <a href=\"{ziel}\">Abbrechen</a></form></section>",
         maskiere(token),
         art.kurz()
     )
@@ -544,7 +547,7 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
         let liste: Vec<String> = z
             .warteschlange
             .iter()
-            .map(|(art, anlass)| format!("{} ({})", art.name(), anlass_text(*anlass)))
+            .map(|a| format!("{} ({})", a.art.name(), anlass_text(a.anlass)))
             .collect();
         let _ = write!(s, "<p>Wartet: {}</p>", maskiere(&liste.join(", ")));
     }
@@ -606,7 +609,7 @@ fn update_hinweis(z: &Zustand) -> String {
     }
 }
 
-fn gesamtstatus_teil(z: &Zustand) -> String {
+fn gesamtstatus_teil(z: &Zustand, lagezeile: &str) -> String {
     let Some(b) = z.gesamtstatus() else {
         return String::new();
     };
@@ -627,16 +630,17 @@ fn gesamtstatus_teil(z: &Zustand) -> String {
         "<section id=\"betrieb\"><div class=\"kopf {klasse}\">{}</div>",
         maskiere(titel)
     );
-    if !b.gruende().is_empty() {
-        s.push_str("<ul>");
-        for g in b.gruende() {
-            if let Some((_, status)) = journal.as_ref().filter(|(grund, _)| grund == g) {
-                let _ = write!(s, "<li>Journal einrichten {status}</li>");
-            } else {
-                let _ = write!(s, "<li>{}</li>", maskiere(g));
-            }
+    let lagezeile = lagezeile.strip_prefix("Halt – ").unwrap_or(lagezeile);
+    let mut gruende = String::new();
+    for g in b.gruende() {
+        if let Some((_, status)) = journal.as_ref().filter(|(grund, _)| grund == g) {
+            let _ = write!(gruende, "<li>Journal einrichten {status}</li>");
+        } else if g != lagezeile {
+            let _ = write!(gruende, "<li>{}</li>", maskiere(g));
         }
-        s.push_str("</ul>");
+    }
+    if !gruende.is_empty() {
+        let _ = write!(s, "<ul>{gruende}</ul>");
     }
     s.push_str("</section>");
     s
@@ -646,7 +650,11 @@ fn gesamtstatus_teil(z: &Zustand) -> String {
 pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> String {
     let mut s = marke(start);
     s.push_str(&taetigkeit(z, heute));
-    s.push_str(&gesamtstatus_teil(z));
+    let lagezeile = z
+        .lage
+        .as_ref()
+        .map_or("", |l| l.bild.naechster_schritt.as_str());
+    s.push_str(&gesamtstatus_teil(z, lagezeile));
     s.push_str(&update_hinweis(z));
     if z.laufend.is_some() && z.lage.is_some() {
         s.push_str("<p class=\"leise\">Das Lagebild zeigt den Stand vor dem laufenden Auftrag und wird danach aktualisiert.</p>");
@@ -677,7 +685,7 @@ pub fn status(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
         "{}{}<section>{}<div class=\"kopf\">{}</div><div>{}</div>\
          <div class=\"leise\">Nächster geplanter Lauf: {}</div></section>",
         marke(start),
-        gesamtstatus_teil(z),
+        gesamtstatus_teil(z, &lage),
         update_hinweis(z),
         maskiere(&jetzt),
         maskiere(&lage),
@@ -1030,7 +1038,11 @@ fn autostart_teil(token: &str, e: &Einrichtung, s: &mut String) {
         autostart::Stand::Aus => ("Aus.", "Autostart einschalten", "an", ""),
         autostart::Stand::Fremd => {
             s.push_str("<p>Ein Autostart-Eintrag ist bereits vorhanden und gehört nicht zu \
-                diesem Ordner. Öffne die Einrichtung im Hauptordner, wenn du ihn ändern willst.</p></section>");
+                diesem Ordner. Öffne die Einrichtung im bisherigen Hauptordner, wenn du ihn ändern willst. \
+                Hast du den Ordner verschoben oder umbenannt, öffne mit Windows-Taste + R und \
+                <code>shell:startup</code> deinen Autostart-Ordner. Entferne dort \
+                <code>DepotSchlopf.cmd</code>, wenn du den Eintrag dem alten Ordner zuordnen kannst. \
+                Lade dann diese Einrichtung neu und schalte den Autostart hier ein.</p></section>");
             return;
         }
         autostart::Stand::NichtVerfuegbar => {

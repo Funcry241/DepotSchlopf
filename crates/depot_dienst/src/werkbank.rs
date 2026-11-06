@@ -150,12 +150,20 @@ pub const WARTEN_MAX: usize = 4;
 /// So alt darf das Lagebild hoechstens werden, wenn nichts laeuft.
 pub const LAGE_SEKUNDEN: i64 = 5;
 
+/// Ein Auftrag in der Warteschlange. Ein Update trägt den bereits bestätigten Commit.
+#[derive(Debug)]
+pub struct WartenderAuftrag {
+    pub art: Art,
+    pub anlass: Anlass,
+    update_commit: Option<String>,
+}
+
 /// Der veraenderliche Zustand.
 #[derive(Debug)]
 pub struct Zustand {
     pub naechste_nr: u64,
     pub laufend: Option<Auftrag>,
-    pub warteschlange: VecDeque<(Art, Anlass)>,
+    pub warteschlange: VecDeque<WartenderAuftrag>,
     pub verlauf: VecDeque<Auftrag>,
     pub zeitplan: Zeitplan,
     /// Warum der Zeitplan nicht gilt (unlesbare Datei); dann ist er aus.
@@ -210,7 +218,7 @@ impl Zustand {
     pub fn auftrag_stand(&self, art: Art) -> Option<&'static str> {
         if self.laufend.as_ref().is_some_and(|a| a.art == art) {
             Some("läuft …")
-        } else if self.warteschlange.iter().any(|(a, _)| *a == art) {
+        } else if self.warteschlange.iter().any(|a| a.art == art) {
             Some("wartet …")
         } else {
             None
@@ -502,7 +510,7 @@ impl Dienst {
     /// Dieselbe Art laeuft oder wartet schon, oder die Warteschlange ist voll.
     pub fn einreihen(&self, art: Art, anlass: Anlass) -> Result<(), &'static str> {
         let mut z = self.sperre();
-        einreihen(&mut z, art, anlass)
+        einreihen(&mut z, art, anlass, None)
     }
 
     /// Reiht einen Auftrag von Hand ein. Wie `einreihen`, dazu: Derselbe Auftrag, der vor
@@ -523,7 +531,7 @@ impl Dienst {
         if gerade {
             return Err("gerade erst erledigt");
         }
-        einreihen(&mut z, art, Anlass::Hand)
+        einreihen(&mut z, art, Anlass::Hand, None)
     }
 
     pub(crate) fn update_von_hand(&self, sha: &str) -> Result<(), &'static str> {
@@ -531,7 +539,8 @@ impl Dienst {
         if z.update_angebot().is_none_or(|(angebot, _)| angebot != sha) {
             return Err("update_suche");
         }
-        einreihen(&mut z, Art::Update, Anlass::Hand).map_err(|_| "update_belegt")
+        einreihen(&mut z, Art::Update, Anlass::Hand, Some(sha.to_owned()))
+            .map_err(|_| "update_belegt")
     }
 
     /// Speichert und aktiviert einen neuen Zeitplan. Einschalten (aus wird an) geht nur, wenn
@@ -568,8 +577,13 @@ impl Dienst {
         (!self.update_offen()).then_some(())?;
         self.zeitplan_pruefen(&mut z, jetzt);
         if z.laufend.is_none()
-            && let Some((art, anlass)) = z.warteschlange.pop_front()
+            && let Some(wartend) = z.warteschlange.pop_front()
         {
+            let WartenderAuftrag {
+                art,
+                anlass,
+                update_commit,
+            } = wartend;
             if art == Art::Papier && anlass == Anlass::Zeitplan {
                 let noch_faellig = ortszeit(jetzt).is_some_and(|(tag, h, m, _, _)| {
                     faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen)
@@ -624,17 +638,7 @@ impl Dienst {
                 ablegen(&mut z, auftrag);
                 return None;
             }
-            let mut befehl = (self.starter)(art, &self.wurzel);
-            if art == Art::Update
-                && let Some((sha, _)) = z.update_angebot()
-            {
-                befehl.arg(sha);
-            }
-            befehl
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            match befehl.spawn() {
+            match self.starte_auftrag(art, update_commit.as_deref()) {
                 Ok(kind) => {
                     z.laufend = Some(auftrag);
                     return Some((nr, kind));
@@ -669,6 +673,21 @@ impl Dienst {
         None
     }
 
+    fn starte_auftrag(&self, art: Art, update_commit: Option<&str>) -> std::io::Result<Child> {
+        if art == Art::Update && update_commit.is_none_or(|sha| !crate::rueckfall::ist_commit(sha))
+        {
+            return Err(std::io::Error::other(
+                "Kein bestätigter Commit. Bitte suche erneut nach einem Update.",
+            ));
+        }
+        (self.starter)(art, &self.wurzel)
+            .args(update_commit)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    }
+
     fn zeitplan_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
         if z.neustart || z.erledigt_fehler.is_some() {
             return;
@@ -682,12 +701,12 @@ impl Dienst {
         // Der Papiertag wird erst bei seinem Start vermerkt (`schritt`); wartet er schon, bleibt
         // es bei dem einen.
         if art == Art::Papier {
-            let _ = einreihen(z, art, Anlass::Zeitplan);
+            let _ = einreihen(z, art, Anlass::Zeitplan, None);
             return;
         }
         // Bei voller Warteschlange bleibt der Abruf faellig. Vor der Ausfuehrung wird
         // er dauerhaft vermerkt, damit ein Neustart ihn nicht doppelt startet.
-        if einreihen(z, art, Anlass::Zeitplan).is_err() {
+        if einreihen(z, art, Anlass::Zeitplan, None).is_err() {
             return;
         }
         let mut neu = z.erledigt;
@@ -818,11 +837,19 @@ impl Dienst {
     }
 }
 
-fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static str> {
+fn einreihen(
+    z: &mut Zustand,
+    art: Art,
+    anlass: Anlass,
+    update_commit: Option<String>,
+) -> Result<(), &'static str> {
+    if art == Art::Update && update_commit.is_none() {
+        return Err("Kein bestätigter Commit. Bitte suche erneut nach einem Update.");
+    }
     // Kein Auftrag darf zwischen dem Vorrücken und der Datenprüfung des neuen Dienstes laufen.
     if z.neustart
         || z.laufend.as_ref().is_some_and(|a| a.art == Art::Update)
-        || z.warteschlange.iter().any(|(a, _)| *a == Art::Update)
+        || z.warteschlange.iter().any(|a| a.art == Art::Update)
     {
         return Err("Update läuft, wartet oder startet den Dienst neu");
     }
@@ -830,14 +857,18 @@ fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static s
         return Err("Update nur, wenn nichts läuft oder wartet");
     }
     if z.laufend.as_ref().is_some_and(|a| a.art == art)
-        || z.warteschlange.iter().any(|(a, _)| *a == art)
+        || z.warteschlange.iter().any(|a| a.art == art)
     {
         return Err("laeuft schon oder wartet schon");
     }
     if z.warteschlange.len() >= WARTEN_MAX {
         return Err("zu viele wartende Auftraege");
     }
-    z.warteschlange.push_back((art, anlass));
+    z.warteschlange.push_back(WartenderAuftrag {
+        art,
+        anlass,
+        update_commit,
+    });
     Ok(())
 }
 
@@ -885,7 +916,9 @@ pub fn nach_neustart(z: &Zustand, tag: Datum) -> Option<(bool, String)> {
         .map(|a| if a.ende.is_none() { None } else { a.erfolg })
         .or_else(|| {
             (z.erledigt.kurse_ok == Some(tag)
-                && z.warteschlange.contains(&(Art::Papier, Anlass::Zeitplan)))
+                && z.warteschlange
+                    .iter()
+                    .any(|a| a.art == Art::Papier && a.anlass == Anlass::Zeitplan))
             .then_some(None)
         });
     let kurse_vorher = frueher(&kurse, Frueher::Beendet) || frueher(&kurse, Frueher::Unterbrochen);

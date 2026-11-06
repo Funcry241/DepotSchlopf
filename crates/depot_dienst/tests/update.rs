@@ -15,6 +15,7 @@ use depot_lage::{Hinterlegt, Umgebung, Zugang, lagebild};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+const UPDATE_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const HOST: &str = "127.0.0.1:47410";
 const HERKUNFT: &str = "http://127.0.0.1:47410";
 
@@ -38,34 +39,20 @@ fn mittag() -> Result<Zeitpunkt, String> {
 }
 
 fn echo_starter() -> Starter {
-    Box::new(move |art: Art, _wurzel: &Path| {
-        let zeile = format!("lauf {}", art.kurz());
-        #[cfg(windows)]
-        {
-            let mut c = Command::new("cmd");
-            c.args(["/C", &format!("echo {zeile}")]);
-            c
-        }
-        #[cfg(not(windows))]
-        {
-            let mut c = Command::new("sh");
-            c.args(["-c", &format!("echo {zeile}")]);
-            c
-        }
-    })
-}
-
-fn echo_starter_mit(zeile: &str) -> Starter {
-    let zeile = zeile.to_string();
-    Box::new(move |_, _| {
+    Box::new(|art, _wurzel| {
+        let zeile = if art == Art::UpdatePruefen {
+            format!("[Update] Kandidat: {UPDATE_SHA}")
+        } else {
+            format!("lauf {}", art.kurz())
+        };
         #[cfg(windows)]
         let mut c = Command::new("cmd");
         #[cfg(windows)]
-        c.args(["/C", "echo", &zeile]);
+        c.args(["/C", format!("echo {zeile}").as_str()]);
         #[cfg(not(windows))]
         let mut c = Command::new("sh");
         #[cfg(not(windows))]
-        c.args(["-c", "printf '%s\\n' \"$1\"", "test", &zeile]);
+        c.args(["-c", "printf '%s\\n' \"$@\"", "test", &zeile]);
         c
     })
 }
@@ -164,24 +151,37 @@ fn lauf_ab(d: &Arc<Dienst>, t: Zeitpunkt) -> Result<Art, String> {
     Ok(art)
 }
 
+fn suche_update(d: &Arc<Dienst>, t: Zeitpunkt) -> Result<(), String> {
+    d.einreihen(Art::UpdatePruefen, Anlass::Hand)?;
+    assert_eq!(lauf_ab(d, t)?, Art::UpdatePruefen);
+    Ok(())
+}
+
+fn bestaetige_update(d: &Dienst) -> Result<String, String> {
+    post_auftrag(d, &format!("update&geprueft=ja&sha={UPDATE_SHA}"))
+}
+
 #[test]
 fn update_laeuft_allein_und_sperrt_auftraege_bis_zum_neustart() -> Result<(), String> {
     let wurzel = ordner()?;
     let t = mittag()?;
     let d = dienst(wurzel.clone());
+    assert!(d.einreihen(Art::Update, Anlass::Hand).is_err());
+    assert!(d.von_hand(Art::Update, t).is_err());
+    assert!(d.schritt(t).is_none());
+    suche_update(&d, t)?;
     d.einreihen(Art::Termine, Anlass::Hand)?;
-    assert!(
-        d.einreihen(Art::Update, Anlass::Hand).is_err(),
-        "etwas wartet"
-    );
+    assert!(bestaetige_update(&d)?.contains("m=update_belegt"));
     let d = dienst(wurzel.clone());
-    d.einreihen(Art::Update, Anlass::Hand)?;
+    suche_update(&d, t)?;
+    assert!(bestaetige_update(&d)?.contains("m=update#update"));
     assert!(d.einreihen(Art::Kurse, Anlass::Hand).is_err());
     assert_eq!(lauf_ab(&d, t)?, Art::Update);
     // Ohne update_offen.txt hat der Lauf nichts eingespielt: kein Neustart.
     assert!(!d.sperre().neustart);
     let d = dienst(wurzel.clone());
-    d.einreihen(Art::Update, Anlass::Hand)?;
+    suche_update(&d, t)?;
+    assert!(bestaetige_update(&d)?.contains("m=update#update"));
     let (nr, kind) = some(d.schritt(t), "Update gestartet")?;
     assert!(d.einreihen(Art::Kurse, Anlass::Hand).is_err());
     offen_schreiben(&wurzel, &"a".repeat(40), &"b".repeat(40))?;
@@ -230,32 +230,50 @@ fn knoepfe_auf_der_einrichtung_und_marke_des_starts() -> Result<(), String> {
 }
 
 #[test]
-fn update_bestaetigung_bindet_den_gefundenen_commit() -> Result<(), String> {
-    let sha = "a".repeat(40);
-    let ausgabe = format!("[Update] Kandidat: {sha}");
-    let d = Arc::new(Dienst::neu(
-        ordner()?,
-        TOKEN.into(),
-        echo_starter_mit(&ausgabe),
-        leeres_lagebild(),
-    ));
-    let t = mittag()?;
+fn update_ohne_commit_startet_auch_bei_fehlerhaftem_warteschlangeneintrag_nicht()
+-> Result<(), String> {
+    let d = dienst(ordner()?);
     d.einreihen(Art::UpdatePruefen, Anlass::Hand)?;
-    let (nr, kind) = d.schritt(t).ok_or("Suchlauf startet nicht")?;
-    d.verfolge(nr, kind, || mittag().ok());
-    let ziel = format!("/bestaetigen?art=update&sha={sha}");
+    some(
+        d.sperre().warteschlange.front_mut(),
+        "Warteschlangeneintrag",
+    )?
+    .art = Art::Update;
+    assert!(d.schritt(mittag()?).is_none());
+    let z = d.sperre();
+    let lauf = some(z.verlauf.front(), "abgelehnter Update-Lauf")?;
+    assert_eq!(lauf.erfolg, Some(false));
+    assert!(
+        lauf.protokoll
+            .iter()
+            .any(|z| z.contains("Bitte suche erneut"))
+    );
+    Ok(())
+}
+
+#[test]
+fn update_bestaetigung_bindet_den_gefundenen_commit() -> Result<(), String> {
+    let d = dienst(ordner()?);
+    let t = mittag()?;
+    suche_update(&d, t)?;
+    let ziel = format!("/bestaetigen?art=update&sha={UPDATE_SHA}");
     assert!(get(&d, "/teil/update")?.contains("Eine neue Version ist verfügbar"));
-    assert!(get(&d, &ziel)?.contains("Ich möchte fortfahren"));
+    assert!(get(&d, &ziel)?.contains("Ich spiele diese Version ein."));
     assert!(get(&d, "/bestaetigen?art=update&sha=alt")?.contains("m=update_suche"));
     assert!(post_auftrag(&d, "update&geprueft=ja&sha=alt")?.contains("m=update_suche"));
     assert!(d.sperre().warteschlange.is_empty());
+    assert!(bestaetige_update(&d)?.contains("m=update#update"));
+    // Nach dem Einreihen ist das Suchergebnis für den Start entbehrlich.
+    d.sperre().verlauf.clear();
+    assert_eq!(lauf_ab(&d, t)?, Art::Update);
+    let z = d.sperre();
+    let lauf = some(z.verlauf.front(), "abgeschlossener Update-Lauf")?;
     assert!(
-        post_auftrag(&d, &format!("update&geprueft=ja&sha={sha}"))?.contains("m=update#update")
+        lauf.protokoll
+            .iter()
+            .any(|zeile| zeile.contains(UPDATE_SHA))
     );
-    assert_eq!(
-        d.sperre().warteschlange.front(),
-        Some(&(Art::Update, Anlass::Hand))
-    );
+
     Ok(())
 }
 
