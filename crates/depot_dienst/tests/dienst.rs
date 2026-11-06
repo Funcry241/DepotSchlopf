@@ -1141,7 +1141,8 @@ fn papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand() -> Result<(), 
     assert!(r(&formular(&"a".repeat(64)), &umw).contains("papierfreigabe_geaendert"));
     let anfrage = formular(&angebot.abdruck);
     assert!(r(&anfrage, &Attrappe::default()).contains("papierfreigabe_unbestaetigt"));
-    assert!(r(&anfrage, &umw).contains("papierfreigabe_ok"));
+    let antwort = r(&anfrage, &umw);
+    assert!(antwort.contains("papierfreigabe_ok"), "{antwort}");
     assert!(depot_lage::papier_freigabe_angebot(&wurzel).is_none());
     let journal = fs::read_to_string(daten.join("journal.txt")).map_err(|e| e.to_string())?;
     assert!(journal.contains("papier-freigabe;2026-11-04;1000000;einrichtung;Wolfgang"));

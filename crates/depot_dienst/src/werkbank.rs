@@ -454,7 +454,11 @@ impl Dienst {
                 "papierfreigabe_ok"
             }
             Err(depot_lage::PapierFreigabeFehler::Geaendert) => "papierfreigabe_geaendert",
-            Err(depot_lage::PapierFreigabeFehler::Abgelehnt) => "papierfreigabe_fehler",
+            Err(depot_lage::PapierFreigabeFehler::Belegt) => "papierfreigabe_belegt",
+            Err(depot_lage::PapierFreigabeFehler::Abgelehnt(grund)) => {
+                eprintln!("[Papierfreigabe] {grund}");
+                "papierfreigabe_fehler"
+            }
         }
     }
 

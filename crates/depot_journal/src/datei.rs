@@ -316,7 +316,7 @@ fn sichere(ziel: &Path, rest: &[u8]) -> Result<(), JournalFehler> {
 #[derive(Debug)]
 pub struct Journal {
     vermerk: PathBuf,
-    /// Die geoeffnete und vom Betriebssystem gesperrte Datei. Die Sperre endet mit ihr.
+    /// Die geoeffnete und vom Betriebssystem gesperrte Datei.
     datei: File,
     laenge: u64,
     kette: String,
@@ -324,6 +324,14 @@ pub struct Journal {
     stand: Stand,
     /// Grund, falls ein Schreibfehler das Journal gesperrt hat (R29).
     gesperrt: Option<String>,
+}
+
+impl Drop for Journal {
+    fn drop(&mut self) {
+        // Unter Unix kann ein gleichzeitig gestarteter Kindprozess den Dateideskriptor
+        // bis zum exec erben. Explizit entsperren, damit der naechste Lauf nicht darauf wartet.
+        let _ = self.datei.unlock();
+    }
 }
 
 /// Prueft alle Eintraege nach dem Kopf und rechnet den Stand nach.

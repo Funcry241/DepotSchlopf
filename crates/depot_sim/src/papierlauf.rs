@@ -63,21 +63,24 @@ pub fn papier_freigabe_angebot(wurzel: &Path) -> Option<PapierFreigabeAngebot> {
 #[derive(Debug)]
 pub enum PapierFreigabeFehler {
     Geaendert,
-    Abgelehnt,
+    Belegt,
+    Abgelehnt(String),
 }
 
 /// Bestaetigt den angezeigten Stand unter derselben Journalsperre wie ein Papiertag.
 pub fn papier_freigeben(wurzel: &Path, gesehen: &str) -> Result<(), PapierFreigabeFehler> {
     let daten = wurzel.join("daten");
-    let mut j = Journal::oeffnen(&daten.join("journal.txt"))
-        .map_err(|_| PapierFreigabeFehler::Abgelehnt)?;
+    let mut j = Journal::oeffnen(&daten.join("journal.txt")).map_err(|e| match e {
+        depot_journal::JournalFehler::Belegt => PapierFreigabeFehler::Belegt,
+        e => PapierFreigabeFehler::Abgelehnt(format!("{e:?}")),
+    })?;
     if j.bestaetigt().1 != gesehen {
         return Err(PapierFreigabeFehler::Geaendert);
     }
     let konto = Papierdatei::oeffnen(&daten.join("papierkonto.txt"), true, &[])
-        .map_err(|_| PapierFreigabeFehler::Abgelehnt)?;
+        .map_err(|e| PapierFreigabeFehler::Abgelehnt(format!("{e:?}")))?;
     j.gebe_papier_frei(gesehen, &konto)
-        .map_err(|_| PapierFreigabeFehler::Abgelehnt)
+        .map_err(|e| PapierFreigabeFehler::Abgelehnt(format!("{e:?}")))
 }
 
 /// Ein Papiertag mit den heute belegten Schlusskursen: Journal `daten/journal.txt`,
