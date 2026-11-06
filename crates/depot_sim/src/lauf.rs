@@ -672,14 +672,19 @@ fn belege_prognose(
     if let (Some(ereignis), Some(ausgangskurs)) = (ereignis, lage.kurse.kurs(&prognose.isin))
         && prognose.gueltig()
     {
-        j.belege_weltprognose(&PrognoseBeleg {
+        match j.belege_weltprognose(&PrognoseBeleg {
             datum: lage.datum,
             berater,
             prognose,
             ausgangskurs,
             ereignis: sauber(ereignis),
-        })
-        .map_err(journal)?;
+        }) {
+            Ok(()) => {}
+            Err(JournalFehler::Abgelehnt(grund)) => j
+                .begruende(lage.datum, name(berater), &format!("Prognose verworfen: {grund}"))
+                .map_err(journal)?,
+            Err(e) => return Err(journal(e)),
+        }
     }
     Ok(())
 }
@@ -968,4 +973,48 @@ fn protokolliere_ausfuehrungen(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn abgelehnte_prognose_laesst_den_tagesabschluss_zu() -> Result<(), LaufFehler> {
+        let ordner = std::env::temp_dir().join(format!(
+            "depot-weltprognose-abgelehnt-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(journal)?;
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        let datum = depot_kern::Datum::neu(2026, 11, 6).ok_or_else(|| halt("Datum"))?;
+        let zeit = Zeitpunkt::neu(datum, 16, 35, 0).ok_or_else(|| halt("Zeit"))?;
+        let isin = depot_kern::Isin::neu("DE0007164600").map_err(|e| halt(format!("{e:?}")))?;
+        let preis = depot_kern::Preis::lies_euro("230").ok_or_else(|| halt("Preis"))?;
+        let kurs = depot_kern::Kurs::exakt(preis, "EUR", datum, zeit, Herkunft::Quelle)
+            .map_err(|e| halt(format!("{e:?}")))?;
+        let kurse = Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| halt(format!("{e:?}")))?;
+        let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| halt(format!("{e:?}")))?;
+        j.beginne_abrechnung(datum).map_err(journal)?;
+        let lage = Lage { datum, topf: &topf, kurse: &kurse, ereignisse: &["Meldung".into()] };
+        let prognose = Weltprognose {
+            isin,
+            richtung: depot_journal::Prognoserichtung::Steigt,
+            handelstage: 3,
+            ereignis_nr: 1,
+            begruendung: "Ursache".into(),
+            widerlegung: "Gegenbeleg".into(),
+        };
+        // In dieser Probe fehlen der Kurs- und der Ereignisbeleg im Journal.
+        belege_prognose(&mut j, &lage, BeraterId::Dachs, prognose)?;
+        assert!(j.stand().weltprognosen().is_empty());
+        assert!(j.stand().begruendungen().iter().any(|(_, _, t)| t.starts_with("Prognose verworfen:")));
+        j.schliesse_ab(datum, Cent(500_000), &"a".repeat(64)).map_err(journal)?;
+        assert_eq!(j.stand().seit_abschluss(), 0);
+        drop(j);
+        std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
+        Ok(())
+    }
 }
