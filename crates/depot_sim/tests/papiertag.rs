@@ -1163,7 +1163,13 @@ fn notbremse_oeffnet_erst_nach_einem_vollstaendig_geprueften_tag_wieder() -> Res
         let datum = tag(t)?;
         let (mut dachs, mut maus) = kaeufer(datum, &allianz);
         let aus = papiertag(
-            &mut j, datum, &universum, &start, &mut dachs, &mut maus, &mut papierkonto,
+            &mut j,
+            datum,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut papierkonto,
         );
         assert_eq!(aus.is_err(), bleibt_halt, "{aus:?}");
         assert_eq!(j.stand().notbremse_aktiv(), bleibt_halt);

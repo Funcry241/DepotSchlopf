@@ -36,8 +36,7 @@ use depot_regelwerk::waehle_tageswerte;
 use sha2::{Digest, Sha256};
 
 use crate::lauf::{
-    Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal,
-    pruefe_stoerung, rechnung,
+    Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal, pruefe_stoerung, rechnung,
 };
 use crate::papier::Broker;
 use crate::szenario::{Berater, Tag};

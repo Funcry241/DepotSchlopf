@@ -277,7 +277,9 @@ impl Stand {
         self.begruendungen.iter().rev().any(|(datum, wer, text)| {
             wer == "Waechter"
                 && text == NOTBREMSE_AKTIV
-                && self.notbremse_freigabe.is_none_or(|freigabe| *datum > freigabe)
+                && self
+                    .notbremse_freigabe
+                    .is_none_or(|freigabe| *datum > freigabe)
         })
     }
 
@@ -286,9 +288,9 @@ impl Stand {
     }
 
     pub(crate) fn papier_bargeld(&self) -> Option<Cent> {
-        self.toepfe.values().try_fold(Cent::NULL, |summe, topf| {
-            summe.checked_add(topf.bargeld())
-        })
+        self.toepfe
+            .values()
+            .try_fold(Cent::NULL, |summe, topf| summe.checked_add(topf.bargeld()))
     }
 
     pub fn abrechnungstag(&self) -> Option<Datum> {
