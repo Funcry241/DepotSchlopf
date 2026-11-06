@@ -1,5 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: TestOnly
-zweck: Rueckfalltests unter Windows mit Git-Zeilenenden und cmd-Pfadquotierung ausfuehrbar machen.
+klasse: KodexAenderung
+zweck: Die Kodex-Gegenproben legen die Zeilenenden ihrer Test-Repositories fest, damit auch ein bisheriger Updater den neuen Stand unter Windows pruefen kann.
 pfade:
-crates/depot_dienst/tests/update.rs
+crates/depot_kodex/tests/befunde.rs
