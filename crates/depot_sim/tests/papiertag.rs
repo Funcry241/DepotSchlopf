@@ -374,6 +374,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
     dachs.antworten.insert(
         d,
         Antwort {
+            prognose: None,
             verwertbar: true,
             einschaetzung: "SAP".into(),
             vorschlag: Some(Vorschlag {
@@ -519,6 +520,7 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
             buch.antworten.insert(
                 d,
                 Antwort {
+                    prognose: None,
                     verwertbar: true,
                     einschaetzung: "SAP".into(),
                     vorschlag: Some(Vorschlag {
@@ -848,6 +850,7 @@ impl depot_sim::Berater for Leser {
     ) -> Antwort {
         self.gesehen.extend(lage.ereignisse.iter().cloned());
         Antwort {
+            prognose: None,
             verwertbar: true,
             einschaetzung: "gelesen".into(),
             vorschlag: None,
@@ -892,7 +895,9 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
             &format!("gestern {i:02}"),
         )?;
     }
-    belege(some(Zeitpunkt::neu(tag(5)?, 15, 14, 0), "Zeit")?, "heute")?;
+    let publiziert = some(Zeitpunkt::neu(tag(5)?, 15, 14, 0), "Zeit")?;
+    belege(publiziert, "heute")?;
+    assert!(depot_sim::papiertag_wiederabspielen(j.stand(), &universum()?, tag(5)?).is_err());
     let mut k = konto(&ort, &j)?;
     let mut dachs = Leser::default();
     let aus = papiertag(
@@ -921,6 +926,37 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
         Some("Nachricht 04.11.2026 05:30 UTC (alphavantage-news): gestern 11")
     );
     assert!(!dachs.gesehen.iter().any(|t| t.contains("zu alt")));
+    assert!(!dachs.gesehen.iter().any(|t| t.contains("Nachtrag")));
+    assert!(
+        j.stand().begruendungen().iter().any(|(_, wer, text)| {
+            wer == "Papiertag" && text.contains("Weltmodell: Wissensstand")
+        })
+    );
+    let spaeter = some(Zeitpunkt::frankfurt(tag(5)?, 23, 0, 0), "Spaeterer Abruf")?;
+    let nachgereicht = vorbedingung(
+        NachrichtBeleg::neu(
+            "alphavantage-news",
+            spaeter,
+            b"nachtrag",
+            publiziert,
+            "Nachtrag",
+        ),
+        "Nachgereichte Nachricht",
+    )?;
+    vorbedingung(j.belege_nachricht(&nachgereicht), "Nachtrag belegen")?;
+    let wissensstand = depot_sim::weltlage_am(j.stand(), tag(5)?, abruf);
+    assert!(!wissensstand.iter().any(|t| t.contains("Nachtrag")));
+    let spaeterer_stand = depot_sim::weltlage_am(j.stand(), tag(5)?, spaeter);
+    assert!(spaeterer_stand.iter().any(|t| t.contains("Nachtrag")));
+    drop(k);
+    drop(j);
+    let j = ort.oeffnen()?;
+    assert_eq!(j.stand().wissensstichtag(tag(5)?), Some(abruf));
+    let wiederholung = vorbedingung(
+        depot_sim::papiertag_wiederabspielen(j.stand(), &universum()?, tag(5)?),
+        "Wiederabspielen",
+    )?;
+    assert_eq!(wiederholung.ereignisse, dachs.gesehen);
     Ok(())
 }
 
@@ -1142,7 +1178,7 @@ fn notbremse_oeffnet_erst_nach_einem_vollstaendig_geprueften_tag_wieder() -> Res
             "Aktive Notbremse nach Schutzverkauf",
         )?;
         vorbedingung(
-            j.schliesse_ab(vorher, Cent(2_000_000), &"a".repeat(64)),
+            j.schliesse_ab(vorher, Cent(1_250_000), &"a".repeat(64)),
             "Historischer Hoechststand",
         )?;
     }
@@ -1174,7 +1210,7 @@ fn notbremse_oeffnet_erst_nach_einem_vollstaendig_geprueften_tag_wieder() -> Res
         assert_eq!(aus.is_err(), bleibt_halt, "{aus:?}");
         assert_eq!(j.stand().notbremse_aktiv(), bleibt_halt);
         assert_eq!(dachs.aufrufe, aufrufe);
-        assert_eq!(j.stand().historischer_hoechststand(), Some(Cent(2_000_000)));
+        assert_eq!(j.stand().historischer_hoechststand(), Some(Cent(1_250_000)));
         assert_eq!(papierkonto.konto().sendungen(), usize::from(t == 9));
     }
     let j = ort.oeffnen()?;
@@ -1185,6 +1221,53 @@ fn notbremse_oeffnet_erst_nach_einem_vollstaendig_geprueften_tag_wieder() -> Res
             .count(),
         1
     );
+    Ok(())
+}
+
+#[test]
+fn gesamtverlust_sperrt_vor_beratung_und_bleibt_nach_neustart() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(450_000)), "Topf A")?;
+    topf.setze_bestand(sap.clone(), 10);
+    let start = [
+        topf,
+        vorbedingung(Topf::neu(TopfId::B, Cent::NULL), "Topf B")?,
+    ];
+    let universum = universum()?;
+    Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    {
+        let mut j = ort.oeffnen()?;
+        for topf in &start {
+            vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+        }
+        for (tag_nr, hoch) in [(3, 1_000_000), (4, 800_000)] {
+            vorbedingung(
+                j.schliesse_ab(tag(tag_nr)?, Cent(hoch), &"a".repeat(64)),
+                "Hoechststand belegen",
+            )?;
+        }
+    }
+    for (t, sendungen) in [(5, 1), (6, 1), (9, 1)] {
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, t, &[(&sap, "250", "250"), (&allianz, "200", "200")])?;
+        let mut konto = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+        let (mut dachs, mut maus) = kaeufer(tag(t)?, &allianz);
+        let aus = papiertag(
+            &mut j,
+            tag(t)?,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut konto,
+        );
+        assert!(matches!(aus, Err(LaufFehler::Halt(grund)) if grund.contains("30 %")));
+        assert!(j.stand().papier_verlustsperre_aktiv());
+        assert_eq!(j.stand().historischer_hoechststand(), Some(Cent(1_000_000)));
+        assert_eq!(dachs.aufrufe, 0);
+        assert_eq!(konto.konto().sendungen(), sendungen);
+    }
     Ok(())
 }
 

@@ -548,11 +548,17 @@ impl Journal {
             Art::Zustand => Err(JournalFehler::Abgelehnt(
                 "Auftragszustaende entstehen nur ueber melde und gleiche_ab".into(),
             )),
+            Art::Weltprognose => Err(JournalFehler::Abgelehnt(
+                "Weltprognose nur ueber belege_weltprognose".into(),
+            )),
             Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
                 "Abrechnungstag nur ueber beginne_abrechnung".into(),
             )),
             Art::NotbremseFreigabe => Err(JournalFehler::Abgelehnt(
                 "Notbremsenfreigabe nur ueber schliesse_wiederanlauf_ab".into(),
+            )),
+            Art::Wissensstichtag => Err(JournalFehler::Abgelehnt(
+                "Wissensstichtag nur ueber belege_wissensstichtag".into(),
             )),
             Art::Format => Err(JournalFehler::Abgelehnt(
                 "Die Umstellung entsteht nur ueber stelle_um".into(),
@@ -676,6 +682,14 @@ impl Journal {
         Ok(hoechststand)
     }
 
+    /// Fixiert eine unabhaengige Weltprognose im laufenden Papiertag.
+    pub fn belege_weltprognose(
+        &mut self,
+        beleg: &crate::weltprognose::PrognoseBeleg,
+    ) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Weltprognose, &beleg.als_text())
+    }
+
     /// Belegt einen Kurs mit Quelle, Abrufzeit und Abdruck der rohen Antwort, bevor er
     /// verwendet wird (R12).
     ///
@@ -746,6 +760,15 @@ impl Journal {
             return Ok(());
         }
         self.schreibe_eintrag(Art::Format, &FORMAT.to_string())
+    }
+
+    /// Fixiert die beim Start des Papiertags verfuegbare Weltlage.
+    pub fn belege_wissensstichtag(
+        &mut self,
+        tag: Datum,
+        zeit: depot_kern::Zeitpunkt,
+    ) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Wissensstichtag, &format!("{tag};{zeit}"))
     }
 
     /// Belegt den Handelstag vor der ersten Ausfuehrung und gibt faellige Erloese frei.

@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use depot_kern::{Cent, Datum, Herkunft, Isin, Rundung, Topf, TopfId, Zeitpunkt};
+use depot_kern::{Cent, Datum, Grenzen, Herkunft, Isin, Rundung, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 
 use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
@@ -18,8 +18,13 @@ use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
 use crate::nachrichtbeleg::{NachrichtBeleg, lies_nachrichtbeleg, nachrichtbeleg_text};
 use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
 
+use crate::weltprognose::PrognoseBeleg;
+
 /// Aktivierungsbeleg des Papier-Waechters, auch in bestehenden Journalen.
 pub const NOTBREMSE_AKTIV: &str = "Notbremse aktiv: nur offene Verkaeufe weiter abgleichen";
+
+/// Dauerhafter Halt der Papier-Notbremse nach Erreichen der Gesamtverlustgrenze.
+pub const PAPIER_VERLUSTSPERRE: &str = "Notbremse: 30 % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig";
 
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +42,8 @@ pub enum Art {
     /// `quelle;abruf;roh;zeit;text`: eine Nachricht von aussen (`nachrichtbeleg`, R40). Nur im
     /// Format 2; die Abrufe fallen nie zurueck.
     Nachricht,
+    /// Fixierte, unabhaengige Prognose eines Beraters im Papiertag.
+    Weltprognose,
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
     /// Rechner verlaesst (R12, R24). Damit ist er reserviert (R37).
     Auftrag,
@@ -62,6 +69,8 @@ pub enum Art {
     Abrechnungstag,
     /// Tagesabschluss, der zugleich die Papier-Notbremse zuruecksetzt.
     NotbremseFreigabe,
+    /// Handelstag und UTC-Wissensstichtag, vor der Entscheidung belegt.
+    Wissensstichtag,
 }
 
 impl Art {
@@ -72,6 +81,7 @@ impl Art {
             Art::Kurs => "kurs",
             Art::Termin => "termin",
             Art::Nachricht => "nachricht",
+            Art::Weltprognose => "weltprognose",
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
             Art::Ki => "ki",
@@ -81,6 +91,7 @@ impl Art {
             Art::Format => "format",
             Art::Abrechnungstag => "abrechnungstag",
             Art::NotbremseFreigabe => "notbremse-freigabe",
+            Art::Wissensstichtag => "wissensstichtag",
         }
     }
 
@@ -91,6 +102,7 @@ impl Art {
             Art::Kurs,
             Art::Termin,
             Art::Nachricht,
+            Art::Weltprognose,
             Art::Auftrag,
             Art::Zustand,
             Art::Ki,
@@ -99,6 +111,7 @@ impl Art {
             Art::Abschluss,
             Art::Abrechnungstag,
             Art::NotbremseFreigabe,
+            Art::Wissensstichtag,
             Art::Format,
         ]
         .into_iter()
@@ -146,6 +159,7 @@ pub struct Stand {
     kurse: Vec<KursBeleg>,
     termine: Vec<TerminBeleg>,
     nachrichten: Vec<NachrichtBeleg>,
+    weltprognosen: Vec<PrognoseBeleg>,
     letzte_kennung: u64,
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
@@ -155,6 +169,7 @@ pub struct Stand {
     prueft_wiederanlauf: bool,
     seit_abschluss: usize,
     abrechnungstag: Option<Datum>,
+    wissensstichtage: BTreeMap<Datum, Zeitpunkt>,
     abrechnungen: Abrechnungen,
 }
 
@@ -197,6 +212,10 @@ impl Stand {
     /// Die Auftraege, die noch keinen Endzustand haben.
     pub fn offene_auftraege(&self) -> impl Iterator<Item = &AuftragsLage> {
         self.auftraege.iter().filter(|l| l.zustand.offen())
+    }
+
+    pub fn weltprognosen(&self) -> &[PrognoseBeleg] {
+        &self.weltprognosen
     }
 
     pub fn beobachtungen(&self) -> &[(Datum, String)] {
@@ -274,13 +293,20 @@ impl Stand {
     }
 
     pub fn notbremse_aktiv(&self) -> bool {
-        self.begruendungen.iter().rev().any(|(datum, wer, text)| {
-            wer == "Waechter"
-                && text == NOTBREMSE_AKTIV
-                && self
-                    .notbremse_freigabe
-                    .is_none_or(|freigabe| *datum > freigabe)
-        })
+        self.papier_verlustsperre_aktiv()
+            || self.begruendungen.iter().rev().any(|(datum, wer, text)| {
+                wer == "Waechter"
+                    && text == NOTBREMSE_AKTIV
+                    && self
+                        .notbremse_freigabe
+                        .is_none_or(|freigabe| *datum > freigabe)
+            })
+    }
+
+    pub fn papier_verlustsperre_aktiv(&self) -> bool {
+        self.begruendungen
+            .iter()
+            .any(|(_, wer, text)| wer == "Waechter" && text == PAPIER_VERLUSTSPERRE)
     }
 
     pub fn prueft_wiederanlauf(&self) -> bool {
@@ -291,6 +317,10 @@ impl Stand {
         self.toepfe
             .values()
             .try_fold(Cent::NULL, |summe, topf| summe.checked_add(topf.bargeld()))
+    }
+
+    pub fn wissensstichtag(&self, tag: Datum) -> Option<Zeitpunkt> {
+        self.wissensstichtage.get(&tag).copied()
     }
 
     pub fn abrechnungstag(&self) -> Option<Datum> {
@@ -338,6 +368,7 @@ impl Stand {
                 self.belege_nachricht(inhalt)?;
                 return Ok(());
             }
+            Art::Weltprognose => self.belege_weltprognose(inhalt)?,
             Art::Auftrag => {
                 let b = lies_auftrag(inhalt).ok_or("Auftrag unlesbar")?;
                 kanonisch(&auftrag_text(&b), inhalt)?;
@@ -390,10 +421,44 @@ impl Stand {
                 return Ok(());
             }
             Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
-            Art::Abschluss => return self.schliesse_ab(inhalt),
             Art::NotbremseFreigabe => return self.belege_wiederanlauf(inhalt),
+            Art::Wissensstichtag => self.belege_wissensstichtag(inhalt)?,
+            Art::Abschluss => {
+                return self.schliesse_ab(inhalt);
+            }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    fn belege_weltprognose(&mut self, inhalt: &str) -> Result<(), String> {
+        let b = PrognoseBeleg::lies(inhalt).ok_or("Weltprognose unlesbar")?;
+        if self.abrechnungstag != Some(b.datum)
+            || self.abschluss.as_ref().is_some_and(|a| a.datum >= b.datum)
+            || self
+                .weltprognosen
+                .iter()
+                .any(|alt| alt.datum == b.datum && alt.berater == b.berater)
+            || b.prognose
+                .ereignis_nr
+                .checked_sub(1)
+                .and_then(|nr| {
+                    self.beobachtungen
+                        .iter()
+                        .filter(|(tag, _)| *tag == b.datum)
+                        .nth(nr)
+                })
+                .is_none_or(|(_, e)| *e != b.ereignis)
+            || !self.kurse.iter().any(|k| {
+                k.isin() == &b.prognose.isin
+                    && k.kurs().handelstag() == b.datum
+                    && k.kurs().preis() == b.ausgangskurs
+                    && k.kurs().herkunft() == Herkunft::Quelle
+            })
+        {
+            return Err("Weltprognose passt nicht zu Papiertag, Ereignis oder Ausgangskurs".into());
+        }
+        self.weltprognosen.push(b);
         Ok(())
     }
 
@@ -434,6 +499,10 @@ impl Stand {
             || self.abrechnungstag != Some(a.datum)
             || !self.gehalten().is_empty()
             || self.offene_auftraege().next().is_some()
+            || self.papier_verlustsperre_aktiv()
+            || self.historischer_hoechststand.is_none_or(|hoch| {
+                Grenzen::standard().papier_gesamtverlust_erreicht(a.hoechststand, hoch)
+            })
             || self.papier_bargeld() != Some(a.hoechststand)
         {
             return Err("Notbremsenfreigabe unzulaessig".into());
@@ -449,6 +518,23 @@ impl Stand {
                 a.hoechststand.0
             ),
         ));
+        Ok(())
+    }
+
+    fn belege_wissensstichtag(&mut self, inhalt: &str) -> Result<(), String> {
+        let (tag, zeit) = inhalt.split_once(';').ok_or("Wissensstichtag unlesbar")?;
+        let tag = Datum::lies(tag).ok_or("Tag des Wissensstichtags unlesbar")?;
+        let zeit = Zeitpunkt::lies(zeit).ok_or("Zeit des Wissensstichtags unlesbar")?;
+        kanonisch(&format!("{tag};{zeit}"), inhalt)?;
+        if self.format != FORMAT
+            || zeit.in_frankfurt().map(|(d, ..)| d) != Some(tag)
+            || self.seit_abschluss != 0
+            || self.abschluss.as_ref().is_some_and(|a| a.datum >= tag)
+            || self.wissensstichtage.contains_key(&tag)
+        {
+            return Err("Wissensstichtag unzulaessig".into());
+        }
+        self.wissensstichtage.insert(tag, zeit);
         Ok(())
     }
 

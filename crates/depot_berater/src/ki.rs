@@ -491,9 +491,15 @@ fn kostenzeile(ist: Option<i64>, reserviert: i64, v: Verbrauch) -> String {
 impl<N: Netz> KiBerater<N> {
     /// Jeder Text, der aus einer Antwort ins Journal geht, ohne Schluessel; sonst verworfen.
     fn ohne_geheimnis_antwort(&self, a: Antwort) -> Result<Antwort, String> {
-        let mut texte = std::iter::once(&a.einschaetzung)
-            .chain(a.vorschlag.iter().flat_map(|v| v.begruendung.values()));
-        if texte.any(|t| self.enthaelt_schluessel(t)) {
+        if std::iter::once(&a.einschaetzung)
+            .chain(a.vorschlag.iter().flat_map(|v| v.begruendung.values()))
+            .chain(
+                a.prognose
+                    .iter()
+                    .flat_map(|p| [&p.begruendung, &p.widerlegung]),
+            )
+            .any(|t| self.enthaelt_schluessel(t))
+        {
             return Err(GEHEIMNIS.into());
         }
         Ok(a)
@@ -532,10 +538,12 @@ impl<N: Netz> Berater for KiBerater<N> {
             .and_then(|a| self.ohne_geheimnis_antwort(a))
         {
             Ok(mut a) => {
+                a.prognose = a.prognose.filter(|p| frage::prognose_sichtbar(p, lage, &f));
                 a.einschaetzung = format!("{} [{}]", a.einschaetzung, e.kosten);
                 a
             }
             Err(grund) => Antwort {
+                prognose: None,
                 verwertbar: false,
                 einschaetzung: format!(
                     "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",

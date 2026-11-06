@@ -28,7 +28,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use depot_journal::{Journal, KursBeleg, NachrichtBeleg, Stand};
+use depot_journal::{Journal, KursBeleg, NachrichtBeleg, PAPIER_VERLUSTSPERRE, Stand};
 use depot_kern::{
     Cent, Datum, Grenzen, Herkunft, Isin, Kurs, Kurse, Rundung, Topf, Universum, Zeitpunkt,
 };
@@ -41,7 +41,7 @@ use crate::lauf::{
 use crate::papier::Broker;
 use crate::szenario::{Berater, Tag};
 
-const FASSUNG: &str = "depot_sim-papiertag-v2";
+const FASSUNG: &str = "depot_sim-papiertag-v3";
 const PAPIERTAG: &str = "Papiertag";
 /// Unter diesem Namen stehen Kandidaten, die heute nicht handelbar sind.
 pub const AUSWAHL: &str = "Auswahl";
@@ -90,10 +90,8 @@ pub fn tageskurse(stand: &Stand, universum: &Universum) -> Result<Tageskurse, La
     tageskurse_bis(stand, universum, None)
 }
 
-/// Die Kurse, die ein Papiertag am Tag `tag` gesehen haette: nur Belege, die bis zum Ende dieses
-/// Tages (Frankfurt) abgerufen waren, und nur, wenn ihr juengster Handelstag `tag` ist. So
-/// laesst sich fuer einen vergangenen Tag dieselbe Kurspruefung wiederholen, ohne spaetere
-/// Abrufe mitzuzaehlen.
+/// Kurse am belegten Stichtag. Fuer einen Tag ohne Papiertag dient der Tagesabschluss als
+/// Obergrenze der Kursdiagnose. Fuer ein historisches Wiederabspielen gilt `papiertag_wiederabspielen`.
 ///
 /// # Errors
 /// `Halt`, wenn es fuer `tag` keine Kurse gab; sonst wie `tageskurse`.
@@ -102,7 +100,9 @@ pub fn tageskurse_am(
     universum: &Universum,
     tag: Datum,
 ) -> Result<Tageskurse, LaufFehler> {
-    let ende = Zeitpunkt::frankfurt(tag, 23, 59, 59)
+    let ende = stand
+        .wissensstichtag(tag)
+        .or_else(|| Zeitpunkt::frankfurt(tag, 23, 59, 59))
         .ok_or_else(|| halt(format!("Kein Tagesende fuer den {}", datum_text(tag))))?;
     let k = tageskurse_bis(stand, universum, Some(ende))?;
     if k.handelstag != tag {
@@ -169,17 +169,21 @@ fn datum_text(d: Datum) -> String {
     format!("{:02}.{:02}.{}", d.tag(), d.monat(), d.jahr())
 }
 
-/// Die belegten Termine vom Handelstag bis `TERMINE_VORAUS_TAGE` voraus, nach Datum; danach die
-/// belegten Nachrichten (`nachrichten`).
-fn ereignisse(stand: &Stand, handelstag: Datum) -> Vec<String> {
+/// Die zum Wissensstichtag bekannten Termine und Nachrichten eines Papiertags.
+pub fn weltlage_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
     let Some(von) = tagesbeginn(handelstag) else {
         return Vec::new();
     };
     let bis = TERMINE_VORAUS_TAGE
         .checked_mul(SEKUNDEN_JE_TAG)
         .and_then(|d| von.checked_add(d));
-    let mut aus: Vec<(Datum, String)> = stand
-        .aktuelle_termine()
+    let termine: BTreeMap<_, _> = stand
+        .termine()
+        .iter()
+        .filter(|b| b.abruf() <= wissen_bis)
+        .map(|b| (b.termin().kennung(), b))
+        .collect();
+    let mut aus: Vec<(Datum, String)> = termine
         .values()
         .filter_map(|b| {
             let t = b.termin();
@@ -200,14 +204,14 @@ fn ereignisse(stand: &Stand, handelstag: Datum) -> Vec<String> {
         .collect();
     aus.sort();
     let mut aus: Vec<String> = aus.into_iter().map(|(_, t)| t).collect();
-    aus.extend(nachrichten(stand, handelstag));
+    aus.extend(nachrichten(stand, handelstag, wissen_bis));
     aus
 }
 
 /// Die belegten Nachrichten (R40), veroeffentlicht vom Beginn des Vortags bis zum Ende des
 /// Handelstags (UTC): hoechstens `MAX_NACHRICHTEN_LAGE`, die neueste zuerst. Wird es dem
 /// Berater zu viel, faellt so die aelteste weg.
-fn nachrichten(stand: &Stand, handelstag: Datum) -> Vec<String> {
+fn nachrichten(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
     let Some(beginn) = tagesbeginn(handelstag) else {
         return Vec::new();
     };
@@ -216,6 +220,7 @@ fn nachrichten(stand: &Stand, handelstag: Datum) -> Vec<String> {
     let mut aus: Vec<&NachrichtBeleg> = stand
         .nachrichten()
         .iter()
+        .filter(|n| n.abruf() <= wissen_bis)
         .filter(|n| {
             let s = n.zeit().sekunden();
             von.is_some_and(|von| s >= von) && bis.is_some_and(|bis| s < bis)
@@ -246,11 +251,12 @@ fn feld(h: &mut Sha256, text: &str) {
 
 /// Abdruck des Tages: haengt am Abdruck des letzten Abschlusses und an allen Kursen und
 /// Ereignissen, mit denen entschieden wird.
-fn abdruck(vorher: Option<&str>, tag: &Tag, vortag: &Kurse) -> String {
+fn abdruck(vorher: Option<&str>, tag: &Tag, vortag: &Kurse, wissen_bis: Zeitpunkt) -> String {
     let mut h = Sha256::new();
     feld(&mut h, FASSUNG);
     feld(&mut h, vorher.unwrap_or("anfang"));
     feld(&mut h, &datum_text(tag.datum));
+    feld(&mut h, &wissen_bis.to_string());
     for k in [&tag.kurse, vortag] {
         feld(&mut h, &k.stand().sekunden().to_string());
         for (isin, kurs) in k.alle() {
@@ -280,7 +286,10 @@ pub fn kurse_von_heute(
     universum: &Universum,
     heute: Datum,
 ) -> Result<Tageskurse, LaufFehler> {
-    let k = tageskurse(stand, universum)?;
+    pruefe_kurstag(tageskurse(stand, universum)?, heute)
+}
+
+fn pruefe_kurstag(k: Tageskurse, heute: Datum) -> Result<Tageskurse, LaufFehler> {
     if k.handelstag != heute {
         return Err(halt(format!(
             "Die neuesten Schlusskurse sind vom {}, heute ist der {}: Ein Tag wird nur mit \
@@ -313,6 +322,9 @@ pub enum Tageslage {
 pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehler> {
     if let Some(a) = stand.abschluss() {
         if a.datum == handelstag {
+            if stand.papier_verlustsperre_aktiv() {
+                return Err(halt(PAPIER_VERLUSTSPERRE));
+            }
             if stand.notbremse_aktiv() {
                 return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
             }
@@ -335,11 +347,32 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
     }
     if stand.notbremse_aktiv() {
         if stand.offene_auftraege().next().is_none() && stand.gehalten().is_empty() {
+            if stand.papier_verlustsperre_aktiv() {
+                return Err(halt(PAPIER_VERLUSTSPERRE));
+            }
             return Ok(Tageslage::WartetAufWiederanlauf);
         }
         return Ok(Tageslage::NurSchutzverkaeufe);
     }
     Ok(Tageslage::Offen)
+}
+
+/// Rekonstruiert die Quellenlage eines Papiertags zum damals belegten Stichtag, ohne
+/// Kontobewegung oder Beratung. Bei aelteren Tagen ohne Stichtag liefert der Aufruf Halt.
+pub fn papiertag_wiederabspielen(
+    stand: &Stand,
+    universum: &Universum,
+    tag: Datum,
+) -> Result<Tag, LaufFehler> {
+    let wissen_bis = stand
+        .wissensstichtag(tag)
+        .ok_or_else(|| halt(format!("Kein belegter Wissensstichtag fuer {tag}")))?;
+    let kurse = pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, tag)?;
+    Ok(Tag {
+        datum: tag,
+        kurse: kurse.heute,
+        ereignisse: weltlage_am(stand, tag, wissen_bis),
+    })
 }
 
 /// Ein Papiertag. `heute` ist das Datum der Uhr; `start` sind die Toepfe, mit denen ein neues
@@ -361,8 +394,45 @@ pub fn papiertag(
     papiertag_mit_uhr(j, heute, universum, start, &mut beteiligte, None)
 }
 
-/// Papiertag mit einer Uhr fuer den Zeitpunkt des Versands. Beim Wiederabspielen ohne Uhr
-/// gilt der belegte Stand der Entscheidungskurse als frueheste moegliche Versandzeit.
+fn belegte_lage(
+    stand: &Stand,
+    universum: &Universum,
+    heute: Datum,
+    uhr: Option<&dyn Fn() -> Option<Zeitpunkt>>,
+) -> Result<(Tageskurse, Zeitpunkt), LaufFehler> {
+    let jetzt = match uhr {
+        Some(uhr) => uhr().ok_or_else(|| halt("Keine verlaessliche Zeit fuer den Wissensstand"))?,
+        // Ein neuer Papiertag ohne reale Uhr dient Szenarien. Seine simulierte Uhr steht
+        // beim letzten an diesem Tag bezeugten Abruf.
+        None => {
+            letzter_abruf_am(stand, heute).ok_or_else(|| halt("Keine Abrufe fuer den Papiertag"))?
+        }
+    };
+    let wissen_bis = stand.wissensstichtag(heute).unwrap_or(jetzt);
+    if wissen_bis > jetzt {
+        return Err(halt("Wissensstichtag liegt nach der aktuellen Uhrzeit"));
+    }
+    let kurse = pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, heute)?;
+    Ok((kurse, wissen_bis))
+}
+
+fn letzter_abruf_am(stand: &Stand, tag: Datum) -> Option<Zeitpunkt> {
+    stand
+        .kurse()
+        .iter()
+        .map(KursBeleg::abruf)
+        .chain(
+            stand
+                .termine()
+                .iter()
+                .map(depot_journal::TerminBeleg::abruf),
+        )
+        .chain(stand.nachrichten().iter().map(NachrichtBeleg::abruf))
+        .filter(|zeit| zeit.in_frankfurt().is_some_and(|(d, ..)| d == tag))
+        .max()
+}
+
+/// Papiertag mit einer Uhr fuer den Zeitpunkt des Versands.
 pub(crate) fn papiertag_mit_uhr(
     j: &mut Journal,
     heute: Datum,
@@ -371,7 +441,7 @@ pub(crate) fn papiertag_mit_uhr(
     beteiligte: &mut Beteiligte<'_, '_, '_>,
     uhr: Option<&dyn Fn() -> Option<Zeitpunkt>>,
 ) -> Result<Ausgang, LaufFehler> {
-    let k = kurse_von_heute(j.stand(), universum, heute)?;
+    let (k, wissen_bis) = belegte_lage(j.stand(), universum, heute, uhr)?;
     let neu = j.stand().toepfe().is_empty();
     if !neu {
         // Wiederanlauf: zuerst der Abgleich, auch wenn der Tag schon abgeschlossen ist
@@ -390,6 +460,8 @@ pub(crate) fn papiertag_mit_uhr(
     }
     let letzter = j.stand().abschluss().cloned();
     j.stelle_um().map_err(journal)?;
+    j.belege_wissensstichtag(heute, wissen_bis)
+        .map_err(journal)?;
     let hoch = if neu {
         for t in start {
             j.setze_topf(t).map_err(journal)?;
@@ -405,12 +477,14 @@ pub(crate) fn papiertag_mit_uhr(
     let tag = Tag {
         datum: k.handelstag,
         kurse: k.heute,
-        ereignisse: ereignisse(j.stand(), k.handelstag),
+        ereignisse: weltlage_am(j.stand(), k.handelstag, wissen_bis),
     };
     j.begruende(
         tag.datum,
         PAPIERTAG,
-        "Papiergeld; Ausfuehrung erst zu einem geprueften Schlusskurs nach Versand",
+        &format!(
+            "Papiergeld; Ausfuehrung erst zu einem geprueften Schlusskurs nach Versand. Weltmodell: Wissensstand {wissen_bis}."
+        ),
     )
     .map_err(journal)?;
     let wahl = waehle_tageswerte(
@@ -429,9 +503,13 @@ pub(crate) fn papiertag_mit_uhr(
         letzter.as_ref().map(|a| a.abdruck.as_str()),
         &tag,
         &k.vortag,
+        wissen_bis,
     );
     let nr = tagnummer(tag.datum).ok_or_else(|| rechnung("Tagnummer"))?;
-    let belegte_zeit = || Some(tag.kurse.stand());
+    let belegte_zeit = || match uhr {
+        Some(uhr) => uhr().filter(|zeit| *zeit >= wissen_bis),
+        None => Some(tag.kurse.stand()),
+    };
     let z = Zyklus {
         grenzen: &grenzen,
         universum: &wahl.universum,
@@ -439,7 +517,7 @@ pub(crate) fn papiertag_mit_uhr(
         vortag: &k.vortag,
         nr,
         abdruck: &ab,
-        uhr: Some(uhr.unwrap_or(&belegte_zeit)),
+        uhr: Some(&belegte_zeit),
         vollstaendige_kurse: wahl.ausgelassen.is_empty(),
     };
     let hoechststand = ein_tag(j, &z, hoch, &wahl.fehler, beteiligte)?;

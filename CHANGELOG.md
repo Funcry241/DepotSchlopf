@@ -6,7 +6,11 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
-- Die Papier-Notbremse prüft den Wiederanlauf automatisch. Erst ein späterer, vollständig geprüfter Papiertag, der ohne Bestand und offene Orders beginnt, hebt den Halt zusammen mit dem Tagesabschluss auf. Neue Orders sind frühestens beim nächsten regulären Papiertag möglich. Der Kontowächter erhält einen neuen Referenzwert aus dem Papierbargeld. Das Journal und der historische Höchststand im Lagebild bewahren den bisherigen Verlauf.
+- Die Papier-Notbremse prüft den Wiederanlauf automatisch. Erst ein späterer, vollständig geprüfter Papiertag, der ohne Bestand und offene Orders beginnt, hebt den Halt zusammen mit dem Tagesabschluss auf. Neue Orders sind frühestens beim nächsten regulären Papiertag möglich. Der Kontowächter erhält einen neuen Referenzwert aus dem Papierbargeld. Ab 30 % Verlust gegenüber dem dauerhaft belegten historischen Höchststand stoppt der Papiertag neue Käufe und setzt die Sperre dauerhaft. Schutzverkäufe laufen weiter. Ein automatischer Wiederanlauf ist dann gesperrt.
+
+- Dachs und Maus können im Papiertag je eine eigenständige Weltprognose mit Ereignis, Wert, Richtung, Zeithorizont und Widerlegungskriterium hinterlegen. Der Papiertag holt beide Antworten vor der gegenseitigen Prüfung ein. Das Journal bindet die Prognose an das beobachtete Ereignis und den Ausgangskurs. Dazu sind keine zusätzlichen Anbieteraufrufe nötig.
+
+- Der Papiertag friert den Wissensstand für das Weltmodell ein. Er verwendet ausschließlich Kurse, Nachrichten und Terminversionen, die bis zu diesem Zeitpunkt belegt waren. Ein eigener Journaleintrag hält den Stichtag fest. Das Wiederabspielen verwendet genau diesen Stichtag und verlangt einen Beleg. Eine später abgerufene Meldung erscheint beim Rückblick nicht allein deshalb, weil sie früher veröffentlicht wurde.
 
 - Der Papiertag speichert die Versandzeit neuer Orders. Nach einem Neustart bleiben sie reserviert und warten bis zum ersten Börsenschluss nach ihrem Versand. Fehlt dafür ein geprüfter Kurs oder liegt er außerhalb des Limits, verfällt die Order. Journal und Papierkonto belegen die Kurszeit, aus deren Handelstag die Valuta folgt. Die Notbremse storniert offene Käufe und lässt nur noch offene Verkäufe zum späteren Kurs abarbeiten. Neue zeitbelegte Orders schreiben das Papierkonto als `papierkonto-v2`. Alte Dateien lassen sich mit der neuen Version lesen.
 
