@@ -218,8 +218,14 @@ mod papierorder_tests {
         let versand = Zeitpunkt::frankfurt(mittwoch, 22, 15, 0).ok_or("Versand")?;
         let sap = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
         let coca_cola = Isin::neu("US1912161007").map_err(|e| format!("{e:?}"))?;
-        assert_eq!(papierorder_schluss(&sap, versand), Boerse::Xetra.schluss(donnerstag));
-        assert_eq!(papierorder_schluss(&coca_cola, versand), Boerse::Nyse.schluss(freitag));
+        assert_eq!(
+            papierorder_schluss(&sap, versand),
+            Boerse::Xetra.schluss(donnerstag)
+        );
+        assert_eq!(
+            papierorder_schluss(&coca_cola, versand),
+            Boerse::Nyse.schluss(freitag)
+        );
         Ok(())
     }
 }

@@ -1116,7 +1116,10 @@ fn notbremse_arbeitet_verkaeufe_nach_neustart_ab_und_bleibt_aktiv() -> Result<()
         assert_eq!(k.konto().sendungen(), sendungen);
         let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A")?;
         assert_eq!(a.stueck(&sap), bestand);
-        assert_eq!(j.stand().offene_auftraege().count(), usize::from(bestand > 0));
+        assert_eq!(
+            j.stand().offene_auftraege().count(),
+            usize::from(bestand > 0)
+        );
     }
     Ok(())
 }
@@ -1135,7 +1138,13 @@ fn order_ohne_kurs_verfaellt_und_gibt_den_topf_wieder_frei() -> Result<(), Strin
     let (mut dachs, mut maus) = kaeufer(tag(5)?, &allianz);
     vorbedingung(
         papiertag(
-            &mut journal, tag(5)?, &universum()?, &start()?, &mut dachs, &mut maus, &mut papierkonto,
+            &mut journal,
+            tag(5)?,
+            &universum()?,
+            &start()?,
+            &mut dachs,
+            &mut maus,
+            &mut papierkonto,
         ),
         "Kaufauftrag",
     )?;
@@ -1151,7 +1160,13 @@ fn order_ohne_kurs_verfaellt_und_gibt_den_topf_wieder_frei() -> Result<(), Strin
     let (mut dachs, mut maus) = kaeufer(tag(6)?, &sap);
     vorbedingung(
         papiertag(
-            &mut journal, tag(6)?, &universum()?, &start()?, &mut dachs, &mut maus, &mut papierkonto,
+            &mut journal,
+            tag(6)?,
+            &universum()?,
+            &start()?,
+            &mut dachs,
+            &mut maus,
+            &mut papierkonto,
         ),
         "Papiertag ohne Kurs der offenen Order",
     )?;
@@ -1161,6 +1176,11 @@ fn order_ohne_kurs_verfaellt_und_gibt_den_topf_wieder_frei() -> Result<(), Strin
     assert!(journal.stand().begruendungen().iter().any(|(_, _, text)| {
         text.contains(&format!("Auftrag {nr} verfaellt: kein gepruefter Kurs"))
     }));
-    assert!(journal.stand().offene_auftraege().any(|l| l.beleg.isin == sap));
+    assert!(
+        journal
+            .stand()
+            .offene_auftraege()
+            .any(|l| l.beleg.isin == sap)
+    );
     Ok(())
 }

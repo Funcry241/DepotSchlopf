@@ -24,11 +24,11 @@
 //! zweite Frage fuer denselben Zyklus.
 
 use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung, Stand};
+use depot_kern::liste::papierorder_schluss;
 use depot_kern::{
     BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
     Zeitpunkt,
 };
-use depot_kern::liste::papierorder_schluss;
 use depot_ki::Sperre;
 use depot_regelwerk::{
     DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide,
@@ -877,7 +877,11 @@ fn protokolliere_ausfuehrungen(
                 (Some(kurse), Some(schluss)) => {
                     if schluss.datum() != kurse.stand().datum() {
                         "Boersentag der Order bereits vorbei"
-                    } else if kurse.eintrag(&l.beleg.isin).map(depot_kern::Kurs::zeitpunkt) != Some(schluss) {
+                    } else if kurse
+                        .eintrag(&l.beleg.isin)
+                        .map(depot_kern::Kurs::zeitpunkt)
+                        != Some(schluss)
+                    {
                         "kein gepruefter Kurs am Boersenschluss"
                     } else {
                         "Kurs ausserhalb des Limits"

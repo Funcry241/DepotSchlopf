@@ -20,8 +20,8 @@ use std::fmt::Write as _;
 use depot_journal::{
     Abrechnungen, Ausfuehrung, Konto, KontoOrder, KontoStatus, Kontoauszug, papier_valuta,
 };
-use depot_kern::{Cent, Datum, Gebuehren, Grenzen, Isin, Kurse, Rundung, Topf, Zeitpunkt};
 use depot_kern::liste::papierorder_schluss;
+use depot_kern::{Cent, Datum, Gebuehren, Grenzen, Isin, Kurse, Rundung, Topf, Zeitpunkt};
 use depot_regelwerk::{GenehmigterAuftrag, Richtung};
 
 /// Antwort des Brokers auf einen Versand.
@@ -173,8 +173,8 @@ impl Papierkonto {
             if stand < schluss {
                 return;
             }
-            eintrag = eintrag
-                .filter(|k| stand.datum() == schluss.datum() && k.zeitpunkt() == schluss);
+            eintrag =
+                eintrag.filter(|k| stand.datum() == schluss.datum() && k.zeitpunkt() == schluss);
         }
         let ausfuehrung = eintrag.and_then(|eintrag| {
             let exakt = eintrag.preis();

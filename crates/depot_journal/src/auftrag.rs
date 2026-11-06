@@ -186,7 +186,9 @@ impl AuftragsLage {
         let b = &self.beleg;
         let nr = b.nr;
         if self.frist != a.kurszeit {
-            return Err(format!("Auftrag {nr}: Kurszeit weicht von der belegten Frist ab"));
+            return Err(format!(
+                "Auftrag {nr}: Kurszeit weicht von der belegten Frist ab"
+            ));
         }
         if a.stueck == 0 || a.kurs.0 <= 0 || a.gebuehr.0 < 0 {
             return Err(format!("Auftrag {nr}: Ausfuehrung unplausibel"));

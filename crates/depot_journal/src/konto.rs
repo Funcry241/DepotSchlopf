@@ -16,7 +16,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use depot_kern::{Boerse, Cent, Datum, Grenzen, Isin, TopfId, Zeitpunkt, liste::papierorder_schluss};
+use depot_kern::{
+    Boerse, Cent, Datum, Grenzen, Isin, TopfId, Zeitpunkt, liste::papierorder_schluss,
+};
 use depot_regelwerk::{GenehmigterAuftrag, Richtung};
 
 use crate::auftrag::{AuftragsZustand, Ausfuehrung, Meldung};
@@ -286,7 +288,9 @@ impl Journal {
                 .and_then(|l| papierorder_schluss(&l.beleg.isin, *zeit))
                 != Some(*frist)
         {
-            return Err(JournalFehler::Abgelehnt("Versand: ungueltige Boersenfrist".into()));
+            return Err(JournalFehler::Abgelehnt(
+                "Versand: ungueltige Boersenfrist".into(),
+            ));
         }
         self.schreibe_meldung(nr, meldung)
     }
