@@ -1,7 +1,8 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Gate und Datenprobe legen LF fuer ihre Git-Kindprozesse fest, auch bei abweichender Git-Konfiguration des Nutzers.
+zweck: Kontingent von Alpha Vantage mit Nachrichten: Der Xetra-Lauf holt mit demselben Schluessel einmal die Nachrichten, deshalb laesst pruefe_liste fuer Alpha Vantage hoechstens 24 Werte zu (25 Abrufe am Tag minus einer fuer die Nachrichten). Liste unveraendert, keine Grenze geaendert, keine neue Abhaengigkeit.
 pfade:
-crates/depot_lauf/src/abbild.rs
-crates/depot_lauf/src/export.rs
-crates/depot_lauf/src/update.rs
+crates/depot_kern/
+crates/depot_sammler/
+docs/
+CHANGELOG.md

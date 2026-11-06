@@ -30,12 +30,20 @@ pub fn quelle(boerse: Boerse) -> &'static str {
     }
 }
 
+/// Abrufe am Tag, die Alpha Vantage in der kostenlosen Stufe erlaubt.
+pub const ABRUFE_ALPHA_VANTAGE: usize = 25;
+
+/// Abrufe am Tag bei Alpha Vantage, die nicht fuer Kurse sind: die Nachrichten, die der
+/// Xetra-Lauf mit demselben Schluessel einmal holt (`depot_sammler::nachrichten`).
+pub const WEITERE_ABRUFE_ALPHA_VANTAGE: usize = 1;
+
 /// Wie viele Werte eine Quelle je Lauf hoechstens bekommt: ein Abruf je Wert, und ein Lauf muss
-/// in das Tageskontingent der kostenlosen Stufe passen. Alpha Vantage erlaubt 25 Abrufe am Tag;
-/// Tiingo 1000 am Tag, aber nur 500 verschiedene Kuerzel im Monat, das ist die engere Grenze.
+/// mit allen weiteren Abrufen derselben Quelle in das Tageskontingent der kostenlosen Stufe
+/// passen. Alpha Vantage: 25 Abrufe am Tag, einer davon fuer die Nachrichten. Tiingo: 1000 am
+/// Tag, aber nur 500 verschiedene Kuerzel im Monat, das ist die engere Grenze.
 pub fn hoechstens_werte(quelle_name: &str) -> usize {
     match quelle_name {
-        QUELLE => 25,
+        QUELLE => ABRUFE_ALPHA_VANTAGE.saturating_sub(WEITERE_ABRUFE_ALPHA_VANTAGE),
         QUELLE_US => 500,
         _ => 0,
     }

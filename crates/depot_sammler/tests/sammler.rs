@@ -177,7 +177,8 @@ fn isin_mit_pruefziffer(n: u8) -> String {
 
 /// Die festgelegte Liste ist gueltig und passt je Quelle in das Tageskontingent der kostenlosen
 /// Stufe. Fehlerhafte Listen werden abgelehnt, auch eine, die das Kontingent einer Quelle
-/// ueberschreitet.
+/// ueberschreitet. Bei Alpha Vantage zaehlt der Nachrichtenabruf des Xetra-Laufs mit: 24 Werte
+/// und eine Nachrichtenabfrage sind die 25 Abrufe des Tages.
 #[test]
 fn beobachtungsliste_gueltig() -> Result<(), String> {
     let l = beobachtungsliste()?;
@@ -185,16 +186,16 @@ fn beobachtungsliste_gueltig() -> Result<(), String> {
         let n = l.iter().filter(|w| quelle(w.boerse) == q).count();
         assert!(n > 0 && n <= hoechstens_werte(q), "{q}: {n}");
     }
-    let isins: Vec<String> = (0..26_u8).map(isin_mit_pruefziffer).collect();
-    let kuerzel: Vec<String> = (0..26_u8).map(|i| format!("X{i}.DEX")).collect();
+    let isins: Vec<String> = (0..25_u8).map(isin_mit_pruefziffer).collect();
+    let kuerzel: Vec<String> = (0..25_u8).map(|i| format!("X{i}.DEX")).collect();
     let zu_viele: Vec<(&str, Boerse, &str, &str)> = isins
         .iter()
         .zip(&kuerzel)
         .map(|(i, k)| (i.as_str(), Boerse::Xetra, k.as_str(), "x"))
         .collect();
     let fehler = pruefe_liste(&zu_viele).err().unwrap_or_default();
-    assert!(fehler.contains("hoechstens 25"), "{fehler}");
-    assert!(pruefe_liste(zu_viele.get(..25).unwrap_or_default()).is_ok());
+    assert!(fehler.contains("hoechstens 24"), "{fehler}");
+    assert!(pruefe_liste(zu_viele.get(..24).unwrap_or_default()).is_ok());
     assert!(pruefe_liste(&[("DE0007164601", Boerse::Xetra, "SAP.DEX", "x")]).is_err());
     assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP.DE", "x")]).is_err());
     assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP&X.DEX", "x")]).is_err());
