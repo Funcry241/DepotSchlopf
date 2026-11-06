@@ -1145,7 +1145,7 @@ fn papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand() -> Result<(), 
     assert!(antwort.contains("papierfreigabe_ok"), "{antwort}");
     assert!(depot_lage::papier_freigabe_angebot(&wurzel).is_none());
     let journal = fs::read_to_string(daten.join("journal.txt")).map_err(|e| e.to_string())?;
-    assert!(journal.contains("papier-freigabe;2026-11-04;1000000;einrichtung;Wolfgang"));
+    assert!(journal.contains("papier-freigabe;2026-11-04;1000000;einrichtung;dialog"));
     Ok(())
 }
 

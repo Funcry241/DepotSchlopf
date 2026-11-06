@@ -970,7 +970,7 @@ fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
          <p>Die neue Verlustmessung beginnt nach dem Kontenabgleich bei <strong>{}</strong>. \
          Gesamtverlust seit dem historischen Höchststand: <strong>{}</strong>. \
          Der historische Höchststand bleibt erhalten. Nach dem Absenden musst du die Freigabe \
-         im separaten Windows-Dialog bestätigen.</p>\
+         innerhalb von zwei Minuten im separaten Windows-Dialog bestätigen.</p>\
          <form method=\"post\" action=\"/papierfreigabe\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\

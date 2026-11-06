@@ -105,7 +105,7 @@ pub enum Art {
     NotbremseFreigabe,
     /// `datum;grundkennung`: typisierter Halt des Papierdepots.
     PapierHalt,
-    /// `abschlussdatum;bargeld;einrichtung;Wolfgang`: Freigabe nach der Gesamtverlustsperre.
+    /// `abschlussdatum;bargeld;einrichtung;dialog`: Freigabe nach der Gesamtverlustsperre.
     PapierFreigabe,
     /// Handelstag und UTC-Wissensstichtag, vor der Entscheidung belegt.
     Wissensstichtag,
@@ -219,7 +219,7 @@ pub struct Stand {
 }
 
 pub(crate) fn papier_freigabe_text(tag: Datum, bargeld: Cent) -> String {
-    format!("{tag};{};einrichtung;Wolfgang", bargeld.0)
+    format!("{tag};{};einrichtung;dialog", bargeld.0)
 }
 
 impl Stand {
@@ -633,7 +633,7 @@ impl Stand {
         self.papier_neustart = Some(bargeld);
         self.notbremse_freigabe = Some(tag);
         self.prueft_wiederanlauf = false;
-        self.begruendungen.push((tag, "Wolfgang".into(), format!(
+        self.begruendungen.push((tag, "Einrichtung, Dialog".into(), format!(
             "Papier-Gesamtverlustsperre in der Einrichtung freigegeben. Neue Verlustmessung ab {} Cent.",
             bargeld.0
         )));
