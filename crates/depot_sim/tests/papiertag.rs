@@ -896,7 +896,13 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
     belege(publiziert, "heute")?;
     let spaeter = some(Zeitpunkt::neu(tag(6)?, 10, 0, 0), "Spaeterer Abruf")?;
     let nachgereicht = vorbedingung(
-        NachrichtBeleg::neu("alphavantage-news", spaeter, b"nachtrag", publiziert, "Nachtrag"),
+        NachrichtBeleg::neu(
+            "alphavantage-news",
+            spaeter,
+            b"nachtrag",
+            publiziert,
+            "Nachtrag",
+        ),
         "Nachgereichte Nachricht",
     )?;
     vorbedingung(j.belege_nachricht(&nachgereicht), "Nachtrag belegen")?;
@@ -933,9 +939,11 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
     );
     assert!(!dachs.gesehen.iter().any(|t| t.contains("zu alt")));
     assert!(!dachs.gesehen.iter().any(|t| t.contains("Nachtrag")));
-    assert!(j.stand().begruendungen().iter().any(|(_, wer, text)| {
-        wer == "Papiertag" && text.contains("Weltmodell: Wissensstand")
-    }));
+    assert!(
+        j.stand().begruendungen().iter().any(|(_, wer, text)| {
+            wer == "Papiertag" && text.contains("Weltmodell: Wissensstand")
+        })
+    );
     Ok(())
 }
 

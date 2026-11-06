@@ -457,7 +457,10 @@ pub(crate) fn papiertag_mit_uhr(
         wissen_bis,
     );
     let nr = tagnummer(tag.datum).ok_or_else(|| rechnung("Tagnummer"))?;
-    let belegte_zeit = || Some(tag.kurse.stand());
+    let belegte_zeit = || match uhr {
+        Some(uhr) => uhr().filter(|zeit| *zeit >= wissen_bis),
+        None => Some(tag.kurse.stand()),
+    };
     let z = Zyklus {
         grenzen: &grenzen,
         universum: &wahl.universum,
@@ -465,7 +468,7 @@ pub(crate) fn papiertag_mit_uhr(
         vortag: &k.vortag,
         nr,
         abdruck: &ab,
-        uhr: Some(uhr.unwrap_or(&belegte_zeit)),
+        uhr: Some(&belegte_zeit),
     };
     let hoechststand = ein_tag(j, &z, hoch, &wahl.fehler, beteiligte)?;
     Ok(Ausgang::Abgeschlossen {
