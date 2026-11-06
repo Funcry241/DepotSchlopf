@@ -97,6 +97,15 @@ pub fn cargo_befehl(dir: &Path, bau: &Path) -> Command {
             c.env_remove(k);
         }
     }
+    // Die Prüfkopie enthält die Bytes der Git-Blobs. Auch Git-Aufrufe des Gates
+    // und seiner Test-Repositories müssen LF behalten, unabhängig von Nutzer- und Systemconfig.
+    c.envs([
+        ("GIT_CONFIG_COUNT", "2"),
+        ("GIT_CONFIG_KEY_0", "core.autocrlf"),
+        ("GIT_CONFIG_VALUE_0", "false"),
+        ("GIT_CONFIG_KEY_1", "core.eol"),
+        ("GIT_CONFIG_VALUE_1", "lf"),
+    ]);
     c.env("CARGO_TARGET_DIR", bau);
     c
 }
