@@ -153,6 +153,10 @@ impl Umwelt for Attrappe {
             .and_then(Zeitpunkt::lies)
     }
 
+    fn papierdialog_testen(&self) -> depot_dienst::DialogErgebnis {
+        depot_dienst::DialogErgebnis::Ja
+    }
+
     fn autostart_setzen(&self, _wurzel: &Path, an: bool) -> Result<(), String> {
         *self
             .autostart
@@ -1098,6 +1102,35 @@ fn papierfreigabe_verlangt_bestaetigung_und_journalabdruck() -> Result<(), Strin
 }
 
 #[test]
+fn testdialog_ist_ohne_sperre_verfuegbar_und_schreibt_nichts() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let d = dienst(wurzel, true);
+    let t = donnerstag(12, 0)?;
+    assert!(get(&d, "/einrichtung", t).contains("Freigabedialog testen"));
+    for (name, inhalt) in [
+        ("journal.txt", "Originaljournal"),
+        ("journal.vermerk", "Originalvermerk"),
+        ("papierkonto.txt", "Originalkonto"),
+    ] {
+        fs::write(daten.join(name), inhalt).map_err(|e| e.to_string())?;
+    }
+    let a = formular_post("/papierdialog-test", &format!("t={TOKEN}"));
+    assert!(text(&behandle(&d, &Attrappe::default(), &a, t)).contains("dialogtest_ja"));
+    for (name, inhalt) in [
+        ("journal.txt", "Originaljournal"),
+        ("journal.vermerk", "Originalvermerk"),
+        ("papierkonto.txt", "Originalkonto"),
+    ] {
+        assert_eq!(
+            fs::read(daten.join(name)).map_err(|e| e.to_string())?,
+            inhalt.as_bytes()
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand() -> Result<(), String> {
     let wurzel = ordner()?;
     let daten = wurzel.join("daten");
@@ -1743,6 +1776,46 @@ fn nur_xetra(wurzel: PathBuf) -> Arc<Dienst> {
     let d = dienst(wurzel, true);
     d.sperre().boersen = vec![Boerse::Xetra];
     d
+}
+
+#[test]
+fn zeitplan_holt_kursabruf_und_papiertag_nach_update_probe_nach() -> Result<(), String> {
+    let faellig = donnerstag(17, 45)?;
+    let spaeter = donnerstag(17, 47)?;
+    let tag = some(faellig.datum(), "Handelstag")?;
+    for (kurs_vorher, erwartet) in [
+        (None, Art::KurseVon(Boerse::Xetra)),
+        (Some(tag), Art::Papier),
+    ] {
+        let wurzel = eingeschaltet(ordner()?)?;
+        let erledigt = Erledigt {
+            termine: Some(tag),
+            kurse: kurs_vorher,
+            kurse_ok: kurs_vorher,
+            ..Erledigt::default()
+        };
+        let datei = wurzel.join("daten/dienst_erledigt.txt");
+        fs::write(&datei, erledigt.als_text()).map_err(|e| e.to_string())?;
+        let offen = depot_dienst::rueckfall::offen_pfad(&wurzel);
+        fs::write(&offen, "Update auf Probe").map_err(|e| e.to_string())?;
+        let d = nur_xetra(wurzel);
+        assert!(d.schritt(faellig).is_none());
+        assert!(d.schritt(spaeter).is_none());
+        assert!(wartend(&d).is_empty());
+        assert_eq!(
+            fs::read_to_string(datei).map_err(|e| e.to_string())?,
+            erledigt.als_text()
+        );
+
+        fs::remove_file(offen).map_err(|e| e.to_string())?;
+        let (nr, kind) = some(d.schritt(spaeter), "Fälliger Auftrag nach Bestätigung")?;
+        assert_eq!(
+            d.sperre().laufend.as_ref().map(|a| (a.art, a.anlass)),
+            Some((erwartet, Anlass::Zeitplan))
+        );
+        d.verfolge(nr, kind, || donnerstag(17, 48).ok());
+    }
+    Ok(())
 }
 
 /// Die Live-Ansicht nach einem Neustart: der Satz mit `id="neustart"`.

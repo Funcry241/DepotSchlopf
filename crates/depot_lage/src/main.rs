@@ -86,6 +86,18 @@ fn lauf(wurzel: &Path) -> Result<PathBuf, String> {
 }
 
 fn main() -> ExitCode {
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if let [befehl, daten] = args.as_slice()
+        && befehl == "--update-datenprobe"
+    {
+        return match depot_lage::update_datenprobe(Path::new(daten)) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("[Datenprobe] {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let Some(wurzel) = wurzel() else {
         eprintln!("[Lage] FEHLER: Projektordner nicht gefunden. run.cmd im Projektordner starten.");
         return ExitCode::FAILURE;

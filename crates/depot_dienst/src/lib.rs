@@ -23,6 +23,7 @@ pub mod autostart;
 pub mod http;
 pub mod kostenschutz;
 mod papierdialog;
+pub use papierdialog::DialogErgebnis;
 pub mod programmstand;
 pub mod rueckfall;
 pub mod schluessel;
@@ -62,6 +63,10 @@ pub trait Umwelt: Send + Sync {
     ) -> Option<Zeitpunkt> {
         None
     }
+    fn papierdialog_testen(&self) -> DialogErgebnis {
+        DialogErgebnis::NichtVerfuegbar
+    }
+
     /// # Errors
     /// Ordner oder Pfad ungeeignet, Schreibfehler.
     fn autostart_setzen(&self, wurzel: &Path, an: bool) -> Result<(), String>;
@@ -93,6 +98,10 @@ impl Umwelt for System {
         } else {
             None
         }
+    }
+
+    fn papierdialog_testen(&self) -> DialogErgebnis {
+        papierdialog::testen()
     }
 
     fn autostart_setzen(&self, wurzel: &Path, an: bool) -> Result<(), String> {
@@ -347,6 +356,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kurse),
         "/papierfreigabe" => papier_freigeben(d, u, &f),
+        "/papierdialog-test" => papierdialog_testen(d, u),
         "/autostart" => {
             let an = match feld(&f, "an") {
                 Some("an") => true,
@@ -361,6 +371,20 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         }
         _ => http::text(404, "Nicht gefunden"),
     }
+}
+
+fn papierdialog_testen(d: &Dienst, u: &dyn Umwelt) -> Vec<u8> {
+    let meldung = if let Ok(_dialog) = d.papierdialog.try_lock() {
+        match u.papierdialog_testen() {
+            DialogErgebnis::Ja => "dialogtest_ja",
+            DialogErgebnis::Nein => "dialogtest_nein",
+            DialogErgebnis::ZeitAbgelaufen => "dialogtest_zeit",
+            DialogErgebnis::NichtVerfuegbar => "dialogtest_fehler",
+        }
+    } else {
+        "dialogtest_belegt"
+    };
+    http::umleitung(&format!("/einrichtung?m={meldung}#papierdialog-test"))
 }
 
 fn papier_freigeben(d: &Dienst, u: &dyn Umwelt, f: &[(String, String)]) -> Vec<u8> {

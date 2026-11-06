@@ -142,6 +142,14 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "halt",
             "Schlüssel nicht gespeichert: Die Anmeldeinformationsverwaltung hat abgelehnt.",
         ),
+        "dialogtest_ja" => ("gut", "Dialogtest: Ja. Es wurde nichts freigegeben."),
+        "dialogtest_nein" => ("gut", "Dialogtest: Nein. Es wurde nichts freigegeben."),
+        "dialogtest_zeit" => (
+            "gut",
+            "Dialogtest: Zeit abgelaufen. Es wurde nichts freigegeben.",
+        ),
+        "dialogtest_fehler" => ("offen", "Der Windows-Dialog konnte nicht geöffnet werden."),
+        "dialogtest_belegt" => ("offen", "Es ist bereits ein Freigabedialog geöffnet."),
         "papierfreigabe_ok" => (
             "gut",
             "Papierhandel freigegeben. Die neue Verlustmessung beginnt beim bestätigten Bargeld. Der nächste reguläre Papiertag kann wieder handeln.",
@@ -895,7 +903,9 @@ fn update_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
     s.push_str(
         "<section id=\"update\"><h2>Update</h2><p class=\"leise\">Das Update folgt nur \
          <code>main</code> auf GitHub. Einspielen prüft den neuen Stand zuerst mit dem ganzen Gate \
-         in einem eigenen Ordner; nur wenn er besteht, rückt der Projektordner vorwärts, ohne \
+         in einem eigenen Ordner. Danach prüft der neue Stand eine Kopie von Journal und Papierkonto \
+         und sichert die bisherigen Papierdaten unter <code>daten/sicherung</code>. Erst wenn alle \
+         Prüfungen erfolgreich sind, rückt der Projektordner vorwärts, ohne \
          Lokales zu überschreiben. Danach startet der Dienst neu. Kommt er nicht hoch, setzt \
          DepotSchlopf.cmd den alten Stand zurück. Das Gate dauert einige Minuten.</p>",
     );
@@ -1002,6 +1012,15 @@ pub fn einrichtung(
     kostenschutz_teil(token, e, &mut s);
     kurssperre_teil(token, e, &mut s);
     papierfreigabe_teil(token, e, &mut s);
+    let _ = write!(
+        s,
+        "<section id=\"papierdialog-test\"><h2>Windows-Dialog prüfen</h2>\
+         <p>Zeigt den Freigabedialog als Test. Es wird nichts freigegeben oder gespeichert.</p>\
+         <form method=\"post\" action=\"/papierdialog-test\">\
+         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <button type=\"submit\">Freigabedialog testen</button></form></section>",
+        maskiere(token)
+    );
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);
     autostart_teil(token, e, &mut s);

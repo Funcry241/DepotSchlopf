@@ -151,7 +151,7 @@ fn lauf_ab(d: &Arc<Dienst>, t: Zeitpunkt) -> Result<Art, String> {
 }
 
 #[test]
-fn update_nur_allein_und_neustart_erst_wenn_nichts_mehr_wartet() -> Result<(), String> {
+fn update_laeuft_allein_und_sperrt_auftraege_bis_zum_neustart() -> Result<(), String> {
     let wurzel = ordner()?;
     let t = mittag()?;
     let d = dienst(wurzel.clone());
@@ -162,24 +162,22 @@ fn update_nur_allein_und_neustart_erst_wenn_nichts_mehr_wartet() -> Result<(), S
     );
     let d = dienst(wurzel.clone());
     d.einreihen(Art::Update, Anlass::Hand)?;
-    // Was danach kommt, wartet und laeuft vor dem Neustart.
-    d.einreihen(Art::Kurse, Anlass::Hand)?;
+    assert!(d.einreihen(Art::Kurse, Anlass::Hand).is_err());
     assert_eq!(lauf_ab(&d, t)?, Art::Update);
     // Ohne update_offen.txt hat der Lauf nichts eingespielt: kein Neustart.
     assert!(!d.sperre().neustart);
     let d = dienst(wurzel.clone());
     d.einreihen(Art::Update, Anlass::Hand)?;
-    d.einreihen(Art::Kurse, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(t), "Update gestartet")?;
+    assert!(d.einreihen(Art::Kurse, Anlass::Hand).is_err());
     offen_schreiben(&wurzel, &"a".repeat(40), &"b".repeat(40))?;
-    assert_eq!(lauf_ab(&d, t)?, Art::Update);
-    assert!(d.sperre().neustart);
-    assert!(!d.neustart_bereit(), "Kurse warten noch");
-    assert!(
-        d.einreihen(Art::Update, Anlass::Hand).is_err(),
-        "nur einmal je Start"
-    );
-    assert_eq!(lauf_ab(&d, t)?, Art::Kurse);
+    d.verfolge(nr, kind, || mittag().ok());
     assert!(d.neustart_bereit());
+    assert!(d.einreihen(Art::Update, Anlass::Hand).is_err());
+    assert!(d.einreihen(Art::Kurse, Anlass::Hand).is_err());
+    let probe = dienst(wurzel);
+    probe.einreihen(Art::Kurse, Anlass::Hand)?;
+    assert!(probe.schritt(t).is_none(), "Probezeit hält Aufträge zurück");
     assert!(get(&d, "/teil/live")?.contains("Der Dienst startet neu."));
     Ok(())
 }
@@ -343,6 +341,82 @@ fn bestaetigen_nur_auf_dem_neuen_stand() -> Result<(), String> {
     assert!(!rueckfall::offen_pfad(&w).exists());
     assert_eq!(rueckfall::bestaetige(&w)?, None);
     assert_eq!(g(&w, &["rev-parse", "HEAD"])?, neu);
+    Ok(())
+}
+
+#[test]
+fn bestaetigen_lehnt_unlesbares_journal_ab_und_erlaubt_code_rueckfall() -> Result<(), String> {
+    let (w, vorher, neu) = zwei_staende()?;
+    offen_schreiben(&w, &vorher, &neu)?;
+    let journal = w.join("daten").join("journal.txt");
+    fs::write(&journal, b"kaputt").map_err(|e| e.to_string())?;
+    assert!(
+        rueckfall::bestaetige_mit_wiederholung(
+            &w,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(1),
+        )
+        .is_err_and(|e| e.contains("Papierdaten"))
+    );
+    assert!(rueckfall::offen_pfad(&w).exists());
+    assert!(rueckfall::zuruecksetzen(&w)?.is_some());
+    assert_eq!(g(&w, &["rev-parse", "HEAD"])?, vorher);
+    assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, b"kaputt");
+    Ok(())
+}
+
+#[test]
+fn bestaetigung_wiederholt_eine_voruebergehende_journalsperre() -> Result<(), String> {
+    use std::{fs::OpenOptions, thread, time::Duration};
+
+    let (w, vorher, neu) = zwei_staende()?;
+    offen_schreiben(&w, &vorher, &neu)?;
+    let daten = w.join("daten");
+    for (name, inhalt) in [
+        (
+            "journal.txt",
+            include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/journal.txt")
+                .as_slice(),
+        ),
+        (
+            "journal.vermerk",
+            include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/journal.vermerk")
+                .as_slice(),
+        ),
+        (
+            "papierkonto.txt",
+            include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/papierkonto.txt")
+                .as_slice(),
+        ),
+    ] {
+        fs::write(daten.join(name), inhalt).map_err(|e| e.to_string())?;
+    }
+    let sperre = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(daten.join("journal.txt"))
+        .map_err(|e| e.to_string())?;
+    sperre.try_lock().map_err(|e| e.to_string())?;
+    assert!(
+        rueckfall::bestaetige_mit_wiederholung(&w, Duration::ZERO, Duration::ZERO)
+            .is_err_and(|e| e.contains("durchgehend belegt"))
+    );
+    assert!(rueckfall::offen_pfad(&w).exists());
+    let freigabe = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(100));
+        sperre.unlock()
+    });
+    let ergebnis = rueckfall::bestaetige_mit_wiederholung(
+        &w,
+        Duration::from_secs(3),
+        Duration::from_millis(20),
+    );
+    freigabe
+        .join()
+        .map_err(|_| "Journalsperre freigeben")?
+        .map_err(|e| e.to_string())?;
+    assert_eq!(ergebnis?, Some(Offen { vorher, neu }));
+    assert!(!rueckfall::offen_pfad(&w).exists());
     Ok(())
 }
 

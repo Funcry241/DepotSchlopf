@@ -1,4 +1,6 @@
-# Windows-Praxistest der Papierfreigabe
+# Entwickler-Prüfdaten für die Papierfreigabe
+
+Für den Windows-Dialog im laufenden DepotSchlopf gibt es in der Einrichtung den Knopf **Freigabedialog testen**. Dieser Weg zeigt den echten Dialog und schreibt weder ins Journal noch ins Papierkonto. Die folgenden Prüfdaten dienen der Entwicklung und dem vollständigen Test eines Freigabebelegs in einer getrennten Installation.
 
 **Die drei synthetischen Prüfdateien gehören ausschließlich in eine separate Prüfinstallation.**
 
