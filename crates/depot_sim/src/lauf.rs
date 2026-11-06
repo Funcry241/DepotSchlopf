@@ -495,11 +495,12 @@ fn papier_notbremse(
     markt_offener_orders(j, z, konto)?;
     let toepfe: Vec<_> = j.stand().toepfe().values().cloned().collect();
     for mut topf in toepfe {
+        let topf_id = topf.id();
         // Bereits beauftragte Verkaeufe bleiben bestehen und binden ihren offenen Rest.
         for l in j
             .stand()
             .offene_auftraege()
-            .filter(|l| l.beleg.topf == topf.id())
+            .filter(|l| l.beleg.topf == topf_id)
         {
             let frei = topf
                 .stueck(&l.beleg.isin)
