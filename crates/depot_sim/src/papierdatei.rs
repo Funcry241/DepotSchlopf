@@ -16,7 +16,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use depot_journal::{Konto, KontoOrder, Kontoauszug};
-use depot_kern::{Datum, Kurse, Topf};
+use depot_kern::{Datum, Kurse, Topf, Zeitpunkt};
 use depot_regelwerk::GenehmigterAuftrag;
 
 use crate::papier::{Broker, Papierkonto, Sendeantwort};
@@ -143,6 +143,21 @@ impl Broker for Papierdatei {
         }
     }
 
+    fn sende_am(&mut self, auftrag: &GenehmigterAuftrag, zeit: Zeitpunkt) -> Sendeantwort {
+        let vorher = self.konto.clone();
+        let antwort = self.konto.sende_am(auftrag, zeit);
+        if self.sichere(vorher) {
+            antwort
+        } else {
+            Sendeantwort::KeineAntwort
+        }
+    }
+
+    fn stoppe_kaeufe(&mut self) -> bool {
+        let vorher = self.konto.clone();
+        self.konto.stoppe_kaeufe() && self.sichere(vorher)
+    }
+
     fn rechne_ab(&mut self, tag: Datum) {
         self.konto.rechne_ab(tag);
     }
@@ -150,7 +165,9 @@ impl Broker for Papierdatei {
     fn markt(&mut self, kurse: &Kurse) {
         let vorher = self.konto.clone();
         self.konto.markt(kurse);
-        self.sichere(vorher);
+        if self.konto != vorher {
+            self.sichere(vorher);
+        }
     }
 
     fn stoerung(&self) -> Option<String> {

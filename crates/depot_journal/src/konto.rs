@@ -16,7 +16,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use depot_kern::{Boerse, Cent, Datum, Grenzen, Isin, TopfId};
+use depot_kern::{
+    Boerse, Cent, Datum, Grenzen, Isin, TopfId, Zeitpunkt, liste::papierorder_schluss,
+};
 use depot_regelwerk::{GenehmigterAuftrag, Richtung};
 
 use crate::auftrag::{AuftragsZustand, Ausfuehrung, Meldung};
@@ -39,6 +41,7 @@ pub enum KontoStatus {
 pub struct KontoOrder {
     pub status: KontoStatus,
     pub ausfuehrungen: Vec<Ausfuehrung>,
+    pub versand: Option<(Zeitpunkt, Zeitpunkt)>,
 }
 
 /// Valuta und Nettoerloes je Verkaufsorder im EUR-Papiermodell.
@@ -278,6 +281,17 @@ impl Journal {
     /// `Abgelehnt`, wenn der Schritt nach der Zustandsmaschine unzulaessig ist oder die
     /// Ausfuehrung Limit, Menge oder Deckung verletzt. Sonst wie `anhaengen`.
     pub fn melde(&mut self, nr: u64, meldung: &Meldung) -> Result<(), JournalFehler> {
+        if let Meldung::GesendetAm(zeit, frist) = meldung
+            && self
+                .stand()
+                .auftrag(nr)
+                .and_then(|l| papierorder_schluss(&l.beleg.isin, *zeit))
+                != Some(*frist)
+        {
+            return Err(JournalFehler::Abgelehnt(
+                "Versand: ungueltige Boersenfrist".into(),
+            ));
+        }
         self.schreibe_meldung(nr, meldung)
     }
 
@@ -318,6 +332,14 @@ impl Journal {
                 _ => Some(Abweichung::OrderFehlt(nr)),
             });
         };
+        if lage.versand.zip(lage.frist) != order.versand
+            && lage.zustand != AuftragsZustand::Reserviert
+        {
+            return Ok(Some(Abweichung::Unbuchbar {
+                nr,
+                grund: "Versandzeit oder Boersenfrist weicht vom Journal ab".into(),
+            }));
+        }
         let mut folge = Vec::new();
         match lage.zustand {
             AuftragsZustand::Reserviert => return Ok(Some(Abweichung::OrderOhneVersand(nr))),

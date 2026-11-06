@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use depot_kern::{Cent, Datum, Isin, Topf, TopfId, Zeitpunkt};
+use depot_kern::{Cent, Datum, Herkunft, Isin, Rundung, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 
 use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
@@ -367,9 +367,8 @@ impl Stand {
     fn schliesse_ab(&mut self, inhalt: &str) -> Result<(), String> {
         let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
         kanonisch(&abschluss_text(&a), inhalt)?;
-        // Tagesorders enden am Tag (Kap. 10): Ein Tag mit offenem Auftrag ist nicht
-        // vollstaendig belegt.
-        if let Some(l) = self.offene_auftraege().next() {
+        // Nur bestaetigte, zeitbelegte Papierorders duerfen in den naechsten Tag.
+        if let Some(l) = self.offene_auftraege().find(|l| !ueber_nacht(l)) {
             return Err(format!(
                 "Abschluss mit offenem Auftrag {} ({:?})",
                 l.beleg.nr, l.zustand
@@ -398,7 +397,7 @@ impl Stand {
         let tag = Datum::lies(inhalt).ok_or("Abrechnungstag unlesbar")?;
         kanonisch(&tag.to_string(), inhalt)?;
         if self.format != FORMAT
-            || self.offene_auftraege().next().is_some()
+            || self.offene_auftraege().any(|l| !ueber_nacht(l))
             || self.abschluss.as_ref().is_some_and(|a| tag <= a.datum)
             || self.abrechnungstag.is_some_and(|alt| {
                 tag <= alt || self.abschluss.as_ref().is_none_or(|a| a.datum != alt)
@@ -530,10 +529,30 @@ impl Stand {
         aus: &crate::auftrag::Ausfuehrung,
     ) -> Result<Option<(Datum, Cent)>, String> {
         let Some(tag) = self.abrechnungstag else {
-            return Ok(None);
+            return if aus.kurszeit.is_some() {
+                Err("Kurszeit ohne Abrechnungstag".into())
+            } else {
+                Ok(None)
+            };
         };
         if self.abschluss.as_ref().is_some_and(|a| a.datum == tag) {
             return Err("Ausfuehrung ohne offenen Abrechnungstag".into());
+        }
+        if let Some(zeit) = aus.kurszeit {
+            let rundung = match beleg.richtung {
+                Richtung::Kauf => Rundung::Auf,
+                Richtung::Verkauf => Rundung::Ab,
+            };
+            if zeit.datum() != Some(tag)
+                || !self.kurse.iter().any(|b| {
+                    b.isin() == &beleg.isin
+                        && b.kurs().herkunft() == Herkunft::Quelle
+                        && b.kurs().zeitpunkt() == zeit
+                        && b.kurs().preis().mal_stueck(1, rundung) == Some(aus.kurs)
+                })
+            {
+                return Err("Kein passender Kursbeleg am Abrechnungstag".into());
+            }
         }
         if beleg.richtung != Richtung::Verkauf {
             return Ok(None);
@@ -607,6 +626,11 @@ impl Stand {
 }
 
 /// Bucht eine Ausfuehrung im Topf: Bargeld und Bestand nie negativ.
+fn ueber_nacht(l: &AuftragsLage) -> bool {
+    use crate::auftrag::AuftragsZustand as Z;
+    l.versand.is_some() && matches!(l.zustand, Z::Angenommen | Z::Teilgefuellt)
+}
+
 fn buche(topf: &Topf, b: &AuftragsBeleg, a: &crate::auftrag::Ausfuehrung) -> Result<Topf, String> {
     let volumen = a
         .kurs

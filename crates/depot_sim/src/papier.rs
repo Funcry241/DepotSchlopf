@@ -20,7 +20,8 @@ use std::fmt::Write as _;
 use depot_journal::{
     Abrechnungen, Ausfuehrung, Konto, KontoOrder, KontoStatus, Kontoauszug, papier_valuta,
 };
-use depot_kern::{Cent, Datum, Gebuehren, Grenzen, Isin, Kurse, Rundung, Topf};
+use depot_kern::liste::papierorder_schluss;
+use depot_kern::{Cent, Datum, Gebuehren, Grenzen, Isin, Kurse, Rundung, Topf, Zeitpunkt};
 use depot_regelwerk::{GenehmigterAuftrag, Richtung};
 
 /// Antwort des Brokers auf einen Versand.
@@ -35,6 +36,14 @@ pub enum Sendeantwort {
 /// Der Broker, wie die Auftragsstelle ihn sieht: lesen wie der Kontowaechter, dazu senden.
 pub trait Broker: Konto {
     fn sende(&mut self, auftrag: &GenehmigterAuftrag) -> Sendeantwort;
+    /// Versand mit belegter Zeit fuer einen Auftrag im Papiertag.
+    fn sende_am(&mut self, _auftrag: &GenehmigterAuftrag, _zeit: Zeitpunkt) -> Sendeantwort {
+        Sendeantwort::Abgelehnt("Konto unterstuetzt keinen zeitbelegten Versand".into())
+    }
+    /// Storniert im Halt offene Kaeufe und bestaetigt, dass keine mehr offen sind.
+    fn stoppe_kaeufe(&mut self) -> bool {
+        false
+    }
     /// Der Markt laeuft bis zum Schluss dieses Handelstags.
     fn markt(&mut self, kurse: &Kurse);
     /// Gibt faellige Verkaufserloese zum Kauf frei.
@@ -60,6 +69,7 @@ struct PapierOrder {
     auftrag: Order,
     status: KontoStatus,
     ausfuehrungen: Vec<Ausfuehrung>,
+    versand: Option<(Zeitpunkt, Zeitpunkt)>,
 }
 
 /// Das erfundene Gesamtkonto.
@@ -157,7 +167,16 @@ impl Papierkonto {
             return;
         };
         let a = &o.auftrag;
-        let ausfuehrung = kurse.eintrag(&a.isin).and_then(|eintrag| {
+        let mut eintrag = kurse.eintrag(&a.isin);
+        if let Some((_, schluss)) = o.versand {
+            let stand = kurse.stand();
+            if stand < schluss {
+                return;
+            }
+            eintrag =
+                eintrag.filter(|k| stand.datum() == schluss.datum() && k.zeitpunkt() == schluss);
+        }
+        let ausfuehrung = eintrag.and_then(|eintrag| {
             let exakt = eintrag.preis();
             // Limit in ganzen Cent: Aufgerundet liegt ein Kurs genau dann nicht ueber dem Limit,
             // wenn er es exakt nicht tut; abgerundet ebenso nicht darunter.
@@ -199,6 +218,7 @@ impl Papierkonto {
                     stueck: a.stueck,
                     kurs,
                     gebuehr,
+                    kurszeit: o.versand.map(|_| eintrag.zeitpunkt()),
                 },
             ))
         });
@@ -245,12 +265,13 @@ impl Konto for Papierkonto {
         self.orders.get(&nr).map(|o| KontoOrder {
             status: o.status,
             ausfuehrungen: o.ausfuehrungen.clone(),
+            versand: o.versand,
         })
     }
 }
 
-impl Broker for Papierkonto {
-    fn sende(&mut self, g: &GenehmigterAuftrag) -> Sendeantwort {
+impl Papierkonto {
+    fn nehme_an(&mut self, g: &GenehmigterAuftrag, versand: Option<Zeitpunkt>) -> Sendeantwort {
         self.sendungen = self.sendungen.saturating_add(1);
         let a = g.auftrag();
         let nr = a.kennung.nr();
@@ -265,6 +286,14 @@ impl Broker for Papierkonto {
             stueck: a.stueck,
             limit: a.limit,
         };
+        let versand = if let Some(zeit) = versand {
+            let Some(frist) = papierorder_schluss(&o.isin, zeit) else {
+                return Sendeantwort::Abgelehnt("keine Frist der Boerse".into());
+            };
+            Some((zeit, frist))
+        } else {
+            None
+        };
         let status = if self.gedeckt(&o) == Some(true) {
             KontoStatus::Offen
         } else {
@@ -276,12 +305,32 @@ impl Broker for Papierkonto {
                 auftrag: o,
                 status,
                 ausfuehrungen: Vec::new(),
+                versand,
             },
         );
         match status {
             KontoStatus::Offen => Sendeantwort::Angenommen,
             _ => Sendeantwort::Abgelehnt("keine Deckung im Konto".into()),
         }
+    }
+}
+
+impl Broker for Papierkonto {
+    fn sende(&mut self, g: &GenehmigterAuftrag) -> Sendeantwort {
+        self.nehme_an(g, None)
+    }
+
+    fn sende_am(&mut self, g: &GenehmigterAuftrag, zeit: Zeitpunkt) -> Sendeantwort {
+        self.nehme_an(g, Some(zeit))
+    }
+
+    fn stoppe_kaeufe(&mut self) -> bool {
+        for o in self.orders.values_mut() {
+            if o.status == KontoStatus::Offen && o.auftrag.richtung == Richtung::Kauf {
+                o.status = KontoStatus::Storniert;
+            }
+        }
+        true
     }
 
     fn rechne_ab(&mut self, tag: Datum) {
@@ -301,7 +350,8 @@ impl Broker for Papierkonto {
     }
 }
 
-const KOPF: &str = "papierkonto-v1";
+const KOPF_ALT: &str = "papierkonto-v1";
+const KOPF: &str = "papierkonto-v2";
 
 fn richtung_text(r: Richtung) -> &'static str {
     match r {
@@ -341,8 +391,13 @@ fn lies_richtung(t: &str) -> Option<Richtung> {
 impl Papierkonto {
     /// Das Konto als Text, eine Angabe je Zeile. `aus_text` liest genau diese Form.
     pub fn als_text(&self) -> String {
+        let kopf = if self.orders.values().any(|o| o.versand.is_some()) {
+            KOPF
+        } else {
+            KOPF_ALT
+        };
         let mut t = format!(
-            "{KOPF}\nbargeld;{}\nsendungen;{}\n",
+            "{kopf}\nbargeld;{}\nsendungen;{}\n",
             self.bargeld.0, self.sendungen
         );
         for (isin, n) in &self.bestand {
@@ -359,12 +414,19 @@ impl Papierkonto {
                 a.limit.0,
                 status_text(o.status)
             );
+            if let Some((zeit, frist)) = o.versand {
+                let _ = writeln!(t, "versand;{nr};{zeit};{frist}");
+            }
             for x in &o.ausfuehrungen {
-                let _ = writeln!(
+                let _ = write!(
                     t,
                     "ausfuehrung;{nr};{};{};{}",
                     x.stueck, x.kurs.0, x.gebuehr.0
                 );
+                if let Some(zeit) = x.kurszeit {
+                    let _ = write!(t, ";{zeit}");
+                }
+                t.push('\n');
             }
         }
         for (nr, (datum, erloes)) in &self.abrechnungen {
@@ -380,7 +442,7 @@ impl Papierkonto {
     /// Nennt die erste unlesbare Zeile.
     pub fn aus_text(text: &str) -> Result<Papierkonto, String> {
         let mut zeilen = text.lines();
-        if zeilen.next() != Some(KOPF) {
+        if !matches!(zeilen.next(), Some(KOPF | KOPF_ALT)) {
             return Err(format!("Papierkonto: Kopf {KOPF} fehlt"));
         }
         let mut k = Papierkonto {
@@ -412,16 +474,34 @@ impl Papierkonto {
                         },
                         status: lies_status(status).ok_or_else(fehler)?,
                         ausfuehrungen: Vec::new(),
+                        versand: None,
                     };
                     k.orders.insert(nr.parse().map_err(|_| fehler())?, o);
                 }
-                ["ausfuehrung", nr, stueck, kurs, gebuehr] => {
+                ["versand", nr, zeit, frist] => {
+                    let nr = nr.parse().map_err(|_| fehler())?;
+                    let o = k.orders.get_mut(&nr).ok_or_else(fehler)?;
+                    let zeit = Zeitpunkt::lies(zeit).ok_or_else(fehler)?;
+                    let frist = Zeitpunkt::lies(frist)
+                        .filter(|f| *f > zeit)
+                        .ok_or_else(fehler)?;
+                    o.versand = Some((zeit, frist));
+                }
+                ["ausfuehrung", nr, stueck, kurs, gebuehr, rest @ ..] => {
                     let nr: u64 = nr.parse().map_err(|_| fehler())?;
                     let o = k.orders.get_mut(&nr).ok_or_else(fehler)?;
+                    let kurszeit = match (o.versand, rest) {
+                        (None, []) => None,
+                        (Some((_, frist)), [zeit]) if Zeitpunkt::lies(zeit) == Some(frist) => {
+                            Some(frist)
+                        }
+                        _ => return Err(fehler()),
+                    };
                     o.ausfuehrungen.push(Ausfuehrung {
                         stueck: stueck.parse().map_err(|_| fehler())?,
                         kurs: Cent(kurs.parse().map_err(|_| fehler())?),
                         gebuehr: Cent(gebuehr.parse().map_err(|_| fehler())?),
+                        kurszeit,
                     });
                 }
                 ["abrechnung", nr, datum, netto] => {

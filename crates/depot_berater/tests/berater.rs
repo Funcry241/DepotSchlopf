@@ -510,8 +510,11 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
         matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
         "Ausgang: {aus:?}"
     );
-    let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A")?;
-    assert!(a.stueck(&sap()?) > 0, "SAP gekauft");
+    let sap = sap()?;
+    assert!(
+        j.stand().offene_auftraege().any(|l| l.beleg.isin == sap),
+        "SAP-Kauf wartet auf einen spaeteren Kurs"
+    );
     assert_eq!(dachs.netz().gesendet.len(), 1);
     assert_eq!(maus.netz().gesendet.len(), 2);
     let mit_kosten = j

@@ -224,9 +224,8 @@ fn depot(l: &Lagebild, s: &mut String) {
     };
     s.push_str(
         "<section><h2>Papierdepot</h2><p class=\"leise\">Nur Papiergeld, simuliert: Jeder \
-         Auftrag gilt als zum Schlusskurs des Entscheidungstags ausgeführt. Ob eine echte Order \
-         zu diesem Preis ausgeführt worden wäre, bleibt offen; ein Plus hier ist ein \
-         Simulationsergebnis.</p>",
+         Neue Orders warten auf einen geprüften Schlusskurs nach ihrem Versand. Ob eine echte \
+         Order zu diesem Preis ausgeführt worden wäre, bleibt offen.</p>",
     );
     if d.toepfe.is_empty() {
         s.push_str("<p class=\"leise\">Noch kein Depot: Es entsteht mit dem ersten Papiertag.</p>");

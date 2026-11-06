@@ -96,6 +96,7 @@ fn aus(stueck: u64, kurs: i64, gebuehr: i64) -> Ausfuehrung {
         stueck,
         kurs: Cent(kurs),
         gebuehr: Cent(gebuehr),
+        kurszeit: None,
     }
 }
 
@@ -157,6 +158,7 @@ impl Skript {
             KontoOrder {
                 status,
                 ausfuehrungen: ausfuehrungen.to_vec(),
+                versand: None,
             },
         );
         Ok(s)
