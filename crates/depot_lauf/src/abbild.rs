@@ -83,10 +83,15 @@ fn bau_variable(name: &str) -> bool {
 /// Der Aufruf des Gates in `dir` mit dem Build-Ordner `bau`. Das Gate erbt keine
 /// Bau-Einstellungen aus der Umgebung (K14-02).
 pub fn gate_befehl(dir: &Path, bau: &Path, args: &[String]) -> Command {
-    let mut c = Command::new("cargo");
+    let mut c = cargo_befehl(dir, bau);
     c.args(["run", "--quiet", "-p", "depot_kodex", "--"])
-        .args(args)
-        .current_dir(dir);
+        .args(args);
+    c
+}
+
+pub fn cargo_befehl(dir: &Path, bau: &Path) -> Command {
+    let mut c = Command::new("cargo");
+    c.current_dir(dir);
     for (k, _) in std::env::vars_os() {
         if bau_variable(&k.to_string_lossy()) {
             c.env_remove(k);
