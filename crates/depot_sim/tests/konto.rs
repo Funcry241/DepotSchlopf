@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_journal::{AuftragsZustand, Journal, Konto, KontoOrder, Kontoauszug, Meldung};
-use depot_kern::{Cent, Grenzen, Kurse, TopfId};
+use depot_kern::{Cent, Datum, Grenzen, Kurse, TopfId};
 use depot_regelwerk::{GenehmigterAuftrag, notbremse_auftraege};
 use depot_sim::{Broker, Drehbuch, LaufFehler, Papierkonto, Sendeantwort, Szenario, lauf};
 
@@ -112,6 +112,10 @@ impl Broker for Gestoert {
             antwort
         }
     }
+    fn rechne_ab(&mut self, tag: Datum) {
+        self.innen.rechne_ab(tag);
+    }
+
     fn markt(&mut self, kurse: &Kurse) {
         self.innen.markt(kurse);
         if let Some(b) = self.fremd.take() {
@@ -276,6 +280,7 @@ fn absturz_direkt_nach_dem_senden_bucht_einmal_und_sendet_nicht() -> Result<(), 
     let nr;
     {
         let mut j = ort.oeffnen()?;
+        vorbedingung(j.beginne_abrechnung(tag2.datum), "Abrechnungstag")?;
         let topf_a = j
             .stand()
             .toepfe()

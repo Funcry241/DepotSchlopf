@@ -96,6 +96,7 @@ fn aus(stueck: u64, kurs: i64, gebuehr: i64) -> Ausfuehrung {
         stueck,
         kurs: Cent(kurs),
         gebuehr: Cent(gebuehr),
+        kurszeit: None,
     }
 }
 
@@ -157,6 +158,7 @@ impl Skript {
             KontoOrder {
                 status,
                 ausfuehrungen: ausfuehrungen.to_vec(),
+                versand: None,
             },
         );
         Ok(s)
@@ -781,4 +783,20 @@ fn befund_k16_01_offene_auftraege_in_beide_richtungen() -> Result<(), String> {
     } else {
         Err(format!("{offen:#?}"))
     }
+}
+
+#[test]
+fn papierabrechnung_verlangt_einen_nachweis_auch_ohne_verkaeufe() -> Result<(), String> {
+    let p = mit_toepfen()?;
+    let mut j = oeffnen(&p)?;
+    let tag = Datum::neu(2026, 11, 5).ok_or("Vorbedingung: Datum")?;
+    vorbedingung(j.beginne_abrechnung(tag), "Abrechnungstag")?;
+    let mut konto = Skript::start()?;
+    assert_eq!(
+        vorbedingung(j.gleiche_ab(&konto), "Abgleich ohne Nachweis")?,
+        vec![Abweichung::AbrechnungsnachweisFehlt]
+    );
+    konto.auszug.abrechnungen = Some(BTreeMap::new());
+    assert!(vorbedingung(j.gleiche_ab(&konto), "Abgleich mit Nachweis")?.is_empty());
+    Ok(())
 }

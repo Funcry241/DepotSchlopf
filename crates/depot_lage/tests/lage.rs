@@ -588,6 +588,7 @@ struct Antwortet;
 impl Berater for Antwortet {
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            prognose: None,
             verwertbar: true,
             einschaetzung: "Heute nichts kaufen.".into(),
             vorschlag: None,
@@ -614,6 +615,7 @@ struct Verwirft;
 impl Berater for Verwirft {
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            prognose: None,
             verwertbar: false,
             einschaetzung: "keine verwertbare Antwort: Limit".into(),
             vorschlag: None,
@@ -648,6 +650,7 @@ impl Berater for OhneSchluessel {
 
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            prognose: None,
             verwertbar: false,
             einschaetzung: "nicht angebunden".into(),
             vorschlag: None,
@@ -904,7 +907,7 @@ fn papierdepot_nennt_die_simulation() -> Result<(), String> {
     let s = html::seite(&l);
     assert!(
         s.contains("Nur Papiergeld, simuliert")
-            && s.contains("zum Schlusskurs des Entscheidungstags ausgeführt"),
+            && s.contains("geprüften Schlusskurs nach ihrem Versand"),
         "{s}"
     );
     Ok(())

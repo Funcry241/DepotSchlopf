@@ -210,7 +210,7 @@ pub fn vermerke_geprueft(wurzel: &Path, baum: &str) {
 }
 
 /// Prueft den neuen Stand in seiner Kopie mit dem ganzen Gate.
-fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
+fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<abbild::Abbild, String> {
     let ablage = abbild::ablage(wurzel);
     println!("[Update] Kopie von {} anlegen", kurz(&k.neu));
     let abbild = abbild::festhalten_commit(wurzel, &ablage, "update", &k.neu)?;
@@ -234,8 +234,63 @@ fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
             probleme.join("\n")
         ));
     }
-    vermerke_geprueft(wurzel, &abbild.baum);
+    Ok(abbild)
+}
+
+fn pruefe_datenkopie(wurzel: &Path, kopie: &abbild::Abbild, probe: &Path) -> Result<(), String> {
+    let aus = abbild::cargo_befehl(&kopie.kopie, &abbild::ablage(wurzel).join("bau-update"))
+        .args([
+            "run",
+            "--locked",
+            "--quiet",
+            "-p",
+            "depot_lage",
+            "--",
+            "--update-datenprobe",
+        ])
+        .arg(probe)
+        .output()
+        .map_err(|e| format!("Datenprobe konnte nicht starten: {e}"))?;
+    if !aus.status.success() {
+        return Err(format!(
+            "Der neue Stand kann deine Papierdaten nicht prüfen. Update nicht eingespielt: {}",
+            String::from_utf8_lossy(&aus.stderr).trim()
+        ));
+    }
+    let probleme = abbild::vergleiche(wurzel, kopie);
+    if !probleme.is_empty() {
+        return Err(format!(
+            "Prüfkopie wurde verändert: {}",
+            probleme.join("\n")
+        ));
+    }
     Ok(())
+}
+
+fn einspielen_mit_datenprobe(
+    wurzel: &Path,
+    k: &Kandidat,
+    ablage: &Path,
+    pruefe: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let daten = wurzel.join("daten");
+    let journal = crate::updatedaten::journal_sperren(&daten)?;
+    let stand = crate::updatedaten::lesen(&daten)?;
+    let probe = crate::updatedaten::Probe::neu(ablage)?;
+    crate::updatedaten::kopiere(&stand, &probe.0)?;
+    pruefe(&probe.0)?;
+    crate::updatedaten::sichern(&daten, &stand, &k.alt)
+        .map_err(|e| format!("Datensicherung fehlgeschlagen. Update nicht eingespielt: {e}"))?;
+    if crate::updatedaten::lesen(&daten)? != stand {
+        return Err(
+            "Papierdaten haben sich während der Prüfung geändert. Update nicht eingespielt.".into(),
+        );
+    }
+    let ergebnis = einspielen(wurzel, k);
+    if let Some(f) = journal {
+        let _ = f.unlock();
+    }
+    ergebnis
 }
 
 /// Spielt einen geprueften Stand vorwaerts ein.
@@ -263,9 +318,10 @@ fn einspielen(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
 
 /// `run.cmd update [pruefen]`.
 pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
-    let nur_pruefen = match optionen {
-        [] => false,
-        [o] if o == "pruefen" => true,
+    let (nur_pruefen, erwartet) = match optionen {
+        [] => (false, None),
+        [o] if o == "pruefen" => (true, None),
+        [sha] if ist_commit(sha) => (false, Some(sha)),
         _ => {
             eprintln!("[Update] FEHLER: erlaubt sind nur `update` und `update pruefen`.");
             return ExitCode::from(2);
@@ -283,12 +339,28 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if erwartet.is_some_and(|sha| sha != &k.neu) {
+        eprintln!("[Update] Seit der Suche gibt es einen anderen Stand. Bitte suche erneut.");
+        return ExitCode::FAILURE;
+    }
     zeige(&k);
     if nur_pruefen {
         println!("[Update] Nur geprueft; eingespielt wird mit `run.cmd update`.");
+        println!("[Update] Kandidat: {}", k.neu);
         return ExitCode::SUCCESS;
     }
-    match pruefe_kopie(wurzel, &k).and_then(|()| einspielen(wurzel, &k)) {
+    let ergebnis = crate::updatedaten::update_sperren(&wurzel.join("daten")).and_then(|sperre| {
+        let ergebnis = pruefe_kopie(wurzel, &k).and_then(|kopie| {
+            einspielen_mit_datenprobe(wurzel, &k, &abbild::ablage(wurzel), |probe| {
+                pruefe_datenkopie(wurzel, &kopie, probe)
+            })?;
+            vermerke_geprueft(wurzel, &kopie.baum);
+            Ok(())
+        });
+        let _ = sperre.unlock();
+        ergebnis
+    });
+    match ergebnis {
         Ok(()) => {
             println!(
                 "[Update] Eingespielt: {} -> {}. Der Dienst startet neu und bestaetigt es; \
@@ -394,6 +466,51 @@ mod tests {
     }
 
     #[test]
+    fn gate_checkout_behaelt_lf_trotz_globaler_git_einstellung() -> Result<(), String> {
+        let a = aufbau()?;
+        let config = a.projekt.join("daten/gitconfig");
+        fs::write(&config, "[core]\n    autocrlf = true\n    eol = crlf\n")
+            .map_err(|e| e.to_string())?;
+        let gate = abbild::gate_befehl(&a.projekt, &a.projekt.join("bau"), &[]);
+        let mut git = Command::new("git");
+        // Die von Cargo an Git vererbte Umgebung übernehmen und eine Nutzerconfig simulieren.
+        for (schluessel, wert) in gate.get_envs() {
+            if let Some(wert) = wert {
+                git.env(schluessel, wert);
+            } else {
+                git.env_remove(schluessel);
+            }
+        }
+        let datei = a.projekt.join("a.txt");
+        fs::remove_file(&datei).map_err(|e| e.to_string())?;
+        let aus = git
+            .current_dir(&a.projekt)
+            .env("GIT_CONFIG_GLOBAL", config)
+            .args(["checkout", "--", "a.txt"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        assert!(
+            aus.status.success(),
+            "{}",
+            String::from_utf8_lossy(&aus.stderr)
+        );
+        assert_eq!(fs::read(&datei).map_err(|e| e.to_string())?, b"eins\n");
+        Ok(())
+    }
+
+    #[test]
+    fn einspielen_lehnt_neueren_als_den_bestaetigten_commit_ab() -> Result<(), String> {
+        let a = aufbau()?;
+        let alt = g(&a.projekt, &["rev-parse", "HEAD"])?;
+        let erwartet = neuer_stand(&a, "zwei")?;
+        neuer_stand(&a, "drei")?;
+        assert_eq!(lauf(&a.projekt, &[erwartet]), ExitCode::FAILURE);
+        assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, alt);
+        assert!(!offen_pfad(&a.projekt).exists());
+        Ok(())
+    }
+
+    #[test]
     fn offen_hat_festes_format() {
         let a = "a".repeat(40);
         let b = "b".repeat(40);
@@ -440,6 +557,53 @@ mod tests {
         );
         // Solange es offen ist, gibt es kein weiteres Update.
         assert!(vorbedingungen(&a.projekt).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn update_rueckt_nur_nach_datenprobe_und_gepruefter_sicherung_vor() -> Result<(), String> {
+        let a = aufbau()?;
+        let neu = neuer_stand(&a, "zwei\n")?;
+        let k = hole(&a.projekt)?.ok_or("Update erwartet")?;
+        let daten = a.projekt.join("daten");
+        let journal = daten.join("journal.txt");
+        let schreibe = |p, bytes: &[u8]| fs::write(p, bytes).map_err(|e| e.to_string());
+        schreibe(&journal, b"Original")?;
+        let sicherung = daten.join("sicherung");
+        let pruefe = |probe: &Path| {
+            let bytes = fs::read(probe.join("journal.txt")).map_err(|e| e.to_string())?;
+            assert_eq!(bytes, b"Original");
+            Ok(())
+        };
+        let e = einspielen_mit_datenprobe(&a.projekt, &k, &a.projekt, |_| {
+            Err("unlesbarer Freigabebeleg".into())
+        });
+        assert_eq!(e, Err("unlesbarer Freigabebeleg".into()));
+        assert!(!offen_pfad(&a.projekt).exists());
+        assert!(!sicherung.exists());
+        assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, k.alt);
+
+        schreibe(&sicherung, b"blockiert")?;
+        let e = einspielen_mit_datenprobe(&a.projekt, &k, &a.projekt, pruefe);
+        assert!(e.is_err_and(|e| e.contains("Datensicherung fehlgeschlagen")));
+        assert!(!offen_pfad(&a.projekt).exists());
+        assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, k.alt);
+
+        fs::remove_file(&sicherung).map_err(|e| e.to_string())?;
+        einspielen_mit_datenprobe(&a.projekt, &k, &a.projekt, pruefe)?;
+        let mut ordner = fs::read_dir(sicherung).map_err(|e| e.to_string())?;
+        let backup = ordner
+            .next()
+            .ok_or("Sicherung fehlt")?
+            .map_err(|e| e.to_string())?
+            .path();
+        assert!(ordner.next().is_none());
+        assert_eq!(
+            fs::read(backup.join("journal.txt")).map_err(|e| e.to_string())?,
+            b"Original"
+        );
+        assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, b"Original");
+        assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, neu);
         Ok(())
     }
 

@@ -16,7 +16,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use depot_kern::{Cent, Grenzen, Isin, TopfId};
+use depot_kern::{
+    Boerse, Cent, Datum, Grenzen, Isin, TopfId, Zeitpunkt, liste::papierorder_schluss,
+};
 use depot_regelwerk::{GenehmigterAuftrag, Richtung};
 
 use crate::auftrag::{AuftragsZustand, Ausfuehrung, Meldung};
@@ -39,6 +41,23 @@ pub enum KontoStatus {
 pub struct KontoOrder {
     pub status: KontoStatus,
     pub ausfuehrungen: Vec<Ausfuehrung>,
+    pub versand: Option<(Zeitpunkt, Zeitpunkt)>,
+}
+
+/// Valuta und Nettoerloes je Verkaufsorder im EUR-Papiermodell.
+pub type Abrechnungen = BTreeMap<u64, (Datum, Cent)>;
+
+/// Einheitliche Regel des EUR-Papiermodells, auch fuer NYSE-Werte.
+pub fn papier_valuta(mut tag: Datum) -> Option<Datum> {
+    for _ in 0..2 {
+        loop {
+            tag = tag.plus_tage(1)?;
+            if Boerse::Xetra.handelstag(tag) {
+                break;
+            }
+        }
+    }
+    Some(tag)
 }
 
 /// Was das Konto meldet. Betraege in Euro-Cent.
@@ -51,6 +70,9 @@ pub struct Kontoauszug {
     pub offene: BTreeSet<u64>,
     /// Waehrungen ausser Euro mit einem Saldo ungleich null.
     pub fremde_waehrungen: BTreeSet<String>,
+    /// Belege seit Aktivierung der Papierabrechnung, auch wenn sie schon faellig wurden.
+    /// `None` bedeutet, dass das Konto keinen Nachweis liefert.
+    pub abrechnungen: Option<Abrechnungen>,
 }
 
 /// Das Konto, wie der Kontowaechter es liest. Lesen darf jeder; senden nur die Auftragsstelle.
@@ -87,13 +109,23 @@ pub enum Abweichung {
         nr: u64,
         grund: String,
     },
+    AbrechnungsnachweisFehlt,
+    Abrechnung {
+        nr: u64,
+        journal: Option<(Datum, Cent)>,
+        konto: Option<(Datum, Cent)>,
+    },
     Rechnung,
 }
 
 /// Bargeld eines Topfes, das noch fuer einen Kauf frei ist: Bargeld minus aller offenen Kaeufe
-/// am Limit mit hoechstmoeglicher Gebuehr (Kap. 9). `None` bei Ueberlauf oder ohne Topf.
+/// am Limit samt Gebuehr und minus noch nicht abgerechneter Erloese.
 pub fn verfuegbar(grenzen: &Grenzen, stand: &Stand, topf: TopfId) -> Option<Cent> {
-    let mut frei = stand.toepfe().get(&topf)?.bargeld();
+    let mut frei = stand
+        .toepfe()
+        .get(&topf)?
+        .bargeld()
+        .checked_sub(stand.gesperrt(topf)?)?;
     for l in stand.offene_auftraege() {
         if l.beleg.topf == topf && l.beleg.richtung == Richtung::Kauf {
             frei = frei.checked_sub(kaufbedarf(grenzen, l.beleg.limit, l.offen_stueck())?)?;
@@ -195,6 +227,25 @@ pub fn abweichungen(stand: &Stand, auszug: &Kontoauszug) -> Vec<Abweichung> {
     for nr in beim_broker.difference(&auszug.offene) {
         aus.push(Abweichung::OrderNichtImAuszug(*nr));
     }
+    match &auszug.abrechnungen {
+        Some(konto) => {
+            let journal = stand.abrechnungen();
+            let nummern: BTreeSet<_> = journal.keys().chain(konto.keys()).copied().collect();
+            for nr in nummern {
+                let j = journal.get(&nr).copied();
+                let k = konto.get(&nr).copied();
+                if j != k {
+                    aus.push(Abweichung::Abrechnung {
+                        nr,
+                        journal: j,
+                        konto: k,
+                    });
+                }
+            }
+        }
+        None if stand.abrechnungstag().is_some() => aus.push(Abweichung::AbrechnungsnachweisFehlt),
+        None => {}
+    }
     if rechnung {
         aus.push(Abweichung::Rechnung);
     }
@@ -230,6 +281,17 @@ impl Journal {
     /// `Abgelehnt`, wenn der Schritt nach der Zustandsmaschine unzulaessig ist oder die
     /// Ausfuehrung Limit, Menge oder Deckung verletzt. Sonst wie `anhaengen`.
     pub fn melde(&mut self, nr: u64, meldung: &Meldung) -> Result<(), JournalFehler> {
+        if let Meldung::GesendetAm(zeit, frist) = meldung
+            && self
+                .stand()
+                .auftrag(nr)
+                .and_then(|l| papierorder_schluss(&l.beleg.isin, *zeit))
+                != Some(*frist)
+        {
+            return Err(JournalFehler::Abgelehnt(
+                "Versand: ungueltige Boersenfrist".into(),
+            ));
+        }
         self.schreibe_meldung(nr, meldung)
     }
 
@@ -270,6 +332,14 @@ impl Journal {
                 _ => Some(Abweichung::OrderFehlt(nr)),
             });
         };
+        if lage.versand.zip(lage.frist) != order.versand
+            && lage.zustand != AuftragsZustand::Reserviert
+        {
+            return Ok(Some(Abweichung::Unbuchbar {
+                nr,
+                grund: "Versandzeit oder Boersenfrist weicht vom Journal ab".into(),
+            }));
+        }
         let mut folge = Vec::new();
         match lage.zustand {
             AuftragsZustand::Reserviert => return Ok(Some(Abweichung::OrderOhneVersand(nr))),

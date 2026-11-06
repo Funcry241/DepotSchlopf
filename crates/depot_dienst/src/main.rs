@@ -21,22 +21,17 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use depot_dienst::programmstand;
 use depot_dienst::rueckfall::{self, NEUSTART};
 use depot_dienst::werkbank::{Dienst, cargo_starter};
 use depot_dienst::{
-    System, Umwelt, behandle, finde_wurzel, http, lagerechner, neues_token, oeffne_browser,
+    System, Umwelt, behandle, finde_wurzel, http, jetzt, lagerechner, neues_token, oeffne_browser,
 };
-use depot_kern::Zeitpunkt;
 
 /// So viele Verbindungen werden hoechstens zugleich bedient; weitere werden geschlossen.
 const VERBINDUNGEN_MAX: usize = 32;
-fn jetzt() -> Option<Zeitpunkt> {
-    let s = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    Zeitpunkt::aus_sekunden(i64::try_from(s).ok()?)
-}
 
 fn bediene(d: &Dienst, u: &dyn Umwelt, mut strom: TcpStream) {
     let _ = strom.set_read_timeout(Some(Duration::from_secs(10)));
@@ -44,10 +39,10 @@ fn bediene(d: &Dienst, u: &dyn Umwelt, mut strom: TcpStream) {
     let antwort = match http::lies(&mut strom) {
         Ok(anfrage) => match jetzt() {
             Some(t) => behandle(d, u, &anfrage, t),
-            None => http::text(500, "Uhr liefert keinen Zeitpunkt"),
+            None => depot_dienst::seiten::fehler(500, "Uhr liefert keinen Zeitpunkt"),
         },
-        Err(http::LeseFehler::ZuGross) => http::text(413, "Anfrage zu gross"),
-        Err(http::LeseFehler::Kaputt) => http::text(400, "Anfrage unlesbar"),
+        Err(http::LeseFehler::ZuGross) => depot_dienst::seiten::fehler(413, "Anfrage zu gross"),
+        Err(http::LeseFehler::Kaputt) => depot_dienst::seiten::fehler(400, "Anfrage unlesbar"),
         Err(http::LeseFehler::Abgebrochen) => return,
     };
     let _ = strom.write_all(&antwort);
@@ -87,13 +82,20 @@ fn bestaetigen(d: &Arc<Dienst>) {
             let d = Arc::clone(d);
             thread::spawn(move || {
                 thread::sleep(rueckfall::BESTAETIGEN_NACH);
-                let m = match rueckfall::bestaetige(&d.wurzel) {
+                let m = match rueckfall::bestaetige_mit_wiederholung(
+                    &d.wurzel,
+                    rueckfall::BESTAETIGUNG_WIEDERHOLEN_FUER,
+                    rueckfall::BESTAETIGUNG_WIEDERHOLEN_ALLE,
+                ) {
                     Ok(Some(o)) => (
                         false,
                         format!("Update auf {} bestätigt.", rueckfall::kurz(&o.neu)),
                     ),
                     Ok(None) => (false, "Kein Update offen.".to_string()),
-                    Err(e) => (true, e),
+                    Err(e) => {
+                        eprintln!("[Update] {e}");
+                        (true, e)
+                    }
                 };
                 d.sperre().update_meldung = Some(m);
             });
@@ -114,7 +116,11 @@ enum Herkunft {
 fn starter_fuer(
     wurzel: &std::path::Path,
     h: &Herkunft,
-) -> (depot_dienst::werkbank::Starter, (bool, String)) {
+) -> (
+    depot_dienst::werkbank::Starter,
+    (bool, String),
+    Option<String>,
+) {
     match h {
         Herkunft::Stand => match programmstand::startklar(wurzel) {
             Ok(s) => (
@@ -126,19 +132,22 @@ fn starter_fuer(
                         s.kurz()
                     ),
                 ),
+                programmstand::commit_fuer_baum(wurzel, &s.baum),
             ),
             Err(e) => (
                 cargo_starter(),
                 (true, format!("Programmstand nicht verwendbar ({e}); Aufträge über Cargo.")),
+                None,
             ),
         },
-        Herkunft::Gebaut(_) => (
+        Herkunft::Gebaut(baum) => (
             cargo_starter(),
             (
                 false,
                 "Mit Cargo gebaut. Läuft der Dienst gleich eine Weile, wird dieser Stand für den nächsten Start gesichert."
                     .into(),
             ),
+            programmstand::commit_fuer_baum(wurzel, baum),
         ),
         Herkunft::Unbekannt => (
             cargo_starter(),
@@ -146,6 +155,7 @@ fn starter_fuer(
                 true,
                 "Ohne Wächter gestartet: Kein Programmstand für einen Start ohne Cargo.".into(),
             ),
+            None,
         ),
     }
 }
@@ -233,13 +243,10 @@ fn main() -> ExitCode {
     };
     let token = neues_token();
     let umwelt: Arc<dyn Umwelt> = Arc::new(System);
-    let (starter, meldung) = starter_fuer(&wurzel, &herkunft);
-    let dienst = Arc::new(Dienst::neu(
-        wurzel,
-        token.clone(),
-        starter,
-        lagerechner(token, Arc::clone(&umwelt)),
-    ));
+    let (starter, meldung, version) = starter_fuer(&wurzel, &herkunft);
+    let mut dienst = Dienst::neu(wurzel, token, starter, lagerechner(Arc::clone(&umwelt)));
+    dienst.version = version;
+    let dienst = Arc::new(dienst);
     dienst.sperre().programm_meldung = Some(meldung);
     bestaetigen(&dienst);
     if let Herkunft::Gebaut(baum) = herkunft {

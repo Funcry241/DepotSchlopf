@@ -33,8 +33,14 @@ mod zugang;
 pub use betrieb::{AnbieterHinweis, Betrieb, SchluesselStand};
 pub use budget::{BudgetStatus, KiBudget, ki_budget, mit_verbrauch};
 pub use depot::{AuftragZeile, DepotLage, Position, TopfLage};
+pub use depot_sim::papierlauf::{
+    PapierFreigabeAngebot, PapierFreigabeFehler, papier_freigabe_angebot, papier_freigeben,
+};
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
-pub use zugang::{PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien};
+pub use zugang::{
+    DatenprobeFehler, PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien,
+    update_datenprobe,
+};
 
 use depot_journal::Stand;
 use depot_journal::anbieter::{Eintrag, Wer};
@@ -497,6 +503,18 @@ fn termin_und_tag(s: &Stand, heute: Datum, kurse_heute: &Heute, punkte: &mut Vec
         ),
     });
     punkte.push(match (tageslage(s, heute), kurse_heute) {
+        (Ok(Tageslage::WartetAufWiederanlauf), _) => punkt(
+            "Papiertag",
+            Ampel::Halt,
+            "Notbremse aktiv. Der nächste Papiertag prüft den automatischen Wiederanlauf.".into(),
+            None,
+        ),
+        (Ok(Tageslage::NurSchutzverkaeufe), _) => punkt(
+            "Papiertag",
+            Ampel::Halt,
+            "Notbremse aktiv. Schutzverkäufe für den verbleibenden Bestand laufen weiter.".into(),
+            Some(Abhilfe::Pruefen),
+        ),
         (Ok(Tageslage::Abgeschlossen(d)), _) => punkt(
             "Papiertag",
             Ampel::Gut,

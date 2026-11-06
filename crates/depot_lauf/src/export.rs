@@ -1015,7 +1015,8 @@ mod tests {
     }
 
     /// Das Gate erbt keine Bau-Einstellungen aus der Umgebung: Jede Variable fuer Cargo,
-    /// Rust oder Git wird entfernt. Es bleiben die Orte der Werkzeuge und die Netzangaben fuer
+    /// Rust oder Git wird entfernt oder mit einem festen Wert ersetzt. Es bleiben die
+    /// Orte der Werkzeuge und die Netzangaben fuer
     /// das Laden von Abhaengigkeiten, deren Inhalt `Cargo.lock` mit Pruefsummen festlegt.
     #[test]
     fn befund_k14_02_gate_erbt_keine_bau_einstellungen() {
@@ -1030,6 +1031,16 @@ mod tests {
                 )
             })
             .collect();
+        let fest = [
+            ("GIT_CONFIG_COUNT", "2"),
+            ("GIT_CONFIG_KEY_0", "core.autocrlf"),
+            ("GIT_CONFIG_VALUE_0", "false"),
+            ("GIT_CONFIG_KEY_1", "core.eol"),
+            ("GIT_CONFIG_VALUE_1", "lf"),
+        ];
+        for (k, wert) in fest {
+            assert_eq!(gesetzt.get(k).and_then(Option::as_deref), Some(wert), "{k}");
+        }
         let mut geprueft = 0_u32;
         let mut offen = Vec::new();
         for (k, _) in std::env::vars_os() {
@@ -1038,7 +1049,7 @@ mod tests {
             let erlaubt = ["CARGO_HOME", "RUSTUP_HOME", "CARGO_TARGET_DIR"].contains(&k.as_str())
                 || k.starts_with("CARGO_HTTP_")
                 || k.starts_with("CARGO_NET_");
-            if !bau_var || erlaubt {
+            if !bau_var || erlaubt || fest.iter().any(|(schluessel, _)| *schluessel == k) {
                 continue;
             }
             geprueft = geprueft.saturating_add(1);

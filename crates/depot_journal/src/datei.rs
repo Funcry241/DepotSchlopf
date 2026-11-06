@@ -21,7 +21,7 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write as _};
 use std::path::{Component, Path, PathBuf};
 
-use depot_kern::{BeraterId, Cent, Datum, Topf, TopfId};
+use depot_kern::{BeraterId, Cent, Datum, Topf, TopfId, Zeitpunkt};
 use depot_ki::{Sperre, grenzabdruck};
 use depot_regelwerk::{GenehmigterAuftrag, Kennungsvergabe};
 use sha2::{Digest, Sha256};
@@ -316,7 +316,7 @@ fn sichere(ziel: &Path, rest: &[u8]) -> Result<(), JournalFehler> {
 #[derive(Debug)]
 pub struct Journal {
     vermerk: PathBuf,
-    /// Die geoeffnete und vom Betriebssystem gesperrte Datei. Die Sperre endet mit ihr.
+    /// Die geoeffnete und vom Betriebssystem gesperrte Datei.
     datei: File,
     laenge: u64,
     kette: String,
@@ -324,6 +324,14 @@ pub struct Journal {
     stand: Stand,
     /// Grund, falls ein Schreibfehler das Journal gesperrt hat (R29).
     gesperrt: Option<String>,
+}
+
+impl Drop for Journal {
+    fn drop(&mut self) {
+        // Unter Unix kann ein gleichzeitig gestarteter Kindprozess den Dateideskriptor
+        // bis zum exec erben. Explizit entsperren, damit der naechste Lauf nicht darauf wartet.
+        let _ = self.datei.unlock();
+    }
 }
 
 /// Prueft alle Eintraege nach dem Kopf und rechnet den Stand nach.
@@ -345,6 +353,16 @@ fn nachrechnen(zeilen: &[String]) -> Result<(Vec<(Art, String)>, Stand), Journal
         eintraege.push((art, inhalt.to_string()));
     }
     Ok((eintraege, stand))
+}
+
+fn lies_vermerk(pfad: &Path) -> Result<Vermerk, JournalFehler> {
+    if !datei_da(pfad)? {
+        return Err(halt("Anhangsvermerk fehlt"));
+    }
+    fs::read_to_string(pfad)
+        .ok()
+        .and_then(|t| Vermerk::lies(&t))
+        .ok_or_else(|| halt("Anhangsvermerk unlesbar"))
 }
 
 impl Journal {
@@ -399,6 +417,41 @@ impl Journal {
         Ok(false)
     }
 
+    /// Prüft einen vollständig bestätigten Stand ohne Wiederherstellung oder Schreibzugriff.
+    /// Ein noch geplanter Anhang verlangt zuerst die normale Wiederherstellung.
+    pub fn pruefe_lesend<R>(
+        pfad: &Path,
+        pruefe: impl FnOnce(&Stand) -> R,
+    ) -> Result<R, JournalFehler> {
+        if !Self::eingerichtet(pfad)? {
+            return Err(halt("nicht eingerichtet: Journal und Vermerk fehlen"));
+        }
+        let mut datei = File::open(pfad).map_err(|e| halt(format!("Journal lesen: {e}")))?;
+        match datei.try_lock_shared() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => return Err(JournalFehler::Belegt),
+            Err(TryLockError::Error(e)) => return Err(halt(format!("sperren: {e}"))),
+        }
+        let vermerk = lies_vermerk(&vermerk_pfad(pfad))?;
+        let mut inhalt = Vec::new();
+        datei
+            .read_to_end(&mut inhalt)
+            .map_err(|e| halt(format!("Journal lesen: {e}")))?;
+        if vermerk.geplant != 0 || als_u64(inhalt.len()).map_err(halt)? != vermerk.laenge {
+            return Err(halt(
+                "Journal hat einen offenen oder unvollständigen Anhang",
+            ));
+        }
+        let (zeilen, kette) = pruefe_zeilen(&inhalt, &kettenanfang()).map_err(halt)?;
+        if kette != vermerk.kette {
+            return Err(halt("Journal weicht vom bestätigten Stand ab"));
+        }
+        let (_, stand) = nachrechnen(&zeilen)?;
+        let ergebnis = pruefe(&stand);
+        let _ = datei.unlock();
+        Ok(ergebnis)
+    }
+
     /// Oeffnet exklusiv, prueft die ganze Kette gegen den Vermerk, behandelt einen vermerkten
     /// Anhang und rechnet den Stand nach. Jede Unstimmigkeit ist Halt.
     ///
@@ -420,13 +473,7 @@ impl Journal {
             Err(TryLockError::WouldBlock) => return Err(JournalFehler::Belegt),
             Err(TryLockError::Error(e)) => return Err(halt(format!("sperren: {e}"))),
         }
-        if !datei_da(&vermerk)? {
-            return Err(halt("Anhangsvermerk fehlt"));
-        }
-        let v = fs::read_to_string(&vermerk)
-            .ok()
-            .and_then(|t| Vermerk::lies(&t))
-            .ok_or_else(|| halt("Anhangsvermerk unlesbar"))?;
+        let v = lies_vermerk(&vermerk)?;
         let mut inhalt = Vec::new();
         datei
             .read_to_end(&mut inhalt)
@@ -548,6 +595,24 @@ impl Journal {
             Art::Zustand => Err(JournalFehler::Abgelehnt(
                 "Auftragszustaende entstehen nur ueber melde und gleiche_ab".into(),
             )),
+            Art::Weltprognose => Err(JournalFehler::Abgelehnt(
+                "Weltprognose nur ueber belege_weltprognose".into(),
+            )),
+            Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
+                "Abrechnungstag nur ueber beginne_abrechnung".into(),
+            )),
+            Art::PapierFreigabe => Err(JournalFehler::Abgelehnt(
+                "Papierfreigabe nur ueber gebe_papier_frei".into(),
+            )),
+            Art::PapierHalt => Err(JournalFehler::Abgelehnt(
+                "Papier-Halt nur ueber belege_papier_halt".into(),
+            )),
+            Art::NotbremseFreigabe => Err(JournalFehler::Abgelehnt(
+                "Notbremsenfreigabe nur ueber schliesse_wiederanlauf_ab".into(),
+            )),
+            Art::Wissensstichtag => Err(JournalFehler::Abgelehnt(
+                "Wissensstichtag nur ueber belege_wissensstichtag".into(),
+            )),
             Art::Format => Err(JournalFehler::Abgelehnt(
                 "Die Umstellung entsteht nur ueber stelle_um".into(),
             )),
@@ -650,6 +715,73 @@ impl Journal {
         )
     }
 
+    /// Loest genau die ausdruecklich bestaetigte Papier-Sperre nach erneutem Kontoabgleich.
+    pub fn gebe_papier_frei(
+        &mut self,
+        gesehen: &str,
+        konto: &dyn crate::Konto,
+        bestaetigt_am: Zeitpunkt,
+    ) -> Result<(), JournalFehler> {
+        if self.kette != gesehen {
+            return Err(JournalFehler::Abgelehnt(
+                "Papierfreigabe: Journalstand hat sich geaendert".into(),
+            ));
+        }
+        let bargeld = self.stand.papier_freigabe_bargeld().ok_or_else(|| {
+            JournalFehler::Abgelehnt("Papierfreigabe: keine freigabefaehige Sperre".into())
+        })?;
+        let abweichungen = crate::konto::abweichungen(&self.stand, &konto.auszug());
+        if !abweichungen.is_empty() {
+            return Err(JournalFehler::Abgelehnt(format!(
+                "Papierfreigabe: Kontowächter {abweichungen:?}"
+            )));
+        }
+        let tag = self
+            .stand
+            .abschluss()
+            .ok_or_else(|| JournalFehler::Abgelehnt("Papierfreigabe ohne Abschluss".into()))?
+            .datum;
+        let basis = crate::stand::papier_freigabe_text(tag, bargeld);
+        self.schreibe_eintrag(Art::PapierFreigabe, &format!("{basis};{bestaetigt_am}"))
+    }
+
+    /// Belegt den Halt des laufenden Papiertags mit seiner dauerhaften Grundkennung.
+    pub fn belege_papier_halt(
+        &mut self,
+        datum: Datum,
+        grund: crate::PapierHalt,
+    ) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::PapierHalt, &format!("{datum};{}", grund.kennung()))
+    }
+
+    /// Schreibt nach erfolgreicher Pruefung den Abschluss und die Papier-Freigabe zusammen.
+    pub fn schliesse_wiederanlauf_ab(
+        &mut self,
+        datum: Datum,
+        abdruck: &str,
+    ) -> Result<Cent, JournalFehler> {
+        let hoechststand = self.stand().papier_bargeld().ok_or_else(|| {
+            JournalFehler::Abgelehnt("Notbremsenfreigabe: Bargeld nicht berechenbar".into())
+        })?;
+        self.schreibe_eintrag(
+            Art::NotbremseFreigabe,
+            &abschluss_text(&Abschluss {
+                datum,
+                hoechststand,
+                abdruck: abdruck.to_string(),
+            }),
+        )?;
+        Ok(hoechststand)
+    }
+
+    /// Fixiert eine unabhaengige Weltprognose im laufenden Papiertag.
+    pub fn belege_weltprognose(
+        &mut self,
+        beleg: &crate::weltprognose::PrognoseBeleg,
+    ) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Weltprognose, &beleg.als_text())
+    }
+
     /// Belegt einen Kurs mit Quelle, Abrufzeit und Abdruck der rohen Antwort, bevor er
     /// verwendet wird (R12).
     ///
@@ -720,6 +852,20 @@ impl Journal {
             return Ok(());
         }
         self.schreibe_eintrag(Art::Format, &FORMAT.to_string())
+    }
+
+    /// Fixiert die beim Start des Papiertags verfuegbare Weltlage.
+    pub fn belege_wissensstichtag(
+        &mut self,
+        tag: Datum,
+        zeit: depot_kern::Zeitpunkt,
+    ) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Wissensstichtag, &format!("{tag};{zeit}"))
+    }
+
+    /// Belegt den Handelstag vor der ersten Ausfuehrung und gibt faellige Erloese frei.
+    pub fn beginne_abrechnung(&mut self, tag: Datum) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Abrechnungstag, &tag.to_string())
     }
 
     /// Schreibt den naechsten Zustand eines Auftrags.

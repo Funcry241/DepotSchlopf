@@ -6,4 +6,3 @@ crates/depot_kern/
 crates/depot_sammler/
 docs/
 CHANGELOG.md
-kodex/aenderung.txt

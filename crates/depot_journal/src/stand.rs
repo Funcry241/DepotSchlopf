@@ -7,15 +7,58 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use depot_kern::{Cent, Datum, Isin, Topf, TopfId, Zeitpunkt};
+use depot_kern::{Cent, Datum, Grenzen, Herkunft, Isin, Rundung, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 
 use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
 
 use crate::kasse::KiStand;
+use crate::konto::{Abrechnungen, papier_valuta};
 use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
 use crate::nachrichtbeleg::{NachrichtBeleg, lies_nachrichtbeleg, nachrichtbeleg_text};
 use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
+
+use crate::weltprognose::PrognoseBeleg;
+
+// Historischer Wortlaut fuer Journale aus #48 und frueher.
+const ALTE_NOTBREMSE: &str = "Notbremse aktiv: nur offene Verkaeufe weiter abgleichen";
+
+const ALTE_VERLUSTSPERRE: &str = "Notbremse: 30 % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig";
+
+/// Gespeicherter Zustand der Papier-Notbremse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PapierHalt {
+    Notbremse,
+    Gesamtverlust,
+}
+
+impl PapierHalt {
+    pub(crate) fn kennung(self) -> &'static str {
+        match self {
+            Self::Notbremse => "notbremse",
+            Self::Gesamtverlust => "gesamtverlust",
+        }
+    }
+
+    pub fn meldung(self) -> String {
+        match self {
+            Self::Notbremse => "Notbremse aktiv: Schutzverkaeufe laufen weiter".into(),
+            Self::Gesamtverlust => {
+                let bp = Grenzen::standard().papier_gesamtverlust_bp();
+                let ganz = bp.div_euclid(100);
+                let rest = bp.rem_euclid(100);
+                let prozent = if rest == 0 {
+                    ganz.to_string()
+                } else {
+                    format!("{ganz},{rest:02}")
+                };
+                format!(
+                    "Notbremse: {prozent} % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig"
+                )
+            }
+        }
+    }
+}
 
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +76,8 @@ pub enum Art {
     /// `quelle;abruf;roh;zeit;text`: eine Nachricht von aussen (`nachrichtbeleg`, R40). Nur im
     /// Format 2; die Abrufe fallen nie zurueck.
     Nachricht,
+    /// Fixierte, unabhaengige Prognose eines Beraters im Papiertag.
+    Weltprognose,
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
     /// Rechner verlaesst (R12, R24). Damit ist er reserviert (R37).
     Auftrag,
@@ -54,6 +99,16 @@ pub enum Art {
     /// seine ganze Vorgeschichte (64 Hex-Zeichen). Ein Wiederanlauf setzt nur nach einem
     /// Abschluss fort; die Daten steigen streng.
     Abschluss,
+    /// Handelstag fuer die Abrechnung nachfolgender Ausfuehrungen.
+    Abrechnungstag,
+    /// Tagesabschluss, der zugleich die Papier-Notbremse zuruecksetzt.
+    NotbremseFreigabe,
+    /// `datum;grundkennung`: typisierter Halt des Papierdepots.
+    PapierHalt,
+    /// `abschlussdatum;bargeld;einrichtung;dialog;zeitpunkt-utc`: Freigabe nach der Gesamtverlustsperre.
+    PapierFreigabe,
+    /// Handelstag und UTC-Wissensstichtag, vor der Entscheidung belegt.
+    Wissensstichtag,
 }
 
 impl Art {
@@ -64,6 +119,7 @@ impl Art {
             Art::Kurs => "kurs",
             Art::Termin => "termin",
             Art::Nachricht => "nachricht",
+            Art::Weltprognose => "weltprognose",
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
             Art::Ki => "ki",
@@ -71,6 +127,11 @@ impl Art {
             Art::Begruendung => "begruendung",
             Art::Abschluss => "abschluss",
             Art::Format => "format",
+            Art::Abrechnungstag => "abrechnungstag",
+            Art::NotbremseFreigabe => "notbremse-freigabe",
+            Art::PapierHalt => "papier-halt",
+            Art::PapierFreigabe => "papier-freigabe",
+            Art::Wissensstichtag => "wissensstichtag",
         }
     }
 
@@ -81,12 +142,18 @@ impl Art {
             Art::Kurs,
             Art::Termin,
             Art::Nachricht,
+            Art::Weltprognose,
             Art::Auftrag,
             Art::Zustand,
             Art::Ki,
             Art::KiGrenzen,
             Art::Begruendung,
             Art::Abschluss,
+            Art::Abrechnungstag,
+            Art::NotbremseFreigabe,
+            Art::PapierHalt,
+            Art::PapierFreigabe,
+            Art::Wissensstichtag,
             Art::Format,
         ]
         .into_iter()
@@ -134,11 +201,25 @@ pub struct Stand {
     kurse: Vec<KursBeleg>,
     termine: Vec<TerminBeleg>,
     nachrichten: Vec<NachrichtBeleg>,
+    weltprognosen: Vec<PrognoseBeleg>,
     letzte_kennung: u64,
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
     abschluss: Option<Abschluss>,
+    historischer_hoechststand: Option<Cent>,
+    papier_halt: Option<PapierHalt>,
+    papier_verlustreferenz: Option<Cent>,
+    papier_neustart: Option<Cent>,
+    notbremse_freigabe: Option<Datum>,
+    prueft_wiederanlauf: bool,
     seit_abschluss: usize,
+    abrechnungstag: Option<Datum>,
+    wissensstichtage: BTreeMap<Datum, Zeitpunkt>,
+    abrechnungen: Abrechnungen,
+}
+
+pub(crate) fn papier_freigabe_text(tag: Datum, bargeld: Cent) -> String {
+    format!("{tag};{};einrichtung;dialog", bargeld.0)
 }
 
 impl Stand {
@@ -180,6 +261,10 @@ impl Stand {
     /// Die Auftraege, die noch keinen Endzustand haben.
     pub fn offene_auftraege(&self) -> impl Iterator<Item = &AuftragsLage> {
         self.auftraege.iter().filter(|l| l.zustand.offen())
+    }
+
+    pub fn weltprognosen(&self) -> &[PrognoseBeleg] {
+        &self.weltprognosen
     }
 
     pub fn beobachtungen(&self) -> &[(Datum, String)] {
@@ -252,6 +337,84 @@ impl Stand {
         self.letzte_kennung
     }
 
+    pub fn historischer_hoechststand(&self) -> Option<Cent> {
+        self.historischer_hoechststand
+    }
+
+    pub fn papier_halt(&self) -> Option<PapierHalt> {
+        self.papier_halt
+    }
+
+    pub fn notbremse_aktiv(&self) -> bool {
+        self.papier_halt.is_some()
+    }
+
+    pub fn papier_verlustsperre_aktiv(&self) -> bool {
+        self.papier_halt == Some(PapierHalt::Gesamtverlust)
+    }
+
+    /// Prueft den belegten Gesamtverlust. Beim ersten Tag liefert der Lauf den Startwert.
+    pub fn papier_gesamtverlust_erreicht(
+        &self,
+        wert: Cent,
+        startwert: Option<Cent>,
+    ) -> Option<bool> {
+        let hoch = self
+            .papier_verlustreferenz
+            .or(self.historischer_hoechststand)
+            .max(startwert)?;
+        Some(Grenzen::standard().papier_gesamtverlust_erreicht(wert, hoch))
+    }
+
+    pub fn papier_waechterreferenz(&self) -> Option<Cent> {
+        self.papier_neustart
+            .or_else(|| self.abschluss.as_ref().map(|a| a.hoechststand))
+    }
+
+    /// Kandidat fuer eine ausdrueckliche Freigabe. Der Kontoabgleich folgt vor dem Schreiben.
+    pub fn papier_freigabe_bargeld(&self) -> Option<Cent> {
+        if self.papier_verlustsperre_aktiv()
+            && self.seit_abschluss == 0
+            && self.abschluss.is_some()
+            && self.gehalten().is_empty()
+            && self.offene_auftraege().next().is_none()
+        {
+            return self.papier_bargeld().filter(|c| *c > Cent::NULL);
+        }
+        None
+    }
+
+    pub fn prueft_wiederanlauf(&self) -> bool {
+        self.prueft_wiederanlauf
+    }
+
+    pub(crate) fn papier_bargeld(&self) -> Option<Cent> {
+        self.toepfe
+            .values()
+            .try_fold(Cent::NULL, |summe, topf| summe.checked_add(topf.bargeld()))
+    }
+
+    pub fn wissensstichtag(&self, tag: Datum) -> Option<Zeitpunkt> {
+        self.wissensstichtage.get(&tag).copied()
+    }
+
+    pub fn abrechnungstag(&self) -> Option<Datum> {
+        self.abrechnungstag
+    }
+
+    pub fn abrechnungen(&self) -> &Abrechnungen {
+        &self.abrechnungen
+    }
+
+    pub(crate) fn gesperrt(&self, topf: TopfId) -> Option<Cent> {
+        self.auftraege
+            .iter()
+            .filter(|l| l.beleg.topf == topf)
+            .filter_map(|l| self.abrechnungen.get(&l.beleg.nr))
+            .filter(|(valuta, _)| self.abrechnungstag.is_none_or(|tag| *valuta > tag))
+            .try_fold(Cent::NULL, |summe, (_, netto)| summe.checked_add(*netto))
+    }
+
     /// Wendet einen Eintrag an. Ein Fehler laesst den Stand unveraendert.
     pub(crate) fn anwenden(&mut self, art: Art, inhalt: &str) -> Result<(), String> {
         match art {
@@ -263,7 +426,7 @@ impl Stand {
             Art::Topf => {
                 let t = lies_topf(inhalt).ok_or("Topf unlesbar")?;
                 kanonisch(&topf_text(&t), inhalt)?;
-                self.pruefe_deckung(&t, None)?;
+                self.pruefe_deckung(&t, None, Cent::NULL)?;
                 self.toepfe.insert(t.id(), t);
             }
             // Belege von aussen beginnen keinen Tag: Der Sammler schreibt sie vor dem Papiertag
@@ -280,6 +443,7 @@ impl Stand {
                 self.belege_nachricht(inhalt)?;
                 return Ok(());
             }
+            Art::Weltprognose => self.belege_weltprognose(inhalt)?,
             Art::Auftrag => {
                 let b = lies_auftrag(inhalt).ok_or("Auftrag unlesbar")?;
                 kanonisch(&auftrag_text(&b), inhalt)?;
@@ -302,7 +466,7 @@ impl Stand {
                     .get(&b.topf)
                     .ok_or_else(|| format!("Auftrag {nr}: Topf {:?} fehlt", b.topf))?;
                 let neu = AuftragsLage::reserviert(b);
-                self.pruefe_deckung(topf, Some(&neu))?;
+                self.pruefe_deckung(topf, Some(&neu), Cent::NULL)?;
                 self.letzte_kennung = nr;
                 self.auftraege.push(neu);
             }
@@ -316,6 +480,7 @@ impl Stand {
             Art::Begruendung => {
                 let b = lies_begruendung(inhalt).ok_or("Begruendung unlesbar")?;
                 kanonisch(&begruendung_text(b.0, &b.1, &b.2), inhalt)?;
+                self.lies_alten_papier_halt(b.0, &b.1, &b.2);
                 self.begruendungen.push(b);
             }
             Art::Format => {
@@ -331,32 +496,220 @@ impl Stand {
                 self.format = FORMAT;
                 return Ok(());
             }
+            Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
+            Art::NotbremseFreigabe => return self.belege_wiederanlauf(inhalt),
+            Art::PapierHalt => self.belege_papier_halt(inhalt)?,
+            Art::PapierFreigabe => return self.belege_papier_freigabe(inhalt),
+            Art::Wissensstichtag => self.belege_wissensstichtag(inhalt)?,
             Art::Abschluss => {
-                let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
-                kanonisch(&abschluss_text(&a), inhalt)?;
-                // Tagesorders enden am Tag (Kap. 10): Ein Tag mit offenem Auftrag ist nicht
-                // vollstaendig belegt.
-                if let Some(l) = self.offene_auftraege().next() {
-                    return Err(format!(
-                        "Abschluss mit offenem Auftrag {} ({:?})",
-                        l.beleg.nr, l.zustand
-                    ));
-                }
-                if let Some(vorher) = &self.abschluss
-                    && a.datum <= vorher.datum
-                {
-                    return Err(format!(
-                        "Abschluss {} nicht nach dem letzten ({})",
-                        datum_text(a.datum),
-                        datum_text(vorher.datum)
-                    ));
-                }
-                self.abschluss = Some(a);
-                self.seit_abschluss = 0;
-                return Ok(());
+                return self.schliesse_ab(inhalt);
             }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    fn belege_weltprognose(&mut self, inhalt: &str) -> Result<(), String> {
+        let b = PrognoseBeleg::lies(inhalt).ok_or("Weltprognose unlesbar")?;
+        if self.abrechnungstag != Some(b.datum)
+            || self.abschluss.as_ref().is_some_and(|a| a.datum >= b.datum)
+            || self
+                .weltprognosen
+                .iter()
+                .any(|alt| alt.datum == b.datum && alt.berater == b.berater)
+            || b.prognose
+                .ereignis_nr
+                .checked_sub(1)
+                .and_then(|nr| {
+                    self.beobachtungen
+                        .iter()
+                        .filter(|(tag, _)| *tag == b.datum)
+                        .nth(nr)
+                })
+                .is_none_or(|(_, e)| *e != b.ereignis)
+            || !self.kurse.iter().any(|k| {
+                k.isin() == &b.prognose.isin
+                    && k.kurs().handelstag() == b.datum
+                    && k.kurs().preis() == b.ausgangskurs
+                    && k.kurs().herkunft() == Herkunft::Quelle
+            })
+        {
+            return Err("Weltprognose passt nicht zu Papiertag, Ereignis oder Ausgangskurs".into());
+        }
+        self.weltprognosen.push(b);
+        Ok(())
+    }
+
+    fn schliesse_ab(&mut self, inhalt: &str) -> Result<(), String> {
+        let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
+        kanonisch(&abschluss_text(&a), inhalt)?;
+        // Nur bestaetigte, zeitbelegte Papierorders duerfen in den naechsten Tag.
+        if let Some(l) = self.offene_auftraege().find(|l| !ueber_nacht(l)) {
+            return Err(format!(
+                "Abschluss mit offenem Auftrag {} ({:?})",
+                l.beleg.nr, l.zustand
+            ));
+        }
+        if let Some(vorher) = &self.abschluss
+            && a.datum <= vorher.datum
+        {
+            return Err(format!(
+                "Abschluss {} nicht nach dem letzten ({})",
+                datum_text(a.datum),
+                datum_text(vorher.datum)
+            ));
+        }
+        if let Some(tag) = self.abrechnungstag
+            && a.datum != tag
+        {
+            return Err("Abschluss passt nicht zum Abrechnungstag".into());
+        }
+        self.historischer_hoechststand = self.historischer_hoechststand.max(Some(a.hoechststand));
+        self.papier_verlustreferenz = self
+            .papier_verlustreferenz
+            .map(|hoch| hoch.max(a.hoechststand));
+        self.papier_neustart = None;
+        self.abschluss = Some(a);
+        self.seit_abschluss = 0;
+        Ok(())
+    }
+
+    fn lies_alten_papier_halt(&mut self, tag: Datum, wer: &str, text: &str) {
+        if wer == "Waechter" {
+            match text {
+                ALTE_VERLUSTSPERRE => self.papier_halt = Some(PapierHalt::Gesamtverlust),
+                ALTE_NOTBREMSE
+                    if self.papier_halt.is_none()
+                        && self
+                            .notbremse_freigabe
+                            .is_none_or(|freigabe| tag > freigabe) =>
+                {
+                    self.papier_halt = Some(PapierHalt::Notbremse);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn belege_papier_halt(&mut self, inhalt: &str) -> Result<(), String> {
+        let (tag, grund) = inhalt.split_once(';').ok_or("Papier-Halt unlesbar")?;
+        let tag = Datum::lies(tag).ok_or("Tag des Papier-Halts unlesbar")?;
+        let grund = match grund {
+            "notbremse" => PapierHalt::Notbremse,
+            "gesamtverlust" => PapierHalt::Gesamtverlust,
+            _ => return Err("Grundkennung des Papier-Halts unbekannt".into()),
+        };
+        kanonisch(&format!("{tag};{}", grund.kennung()), inhalt)?;
+        if self.abrechnungstag != Some(tag)
+            || self.abschluss.as_ref().is_some_and(|a| a.datum >= tag)
+            || !matches!(
+                (self.papier_halt, grund),
+                (None, _) | (Some(PapierHalt::Notbremse), PapierHalt::Gesamtverlust)
+            )
+        {
+            return Err("Papier-Halt unzulaessig".into());
+        }
+        self.papier_halt = Some(grund);
+        self.begruendungen
+            .push((tag, "Waechter".into(), grund.meldung()));
+        Ok(())
+    }
+
+    fn belege_papier_freigabe(&mut self, inhalt: &str) -> Result<(), String> {
+        let tag = self
+            .abschluss
+            .as_ref()
+            .ok_or("Papierfreigabe ohne Abschluss")?
+            .datum;
+        let bargeld = self
+            .papier_freigabe_bargeld()
+            .ok_or("Papierfreigabe unzulaessig")?;
+        if !Grenzen::standard().papier_freigabe_neue_messung() {
+            return Err("Neue Papier-Verlustmessung ist nicht freigegeben".into());
+        }
+        let basis = papier_freigabe_text(tag, bargeld);
+        let zeit = inhalt
+            .strip_prefix(&basis)
+            .and_then(|rest| rest.strip_prefix(';'))
+            .and_then(Zeitpunkt::lies)
+            .ok_or("UTC-Zeit der Papierfreigabe fehlt oder ist unlesbar")?;
+        kanonisch(&format!("{basis};{zeit}"), inhalt)?;
+        if zeit.in_frankfurt().is_none_or(|(datum, ..)| datum < tag) {
+            return Err("Papierfreigabe vor dem Abschlusstag".into());
+        }
+        self.papier_halt = None;
+        self.papier_verlustreferenz = Some(bargeld);
+        self.papier_neustart = Some(bargeld);
+        self.notbremse_freigabe = Some(tag);
+        self.prueft_wiederanlauf = false;
+        self.begruendungen.push((tag, "Einrichtung, Dialog".into(), format!(
+            "Papier-Gesamtverlustsperre in der Einrichtung freigegeben. Neue Verlustmessung ab {} Cent. Bestätigt am {zeit}.",
+            bargeld.0
+        )));
+        Ok(())
+    }
+
+    fn belege_wiederanlauf(&mut self, inhalt: &str) -> Result<(), String> {
+        let a = lies_abschluss(inhalt).ok_or("Notbremsenfreigabe unlesbar")?;
+        if !self.prueft_wiederanlauf
+            || !self.notbremse_aktiv()
+            || self.abrechnungstag != Some(a.datum)
+            || !self.gehalten().is_empty()
+            || self.offene_auftraege().next().is_some()
+            || self.papier_verlustsperre_aktiv()
+            || self.papier_gesamtverlust_erreicht(a.hoechststand, None) != Some(false)
+            || self.papier_bargeld() != Some(a.hoechststand)
+        {
+            return Err("Notbremsenfreigabe unzulaessig".into());
+        }
+        self.schliesse_ab(inhalt)?;
+        self.papier_halt = None;
+        self.notbremse_freigabe = Some(a.datum);
+        self.prueft_wiederanlauf = false;
+        self.begruendungen.push((
+            a.datum,
+            "Waechter".into(),
+            format!(
+                "Notbremse automatisch aufgehoben: Konto abgeglichen und Kurse geprueft. Neuer Referenzwert {} Cent; normaler Betrieb ab dem naechsten Papiertag.",
+                a.hoechststand.0
+            ),
+        ));
+        Ok(())
+    }
+
+    fn belege_wissensstichtag(&mut self, inhalt: &str) -> Result<(), String> {
+        let (tag, zeit) = inhalt.split_once(';').ok_or("Wissensstichtag unlesbar")?;
+        let tag = Datum::lies(tag).ok_or("Tag des Wissensstichtags unlesbar")?;
+        let zeit = Zeitpunkt::lies(zeit).ok_or("Zeit des Wissensstichtags unlesbar")?;
+        kanonisch(&format!("{tag};{zeit}"), inhalt)?;
+        if self.format != FORMAT
+            || zeit.in_frankfurt().map(|(d, ..)| d) != Some(tag)
+            || self.seit_abschluss != 0
+            || self.abschluss.as_ref().is_some_and(|a| a.datum >= tag)
+            || self.wissensstichtage.contains_key(&tag)
+        {
+            return Err("Wissensstichtag unzulaessig".into());
+        }
+        self.wissensstichtage.insert(tag, zeit);
+        Ok(())
+    }
+
+    fn beginne_abrechnung(&mut self, inhalt: &str) -> Result<(), String> {
+        let tag = Datum::lies(inhalt).ok_or("Abrechnungstag unlesbar")?;
+        kanonisch(&tag.to_string(), inhalt)?;
+        if self.format != FORMAT
+            || self.offene_auftraege().any(|l| !ueber_nacht(l))
+            || self.abschluss.as_ref().is_some_and(|a| tag <= a.datum)
+            || self.abrechnungstag.is_some_and(|alt| {
+                tag <= alt || self.abschluss.as_ref().is_none_or(|a| a.datum != alt)
+            })
+        {
+            return Err("Abrechnungstag unzulaessig".into());
+        }
+        self.prueft_wiederanlauf = self.notbremse_aktiv()
+            && self.gehalten().is_empty()
+            && self.offene_auftraege().next().is_none();
+        self.abrechnungstag = Some(tag);
         Ok(())
     }
 
@@ -446,11 +799,27 @@ impl Stand {
             .toepfe
             .get(&neu.beleg.topf)
             .ok_or_else(|| format!("Auftrag {nr}: Topf fehlt"))?;
-        let topf = match m {
-            Meldung::Ausfuehrung(a) => buche(topf, &neu.beleg, a)?,
-            _ => topf.clone(),
+        let (topf, erloes) = match m {
+            Meldung::Ausfuehrung(a) => (
+                buche(topf, &neu.beleg, a)?,
+                self.neuer_erloes(&neu.beleg, a)?,
+            ),
+            _ => (topf.clone(), None),
         };
-        self.pruefe_deckung(&topf, Some(&neu))?;
+        self.pruefe_deckung(
+            &topf,
+            Some(&neu),
+            erloes.map_or(Cent::NULL, |(_, netto)| netto),
+        )?;
+        if let Some((valuta, netto)) = erloes {
+            let gesamt = self
+                .abrechnungen
+                .get(&nr)
+                .map_or(Cent::NULL, |(_, n)| *n)
+                .checked_add(netto)
+                .ok_or("Verkaufserloes: Ueberlauf")?;
+            self.abrechnungen.insert(nr, (valuta, gesamt));
+        }
         self.toepfe.insert(topf.id(), topf);
         if let Some(platz) = self.auftraege.get_mut(index) {
             *platz = neu;
@@ -458,11 +827,59 @@ impl Stand {
         Ok(())
     }
 
+    fn neuer_erloes(
+        &self,
+        beleg: &AuftragsBeleg,
+        aus: &crate::auftrag::Ausfuehrung,
+    ) -> Result<Option<(Datum, Cent)>, String> {
+        let Some(tag) = self.abrechnungstag else {
+            return if aus.kurszeit.is_some() {
+                Err("Kurszeit ohne Abrechnungstag".into())
+            } else {
+                Ok(None)
+            };
+        };
+        if self.abschluss.as_ref().is_some_and(|a| a.datum == tag) {
+            return Err("Ausfuehrung ohne offenen Abrechnungstag".into());
+        }
+        if let Some(zeit) = aus.kurszeit {
+            let rundung = match beleg.richtung {
+                Richtung::Kauf => Rundung::Auf,
+                Richtung::Verkauf => Rundung::Ab,
+            };
+            if zeit.datum() != Some(tag)
+                || !self.kurse.iter().any(|b| {
+                    b.isin() == &beleg.isin
+                        && b.kurs().herkunft() == Herkunft::Quelle
+                        && b.kurs().zeitpunkt() == zeit
+                        && b.kurs().preis().mal_stueck(1, rundung) == Some(aus.kurs)
+                })
+            {
+                return Err("Kein passender Kursbeleg am Abrechnungstag".into());
+            }
+        }
+        if beleg.richtung != Richtung::Verkauf {
+            return Ok(None);
+        }
+        let netto = aus
+            .kurs
+            .mal_stueck(aus.stueck)
+            .and_then(|v| v.checked_sub(aus.gebuehr))
+            .ok_or("Verkaufserloes: Ueberlauf")?;
+        let valuta = papier_valuta(tag).ok_or("Valuta ausserhalb des Kalenders")?;
+        Ok((netto > Cent::NULL).then_some((valuta, netto)))
+    }
+
     /// Die Deckung eines Topfes (R37, Kap. 9): Das Bargeld traegt alle offenen Kaeufe am Limit,
     /// der Bestand jedes Werts alle offenen Verkaeufe. `ersatz` steht fuer den Auftrag mit
     /// seiner Kennung oder kommt neu hinzu. Was ein Kauf darueber hinaus an Gebuehr braucht,
     /// prueft der Kontowaechter vor der Reservierung (`Journal::reserviere_auftrag`).
-    fn pruefe_deckung(&self, topf: &Topf, ersatz: Option<&AuftragsLage>) -> Result<(), String> {
+    fn pruefe_deckung(
+        &self,
+        topf: &Topf,
+        ersatz: Option<&AuftragsLage>,
+        neuer_erloes: Cent,
+    ) -> Result<(), String> {
         let ersetzt = ersatz.map(|e| e.beleg.nr);
         let offene = self
             .auftraege
@@ -489,11 +906,15 @@ impl Stand {
                 }
             }
         }
-        if kauf > topf.bargeld() {
+        let frei = self
+            .gesperrt(topf.id())
+            .and_then(|s| s.checked_add(neuer_erloes))
+            .and_then(|s| topf.bargeld().checked_sub(s))
+            .ok_or("Deckung: Ueberlauf")?;
+        if kauf > frei {
             return Err(format!(
                 "Deckung: offene Kaeufe {} Cent ueber dem Bargeld {} Cent",
-                kauf.0,
-                topf.bargeld().0
+                kauf.0, frei.0
             ));
         }
         for (isin, stueck) in verkauf {
@@ -509,6 +930,11 @@ impl Stand {
 }
 
 /// Bucht eine Ausfuehrung im Topf: Bargeld und Bestand nie negativ.
+fn ueber_nacht(l: &AuftragsLage) -> bool {
+    use crate::auftrag::AuftragsZustand as Z;
+    l.versand.is_some() && matches!(l.zustand, Z::Angenommen | Z::Teilgefuellt)
+}
+
 fn buche(topf: &Topf, b: &AuftragsBeleg, a: &crate::auftrag::Ausfuehrung) -> Result<Topf, String> {
     let volumen = a
         .kurs
@@ -740,4 +1166,37 @@ fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
         limit,
         anlass,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn papierfreigabe_verlangt_zeit_ab_abschlusstag_in_frankfurt() -> Result<(), String> {
+        let tag = Datum::lies("2026-11-04").ok_or("Abschlusstag")?;
+        let bargeld = Cent(1_000_000);
+        let topf = Topf::neu(TopfId::A, bargeld).map_err(|e| format!("{e:?}"))?;
+        let mut stand = Stand {
+            toepfe: BTreeMap::from([(TopfId::A, topf)]),
+            abschluss: Some(Abschluss {
+                datum: tag,
+                hoechststand: Cent(1_500_000),
+                abdruck: "a".repeat(64),
+            }),
+            papier_halt: Some(PapierHalt::Gesamtverlust),
+            ..Stand::default()
+        };
+        let basis = papier_freigabe_text(tag, bargeld);
+        assert!(stand.belege_papier_freigabe(&basis).is_err());
+        assert!(
+            stand
+                .belege_papier_freigabe(&format!("{basis};2026-11-03T22:59:59Z"))
+                .is_err()
+        );
+        assert!(stand.papier_verlustsperre_aktiv());
+        stand.belege_papier_freigabe(&format!("{basis};2026-11-03T23:00:00Z"))?;
+        assert!(!stand.papier_verlustsperre_aktiv());
+        Ok(())
+    }
 }

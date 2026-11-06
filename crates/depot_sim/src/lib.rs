@@ -35,7 +35,7 @@ pub use papier::{Broker, Papierkonto, Sendeantwort};
 pub use papierdatei::Papierdatei;
 pub use papiertag::{
     AUSWAHL, Ausgang, MAX_NACHRICHTEN_LAGE, Tageskurse, Tageslage, kurse_von_heute, papiertag,
-    tageskurse, tageskurse_am, tageslage, tagnummer,
+    papiertag_wiederabspielen, tageskurse, tageskurse_am, tageslage, tagnummer, weltlage_am,
 };
 pub use szenario::{
     Antwort, Berater, Drehbuch, KEINE_VERWERTBARE_ANTWORT, Lage, Stumm, Szenario, Tag, Urteil,

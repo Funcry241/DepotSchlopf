@@ -91,6 +91,15 @@ fn nur_ein_gepruefter_sauberer_stand_wird_gesichert() -> Result<(), String> {
         );
     }
     assert_eq!(startklar(&wurzel)?, s);
+    let commit = git(&wurzel, &["rev-parse", "HEAD"])?;
+    assert_eq!(
+        programmstand::commit_fuer_baum(&wurzel, &s.baum),
+        Some(commit)
+    );
+    fs::write(wurzel.join("a.txt"), "zwei\n").map_err(|e| e.to_string())?;
+    git(&wurzel, &["commit", "-q", "-am", "zwei"])?;
+    assert!(programmstand::commit_fuer_baum(&wurzel, &s.baum).is_none());
+
     Ok(())
 }
 

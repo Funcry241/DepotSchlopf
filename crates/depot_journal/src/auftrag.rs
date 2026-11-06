@@ -16,7 +16,7 @@
 //! nicht belegen. Gefuellt ist ein Auftrag, wenn seine Ausfuehrungen genau die beauftragte Menge
 //! ergeben; mehr nimmt das Journal nicht an. Eine Ausfuehrung haelt das Limit ein.
 
-use depot_kern::Cent;
+use depot_kern::{Cent, Zeitpunkt};
 use depot_regelwerk::Richtung;
 
 use crate::stand::AuftragsBeleg;
@@ -66,12 +66,14 @@ pub struct Ausfuehrung {
     pub stueck: u64,
     pub kurs: Cent,
     pub gebuehr: Cent,
+    pub kurszeit: Option<Zeitpunkt>,
 }
 
 /// Was zu einem Auftrag gemeldet wird.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Meldung {
     Gesendet,
+    GesendetAm(Zeitpunkt, Zeitpunkt),
     Unbekannt,
     Angenommen,
     Abgelehnt,
@@ -84,7 +86,7 @@ pub enum Meldung {
 impl Meldung {
     fn name(self) -> &'static str {
         match self {
-            Meldung::Gesendet => "gesendet",
+            Meldung::Gesendet | Meldung::GesendetAm(..) => "gesendet",
             Meldung::Unbekannt => "unbekannt",
             Meldung::Angenommen => "angenommen",
             Meldung::Abgelehnt => "abgelehnt",
@@ -102,6 +104,8 @@ pub struct AuftragsLage {
     pub beleg: AuftragsBeleg,
     pub zustand: AuftragsZustand,
     pub ausfuehrungen: Vec<Ausfuehrung>,
+    pub versand: Option<Zeitpunkt>,
+    pub frist: Option<Zeitpunkt>,
 }
 
 impl AuftragsLage {
@@ -110,6 +114,8 @@ impl AuftragsLage {
             beleg,
             zustand: AuftragsZustand::Alt,
             ausfuehrungen: Vec::new(),
+            versand: None,
+            frist: None,
         }
     }
 
@@ -118,6 +124,8 @@ impl AuftragsLage {
             beleg,
             zustand: AuftragsZustand::Reserviert,
             ausfuehrungen: Vec::new(),
+            versand: None,
+            frist: None,
         }
     }
 
@@ -144,6 +152,11 @@ impl AuftragsLage {
         let mut neu = self.clone();
         neu.zustand = match (self.zustand, m) {
             (Z::Reserviert, Meldung::Gesendet) => Z::Gesendet,
+            (Z::Reserviert, Meldung::GesendetAm(zeit, frist)) if frist > zeit => {
+                neu.versand = Some(*zeit);
+                neu.frist = Some(*frist);
+                Z::Gesendet
+            }
             (Z::Reserviert, Meldung::Verworfen) => Z::Verworfen,
             (Z::Gesendet, Meldung::Unbekannt) => Z::Unbekannt,
             (Z::Gesendet | Z::Unbekannt, Meldung::Angenommen) => Z::Angenommen,
@@ -172,6 +185,11 @@ impl AuftragsLage {
     fn pruefe(&self, a: &Ausfuehrung) -> Result<(), String> {
         let b = &self.beleg;
         let nr = b.nr;
+        if self.frist != a.kurszeit {
+            return Err(format!(
+                "Auftrag {nr}: Kurszeit weicht von der belegten Frist ab"
+            ));
+        }
         if a.stueck == 0 || a.kurs.0 <= 0 || a.gebuehr.0 < 0 {
             return Err(format!("Auftrag {nr}: Ausfuehrung unplausibel"));
         }
@@ -201,13 +219,21 @@ impl AuftragsLage {
 
 pub(crate) fn meldung_text(nr: u64, m: &Meldung) -> String {
     match m {
-        Meldung::Ausfuehrung(a) => format!(
-            "{nr};{};{};{};{}",
-            m.name(),
-            a.stueck,
-            a.kurs.0,
-            a.gebuehr.0
-        ),
+        Meldung::GesendetAm(zeit, frist) => format!("{nr};{};{zeit};{frist}", m.name()),
+        Meldung::Ausfuehrung(a) => {
+            let mut basis = format!(
+                "{nr};{};{};{};{}",
+                m.name(),
+                a.stueck,
+                a.kurs.0,
+                a.gebuehr.0
+            );
+            if let Some(zeit) = a.kurszeit {
+                use std::fmt::Write as _;
+                let _ = write!(basis, ";{zeit}");
+            }
+            basis
+        }
         _ => format!("{nr};{}", m.name()),
     }
 }
@@ -229,12 +255,21 @@ pub(crate) fn lies_meldung(inhalt: &str) -> Option<(u64, Meldung)> {
             .find(|m| m.name() == *name)?;
             (nr, m)
         }
-        [nr, "ausfuehrung", stueck, kurs, gebuehr] => (
+        [nr, "gesendet", zeit, frist] => (
+            nr,
+            Meldung::GesendetAm(Zeitpunkt::lies(zeit)?, Zeitpunkt::lies(frist)?),
+        ),
+        [nr, "ausfuehrung", stueck, kurs, gebuehr, rest @ ..] => (
             nr,
             Meldung::Ausfuehrung(Ausfuehrung {
                 stueck: stueck.parse().ok()?,
                 kurs: Cent(kurs.parse().ok()?),
                 gebuehr: Cent(gebuehr.parse().ok()?),
+                kurszeit: match rest {
+                    [] => None,
+                    [zeit] => Some(Zeitpunkt::lies(zeit)?),
+                    _ => return None,
+                },
             }),
         ),
         _ => return None,

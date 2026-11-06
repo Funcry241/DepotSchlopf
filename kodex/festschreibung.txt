@@ -14,7 +14,7 @@ abhaengigkeiten.depot_sim: dependencies.depot_journal={"workspace"=true};depende
 abhaengigkeiten.workspace: workspace.dependencies.depot_journal={"path"="crates/depot_journal"};workspace.dependencies.depot_kern={"path"="crates/depot_kern"};workspace.dependencies.depot_ki={"path"="crates/depot_ki"};workspace.dependencies.depot_kodex={"path"="crates/depot_kodex"};workspace.dependencies.depot_lage={"path"="crates/depot_lage"};workspace.dependencies.depot_regelwerk={"path"="crates/depot_regelwerk"};workspace.dependencies.depot_sim={"path"="crates/depot_sim"};workspace.dependencies.keyring-core="1.0";workspace.dependencies.sha2="0.10";workspace.dependencies.ureq={"default-features"=false,"features"=["rustls"],"version"="3.5"};workspace.dependencies.windows-native-keyring-store={"default-features"=false,"version"="1.1"}
 cargo_lock: e29c98391bd9a7a7463d83a1bd389a4825b1d473db6b1bdf3ca5a0da125d0fff
 crates: depot_berater,depot_dienst,depot_journal,depot_kern,depot_ki,depot_kodex,depot_lage,depot_lauf,depot_regelwerk,depot_sammler,depot_sim
-grenzen: 4d27d4417668d33ecc404e0d9d1dcb1e496f464994c4b1734121e03a9796b05a
+grenzen: cd1f0bb8672f4537d5c816043042145a5c6f8521768b2d3ce28a5c388f128e6f
 ki_budget: 2e323d930a556308633f0852d1fbfa91cab3f2fff91bf4096e62b07767aeb1ca
 lints: 920e5415b5ec05b278ec52b7a41d7779c20a6d6c8f9c3b0820fed4307dbff6cd
 produktarten: Aktie,EtfPhysischUcits

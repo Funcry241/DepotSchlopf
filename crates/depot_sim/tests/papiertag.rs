@@ -282,10 +282,13 @@ fn papierkonto_text_nur_in_eigener_form() -> Result<(), String> {
     Ok(())
 }
 
-/// Dachs kauft SAP zu einem Schluss feiner als ein Cent; Maus stimmt zu. Ausgefuehrt wird zum
-/// aufgerundeten Cent, Journal und Papierkonto stimmen danach ueberein.
+/// Die Kauforder bleibt bis zum naechsten Schluss offen und uebersteht den Neustart.
+/// Der spaetere Kurs wird zum aufgerundeten Cent ausgefuehrt.
 #[test]
-fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
+fn kauf_wartet_auf_spaeteren_kurs_und_rundet_auf() -> Result<(), String> {
+    use depot_journal::Konto;
+    use depot_sim::Broker;
+
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let mut j = ort.oeffnen()?;
@@ -294,35 +297,12 @@ fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
         5,
         &[(&sap, "230", "230.105"), (&allianz, "350", "351")],
     )?;
-    let d = tag(5)?;
-    let mut dachs = Drehbuch::default();
-    dachs.antworten.insert(
-        d,
-        Antwort {
-            verwertbar: true,
-            einschaetzung: "SAP nach Zahlen".into(),
-            vorschlag: Some(Vorschlag {
-                berater: BeraterId::Dachs,
-                zielgewichte_bp: [(sap.clone(), 2_000)].into_iter().collect(),
-                begruendung: [(sap.clone(), "beobachtet".to_string())]
-                    .into_iter()
-                    .collect(),
-            }),
-        },
-    );
-    let mut maus = Drehbuch::default();
-    maus.urteile.insert(
-        d,
-        Urteil {
-            verwertbar: true,
-            zustimmung: true,
-            begruendung: "passt".into(),
-        },
-    );
+    let heute = tag(5)?;
+    let (mut dachs, mut maus) = kaeufer(heute, &sap);
     let mut k = konto(&ort, &j)?;
     let aus = papiertag(
         &mut j,
-        d,
+        heute,
         &universum()?,
         &start()?,
         &mut dachs,
@@ -333,19 +313,50 @@ fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
         matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
         "Ausgang: {aus:?}"
     );
+    let lage = some(j.stand().offene_auftraege().next(), "Offene Kauforder")?;
+    let nr = lage.beleg.nr;
+    let versand = some(lage.versand, "Versandzeit")?;
+    assert!(lage.ausfuehrungen.is_empty());
+    drop(k);
+    drop(j);
+
+    let mut j = ort.oeffnen()?;
+    let mut k = konto(&ort, &j)?;
+    let alte_kurse = vorbedingung(
+        depot_sim::tageskurse(j.stand(), &universum()?),
+        "Alte Kurse",
+    )?;
+    k.markt(&alte_kurse.heute);
+    let order = some(k.order(nr), "Offene Order im Papierkonto")?;
+    assert_eq!(order.status, depot_journal::KontoStatus::Offen);
+    assert!(order.ausfuehrungen.is_empty());
+    // Der Vortag wird beim naechsten Abruf nochmals belegt. Sein Kurs liegt vor dem Versand.
+    belege(
+        &mut j,
+        6,
+        &[(&sap, "230.105", "230.106"), (&allianz, "351", "351")],
+    )?;
+    let aus = papiertag(
+        &mut j,
+        tag(6)?,
+        &universum()?,
+        &start()?,
+        &mut Stumm,
+        &mut Stumm,
+        &mut k,
+    );
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let lage = some(j.stand().auftrag(nr), "Kauforder")?;
+    let fill = some(lage.ausfuehrungen.first(), "Ausfuehrung")?;
+    let kurszeit = some(fill.kurszeit, "Kurszeit")?;
+    assert_eq!(lage.versand, Some(versand));
+    assert_eq!(kurszeit.datum(), Some(tag(6)?));
+    assert!(kurszeit > versand);
+    assert_eq!(k.konto().sendungen(), 1, "kein zweiter Versand");
     let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A")?;
     let stueck = a.stueck(&sap);
     assert!(stueck > 0, "SAP gekauft");
-    let ausfuehrungen: Vec<_> = j
-        .stand()
-        .auftraege()
-        .iter()
-        .flat_map(|l| l.ausfuehrungen.clone())
-        .collect();
-    assert!(
-        ausfuehrungen.iter().all(|x| x.kurs == Cent(23_011)),
-        "zum aufgerundeten Cent: {ausfuehrungen:?}"
-    );
+    assert_eq!(fill.kurs, Cent(23_011), "zum aufgerundeten Cent");
     assert!(j.gleiche_ab(&k).map_err(|e| format!("{e:?}"))?.is_empty());
     // Das Konto in der Datei ist das Konto des Laufs.
     let datei = vorbedingung(fs::read_to_string(&ort.konto), "Konto lesen")?;
@@ -363,6 +374,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
     dachs.antworten.insert(
         d,
         Antwort {
+            prognose: None,
             verwertbar: true,
             einschaetzung: "SAP".into(),
             vorschlag: Some(Vorschlag {
@@ -508,6 +520,7 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
             buch.antworten.insert(
                 d,
                 Antwort {
+                    prognose: None,
                     verwertbar: true,
                     einschaetzung: "SAP".into(),
                     vorschlag: Some(Vorschlag {
@@ -716,25 +729,31 @@ fn kandidat_ohne_kurs_faellt_aus_gehaltener_wert_haelt_den_zyklus() -> Result<()
         !begr.iter().any(|(_, wer, _)| wer == "Daten"),
         "kein Ausfall: {begr:?}"
     );
-    assert!(
-        some(j.stand().toepfe().get(&TopfId::A), "Topf A")?.stueck(&sap) > 0,
-        "SAP gekauft"
-    );
-
-    // Am 06.11. fehlt der Kurs von SAP, das gehalten wird: Der Zyklus faellt aus.
-    belege(&mut j, 6, &[(&allianz, "350", "351")])?;
+    assert!(j.stand().offene_auftraege().any(|l| l.beleg.isin == sap));
+    // Zunaechst wird die Order am naechsten Schluss ausgefuehrt.
+    belege(&mut j, 6, &[(&sap, "231", "231"), (&allianz, "350", "351")])?;
+    drop(k);
     drop(j);
     let aus = stumm_tag(&ort, 6)?;
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let mut j = ort.oeffnen()?;
+    assert!(some(j.stand().toepfe().get(&TopfId::A), "Topf A")?.stueck(&sap) > 0);
+
+    // Am 09.11. fehlt der Kurs des nun gehaltenen SAP: Der Zyklus faellt aus.
+    belege(&mut j, 9, &[(&allianz, "350", "351")])?;
+    drop(j);
+    let aus = stumm_tag(&ort, 9)?;
     assert!(
         matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
         "Ausgang: {aus:?}"
     );
     let j = ort.oeffnen()?;
+    let montag = tag(9)?;
     let daten: Vec<&str> = j
         .stand()
         .begruendungen()
         .iter()
-        .filter(|(tag, wer, _)| *tag == d.plus_tage(1).unwrap_or(d) && wer == "Daten")
+        .filter(|(tag, wer, _)| *tag == montag && wer == "Daten")
         .map(|(_, _, t)| t.as_str())
         .collect();
     assert!(
@@ -831,6 +850,7 @@ impl depot_sim::Berater for Leser {
     ) -> Antwort {
         self.gesehen.extend(lage.ereignisse.iter().cloned());
         Antwort {
+            prognose: None,
             verwertbar: true,
             einschaetzung: "gelesen".into(),
             vorschlag: None,
@@ -875,7 +895,9 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
             &format!("gestern {i:02}"),
         )?;
     }
-    belege(some(Zeitpunkt::neu(tag(5)?, 15, 14, 0), "Zeit")?, "heute")?;
+    let publiziert = some(Zeitpunkt::neu(tag(5)?, 15, 14, 0), "Zeit")?;
+    belege(publiziert, "heute")?;
+    assert!(depot_sim::papiertag_wiederabspielen(j.stand(), &universum()?, tag(5)?).is_err());
     let mut k = konto(&ort, &j)?;
     let mut dachs = Leser::default();
     let aus = papiertag(
@@ -904,6 +926,37 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
         Some("Nachricht 04.11.2026 05:30 UTC (alphavantage-news): gestern 11")
     );
     assert!(!dachs.gesehen.iter().any(|t| t.contains("zu alt")));
+    assert!(!dachs.gesehen.iter().any(|t| t.contains("Nachtrag")));
+    assert!(
+        j.stand().begruendungen().iter().any(|(_, wer, text)| {
+            wer == "Papiertag" && text.contains("Weltmodell: Wissensstand")
+        })
+    );
+    let spaeter = some(Zeitpunkt::frankfurt(tag(5)?, 23, 0, 0), "Spaeterer Abruf")?;
+    let nachgereicht = vorbedingung(
+        NachrichtBeleg::neu(
+            "alphavantage-news",
+            spaeter,
+            b"nachtrag",
+            publiziert,
+            "Nachtrag",
+        ),
+        "Nachgereichte Nachricht",
+    )?;
+    vorbedingung(j.belege_nachricht(&nachgereicht), "Nachtrag belegen")?;
+    let wissensstand = depot_sim::weltlage_am(j.stand(), tag(5)?, abruf);
+    assert!(!wissensstand.iter().any(|t| t.contains("Nachtrag")));
+    let spaeterer_stand = depot_sim::weltlage_am(j.stand(), tag(5)?, spaeter);
+    assert!(spaeterer_stand.iter().any(|t| t.contains("Nachtrag")));
+    drop(k);
+    drop(j);
+    let j = ort.oeffnen()?;
+    assert_eq!(j.stand().wissensstichtag(tag(5)?), Some(abruf));
+    let wiederholung = vorbedingung(
+        depot_sim::papiertag_wiederabspielen(j.stand(), &universum()?, tag(5)?),
+        "Wiederabspielen",
+    )?;
+    assert_eq!(wiederholung.ereignisse, dachs.gesehen);
     Ok(())
 }
 
@@ -913,4 +966,510 @@ fn belege_kurse(j: &mut Journal) -> Result<(), String> {
         5,
         &[(&sap()?, "230.10", "231.00"), (&allianz()?, "350", "351.5")],
     )
+}
+
+#[test]
+fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
+    use depot_journal::Konto;
+    use depot_kern::{Grenzen, Kurse};
+    use depot_regelwerk::{Eingabe, Kennungsvergabe, entscheide, notbremse_auftraege};
+    use depot_sim::{Broker, Sendeantwort};
+
+    let ort = Ort::neu()?;
+    let isin = sap()?;
+    let freitag = tag(6)?;
+    let schluss = some(Zeitpunkt::frankfurt(freitag, 17, 35, 0), "Schluss")?;
+    let kurs = vorbedingung(
+        Kurs::neu(Cent(25_000), "EUR", freitag, schluss, Herkunft::Quelle),
+        "Kurs",
+    )?;
+    let kurse = vorbedingung(Kurse::neu(schluss, vec![(isin.clone(), kurs)]), "Kurse")?;
+    let mut start = vorbedingung(Topf::neu(TopfId::A, Cent::NULL), "Topf")?;
+    start.setze_bestand(isin.clone(), 20);
+    let grenzen = Grenzen::standard();
+    let mut vergabe = Kennungsvergabe::nach(0);
+    let verkauf = some(
+        notbremse_auftraege(&grenzen, &start, &kurse, &mut vergabe),
+        "Verkauf",
+    )?;
+    let verkauf = some(verkauf.first(), "Verkaufsauftrag")?;
+
+    let liquid = vorbedingung(Topf::neu(TopfId::A, Cent(499_725)), "Liquid")?;
+    let vorschlag = Vorschlag {
+        berater: BeraterId::Dachs,
+        zielgewichte_bp: [(isin.clone(), 2_000)].into_iter().collect(),
+        begruendung: [(isin, "beobachtet".into())].into_iter().collect(),
+    };
+    let universum = universum()?;
+    let eingabe = Eingabe {
+        grenzen: &grenzen,
+        universum: &universum,
+        topf: &liquid,
+        kurse: &kurse,
+        vorschlag: Some(&vorschlag),
+        halt: false,
+    };
+    let kauf = entscheide(&eingabe, &mut vergabe);
+    let kauf = some(kauf.kaeufe.first(), "Kaufauftrag")?;
+    let kauf_nach_abrechnung = entscheide(&eingabe, &mut vergabe);
+    let kauf_nach_abrechnung = some(kauf_nach_abrechnung.kaeufe.first(), "Zweiter Kaufauftrag")?;
+
+    let start = [start];
+    let mut k = Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    assert_eq!(k.sende(verkauf), Sendeantwort::Angenommen);
+    k.markt(&kurse);
+    assert_eq!(k.auszug().bargeld, Cent(499_725));
+    drop(k);
+
+    let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+    k.rechne_ab(tag(9)?);
+    assert!(matches!(k.sende(kauf), Sendeantwort::Abgelehnt(_)));
+    k.rechne_ab(tag(10)?);
+    assert_eq!(k.stoerung(), None);
+    drop(k);
+
+    let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+    k.rechne_ab(tag(10)?);
+    assert_eq!(k.auszug().bargeld, Cent(499_725));
+    assert_eq!(k.sende(kauf_nach_abrechnung), Sendeantwort::Angenommen);
+    Ok(())
+}
+
+#[test]
+fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() -> Result<(), String>
+{
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut a = vorbedingung(Topf::neu(TopfId::A, Cent::NULL), "Topf A")?;
+    a.setze_bestand(sap.clone(), 20);
+    let b = vorbedingung(Topf::neu(TopfId::B, Cent(500_000)), "Topf B")?;
+    let start = [a, b];
+    let universum = universum()?;
+    let preise = [(&sap, "250", "250"), (&allianz, "200", "200")];
+    for t in [5, 6, 9, 10, 11] {
+        let datum = tag(t)?;
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, t, &preise)?;
+        let (mut dachs, mut maus) = kaeufer(datum, &allianz);
+        if let Some(v) = dachs
+            .antworten
+            .get_mut(&datum)
+            .and_then(|a| a.vorschlag.as_mut())
+        {
+            v.zielgewichte_bp.insert(sap.clone(), 3_500);
+            v.begruendung.insert(sap.clone(), "Bestand halten".into());
+        }
+        if t == 9 {
+            let text = vorbedingung(fs::read_to_string(&ort.konto), "Kontodatei")?;
+            let ohne: String = text
+                .split_inclusive('\n')
+                .filter(|z| !z.starts_with("abrechnung;"))
+                .collect();
+            assert_ne!(text, ohne, "Verkauf und Abrechnung muessen belegt sein");
+            vorbedingung(fs::write(&ort.konto, ohne), "Abrechnung entfernen")?;
+            let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+            let aus = papiertag(
+                &mut j, datum, &universum, &start, &mut dachs, &mut maus, &mut k,
+            );
+            assert!(
+                matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Abrechnung")),
+                "{aus:?}"
+            );
+            assert_eq!(j.stand().seit_abschluss(), 0, "Halt vor Beginn des Tages");
+            assert_eq!(dachs.aufrufe, 0);
+            vorbedingung(fs::write(&ort.konto, text), "Kontodatei wiederherstellen")?;
+        }
+        let mut k = Papierdatei::oeffnen(&ort.konto, t != 5, &start)?;
+        let aus = papiertag(
+            &mut j, datum, &universum, &start, &mut dachs, &mut maus, &mut k,
+        );
+        assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+        let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A nach dem Lauf")?;
+        assert_eq!(
+            a.bargeld() > Cent::NULL,
+            t != 5,
+            "Verkaufserloes am Tag {t}"
+        );
+        assert_eq!(a.stueck(&allianz) > 0, t == 11, "Kauf am Tag {t}");
+        assert_eq!(
+            j.stand().begruendungen().iter().any(|(d, wer, text)| {
+                *d == datum && wer == "Kontowaechter" && text.contains("keine Deckung")
+            }),
+            matches!(t, 6 | 9),
+            "Kaufversuch im Journal am Tag {t}"
+        );
+        assert!(
+            vorbedingung(j.gleiche_ab(&k), "Abgleich")?.is_empty(),
+            "Abgleich am Tag {t}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn notbremse_arbeitet_verkaeufe_nach_neustart_ab_und_bleibt_aktiv() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf A")?;
+    topf.setze_bestand(sap.clone(), 10);
+    let start = [
+        topf,
+        vorbedingung(Topf::neu(TopfId::B, Cent::NULL), "Topf B")?,
+    ];
+    let universum = universum()?;
+    {
+        Papierdatei::oeffnen(&ort.konto, false, &start)?;
+        let mut j = ort.oeffnen()?;
+        for topf in &start {
+            vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+        }
+        vorbedingung(
+            j.schliesse_ab(tag(4)?, Cent(500_000), &"a".repeat(64)),
+            "Vorheriger Hoechststand",
+        )?;
+    }
+    for (t, vorher, kurs, sendungen, bestand) in [
+        (5, "250", "250", 1, 10),
+        (6, "250", "240", 2, 10),
+        (9, "240", "230", 3, 10),
+        (10, "230", "230", 3, 0),
+    ] {
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, t, &[(&sap, vorher, kurs), (&allianz, "200", "200")])?;
+        let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+        let (mut dachs, mut maus) = kaeufer(tag(t)?, &allianz);
+        let aus = papiertag(
+            &mut j,
+            tag(t)?,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut k,
+        );
+        assert!(matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Notbremse")));
+        assert_eq!(dachs.aufrufe, 0);
+        assert_eq!(k.konto().sendungen(), sendungen);
+        let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A")?;
+        assert_eq!(a.stueck(&sap), bestand);
+        assert_eq!(
+            j.stand().offene_auftraege().count(),
+            usize::from(bestand > 0)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn notbremse_oeffnet_erst_nach_einem_vollstaendig_geprueften_tag_wieder() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let start = start()?;
+    let universum = universum()?;
+    {
+        Papierdatei::oeffnen(&ort.konto, false, &start)?;
+        let mut j = ort.oeffnen()?;
+        for topf in &start {
+            vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+        }
+        let vorher = tag(4)?;
+        vorbedingung(
+            j.begruende(
+                vorher,
+                "Waechter",
+                "Notbremse aktiv: nur offene Verkaeufe weiter abgleichen",
+            ),
+            "Aktive Notbremse nach Schutzverkauf",
+        )?;
+        vorbedingung(
+            j.schliesse_ab(vorher, Cent(1_250_000), &"a".repeat(64)),
+            "Historischer Hoechststand",
+        )?;
+    }
+    for (t, vollstaendig, bleibt_halt, aufrufe) in [
+        (5, false, true, 0),
+        (6, true, false, 0),
+        (9, true, false, 1),
+    ] {
+        let mut j = ort.oeffnen()?;
+        let preise = [(&sap, "250", "250"), (&allianz, "200", "200")];
+        let preise = if vollstaendig {
+            preise.as_slice()
+        } else {
+            preise.get(..1).ok_or("Vorbedingung: SAP-Kurs")?
+        };
+        belege(&mut j, t, preise)?;
+        let mut papierkonto = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+        let datum = tag(t)?;
+        let (mut dachs, mut maus) = kaeufer(datum, &allianz);
+        let aus = papiertag(
+            &mut j,
+            datum,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut papierkonto,
+        );
+        assert_eq!(aus.is_err(), bleibt_halt, "{aus:?}");
+        assert_eq!(j.stand().notbremse_aktiv(), bleibt_halt);
+        assert_eq!(dachs.aufrufe, aufrufe);
+        assert_eq!(j.stand().historischer_hoechststand(), Some(Cent(1_250_000)));
+        assert_eq!(papierkonto.konto().sendungen(), usize::from(t == 9));
+    }
+    let j = ort.oeffnen()?;
+    assert_eq!(
+        j.eintraege()
+            .iter()
+            .filter(|(art, _)| *art == Art::NotbremseFreigabe)
+            .count(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn gesamtverlust_sperrt_vor_beratung_und_bleibt_nach_neustart() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(450_000)), "Topf A")?;
+    topf.setze_bestand(sap.clone(), 10);
+    let start = [
+        topf,
+        vorbedingung(Topf::neu(TopfId::B, Cent::NULL), "Topf B")?,
+    ];
+    let universum = universum()?;
+    Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    {
+        let mut j = ort.oeffnen()?;
+        for topf in &start {
+            vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+        }
+        for (tag_nr, hoch) in [(3, 1_000_000), (4, 800_000)] {
+            vorbedingung(
+                j.schliesse_ab(tag(tag_nr)?, Cent(hoch), &"a".repeat(64)),
+                "Hoechststand belegen",
+            )?;
+        }
+    }
+    for (t, sendungen) in [(5, 1), (6, 1), (9, 1)] {
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, t, &[(&sap, "250", "250"), (&allianz, "200", "200")])?;
+        let mut konto = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+        let (mut dachs, mut maus) = kaeufer(tag(t)?, &allianz);
+        let aus = papiertag(
+            &mut j,
+            tag(t)?,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut konto,
+        );
+        assert!(matches!(aus, Err(LaufFehler::Halt(grund)) if grund.contains("30 %")));
+        assert!(j.stand().papier_verlustsperre_aktiv());
+        assert_eq!(j.stand().historischer_hoechststand(), Some(Cent(1_000_000)));
+        assert_eq!(dachs.aufrufe, 0);
+        assert_eq!(konto.konto().sendungen(), sendungen);
+    }
+    let j = ort.oeffnen()?;
+    assert!(
+        j.eintraege()
+            .iter()
+            .any(|(art, inhalt)| { *art == Art::PapierHalt && inhalt.ends_with(";gesamtverlust") })
+    );
+    Ok(())
+}
+
+#[test]
+fn alte_verlustsperre_bleibt_beim_oeffnen_erhalten() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    {
+        let mut j = ort.oeffnen()?;
+        vorbedingung(
+            j.begruende(
+                tag(4)?,
+                "Waechter",
+                "Notbremse: 30 % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig",
+            ),
+            "Alte Verlustsperre belegen",
+        )?;
+        vorbedingung(
+            j.schliesse_ab(tag(4)?, Cent(1_000_000), &"a".repeat(64)),
+            "Abschluss",
+        )?;
+    }
+    assert!(ort.oeffnen()?.stand().papier_verlustsperre_aktiv());
+    Ok(())
+}
+
+#[test]
+fn ausdrueckliche_papierfreigabe_bindet_konto_und_startet_neue_verlustmessung() -> Result<(), String>
+{
+    let ort = Ort::neu()?;
+    let start = start()?;
+    let bargeld = Cent(1_000_000);
+    let historisch = Cent(1_500_000);
+    let mut konto = Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    let ab = "a".repeat(64);
+    let tag_vorher = tag(4)?;
+    let bestaetigt_am = some(Zeitpunkt::neu(tag(5)?, 11, 1, 23), "Freigabezeit")?;
+    let freigeben = |j: &mut Journal, abdruck: &str, konto: &Papierdatei| {
+        j.gebe_papier_frei(abdruck, konto, bestaetigt_am)
+    };
+    let mut j = ort.oeffnen()?;
+    for topf in &start {
+        vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+    }
+    vorbedingung(j.beginne_abrechnung(tag_vorher), "Tag starten")?;
+    vorbedingung(
+        j.belege_papier_halt(tag_vorher, depot_journal::PapierHalt::Gesamtverlust),
+        "Sperre",
+    )?;
+    let abdruck = j.bestaetigt().1;
+    assert!(
+        freigeben(&mut j, &abdruck, &konto).is_err(),
+        "Tag noch offen"
+    );
+    vorbedingung(j.schliesse_ab(tag_vorher, historisch, &ab), "Abschluss")?;
+    let anker = j.bestaetigt();
+    let falsches_konto = Papierdatei::oeffnen(
+        &ort.dir.join("falsch.txt"),
+        false,
+        &[vorbedingung(
+            Topf::neu(TopfId::A, Cent(900_000)),
+            "Abweichendes Bargeld",
+        )?],
+    )?;
+    assert!(
+        freigeben(&mut j, &ab, &konto).is_err(),
+        "Fremder Journalstand"
+    );
+    assert!(
+        freigeben(&mut j, &anker.1, &falsches_konto).is_err(),
+        "Konto weicht ab"
+    );
+    assert_eq!(j.bestaetigt(), anker);
+    vorbedingung(freigeben(&mut j, &anker.1, &konto), "Papierfreigabe")?;
+    assert!(
+        freigeben(&mut j, &anker.1, &konto).is_err(),
+        "Doppelte Freigabe"
+    );
+    drop(j);
+
+    let mut j = ort.oeffnen()?;
+    assert!(!j.stand().notbremse_aktiv());
+    assert_eq!(j.stand().historischer_hoechststand(), Some(historisch));
+    assert_eq!(j.stand().papier_waechterreferenz(), Some(bargeld));
+    assert_eq!(
+        j.stand().papier_gesamtverlust_erreicht(Cent(700_001), None),
+        Some(false)
+    );
+    assert_eq!(
+        j.stand().papier_gesamtverlust_erreicht(Cent(700_000), None),
+        Some(true)
+    );
+
+    let (sap, allianz) = (sap()?, allianz()?);
+    belege(&mut j, 5, &[(&sap, "250", "250"), (&allianz, "200", "200")])?;
+    vorbedingung(
+        papiertag(
+            &mut j,
+            tag(5)?,
+            &universum()?,
+            &start,
+            &mut Stumm,
+            &mut Stumm,
+            &mut konto,
+        ),
+        "Erster regulaerer Papiertag nach Freigabe",
+    )?;
+    assert_eq!(j.stand().historischer_hoechststand(), Some(historisch));
+
+    // Ein belegter Hoechststand der neuen Phase liegt unter dem historischen Hoechststand.
+    // Der anschliessende echte Papiertag bewertet das reale Testkonto bei 1.000.000 Cent.
+    vorbedingung(j.beginne_abrechnung(tag(6)?), "Tag mit neuem Hoechststand")?;
+    vorbedingung(
+        j.schliesse_ab(tag(6)?, Cent(1_428_572), &ab),
+        "Hoechststand der neuen Phase",
+    )?;
+    drop(j);
+    let mut j = ort.oeffnen()?;
+    belege(&mut j, 9, &[(&sap, "250", "250"), (&allianz, "200", "200")])?;
+    let (mut dachs, mut maus) = kaeufer(tag(9)?, &allianz);
+    let aus = papiertag(
+        &mut j,
+        tag(9)?,
+        &universum()?,
+        &start,
+        &mut dachs,
+        &mut maus,
+        &mut konto,
+    );
+    assert!(matches!(aus, Err(LaufFehler::Halt(grund)) if grund.contains("30 %")));
+    assert_eq!(dachs.aufrufe, 0);
+    assert!(j.stand().papier_verlustsperre_aktiv());
+    assert_eq!(j.stand().historischer_hoechststand(), Some(historisch));
+    Ok(())
+}
+
+#[test]
+fn order_ohne_kurs_verfaellt_und_gibt_den_topf_wieder_frei() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut journal = ort.oeffnen()?;
+    belege(
+        &mut journal,
+        5,
+        &[(&sap, "250", "250"), (&allianz, "200", "200")],
+    )?;
+    let mut papierkonto = konto(&ort, &journal)?;
+    let (mut dachs, mut maus) = kaeufer(tag(5)?, &allianz);
+    vorbedingung(
+        papiertag(
+            &mut journal,
+            tag(5)?,
+            &universum()?,
+            &start()?,
+            &mut dachs,
+            &mut maus,
+            &mut papierkonto,
+        ),
+        "Kaufauftrag",
+    )?;
+    let order = some(journal.stand().offene_auftraege().next(), "Offene Order")?;
+    let nr = order.beleg.nr;
+    assert_eq!(order.beleg.isin, allianz);
+    drop(papierkonto);
+    drop(journal);
+
+    let mut journal = ort.oeffnen()?;
+    belege(&mut journal, 6, &[(&sap, "250", "250")])?;
+    let mut papierkonto = konto(&ort, &journal)?;
+    let (mut dachs, mut maus) = kaeufer(tag(6)?, &sap);
+    vorbedingung(
+        papiertag(
+            &mut journal,
+            tag(6)?,
+            &universum()?,
+            &start()?,
+            &mut dachs,
+            &mut maus,
+            &mut papierkonto,
+        ),
+        "Papiertag ohne Kurs der offenen Order",
+    )?;
+    let order = some(journal.stand().auftrag(nr), "Verfallene Order")?;
+    assert_eq!(order.zustand, depot_journal::AuftragsZustand::Verfallen);
+    assert!(order.ausfuehrungen.is_empty());
+    assert!(journal.stand().begruendungen().iter().any(|(_, _, text)| {
+        text.contains(&format!("Auftrag {nr} verfaellt: kein gepruefter Kurs"))
+    }));
+    assert!(
+        journal
+            .stand()
+            .offene_auftraege()
+            .any(|l| l.beleg.isin == sap)
+    );
+    Ok(())
 }

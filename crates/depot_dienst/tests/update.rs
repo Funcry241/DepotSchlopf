@@ -15,6 +15,7 @@ use depot_lage::{Hinterlegt, Umgebung, Zugang, lagebild};
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+const UPDATE_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const HOST: &str = "127.0.0.1:47410";
 const HERKUNFT: &str = "http://127.0.0.1:47410";
 
@@ -38,26 +39,27 @@ fn mittag() -> Result<Zeitpunkt, String> {
 }
 
 fn echo_starter() -> Starter {
-    Box::new(move |art: Art, _wurzel: &Path| {
-        let zeile = format!("lauf {}", art.kurz());
+    Box::new(|art, _wurzel| {
+        let zeile = if art == Art::UpdatePruefen {
+            format!("[Update] Kandidat: {UPDATE_SHA}")
+        } else {
+            format!("lauf {}", art.kurz())
+        };
         #[cfg(windows)]
-        {
-            let mut c = Command::new("cmd");
-            c.args(["/C", &format!("echo {zeile}")]);
-            c
-        }
+        let mut c = Command::new("cmd");
+        #[cfg(windows)]
+        c.args(["/C", format!("echo {zeile}").as_str()]);
         #[cfg(not(windows))]
-        {
-            let mut c = Command::new("sh");
-            c.args(["-c", &format!("echo {zeile}")]);
-            c
-        }
+        let mut c = Command::new("sh");
+        #[cfg(not(windows))]
+        c.args(["-c", "printf '%s\\n' \"$@\"", "test", &zeile]);
+        c
     })
 }
 
 fn leeres_lagebild() -> Lagerechner {
     Box::new(|_wurzel: &Path, jetzt: Zeitpunkt| {
-        let l = lagebild(&Umgebung {
+        lagebild(&Umgebung {
             jetzt,
             journal: Zugang::NichtEingerichtet,
             kursquelle: Hinterlegt::Nein,
@@ -70,8 +72,7 @@ fn leeres_lagebild() -> Lagerechner {
             anbieter: Vec::new(),
             anbieter_unlesbar: 0,
             ki_halt: None,
-        });
-        (l, "<section>LAGEBILD</section>".to_string())
+        })
     })
 }
 
@@ -97,8 +98,8 @@ impl Umwelt for Leer {
     ) -> Result<(), String> {
         Err("nicht in Tests".into())
     }
-    fn autostart(&self, _wurzel: &Path) -> bool {
-        false
+    fn autostart(&self, _wurzel: &Path) -> depot_dienst::autostart::Stand {
+        depot_dienst::autostart::Stand::Aus
     }
     fn autostart_setzen(&self, _wurzel: &Path, _an: bool) -> Result<(), String> {
         Err("nicht in Tests".into())
@@ -150,36 +151,47 @@ fn lauf_ab(d: &Arc<Dienst>, t: Zeitpunkt) -> Result<Art, String> {
     Ok(art)
 }
 
+fn suche_update(d: &Arc<Dienst>, t: Zeitpunkt) -> Result<(), String> {
+    d.einreihen(Art::UpdatePruefen, Anlass::Hand)?;
+    assert_eq!(lauf_ab(d, t)?, Art::UpdatePruefen);
+    Ok(())
+}
+
+fn bestaetige_update(d: &Dienst) -> Result<String, String> {
+    post_auftrag(d, &format!("update&geprueft=ja&sha={UPDATE_SHA}"))
+}
+
 #[test]
-fn update_nur_allein_und_neustart_erst_wenn_nichts_mehr_wartet() -> Result<(), String> {
+fn update_laeuft_allein_und_sperrt_auftraege_bis_zum_neustart() -> Result<(), String> {
     let wurzel = ordner()?;
     let t = mittag()?;
     let d = dienst(wurzel.clone());
+    assert!(d.einreihen(Art::Update, Anlass::Hand).is_err());
+    assert!(d.von_hand(Art::Update, t).is_err());
+    assert!(d.schritt(t).is_none());
+    suche_update(&d, t)?;
     d.einreihen(Art::Termine, Anlass::Hand)?;
-    assert!(
-        d.einreihen(Art::Update, Anlass::Hand).is_err(),
-        "etwas wartet"
-    );
+    assert!(bestaetige_update(&d)?.contains("m=update_belegt"));
     let d = dienst(wurzel.clone());
-    d.einreihen(Art::Update, Anlass::Hand)?;
-    // Was danach kommt, wartet und laeuft vor dem Neustart.
-    d.einreihen(Art::Kurse, Anlass::Hand)?;
+    suche_update(&d, t)?;
+    assert!(bestaetige_update(&d)?.contains("m=update#update"));
+    assert!(d.einreihen(Art::Kurse, Anlass::Hand).is_err());
     assert_eq!(lauf_ab(&d, t)?, Art::Update);
     // Ohne update_offen.txt hat der Lauf nichts eingespielt: kein Neustart.
     assert!(!d.sperre().neustart);
     let d = dienst(wurzel.clone());
-    d.einreihen(Art::Update, Anlass::Hand)?;
-    d.einreihen(Art::Kurse, Anlass::Hand)?;
+    suche_update(&d, t)?;
+    assert!(bestaetige_update(&d)?.contains("m=update#update"));
+    let (nr, kind) = some(d.schritt(t), "Update gestartet")?;
+    assert!(d.einreihen(Art::Kurse, Anlass::Hand).is_err());
     offen_schreiben(&wurzel, &"a".repeat(40), &"b".repeat(40))?;
-    assert_eq!(lauf_ab(&d, t)?, Art::Update);
-    assert!(d.sperre().neustart);
-    assert!(!d.neustart_bereit(), "Kurse warten noch");
-    assert!(
-        d.einreihen(Art::Update, Anlass::Hand).is_err(),
-        "nur einmal je Start"
-    );
-    assert_eq!(lauf_ab(&d, t)?, Art::Kurse);
+    d.verfolge(nr, kind, || mittag().ok());
     assert!(d.neustart_bereit());
+    assert!(d.einreihen(Art::Update, Anlass::Hand).is_err());
+    assert!(d.einreihen(Art::Kurse, Anlass::Hand).is_err());
+    let probe = dienst(wurzel);
+    probe.einreihen(Art::Kurse, Anlass::Hand)?;
+    assert!(probe.schritt(t).is_none(), "Probezeit hält Aufträge zurück");
     assert!(get(&d, "/teil/live")?.contains("Der Dienst startet neu."));
     Ok(())
 }
@@ -190,7 +202,7 @@ fn knoepfe_auf_der_einrichtung_und_marke_des_starts() -> Result<(), String> {
     let seite = get(&d, "/einrichtung")?;
     assert!(seite.contains("id=\"update\""));
     assert!(seite.contains("name=\"art\" value=\"update_pruefen\""));
-    assert!(seite.contains("name=\"art\" value=\"update\""));
+    assert!(!seite.contains("/bestaetigen?art=update"));
     let marke = format!("data-start=\"{}\"", d.start);
     assert!(d.start.len() == 16 && !TOKEN.starts_with(&d.start));
     for pfad in ["/", "/teil/live", "/teil/status", "/einrichtung"] {
@@ -208,10 +220,60 @@ fn knoepfe_auf_der_einrichtung_und_marke_des_starts() -> Result<(), String> {
     assert!(r.contains("Location: /einrichtung?m=update#update\r\n"));
     let r = post_auftrag(&d, "update")?;
     assert!(
-        r.contains("Location: /einrichtung?m=update_belegt#update\r\n"),
-        "Pruefen wartet noch"
+        r.contains("Location: /einrichtung?m=update_bestaetigen#update\r\n"),
+        "Bestätigung fehlt"
     );
-    assert!(get(&d, "/einrichtung?m=update_belegt")?.contains("Update nicht eingereiht"));
+    let r = post_auftrag(&d, "update&geprueft=ja")?;
+    assert!(r.contains("Location: /einrichtung?m=update_suche#update\r\n"));
+    assert!(get(&d, "/teil/update")?.contains("wartet"));
+    Ok(())
+}
+
+#[test]
+fn update_ohne_commit_startet_auch_bei_fehlerhaftem_warteschlangeneintrag_nicht()
+-> Result<(), String> {
+    let d = dienst(ordner()?);
+    d.einreihen(Art::UpdatePruefen, Anlass::Hand)?;
+    some(
+        d.sperre().warteschlange.front_mut(),
+        "Warteschlangeneintrag",
+    )?
+    .art = Art::Update;
+    assert!(d.schritt(mittag()?).is_none());
+    let z = d.sperre();
+    let lauf = some(z.verlauf.front(), "abgelehnter Update-Lauf")?;
+    assert_eq!(lauf.erfolg, Some(false));
+    assert!(
+        lauf.protokoll
+            .iter()
+            .any(|z| z.contains("Bitte suche erneut"))
+    );
+    Ok(())
+}
+
+#[test]
+fn update_bestaetigung_bindet_den_gefundenen_commit() -> Result<(), String> {
+    let d = dienst(ordner()?);
+    let t = mittag()?;
+    suche_update(&d, t)?;
+    let ziel = format!("/bestaetigen?art=update&sha={UPDATE_SHA}");
+    assert!(get(&d, "/teil/update")?.contains("Eine neue Version ist verfügbar"));
+    assert!(get(&d, &ziel)?.contains("Ich spiele diese Version ein."));
+    assert!(get(&d, "/bestaetigen?art=update&sha=alt")?.contains("m=update_suche"));
+    assert!(post_auftrag(&d, "update&geprueft=ja&sha=alt")?.contains("m=update_suche"));
+    assert!(d.sperre().warteschlange.is_empty());
+    assert!(bestaetige_update(&d)?.contains("m=update#update"));
+    // Nach dem Einreihen ist das Suchergebnis für den Start entbehrlich.
+    d.sperre().verlauf.clear();
+    assert_eq!(lauf_ab(&d, t)?, Art::Update);
+    let z = d.sperre();
+    let lauf = some(z.verlauf.front(), "abgeschlossener Update-Lauf")?;
+    assert!(
+        lauf.protokoll
+            .iter()
+            .any(|zeile| zeile.contains(UPDATE_SHA))
+    );
+
     Ok(())
 }
 
@@ -288,10 +350,8 @@ fn rueckfall_setzt_auf_den_alten_stand_zurueck_und_lehnt_den_neuen_ab() -> Resul
     assert!(m.contains("zurueckgesetzt"), "{m}");
     assert_eq!(g(&w, &["rev-parse", "HEAD"])?, vorher);
     assert_eq!(g(&w, &["symbolic-ref", "--short", "HEAD"])?, "main");
-    assert_eq!(
-        fs::read_to_string(w.join("a.txt")).map_err(|e| e.to_string())?,
-        "alt\n"
-    );
+    let inhalt = fs::read_to_string(w.join("a.txt")).map_err(|e| e.to_string())?;
+    assert!(matches!(inhalt.as_str(), "alt\n" | "alt\r\n"), "{inhalt:?}");
     assert!(w.join("eigen.txt").exists());
     assert!(!rueckfall::offen_pfad(&w).exists());
     assert_eq!(
@@ -346,6 +406,82 @@ fn bestaetigen_nur_auf_dem_neuen_stand() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn bestaetigen_lehnt_unlesbares_journal_ab_und_erlaubt_code_rueckfall() -> Result<(), String> {
+    let (w, vorher, neu) = zwei_staende()?;
+    offen_schreiben(&w, &vorher, &neu)?;
+    let journal = w.join("daten").join("journal.txt");
+    fs::write(&journal, b"kaputt").map_err(|e| e.to_string())?;
+    assert!(
+        rueckfall::bestaetige_mit_wiederholung(
+            &w,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(1),
+        )
+        .is_err_and(|e| e.contains("Papierdaten"))
+    );
+    assert!(rueckfall::offen_pfad(&w).exists());
+    assert!(rueckfall::zuruecksetzen(&w)?.is_some());
+    assert_eq!(g(&w, &["rev-parse", "HEAD"])?, vorher);
+    assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, b"kaputt");
+    Ok(())
+}
+
+#[test]
+fn bestaetigung_wiederholt_eine_voruebergehende_journalsperre() -> Result<(), String> {
+    use std::{fs::OpenOptions, thread, time::Duration};
+
+    let (w, vorher, neu) = zwei_staende()?;
+    offen_schreiben(&w, &vorher, &neu)?;
+    let daten = w.join("daten");
+    for (name, inhalt) in [
+        (
+            "journal.txt",
+            include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/journal.txt")
+                .as_slice(),
+        ),
+        (
+            "journal.vermerk",
+            include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/journal.vermerk")
+                .as_slice(),
+        ),
+        (
+            "papierkonto.txt",
+            include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/papierkonto.txt")
+                .as_slice(),
+        ),
+    ] {
+        fs::write(daten.join(name), inhalt).map_err(|e| e.to_string())?;
+    }
+    let sperre = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(daten.join("journal.txt"))
+        .map_err(|e| e.to_string())?;
+    sperre.try_lock().map_err(|e| e.to_string())?;
+    assert!(
+        rueckfall::bestaetige_mit_wiederholung(&w, Duration::ZERO, Duration::ZERO)
+            .is_err_and(|e| e.contains("durchgehend belegt"))
+    );
+    assert!(rueckfall::offen_pfad(&w).exists());
+    let freigabe = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(100));
+        sperre.unlock()
+    });
+    let ergebnis = rueckfall::bestaetige_mit_wiederholung(
+        &w,
+        Duration::from_secs(3),
+        Duration::from_millis(20),
+    );
+    freigabe
+        .join()
+        .map_err(|_| "Journalsperre freigeben")?
+        .map_err(|e| e.to_string())?;
+    assert_eq!(ergebnis?, Some(Offen { vorher, neu }));
+    assert!(!rueckfall::offen_pfad(&w).exists());
+    Ok(())
+}
+
 // --- Waechter: Probezeit mit Frist (Maus, Befund zu #30) ---
 
 /// Ein Kindprozess aus einem kleinen Skript; `{offen}` steht fuer den Pfad der Markierung.
@@ -354,21 +490,26 @@ fn kind(
     skript_windows: &str,
     offen: &Path,
 ) -> Result<std::process::Child, String> {
-    let p = offen.display().to_string();
     #[cfg(windows)]
     let mut c = {
+        use std::os::windows::process::CommandExt as _;
+
         let _ = skript_unix;
-        let mut c = Command::new("cmd");
-        c.args(["/C", &skript_windows.replace("{offen}", &p)]);
+        let mut c = Command::new("cmd.exe");
+        // cmd liest den Rest hinter /C selbst. Die normalen Argument-Escapes würden
+        // die Anführungszeichen für den Pfad mit einem Backslash versehen.
+        c.args(["/D", "/V:OFF", "/C"])
+            .raw_arg(skript_windows.replace("{offen}", "%DEPOT_TEST_OFFEN%"));
         c
     };
     #[cfg(not(windows))]
     let mut c = {
         let _ = skript_windows;
         let mut c = Command::new("sh");
-        c.args(["-c", &skript_unix.replace("{offen}", &p)]);
+        c.args(["-c", &skript_unix.replace("{offen}", "$DEPOT_TEST_OFFEN")]);
         c
     };
+    c.env("DEPOT_TEST_OFFEN", offen);
     c.spawn().map_err(|e| format!("Vorbedingung Kind: {e}"))
 }
 
@@ -415,8 +556,8 @@ fn haengender_neuer_stand_wird_nach_der_frist_beendet() -> Result<(), String> {
 fn nach_der_bestaetigung_zaehlt_der_code() -> Result<(), String> {
     let offen = markierung()?;
     let mut k = kind(
-        "rm -f '{offen}'; sleep 0.3; exit 3",
-        "del /q \"{offen}\" & ping -n 2 127.0.0.1 >nul & exit /b 3",
+        "rm \"{offen}\" || exit 91; exit 3",
+        "del /q \"{offen}\" || exit /b 91 & if exist \"{offen}\" exit /b 91 & exit /b 3",
         &offen,
     )?;
     let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(30), KURZ);

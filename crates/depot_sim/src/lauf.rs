@@ -23,14 +23,18 @@
 //! Was ein angefangener Tag gekostet hat, steht im Journal; ihn zu wiederholen, waere eine
 //! zweite Frage fuer denselben Zyklus.
 
-use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung};
+use depot_journal::{
+    AuftragsZustand, Journal, JournalFehler, Meldung, PapierHalt, PrognoseBeleg, Weltprognose,
+};
+use depot_kern::liste::papierorder_schluss;
 use depot_kern::{
     BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
+    Zeitpunkt,
 };
 use depot_ki::Sperre;
 use depot_regelwerk::{
-    DatenFehler, Eingabe, GenehmigterAuftrag, WaechterBefund, entscheide, notbremse_auftraege,
-    pruefe_kurse, waechter,
+    DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide,
+    notbremse_auftraege, pruefe_kurse, waechter,
 };
 
 use crate::abdruck;
@@ -293,6 +297,8 @@ pub fn lauf(
                 vortag,
                 nr,
                 abdruck,
+                uhr: None,
+                vollstaendige_kurse: false,
             };
             hoch = ein_tag(j, &z, hoch, &fehler, &mut beteiligte)?;
         }
@@ -357,6 +363,9 @@ pub(crate) struct Zyklus<'a> {
     pub(crate) nr: u32,
     /// Abdruck der Vorgeschichte bis einschliesslich dieses Tages.
     pub(crate) abdruck: &'a str,
+    /// Reale Versandzeit im Papiertag. Die historische Beispielszenario-Simulation hat keine Uhr.
+    pub(crate) uhr: Option<&'a dyn Fn() -> Option<Zeitpunkt>>,
+    pub(crate) vollstaendige_kurse: bool,
 }
 
 /// Ein Tag. Liefert den Hoechststand nach dem Tag.
@@ -372,8 +381,20 @@ pub(crate) fn ein_tag(
         jr.beobachte(tag.datum, &sauber(ereignis))
             .map_err(journal)?;
     }
+    jr.beginne_abrechnung(tag.datum).map_err(journal)?;
     kontowaechter(jr, tag, &*beteiligte.konto)?;
+    beteiligte.konto.rechne_ab(tag.datum);
+    pruefe_stoerung(&*beteiligte.konto)?;
+    if z.uhr.is_some()
+        && (pruefe_papier_verlustsperre(jr, z, hoch, fehler.is_empty())?
+            || jr.stand().notbremse_aktiv())
+    {
+        return papier_notbremse_fortsetzen(jr, z, hoch, &mut *beteiligte.konto, fehler.is_empty());
+    }
     if !fehler.is_empty() {
+        if z.uhr.is_some() {
+            markt_offener_orders(jr, z, &mut *beteiligte.konto, false)?;
+        }
         for f in fehler {
             begruende(jr, tag, DATEN, &format!("{f:?}"))?;
         }
@@ -395,6 +416,9 @@ pub(crate) fn ein_tag(
     };
     match befund {
         WaechterBefund::InOrdnung => {}
+        WaechterBefund::Notbremse { .. } if z.uhr.is_some() => {
+            return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto, true);
+        }
         WaechterBefund::Notbremse { .. } => {
             begruende(
                 jr,
@@ -411,6 +435,9 @@ pub(crate) fn ein_tag(
             return Err(halt(format!("Waechter: {befund:?}")));
         }
         WaechterBefund::Tagesverlust { .. } | WaechterBefund::Unplausibel => {
+            if z.uhr.is_some() {
+                stoppe_kaeufe(jr, tag, &mut *beteiligte.konto)?;
+            }
             begruende(
                 jr,
                 tag,
@@ -420,16 +447,182 @@ pub(crate) fn ein_tag(
             return Err(halt(format!("Waechter: {befund:?}")));
         }
     }
+    if z.uhr.is_some() {
+        markt_offener_orders(jr, z, &mut *beteiligte.konto, true)?;
+        if pruefe_papier_verlustsperre(jr, z, hoch, true)? {
+            return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto, true);
+        }
+    }
     // Fuer den Hoechststand zaehlt der aufgerundete Wert (siehe `depotwert`).
-    let heute =
-        depotwert(toepfe.iter(), &tag.kurse, Rundung::Auf).ok_or_else(|| rechnung("Depotwert"))?;
+    let heute = depotwert(jr.stand().toepfe().values(), &tag.kurse, Rundung::Auf)
+        .ok_or_else(|| rechnung("Depotwert"))?;
     let b = beteiligte;
-    topf_zyklus(jr, z, TopfId::A, b.dachs, b.maus, &mut *b.konto)?;
-    topf_zyklus(jr, z, TopfId::B, b.maus, b.dachs, &mut *b.konto)?;
+    let topf_a = frage_topf(jr, z, TopfId::A, b.dachs)?;
+    // Im Papiertag muessen beide Antworten feststehen, bevor jemand den Vorschlag des
+    // anderen sieht. Das Beispiel-Szenario behaelt seine bisherige Aufrufreihenfolge.
+    let topf_b = if z.uhr.is_some() {
+        Some(frage_topf(jr, z, TopfId::B, b.maus)?)
+    } else {
+        None
+    };
+    topf_zyklus(jr, z, topf_a, b.maus, &mut *b.konto)?;
+    let topf_b = match topf_b {
+        Some(topf) => topf,
+        None => frage_topf(jr, z, TopfId::B, b.maus)?,
+    };
+    topf_zyklus(jr, z, topf_b, b.dachs, &mut *b.konto)?;
     let hoch = hoch.max(heute);
     jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
     Ok(hoch)
+}
+
+fn stoppe_kaeufe(j: &mut Journal, tag: &Tag, konto: &mut dyn Broker) -> Result<(), LaufFehler> {
+    if j.stand()
+        .offene_auftraege()
+        .any(|l| l.beleg.richtung == Richtung::Kauf)
+    {
+        if !konto.stoppe_kaeufe() {
+            return Err(halt("Offene Kaeufe konnten nicht sicher storniert werden"));
+        }
+        kontowaechter(j, tag, &*konto)?;
+        if j.stand()
+            .offene_auftraege()
+            .any(|l| l.beleg.richtung == Richtung::Kauf)
+        {
+            return Err(halt("Kauf nach Storno noch offen"));
+        }
+    }
+    Ok(())
+}
+
+/// Prueft vor der Marktverarbeitung und nach Ausfuehrungen inklusive Gebuehren.
+/// Ohne gepruefte Kurse laesst sich Bestand nicht bewerten; der Lauf sperrt Kaeufe an diesem Tag ohnehin.
+fn pruefe_papier_verlustsperre(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    hoch: Cent,
+    kurse_ok: bool,
+) -> Result<bool, LaufFehler> {
+    if j.stand().papier_verlustsperre_aktiv() {
+        return Ok(true);
+    }
+    let stand = j.stand();
+    let wert = if kurse_ok || stand.gehalten().is_empty() {
+        depotwert(stand.toepfe().values(), &z.tag.kurse, Rundung::Ab)
+    } else {
+        None
+    };
+    if wert.is_some_and(|wert| stand.papier_gesamtverlust_erreicht(wert, Some(hoch)) == Some(true))
+    {
+        j.belege_papier_halt(z.tag.datum, PapierHalt::Gesamtverlust)
+            .map_err(journal)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn papier_notbremse_fortsetzen(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    hoch: Cent,
+    konto: &mut dyn Broker,
+    kurse_ok: bool,
+) -> Result<Cent, LaufFehler> {
+    if !j.stand().papier_verlustsperre_aktiv()
+        && j.stand().prueft_wiederanlauf()
+        && kurse_ok
+        && z.vollstaendige_kurse
+    {
+        return j
+            .schliesse_wiederanlauf_ab(z.tag.datum, z.abdruck)
+            .map_err(journal);
+    }
+    papier_notbremse(j, z, hoch, konto, kurse_ok)
+}
+
+fn papier_notbremse(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    hoch: Cent,
+    konto: &mut dyn Broker,
+    kurse_ok: bool,
+) -> Result<Cent, LaufFehler> {
+    stoppe_kaeufe(j, z.tag, konto)?;
+    if !j.stand().notbremse_aktiv() {
+        j.belege_papier_halt(z.tag.datum, PapierHalt::Notbremse)
+            .map_err(journal)?;
+    }
+    markt_offener_orders(j, z, konto, kurse_ok)?;
+    pruefe_papier_verlustsperre(j, z, hoch, kurse_ok)?;
+    if kurse_ok {
+        erneuere_schutzverkaeufe(j, z, konto)?;
+    }
+    j.schliesse_ab(z.tag.datum, hoch, z.abdruck)
+        .map_err(journal)?;
+    Err(halt(
+        j.stand()
+            .papier_halt()
+            .unwrap_or(PapierHalt::Notbremse)
+            .meldung(),
+    ))
+}
+
+fn erneuere_schutzverkaeufe(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    konto: &mut dyn Broker,
+) -> Result<(), LaufFehler> {
+    let toepfe: Vec<_> = j.stand().toepfe().values().cloned().collect();
+    for mut topf in toepfe {
+        let topf_id = topf.id();
+        // Bereits beauftragte Verkaeufe bleiben bestehen und binden ihren offenen Rest.
+        for l in j
+            .stand()
+            .offene_auftraege()
+            .filter(|l| l.beleg.topf == topf_id)
+        {
+            let frei = topf
+                .stueck(&l.beleg.isin)
+                .checked_sub(l.offen_stueck())
+                .ok_or_else(|| rechnung("Offener Verkauf"))?;
+            topf.setze_bestand(l.beleg.isin.clone(), frei);
+        }
+        let mut vergabe = j.kennungsvergabe();
+        let auftraege = notbremse_auftraege(z.grenzen, &topf, &z.tag.kurse, &mut vergabe)
+            .ok_or_else(|| halt("Notbremse: Kurs fehlt; Halt ohne Verkauf"))?;
+        fuehre_aus(j, z, topf.id(), &auftraege, konto)?;
+    }
+    Ok(())
+}
+
+fn markt_offener_orders(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    konto: &mut dyn Broker,
+    kurse_ok: bool,
+) -> Result<(), LaufFehler> {
+    let offen: Vec<_> = j.stand().offene_auftraege().map(|l| l.beleg.nr).collect();
+    if offen.is_empty() {
+        return Ok(());
+    }
+    let kurse = &z.tag.kurse;
+    let handelbar = z.universum.isins();
+    let eintraege = kurse
+        .alle()
+        .filter(|(isin, _)| kurse_ok && handelbar.contains(*isin))
+        .filter_map(|(isin, kurs)| Some((isin.clone(), kurs.clone(), kurse.abruf(isin)?)))
+        .collect();
+    let stand = z
+        .uhr
+        .and_then(|uhr| uhr())
+        .filter(|zeit| *zeit >= kurse.stand())
+        .ok_or_else(|| halt("Keine verlaessliche Marktzeit"))?;
+    let kurse = Kurse::mit_abrufen(stand, eintraege)
+        .map_err(|e| halt(format!("Kurse fuer offene Orders: {e:?}")))?;
+    konto.markt(&kurse);
+    kontowaechter(j, z.tag, &*konto)?;
+    protokolliere_ausfuehrungen(j, z.tag, &offen, Some(&kurse))
 }
 
 /// Fragt einen Berater, wenn der Kostenschutz es erlaubt. `None` heisst: nicht gefragt; der
@@ -489,6 +682,12 @@ fn frage(
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag")? {
         let mut antwort = frager.vorschlagen(e, lage);
         let wie = if antwort.verwertbar {
+            if z.uhr.is_some()
+                && let Some(prognose) = antwort.prognose.take()
+                && z.universum.isins().contains(&prognose.isin)
+            {
+                belege_prognose(j, lage, wer, prognose)?;
+            }
             ANTWORT_VERWENDET
         } else {
             // Eine verworfene Antwort traegt nie einen Vorschlag weiter.
@@ -512,23 +711,98 @@ fn frage(
     Ok(vorschlag)
 }
 
-/// Ein Topf in einem Zyklus: Der zustaendige Berater schlaegt vor, der andere prueft, das
-/// Regelwerk entscheidet.
-fn topf_zyklus(
+fn belege_prognose(
+    j: &mut Journal,
+    lage: &Lage<'_>,
+    berater: BeraterId,
+    prognose: Weltprognose,
+) -> Result<(), LaufFehler> {
+    let ereignis = prognose
+        .ereignis_nr
+        .checked_sub(1)
+        .and_then(|nr| lage.ereignisse.get(nr));
+    if let (Some(ereignis), Some(ausgangskurs)) = (ereignis, lage.kurse.kurs(&prognose.isin))
+        && prognose.gueltig()
+    {
+        match j.belege_weltprognose(&PrognoseBeleg {
+            datum: lage.datum,
+            berater,
+            prognose,
+            ausgangskurs,
+            ereignis: sauber(ereignis),
+        }) {
+            Ok(()) => {}
+            Err(JournalFehler::Abgelehnt(grund)) => j
+                .begruende(
+                    lage.datum,
+                    name(berater),
+                    &format!("Prognose verworfen: {grund}"),
+                )
+                .map_err(journal)?,
+            Err(e) => return Err(journal(e)),
+        }
+    }
+    Ok(())
+}
+
+struct TopfAntwort {
+    topf: Topf,
+    vorschlag: Option<Vorschlag>,
+}
+
+fn frage_topf(
     j: &mut Journal,
     z: &Zyklus<'_>,
     id: TopfId,
     frager: &mut dyn Berater,
-    pruefer: &mut dyn Berater,
-    konto: &mut dyn Broker,
-) -> Result<(), LaufFehler> {
-    let (tag, zyklus) = (z.tag, z.nr);
+) -> Result<TopfAntwort, LaufFehler> {
+    let tag = z.tag;
     let topf = j
         .stand()
         .toepfe()
         .get(&id)
         .cloned()
         .ok_or_else(|| halt(format!("{} fehlt im Journal", topf_name(id))))?;
+    let t = topf_name(id);
+    let lage = Lage {
+        datum: tag.datum,
+        topf: &topf,
+        kurse: &tag.kurse,
+        ereignisse: &tag.ereignisse,
+    };
+    let wartet = j
+        .stand()
+        .offene_auftraege()
+        .find(|l| l.versand.is_some() && l.beleg.topf == id)
+        .map(|l| l.beleg.nr);
+    let vorschlag = if let Some(nr) = wartet {
+        begruende(
+            j,
+            tag,
+            AUFTRAGSSTELLE,
+            &format!("{t}: wartet auf offenen Auftrag {nr}"),
+        )?;
+        None
+    } else {
+        frage(j, z, id, frager, &lage)?
+    };
+    Ok(TopfAntwort { topf, vorschlag })
+}
+
+/// Der zweite Berater prueft den Vorschlag, dann entscheidet das Regelwerk.
+fn topf_zyklus(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    antwort: TopfAntwort,
+    pruefer: &mut dyn Berater,
+    konto: &mut dyn Broker,
+) -> Result<(), LaufFehler> {
+    let TopfAntwort {
+        topf,
+        mut vorschlag,
+    } = antwort;
+    let (tag, zyklus) = (z.tag, z.nr);
+    let id = topf.id();
     let zweiter = andere(id.berater());
     let t = topf_name(id);
     let lage = Lage {
@@ -537,7 +811,6 @@ fn topf_zyklus(
         kurse: &tag.kurse,
         ereignisse: &tag.ereignisse,
     };
-    let mut vorschlag = frage(j, z, id, frager, &lage)?;
     if vorschlag.is_some() && !pruefer.angebunden() {
         vorschlag = None;
         begruende(
@@ -596,7 +869,7 @@ fn topf_zyklus(
     }
     let alle = fuehre_aus(j, z, id, &ent.verkaeufe, konto);
     // Das Regelwerk rechnet die Kaeufe mit dem Erloes der Verkaeufe: Sie gehen nur raus, wenn
-    // alle Verkaeufe ausgefuehrt sind; sonst verfallen sie.
+    // alle Verkaeufe ausgefuehrt sind und das bereits abgerechnete Geld ausreicht.
     match alle {
         Ok(()) if verkauft(j, &ent.verkaeufe) => fuehre_aus(j, z, id, &ent.kaeufe, konto),
         Ok(()) if ent.kaeufe.is_empty() => Ok(()),
@@ -653,8 +926,27 @@ fn fuehre_aus(
             }
             Err(e) => return Err(journal(e)),
         }
-        j.melde(nr, &Meldung::Gesendet).map_err(journal)?;
-        let antwort = konto.sende(a);
+        let versand = z
+            .uhr
+            .map(|uhr| {
+                uhr()
+                    .filter(|zeit| *zeit >= tag.kurse.stand())
+                    .ok_or_else(|| halt("Keine verlaessliche Versandzeit"))
+            })
+            .transpose()?;
+        let meldung = match versand {
+            Some(zeit) => {
+                let frist = papierorder_schluss(&a.auftrag().isin, zeit)
+                    .ok_or_else(|| halt("Keine Boersenfrist fuer den Auftrag"))?;
+                Meldung::GesendetAm(zeit, frist)
+            }
+            None => Meldung::Gesendet,
+        };
+        j.melde(nr, &meldung).map_err(journal)?;
+        let antwort = match versand {
+            Some(zeit) => konto.sende_am(a, zeit),
+            None => konto.sende(a),
+        };
         // Ist das Konto nicht gesichert, bestaetigt das Journal nichts mehr davon (K23-01).
         pruefe_stoerung(&*konto)?;
         match antwort {
@@ -682,12 +974,24 @@ fn fuehre_aus(
         }
         gesendet.push(nr);
     }
-    konto.markt(&tag.kurse);
+    if z.uhr.is_none() {
+        konto.markt(&tag.kurse);
+    }
     kontowaechter(j, tag, &*konto)?;
-    for nr in gesendet {
-        let Some(l) = j.stand().auftrag(nr).cloned() else {
-            return Err(halt(format!("{t}: Auftrag {nr} fehlt im Journal")));
+    protokolliere_ausfuehrungen(j, tag, &gesendet, None)
+}
+
+fn protokolliere_ausfuehrungen(
+    j: &mut Journal,
+    tag: &Tag,
+    nummern: &[u64],
+    papierkurse: Option<&Kurse>,
+) -> Result<(), LaufFehler> {
+    for nr in nummern {
+        let Some(l) = j.stand().auftrag(*nr).cloned() else {
+            return Err(halt(format!("Auftrag {nr} fehlt im Journal")));
         };
+        let t = topf_name(l.beleg.topf);
         for a in &l.ausfuehrungen {
             begruende(
                 j,
@@ -700,13 +1004,85 @@ fn fuehre_aus(
             )?;
         }
         if l.zustand == AuftragsZustand::Verfallen {
+            let grund = match (papierkurse, l.frist) {
+                (Some(kurse), Some(schluss)) => {
+                    if schluss.datum() != kurse.stand().datum() {
+                        "Boersentag der Order bereits vorbei"
+                    } else if kurse
+                        .eintrag(&l.beleg.isin)
+                        .map(depot_kern::Kurs::zeitpunkt)
+                        != Some(schluss)
+                    {
+                        "kein gepruefter Kurs am Boersenschluss"
+                    } else {
+                        "Kurs ausserhalb des Limits"
+                    }
+                }
+                _ => "Kurs ausserhalb des Limits",
+            };
             begruende(
                 j,
                 tag,
                 SIMULATION,
-                &format!("{t}: Auftrag {nr} verfaellt: Kurs ausserhalb des Limits"),
+                &format!("{t}: Auftrag {nr} verfaellt: {grund}"),
             )?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn abgelehnte_prognose_laesst_den_tagesabschluss_zu() -> Result<(), LaufFehler> {
+        let ordner = std::env::temp_dir().join(format!(
+            "depot-weltprognose-abgelehnt-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(journal)?;
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        let datum = depot_kern::Datum::neu(2026, 11, 6).ok_or_else(|| halt("Datum"))?;
+        let zeit = Zeitpunkt::neu(datum, 16, 35, 0).ok_or_else(|| halt("Zeit"))?;
+        let isin = depot_kern::Isin::neu("DE0007164600").map_err(|e| halt(format!("{e:?}")))?;
+        let preis = depot_kern::Preis::lies_euro("230").ok_or_else(|| halt("Preis"))?;
+        let kurs = depot_kern::Kurs::exakt(preis, "EUR", datum, zeit, Herkunft::Quelle)
+            .map_err(|e| halt(format!("{e:?}")))?;
+        let kurse =
+            Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| halt(format!("{e:?}")))?;
+        let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| halt(format!("{e:?}")))?;
+        j.beginne_abrechnung(datum).map_err(journal)?;
+        let lage = Lage {
+            datum,
+            topf: &topf,
+            kurse: &kurse,
+            ereignisse: &["Meldung".into()],
+        };
+        let prognose = Weltprognose {
+            isin,
+            richtung: depot_journal::Prognoserichtung::Steigt,
+            handelstage: 3,
+            ereignis_nr: 1,
+            begruendung: "Ursache".into(),
+            widerlegung: "Gegenbeleg".into(),
+        };
+        // In dieser Probe fehlen der Kurs- und der Ereignisbeleg im Journal.
+        belege_prognose(&mut j, &lage, BeraterId::Dachs, prognose)?;
+        assert!(j.stand().weltprognosen().is_empty());
+        assert!(
+            j.stand()
+                .begruendungen()
+                .iter()
+                .any(|(_, _, t)| t.starts_with("Prognose verworfen:"))
+        );
+        j.schliesse_ab(datum, Cent(500_000), &"a".repeat(64))
+            .map_err(journal)?;
+        assert_eq!(j.stand().seit_abschluss(), 0);
+        drop(j);
+        std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
+        Ok(())
+    }
 }

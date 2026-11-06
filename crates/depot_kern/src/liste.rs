@@ -13,6 +13,7 @@
 use crate::boerse::Boerse;
 use crate::grenzen::Universum;
 use crate::instrument::{Instrument, InstrumentArt, Isin};
+use crate::zeit::Zeitpunkt;
 
 /// Name der Quelle fuer Xetra-Werte im Journal (`kurs;quelle;…`).
 pub const QUELLE: &str = "alphavantage";
@@ -156,6 +157,22 @@ pub fn beobachtungsliste() -> Result<Vec<Wert>, String> {
     pruefe_liste(&WERTE)
 }
 
+/// Der erste Schluss der Boerse des Werts nach dem Versand. Nur dieser Schluss ist fuer
+/// eine zeitbelegte Papierorder erreichbar. Ohne bekannte Boerse gibt es keine Frist.
+pub fn papierorder_schluss(isin: &Isin, versand: Zeitpunkt) -> Option<Zeitpunkt> {
+    let (_, boerse, _, _) = WERTE.iter().find(|(id, ..)| *id == isin.als_str())?;
+    let mut tag = versand.datum()?;
+    loop {
+        if boerse.handelstag(tag) {
+            let schluss = boerse.schluss(tag)?;
+            if schluss > versand {
+                return Some(schluss);
+            }
+        }
+        tag = tag.plus_tage(1)?;
+    }
+}
+
 /// Die Boersen der festgelegten Liste.
 pub fn boersen() -> Vec<Boerse> {
     let mut b: Vec<Boerse> = WERTE.iter().map(|(_, boerse, _, _)| *boerse).collect();
@@ -195,4 +212,28 @@ pub fn als_universum(werte: &[Wert]) -> Universum {
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod papierorder_tests {
+    use super::*;
+
+    #[test]
+    fn papierorder_wartet_auf_ihre_boerse() -> Result<(), String> {
+        let mittwoch = crate::Datum::neu(2026, 11, 25).ok_or("Mittwoch")?;
+        let donnerstag = mittwoch.plus_tage(1).ok_or("Donnerstag")?;
+        let freitag = donnerstag.plus_tage(1).ok_or("Freitag")?;
+        let versand = Zeitpunkt::frankfurt(mittwoch, 22, 15, 0).ok_or("Versand")?;
+        let sap = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let coca_cola = Isin::neu("US1912161007").map_err(|e| format!("{e:?}"))?;
+        assert_eq!(
+            papierorder_schluss(&sap, versand),
+            Boerse::Xetra.schluss(donnerstag)
+        );
+        assert_eq!(
+            papierorder_schluss(&coca_cola, versand),
+            Boerse::Nyse.schluss(freitag)
+        );
+        Ok(())
+    }
 }
