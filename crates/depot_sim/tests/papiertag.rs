@@ -1314,6 +1314,9 @@ fn ausdrueckliche_papierfreigabe_bindet_konto_und_startet_neue_verlustmessung() 
     let ab = "a".repeat(64);
     let tag_vorher = tag(4)?;
     let bestaetigt_am = some(Zeitpunkt::neu(tag(5)?, 11, 1, 23), "Freigabezeit")?;
+    let freigeben = |j: &mut Journal, abdruck: &str, konto: &Papierdatei| {
+        j.gebe_papier_frei(abdruck, konto, bestaetigt_am)
+    };
     let mut j = ort.oeffnen()?;
     for topf in &start {
         vorbedingung(j.setze_topf(topf), "Topf belegen")?;
@@ -1323,9 +1326,9 @@ fn ausdrueckliche_papierfreigabe_bindet_konto_und_startet_neue_verlustmessung() 
         j.belege_papier_halt(tag_vorher, depot_journal::PapierHalt::Gesamtverlust),
         "Sperre",
     )?;
+    let abdruck = j.bestaetigt().1;
     assert!(
-        j.gebe_papier_frei(&j.bestaetigt().1, &konto, bestaetigt_am)
-            .is_err(),
+        freigeben(&mut j, &abdruck, &konto).is_err(),
         "Tag noch offen"
     );
     vorbedingung(j.schliesse_ab(tag_vorher, historisch, &ab), "Abschluss")?;
@@ -1339,30 +1342,23 @@ fn ausdrueckliche_papierfreigabe_bindet_konto_und_startet_neue_verlustmessung() 
         )?],
     )?;
     assert!(
-        j.gebe_papier_frei(&ab, &konto, bestaetigt_am).is_err(),
+        freigeben(&mut j, &ab, &konto).is_err(),
         "Fremder Journalstand"
     );
     assert!(
-        j.gebe_papier_frei(&anker.1, &falsches_konto, bestaetigt_am)
-            .is_err(),
+        freigeben(&mut j, &anker.1, &falsches_konto).is_err(),
         "Konto weicht ab"
     );
     assert_eq!(j.bestaetigt(), anker);
-    vorbedingung(
-        j.gebe_papier_frei(&anker.1, &konto, bestaetigt_am),
-        "Papierfreigabe",
-    )?;
+    vorbedingung(freigeben(&mut j, &anker.1, &konto), "Papierfreigabe")?;
     assert!(
-        j.gebe_papier_frei(&anker.1, &konto, bestaetigt_am).is_err(),
+        freigeben(&mut j, &anker.1, &konto).is_err(),
         "Doppelte Freigabe"
     );
     drop(j);
 
     let mut j = ort.oeffnen()?;
     assert!(!j.stand().notbremse_aktiv());
-    assert!(j.stand().begruendungen().iter().any(|(_, wer, text)| {
-        wer == "Einrichtung, Dialog" && text.contains("2026-11-05T11:01:23Z")
-    }));
     assert_eq!(j.stand().historischer_hoechststand(), Some(historisch));
     assert_eq!(j.stand().papier_waechterreferenz(), Some(bargeld));
     assert_eq!(

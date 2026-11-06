@@ -1154,6 +1154,14 @@ fn papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand() -> Result<(), 
         "papier-freigabe;2026-11-04;1000000;einrichtung;dialog;",
         "2026-11-05T11:01:23Z"
     )));
+    assert!(depot_lage::mit_journal(&daten, |zugang| {
+        let Zugang::Offen(stand) = zugang else {
+            return false;
+        };
+        stand.begruendungen().iter().any(|(_, wer, text)| {
+            wer == "Einrichtung, Dialog" && text.contains("2026-11-05T11:01:23Z")
+        })
+    }));
     Ok(())
 }
 
