@@ -61,7 +61,10 @@ pub mod terminbeleg;
 pub use auftrag::{AuftragsLage, AuftragsZustand, Ausfuehrung, Meldung};
 pub use datei::{Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
 pub use kasse::{AufrufErlaubnis, KiStand};
-pub use konto::{Abweichung, Konto, KontoOrder, KontoStatus, Kontoauszug, verfuegbar};
+pub use konto::{
+    Abrechnungen, Abweichung, Konto, KontoOrder, KontoStatus, Kontoauszug, papier_valuta,
+    verfuegbar,
+};
 pub use kursbeleg::KursBeleg;
 pub use nachrichtbeleg::{MAX_NACHRICHT, NachrichtBeleg};
 pub use stand::{Abschluss, Art, AuftragsBeleg, FORMAT, FORMAT_ALT, Stand};

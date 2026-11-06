@@ -1,15 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Nachrichten ueber den Sammler (Wolfgang 05.11.2026): run.cmd kurse holt einmal am Tag Marktnachrichten von Alpha Vantage und belegt sie als neue Journalart nachricht (beginnt keinen Tag); der Papiertag gibt sie Dachs und Maus mit; Termine und Nachrichten in der Frage auf 24.000 Bytes begrenzt, damit jede Anfrage unter dem Deckel bleibt; JSON-Leser nach depot_kern. Keine neuen Grenzen, keine neuen Abhaengigkeiten, Festschreibung unveraendert. Baut auf #25 auf.
+zweck: EUR-Papierkonto mit Abrechnung offener Verkaufserloese. Kaeufe duerfen pro Topf nur abgerechnetes Bargeld nutzen. Journal und Papierkonto fuehren und vergleichen die Abrechnungsbelege unabhaengig. Nettoerloese werden am zweiten folgenden Xetra-Handelstag freigegeben, im EUR-Papiermodell auch bei NYSE-Werten. Keine Aenderung an festgeschriebenen Grenzen oder Abhaengigkeiten.
 pfade:
-run.cmd
-crates/depot_berater/
 crates/depot_journal/
-crates/depot_kern/src/json.rs
-crates/depot_kern/src/lib.rs
-crates/depot_lauf/src/main.rs
-crates/depot_sammler/
 crates/depot_sim/
-docs/
 CHANGELOG.md
-README.md

@@ -372,7 +372,10 @@ pub(crate) fn ein_tag(
         jr.beobachte(tag.datum, &sauber(ereignis))
             .map_err(journal)?;
     }
+    jr.beginne_abrechnung(tag.datum).map_err(journal)?;
     kontowaechter(jr, tag, &*beteiligte.konto)?;
+    beteiligte.konto.rechne_ab(tag.datum);
+    pruefe_stoerung(&*beteiligte.konto)?;
     if !fehler.is_empty() {
         for f in fehler {
             begruende(jr, tag, DATEN, &format!("{f:?}"))?;
@@ -596,7 +599,7 @@ fn topf_zyklus(
     }
     let alle = fuehre_aus(j, z, id, &ent.verkaeufe, konto);
     // Das Regelwerk rechnet die Kaeufe mit dem Erloes der Verkaeufe: Sie gehen nur raus, wenn
-    // alle Verkaeufe ausgefuehrt sind; sonst verfallen sie.
+    // alle Verkaeufe ausgefuehrt sind und das bereits abgerechnete Geld ausreicht.
     match alle {
         Ok(()) if verkauft(j, &ent.verkaeufe) => fuehre_aus(j, z, id, &ent.kaeufe, konto),
         Ok(()) if ent.kaeufe.is_empty() => Ok(()),

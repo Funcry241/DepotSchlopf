@@ -548,6 +548,9 @@ impl Journal {
             Art::Zustand => Err(JournalFehler::Abgelehnt(
                 "Auftragszustaende entstehen nur ueber melde und gleiche_ab".into(),
             )),
+            Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
+                "Abrechnungstag nur ueber beginne_abrechnung".into(),
+            )),
             Art::Format => Err(JournalFehler::Abgelehnt(
                 "Die Umstellung entsteht nur ueber stelle_um".into(),
             )),
@@ -720,6 +723,11 @@ impl Journal {
             return Ok(());
         }
         self.schreibe_eintrag(Art::Format, &FORMAT.to_string())
+    }
+
+    /// Belegt den Handelstag vor der ersten Ausfuehrung und gibt faellige Erloese frei.
+    pub fn beginne_abrechnung(&mut self, tag: Datum) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Abrechnungstag, &tag.to_string())
     }
 
     /// Schreibt den naechsten Zustand eines Auftrags.

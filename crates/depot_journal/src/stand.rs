@@ -13,6 +13,7 @@ use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
 
 use crate::kasse::KiStand;
+use crate::konto::{Abrechnungen, papier_valuta};
 use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
 use crate::nachrichtbeleg::{NachrichtBeleg, lies_nachrichtbeleg, nachrichtbeleg_text};
 use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
@@ -54,6 +55,8 @@ pub enum Art {
     /// seine ganze Vorgeschichte (64 Hex-Zeichen). Ein Wiederanlauf setzt nur nach einem
     /// Abschluss fort; die Daten steigen streng.
     Abschluss,
+    /// Handelstag fuer die Abrechnung nachfolgender Ausfuehrungen.
+    Abrechnungstag,
 }
 
 impl Art {
@@ -71,6 +74,7 @@ impl Art {
             Art::Begruendung => "begruendung",
             Art::Abschluss => "abschluss",
             Art::Format => "format",
+            Art::Abrechnungstag => "abrechnungstag",
         }
     }
 
@@ -87,6 +91,7 @@ impl Art {
             Art::KiGrenzen,
             Art::Begruendung,
             Art::Abschluss,
+            Art::Abrechnungstag,
             Art::Format,
         ]
         .into_iter()
@@ -139,6 +144,8 @@ pub struct Stand {
     begruendungen: Vec<(Datum, String, String)>,
     abschluss: Option<Abschluss>,
     seit_abschluss: usize,
+    abrechnungstag: Option<Datum>,
+    abrechnungen: Abrechnungen,
 }
 
 impl Stand {
@@ -252,6 +259,23 @@ impl Stand {
         self.letzte_kennung
     }
 
+    pub fn abrechnungstag(&self) -> Option<Datum> {
+        self.abrechnungstag
+    }
+
+    pub fn abrechnungen(&self) -> &Abrechnungen {
+        &self.abrechnungen
+    }
+
+    pub(crate) fn gesperrt(&self, topf: TopfId) -> Option<Cent> {
+        self.auftraege
+            .iter()
+            .filter(|l| l.beleg.topf == topf)
+            .filter_map(|l| self.abrechnungen.get(&l.beleg.nr))
+            .filter(|(valuta, _)| self.abrechnungstag.is_none_or(|tag| *valuta > tag))
+            .try_fold(Cent::NULL, |summe, (_, netto)| summe.checked_add(*netto))
+    }
+
     /// Wendet einen Eintrag an. Ein Fehler laesst den Stand unveraendert.
     pub(crate) fn anwenden(&mut self, art: Art, inhalt: &str) -> Result<(), String> {
         match art {
@@ -263,7 +287,7 @@ impl Stand {
             Art::Topf => {
                 let t = lies_topf(inhalt).ok_or("Topf unlesbar")?;
                 kanonisch(&topf_text(&t), inhalt)?;
-                self.pruefe_deckung(&t, None)?;
+                self.pruefe_deckung(&t, None, Cent::NULL)?;
                 self.toepfe.insert(t.id(), t);
             }
             // Belege von aussen beginnen keinen Tag: Der Sammler schreibt sie vor dem Papiertag
@@ -302,7 +326,7 @@ impl Stand {
                     .get(&b.topf)
                     .ok_or_else(|| format!("Auftrag {nr}: Topf {:?} fehlt", b.topf))?;
                 let neu = AuftragsLage::reserviert(b);
-                self.pruefe_deckung(topf, Some(&neu))?;
+                self.pruefe_deckung(topf, Some(&neu), Cent::NULL)?;
                 self.letzte_kennung = nr;
                 self.auftraege.push(neu);
             }
@@ -331,32 +355,58 @@ impl Stand {
                 self.format = FORMAT;
                 return Ok(());
             }
+            Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
             Art::Abschluss => {
-                let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
-                kanonisch(&abschluss_text(&a), inhalt)?;
-                // Tagesorders enden am Tag (Kap. 10): Ein Tag mit offenem Auftrag ist nicht
-                // vollstaendig belegt.
-                if let Some(l) = self.offene_auftraege().next() {
-                    return Err(format!(
-                        "Abschluss mit offenem Auftrag {} ({:?})",
-                        l.beleg.nr, l.zustand
-                    ));
-                }
-                if let Some(vorher) = &self.abschluss
-                    && a.datum <= vorher.datum
-                {
-                    return Err(format!(
-                        "Abschluss {} nicht nach dem letzten ({})",
-                        datum_text(a.datum),
-                        datum_text(vorher.datum)
-                    ));
-                }
-                self.abschluss = Some(a);
-                self.seit_abschluss = 0;
-                return Ok(());
+                return self.schliesse_ab(inhalt);
             }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    fn schliesse_ab(&mut self, inhalt: &str) -> Result<(), String> {
+        let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
+        kanonisch(&abschluss_text(&a), inhalt)?;
+        // Tagesorders enden am Tag (Kap. 10): Ein Tag mit offenem Auftrag ist nicht
+        // vollstaendig belegt.
+        if let Some(l) = self.offene_auftraege().next() {
+            return Err(format!(
+                "Abschluss mit offenem Auftrag {} ({:?})",
+                l.beleg.nr, l.zustand
+            ));
+        }
+        if let Some(vorher) = &self.abschluss
+            && a.datum <= vorher.datum
+        {
+            return Err(format!(
+                "Abschluss {} nicht nach dem letzten ({})",
+                datum_text(a.datum),
+                datum_text(vorher.datum)
+            ));
+        }
+        if let Some(tag) = self.abrechnungstag
+            && a.datum != tag
+        {
+            return Err("Abschluss passt nicht zum Abrechnungstag".into());
+        }
+        self.abschluss = Some(a);
+        self.seit_abschluss = 0;
+        Ok(())
+    }
+
+    fn beginne_abrechnung(&mut self, inhalt: &str) -> Result<(), String> {
+        let tag = Datum::lies(inhalt).ok_or("Abrechnungstag unlesbar")?;
+        kanonisch(&tag.to_string(), inhalt)?;
+        if self.format != FORMAT
+            || self.offene_auftraege().next().is_some()
+            || self.abschluss.as_ref().is_some_and(|a| tag <= a.datum)
+            || self.abrechnungstag.is_some_and(|alt| {
+                tag <= alt || self.abschluss.as_ref().is_none_or(|a| a.datum != alt)
+            })
+        {
+            return Err("Abrechnungstag unzulaessig".into());
+        }
+        self.abrechnungstag = Some(tag);
         Ok(())
     }
 
@@ -446,11 +496,27 @@ impl Stand {
             .toepfe
             .get(&neu.beleg.topf)
             .ok_or_else(|| format!("Auftrag {nr}: Topf fehlt"))?;
-        let topf = match m {
-            Meldung::Ausfuehrung(a) => buche(topf, &neu.beleg, a)?,
-            _ => topf.clone(),
+        let (topf, erloes) = match m {
+            Meldung::Ausfuehrung(a) => (
+                buche(topf, &neu.beleg, a)?,
+                self.neuer_erloes(&neu.beleg, a)?,
+            ),
+            _ => (topf.clone(), None),
         };
-        self.pruefe_deckung(&topf, Some(&neu))?;
+        self.pruefe_deckung(
+            &topf,
+            Some(&neu),
+            erloes.map_or(Cent::NULL, |(_, netto)| netto),
+        )?;
+        if let Some((valuta, netto)) = erloes {
+            let gesamt = self
+                .abrechnungen
+                .get(&nr)
+                .map_or(Cent::NULL, |(_, n)| *n)
+                .checked_add(netto)
+                .ok_or("Verkaufserloes: Ueberlauf")?;
+            self.abrechnungen.insert(nr, (valuta, gesamt));
+        }
         self.toepfe.insert(topf.id(), topf);
         if let Some(platz) = self.auftraege.get_mut(index) {
             *platz = neu;
@@ -458,11 +524,39 @@ impl Stand {
         Ok(())
     }
 
+    fn neuer_erloes(
+        &self,
+        beleg: &AuftragsBeleg,
+        aus: &crate::auftrag::Ausfuehrung,
+    ) -> Result<Option<(Datum, Cent)>, String> {
+        let Some(tag) = self.abrechnungstag else {
+            return Ok(None);
+        };
+        if self.abschluss.as_ref().is_some_and(|a| a.datum == tag) {
+            return Err("Ausfuehrung ohne offenen Abrechnungstag".into());
+        }
+        if beleg.richtung != Richtung::Verkauf {
+            return Ok(None);
+        }
+        let netto = aus
+            .kurs
+            .mal_stueck(aus.stueck)
+            .and_then(|v| v.checked_sub(aus.gebuehr))
+            .ok_or("Verkaufserloes: Ueberlauf")?;
+        let valuta = papier_valuta(tag).ok_or("Valuta ausserhalb des Kalenders")?;
+        Ok((netto > Cent::NULL).then_some((valuta, netto)))
+    }
+
     /// Die Deckung eines Topfes (R37, Kap. 9): Das Bargeld traegt alle offenen Kaeufe am Limit,
     /// der Bestand jedes Werts alle offenen Verkaeufe. `ersatz` steht fuer den Auftrag mit
     /// seiner Kennung oder kommt neu hinzu. Was ein Kauf darueber hinaus an Gebuehr braucht,
     /// prueft der Kontowaechter vor der Reservierung (`Journal::reserviere_auftrag`).
-    fn pruefe_deckung(&self, topf: &Topf, ersatz: Option<&AuftragsLage>) -> Result<(), String> {
+    fn pruefe_deckung(
+        &self,
+        topf: &Topf,
+        ersatz: Option<&AuftragsLage>,
+        neuer_erloes: Cent,
+    ) -> Result<(), String> {
         let ersetzt = ersatz.map(|e| e.beleg.nr);
         let offene = self
             .auftraege
@@ -489,11 +583,15 @@ impl Stand {
                 }
             }
         }
-        if kauf > topf.bargeld() {
+        let frei = self
+            .gesperrt(topf.id())
+            .and_then(|s| s.checked_add(neuer_erloes))
+            .and_then(|s| topf.bargeld().checked_sub(s))
+            .ok_or("Deckung: Ueberlauf")?;
+        if kauf > frei {
             return Err(format!(
                 "Deckung: offene Kaeufe {} Cent ueber dem Bargeld {} Cent",
-                kauf.0,
-                topf.bargeld().0
+                kauf.0, frei.0
             ));
         }
         for (isin, stueck) in verkauf {

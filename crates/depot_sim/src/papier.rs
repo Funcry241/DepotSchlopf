@@ -17,8 +17,10 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use depot_journal::{Ausfuehrung, Konto, KontoOrder, KontoStatus, Kontoauszug};
-use depot_kern::{Cent, Gebuehren, Grenzen, Isin, Kurse, Rundung, Topf};
+use depot_journal::{
+    Abrechnungen, Ausfuehrung, Konto, KontoOrder, KontoStatus, Kontoauszug, papier_valuta,
+};
+use depot_kern::{Cent, Datum, Gebuehren, Grenzen, Isin, Kurse, Rundung, Topf};
 use depot_regelwerk::{GenehmigterAuftrag, Richtung};
 
 /// Antwort des Brokers auf einen Versand.
@@ -35,6 +37,8 @@ pub trait Broker: Konto {
     fn sende(&mut self, auftrag: &GenehmigterAuftrag) -> Sendeantwort;
     /// Der Markt laeuft bis zum Schluss dieses Handelstags.
     fn markt(&mut self, kurse: &Kurse);
+    /// Gibt faellige Verkaufserloese zum Kauf frei.
+    fn rechne_ab(&mut self, _tag: Datum) {}
     /// Eine Stoerung des Kontos: Sein Stand ist nicht gesichert. Dann haelt der Lauf an, bevor
     /// das Journal noch etwas vom Konto bestaetigt (K23-01).
     fn stoerung(&self) -> Option<String> {
@@ -64,6 +68,8 @@ pub struct Papierkonto {
     bargeld: Cent,
     bestand: BTreeMap<Isin, u64>,
     orders: BTreeMap<u64, PapierOrder>,
+    abrechnungen: Abrechnungen,
+    abrechnungstag: Option<Datum>,
     gebuehren: Gebuehren,
     sendungen: usize,
 }
@@ -84,6 +90,8 @@ impl Papierkonto {
             bargeld,
             bestand,
             orders: BTreeMap::new(),
+            abrechnungen: Abrechnungen::new(),
+            abrechnungstag: None,
             gebuehren: Grenzen::standard().gebuehren(),
             sendungen: 0,
         })
@@ -106,10 +114,19 @@ impl Papierkonto {
             .filter(|o| o.status == KontoStatus::Offen)
     }
 
+    fn abgerechnetes_bargeld(&self) -> Option<Cent> {
+        self.abrechnungen
+            .values()
+            .filter(|(valuta, _)| self.abrechnungstag.is_none_or(|tag| *valuta > tag))
+            .try_fold(self.bargeld, |saldo, (_, erloes)| {
+                saldo.checked_sub(*erloes)
+            })
+    }
+
     fn gedeckt(&self, a: &Order) -> Option<bool> {
         match a.richtung {
             Richtung::Kauf => {
-                let mut frei = self.bargeld;
+                let mut frei = self.abgerechnetes_bargeld()?;
                 for o in self
                     .offen()
                     .filter(|o| o.auftrag.richtung == Richtung::Kauf)
@@ -140,7 +157,8 @@ impl Papierkonto {
             return;
         };
         let a = &o.auftrag;
-        let ausfuehrung = kurse.kurs(&a.isin).and_then(|exakt| {
+        let ausfuehrung = kurse.eintrag(&a.isin).and_then(|eintrag| {
+            let exakt = eintrag.preis();
             // Limit in ganzen Cent: Aufgerundet liegt ein Kurs genau dann nicht ueber dem Limit,
             // wenn er es exakt nicht tut; abgerundet ebenso nicht darunter.
             let (kurs, im_limit) = match a.richtung {
@@ -167,8 +185,15 @@ impl Papierkonto {
                     gehalten.checked_sub(a.stueck)?,
                 ),
             };
+            let erloes = volumen.checked_sub(gebuehr)?;
+            let abrechnung = if a.richtung == Richtung::Verkauf && erloes > Cent::NULL {
+                Some((papier_valuta(eintrag.handelstag())?, erloes))
+            } else {
+                None
+            };
             Some((
                 bargeld,
+                abrechnung,
                 stueck,
                 Ausfuehrung {
                     stueck: a.stueck,
@@ -182,8 +207,11 @@ impl Papierkonto {
             return;
         };
         match ausfuehrung {
-            Some((bargeld, stueck, aus)) => {
+            Some((bargeld, abrechnung, stueck, aus)) => {
                 self.bargeld = bargeld;
+                if let Some(erloes) = abrechnung {
+                    self.abrechnungen.insert(nr, erloes);
+                }
                 if stueck == 0 {
                     self.bestand.remove(&isin);
                 } else {
@@ -209,6 +237,7 @@ impl Konto for Papierkonto {
                 .map(|(nr, _)| *nr)
                 .collect(),
             fremde_waehrungen: std::collections::BTreeSet::new(),
+            abrechnungen: Some(self.abrechnungen.clone()),
         }
     }
 
@@ -253,6 +282,10 @@ impl Broker for Papierkonto {
             KontoStatus::Offen => Sendeantwort::Angenommen,
             _ => Sendeantwort::Abgelehnt("keine Deckung im Konto".into()),
         }
+    }
+
+    fn rechne_ab(&mut self, tag: Datum) {
+        self.abrechnungstag = self.abrechnungstag.max(Some(tag));
     }
 
     fn markt(&mut self, kurse: &Kurse) {
@@ -334,6 +367,9 @@ impl Papierkonto {
                 );
             }
         }
+        for (nr, (datum, erloes)) in &self.abrechnungen {
+            let _ = writeln!(t, "abrechnung;{nr};{datum};{}", erloes.0);
+        }
         t
     }
 
@@ -351,6 +387,8 @@ impl Papierkonto {
             bargeld: Cent::NULL,
             bestand: BTreeMap::new(),
             orders: BTreeMap::new(),
+            abrechnungen: Abrechnungen::new(),
+            abrechnungstag: None,
             gebuehren: Grenzen::standard().gebuehren(),
             sendungen: 0,
         };
@@ -385,6 +423,24 @@ impl Papierkonto {
                         kurs: Cent(kurs.parse().map_err(|_| fehler())?),
                         gebuehr: Cent(gebuehr.parse().map_err(|_| fehler())?),
                     });
+                }
+                ["abrechnung", nr, datum, netto] => {
+                    let nr: u64 = nr.parse().map_err(|_| fehler())?;
+                    let datum = Datum::lies(datum).ok_or_else(fehler)?;
+                    let netto = Cent(netto.parse().map_err(|_| fehler())?);
+                    let order = k.orders.get(&nr).ok_or_else(fehler)?;
+                    let erloes = order.ausfuehrungen.iter().try_fold(Cent::NULL, |summe, a| {
+                        let netto = a.kurs.mal_stueck(a.stueck)?.checked_sub(a.gebuehr)?;
+                        summe.checked_add(netto.max(Cent::NULL))
+                    });
+                    if order.auftrag.richtung != Richtung::Verkauf
+                        || order.status != KontoStatus::Gefuellt
+                        || netto <= Cent::NULL
+                        || erloes != Some(netto)
+                    {
+                        return Err(fehler());
+                    }
+                    k.abrechnungen.insert(nr, (datum, netto));
                 }
                 _ => return Err(fehler()),
             }

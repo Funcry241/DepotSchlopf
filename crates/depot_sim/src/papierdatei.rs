@@ -16,7 +16,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use depot_journal::{Konto, KontoOrder, Kontoauszug};
-use depot_kern::{Kurse, Topf};
+use depot_kern::{Datum, Kurse, Topf};
 use depot_regelwerk::GenehmigterAuftrag;
 
 use crate::papier::{Broker, Papierkonto, Sendeantwort};
@@ -141,6 +141,10 @@ impl Broker for Papierdatei {
         } else {
             Sendeantwort::KeineAntwort
         }
+    }
+
+    fn rechne_ab(&mut self, tag: Datum) {
+        self.konto.rechne_ab(tag);
     }
 
     fn markt(&mut self, kurse: &Kurse) {
