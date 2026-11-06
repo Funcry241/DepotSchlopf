@@ -19,6 +19,7 @@ const STIL_DIENST: &str = "\
 nav{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}nav a{color:inherit}\
 nav a.hier{font-weight:600;text-decoration:none}\
 form.knopf{display:inline;margin:0}\
+a.aktion{display:inline-block;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;color:inherit}\
 button{font:inherit;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;\
 background:var(--flaeche);color:var(--text);cursor:pointer}\
 button:disabled{opacity:.65;cursor:default}\
@@ -30,8 +31,29 @@ margin:6px 0}\
 .meldung{border-left:4px solid currentColor;padding-left:10px}\
 label{display:block;margin:6px 0}";
 
-/// Ein Knopf, der einen Auftrag einreiht.
-pub fn auftrag_knopf(token: &str, art: Art, text: &str) -> String {
+/// Ein Bedienelement zu einem Auftrag und seinem aktuellen Stand.
+fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
+    let status = z.auftrag_stand(art).or_else(|| match art {
+        Art::Kurse => z
+            .auftrag_stand(Art::KurseVon(depot_kern::Boerse::Xetra))
+            .or_else(|| z.auftrag_stand(Art::KurseVon(depot_kern::Boerse::Nyse))),
+        _ => None,
+    });
+    if let Some(status) = status {
+        return format!(
+            "<button type=\"button\" disabled>{} · {status}</button>",
+            maskiere(text)
+        );
+    }
+    if z.neustart || z.auftrag_stand(Art::Update).is_some() {
+        return format!(
+            "<button type=\"button\" disabled>{} · wartet auf Update</button>",
+            maskiere(text)
+        );
+    }
+    if art == Art::Papier {
+        return bestaetigungslink(art, text, None);
+    }
     format!(
         "<form class=\"knopf\" method=\"post\" action=\"/ausfuehren\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
@@ -43,13 +65,54 @@ pub fn auftrag_knopf(token: &str, art: Art, text: &str) -> String {
     )
 }
 
+fn bestaetigungslink(art: Art, text: &str, sha: Option<&str>) -> String {
+    let stand = sha.map_or_else(String::new, |s| format!("&amp;sha={}", maskiere(s)));
+    format!(
+        "<a class=\"aktion\" href=\"/bestaetigen?art={}{stand}\">{}</a>",
+        art.kurz(),
+        maskiere(text)
+    )
+}
+
+pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> String {
+    let (text, ziel) = if sha.is_some() {
+        (
+            "Das Update sichert deine Papierdaten und prüft die neue Version. Das dauert ein paar Minuten. Danach startet DepotSchlopf neu.",
+            "/einrichtung#update",
+        )
+    } else {
+        (
+            "Der Papiertag handelt mit Papiergeld. Sind Dachs oder Maus eingerichtet und verfügbar, können ihre Antworten echtes KI-Budget verbrauchen.",
+            "/",
+        )
+    };
+    let stand = sha.map_or_else(String::new, |sha| {
+        format!(
+            "<p>Version <code>{0}</code></p><input type=\"hidden\" name=\"sha\" value=\"{0}\">",
+            maskiere(sha)
+        )
+    });
+    format!(
+        "<section><h2>{0}</h2><p>{text}</p><form method=\"post\" action=\"/ausfuehren\">\
+         <input type=\"hidden\" name=\"t\" value=\"{1}\">\
+         <input type=\"hidden\" name=\"art\" value=\"{2}\">{stand}\
+         <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> Ich möchte fortfahren.</label>\
+         <button type=\"submit\">{0}</button> <a href=\"{ziel}\">Abbrechen</a></form></section>",
+        maskiere(art.name()),
+        maskiere(token),
+        art.kurz()
+    )
+}
+
 /// Das Bedienelement zu einer Abhilfe des Lagebilds.
-pub fn abhilfe_knopf(token: &str, a: Abhilfe) -> Option<String> {
+fn abhilfe_knopf(token: &str, z: &Zustand, a: Abhilfe) -> Option<String> {
     match a {
-        Abhilfe::JournalEinrichten => Some(auftrag_knopf(token, Art::Einrichten, "Einrichten")),
-        Abhilfe::KurseAbrufen => Some(auftrag_knopf(token, Art::Kurse, "Kurse abrufen")),
-        Abhilfe::TermineAbrufen => Some(auftrag_knopf(token, Art::Termine, "Termine abrufen")),
-        Abhilfe::PapiertagStarten => Some(auftrag_knopf(token, Art::Papier, "Papiertag starten")),
+        Abhilfe::JournalEinrichten => Some(auftrag_knopf(token, z, Art::Einrichten, "Einrichten")),
+        Abhilfe::KurseAbrufen => Some(auftrag_knopf(token, z, Art::Kurse, "Kurse abrufen")),
+        Abhilfe::TermineAbrufen => Some(auftrag_knopf(token, z, Art::Termine, "Termine abrufen")),
+        Abhilfe::PapiertagStarten => {
+            Some(auftrag_knopf(token, z, Art::Papier, "Papiertag starten"))
+        }
         Abhilfe::SchluesselKursquelle
         | Abhilfe::SchluesselKursquelleUs
         | Abhilfe::SchluesselBerater(_) => {
@@ -226,6 +289,18 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "halt",
             "Die Freigabe konnte nicht bestätigt werden. Lade die Einrichtung neu und prüfe Journal und Papierkonto.",
         ),
+        "papier_bestaetigen" => (
+            "offen",
+            "Papiertag unverändert. Öffne den Bestätigungsschritt und setze den Haken.",
+        ),
+        "update_bestaetigen" => (
+            "offen",
+            "Update unverändert. Öffne den Bestätigungsschritt und setze den Haken.",
+        ),
+        "update_suche" => (
+            "offen",
+            "Kein passendes Update zur Bestätigung. Suche erneut nach einem Update.",
+        ),
         "update" => (
             "gut",
             "Auftrag eingereiht. Sein Protokoll steht auf Live unter Tätigkeit.",
@@ -257,8 +332,11 @@ pub fn rahmen(
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
          <title>DepotSchlopf</title><style>{STIL}{STIL_DIENST}</style></head><body>\
          <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt, etwa \
-         beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu.</div><main>\
-         <nav><h1>DepotSchlopf</h1>{}{}<span class=\"leise\">Nur Papiergeld.</span></nav>",
+         beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu. Wenn du das schwarze \
+         Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div><main>\
+         <nav><h1>DepotSchlopf</h1>{}{}<span class=\"leise\">Nur Papiergeld.</span></nav>\
+         <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit der Zeitplan läuft. \
+         Du kannst es minimieren.</p>",
         nav("/", "Live"),
         nav("/einrichtung", "Einrichtung")
     );
@@ -364,6 +442,20 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     }
 }
 
+/// Fehler mit festen Wegen zurück. Eingabewerte werden dabei nicht übernommen.
+pub fn fehler(status: u16, text: &str) -> Vec<u8> {
+    let inhalt = format!(
+        "<section><h2>Aktion nicht ausgeführt</h2><p>{}</p>\
+         <p><a href=\"/\">Zurück zu Live</a> · <a href=\"/einrichtung\">Zur Einrichtung</a></p></section>",
+        maskiere(text)
+    );
+    crate::http::antwort(
+        status,
+        "text/html; charset=utf-8",
+        rahmen("", None, None, &inhalt).as_bytes(),
+    )
+}
+
 fn protokoll(id: &str, a: &Auftrag, offen: bool) -> String {
     let mut text = String::new();
     for z in &a.protokoll {
@@ -405,6 +497,9 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
             maskiere(&a.kennung),
             protokoll("l", a, true)
         );
+        if a.protokoll.is_empty() {
+            s.push_str("<p>Der Lauf wird vorbereitet. Beim ersten Start kann das ein paar Minuten dauern.</p>");
+        }
         if let Some(h) = &a.hinweis {
             let _ = write!(
                 s,
@@ -515,15 +610,31 @@ fn gesamtstatus_teil(z: &Zustand) -> String {
     let Some(b) = z.gesamtstatus() else {
         return String::new();
     };
+    let journal = z.lage.as_ref().and_then(|l| {
+        let p = l
+            .bild
+            .punkte
+            .iter()
+            .find(|p| p.abhilfe == Some(Abhilfe::JournalEinrichten))?;
+        let status = z.auftrag_stand(Art::Einrichten)?;
+        Some((format!("{}: {}", p.name, p.text), status))
+    });
+    let (klasse, titel) = match (&journal, b.gruende()) {
+        (Some((grund, _)), [einziger]) if grund == einziger => ("offen", "Journal in Arbeit"),
+        _ => (b.klasse(), b.titel()),
+    };
     let mut s = format!(
-        "<section id=\"betrieb\"><div class=\"kopf {}\">{}</div>",
-        b.klasse(),
-        maskiere(b.titel())
+        "<section id=\"betrieb\"><div class=\"kopf {klasse}\">{}</div>",
+        maskiere(titel)
     );
     if !b.gruende().is_empty() {
         s.push_str("<ul>");
         for g in b.gruende() {
-            let _ = write!(s, "<li>{}</li>", maskiere(g));
+            if let Some((_, status)) = journal.as_ref().filter(|(grund, _)| grund == g) {
+                let _ = write!(s, "<li>Journal einrichten {status}</li>");
+            } else {
+                let _ = write!(s, "<li>{}</li>", maskiere(g));
+            }
         }
         s.push_str("</ul>");
     }
@@ -532,13 +643,20 @@ fn gesamtstatus_teil(z: &Zustand) -> String {
 }
 
 /// Der Inhalt der Live-Seite (auch `/teil/live`).
-pub fn live(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
+pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> String {
     let mut s = marke(start);
+    s.push_str(&taetigkeit(z, heute));
     s.push_str(&gesamtstatus_teil(z));
     s.push_str(&update_hinweis(z));
-    s.push_str(&taetigkeit(z, heute));
+    if z.laufend.is_some() && z.lage.is_some() {
+        s.push_str("<p class=\"leise\">Das Lagebild zeigt den Stand vor dem laufenden Auftrag und wird danach aktualisiert.</p>");
+    }
     match &z.lage {
-        Some(l) => s.push_str(&l.html),
+        Some(l) => s.push_str(&depot_lage::html::inhalt_mit(
+            &l.bild,
+            &|a| abhilfe_knopf(token, z, a),
+            false,
+        )),
         None => s.push_str("<section><p class=\"leise\">Lagebild wird berechnet …</p></section>"),
     }
     s
@@ -553,7 +671,7 @@ pub fn status(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
     let lage = z
         .lage
         .as_ref()
-        .map(|l| l.naechster_schritt.clone())
+        .map(|l| l.bild.naechster_schritt.clone())
         .unwrap_or_default();
     format!(
         "{}{}<section>{}<div class=\"kopf\">{}</div><div>{}</div>\
@@ -804,7 +922,7 @@ fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
             s,
             "<tr><td>{}</td><td>{zuletzt}</td><td>{}</td></tr>",
             maskiere(name),
-            auftrag_knopf(token, art, "Jetzt prüfen")
+            auftrag_knopf(token, z, art, "Jetzt prüfen")
         );
     }
     s.push_str("</table></div></section>");
@@ -934,15 +1052,60 @@ fn autostart_teil(token: &str, e: &Einrichtung, s: &mut String) {
     );
 }
 
-fn update_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
-    s.push_str(
-        "<section id=\"update\"><h2>Update</h2><p class=\"leise\">Das Update folgt nur \
-         <code>main</code> auf GitHub. Einspielen prüft den neuen Stand zuerst mit dem ganzen Gate \
-         in einem eigenen Ordner. Danach prüft der neue Stand eine Kopie von Journal und Papierkonto \
-         und sichert die bisherigen Papierdaten unter <code>daten/sicherung</code>. Erst wenn alle \
-         Prüfungen erfolgreich sind, rückt der Projektordner vorwärts, ohne \
-         Lokales zu überschreiben. Danach startet der Dienst neu. Kommt er nicht hoch, setzt \
-         DepotSchlopf.cmd den alten Stand zurück. Das Gate dauert einige Minuten.</p>",
+pub(crate) fn update_aktionen(token: &str, start: &str, z: &Zustand) -> String {
+    let mut s = marke(start);
+    let _ = write!(
+        s,
+        "<p>{}</p>",
+        auftrag_knopf(token, z, Art::UpdatePruefen, "Nach Update suchen")
+    );
+    if let Some(status) = z.auftrag_stand(Art::Update) {
+        let _ = write!(
+            s,
+            "<p>Update {status} Unter <a href=\"/\">Live</a> siehst du den Fortschritt.</p>"
+        );
+    } else if z.auftrag_stand(Art::UpdatePruefen).is_some() {
+        s.push_str("<p>Hier erscheint das Ergebnis der Suche.</p>");
+    } else if let Some((sha, protokoll)) = z.update_angebot() {
+        s.push_str("<p>Eine neue Version ist verfügbar.</p><ul>");
+        for titel in protokoll.iter().filter_map(|z| z.strip_prefix("  ")) {
+            let _ = write!(s, "<li>{}</li>", maskiere(titel));
+        }
+        let _ = write!(
+            s,
+            "</ul><p>{}</p>",
+            bestaetigungslink(Art::Update, "Update einspielen", Some(sha))
+        );
+    } else if let Some(a) = z
+        .letzter_update_lauf()
+        .filter(|a| a.art == Art::UpdatePruefen)
+    {
+        if a.erfolg == Some(true) && a.frueher == Frueher::Nein {
+            s.push_str("<p>Die Suche hat keine neue Version gefunden.</p>");
+        } else {
+            s.push_str("<p>Die Suche konnte nicht abgeschlossen werden. Details stehen unter <a href=\"/\">Live</a>.</p>");
+        }
+    } else if z
+        .letzter_update_lauf()
+        .is_some_and(|a| a.art == Art::Update && a.erfolg == Some(false))
+    {
+        s.push_str("<p>Das Update wurde abgebrochen. Sieh unter <a href=\"/\">Live</a> nach und starte bei Bedarf eine neue Suche.</p>");
+    } else {
+        s.push_str("<p>Suche zuerst nach einer neuen Version.</p>");
+    }
+    s
+}
+
+fn update_teil(token: &str, start: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
+    let _ = write!(
+        s,
+        "<section id=\"update\"><h2>Update</h2>\
+         <p>Holt eine neue Version. Vor dem Einspielen prüft DepotSchlopf die Version und sichert deine Papierdaten. \
+         Das dauert ein paar Minuten.</p><div data-teil=\"/teil/update\">{}</div>\
+         <details><summary>Technische Details</summary><p>Der Dienst prüft die Version aus <code>main</code> \
+         in einem eigenen Ordner. Deine Sicherung liegt unter <code>daten/sicherung</code>. \
+         Falls der Dienst mit der neuen Version nicht startet, kehrt er zum alten Stand zurück.</p>",
+        update_aktionen(token, start, z)
     );
     s.push_str(&update_hinweis(z));
     if let Some((fehler, text)) = &z.programm_meldung {
@@ -951,25 +1114,6 @@ fn update_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
             "<p id=\"programmstand\"><span class=\"{}\">Start nach einem Neustart:</span> {}</p>",
             if *fehler { "offen" } else { "gut" },
             maskiere(text)
-        );
-    }
-    for art in [Art::UpdatePruefen, Art::Update] {
-        // Ein Kursabruf je Boerse zaehlt fuer die Kursquellen mit.
-        let gleich = |a: Art| a == art || (art == Art::Kurse && matches!(a, Art::KurseVon(_)));
-        let zuletzt = z.verlauf.iter().find(|a| gleich(a.art)).map_or_else(
-            || "seit Dienststart nicht".to_string(),
-            |a| {
-                let (klasse, text) = ergebnis(a);
-                format!(
-                    "<span class=\"{klasse}\">{text}</span> {}",
-                    maskiere(&zeit_text(a.start))
-                )
-            },
-        );
-        let _ = write!(
-            s,
-            "<p>{} <span class=\"leise\">Zuletzt: {zuletzt}</span></p>",
-            auftrag_knopf(token, art, art.name())
         );
     }
     match &e.abgelehnt {
@@ -985,7 +1129,7 @@ fn update_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
             let _ = write!(s, "<p class=\"halt\">{}</p>", maskiere(f));
         }
     }
-    s.push_str("</section>");
+    s.push_str("</details></section>");
 }
 
 fn grenzen_teil(e: &Einrichtung, s: &mut String) {
@@ -1045,8 +1189,9 @@ pub fn einrichtung(
     );
     s.push_str(
         "<section><h2>So fängst du an</h2><ol>\
-         <li><a href=\"#schluessel\">Schlüssel einrichten</a> und auf <a href=\"/\">Live</a> prüfen, \
-         was für einen manuellen Papiertag noch fehlt.</li>\
+         <li>Auf <a href=\"/\">Live</a> das Journal einrichten, falls es noch fehlt.</li>\
+         <li><a href=\"#schluessel\">Schlüssel einrichten</a>, die <a href=\"#quellen\">Datenquellen prüfen</a> \
+         und auf <a href=\"/\">Live</a> einen manuellen Papiertag testen.</li>\
          <li>Wenn der manuelle Test klappt, kannst du den <a href=\"#zeitplan\">Zeitplan</a> \
          für automatische Läufe einschalten.</li>\
          <li><a href=\"#autostart\">Autostart</a> ist optional. Schalte ihn ein, wenn DepotSchlopf \
@@ -1070,7 +1215,7 @@ pub fn einrichtung(
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);
     autostart_teil(token, e, &mut s);
-    update_teil(token, z, e, &mut s);
+    update_teil(token, start, z, e, &mut s);
     grenzen_teil(e, &mut s);
     let _ = write!(
         s,
@@ -1107,43 +1252,43 @@ pub const APP_JS: &str = r#""use strict";
       b.disabled = false;
     });
   });
-  var ziel = document.querySelector("[data-teil]");
-  var banner = document.getElementById("getrennt");
-  if (!ziel) { return; }
-  var url = ziel.getAttribute("data-teil");
-  var marke = document.querySelector("[data-start]");
-  var start = marke ? marke.getAttribute("data-start") : null;
-  var zuletzt = null;
-  var fehler = 0;
-  function offen() {
-    var s = {};
-    ziel.querySelectorAll("details[id]").forEach(function (d) { s[d.id] = d.open; });
-    return s;
-  }
-  function hole() {
-    fetch(url, { cache: "no-store", credentials: "same-origin" })
-      .then(function (r) { if (!r.ok) { throw new Error(String(r.status)); } return r.text(); })
-      .then(function (t) {
-        var m = /data-start="([^"]*)"/.exec(t);
-        if (start && m && m[1] !== start) {
-          window.location.replace(window.location.pathname);
-          return;
-        }
-        if (t !== zuletzt) {
-          var s = offen();
-          ziel.innerHTML = t;
-          zuletzt = t;
-          Object.keys(s).forEach(function (id) {
-            var d = document.getElementById(id);
-            if (d) { d.open = s[id]; }
-          });
-        }
-        banner.hidden = true;
-        fehler = 0;
-      })
-      .catch(function () { banner.hidden = false; fehler += 1; })
-      .then(function () { setTimeout(hole, fehler ? Math.min(10000, 2000 * fehler) : 2000); });
-  }
-  setTimeout(hole, 2000);
+  document.querySelectorAll("[data-teil]").forEach(function (ziel, nr) {
+    var banner = document.getElementById("getrennt");
+    var url = ziel.getAttribute("data-teil");
+    var marke = document.querySelector("[data-start]");
+    var start = marke ? marke.getAttribute("data-start") : null;
+    var zuletzt = null;
+    var fehler = 0;
+    function offen() {
+      var s = {};
+      ziel.querySelectorAll("details[id]").forEach(function (d) { s[d.id] = d.open; });
+      return s;
+    }
+    function hole() {
+      fetch(url, { cache: "no-store", credentials: "same-origin" })
+        .then(function (r) { if (!r.ok) { throw new Error(String(r.status)); } return r.text(); })
+        .then(function (t) {
+          var m = /data-start="([^"]*)"/.exec(t);
+          if (start && m && m[1] !== start) {
+            window.location.replace(window.location.pathname);
+            return;
+          }
+          if (t !== zuletzt) {
+            var s = offen();
+            ziel.innerHTML = t;
+            zuletzt = t;
+            Object.keys(s).forEach(function (id) {
+              var d = document.getElementById(id);
+              if (d) { d.open = s[id]; }
+            });
+          }
+          if (nr === 0) { banner.hidden = true; }
+          fehler = 0;
+        })
+        .catch(function () { if (nr === 0) { banner.hidden = false; } fehler += 1; })
+        .then(function () { setTimeout(hole, fehler ? Math.min(10000, 2000 * fehler) : 2000); });
+    }
+    setTimeout(hole, 2000);
+  });
 })();
 "#;

@@ -55,9 +55,24 @@ fn echo_starter() -> Starter {
     })
 }
 
+fn echo_starter_mit(zeile: &str) -> Starter {
+    let zeile = zeile.to_string();
+    Box::new(move |_, _| {
+        #[cfg(windows)]
+        let mut c = Command::new("cmd");
+        #[cfg(windows)]
+        c.args(["/C", "echo", &zeile]);
+        #[cfg(not(windows))]
+        let mut c = Command::new("sh");
+        #[cfg(not(windows))]
+        c.args(["-c", "printf '%s\\n' \"$1\"", "test", &zeile]);
+        c
+    })
+}
+
 fn leeres_lagebild() -> Lagerechner {
     Box::new(|_wurzel: &Path, jetzt: Zeitpunkt| {
-        let l = lagebild(&Umgebung {
+        lagebild(&Umgebung {
             jetzt,
             journal: Zugang::NichtEingerichtet,
             kursquelle: Hinterlegt::Nein,
@@ -70,8 +85,7 @@ fn leeres_lagebild() -> Lagerechner {
             anbieter: Vec::new(),
             anbieter_unlesbar: 0,
             ki_halt: None,
-        });
-        (l, "<section>LAGEBILD</section>".to_string())
+        })
     })
 }
 
@@ -188,7 +202,7 @@ fn knoepfe_auf_der_einrichtung_und_marke_des_starts() -> Result<(), String> {
     let seite = get(&d, "/einrichtung")?;
     assert!(seite.contains("id=\"update\""));
     assert!(seite.contains("name=\"art\" value=\"update_pruefen\""));
-    assert!(seite.contains("name=\"art\" value=\"update\""));
+    assert!(!seite.contains("/bestaetigen?art=update"));
     let marke = format!("data-start=\"{}\"", d.start);
     assert!(d.start.len() == 16 && !TOKEN.starts_with(&d.start));
     for pfad in ["/", "/teil/live", "/teil/status", "/einrichtung"] {
@@ -206,10 +220,42 @@ fn knoepfe_auf_der_einrichtung_und_marke_des_starts() -> Result<(), String> {
     assert!(r.contains("Location: /einrichtung?m=update#update\r\n"));
     let r = post_auftrag(&d, "update")?;
     assert!(
-        r.contains("Location: /einrichtung?m=update_belegt#update\r\n"),
-        "Pruefen wartet noch"
+        r.contains("Location: /einrichtung?m=update_bestaetigen#update\r\n"),
+        "Bestätigung fehlt"
     );
-    assert!(get(&d, "/einrichtung?m=update_belegt")?.contains("Update nicht eingereiht"));
+    let r = post_auftrag(&d, "update&geprueft=ja")?;
+    assert!(r.contains("Location: /einrichtung?m=update_suche#update\r\n"));
+    assert!(get(&d, "/teil/update")?.contains("wartet"));
+    Ok(())
+}
+
+#[test]
+fn update_bestaetigung_bindet_den_gefundenen_commit() -> Result<(), String> {
+    let sha = "a".repeat(40);
+    let ausgabe = format!("[Update] Kandidat: {sha}");
+    let d = Arc::new(Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        echo_starter_mit(&ausgabe),
+        leeres_lagebild(),
+    ));
+    let t = mittag()?;
+    d.einreihen(Art::UpdatePruefen, Anlass::Hand)?;
+    let (nr, kind) = d.schritt(t).ok_or("Suchlauf startet nicht")?;
+    d.verfolge(nr, kind, || mittag().ok());
+    let ziel = format!("/bestaetigen?art=update&sha={sha}");
+    assert!(get(&d, "/teil/update")?.contains("Eine neue Version ist verfügbar"));
+    assert!(get(&d, &ziel)?.contains("Ich möchte fortfahren"));
+    assert!(get(&d, "/bestaetigen?art=update&sha=alt")?.contains("m=update_suche"));
+    assert!(post_auftrag(&d, "update&geprueft=ja&sha=alt")?.contains("m=update_suche"));
+    assert!(d.sperre().warteschlange.is_empty());
+    assert!(
+        post_auftrag(&d, &format!("update&geprueft=ja&sha={sha}"))?.contains("m=update#update")
+    );
+    assert_eq!(
+        d.sperre().warteschlange.front(),
+        Some(&(Art::Update, Anlass::Hand))
+    );
     Ok(())
 }
 

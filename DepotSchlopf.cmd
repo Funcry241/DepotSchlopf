@@ -10,7 +10,7 @@ rem Der mitgelieferte Starter prueft den gesicherten Stand, bevor ein Programm d
 rem Ist er nicht startklar, baut der Waechter mit Cargo.
 rem Alles steht in EINEM Klammerblock: cmd liest ihn einmal ganz. Aendert ein Update diese
 rem Datei, waehrend sie laeuft, liest cmd nichts Neues nach.
-title DepotSchlopf
+title DepotSchlopf - nicht schliessen
 rem Der folgende PowerShell-Aufruf verwendet nur feste Befehle. daten/ liefert nur Daten.
 set "DEPOT_START_ARG=%~1"
 set "PRUEFE_BAUM=$ErrorActionPreference='Stop'; try { if (Test-Path -LiteralPath 'daten/update_offen.txt') { exit 2 }; $status=git status --porcelain; if ($LASTEXITCODE -ne 0 -or $status) { exit 2 }; $baum=git rev-parse --verify 'HEAD^{tree}'; if ($LASTEXITCODE -ne 0 -or $baum -cnotmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') { exit 2 }; if (('geprueft-v1;'+$baum) -cnotin (Get-Content -LiteralPath 'daten/geprueft.txt')) { exit 2 };"

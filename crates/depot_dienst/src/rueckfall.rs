@@ -45,7 +45,7 @@ pub fn abgelehnt_pfad(wurzel: &Path) -> PathBuf {
     wurzel.join("daten").join("update_abgelehnt.txt")
 }
 
-fn ist_commit(s: &str) -> bool {
+pub(crate) fn ist_commit(s: &str) -> bool {
     (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 

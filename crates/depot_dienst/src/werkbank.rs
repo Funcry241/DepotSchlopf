@@ -18,7 +18,7 @@ use std::thread;
 
 use depot_kern::{Boerse, Datum, Zeitpunkt};
 use depot_lage::anbieter::Wer as Quelle;
-use depot_lage::{Ampel, Betrieb, Lagebild, SchluesselStand, ortszeit};
+use depot_lage::{Betrieb, Lagebild, SchluesselStand, ortszeit};
 
 use crate::zeitplan::{Erledigt, Zeitplan, faellig_fuer};
 
@@ -133,17 +133,11 @@ pub struct Auftrag {
     pub frueher: Frueher,
 }
 
-/// Das zuletzt gerechnete Lagebild, schon als HTML.
+/// Das zuletzt gerechnete Lagebild.
 #[derive(Clone, Debug)]
 pub struct Lage {
     pub stand: Zeitpunkt,
-    pub gesamt: Ampel,
-    pub naechster_schritt: String,
-    /// Gesamtstatus aus dem Lagebild; die Oberflaeche ergaenzt den Zeitplan.
-    pub betrieb: Betrieb,
-    /// Stand jedes Schluessels aus dem Lagebild.
-    pub schluessel: Vec<(Quelle, SchluesselStand)>,
-    pub html: String,
+    pub bild: Lagebild,
 }
 
 /// Hoechstens so viele Zeilen Protokoll je Auftrag, so viele Zeichen je Zeile.
@@ -212,10 +206,43 @@ fn quelle_name(w: Quelle) -> &'static str {
 pub const DOPPELT_SEKUNDEN: i64 = 30;
 
 impl Zustand {
+    /// Stand des Auftrags für die Bedienelemente.
+    pub fn auftrag_stand(&self, art: Art) -> Option<&'static str> {
+        if self.laufend.as_ref().is_some_and(|a| a.art == art) {
+            Some("läuft …")
+        } else if self.warteschlange.iter().any(|(a, _)| *a == art) {
+            Some("wartet …")
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn letzter_update_lauf(&self) -> Option<&Auftrag> {
+        self.verlauf
+            .iter()
+            .find(|a| matches!(a.art, Art::Update | Art::UpdatePruefen))
+    }
+
+    /// Der letzte erfolgreiche Suchlauf kann einen konkreten Commit anbieten.
+    pub(crate) fn update_angebot(&self) -> Option<(&str, &[String])> {
+        let a = self.letzter_update_lauf()?;
+        if a.art != Art::UpdatePruefen
+            || a.erfolg != Some(true)
+            || a.frueher != Frueher::Nein
+            || self.auftrag_stand(Art::UpdatePruefen).is_some()
+            || self.neustart
+        {
+            return None;
+        }
+        let (kandidat, titel) = a.protokoll.split_last()?;
+        let sha = kandidat.strip_prefix("[Update] Kandidat: ")?;
+        crate::rueckfall::ist_commit(sha).then_some((sha, titel))
+    }
+
     /// Der Gesamtstatus: der des Lagebilds, ergaenzt um den Zeitplan des Dienstes. `None`,
     /// solange das Lagebild noch nicht berechnet ist.
     pub fn gesamtstatus(&self) -> Option<Betrieb> {
-        let b = self.lage.as_ref()?.betrieb.clone();
+        let b = self.lage.as_ref()?.bild.betrieb.clone();
         let zeitplan_fehler = self
             .erledigt_fehler
             .as_ref()
@@ -249,6 +276,7 @@ impl Zustand {
         // Ausdruecklich jede noetige Einstellung (Maus zu #32): jeder Schluessel hinterlegt und
         // nicht abgelehnt, dazu kein Eingriff. „Läuft ohne KI“ reicht nicht.
         let mut fehlt: Vec<String> = l
+            .bild
             .schluessel
             .iter()
             .filter(|(_, st)| {
@@ -259,10 +287,10 @@ impl Zustand {
             })
             .map(|(w, st)| format!("{}: Schlüssel {}", quelle_name(*w), st.text()))
             .collect();
-        if l.schluessel.is_empty() {
+        if l.bild.schluessel.is_empty() {
             fehlt.push("Stand der Schlüssel unbekannt".into());
         }
-        if let Betrieb::EingriffNoetig(g) = &l.betrieb {
+        if let Betrieb::EingriffNoetig(g) = &l.bild.betrieb {
             fehlt.extend(g.iter().cloned());
         }
         if fehlt.is_empty() {
@@ -277,8 +305,8 @@ impl Zustand {
 /// harmloser Befehl.
 pub type Starter = Box<dyn Fn(Art, &Path) -> Command + Send + Sync>;
 
-/// Rechnet das Lagebild als HTML; bekommt den Projektordner und die Uhr.
-pub type Lagerechner = Box<dyn Fn(&Path, Zeitpunkt) -> (Lagebild, String) + Send + Sync>;
+/// Rechnet das Lagebild; bekommt den Projektordner und die Uhr.
+pub type Lagerechner = Box<dyn Fn(&Path, Zeitpunkt) -> Lagebild + Send + Sync>;
 
 /// Der Dienst.
 pub struct Dienst {
@@ -498,6 +526,14 @@ impl Dienst {
         einreihen(&mut z, art, Anlass::Hand)
     }
 
+    pub(crate) fn update_von_hand(&self, sha: &str) -> Result<(), &'static str> {
+        let mut z = self.sperre();
+        if z.update_angebot().is_none_or(|(angebot, _)| angebot != sha) {
+            return Err("update_suche");
+        }
+        einreihen(&mut z, Art::Update, Anlass::Hand).map_err(|_| "update_belegt")
+    }
+
     /// Speichert und aktiviert einen neuen Zeitplan. Einschalten (aus wird an) geht nur, wenn
     /// `Zustand::einschalten_erlaubt`; Ausschalten und Aendern eines laufenden Zeitplans immer.
     ///
@@ -589,6 +625,11 @@ impl Dienst {
                 return None;
             }
             let mut befehl = (self.starter)(art, &self.wurzel);
+            if art == Art::Update
+                && let Some((sha, _)) = z.update_angebot()
+            {
+                befehl.arg(sha);
+            }
             befehl
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -620,16 +661,9 @@ impl Dienst {
         if noetig {
             // Ohne Sperre rechnen: Die Oberflaeche bleibt bedienbar. Ein Auftrag startet nur hier
             // im Arbeiter, also nicht, solange das Lagebild das Journal liest.
-            let (bild, html) = (self.lagerechner)(&self.wurzel, jetzt);
+            let bild = (self.lagerechner)(&self.wurzel, jetzt);
             let mut z = self.sperre();
-            z.lage = Some(Lage {
-                stand: jetzt,
-                gesamt: bild.gesamt,
-                naechster_schritt: bild.naechster_schritt,
-                betrieb: bild.betrieb,
-                schluessel: bild.schluessel,
-                html,
-            });
+            z.lage = Some(Lage { stand: jetzt, bild });
             z.lage_veraltet = false;
         }
         None

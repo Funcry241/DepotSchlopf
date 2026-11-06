@@ -39,10 +39,10 @@ fn bediene(d: &Dienst, u: &dyn Umwelt, mut strom: TcpStream) {
     let antwort = match http::lies(&mut strom) {
         Ok(anfrage) => match jetzt() {
             Some(t) => behandle(d, u, &anfrage, t),
-            None => http::text(500, "Uhr liefert keinen Zeitpunkt"),
+            None => depot_dienst::seiten::fehler(500, "Uhr liefert keinen Zeitpunkt"),
         },
-        Err(http::LeseFehler::ZuGross) => http::text(413, "Anfrage zu gross"),
-        Err(http::LeseFehler::Kaputt) => http::text(400, "Anfrage unlesbar"),
+        Err(http::LeseFehler::ZuGross) => depot_dienst::seiten::fehler(413, "Anfrage zu gross"),
+        Err(http::LeseFehler::Kaputt) => depot_dienst::seiten::fehler(400, "Anfrage unlesbar"),
         Err(http::LeseFehler::Abgebrochen) => return,
     };
     let _ = strom.write_all(&antwort);
@@ -238,9 +238,9 @@ fn main() -> ExitCode {
     let (starter, meldung) = starter_fuer(&wurzel, &herkunft);
     let dienst = Arc::new(Dienst::neu(
         wurzel,
-        token.clone(),
+        token,
         starter,
-        lagerechner(token, Arc::clone(&umwelt)),
+        lagerechner(Arc::clone(&umwelt)),
     ));
     dienst.sperre().programm_meldung = Some(meldung);
     bestaetigen(&dienst);
