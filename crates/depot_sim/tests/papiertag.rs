@@ -297,35 +297,12 @@ fn kauf_wartet_auf_spaeteren_kurs_und_rundet_auf() -> Result<(), String> {
         5,
         &[(&sap, "230", "230.105"), (&allianz, "350", "351")],
     )?;
-    let d = tag(5)?;
-    let mut dachs = Drehbuch::default();
-    dachs.antworten.insert(
-        d,
-        Antwort {
-            verwertbar: true,
-            einschaetzung: "SAP nach Zahlen".into(),
-            vorschlag: Some(Vorschlag {
-                berater: BeraterId::Dachs,
-                zielgewichte_bp: [(sap.clone(), 2_000)].into_iter().collect(),
-                begruendung: [(sap.clone(), "beobachtet".to_string())]
-                    .into_iter()
-                    .collect(),
-            }),
-        },
-    );
-    let mut maus = Drehbuch::default();
-    maus.urteile.insert(
-        d,
-        Urteil {
-            verwertbar: true,
-            zustimmung: true,
-            begruendung: "passt".into(),
-        },
-    );
+    let heute = tag(5)?;
+    let (mut dachs, mut maus) = kaeufer(heute, &sap);
     let mut k = konto(&ort, &j)?;
     let aus = papiertag(
         &mut j,
-        d,
+        heute,
         &universum()?,
         &start()?,
         &mut dachs,
@@ -336,10 +313,10 @@ fn kauf_wartet_auf_spaeteren_kurs_und_rundet_auf() -> Result<(), String> {
         matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
         "Ausgang: {aus:?}"
     );
-    let l = some(j.stand().offene_auftraege().next(), "Offene Kauforder")?;
-    let nr = l.beleg.nr;
-    let versand = some(l.versand, "Versandzeit")?;
-    assert!(l.ausfuehrungen.is_empty());
+    let lage = some(j.stand().offene_auftraege().next(), "Offene Kauforder")?;
+    let nr = lage.beleg.nr;
+    let versand = some(lage.versand, "Versandzeit")?;
+    assert!(lage.ausfuehrungen.is_empty());
     drop(k);
     drop(j);
 
@@ -369,26 +346,17 @@ fn kauf_wartet_auf_spaeteren_kurs_und_rundet_auf() -> Result<(), String> {
         &mut k,
     );
     assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
-    let l = some(j.stand().auftrag(nr), "Kauforder")?;
-    let fill = some(l.ausfuehrungen.first(), "Ausfuehrung")?;
+    let lage = some(j.stand().auftrag(nr), "Kauforder")?;
+    let fill = some(lage.ausfuehrungen.first(), "Ausfuehrung")?;
     let kurszeit = some(fill.kurszeit, "Kurszeit")?;
-    assert_eq!(l.versand, Some(versand));
+    assert_eq!(lage.versand, Some(versand));
     assert_eq!(kurszeit.datum(), Some(tag(6)?));
     assert!(kurszeit > versand);
     assert_eq!(k.konto().sendungen(), 1, "kein zweiter Versand");
     let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A")?;
     let stueck = a.stueck(&sap);
     assert!(stueck > 0, "SAP gekauft");
-    let ausfuehrungen: Vec<_> = j
-        .stand()
-        .auftraege()
-        .iter()
-        .flat_map(|l| l.ausfuehrungen.clone())
-        .collect();
-    assert!(
-        ausfuehrungen.iter().all(|x| x.kurs == Cent(23_011)),
-        "zum aufgerundeten Cent: {ausfuehrungen:?}"
-    );
+    assert_eq!(fill.kurs, Cent(23_011), "zum aufgerundeten Cent");
     assert!(j.gleiche_ab(&k).map_err(|e| format!("{e:?}"))?.is_empty());
     // Das Konto in der Datei ist das Konto des Laufs.
     let datei = vorbedingung(fs::read_to_string(&ort.konto), "Konto lesen")?;
