@@ -1,7 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Zeitpunkt der manuellen Papierfreigabe unmittelbar nach dem Dialog in UTC belegen. Vorhandene Journalbelege bleiben lesbar.
+zweck: Papierfreigabe nur mit kanonischer UTC-Zeit am Abschlusstag oder spaeter nach Frankfurter Ortszeit akzeptieren und Zeitbeleg in der Architektur festhalten.
 pfade:
-crates/depot_dienst/
-crates/depot_journal/
-crates/depot_sim/
+crates/depot_journal/src/stand.rs
+docs/ARCHITEKTUR.md
