@@ -914,3 +914,70 @@ fn belege_kurse(j: &mut Journal) -> Result<(), String> {
         &[(&sap()?, "230.10", "231.00"), (&allianz()?, "350", "351.5")],
     )
 }
+
+#[test]
+fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
+    use depot_journal::Konto;
+    use depot_kern::{Grenzen, Kurse};
+    use depot_regelwerk::{Eingabe, Kennungsvergabe, entscheide, notbremse_auftraege};
+    use depot_sim::{Broker, Sendeantwort};
+
+    let ort = Ort::neu()?;
+    let isin = sap()?;
+    let freitag = tag(6)?;
+    let schluss = some(Zeitpunkt::frankfurt(freitag, 17, 35, 0), "Schluss")?;
+    let kurs = vorbedingung(
+        Kurs::neu(Cent(25_000), "EUR", freitag, schluss, Herkunft::Quelle),
+        "Kurs",
+    )?;
+    let kurse = vorbedingung(Kurse::neu(schluss, vec![(isin.clone(), kurs)]), "Kurse")?;
+    let mut start = vorbedingung(Topf::neu(TopfId::A, Cent::NULL), "Topf")?;
+    start.setze_bestand(isin.clone(), 20);
+    let grenzen = Grenzen::standard();
+    let mut vergabe = Kennungsvergabe::nach(0);
+    let verkauf = some(
+        notbremse_auftraege(&grenzen, &start, &kurse, &mut vergabe),
+        "Verkauf",
+    )?;
+    let verkauf = some(verkauf.first(), "Verkaufsauftrag")?;
+
+    let liquid = vorbedingung(Topf::neu(TopfId::A, Cent(499_725)), "Liquid")?;
+    let vorschlag = Vorschlag {
+        berater: BeraterId::Dachs,
+        zielgewichte_bp: [(isin.clone(), 2_000)].into_iter().collect(),
+        begruendung: [(isin, "beobachtet".into())].into_iter().collect(),
+    };
+    let universum = universum()?;
+    let eingabe = Eingabe {
+        grenzen: &grenzen,
+        universum: &universum,
+        topf: &liquid,
+        kurse: &kurse,
+        vorschlag: Some(&vorschlag),
+        halt: false,
+    };
+    let kauf = entscheide(&eingabe, &mut vergabe);
+    let kauf = some(kauf.kaeufe.first(), "Kaufauftrag")?;
+    let kauf_nach_abrechnung = entscheide(&eingabe, &mut vergabe);
+    let kauf_nach_abrechnung = some(kauf_nach_abrechnung.kaeufe.first(), "Zweiter Kaufauftrag")?;
+
+    let start = [start];
+    let mut k = Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    assert_eq!(k.sende(verkauf), Sendeantwort::Angenommen);
+    k.markt(&kurse);
+    assert_eq!(k.auszug().bargeld, Cent(499_725));
+    drop(k);
+
+    let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+    k.rechne_ab(tag(9)?);
+    assert!(matches!(k.sende(kauf), Sendeantwort::Abgelehnt(_)));
+    k.rechne_ab(tag(10)?);
+    assert_eq!(k.stoerung(), None);
+    drop(k);
+
+    let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+    k.rechne_ab(tag(10)?);
+    assert_eq!(k.auszug().bargeld, Cent(499_725));
+    assert_eq!(k.sende(kauf_nach_abrechnung), Sendeantwort::Angenommen);
+    Ok(())
+}

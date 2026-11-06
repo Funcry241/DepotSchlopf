@@ -11,12 +11,13 @@
 //! sie genau dem frisch eroeffneten Konto zu den Starttoepfen entspricht; dann setzt der naechste
 //! Lauf sie fort (K23-03). Jede andere Datei ohne Depot ist Halt.
 
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use depot_journal::{Konto, KontoOrder, Kontoauszug};
-use depot_kern::{Kurse, Topf};
+use depot_kern::{Cent, Datum, Kurse, Topf};
 use depot_regelwerk::GenehmigterAuftrag;
 
 use crate::papier::{Broker, Papierkonto, Sendeantwort};
@@ -141,6 +142,18 @@ impl Broker for Papierdatei {
         } else {
             Sendeantwort::KeineAntwort
         }
+    }
+
+    fn rechne_ab(&mut self, tag: Datum) {
+        let vorher = self.konto.clone();
+        self.konto.rechne_ab(tag);
+        if vorher != self.konto {
+            self.sichere(vorher);
+        }
+    }
+
+    fn offene_erloese(&self) -> Option<&BTreeMap<u64, (Datum, Cent)>> {
+        self.konto.offene_erloese()
     }
 
     fn markt(&mut self, kurse: &Kurse) {
