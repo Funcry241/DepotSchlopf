@@ -1,7 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Funktion
-zweck: Zeitpunkt der manuellen Papierfreigabe unmittelbar nach dem Dialog in UTC belegen. Vorhandene Journalbelege bleiben lesbar.
+klasse: DokuOnly
+zweck: Synthetische Windows-Pruefdaten und Hinweise fuer die manuelle Papierfreigabe im separaten Pruefordner bereitstellen.
 pfade:
-crates/depot_dienst/
-crates/depot_journal/
-crates/depot_sim/
+docs/pruefberichte/papierfreigabe/
