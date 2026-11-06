@@ -443,12 +443,12 @@ impl Dienst {
     }
 
     /// Nach dem Windows-Dialog die Freigabe bei ruhender Werkbank belegen.
-    pub(crate) fn papier_freigeben(&self, gesehen: &str) -> &'static str {
+    pub(crate) fn papier_freigeben(&self, gesehen: &str, bestaetigt_am: Zeitpunkt) -> &'static str {
         let mut z = self.sperre();
         if z.laufend.is_some() || !z.warteschlange.is_empty() {
             return "papierfreigabe_belegt";
         }
-        match depot_lage::papier_freigeben(&self.wurzel, gesehen) {
+        match depot_lage::papier_freigeben(&self.wurzel, gesehen, bestaetigt_am) {
             Ok(()) => {
                 z.lage_veraltet = true;
                 "papierfreigabe_ok"

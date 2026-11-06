@@ -105,7 +105,7 @@ pub enum Art {
     NotbremseFreigabe,
     /// `datum;grundkennung`: typisierter Halt des Papierdepots.
     PapierHalt,
-    /// `abschlussdatum;bargeld;einrichtung;dialog`: Freigabe nach der Gesamtverlustsperre.
+    /// `abschlussdatum;bargeld;einrichtung;dialog;zeitpunkt-utc`: Freigabe nach der Gesamtverlustsperre.
     PapierFreigabe,
     /// Handelstag und UTC-Wissensstichtag, vor der Entscheidung belegt.
     Wissensstichtag,
@@ -627,14 +627,27 @@ impl Stand {
         if !Grenzen::standard().papier_freigabe_neue_messung() {
             return Err("Neue Papier-Verlustmessung ist nicht freigegeben".into());
         }
-        kanonisch(&papier_freigabe_text(tag, bargeld), inhalt)?;
+        let basis = papier_freigabe_text(tag, bargeld);
+        let zeit = if inhalt == basis {
+            // Belege aus #52 enthalten nur das Abschlussdatum.
+            None
+        } else {
+            let zeit = inhalt
+                .strip_prefix(&basis)
+                .and_then(|rest| rest.strip_prefix(';'))
+                .and_then(Zeitpunkt::lies)
+                .ok_or("UTC-Zeit der Papierfreigabe unlesbar")?;
+            kanonisch(&format!("{basis};{zeit}"), inhalt)?;
+            Some(zeit)
+        };
         self.papier_halt = None;
         self.papier_verlustreferenz = Some(bargeld);
         self.papier_neustart = Some(bargeld);
         self.notbremse_freigabe = Some(tag);
         self.prueft_wiederanlauf = false;
+        let zeit = zeit.map_or_else(String::new, |z| format!(" Bestätigt am {z}."));
         self.begruendungen.push((tag, "Einrichtung, Dialog".into(), format!(
-            "Papier-Gesamtverlustsperre in der Einrichtung freigegeben. Neue Verlustmessung ab {} Cent.",
+            "Papier-Gesamtverlustsperre in der Einrichtung freigegeben. Neue Verlustmessung ab {} Cent.{zeit}",
             bargeld.0
         )));
         Ok(())

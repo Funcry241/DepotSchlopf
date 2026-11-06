@@ -144,8 +144,13 @@ impl Umwelt for Attrappe {
         false
     }
 
-    fn papierfreigabe_bestaetigen(&self, _angebot: &depot_lage::PapierFreigabeAngebot) -> bool {
+    fn papierfreigabe_bestaetigen(
+        &self,
+        _angebot: &depot_lage::PapierFreigabeAngebot,
+    ) -> Option<Zeitpunkt> {
         self.papierfreigabe
+            .then_some("2026-11-05T11:01:23Z")
+            .and_then(Zeitpunkt::lies)
     }
 
     fn autostart_setzen(&self, _wurzel: &Path, an: bool) -> Result<(), String> {
@@ -1145,7 +1150,10 @@ fn papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand() -> Result<(), 
     assert!(antwort.contains("papierfreigabe_ok"), "{antwort}");
     assert!(depot_lage::papier_freigabe_angebot(&wurzel).is_none());
     let journal = fs::read_to_string(daten.join("journal.txt")).map_err(|e| e.to_string())?;
-    assert!(journal.contains("papier-freigabe;2026-11-04;1000000;einrichtung;dialog"));
+    assert!(journal.contains(concat!(
+        "papier-freigabe;2026-11-04;1000000;einrichtung;dialog;",
+        "2026-11-05T11:01:23Z"
+    )));
     Ok(())
 }
 

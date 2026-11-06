@@ -68,7 +68,11 @@ pub enum PapierFreigabeFehler {
 }
 
 /// Bestaetigt den angezeigten Stand unter derselben Journalsperre wie ein Papiertag.
-pub fn papier_freigeben(wurzel: &Path, gesehen: &str) -> Result<(), PapierFreigabeFehler> {
+pub fn papier_freigeben(
+    wurzel: &Path,
+    gesehen: &str,
+    bestaetigt_am: Zeitpunkt,
+) -> Result<(), PapierFreigabeFehler> {
     let daten = wurzel.join("daten");
     let mut j = Journal::oeffnen(&daten.join("journal.txt")).map_err(|e| match e {
         depot_journal::JournalFehler::Belegt => PapierFreigabeFehler::Belegt,
@@ -79,7 +83,7 @@ pub fn papier_freigeben(wurzel: &Path, gesehen: &str) -> Result<(), PapierFreiga
     }
     let konto = Papierdatei::oeffnen(&daten.join("papierkonto.txt"), true, &[])
         .map_err(|e| PapierFreigabeFehler::Abgelehnt(format!("{e:?}")))?;
-    j.gebe_papier_frei(gesehen, &konto)
+    j.gebe_papier_frei(gesehen, &konto, bestaetigt_am)
         .map_err(|e| PapierFreigabeFehler::Abgelehnt(format!("{e:?}")))
 }
 

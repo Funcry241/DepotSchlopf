@@ -33,6 +33,7 @@ pub mod werkbank;
 pub mod zeitplan;
 
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use depot_kern::{BeraterId, Zeitpunkt};
 use depot_lage::betrieb::schluessel_stand;
@@ -55,8 +56,11 @@ pub trait Umwelt: Send + Sync {
     fn schluessel_ablegen(&self, wer: Wer, text: &str) -> Result<(), String>;
     fn autostart(&self, wurzel: &Path) -> bool;
     /// Verlangt eine Bestaetigung ausserhalb der lokalen Webseite.
-    fn papierfreigabe_bestaetigen(&self, _angebot: &depot_lage::PapierFreigabeAngebot) -> bool {
-        false
+    fn papierfreigabe_bestaetigen(
+        &self,
+        _angebot: &depot_lage::PapierFreigabeAngebot,
+    ) -> Option<Zeitpunkt> {
+        None
     }
     /// # Errors
     /// Ordner oder Pfad ungeeignet, Schreibfehler.
@@ -80,8 +84,15 @@ impl Umwelt for System {
         autostart::an(wurzel)
     }
 
-    fn papierfreigabe_bestaetigen(&self, angebot: &depot_lage::PapierFreigabeAngebot) -> bool {
-        papierdialog::bestaetigen(angebot)
+    fn papierfreigabe_bestaetigen(
+        &self,
+        angebot: &depot_lage::PapierFreigabeAngebot,
+    ) -> Option<Zeitpunkt> {
+        if papierdialog::bestaetigen(angebot) {
+            jetzt()
+        } else {
+            None
+        }
     }
 
     fn autostart_setzen(&self, wurzel: &Path, an: bool) -> Result<(), String> {
@@ -146,6 +157,12 @@ pub fn oeffne_browser() {
             .spawn();
     }
     println!("[Dienst] Oberflaeche: {adresse}");
+}
+
+/// Aktuelle UTC-Zeit des Dienstes.
+pub fn jetzt() -> Option<Zeitpunkt> {
+    let s = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    Zeitpunkt::aus_sekunden(i64::try_from(s).ok()?)
 }
 
 fn heute(jetzt: Zeitpunkt) -> Option<depot_kern::Datum> {
@@ -364,10 +381,10 @@ fn papier_freigeben(d: &Dienst, u: &dyn Umwelt, f: &[(String, String)]) -> Vec<u
     else {
         return zurueck("papierfreigabe_geaendert");
     };
-    if !u.papierfreigabe_bestaetigen(&angebot) {
+    let Some(bestaetigt_am) = u.papierfreigabe_bestaetigen(&angebot) else {
         return zurueck("papierfreigabe_unbestaetigt");
-    }
-    zurueck(d.papier_freigeben(gesehen))
+    };
+    zurueck(d.papier_freigeben(gesehen, bestaetigt_am))
 }
 
 /// Welche Sperrdatei ein Formular aufhebt.
