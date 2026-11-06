@@ -981,3 +981,74 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
     assert_eq!(k.sende(kauf_nach_abrechnung), Sendeantwort::Angenommen);
     Ok(())
 }
+
+#[test]
+fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei()
+-> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut a = vorbedingung(Topf::neu(TopfId::A, Cent::NULL), "Topf A")?;
+    a.setze_bestand(sap.clone(), 20);
+    let b = vorbedingung(Topf::neu(TopfId::B, Cent(500_000)), "Topf B")?;
+    let start = [a, b];
+    let universum = universum()?;
+    let preise = [(&sap, "250", "250"), (&allianz, "200", "200")];
+    for t in [5, 6, 9] {
+        let datum = tag(t)?;
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, t, &preise)?;
+        let (mut dachs, mut maus) = kaeufer(datum, &allianz);
+        if t == 6 {
+            let text = vorbedingung(fs::read_to_string(&ort.konto), "Kontodatei")?;
+            let ohne: String = text
+                .split_inclusive('\n')
+                .filter(|z| !z.starts_with("abrechnung;"))
+                .collect();
+            assert_ne!(text, ohne, "Verkauf und Abrechnung muessen belegt sein");
+            vorbedingung(fs::write(&ort.konto, ohne), "Abrechnung entfernen")?;
+            let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+            let aus = papiertag(
+                &mut j,
+                datum,
+                &universum,
+                &start,
+                &mut dachs,
+                &mut maus,
+                &mut k,
+            );
+            assert!(
+                matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Abrechnung")),
+                "{aus:?}"
+            );
+            assert_eq!(j.stand().seit_abschluss(), 0, "Halt vor Beginn des Tages");
+            assert_eq!(dachs.aufrufe, 0);
+            vorbedingung(fs::write(&ort.konto, text), "Kontodatei wiederherstellen")?;
+        }
+        let mut k = Papierdatei::oeffnen(&ort.konto, t != 5, &start)?;
+        let aus = papiertag(
+            &mut j,
+            datum,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut k,
+        );
+        assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+        let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A nach dem Lauf")?;
+        assert!(a.bargeld() > Cent::NULL, "Verkaufserloes ist verbucht");
+        assert_eq!(a.stueck(&allianz) > 0, t == 9, "Kauf am Tag {t}");
+        assert_eq!(
+            j.stand().begruendungen().iter().any(|(d, wer, text)| {
+                *d == datum && wer == "Kontowaechter" && text.contains("keine Deckung")
+            }),
+            t != 9,
+            "Kaufversuch im Journal am Tag {t}"
+        );
+        assert!(
+            vorbedingung(j.gleiche_ab(&k), "Abgleich")?.is_empty(),
+            "Abgleich am Tag {t}"
+        );
+    }
+    Ok(())
+}

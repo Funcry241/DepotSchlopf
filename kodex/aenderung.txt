@@ -1,6 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: EUR-Papierkonto mit Abrechnung offener Verkaufserloese. Kaeufe duerfen pro Topf nur abgerechnetes Bargeld nutzen. Offene Nettoerloese bleiben ueber Neustarts erhalten und werden am zweiten folgenden Xetra-Handelstag freigegeben. Keine Aenderung an festgeschriebenen Grenzen oder Abhaengigkeiten.
+zweck: EUR-Papierkonto mit Abrechnung offener Verkaufserloese. Kaeufe duerfen pro Topf nur abgerechnetes Bargeld nutzen. Journal und Papierkonto fuehren und vergleichen die Abrechnungsbelege unabhaengig. Nettoerloese werden am zweiten folgenden Xetra-Handelstag freigegeben, im EUR-Papiermodell auch bei NYSE-Werten. Keine Aenderung an festgeschriebenen Grenzen oder Abhaengigkeiten.
 pfade:
+crates/depot_journal/
 crates/depot_sim/
 CHANGELOG.md

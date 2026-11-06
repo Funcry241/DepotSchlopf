@@ -23,14 +23,14 @@
 //! Was ein angefangener Tag gekostet hat, steht im Journal; ihn zu wiederholen, waere eine
 //! zweite Frage fuer denselben Zyklus.
 
-use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung, verfuegbar};
+use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung};
 use depot_kern::{
     BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
 };
 use depot_ki::Sperre;
 use depot_regelwerk::{
-    DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide,
-    notbremse_auftraege, pruefe_kurse, waechter,
+    DatenFehler, Eingabe, GenehmigterAuftrag, WaechterBefund, entscheide, notbremse_auftraege,
+    pruefe_kurse, waechter,
 };
 
 use crate::abdruck;
@@ -372,6 +372,7 @@ pub(crate) fn ein_tag(
         jr.beobachte(tag.datum, &sauber(ereignis))
             .map_err(journal)?;
     }
+    jr.beginne_abrechnung(tag.datum).map_err(journal)?;
     kontowaechter(jr, tag, &*beteiligte.konto)?;
     beteiligte.konto.rechne_ab(tag.datum);
     pruefe_stoerung(&*beteiligte.konto)?;
@@ -622,70 +623,6 @@ fn verkauft(j: &Journal, auftraege: &[GenehmigterAuftrag]) -> bool {
     })
 }
 
-fn offener_erloes(j: &Journal, konto: &dyn Broker, id: TopfId) -> Result<Cent, LaufFehler> {
-    konto
-        .offene_erloese()
-        .into_iter()
-        .flatten()
-        .try_fold(Cent::NULL, |summe, (nr, (_, netto))| {
-            let l = j
-                .stand()
-                .auftrag(*nr)
-                .ok_or_else(|| halt(format!("Verkaufserloes zu unbekanntem Auftrag {nr}")))?;
-            if l.beleg.richtung != Richtung::Verkauf || l.zustand != AuftragsZustand::Gefuellt {
-                return Err(halt(format!(
-                    "Verkaufserloes ohne ausgefuehrten Auftrag {nr}"
-                )));
-            }
-            if l.beleg.topf == id {
-                summe
-                    .checked_add(*netto)
-                    .ok_or_else(|| rechnung("Verkaufserloes"))
-            } else {
-                Ok(summe)
-            }
-        })
-}
-
-fn kauf_abgerechnet(
-    j: &mut Journal,
-    z: &Zyklus<'_>,
-    id: TopfId,
-    a: &GenehmigterAuftrag,
-    konto: &dyn Broker,
-) -> Result<bool, LaufFehler> {
-    let offen = offener_erloes(j, konto, id)?;
-    if offen == Cent::NULL {
-        return Ok(true);
-    }
-    let frei = verfuegbar(z.grenzen, j.stand(), id)
-        .and_then(|frei| frei.checked_sub(offen))
-        .ok_or_else(|| rechnung("Abgerechnetes Bargeld"))?;
-    let a = a.auftrag();
-    let bedarf = a
-        .limit
-        .mal_stueck(a.stueck)
-        .and_then(|v| v.checked_add(z.grenzen.gebuehren().fuer(v)?))
-        .ok_or_else(|| rechnung("Kaufbedarf"))?;
-    if bedarf > frei {
-        begruende(
-            j,
-            z.tag,
-            KONTOWAECHTER,
-            &format!(
-                "{}: Kauf {} entfaellt: {} Cent Verkaufserloes noch nicht abgerechnet, {} Cent frei, {} Cent benoetigt",
-                topf_name(id),
-                a.kennung.nr(),
-                offen.0,
-                frei.0,
-                bedarf.0
-            ),
-        )?;
-        return Ok(false);
-    }
-    Ok(true)
-}
-
 /// Die Auftragsstelle: Jeder Auftrag wird mit Deckung reserviert (Kontowaechter), als
 /// gesendet belegt und erst dann an das Konto gesendet. Ohne Antwort gilt der Sendestatus als
 /// unbekannt; geklaert wird nur ueber den Abgleich, nie durch einen zweiten Versand (R37).
@@ -706,9 +643,6 @@ fn fuehre_aus(
     let mut gesendet = Vec::new();
     for a in auftraege {
         let nr = a.auftrag().kennung.nr();
-        if a.auftrag().richtung == Richtung::Kauf && !kauf_abgerechnet(j, z, id, a, &*konto)? {
-            continue;
-        }
         match j.reserviere_auftrag(z.grenzen, id, a) {
             Ok(()) => {}
             Err(JournalFehler::Abgelehnt(grund)) => {
