@@ -16,8 +16,14 @@ use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand}
 use crate::zeitplan::{Zeitplan, lies_uhrzeit, naechster_fuer, uhrzeit_text};
 
 const STIL_DIENST: &str = "\
-nav{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}nav a{color:inherit}\
-nav a.hier{font-weight:600;text-decoration:none}\
+nav{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;--nav-akzent:#005c97}\
+@media (prefers-color-scheme:dark){nav{--nav-akzent:#74c7ff}}\
+nav a{color:inherit;text-decoration:none;padding:6px 10px;border-bottom:3px solid transparent;\
+border-radius:6px 6px 0 0}\
+nav a:hover{background:var(--flaeche)}\
+nav a[aria-current=page]{font-weight:700;background:var(--flaeche);border-bottom-color:var(--nav-akzent)}\
+nav a:focus-visible{outline:2px solid currentColor;outline-offset:2px}\
+.version{margin-inline-start:auto;white-space:nowrap}\
 form.knopf{display:inline;margin:0}\
 a.aktion{display:inline-block;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;color:inherit}\
 button{font:inherit;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;\
@@ -323,12 +329,32 @@ pub fn rahmen(
     teil: Option<&str>,
     meldung: Option<(&str, &str)>,
     inhalt: &str,
+    commit: Option<&str>,
 ) -> String {
     let mut s = String::with_capacity(inhalt.len().saturating_add(4096));
     let nav = |pfad: &str, text: &str| {
-        let klasse = if pfad == hier { " class=\"hier\"" } else { "" };
-        format!("<a href=\"{pfad}\"{klasse}>{text}</a>")
+        let aktuell = if pfad == hier {
+            " aria-current=\"page\""
+        } else {
+            ""
+        };
+        format!("<a href=\"{pfad}\"{aktuell}>{text}</a>")
     };
+    let version = commit.map_or_else(
+        || {
+            format!(
+                "<span class=\"version leise\">Version {} · Commit unbekannt</span>",
+                env!("CARGO_PKG_VERSION")
+            )
+        },
+        |sha| {
+            format!(
+                "<span class=\"version leise\" title=\"{}\">Version {}</span>",
+                maskiere(sha),
+                maskiere(crate::rueckfall::kurz(sha))
+            )
+        },
+    );
     let _ = write!(
         s,
         "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
@@ -337,7 +363,8 @@ pub fn rahmen(
          <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt, etwa \
          beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu. Wenn du das schwarze \
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div><main>\
-         <nav><h1>DepotSchlopf</h1>{}{}<span class=\"leise\">Nur Papiergeld.</span></nav>\
+         <nav aria-label=\"Hauptnavigation\"><h1>DepotSchlopf</h1>{}{}\
+         <span class=\"leise\">Nur Papiergeld.</span>{version}</nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit der Zeitplan läuft. \
          Du kannst es minimieren.</p>",
         nav("/", "Live"),
@@ -455,7 +482,7 @@ pub fn fehler(status: u16, text: &str) -> Vec<u8> {
     crate::http::antwort(
         status,
         "text/html; charset=utf-8",
-        rahmen("", None, None, &inhalt).as_bytes(),
+        rahmen("", None, None, &inhalt, None).as_bytes(),
     )
 }
 
@@ -465,11 +492,16 @@ fn protokoll(id: &str, a: &Auftrag, offen: bool) -> String {
         text.push_str(&maskiere(z));
         text.push('\n');
     }
-    if text.is_empty() {
+    let kopieren = if text.is_empty() {
         text.push_str("(noch keine Ausgabe)");
-    }
+        ""
+    } else {
+        "<button type=\"button\" data-protokoll-kopieren>Protokoll kopieren</button> \
+         <span class=\"leise\" role=\"status\"></span>"
+    };
     format!(
-        "<details id=\"{id}-{}\"{}><summary>Protokoll ({} Zeilen)</summary><pre>{text}</pre></details>",
+        "<details id=\"{id}-{}\"{}><summary>Protokoll ({} Zeilen)</summary>\
+         {kopieren}<pre>{text}</pre></details>",
         maskiere(&a.kennung),
         if offen { " open" } else { "" },
         a.protokoll.len()
@@ -1245,6 +1277,29 @@ pub fn einrichtung(
 /// tragen dann das Token des neuen Starts.
 pub const APP_JS: &str = r#""use strict";
 (function () {
+  // Delegiert, da Live auch laufende Protokolle regelmäßig ersetzt.
+  document.addEventListener("click", async function (e) {
+    var b = e.target.closest("[data-protokoll-kopieren]");
+    if (!b) { return; }
+    var block = b.closest("details");
+    var log = block.querySelector("pre");
+    var status = block.querySelector("[role=status]");
+    try {
+      await navigator.clipboard.writeText(log.textContent);
+      status.textContent = "Kopiert.";
+    } catch (_) {
+      var auswahl = window.getSelection();
+      if (auswahl && log.isConnected) {
+        var bereich = document.createRange();
+        bereich.selectNodeContents(log);
+        auswahl.removeAllRanges();
+        auswahl.addRange(bereich);
+        status.textContent = "Text markiert. Drücke Strg+C zum Kopieren.";
+      } else {
+        status.textContent = "Bitte markiere und kopiere den Text von Hand.";
+      }
+    }
+  });
   // Doppelklicks: Ein abgesendetes Formular sperrt seinen Knopf. Der Dienst lehnt doppelte
   // Auftraege ohnehin ab; so sieht man sofort, dass der Klick angekommen ist.
   document.addEventListener("submit", function (e) {

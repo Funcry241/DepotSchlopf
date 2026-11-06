@@ -154,6 +154,15 @@ pub fn sauberer_baum(wurzel: &Path) -> Result<String, String> {
     Ok(baum)
 }
 
+/// Nennt den Commit nur, wenn HEAD denselben Quellbaum wie das Programm hat.
+pub fn commit_fuer_baum(wurzel: &Path, baum: &str) -> Option<String> {
+    let git = git(wurzel, &["rev-parse", "HEAD^{commit}", "HEAD^{tree}"]).ok()?;
+    let mut zeilen = git.lines();
+    let commit = zeilen.next()?;
+    (ist_baum(commit) && zeilen.next() == Some(baum) && zeilen.next().is_none())
+        .then(|| commit.to_owned())
+}
+
 /// Hat genau dieser Baum das Gate bestanden?
 pub fn geprueft(wurzel: &Path, baum: &str) -> bool {
     lies_falls_da(&geprueft_pfad(wurzel)).is_ok_and(|t| {

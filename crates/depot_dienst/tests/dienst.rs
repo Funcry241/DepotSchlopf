@@ -624,6 +624,9 @@ fn auftrag_laeuft_mit_protokoll_und_eindeutiger_kennung() -> Result<(), String> 
     assert_eq!(a.erfolg, Some(true));
     assert_eq!(a.protokoll, vec!["lauf termine".to_string()]);
     assert_eq!(a.kennung, format!("{}-{nr}", t.sekunden()));
+    let seite = seiten::live(TOKEN, "s", &z, t.datum());
+    assert!(seite.contains("data-protokoll-kopieren>Protokoll kopieren"));
+    assert!(seite.contains("<pre>lauf termine\n</pre>"));
     drop(z);
     assert!(d.schritt(t).is_none());
     assert!(d.sperre().lage.is_some(), "danach das Lagebild");
@@ -1099,6 +1102,29 @@ fn get(d: &Dienst, ziel: &str, t: Zeitpunkt) -> String {
         &anfrage("GET", ziel, &[("Host", HOST)], ""),
         t,
     ))
+}
+
+#[test]
+fn navigation_markiert_aktuelle_seite_und_zeigt_laufenden_stand() -> Result<(), String> {
+    let mut d = Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        echo_starter(true),
+        leeres_lagebild(),
+    );
+    let t = donnerstag(12, 0)?;
+    assert!(get(&d, "/", t).contains("Commit unbekannt"));
+    let sha = "a".repeat(40);
+    d.version = Some(sha.clone());
+    for (pfad, titel) in [("/", "Live"), ("/einrichtung", "Einrichtung")] {
+        let html = get(&d, pfad, t);
+        assert_eq!(html.matches("aria-current=\"page\"").count(), 1);
+        assert!(html.contains(&format!(
+            "<a href=\"{pfad}\" aria-current=\"page\">{titel}</a>"
+        )));
+        assert!(html.contains(&format!("title=\"{sha}\">Version aaaaaaaaaa</span>")));
+    }
+    Ok(())
 }
 
 #[test]
