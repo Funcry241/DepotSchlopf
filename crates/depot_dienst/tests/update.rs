@@ -97,8 +97,8 @@ impl Umwelt for Leer {
     ) -> Result<(), String> {
         Err("nicht in Tests".into())
     }
-    fn autostart(&self, _wurzel: &Path) -> bool {
-        false
+    fn autostart(&self, _wurzel: &Path) -> depot_dienst::autostart::Stand {
+        depot_dienst::autostart::Stand::Aus
     }
     fn autostart_setzen(&self, _wurzel: &Path, _an: bool) -> Result<(), String> {
         Err("nicht in Tests".into())

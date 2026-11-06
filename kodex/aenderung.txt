@@ -1,9 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Update-Kandidat liest eine Kopie der Papierdaten vor dem Einspielen. Der Updater sichert und verifiziert die Daten, der Dienst prueft sie vor der Bestaetigung. Der Windows-Dialogtest schreibt keine Papierdaten.
+zweck: Einrichtung erklaert den empfohlenen Einstieg. Zeitplan speichert Einstellungen getrennt vom Schalten. Autostart verlangt eine Bestaetigung zum Ausschalten und schuetzt Eintraege anderer Projektordner.
 pfade:
 crates/depot_dienst/
-crates/depot_journal/src/datei.rs
-crates/depot_lage/
-crates/depot_lauf/
-docs/pruefberichte/papierfreigabe/README.md

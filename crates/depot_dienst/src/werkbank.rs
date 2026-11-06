@@ -505,7 +505,15 @@ impl Dienst {
     /// Einschalten nicht erlaubt, oder die Datei laesst sich nicht schreiben; dann gilt der alte
     /// weiter.
     pub fn setze_zeitplan(&self, plan: Zeitplan) -> Result<(), ZeitplanAbgelehnt> {
+        self.aendere_zeitplan(|_| plan)
+    }
+
+    pub(crate) fn aendere_zeitplan(
+        &self,
+        aenderung: impl FnOnce(Zeitplan) -> Zeitplan,
+    ) -> Result<(), ZeitplanAbgelehnt> {
         let mut z = self.sperre();
+        let plan = aenderung(z.zeitplan);
         if plan.an && !z.zeitplan.an {
             z.einschalten_erlaubt()?;
         }

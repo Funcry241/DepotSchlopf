@@ -8,6 +8,7 @@ use depot_kern::Datum;
 use depot_lage::html::{STIL, maskiere};
 use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, ortszeit, zeit_text};
 
+use crate::autostart;
 use crate::http::feld;
 use crate::kostenschutz;
 use crate::schluessel::Wer;
@@ -20,6 +21,7 @@ nav a.hier{font-weight:600;text-decoration:none}\
 form.knopf{display:inline;margin:0}\
 button{font:inherit;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;\
 background:var(--flaeche);color:var(--text);cursor:pointer}\
+button:disabled{opacity:.65;cursor:default}\
 input[type=password],input[type=time]{font:inherit;padding:3px 6px;border:1px solid var(--linie);\
 border-radius:6px;background:var(--grund);color:var(--text);max-width:100%}\
 pre{white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,Consolas,monospace;\
@@ -170,7 +172,22 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "halt",
             "Die Freigabe konnte nicht bestätigt werden. Lade die Einrichtung neu und prüfe Journal und Papierkonto.",
         ),
-        "zeitplan" => ("gut", "Zeitplan gespeichert und aktiv."),
+        "zeitplan" => (
+            "gut",
+            "Einstellungen gespeichert. Ob der Zeitplan an oder aus ist, bleibt unverändert.",
+        ),
+        "zeitplan_an" => (
+            "gut",
+            "Zeitplan eingeschaltet. Die gespeicherten Einstellungen gelten.",
+        ),
+        "zeitplan_aus" => (
+            "gut",
+            "Zeitplan ausgeschaltet. Bereits gestartete Läufe laufen zu Ende.",
+        ),
+        "zeitplan_neu_laden" => (
+            "offen",
+            "Zeitplan unverändert. Bitte lade die Einrichtung neu und wähle die gewünschte Aktion.",
+        ),
         "zeitplan_ungueltig" => (
             "halt",
             "Zeitplan nicht gespeichert: Uhrzeit im Format hh:mm. Die übrigen Eingaben stehen \
@@ -179,26 +196,29 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "zeitplan_einrichtung" => (
             "halt",
             "Zeitplan nicht eingeschaltet: Erst muss die Einrichtung vollständig sein. Was fehlt, \
-             steht beim Zeitplan. Ihre Eingaben stehen noch im Formular.",
+             steht beim Zeitplan.",
         ),
         "zeitplan_lage" => (
             "offen",
             "Zeitplan nicht eingeschaltet: Der Stand wird gerade neu geprüft. Bitte in ein paar \
-             Sekunden noch einmal speichern; Ihre Eingaben stehen noch im Formular.",
+             Sekunden den Stand neu laden und erneut einschalten.",
         ),
         "zeitplan_fehler" => (
             "halt",
-            "Zeitplan nicht gespeichert: Datei nicht schreibbar. Der alte gilt weiter; Ihre \
-             Eingaben stehen noch im Formular.",
+            "Zeitplan unverändert. Die Datei konnte nicht gespeichert werden.",
         ),
         "autostart_an" => (
             "gut",
-            "Autostart eingerichtet: ab dem nächsten Windows-Start.",
+            "Autostart eingerichtet. DepotSchlopf startet bei deiner nächsten Windows-Anmeldung.",
         ),
         "autostart_aus" => ("gut", "Autostart entfernt."),
+        "autostart_bestaetigen" => (
+            "offen",
+            "Autostart unverändert. Setze erst den Haken zur Bestätigung.",
+        ),
         "autostart_fehler" => (
             "halt",
-            "Autostart nicht geändert (Ordner oder Pfad ungeeignet).",
+            "Autostart unverändert. Prüfe den Stand unten. Falls er sich ändern lässt, versuche es erneut.",
         ),
         "update" => (
             "gut",
@@ -553,7 +573,6 @@ fn regel(w: Wer) -> &'static str {
 /// gueltige Werte werden uebernommen; ein Schluessel ist nie dabei.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Entwurf {
-    pub an: Option<bool>,
     pub termine: Option<(u8, u8)>,
     pub kurse: Option<(u8, u8)>,
     pub papier_danach: Option<bool>,
@@ -574,7 +593,6 @@ impl Entwurf {
             return Entwurf::default();
         }
         Entwurf {
-            an: haken("an"),
             termine: zeit("termine"),
             kurse: zeit("kurse"),
             papier_danach: haken("papier_danach"),
@@ -584,9 +602,6 @@ impl Entwurf {
     /// Als Teil einer Abfrage (`&entwurf=ja&...`), nur mit gueltigen Werten.
     pub fn als_abfrage(&self) -> String {
         let mut q = String::from("&entwurf=ja");
-        if self.an == Some(true) {
-            q.push_str("&an=ja");
-        }
         if self.papier_danach == Some(true) {
             q.push_str("&papier_danach=ja");
         }
@@ -619,7 +634,7 @@ pub struct Einrichtung {
     pub zeitplan_gespeichert: Option<bool>,
     /// Abgelehnte Eingaben, die wieder im Formular stehen.
     pub entwurf: Entwurf,
-    pub autostart: bool,
+    pub autostart: autostart::Stand,
     pub wurzel: String,
     pub grenzen: Vec<Grenzwert>,
     /// Staende, die nach einem Update zurueckgesetzt wurden (`daten/update_abgelehnt.txt`),
@@ -796,73 +811,70 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
         .as_ref()
         .or(zustand.zeitplan_fehler.as_ref());
     let gespeichert = match (e.zeitplan_gespeichert, fehler) {
-        (_, Some(f)) => format!("<span class=\"halt\">{}</span>", maskiere(f)),
-        (Some(true), None) => "<span class=\"gut\">gespeichert und aktiv</span>".into(),
-        (Some(false), None) => {
-            "<span class=\"offen\">Datei weicht vom aktiven Zeitplan ab</span>".into()
-        }
-        (None, None) => {
-            "<span class=\"offen\">noch nicht gespeichert: aus, bis Sie ihn einschalten</span>"
-                .into()
-        }
-    };
-    let aktiv = if p.an {
-        format!(
-            "an: Termine {}, Kurse Xetra {}{}",
-            uhrzeit_text(p.termine),
-            uhrzeit_text(p.kurse),
-            if p.papier_danach {
-                ", danach Papiertag"
-            } else {
-                ""
-            }
-        )
-    } else {
-        "aus".into()
+        (_, Some(f)) => format!("<p class=\"halt\">{}</p>", maskiere(f)),
+        (Some(true), None) => "<p>Einstellungen gespeichert.</p>".into(),
+        (Some(false), None) => "<p class=\"offen\">Datei weicht vom laufenden Stand ab.</p>".into(),
+        (None, None) => "<p>Es gelten die voreingestellten Uhrzeiten.</p>".into(),
     };
     let haken = |b: bool| if b { " checked" } else { "" };
-    // Nach einer Ablehnung stehen die eigenen Eingaben im Formular, sonst der aktive Plan.
     let ent = &e.entwurf;
-    let f = Zeitplan {
-        an: ent.an.unwrap_or(p.an),
-        termine: ent.termine.unwrap_or(p.termine),
-        kurse: ent.kurse.unwrap_or(p.kurse),
-        papier_danach: ent.papier_danach.unwrap_or(p.papier_danach),
-    };
     let entwurf_hinweis = if ent.leer() {
         ""
     } else {
-        "<p class=\"offen\">Das Formular zeigt Ihre letzten, nicht gespeicherten Eingaben.</p>"
+        "<p class=\"offen\">Das Formular zeigt deine letzten, nicht gespeicherten Eingaben.</p>"
     };
-    // Unpassende Knoepfe erklaeren, was fehlt.
-    let voraussetzung = match zustand.einschalten_erlaubt() {
-        Ok(()) => String::new(),
-        Err(_) if p.an => String::new(),
-        Err(ZeitplanAbgelehnt::Einrichtung(fehlt)) => {
-            let mut liste = String::from(
-                "<p class=\"leise\">Einschalten geht erst, wenn alles eingerichtet ist. Es fehlt:</p><ul>",
-            );
-            for punkt in &fehlt {
-                let _ = write!(liste, "<li>{}</li>", maskiere(punkt));
+    let mut voraussetzung = String::new();
+    let mut gesperrt = "";
+    if !p.an {
+        match zustand.einschalten_erlaubt() {
+            Ok(()) => {}
+            Err(ZeitplanAbgelehnt::Einrichtung(fehlt)) => {
+                gesperrt = " disabled";
+                voraussetzung
+                    .push_str("<p>Einschalten geht erst, wenn diese Punkte erledigt sind.</p><ul>");
+                for punkt in fehlt {
+                    let _ = write!(voraussetzung, "<li>{}</li>", maskiere(&punkt));
+                }
+                voraussetzung.push_str("</ul><p><a href=\"#schluessel\">Schlüssel prüfen</a></p>");
             }
-            liste.push_str(
-                "</ul><p class=\"leise\">Ausschalten und Uhrzeiten ändern geht immer.</p>",
-            );
-            liste
+            Err(_) => {
+                gesperrt = " disabled";
+                voraussetzung.push_str(
+                    "<p>Der Dienst prüft die Einrichtung. Lade den Stand \
+                    nach ein paar Sekunden neu.</p>",
+                );
+            }
         }
-        Err(_) => "<p class=\"leise\">Einschalten geht, sobald der Stand geprüft ist (wenige \
-                   Sekunden). Ausschalten und Uhrzeiten ändern geht immer.</p>"
-            .to_string(),
+    }
+    if !gesperrt.is_empty() {
+        voraussetzung.push_str(
+            "<form method=\"get\" action=\"/einrichtung#zeitplan\">\
+             <button type=\"submit\">Stand neu laden</button></form>",
+        );
+    }
+    let (stand, aktion, knopf) = if p.an {
+        ("An", "aus", "Zeitplan ausschalten")
+    } else {
+        ("Aus", "an", "Zeitplan einschalten")
     };
+    let token = maskiere(token);
     let _ = write!(
         s,
         "<section id=\"zeitplan\"><h2>Zeitplan</h2>\
-         <p>Aktiv: {} · {gespeichert}</p><p class=\"leise\">Montag bis Freitag, Frankfurter \
-         Zeit. Jeder Lauf höchstens einmal am Tag, auch nach einem Neustart.</p>{voraussetzung}\
+         <p><b>{stand}</b> · Empfohlen, wenn DepotSchlopf nach einem erfolgreichen manuellen \
+         Test selbstständig laufen soll.</p>{gespeichert}{voraussetzung}\
+         <form method=\"post\" action=\"/zeitplan\">\
+         <input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <input type=\"hidden\" name=\"aktion\" value=\"{aktion}\">\
+         <button type=\"submit\"{gesperrt}>{knopf}</button></form>\
+         <h3>Uhrzeiten und automatische Läufe</h3>\
+         <p>Änderungen unten gelten erst nach dem Speichern. Der Schalter oben nutzt die zuletzt \
+         gespeicherten Einstellungen. Läufe sind montags bis freitags, nach Frankfurter Zeit. \
+         Für Xetra ist 17:45 Uhr voreingestellt, kurz nach Börsenschluss.</p>\
          {entwurf_hinweis}\
          <form method=\"post\" action=\"/zeitplan\">\
-         <input type=\"hidden\" name=\"t\" value=\"{}\">\
-         <label><input type=\"checkbox\" name=\"an\" value=\"ja\"{}> Zeitplan an</label>\
+         <input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <input type=\"hidden\" name=\"aktion\" value=\"speichern\">\
          <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required></label>\
          <label>Kurse Xetra abrufen um <input type=\"time\" name=\"kurse\" value=\"{}\" required></label>\
          <p class=\"leise\">Jede andere Börse der Liste wird zehn Minuten nach ihrem eigenen \
@@ -870,31 +882,48 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <label><input type=\"checkbox\" name=\"papier_danach\" value=\"ja\"{}> \
          Nach dem letzten Kursabruf des Tages den Papiertag starten (wenn ein Abruf des Tages \
          erfolgreich war)</label>\
-         <button type=\"submit\">Speichern und aktivieren</button></form></section>",
-        maskiere(&aktiv),
-        maskiere(token),
-        haken(f.an),
-        uhrzeit_text(f.termine),
-        uhrzeit_text(f.kurse),
-        haken(f.papier_danach)
+         <button type=\"submit\">Einstellungen speichern</button></form></section>",
+        uhrzeit_text(ent.termine.unwrap_or(p.termine)),
+        uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),
+        haken(ent.papier_danach.unwrap_or(p.papier_danach))
     );
 }
 
 fn autostart_teil(token: &str, e: &Einrichtung, s: &mut String) {
-    let (klasse, text, knopf, wert) = if e.autostart {
-        ("gut", "eingerichtet", "Autostart entfernen", "aus")
-    } else {
-        ("offen", "nicht eingerichtet", "Autostart einrichten", "an")
+    s.push_str(
+        "<section id=\"autostart\"><h2>Autostart mit Windows</h2>\
+         <p>Optional. Empfohlen, wenn DepotSchlopf bei deiner Windows-Anmeldung von selbst \
+         starten soll. Der Browser bleibt geschlossen.</p>",
+    );
+    let (text, knopf, wert, bestaetigung) = match e.autostart {
+        autostart::Stand::An => (
+            "Für diesen Projektordner eingeschaltet.",
+            "Autostart ausschalten",
+            "aus",
+            "<label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
+             Ich möchte DepotSchlopf künftig von Hand starten.</label>",
+        ),
+        autostart::Stand::Aus => ("Aus.", "Autostart einschalten", "an", ""),
+        autostart::Stand::Fremd => {
+            s.push_str("<p>Ein Autostart-Eintrag ist bereits vorhanden und gehört nicht zu \
+                diesem Ordner. Öffne die Einrichtung im Hauptordner, wenn du ihn ändern willst.</p></section>");
+            return;
+        }
+        autostart::Stand::NichtVerfuegbar => {
+            s.push_str(
+                "<p>Hier nicht verfügbar. Der Windows-Autostartordner oder sein Eintrag \
+                ist nicht zugänglich, oder der Projektpfad ist ungeeignet. Du kannst \
+                DepotSchlopf weiterhin von Hand starten.</p></section>",
+            );
+            return;
+        }
     };
     let _ = write!(
         s,
-        "<section id=\"autostart\"><h2>Autostart mit Windows</h2>\
-         <p>Stand: <span class=\"{klasse}\">{text}</span>. Gilt ab dem nächsten Windows-Start; \
-         der Dienst startet dann ohne Browserfenster.</p>\
-         <form class=\"knopf\" method=\"post\" action=\"/autostart\">\
+        "<p>{text}</p><form method=\"post\" action=\"/autostart\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"an\" value=\"{wert}\">\
-         <button type=\"submit\">{knopf}</button></form></section>",
+         {bestaetigung}<button type=\"submit\">{knopf}</button></form></section>",
         maskiere(token)
     );
 }
@@ -1008,6 +1037,17 @@ pub fn einrichtung(
         "<div id=\"stand\" data-teil=\"/teil/status\">{}</div>",
         status(start, z, heute)
     );
+    s.push_str(
+        "<section><h2>So fängst du an</h2><ol>\
+         <li><a href=\"#schluessel\">Schlüssel einrichten</a> und auf <a href=\"/\">Live</a> prüfen, \
+         was für einen manuellen Papiertag noch fehlt.</li>\
+         <li>Wenn der manuelle Test klappt, kannst du den <a href=\"#zeitplan\">Zeitplan</a> \
+         für automatische Läufe einschalten.</li>\
+         <li><a href=\"#autostart\">Autostart</a> ist optional. Schalte ihn ein, wenn DepotSchlopf \
+         bei deiner Windows-Anmeldung von selbst starten soll.</li></ol>\
+         <p><a href=\"#update\">Zum Update</a> · \
+         <a href=\"#papierdialog-test\">Freigabedialog gefahrlos testen</a></p></section>",
+    );
     schluessel_teil(token, e, &mut s);
     kostenschutz_teil(token, e, &mut s);
     kurssperre_teil(token, e, &mut s);
@@ -1048,12 +1088,18 @@ pub const APP_JS: &str = r#""use strict";
     var b = e.target.querySelector("button[type=submit]");
     if (b) {
       if (b.disabled) { e.preventDefault(); return; }
+      if (b.dataset.gesendet) { e.preventDefault(); return; }
+      b.dataset.gesendet = b.textContent;
       setTimeout(function () { b.disabled = true; b.textContent = "wird gesendet …"; }, 0);
     }
   }, true);
   // Zurueck im Browser zeigt die Seite aus dem Speicher: Knoepfe wieder freigeben.
   window.addEventListener("pageshow", function () {
-    document.querySelectorAll("button[disabled]").forEach(function (b) { b.disabled = false; });
+    document.querySelectorAll("button[data-gesendet]").forEach(function (b) {
+      b.textContent = b.dataset.gesendet;
+      delete b.dataset.gesendet;
+      b.disabled = false;
+    });
   });
   var ziel = document.querySelector("[data-teil]");
   var banner = document.getElementById("getrennt");

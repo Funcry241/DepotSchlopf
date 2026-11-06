@@ -55,7 +55,7 @@ pub trait Umwelt: Send + Sync {
     /// # Errors
     /// Ungueltig oder abgelehnt; die Meldung nennt den Schluessel nie.
     fn schluessel_ablegen(&self, wer: Wer, text: &str) -> Result<(), String>;
-    fn autostart(&self, wurzel: &Path) -> bool;
+    fn autostart(&self, wurzel: &Path) -> autostart::Stand;
     /// Verlangt eine Bestaetigung ausserhalb der lokalen Webseite.
     fn papierfreigabe_bestaetigen(
         &self,
@@ -85,8 +85,8 @@ impl Umwelt for System {
         schluessel::ablegen(wer, text)
     }
 
-    fn autostart(&self, wurzel: &Path) -> bool {
-        autostart::an(wurzel)
+    fn autostart(&self, wurzel: &Path) -> autostart::Stand {
+        autostart::stand(wurzel)
     }
 
     fn papierfreigabe_bestaetigen(
@@ -108,7 +108,7 @@ impl Umwelt for System {
         if an {
             autostart::einrichten(wurzel)
         } else {
-            autostart::entfernen()
+            autostart::entfernen(wurzel)
         }
     }
 }
@@ -263,7 +263,7 @@ fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
         Some(_) => None,
     };
     Some(Zeitplan {
-        an: haken("an")?,
+        an: false,
         termine: lies_uhrzeit(feld(f, "termine")?)?,
         kurse: lies_uhrzeit(feld(f, "kurse")?)?,
         papier_danach: haken("papier_danach")?,
@@ -336,22 +336,37 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             }
         }
         "/zeitplan" => {
-            // Bei jeder Ablehnung bleiben die gueltigen Eingaben im Formular stehen.
-            let zurueck = |m: &str| {
-                http::umleitung(&format!(
-                    "/einrichtung?m={m}{}#zeitplan",
-                    seiten::Entwurf::aus_formular(&f).als_abfrage()
-                ))
+            let (meldung, entwurf, ergebnis) = match feld(&f, "aktion") {
+                Some("speichern") => {
+                    let entwurf = seiten::Entwurf::aus_formular(&f).als_abfrage();
+                    let Some(plan) = zeitplan_aus_formular(&f) else {
+                        return http::umleitung(&format!(
+                            "/einrichtung?m=zeitplan_ungueltig{entwurf}#zeitplan"
+                        ));
+                    };
+                    (
+                        "zeitplan",
+                        entwurf,
+                        d.aendere_zeitplan(|alt| Zeitplan { an: alt.an, ..plan }),
+                    )
+                }
+                Some(aktion @ ("an" | "aus")) => {
+                    let an = aktion == "an";
+                    (
+                        if an { "zeitplan_an" } else { "zeitplan_aus" },
+                        String::new(),
+                        d.aendere_zeitplan(|alt| Zeitplan { an, ..alt }),
+                    )
+                }
+                _ => return http::umleitung("/einrichtung?m=zeitplan_neu_laden#zeitplan"),
             };
-            let Some(plan) = zeitplan_aus_formular(&f) else {
-                return zurueck("zeitplan_ungueltig");
+            let fehler = match ergebnis {
+                Ok(()) => return http::umleitung(&format!("/einrichtung?m={meldung}#zeitplan")),
+                Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => "zeitplan_einrichtung",
+                Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => "zeitplan_lage",
+                Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => "zeitplan_fehler",
             };
-            match d.setze_zeitplan(plan) {
-                Ok(()) => http::umleitung("/einrichtung?m=zeitplan#zeitplan"),
-                Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => zurueck("zeitplan_einrichtung"),
-                Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => zurueck("zeitplan_lage"),
-                Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => zurueck("zeitplan_fehler"),
-            }
+            http::umleitung(&format!("/einrichtung?m={fehler}{entwurf}#zeitplan"))
         }
         "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kurse),
@@ -363,6 +378,10 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 Some("aus") => false,
                 _ => return http::text(400, "Abgelehnt: an oder aus erwartet"),
             };
+            if !an && feld(&f, "geprueft") != Some("ja") {
+                return http::umleitung("/einrichtung?m=autostart_bestaetigen#autostart");
+            }
+            let _z = d.sperre();
             match u.autostart_setzen(&d.wurzel, an) {
                 Ok(()) if an => http::umleitung("/einrichtung?m=autostart_an#autostart"),
                 Ok(()) => http::umleitung("/einrichtung?m=autostart_aus#autostart"),

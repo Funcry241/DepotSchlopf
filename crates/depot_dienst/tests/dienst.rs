@@ -140,8 +140,8 @@ impl Umwelt for Attrappe {
         Ok(())
     }
 
-    fn autostart(&self, _wurzel: &Path) -> bool {
-        false
+    fn autostart(&self, _wurzel: &Path) -> depot_dienst::autostart::Stand {
+        depot_dienst::autostart::Stand::Aus
     }
 
     fn papierfreigabe_bestaetigen(
@@ -381,7 +381,7 @@ fn meldungen_spiegeln_keine_eingabe() -> Result<(), String> {
     assert!(!r.contains("<b>"));
     let a = anfrage("GET", "/einrichtung?m=zeitplan", &[("Host", HOST)], "");
     let r = text(&behandle(&d, &umw, &a, donnerstag(12, 0)?));
-    assert!(r.contains("Zeitplan gespeichert und aktiv."));
+    assert!(r.contains("Einstellungen gespeichert."));
     Ok(())
 }
 
@@ -735,11 +735,8 @@ fn k29_01_lesefehler_halten_den_zeitplan_an() -> Result<(), String> {
     assert!(!d2.sperre().zeitplan.an);
     assert!(d2.sperre().erledigt_fehler.is_some());
     assert!(d2.schritt(donnerstag(17, 59)?).is_none());
-    let an = formular_post(
-        "/zeitplan",
-        &format!("t={TOKEN}&an=ja&termine=17%3A40&kurse=17%3A45&papier_danach=ja"),
-    );
-    assert!(text(&behandle(&d2, &umw, &an, donnerstag(18, 0)?)).contains("m=zeitplan#"));
+    let an = formular_post("/zeitplan", &format!("t={TOKEN}&aktion=an"));
+    assert!(text(&behandle(&d2, &umw, &an, donnerstag(18, 0)?)).contains("m=zeitplan_an#"));
     assert!(d2.schritt(donnerstag(18, 0)?).is_none());
     assert!(
         wartend(&d2).is_empty(),
@@ -764,13 +761,13 @@ fn zeitplan_ueber_die_seite_speichern_und_aktivieren() -> Result<(), String> {
     let t = donnerstag(12, 0)?;
     let ungueltig = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&an=ja&termine=8:00&kurse=18:00"),
+        &format!("t={TOKEN}&aktion=speichern&termine=8:00&kurse=18:00"),
     );
     assert!(text(&behandle(&d, &umw, &ungueltig, t)).contains("m=zeitplan_ungueltig"));
     assert_eq!(d.sperre().zeitplan, Zeitplan::default());
     let a = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&termine=08%3A00&kurse=18%3A05"),
+        &format!("t={TOKEN}&aktion=speichern&termine=08%3A00&kurse=18%3A05"),
     );
     assert!(text(&behandle(&d, &umw, &a, t)).contains("m=zeitplan#zeitplan"));
     let erwartet = Zeitplan {
@@ -789,7 +786,7 @@ fn zeitplan_ueber_die_seite_speichern_und_aktivieren() -> Result<(), String> {
         &anfrage("GET", "/einrichtung", &[("Host", HOST)], ""),
         t,
     ));
-    assert!(seite.contains("gespeichert und aktiv"));
+    assert!(seite.contains("Einstellungen gespeichert."));
     Ok(())
 }
 
@@ -809,6 +806,19 @@ fn autostart_nur_mit_harmlosem_pfad() -> Result<(), String> {
     assert_eq!(
         *umw.autostart.lock().unwrap_or_else(PoisonError::into_inner),
         Some(true)
+    );
+    let aus = formular_post("/autostart", &format!("t={TOKEN}&an=aus"));
+    let t = donnerstag(12, 0)?;
+    assert!(text(&behandle(&d, &umw, &aus, t)).contains("m=autostart_bestaetigen"));
+    assert_eq!(
+        *umw.autostart.lock().unwrap_or_else(PoisonError::into_inner),
+        Some(true)
+    );
+    let aus = formular_post("/autostart", &format!("t={TOKEN}&an=aus&geprueft=ja"));
+    assert!(text(&behandle(&d, &umw, &aus, t)).contains("m=autostart_aus"));
+    assert_eq!(
+        *umw.autostart.lock().unwrap_or_else(PoisonError::into_inner),
+        Some(false)
     );
     Ok(())
 }
@@ -1204,11 +1214,8 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
     let d = dienst(wurzel.clone(), true);
     let umw = Attrappe::default();
     let t = donnerstag(12, 0)?;
-    let an = formular_post(
-        "/zeitplan",
-        &format!("t={TOKEN}&an=ja&termine=08%3A15&kurse=18%3A05&papier_danach=ja"),
-    );
-    // Noch kein Lagebild: nicht eingeschaltet, Eingaben bleiben.
+    let an = formular_post("/zeitplan", &format!("t={TOKEN}&aktion=an"));
+    // Noch kein Lagebild: nicht eingeschaltet.
     let r = text(&behandle(&d, &umw, &an, t));
     assert!(r.contains("m=zeitplan_lage"), "{r}");
     assert!(!d.sperre().zeitplan.an);
@@ -1221,12 +1228,10 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
         !wurzel.join("daten").join("zeitplan.txt").exists(),
         "nichts gespeichert"
     );
-    // Die Seite zeigt die eigenen Eingaben wieder und sagt, was fehlt.
+    // Die Seite erklärt, warum der Einschaltknopf gesperrt ist.
     let seite = get(&d, &ort(&r), t);
     assert!(seite.contains("Zeitplan nicht eingeschaltet"), "{seite}");
-    assert!(seite.contains("value=\"08:15\""), "{seite}");
-    assert!(seite.contains("value=\"18:05\""), "{seite}");
-    assert!(seite.contains("nicht gespeicherten Eingaben"), "{seite}");
+    assert!(seite.contains("disabled>Zeitplan einschalten"), "{seite}");
     assert!(seite.contains("Einschalten geht erst"), "{seite}");
     // Ohne Entwurf zeigt die Seite den aktiven Plan.
     let seite = get(&d, "/einrichtung", t);
@@ -1234,7 +1239,7 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
     // Uhrzeiten aendern ohne Einschalten geht immer.
     let aus = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&termine=08%3A15&kurse=18%3A05"),
+        &format!("t={TOKEN}&aktion=speichern&termine=08%3A15&kurse=18%3A05"),
     );
     assert!(text(&behandle(&d, &umw, &aus, t)).contains("m=zeitplan#"));
     // Mit fertiger Einrichtung geht das Einschalten.
@@ -1245,8 +1250,18 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
         lagebild_mit_schluesseln(true),
     ));
     assert!(fertig.schritt(t).is_none());
-    assert!(text(&behandle(&fertig, &umw, &an, t)).contains("m=zeitplan#"));
+    assert!(text(&behandle(&fertig, &umw, &an, t)).contains("m=zeitplan_an#"));
     assert!(fertig.sperre().zeitplan.an);
+    assert!(text(&behandle(&fertig, &umw, &aus, t)).contains("m=zeitplan#"));
+    assert!(fertig.sperre().zeitplan.an, "Speichern schaltet nicht aus");
+    let altes_formular = formular_post("/zeitplan", &format!("t={TOKEN}&an=ja"));
+    assert!(text(&behandle(&fertig, &umw, &altes_formular, t)).contains("m=zeitplan_neu_laden"));
+    let ausschalten = formular_post("/zeitplan", &format!("t={TOKEN}&aktion=aus"));
+    assert!(text(&behandle(&fertig, &umw, &ausschalten, t)).contains("m=zeitplan_aus#"));
+    let plan = fertig.sperre().zeitplan;
+    assert!(!plan.an);
+    assert_eq!(plan.termine, (8, 15));
+    assert_eq!(plan.kurse, (18, 5));
     Ok(())
 }
 
@@ -1256,7 +1271,7 @@ fn ungueltige_eingabe_laesst_die_gueltigen_stehen() -> Result<(), String> {
     let t = donnerstag(12, 0)?;
     let f = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&termine=8%3A00&kurse=18%3A20&papier_danach=ja"),
+        &format!("t={TOKEN}&aktion=speichern&termine=8%3A00&kurse=18%3A20&papier_danach=ja"),
     );
     let r = text(&behandle(&d, &Attrappe::default(), &f, t));
     let ziel = ort(&r);
@@ -1404,10 +1419,7 @@ fn einschalten_verlangt_jeden_schluessel() -> Result<(), String> {
     ));
     let t = donnerstag(12, 0)?;
     assert!(d.schritt(t).is_none());
-    let an = formular_post(
-        "/zeitplan",
-        &format!("t={TOKEN}&an=ja&termine=17%3A40&kurse=17%3A45&papier_danach=ja"),
-    );
+    let an = formular_post("/zeitplan", &format!("t={TOKEN}&aktion=an"));
     let r = text(&behandle(&d, &Attrappe::default(), &an, t));
     assert!(r.contains("m=zeitplan_einrichtung"), "{r}");
     assert!(!d.sperre().zeitplan.an);

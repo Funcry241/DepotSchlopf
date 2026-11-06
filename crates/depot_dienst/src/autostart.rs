@@ -4,6 +4,7 @@
 //! Kein Dienst, keine Registry, keine Adminrechte; entfernen loescht genau diese Datei.
 
 use std::fs;
+use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 
 const DATEI: &str = "DepotSchlopf.cmd";
@@ -49,34 +50,100 @@ pub fn sicherer_pfad(p: &Path) -> Result<&str, String> {
     Ok(w)
 }
 
-/// Ist der Autostart fuer diesen Projektordner eingerichtet?
-pub fn an(wurzel: &Path) -> bool {
-    let (Some(o), Ok(soll)) = (ordner(), inhalt(wurzel)) else {
-        return false;
-    };
-    fs::read_to_string(o.join(DATEI)).is_ok_and(|ist| ist == soll)
+/// Zu welchem Projektordner der Autostart gehört.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stand {
+    Aus,
+    An,
+    Fremd,
+    NichtVerfuegbar,
 }
 
-/// Richtet den Autostart ein.
+fn datei_stand(p: &Path, soll: &str) -> Stand {
+    match fs::symlink_metadata(p) {
+        Err(e) if e.kind() == ErrorKind::NotFound => Stand::Aus,
+        Err(_) => Stand::NichtVerfuegbar,
+        Ok(m) if !m.is_file() => Stand::Fremd,
+        Ok(_) => match fs::read_to_string(p) {
+            Ok(ist) if ist == soll => Stand::An,
+            Ok(_) => Stand::Fremd,
+            Err(_) => Stand::NichtVerfuegbar,
+        },
+    }
+}
+
+/// Stand fuer den aktuellen Projektordner.
+pub fn stand(wurzel: &Path) -> Stand {
+    let (Some(o), Ok(soll)) = (ordner().filter(|o| o.is_dir()), inhalt(wurzel)) else {
+        return Stand::NichtVerfuegbar;
+    };
+    datei_stand(&o.join(DATEI), &soll)
+}
+
+/// Richtet den Autostart ein und erhaelt fremde Eintraege.
 ///
 /// # Errors
-/// Kein Autostart-Ordner, Pfad ungeeignet oder Schreibfehler.
+/// Ordner oder Pfad ungeeignet, Eintrag belegt oder Schreibfehler.
 pub fn einrichten(wurzel: &Path) -> Result<(), String> {
     let o = ordner().ok_or("Autostart-Ordner unbekannt (APPDATA fehlt)")?;
-    let text = inhalt(wurzel)?;
-    crate::werkbank::schreibe_ganz(&o.join(DATEI), &text)
+    eintrag_aendern(&o.join(DATEI), &inhalt(wurzel)?, true)
 }
 
-/// Entfernt den Autostart. Nichts da ist auch gut.
+/// Entfernt ausschliesslich den Eintrag fuer diesen Projektordner.
 ///
 /// # Errors
-/// Kein Autostart-Ordner oder die Datei laesst sich nicht loeschen.
-pub fn entfernen() -> Result<(), String> {
+/// Ordner oder Pfad ungeeignet, Eintrag gehoert einem anderen Ordner oder Loeschen fehlgeschlagen.
+pub fn entfernen(wurzel: &Path) -> Result<(), String> {
     let o = ordner().ok_or("Autostart-Ordner unbekannt (APPDATA fehlt)")?;
-    let p = o.join(DATEI);
-    match fs::remove_file(&p) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("{}: {e}", p.display())),
+    eintrag_aendern(&o.join(DATEI), &inhalt(wurzel)?, false)
+}
+
+fn eintrag_aendern(p: &Path, soll: &str, an: bool) -> Result<(), String> {
+    let fehler = |e| format!("{}: {e}", p.display());
+    match (datei_stand(p, soll), an) {
+        (Stand::Fremd, _) => Err("Ein anderer Autostart-Eintrag ist vorhanden".into()),
+        (Stand::NichtVerfuegbar, _) => Err("Autostart-Eintrag nicht lesbar".into()),
+        (Stand::Aus, false) | (Stand::An, true) => Ok(()),
+        (Stand::An, false) => fs::remove_file(p).map_err(fehler),
+        (Stand::Aus, true) => {
+            let mut datei = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(p)
+                .map_err(fehler)?;
+            if let Err(e) = datei
+                .write_all(soll.as_bytes())
+                .and_then(|()| datei.sync_all())
+            {
+                drop(datei);
+                let _ = fs::remove_file(p);
+                return Err(fehler(e));
+            }
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pruefordner_kann_fremden_autostart_nicht_aendern() -> Result<(), String> {
+        let o = std::env::temp_dir().join(format!("depot-autostart-{}", crate::neues_token()));
+        fs::create_dir(&o).map_err(|e| e.to_string())?;
+        let p = o.join(DATEI);
+        let echt = inhalt(Path::new("C:\\DepotSchlopf"))?;
+        let probe = inhalt(Path::new("C:\\Pruefordner"))?;
+        assert_eq!(datei_stand(&p, &echt), Stand::Aus);
+        eintrag_aendern(&p, &echt, true)?;
+        assert_eq!(datei_stand(&p, &echt), Stand::An);
+        assert_eq!(datei_stand(&p, &probe), Stand::Fremd);
+        assert!(eintrag_aendern(&p, &probe, true).is_err());
+        assert!(eintrag_aendern(&p, &probe, false).is_err());
+        assert_eq!(datei_stand(&p, &echt), Stand::An);
+        eintrag_aendern(&p, &echt, false)?;
+        assert_eq!(datei_stand(&p, &echt), Stand::Aus);
+        fs::remove_dir(o).map_err(|e| e.to_string())
     }
 }
