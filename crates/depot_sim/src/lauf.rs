@@ -681,7 +681,11 @@ fn belege_prognose(
         }) {
             Ok(()) => {}
             Err(JournalFehler::Abgelehnt(grund)) => j
-                .begruende(lage.datum, name(berater), &format!("Prognose verworfen: {grund}"))
+                .begruende(
+                    lage.datum,
+                    name(berater),
+                    &format!("Prognose verworfen: {grund}"),
+                )
                 .map_err(journal)?,
             Err(e) => return Err(journal(e)),
         }
@@ -995,10 +999,16 @@ mod tests {
         let preis = depot_kern::Preis::lies_euro("230").ok_or_else(|| halt("Preis"))?;
         let kurs = depot_kern::Kurs::exakt(preis, "EUR", datum, zeit, Herkunft::Quelle)
             .map_err(|e| halt(format!("{e:?}")))?;
-        let kurse = Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| halt(format!("{e:?}")))?;
+        let kurse =
+            Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| halt(format!("{e:?}")))?;
         let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| halt(format!("{e:?}")))?;
         j.beginne_abrechnung(datum).map_err(journal)?;
-        let lage = Lage { datum, topf: &topf, kurse: &kurse, ereignisse: &["Meldung".into()] };
+        let lage = Lage {
+            datum,
+            topf: &topf,
+            kurse: &kurse,
+            ereignisse: &["Meldung".into()],
+        };
         let prognose = Weltprognose {
             isin,
             richtung: depot_journal::Prognoserichtung::Steigt,
@@ -1010,8 +1020,14 @@ mod tests {
         // In dieser Probe fehlen der Kurs- und der Ereignisbeleg im Journal.
         belege_prognose(&mut j, &lage, BeraterId::Dachs, prognose)?;
         assert!(j.stand().weltprognosen().is_empty());
-        assert!(j.stand().begruendungen().iter().any(|(_, _, t)| t.starts_with("Prognose verworfen:")));
-        j.schliesse_ab(datum, Cent(500_000), &"a".repeat(64)).map_err(journal)?;
+        assert!(
+            j.stand()
+                .begruendungen()
+                .iter()
+                .any(|(_, _, t)| t.starts_with("Prognose verworfen:"))
+        );
+        j.schliesse_ab(datum, Cent(500_000), &"a".repeat(64))
+            .map_err(journal)?;
         assert_eq!(j.stand().seit_abschluss(), 0);
         drop(j);
         std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
