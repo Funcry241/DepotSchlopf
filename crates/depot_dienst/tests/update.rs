@@ -484,32 +484,24 @@ fn bestaetigung_wiederholt_eine_voruebergehende_journalsperre() -> Result<(), St
 
 // --- Waechter: Probezeit mit Frist (Maus, Befund zu #30) ---
 
-/// Ein Kindprozess aus einem kleinen Skript; `{offen}` steht fuer den Pfad der Markierung.
-fn kind(
-    skript_unix: &str,
-    skript_windows: &str,
-    offen: &Path,
-) -> Result<std::process::Child, String> {
+/// Ein Kindprozess fuer einen einfachen Exit oder einen absichtlich haengenden Lauf.
+fn kind(skript_unix: &str, skript_windows: &str) -> Result<std::process::Child, String> {
     #[cfg(windows)]
     let mut c = {
         use std::os::windows::process::CommandExt as _;
 
         let _ = skript_unix;
         let mut c = Command::new("cmd.exe");
-        // cmd liest den Rest hinter /C selbst. Die normalen Argument-Escapes würden
-        // die Anführungszeichen für den Pfad mit einem Backslash versehen.
-        c.args(["/D", "/V:OFF", "/C"])
-            .raw_arg(skript_windows.replace("{offen}", "%DEPOT_TEST_OFFEN%"));
+        c.args(["/D", "/V:OFF", "/C"]).raw_arg(skript_windows);
         c
     };
     #[cfg(not(windows))]
     let mut c = {
         let _ = skript_windows;
         let mut c = Command::new("sh");
-        c.args(["-c", &skript_unix.replace("{offen}", "$DEPOT_TEST_OFFEN")]);
+        c.args(["-c", skript_unix]);
         c
     };
-    c.env("DEPOT_TEST_OFFEN", offen);
     c.spawn().map_err(|e| format!("Vorbedingung Kind: {e}"))
 }
 
@@ -530,7 +522,7 @@ fn ende_vor_der_bestaetigung_faellt_zurueck_auch_mit_code_0() -> Result<(), Stri
         ("exit 1", "exit /b 1"),
         ("exit 3", "exit /b 3"),
     ] {
-        let mut k = kind(u, w, &offen)?;
+        let mut k = kind(u, w)?;
         let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(30), KURZ);
         assert!(matches!(a, waechter::Ausgang::Rueckfall(_)), "{u}: {a:?}");
     }
@@ -541,7 +533,7 @@ fn ende_vor_der_bestaetigung_faellt_zurueck_auch_mit_code_0() -> Result<(), Stri
 fn haengender_neuer_stand_wird_nach_der_frist_beendet() -> Result<(), String> {
     let offen = markierung()?;
     let start = std::time::Instant::now();
-    let mut k = kind("sleep 30", "ping -n 30 127.0.0.1 >nul", &offen)?;
+    let mut k = kind("sleep 30", "ping -n 30 127.0.0.1 >nul")?;
     let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(1), KURZ);
     assert!(matches!(a, waechter::Ausgang::Rueckfall(_)), "{a:?}");
     assert!(start.elapsed() < std::time::Duration::from_secs(20));
@@ -554,16 +546,24 @@ fn haengender_neuer_stand_wird_nach_der_frist_beendet() -> Result<(), String> {
 
 #[test]
 fn nach_der_bestaetigung_zaehlt_der_code() -> Result<(), String> {
+    const KIND_MARKIERUNG: &str = "DEPOTSCHLOPF_TEST_WAECHTER_BESTAETIGUNG";
+    if let Some(offen) = std::env::var_os(KIND_MARKIERUNG) {
+        fs::remove_file(offen).map_err(|e| format!("Bestätigung im Kindprozess: {e}"))?;
+        std::process::exit(3);
+    }
+
     let offen = markierung()?;
-    let mut k = kind(
-        "rm \"{offen}\" || exit 91; exit 3",
-        "del /q \"{offen}\" || exit /b 91 & if exist \"{offen}\" exit /b 91 & exit /b 3",
-        &offen,
-    )?;
+    // Derselbe Test im Kindprozess bestätigt per Rust und beendet sich mit genau Code 3.
+    let mut k = Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
+        .args(["--exact", "nach_der_bestaetigung_zaehlt_der_code"])
+        .env(KIND_MARKIERUNG, &offen)
+        .spawn()
+        .map_err(|e| format!("Vorbedingung Kind: {e}"))?;
     let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(30), KURZ);
     assert_eq!(a, waechter::Ausgang::Ende(Some(3)));
+    assert!(!offen.exists());
     // Ohne Markierung keine Probezeit: Code 0 ist ein gewoehnliches Ende.
-    let mut k = kind("exit 0", "exit /b 0", &offen)?;
+    let mut k = kind("exit 0", "exit /b 0")?;
     let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(30), KURZ);
     assert_eq!(a, waechter::Ausgang::Ende(Some(0)));
     Ok(())

@@ -1,8 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Funktion
-zweck: Kontingent von Alpha Vantage mit Nachrichten: Der Xetra-Lauf holt mit demselben Schluessel einmal die Nachrichten, deshalb laesst pruefe_liste fuer Alpha Vantage hoechstens 24 Werte zu (25 Abrufe am Tag minus einer fuer die Nachrichten). Liste unveraendert, keine Grenze geaendert, keine neue Abhaengigkeit.
+klasse: TestOnly
+zweck: Der Waechtertest verwendet einen Rust-Kindprozess fuer die Bestaetigung und einen eindeutigen Exitcode.
 pfade:
-crates/depot_kern/
-crates/depot_sammler/
-docs/
-CHANGELOG.md
+crates/depot_dienst/tests/update.rs
