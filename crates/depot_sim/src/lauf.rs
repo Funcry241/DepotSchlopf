@@ -23,7 +23,7 @@
 //! Was ein angefangener Tag gekostet hat, steht im Journal; ihn zu wiederholen, waere eine
 //! zweite Frage fuer denselben Zyklus.
 
-use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung, Stand};
+use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung, PrognoseBeleg, Stand, Weltprognose};
 use depot_kern::liste::papierorder_schluss;
 use depot_kern::{
     BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
@@ -448,8 +448,20 @@ pub(crate) fn ein_tag(
     let heute = depotwert(jr.stand().toepfe().values(), &tag.kurse, Rundung::Auf)
         .ok_or_else(|| rechnung("Depotwert"))?;
     let b = beteiligte;
-    topf_zyklus(jr, z, TopfId::A, b.dachs, b.maus, &mut *b.konto)?;
-    topf_zyklus(jr, z, TopfId::B, b.maus, b.dachs, &mut *b.konto)?;
+    let topf_a = frage_topf(jr, z, TopfId::A, b.dachs)?;
+    // Im Papiertag muessen beide Antworten feststehen, bevor jemand den Vorschlag des
+    // anderen sieht. Das Beispiel-Szenario behaelt seine bisherige Aufrufreihenfolge.
+    let topf_b = if z.uhr.is_some() {
+        Some(frage_topf(jr, z, TopfId::B, b.maus)?)
+    } else {
+        None
+    };
+    topf_zyklus(jr, z, topf_a, b.maus, &mut *b.konto)?;
+    let topf_b = match topf_b {
+        Some(topf) => topf,
+        None => frage_topf(jr, z, TopfId::B, b.maus)?,
+    };
+    topf_zyklus(jr, z, topf_b, b.dachs, &mut *b.konto)?;
     let hoch = hoch.max(heute);
     jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
@@ -616,6 +628,12 @@ fn frage(
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag")? {
         let mut antwort = frager.vorschlagen(e, lage);
         let wie = if antwort.verwertbar {
+            if z.uhr.is_some()
+                && let Some(prognose) = antwort.prognose.take()
+                && z.universum.isins().contains(&prognose.isin)
+            {
+                belege_prognose(j, lage, wer, prognose)?;
+            }
             ANTWORT_VERWENDET
         } else {
             // Eine verworfene Antwort traegt nie einen Vorschlag weiter.
@@ -639,24 +657,46 @@ fn frage(
     Ok(vorschlag)
 }
 
-/// Ein Topf in einem Zyklus: Der zustaendige Berater schlaegt vor, der andere prueft, das
-/// Regelwerk entscheidet.
-fn topf_zyklus(
+fn belege_prognose(
+    j: &mut Journal,
+    lage: &Lage<'_>,
+    berater: BeraterId,
+    prognose: Weltprognose,
+) -> Result<(), LaufFehler> {
+    let ereignis = prognose.ereignis_nr.checked_sub(1).and_then(|nr| lage.ereignisse.get(nr));
+    if let (Some(ereignis), Some(ausgangskurs)) = (ereignis, lage.kurse.kurs(&prognose.isin))
+        && prognose.gueltig()
+    {
+        j.belege_weltprognose(&PrognoseBeleg {
+            datum: lage.datum,
+            berater,
+            prognose,
+            ausgangskurs,
+            ereignis: sauber(ereignis),
+        })
+        .map_err(journal)?;
+    }
+    Ok(())
+}
+
+struct TopfAntwort {
+    topf: Topf,
+    vorschlag: Option<Vorschlag>,
+}
+
+fn frage_topf(
     j: &mut Journal,
     z: &Zyklus<'_>,
     id: TopfId,
     frager: &mut dyn Berater,
-    pruefer: &mut dyn Berater,
-    konto: &mut dyn Broker,
-) -> Result<(), LaufFehler> {
-    let (tag, zyklus) = (z.tag, z.nr);
+) -> Result<TopfAntwort, LaufFehler> {
+    let tag = z.tag;
     let topf = j
         .stand()
         .toepfe()
         .get(&id)
         .cloned()
         .ok_or_else(|| halt(format!("{} fehlt im Journal", topf_name(id))))?;
-    let zweiter = andere(id.berater());
     let t = topf_name(id);
     let lage = Lage {
         datum: tag.datum,
@@ -669,7 +709,7 @@ fn topf_zyklus(
         .offene_auftraege()
         .find(|l| l.versand.is_some() && l.beleg.topf == id)
         .map(|l| l.beleg.nr);
-    let mut vorschlag = if let Some(nr) = wartet {
+    let vorschlag = if let Some(nr) = wartet {
         begruende(
             j,
             tag,
@@ -679,6 +719,28 @@ fn topf_zyklus(
         None
     } else {
         frage(j, z, id, frager, &lage)?
+    };
+    Ok(TopfAntwort { topf, vorschlag })
+}
+
+/// Der zweite Berater prueft den Vorschlag, dann entscheidet das Regelwerk.
+fn topf_zyklus(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    antwort: TopfAntwort,
+    pruefer: &mut dyn Berater,
+    konto: &mut dyn Broker,
+) -> Result<(), LaufFehler> {
+    let TopfAntwort { topf, mut vorschlag } = antwort;
+    let (tag, zyklus) = (z.tag, z.nr);
+    let id = topf.id();
+    let zweiter = andere(id.berater());
+    let t = topf_name(id);
+    let lage = Lage {
+        datum: tag.datum,
+        topf: &topf,
+        kurse: &tag.kurse,
+        ereignisse: &tag.ereignisse,
     };
     if vorschlag.is_some() && !pruefer.angebunden() {
         vorschlag = None;

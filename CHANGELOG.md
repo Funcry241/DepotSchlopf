@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Dachs und Maus können im Papiertag je eine eigenständige Weltprognose mit Ereignis, Wert, Richtung, Zeithorizont und Widerlegungskriterium hinterlegen. Der Papiertag holt beide Antworten vor der gegenseitigen Prüfung ein. Das Journal bindet die Prognose an das beobachtete Ereignis und den Ausgangskurs. Dazu sind keine zusätzlichen Anbieteraufrufe nötig.
+
 - Der Papiertag friert den Wissensstand für das Weltmodell ein. Er verwendet ausschließlich Kurse, Nachrichten und Terminversionen, die bis zu diesem Zeitpunkt belegt waren. Das Journal hält den Stichtag fest. Eine später abgerufene Meldung erscheint beim Rückblick nicht allein deshalb, weil sie früher veröffentlicht wurde.
 
 - Der Papiertag speichert die Versandzeit neuer Orders. Nach einem Neustart bleiben sie reserviert und warten bis zum ersten Börsenschluss nach ihrem Versand. Fehlt dafür ein geprüfter Kurs oder liegt er außerhalb des Limits, verfällt die Order. Journal und Papierkonto belegen die Kurszeit, aus deren Handelstag die Valuta folgt. Die Notbremse storniert offene Käufe und lässt nur noch offene Verkäufe zum späteren Kurs abarbeiten. Neue zeitbelegte Orders schreiben das Papierkonto als `papierkonto-v2`. Alte Dateien lassen sich mit der neuen Version lesen.

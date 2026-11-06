@@ -374,6 +374,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
     dachs.antworten.insert(
         d,
         Antwort {
+            prognose: None,
             verwertbar: true,
             einschaetzung: "SAP".into(),
             vorschlag: Some(Vorschlag {
@@ -519,6 +520,7 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
             buch.antworten.insert(
                 d,
                 Antwort {
+                    prognose: None,
                     verwertbar: true,
                     einschaetzung: "SAP".into(),
                     vorschlag: Some(Vorschlag {
@@ -848,6 +850,7 @@ impl depot_sim::Berater for Leser {
     ) -> Antwort {
         self.gesehen.extend(lage.ereignisse.iter().cloned());
         Antwort {
+            prognose: None,
             verwertbar: true,
             einschaetzung: "gelesen".into(),
             vorschlag: None,

@@ -548,6 +548,9 @@ impl Journal {
             Art::Zustand => Err(JournalFehler::Abgelehnt(
                 "Auftragszustaende entstehen nur ueber melde und gleiche_ab".into(),
             )),
+            Art::Weltprognose => Err(JournalFehler::Abgelehnt(
+                "Weltprognose nur ueber belege_weltprognose".into(),
+            )),
             Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
                 "Abrechnungstag nur ueber beginne_abrechnung".into(),
             )),
@@ -651,6 +654,14 @@ impl Journal {
                 abdruck: abdruck.to_string(),
             }),
         )
+    }
+
+    /// Fixiert eine unabhaengige Weltprognose im laufenden Papiertag.
+    pub fn belege_weltprognose(
+        &mut self,
+        beleg: &crate::weltprognose::PrognoseBeleg,
+    ) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Weltprognose, &beleg.als_text())
     }
 
     /// Belegt einen Kurs mit Quelle, Abrufzeit und Abdruck der rohen Antwort, bevor er
