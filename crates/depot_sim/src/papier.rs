@@ -17,7 +17,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use depot_journal::{Abrechnungen, Ausfuehrung, Konto, KontoOrder, KontoStatus, Kontoauszug, papier_valuta};
+use depot_journal::{
+    Abrechnungen, Ausfuehrung, Konto, KontoOrder, KontoStatus, Kontoauszug, papier_valuta,
+};
 use depot_kern::{Cent, Datum, Gebuehren, Grenzen, Isin, Kurse, Rundung, Topf};
 use depot_regelwerk::{GenehmigterAuftrag, Richtung};
 
@@ -443,7 +445,7 @@ impl Papierkonto {
                 _ => return Err(fehler()),
             }
         }
-        if k.abgerechnetes_bargeld().is_none() || k.als_text() != text {
+        if k.als_text() != text {
             return Err("Papierkonto: nicht in der eigenen Form geschrieben".into());
         }
         Ok(k)

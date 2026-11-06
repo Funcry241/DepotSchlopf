@@ -357,36 +357,40 @@ impl Stand {
             }
             Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
             Art::Abschluss => {
-                let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
-                kanonisch(&abschluss_text(&a), inhalt)?;
-                // Tagesorders enden am Tag (Kap. 10): Ein Tag mit offenem Auftrag ist nicht
-                // vollstaendig belegt.
-                if let Some(l) = self.offene_auftraege().next() {
-                    return Err(format!(
-                        "Abschluss mit offenem Auftrag {} ({:?})",
-                        l.beleg.nr, l.zustand
-                    ));
-                }
-                if let Some(vorher) = &self.abschluss
-                    && a.datum <= vorher.datum
-                {
-                    return Err(format!(
-                        "Abschluss {} nicht nach dem letzten ({})",
-                        datum_text(a.datum),
-                        datum_text(vorher.datum)
-                    ));
-                }
-                if let Some(tag) = self.abrechnungstag
-                    && a.datum != tag
-                {
-                    return Err("Abschluss passt nicht zum Abrechnungstag".into());
-                }
-                self.abschluss = Some(a);
-                self.seit_abschluss = 0;
-                return Ok(());
+                return self.schliesse_ab(inhalt);
             }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    fn schliesse_ab(&mut self, inhalt: &str) -> Result<(), String> {
+        let a = lies_abschluss(inhalt).ok_or("Abschluss unlesbar")?;
+        kanonisch(&abschluss_text(&a), inhalt)?;
+        // Tagesorders enden am Tag (Kap. 10): Ein Tag mit offenem Auftrag ist nicht
+        // vollstaendig belegt.
+        if let Some(l) = self.offene_auftraege().next() {
+            return Err(format!(
+                "Abschluss mit offenem Auftrag {} ({:?})",
+                l.beleg.nr, l.zustand
+            ));
+        }
+        if let Some(vorher) = &self.abschluss
+            && a.datum <= vorher.datum
+        {
+            return Err(format!(
+                "Abschluss {} nicht nach dem letzten ({})",
+                datum_text(a.datum),
+                datum_text(vorher.datum)
+            ));
+        }
+        if let Some(tag) = self.abrechnungstag
+            && a.datum != tag
+        {
+            return Err("Abschluss passt nicht zum Abrechnungstag".into());
+        }
+        self.abschluss = Some(a);
+        self.seit_abschluss = 0;
         Ok(())
     }
 
@@ -499,10 +503,18 @@ impl Stand {
             ),
             _ => (topf.clone(), None),
         };
-        self.pruefe_deckung(&topf, Some(&neu), erloes.map_or(Cent::NULL, |(_, netto)| netto))?;
+        self.pruefe_deckung(
+            &topf,
+            Some(&neu),
+            erloes.map_or(Cent::NULL, |(_, netto)| netto),
+        )?;
         if let Some((valuta, netto)) = erloes {
-            let gesamt = self.abrechnungen.get(&nr).map_or(Cent::NULL, |(_, n)| *n)
-                .checked_add(netto).ok_or("Verkaufserloes: Ueberlauf")?;
+            let gesamt = self
+                .abrechnungen
+                .get(&nr)
+                .map_or(Cent::NULL, |(_, n)| *n)
+                .checked_add(netto)
+                .ok_or("Verkaufserloes: Ueberlauf")?;
             self.abrechnungen.insert(nr, (valuta, gesamt));
         }
         self.toepfe.insert(topf.id(), topf);
@@ -526,7 +538,9 @@ impl Stand {
         if beleg.richtung != Richtung::Verkauf {
             return Ok(None);
         }
-        let netto = aus.kurs.mal_stueck(aus.stueck)
+        let netto = aus
+            .kurs
+            .mal_stueck(aus.stueck)
             .and_then(|v| v.checked_sub(aus.gebuehr))
             .ok_or("Verkaufserloes: Ueberlauf")?;
         let valuta = papier_valuta(tag).ok_or("Valuta ausserhalb des Kalenders")?;
@@ -569,7 +583,8 @@ impl Stand {
                 }
             }
         }
-        let frei = self.gesperrt(topf.id())
+        let frei = self
+            .gesperrt(topf.id())
             .and_then(|s| s.checked_add(neuer_erloes))
             .and_then(|s| topf.bargeld().checked_sub(s))
             .ok_or("Deckung: Ueberlauf")?;

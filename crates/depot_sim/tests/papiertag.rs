@@ -983,8 +983,8 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
 }
 
 #[test]
-fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei()
--> Result<(), String> {
+fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() -> Result<(), String>
+{
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let mut a = vorbedingung(Topf::neu(TopfId::A, Cent::NULL), "Topf A")?;
@@ -1008,13 +1008,7 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei()
             vorbedingung(fs::write(&ort.konto, ohne), "Abrechnung entfernen")?;
             let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
             let aus = papiertag(
-                &mut j,
-                datum,
-                &universum,
-                &start,
-                &mut dachs,
-                &mut maus,
-                &mut k,
+                &mut j, datum, &universum, &start, &mut dachs, &mut maus, &mut k,
             );
             assert!(
                 matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Abrechnung")),
@@ -1026,13 +1020,7 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei()
         }
         let mut k = Papierdatei::oeffnen(&ort.konto, t != 5, &start)?;
         let aus = papiertag(
-            &mut j,
-            datum,
-            &universum,
-            &start,
-            &mut dachs,
-            &mut maus,
-            &mut k,
+            &mut j, datum, &universum, &start, &mut dachs, &mut maus, &mut k,
         );
         assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
         let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A nach dem Lauf")?;

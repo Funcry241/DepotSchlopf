@@ -118,7 +118,11 @@ pub enum Abweichung {
 /// Bargeld eines Topfes, das noch fuer einen Kauf frei ist: Bargeld minus aller offenen Kaeufe
 /// am Limit samt Gebuehr und minus noch nicht abgerechneter Erloese.
 pub fn verfuegbar(grenzen: &Grenzen, stand: &Stand, topf: TopfId) -> Option<Cent> {
-    let mut frei = stand.toepfe().get(&topf)?.bargeld().checked_sub(stand.gesperrt(topf)?)?;
+    let mut frei = stand
+        .toepfe()
+        .get(&topf)?
+        .bargeld()
+        .checked_sub(stand.gesperrt(topf)?)?;
     for l in stand.offene_auftraege() {
         if l.beleg.topf == topf && l.beleg.richtung == Richtung::Kauf {
             frei = frei.checked_sub(kaufbedarf(grenzen, l.beleg.limit, l.offen_stueck())?)?;
@@ -228,7 +232,11 @@ pub fn abweichungen(stand: &Stand, auszug: &Kontoauszug) -> Vec<Abweichung> {
                 let j = journal.get(&nr).copied();
                 let k = konto.get(&nr).copied();
                 if j != k {
-                    aus.push(Abweichung::Abrechnung { nr, journal: j, konto: k });
+                    aus.push(Abweichung::Abrechnung {
+                        nr,
+                        journal: j,
+                        konto: k,
+                    });
                 }
             }
         }

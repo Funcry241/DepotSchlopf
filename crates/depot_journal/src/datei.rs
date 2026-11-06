@@ -725,11 +725,12 @@ impl Journal {
         self.schreibe_eintrag(Art::Format, &FORMAT.to_string())
     }
 
-    /// Schreibt den naechsten Zustand eines Auftrags.
+    /// Belegt den Handelstag vor der ersten Ausfuehrung und gibt faellige Erloese frei.
     pub fn beginne_abrechnung(&mut self, tag: Datum) -> Result<(), JournalFehler> {
         self.schreibe_eintrag(Art::Abrechnungstag, &tag.to_string())
     }
 
+    /// Schreibt den naechsten Zustand eines Auftrags.
     pub(crate) fn schreibe_meldung(&mut self, nr: u64, m: &Meldung) -> Result<(), JournalFehler> {
         self.schreibe_eintrag(Art::Zustand, &meldung_text(nr, m))
     }
