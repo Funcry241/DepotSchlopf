@@ -335,39 +335,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 Err(_) => http::umleitung("/einrichtung?m=schluessel_fehler#schluessel"),
             }
         }
-        "/zeitplan" => {
-            let (meldung, entwurf, ergebnis) = match feld(&f, "aktion") {
-                Some("speichern") => {
-                    let entwurf = seiten::Entwurf::aus_formular(&f).als_abfrage();
-                    let Some(plan) = zeitplan_aus_formular(&f) else {
-                        return http::umleitung(&format!(
-                            "/einrichtung?m=zeitplan_ungueltig{entwurf}#zeitplan"
-                        ));
-                    };
-                    (
-                        "zeitplan",
-                        entwurf,
-                        d.aendere_zeitplan(|alt| Zeitplan { an: alt.an, ..plan }),
-                    )
-                }
-                Some(aktion @ ("an" | "aus")) => {
-                    let an = aktion == "an";
-                    (
-                        if an { "zeitplan_an" } else { "zeitplan_aus" },
-                        String::new(),
-                        d.aendere_zeitplan(|alt| Zeitplan { an, ..alt }),
-                    )
-                }
-                _ => return http::umleitung("/einrichtung?m=zeitplan_neu_laden#zeitplan"),
-            };
-            let fehler = match ergebnis {
-                Ok(()) => return http::umleitung(&format!("/einrichtung?m={meldung}#zeitplan")),
-                Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => "zeitplan_einrichtung",
-                Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => "zeitplan_lage",
-                Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => "zeitplan_fehler",
-            };
-            http::umleitung(&format!("/einrichtung?m={fehler}{entwurf}#zeitplan"))
-        }
+        "/zeitplan" => zeitplan_aendern(d, &f),
         "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kurse),
         "/papierfreigabe" => papier_freigeben(d, u, &f),
@@ -390,6 +358,40 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         }
         _ => http::text(404, "Nicht gefunden"),
     }
+}
+
+fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
+    let (meldung, entwurf, ergebnis) = match feld(f, "aktion") {
+        Some("speichern") => {
+            let entwurf = seiten::Entwurf::aus_formular(f).als_abfrage();
+            let Some(plan) = zeitplan_aus_formular(f) else {
+                return http::umleitung(&format!(
+                    "/einrichtung?m=zeitplan_ungueltig{entwurf}#zeitplan"
+                ));
+            };
+            (
+                "zeitplan",
+                entwurf,
+                d.aendere_zeitplan(|alt| Zeitplan { an: alt.an, ..plan }),
+            )
+        }
+        Some(aktion @ ("an" | "aus")) => {
+            let an = aktion == "an";
+            (
+                if an { "zeitplan_an" } else { "zeitplan_aus" },
+                String::new(),
+                d.aendere_zeitplan(|alt| Zeitplan { an, ..alt }),
+            )
+        }
+        _ => return http::umleitung("/einrichtung?m=zeitplan_neu_laden#zeitplan"),
+    };
+    let fehler = match ergebnis {
+        Ok(()) => return http::umleitung(&format!("/einrichtung?m={meldung}#zeitplan")),
+        Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => "zeitplan_einrichtung",
+        Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => "zeitplan_lage",
+        Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => "zeitplan_fehler",
+    };
+    http::umleitung(&format!("/einrichtung?m={fehler}{entwurf}#zeitplan"))
 }
 
 fn papierdialog_testen(d: &Dienst, u: &dyn Umwelt) -> Vec<u8> {

@@ -110,13 +110,67 @@ fn sperr_meldung(code: &str) -> Option<(&'static str, &'static str)> {
     })
 }
 
+fn einstellungs_meldung(code: &str) -> Option<(&'static str, &'static str)> {
+    Some(match code {
+        "zeitplan" => (
+            "gut",
+            "Einstellungen gespeichert. Ob der Zeitplan an oder aus ist, bleibt unverändert.",
+        ),
+        "zeitplan_an" => (
+            "gut",
+            "Zeitplan eingeschaltet. Die gespeicherten Einstellungen gelten.",
+        ),
+        "zeitplan_aus" => (
+            "gut",
+            "Zeitplan ausgeschaltet. Bereits gestartete Läufe laufen zu Ende.",
+        ),
+        "zeitplan_neu_laden" => (
+            "offen",
+            "Zeitplan unverändert. Bitte lade die Einrichtung neu und wähle die gewünschte Aktion.",
+        ),
+        "zeitplan_ungueltig" => (
+            "halt",
+            "Zeitplan nicht gespeichert: Uhrzeit im Format hh:mm. Die übrigen Eingaben stehen \
+             noch im Formular.",
+        ),
+        "zeitplan_einrichtung" => (
+            "halt",
+            "Zeitplan nicht eingeschaltet: Erst muss die Einrichtung vollständig sein. Was fehlt, \
+             steht beim Zeitplan.",
+        ),
+        "zeitplan_lage" => (
+            "offen",
+            "Zeitplan nicht eingeschaltet: Der Stand wird gerade neu geprüft. Bitte in ein paar \
+             Sekunden den Stand neu laden und erneut einschalten.",
+        ),
+        "zeitplan_fehler" => (
+            "halt",
+            "Zeitplan unverändert. Die Datei konnte nicht gespeichert werden.",
+        ),
+        "autostart_an" => (
+            "gut",
+            "Autostart eingerichtet. DepotSchlopf startet bei deiner nächsten Windows-Anmeldung.",
+        ),
+        "autostart_aus" => ("gut", "Autostart entfernt."),
+        "autostart_bestaetigen" => (
+            "offen",
+            "Autostart unverändert. Setze erst den Haken zur Bestätigung.",
+        ),
+        "autostart_fehler" => (
+            "halt",
+            "Autostart unverändert. Prüfe den Stand unten. Falls er sich ändern lässt, versuche es erneut.",
+        ),
+        _ => return None,
+    })
+}
+
 /// Feste Meldungen nach einem Formular; nur bekannte Kennungen erscheinen.
 pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
     let code = abfrage
         .split('&')
         .find_map(|p| p.strip_prefix("m="))
         .unwrap_or_default();
-    if let Some(m) = sperr_meldung(code) {
+    if let Some(m) = sperr_meldung(code).or_else(|| einstellungs_meldung(code)) {
         return Some(m);
     }
     Some(match code {
@@ -171,54 +225,6 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "papierfreigabe_fehler" => (
             "halt",
             "Die Freigabe konnte nicht bestätigt werden. Lade die Einrichtung neu und prüfe Journal und Papierkonto.",
-        ),
-        "zeitplan" => (
-            "gut",
-            "Einstellungen gespeichert. Ob der Zeitplan an oder aus ist, bleibt unverändert.",
-        ),
-        "zeitplan_an" => (
-            "gut",
-            "Zeitplan eingeschaltet. Die gespeicherten Einstellungen gelten.",
-        ),
-        "zeitplan_aus" => (
-            "gut",
-            "Zeitplan ausgeschaltet. Bereits gestartete Läufe laufen zu Ende.",
-        ),
-        "zeitplan_neu_laden" => (
-            "offen",
-            "Zeitplan unverändert. Bitte lade die Einrichtung neu und wähle die gewünschte Aktion.",
-        ),
-        "zeitplan_ungueltig" => (
-            "halt",
-            "Zeitplan nicht gespeichert: Uhrzeit im Format hh:mm. Die übrigen Eingaben stehen \
-             noch im Formular.",
-        ),
-        "zeitplan_einrichtung" => (
-            "halt",
-            "Zeitplan nicht eingeschaltet: Erst muss die Einrichtung vollständig sein. Was fehlt, \
-             steht beim Zeitplan.",
-        ),
-        "zeitplan_lage" => (
-            "offen",
-            "Zeitplan nicht eingeschaltet: Der Stand wird gerade neu geprüft. Bitte in ein paar \
-             Sekunden den Stand neu laden und erneut einschalten.",
-        ),
-        "zeitplan_fehler" => (
-            "halt",
-            "Zeitplan unverändert. Die Datei konnte nicht gespeichert werden.",
-        ),
-        "autostart_an" => (
-            "gut",
-            "Autostart eingerichtet. DepotSchlopf startet bei deiner nächsten Windows-Anmeldung.",
-        ),
-        "autostart_aus" => ("gut", "Autostart entfernt."),
-        "autostart_bestaetigen" => (
-            "offen",
-            "Autostart unverändert. Setze erst den Haken zur Bestätigung.",
-        ),
-        "autostart_fehler" => (
-            "halt",
-            "Autostart unverändert. Prüfe den Stand unten. Falls er sich ändern lässt, versuche es erneut.",
         ),
         "update" => (
             "gut",
