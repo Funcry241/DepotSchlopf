@@ -35,7 +35,8 @@ use depot_regelwerk::waehle_tageswerte;
 use sha2::{Digest, Sha256};
 
 use crate::lauf::{
-    Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal, notbremse_aktiv, pruefe_stoerung, rechnung,
+    Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal, notbremse_aktiv,
+    pruefe_stoerung, rechnung,
 };
 use crate::papier::Broker;
 use crate::szenario::{Berater, Tag};
@@ -296,6 +297,8 @@ pub fn kurse_von_heute(
 pub enum Tageslage {
     /// Der Tag kann beginnen.
     Offen,
+    /// Notbremse: Nur bereits offene Verkaeufe koennen ausgefuehrt werden.
+    NurSchutzverkaeufe,
     /// Der Tag ist schon abgeschlossen.
     Abgeschlossen(Datum),
 }
@@ -308,6 +311,9 @@ pub enum Tageslage {
 pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehler> {
     if let Some(a) = stand.abschluss() {
         if a.datum == handelstag {
+            if notbremse_aktiv(stand) {
+                return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
+            }
             return Ok(Tageslage::Abgeschlossen(a.datum));
         }
         if a.datum > handelstag {
@@ -324,6 +330,12 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
              abgeschlossen. Halt bis zur Pruefung; niemand wird neu gefragt",
             stand.seit_abschluss()
         )));
+    }
+    if notbremse_aktiv(stand) {
+        if stand.offene_auftraege().next().is_none() {
+            return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
+        }
+        return Ok(Tageslage::NurSchutzverkaeufe);
     }
     Ok(Tageslage::Offen)
 }
@@ -343,19 +355,18 @@ pub fn papiertag(
     maus: &mut dyn Berater,
     konto: &mut dyn Broker,
 ) -> Result<Ausgang, LaufFehler> {
-    papiertag_mit_uhr(j, heute, universum, start, dachs, maus, konto, None)
+    let mut beteiligte = Beteiligte { dachs, maus, konto };
+    papiertag_mit_uhr(j, heute, universum, start, &mut beteiligte, None)
 }
 
 /// Papiertag mit einer Uhr fuer den Zeitpunkt des Versands. Beim Wiederabspielen ohne Uhr
 /// gilt der belegte Stand der Entscheidungskurse als frueheste moegliche Versandzeit.
-pub fn papiertag_mit_uhr(
+pub(crate) fn papiertag_mit_uhr(
     j: &mut Journal,
     heute: Datum,
     universum: &Universum,
     start: &[Topf],
-    dachs: &mut dyn Berater,
-    maus: &mut dyn Berater,
-    konto: &mut dyn Broker,
+    beteiligte: &mut Beteiligte<'_, '_, '_>,
     uhr: Option<&dyn Fn() -> Option<Zeitpunkt>>,
 ) -> Result<Ausgang, LaufFehler> {
     let k = kurse_von_heute(j.stand(), universum, heute)?;
@@ -363,8 +374,8 @@ pub fn papiertag_mit_uhr(
     if !neu {
         // Wiederanlauf: zuerst der Abgleich, auch wenn der Tag schon abgeschlossen ist
         // (K23-02). Er belegt, was aus offenen Auftraegen geworden ist, und sendet nichts.
-        pruefe_stoerung(&*konto)?;
-        let abweichungen = j.gleiche_ab(&*konto).map_err(journal)?;
+        pruefe_stoerung(&*beteiligte.konto)?;
+        let abweichungen = j.gleiche_ab(&*beteiligte.konto).map_err(journal)?;
         if !abweichungen.is_empty() {
             return Err(halt(format!(
                 "Kontowaechter: {abweichungen:?}. Halt bis zur Pruefung; niemand wird gefragt, \
@@ -372,13 +383,7 @@ pub fn papiertag_mit_uhr(
             )));
         }
     }
-    let lage = tageslage(j.stand(), k.handelstag)?;
-    if notbremse_aktiv(j)
-        && (matches!(lage, Tageslage::Abgeschlossen(_)) || j.stand().offene_auftraege().next().is_none())
-    {
-        return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
-    }
-    if let Tageslage::Abgeschlossen(d) = lage {
+    if let Tageslage::Abgeschlossen(d) = tageslage(j.stand(), k.handelstag)? {
         return Ok(Ausgang::SchonAbgeschlossen(d));
     }
     let letzter = j.stand().abschluss().cloned();
@@ -434,8 +439,7 @@ pub fn papiertag_mit_uhr(
         abdruck: &ab,
         uhr: Some(uhr.unwrap_or(&belegte_zeit)),
     };
-    let mut beteiligte = Beteiligte { dachs, maus, konto };
-    let hoechststand = ein_tag(j, &z, hoch, &wahl.fehler, &mut beteiligte)?;
+    let hoechststand = ein_tag(j, &z, hoch, &wahl.fehler, beteiligte)?;
     Ok(Ausgang::Abgeschlossen {
         datum: tag.datum,
         hoechststand,

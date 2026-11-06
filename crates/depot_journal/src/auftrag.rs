@@ -217,8 +217,18 @@ pub(crate) fn meldung_text(nr: u64, m: &Meldung) -> String {
     match m {
         Meldung::GesendetAm(zeit) => format!("{nr};{};{zeit}", m.name()),
         Meldung::Ausfuehrung(a) => {
-            let basis = format!("{nr};{};{};{};{}", m.name(), a.stueck, a.kurs.0, a.gebuehr.0);
-            a.kurszeit.map_or_else(|| basis.clone(), |zeit| format!("{basis};{zeit}"))
+            let mut basis = format!(
+                "{nr};{};{};{};{}",
+                m.name(),
+                a.stueck,
+                a.kurs.0,
+                a.gebuehr.0
+            );
+            if let Some(zeit) = a.kurszeit {
+                use std::fmt::Write as _;
+                let _ = write!(basis, ";{zeit}");
+            }
+            basis
         }
         _ => format!("{nr};{}", m.name()),
     }

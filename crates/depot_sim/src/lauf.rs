@@ -23,14 +23,15 @@
 //! Was ein angefangener Tag gekostet hat, steht im Journal; ihn zu wiederholen, waere eine
 //! zweite Frage fuer denselben Zyklus.
 
-use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung};
+use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung, Stand};
 use depot_kern::{
-    BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
+    BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
+    Zeitpunkt,
 };
 use depot_ki::Sperre;
 use depot_regelwerk::{
-    DatenFehler, Eingabe, GenehmigterAuftrag, WaechterBefund, entscheide, notbremse_auftraege,
-    pruefe_kurse, waechter, Richtung,
+    DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide,
+    notbremse_auftraege, pruefe_kurse, waechter,
 };
 
 use crate::abdruck;
@@ -380,12 +381,13 @@ pub(crate) fn ein_tag(
     kontowaechter(jr, tag, &*beteiligte.konto)?;
     beteiligte.konto.rechne_ab(tag.datum);
     pruefe_stoerung(&*beteiligte.konto)?;
-    if z.uhr.is_some() && notbremse_aktiv(jr) {
+    if z.uhr.is_some() && notbremse_aktiv(jr.stand()) {
         if fehler.is_empty() {
             stoppe_kaeufe(jr, tag, &mut *beteiligte.konto)?;
             markt_offener_orders(jr, z, &mut *beteiligte.konto)?;
         }
-        jr.schliesse_ab(tag.datum, hoch, z.abdruck).map_err(journal)?;
+        jr.schliesse_ab(tag.datum, hoch, z.abdruck)
+            .map_err(journal)?;
         return Err(halt(NOTBREMSE_AKTIV));
     }
     if !fehler.is_empty() {
@@ -445,9 +447,8 @@ pub(crate) fn ein_tag(
         markt_offener_orders(jr, z, &mut *beteiligte.konto)?;
     }
     // Fuer den Hoechststand zaehlt der aufgerundete Wert (siehe `depotwert`).
-    let heute =
-        depotwert(jr.stand().toepfe().values(), &tag.kurse, Rundung::Auf)
-            .ok_or_else(|| rechnung("Depotwert"))?;
+    let heute = depotwert(jr.stand().toepfe().values(), &tag.kurse, Rundung::Auf)
+        .ok_or_else(|| rechnung("Depotwert"))?;
     let b = beteiligte;
     topf_zyklus(jr, z, TopfId::A, b.dachs, b.maus, &mut *b.konto)?;
     topf_zyklus(jr, z, TopfId::B, b.maus, b.dachs, &mut *b.konto)?;
@@ -457,19 +458,26 @@ pub(crate) fn ein_tag(
     Ok(hoch)
 }
 
-pub(crate) fn notbremse_aktiv(j: &Journal) -> bool {
-    j.stand().begruendungen().iter().any(|(_, wer, text)| {
-        wer == WAECHTER && text == NOTBREMSE_AKTIV
-    })
+pub(crate) fn notbremse_aktiv(stand: &Stand) -> bool {
+    stand
+        .begruendungen()
+        .iter()
+        .any(|(_, wer, text)| wer == WAECHTER && text == NOTBREMSE_AKTIV)
 }
 
 fn stoppe_kaeufe(j: &mut Journal, tag: &Tag, konto: &mut dyn Broker) -> Result<(), LaufFehler> {
-    if j.stand().offene_auftraege().any(|l| l.beleg.richtung == Richtung::Kauf) {
+    if j.stand()
+        .offene_auftraege()
+        .any(|l| l.beleg.richtung == Richtung::Kauf)
+    {
         if !konto.stoppe_kaeufe() {
             return Err(halt("Offene Kaeufe konnten nicht sicher storniert werden"));
         }
         kontowaechter(j, tag, &*konto)?;
-        if j.stand().offene_auftraege().any(|l| l.beleg.richtung == Richtung::Kauf) {
+        if j.stand()
+            .offene_auftraege()
+            .any(|l| l.beleg.richtung == Richtung::Kauf)
+        {
             return Err(halt("Kauf nach Storno noch offen"));
         }
     }
@@ -487,8 +495,14 @@ fn papier_notbremse(
     begruende(j, z.tag, WAECHTER, NOTBREMSE_AKTIV)?;
     for mut topf in toepfe {
         // Bereits beauftragte Verkaeufe bleiben bestehen und binden ihren offenen Rest.
-        for l in j.stand().offene_auftraege().filter(|l| l.beleg.topf == topf.id()) {
-            let frei = topf.stueck(&l.beleg.isin).checked_sub(l.offen_stueck())
+        for l in j
+            .stand()
+            .offene_auftraege()
+            .filter(|l| l.beleg.topf == topf.id())
+        {
+            let frei = topf
+                .stueck(&l.beleg.isin)
+                .checked_sub(l.offen_stueck())
                 .ok_or_else(|| rechnung("Offener Verkauf"))?;
             topf.setze_bestand(l.beleg.isin.clone(), frei);
         }
@@ -498,7 +512,8 @@ fn papier_notbremse(
         fuehre_aus(j, z, topf.id(), &auftraege, konto)?;
     }
     markt_offener_orders(j, z, konto)?;
-    j.schliesse_ab(z.tag.datum, hoch, z.abdruck).map_err(journal)?;
+    j.schliesse_ab(z.tag.datum, hoch, z.abdruck)
+        .map_err(journal)?;
     Err(halt(NOTBREMSE_AKTIV))
 }
 
@@ -513,7 +528,8 @@ fn markt_offener_orders(
     }
     let kurse = &z.tag.kurse;
     let handelbar = z.universum.isins();
-    let eintraege = kurse.alle()
+    let eintraege = kurse
+        .alle()
         .filter(|(isin, _)| handelbar.contains(*isin))
         .filter_map(|(isin, kurs)| Some((isin.clone(), kurs.clone(), kurse.abruf(isin)?)))
         .collect();
@@ -631,7 +647,12 @@ fn topf_zyklus(
     };
     let wartet = z.uhr.is_some() && j.stand().offene_auftraege().any(|l| l.beleg.topf == id);
     let mut vorschlag = if wartet {
-        begruende(j, tag, AUFTRAGSSTELLE, &format!("{t}: wartet auf offene Orders"))?;
+        begruende(
+            j,
+            tag,
+            AUFTRAGSSTELLE,
+            &format!("{t}: wartet auf offene Orders"),
+        )?;
         None
     } else {
         frage(j, z, id, frager, &lage)?
@@ -738,10 +759,14 @@ fn fuehre_aus(
     let mut gesendet = Vec::new();
     for a in auftraege {
         let nr = a.auftrag().kennung.nr();
-        let versand = z.uhr.map(|uhr| {
-            uhr().filter(|zeit| *zeit >= tag.kurse.stand())
-                .ok_or_else(|| halt("Keine verlaessliche Versandzeit"))
-        }).transpose()?;
+        let versand = z
+            .uhr
+            .map(|uhr| {
+                uhr()
+                    .filter(|zeit| *zeit >= tag.kurse.stand())
+                    .ok_or_else(|| halt("Keine verlaessliche Versandzeit"))
+            })
+            .transpose()?;
         match j.reserviere_auftrag(z.grenzen, id, a) {
             Ok(()) => {}
             Err(JournalFehler::Abgelehnt(grund)) => {
@@ -795,7 +820,11 @@ fn fuehre_aus(
     protokolliere_ausfuehrungen(j, tag, &gesendet)
 }
 
-fn protokolliere_ausfuehrungen(j: &mut Journal, tag: &Tag, nummern: &[u64]) -> Result<(), LaufFehler> {
+fn protokolliere_ausfuehrungen(
+    j: &mut Journal,
+    tag: &Tag,
+    nummern: &[u64],
+) -> Result<(), LaufFehler> {
     for nr in nummern {
         let Some(l) = j.stand().auftrag(*nr).cloned() else {
             return Err(halt(format!("Auftrag {nr} fehlt im Journal")));

@@ -345,15 +345,28 @@ fn kauf_wartet_auf_spaeteren_kurs_und_rundet_auf() -> Result<(), String> {
 
     let mut j = ort.oeffnen()?;
     let mut k = konto(&ort, &j)?;
-    let alte_kurse = vorbedingung(depot_sim::tageskurse(j.stand(), &universum()?), "Alte Kurse")?;
+    let alte_kurse = vorbedingung(
+        depot_sim::tageskurse(j.stand(), &universum()?),
+        "Alte Kurse",
+    )?;
     k.markt(&alte_kurse.heute);
     let order = some(k.order(nr), "Offene Order im Papierkonto")?;
     assert_eq!(order.status, depot_journal::KontoStatus::Offen);
     assert!(order.ausfuehrungen.is_empty());
     // Der Vortag wird beim naechsten Abruf nochmals belegt. Sein Kurs liegt vor dem Versand.
-    belege(&mut j, 6, &[(&sap, "230.105", "230.106"), (&allianz, "351", "351")])?;
+    belege(
+        &mut j,
+        6,
+        &[(&sap, "230.105", "230.106"), (&allianz, "351", "351")],
+    )?;
     let aus = papiertag(
-        &mut j, tag(6)?, &universum()?, &start()?, &mut Stumm, &mut Stumm, &mut k,
+        &mut j,
+        tag(6)?,
+        &universum()?,
+        &start()?,
+        &mut Stumm,
+        &mut Stumm,
+        &mut k,
     );
     assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
     let l = some(j.stand().auftrag(nr), "Kauforder")?;
@@ -1034,7 +1047,11 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
         let mut j = ort.oeffnen()?;
         belege(&mut j, t, &preise)?;
         let (mut dachs, mut maus) = kaeufer(datum, &allianz);
-        if let Some(v) = dachs.antworten.get_mut(&datum).and_then(|a| a.vorschlag.as_mut()) {
+        if let Some(v) = dachs
+            .antworten
+            .get_mut(&datum)
+            .and_then(|a| a.vorschlag.as_mut())
+        {
             v.zielgewichte_bp.insert(sap.clone(), 3_500);
             v.begruendung.insert(sap.clone(), "Bestand halten".into());
         }
@@ -1064,7 +1081,11 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
         );
         assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
         let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A nach dem Lauf")?;
-        assert_eq!(a.bargeld() > Cent::NULL, t != 5, "Verkaufserloes am Tag {t}");
+        assert_eq!(
+            a.bargeld() > Cent::NULL,
+            t != 5,
+            "Verkaufserloes am Tag {t}"
+        );
         assert_eq!(a.stueck(&allianz) > 0, t == 11, "Kauf am Tag {t}");
         assert_eq!(
             j.stand().begruendungen().iter().any(|(d, wer, text)| {
@@ -1077,6 +1098,43 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
             vorbedingung(j.gleiche_ab(&k), "Abgleich")?.is_empty(),
             "Abgleich am Tag {t}"
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn notbremse_arbeitet_verkaeufe_nach_neustart_ab_und_bleibt_aktiv() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf A")?;
+    topf.setze_bestand(sap.clone(), 10);
+    let start = [topf, vorbedingung(Topf::neu(TopfId::B, Cent::NULL), "Topf B")?];
+    let universum = universum()?;
+    {
+        Papierdatei::oeffnen(&ort.konto, false, &start)?;
+        let mut j = ort.oeffnen()?;
+        for topf in &start {
+            vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+        }
+        vorbedingung(
+            j.schliesse_ab(tag(4)?, Cent(500_000), &"a".repeat(64)),
+            "Vorheriger Hoechststand",
+        )?;
+    }
+    for t in [5, 6] {
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, t, &[(&sap, "250", "250"), (&allianz, "200", "200")])?;
+        let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+        let (mut dachs, mut maus) = kaeufer(tag(t)?, &allianz);
+        let aus = papiertag(
+            &mut j, tag(t)?, &universum, &start, &mut dachs, &mut maus, &mut k,
+        );
+        assert!(matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Notbremse")));
+        assert_eq!(dachs.aufrufe, 0);
+        assert_eq!(k.konto().sendungen(), 1);
+        let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A")?;
+        assert_eq!(a.stueck(&sap), if t == 5 { 10 } else { 0 });
+        assert_eq!(j.stand().offene_auftraege().count(), usize::from(t == 5));
     }
     Ok(())
 }

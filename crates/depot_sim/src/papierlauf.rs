@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use depot_journal::Journal;
 use depot_kern::{Cent, Datum, Rundung, Topf, TopfId, Universum, Zeitpunkt};
 
+use crate::lauf::Beteiligte;
 use crate::papierdatei::Papierdatei;
 use crate::papiertag::{Ausgang, papiertag_mit_uhr, tageskurse};
 use crate::szenario::Berater;
@@ -60,9 +61,12 @@ pub fn papier(
         let sekunden = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
         Zeitpunkt::aus_sekunden(i64::try_from(sekunden).ok()?)
     };
-    let ausgang = papiertag_mit_uhr(
-        &mut j, heute, universum, &start, dachs, maus, &mut konto, Some(&uhr),
-    );
+    let mut beteiligte = Beteiligte {
+        dachs,
+        maus,
+        konto: &mut konto,
+    };
+    let ausgang = papiertag_mit_uhr(&mut j, heute, universum, &start, &mut beteiligte, Some(&uhr));
     if let Some(f) = konto.fehler() {
         return Err(format!(
             "Papierkonto nicht geschrieben: {f}. Papierkonto und Journal weichen ab; der naechste Lauf haelt an"

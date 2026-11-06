@@ -301,7 +301,6 @@ impl Papierkonto {
             _ => Sendeantwort::Abgelehnt("keine Deckung im Konto".into()),
         }
     }
-
 }
 
 impl Broker for Papierkonto {
@@ -407,7 +406,11 @@ impl Papierkonto {
                 let _ = writeln!(t, "versand;{nr};{zeit}");
             }
             for x in &o.ausfuehrungen {
-                let _ = write!(t, "ausfuehrung;{nr};{};{};{}", x.stueck, x.kurs.0, x.gebuehr.0);
+                let _ = write!(
+                    t,
+                    "ausfuehrung;{nr};{};{};{}",
+                    x.stueck, x.kurs.0, x.gebuehr.0
+                );
                 if let Some(zeit) = x.kurszeit {
                     let _ = write!(t, ";{zeit}");
                 }
@@ -474,7 +477,9 @@ impl Papierkonto {
                     let kurszeit = match (o.versand, rest) {
                         (None, []) => None,
                         (Some(versand), [zeit]) => Some(
-                            Zeitpunkt::lies(zeit).filter(|z| *z > versand).ok_or_else(fehler)?,
+                            Zeitpunkt::lies(zeit)
+                                .filter(|z| *z > versand)
+                                .ok_or_else(fehler)?,
                         ),
                         _ => return Err(fehler()),
                     };
