@@ -288,6 +288,7 @@ pub struct Dienst {
     /// Kennung dieses Starts, nicht geheim. Die Seite laedt sich neu, wenn sie wechselt.
     pub start: String,
     pub zustand: Mutex<Zustand>,
+    pub(crate) papierdialog: Mutex<()>,
     starter: Starter,
     lagerechner: Lagerechner,
 }
@@ -431,6 +432,7 @@ impl Dienst {
                 verlauf_fehler: None,
                 boersen: depot_kern::liste::boersen(),
             }),
+            papierdialog: Mutex::new(()),
             starter,
             lagerechner,
         }
@@ -438,6 +440,26 @@ impl Dienst {
 
     pub fn sperre(&self) -> MutexGuard<'_, Zustand> {
         self.zustand.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Nach dem Windows-Dialog die Freigabe bei ruhender Werkbank belegen.
+    pub(crate) fn papier_freigeben(&self, gesehen: &str) -> &'static str {
+        let mut z = self.sperre();
+        if z.laufend.is_some() || !z.warteschlange.is_empty() {
+            return "papierfreigabe_belegt";
+        }
+        match depot_lage::papier_freigeben(&self.wurzel, gesehen) {
+            Ok(()) => {
+                z.lage_veraltet = true;
+                "papierfreigabe_ok"
+            }
+            Err(depot_lage::PapierFreigabeFehler::Geaendert) => "papierfreigabe_geaendert",
+            Err(depot_lage::PapierFreigabeFehler::Belegt) => "papierfreigabe_belegt",
+            Err(depot_lage::PapierFreigabeFehler::Abgelehnt(grund)) => {
+                eprintln!("[Papierfreigabe] {grund}");
+                "papierfreigabe_fehler"
+            }
+        }
     }
 
     /// Reiht einen Auftrag ein.

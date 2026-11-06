@@ -1,11 +1,12 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: FestschreibungAenderung
-zweck: Papier-Notbremse bleibt bei 20 Prozent. Nach geprueftem Schutzverkauf nur unter 30 Prozent Gesamtverlust automatisch wieder anlaufen. Ab 30 Prozent unter dem historischen Hoechststand stoppt der Papiertag Kaeufe und sperrt dauerhaft den automatischen Wiederanlauf. Historischer Hoechststand bleibt im Journal erhalten. Grenzfreigabe von Wolfgang erteilt.
+zweck: Papier-Halte typisiert belegen und bestehende Halte weiter lesen. Nach ausdruecklicher Freigabe der Gesamtverlustsperre und Kontenabgleich beginnt die Verlustmessung beim bestaetigten Papierbargeld. Der historische Hoechststand bleibt erhalten. Wolfgang hat diese Papierregel ausdruecklich freigegeben.
 pfade:
-crates/depot_kern/
+crates/depot_dienst/
 crates/depot_journal/
-crates/depot_lage/
+crates/depot_kern/src/grenzen.rs
+crates/depot_lage/src/lib.rs
 crates/depot_sim/
-CHANGELOG.md
+docs/ARCHITEKTUR.md
 kodex/festschreibung.txt
 kodex/freigabe.txt

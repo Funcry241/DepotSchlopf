@@ -142,6 +142,26 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "halt",
             "Schlüssel nicht gespeichert: Die Anmeldeinformationsverwaltung hat abgelehnt.",
         ),
+        "papierfreigabe_ok" => (
+            "gut",
+            "Papierhandel freigegeben. Die neue Verlustmessung beginnt beim bestätigten Bargeld. Der nächste reguläre Papiertag kann wieder handeln.",
+        ),
+        "papierfreigabe_unbestaetigt" => (
+            "halt",
+            "Die Sperre gilt weiter. Bitte bestätige die neue Verlustmessung ausdrücklich.",
+        ),
+        "papierfreigabe_belegt" => (
+            "offen",
+            "Die Sperre gilt weiter. Warte, bis der laufende oder wartende Auftrag abgeschlossen ist.",
+        ),
+        "papierfreigabe_geaendert" => (
+            "halt",
+            "Der Journalstand hat sich geändert. Lade die Einrichtung neu und prüfe die aktuellen Beträge.",
+        ),
+        "papierfreigabe_fehler" => (
+            "halt",
+            "Die Freigabe konnte nicht bestätigt werden. Lade die Einrichtung neu und prüfe Journal und Papierkonto.",
+        ),
         "zeitplan" => ("gut", "Zeitplan gespeichert und aktiv."),
         "zeitplan_ungueltig" => (
             "halt",
@@ -584,6 +604,8 @@ pub struct Einrichtung {
     pub ki_halt: Result<Option<String>, String>,
     /// Inhalt von `daten/kurse.halt`, falls die Kurssperre liegt.
     pub kurse_halt: Result<Option<String>, String>,
+    /// Journalabdruck und Bargeld fuer eine freigabefaehige Papier-Sperre.
+    pub papier_freigabe: Option<depot_lage::PapierFreigabeAngebot>,
     /// `Some(true)`: Datei stimmt mit dem aktiven Zeitplan ueberein; `Some(false)`: weicht ab
     /// oder ist unlesbar; `None`: keine Datei (Voreinstellung).
     pub zeitplan_gespeichert: Option<bool>,
@@ -938,6 +960,30 @@ fn grenzen_teil(e: &Einrichtung, s: &mut String) {
     s.push_str("</table></section>");
 }
 
+fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
+    let Some(angebot) = &e.papier_freigabe else {
+        return;
+    };
+    let _ = write!(
+        s,
+        "<section id=\"papierfreigabe\"><h2>Papierhandel nach Verlustsperre freigeben</h2>\
+         <p>Die neue Verlustmessung beginnt nach dem Kontenabgleich bei <strong>{}</strong>. \
+         Gesamtverlust seit dem historischen Höchststand: <strong>{}</strong>. \
+         Der historische Höchststand bleibt erhalten. Nach dem Absenden musst du die Freigabe \
+         innerhalb von zwei Minuten im separaten Windows-Dialog bestätigen.</p>\
+         <form method=\"post\" action=\"/papierfreigabe\">\
+         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
+         <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
+         Ich bestätige die neue Verlustmessung für den Papierhandel.</label>\
+         <button type=\"submit\">Papierhandel freigeben</button></form></section>",
+        maskiere(&angebot.neuer_start_text()),
+        maskiere(&angebot.gesamtverlust_text()),
+        maskiere(token),
+        maskiere(&angebot.abdruck)
+    );
+}
+
 /// Der Inhalt der Einrichtung.
 pub fn einrichtung(
     token: &str,
@@ -955,6 +1001,7 @@ pub fn einrichtung(
     schluessel_teil(token, e, &mut s);
     kostenschutz_teil(token, e, &mut s);
     kurssperre_teil(token, e, &mut s);
+    papierfreigabe_teil(token, e, &mut s);
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);
     autostart_teil(token, e, &mut s);
