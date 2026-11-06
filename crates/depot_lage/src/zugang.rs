@@ -59,6 +59,59 @@ pub fn mit_journal<R>(daten: &Path, f: impl FnOnce(Zugang<'_>) -> R) -> R {
     }
 }
 
+/// Prüft die Daten für einen Update-Kandidaten ohne Schreibzugriff oder Netz.
+pub fn update_datenprobe(daten: &Path) -> Result<(), String> {
+    use depot_journal::Konto as _;
+    use depot_kern::{Topf, TopfId};
+    use depot_sim::papierlauf::START_JE_TOPF;
+
+    let journal = daten.join(JOURNAL);
+    let konto = daten.join(PAPIERKONTO);
+    let konto_da = match fs::symlink_metadata(&konto) {
+        Ok(m) if m.is_file() => true,
+        Ok(_) => return Err("Papierkonto ist keine reguläre Datei".into()),
+        Err(e) if e.kind() == ErrorKind::NotFound => false,
+        Err(e) => return Err(format!("Papierkonto: {e}")),
+    };
+    if !Journal::eingerichtet(&journal).map_err(|e| fehler_text(&e))? {
+        return if konto_da {
+            Err("Papierkonto ohne Journal und Vermerk".into())
+        } else {
+            Ok(())
+        };
+    }
+    Journal::pruefe_lesend(&journal, |stand| {
+        let depot = !stand.toepfe().is_empty();
+        if !depot && !konto_da {
+            return Ok(());
+        }
+        // Nur lesen, selbst wenn das Konto nach der Existenzprüfung verschwindet.
+        let papier = fs::read_to_string(&konto).map_err(|e| format!("Papierkonto: {e}"))?;
+        let papier = depot_sim::Papierkonto::aus_text(&papier)?;
+        if !depot {
+            let [a, b] = [TopfId::A, TopfId::B].map(|id| Topf::neu(id, START_JE_TOPF));
+            let start = [
+                a.map_err(|e| format!("{e:?}"))?,
+                b.map_err(|e| format!("{e:?}"))?,
+            ];
+            return if depot_sim::Papierkonto::eroeffne(&start).as_ref() == Some(&papier) {
+                Ok(())
+            } else {
+                Err("Papierkonto mit Bewegungen, aber ohne Depot im Journal".into())
+            };
+        }
+        let abweichungen = depot_journal::konto::abweichungen(stand, &papier.auszug());
+        if abweichungen.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "Journal und Papierkonto weichen ab: {abweichungen:?}"
+            ))
+        }
+    })
+    .map_err(|e| fehler_text(&e))?
+}
+
 /// Sperrdateien im Datenordner: `*.sperre` (abgebrochener Lauf) und `*.halt` (etwa
 /// `ki.halt` nach einer Kostenueberschreitung). Jede ist Halt, bis ein Mensch geprueft und sie
 /// geloescht hat. Ein nicht lesbarer Ordner zaehlt nicht; das Journal meldet ihn ohnehin.
@@ -92,4 +145,59 @@ pub fn anbieterprotokoll(daten: &Path) -> (Vec<depot_journal::anbieter::Eintrag>
 /// Der Inhalt von `daten/ki.halt`, wenn die Datei liegt und lesbar ist.
 pub fn ki_halt(daten: &Path) -> Option<String> {
     fs::read_to_string(daten.join("ki.halt")).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use depot_journal::{Art, inhalt_fuer, vermerk_fuer};
+
+    #[test]
+    fn datenprobe_lehnt_alte_freigabe_mit_gueltiger_hashkette_ab() -> Result<(), String> {
+        let daten = std::env::temp_dir().join(format!("depot-datenprobe-{}", std::process::id()));
+        fs::create_dir(&daten).map_err(|e| e.to_string())?;
+        let test = (|| {
+            update_datenprobe(&daten)?;
+            let journal =
+                include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/journal.txt");
+            let vermerk =
+                include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/journal.vermerk");
+            let konto =
+                include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/papierkonto.txt");
+            fs::write(daten.join(JOURNAL), journal).map_err(|e| e.to_string())?;
+            fs::write(daten.join("journal.vermerk"), vermerk).map_err(|e| e.to_string())?;
+            fs::write(daten.join(PAPIERKONTO), konto).map_err(|e| e.to_string())?;
+            update_datenprobe(&daten)?;
+            let abschluss = format!("2026-11-04;1500000;{}", "a".repeat(64));
+            let alt = inhalt_fuer(&[
+                (Art::Topf, "A;500000;"),
+                (Art::Topf, "B;500000;"),
+                (Art::Abrechnungstag, "2026-11-04"),
+                (Art::PapierHalt, "2026-11-04;gesamtverlust"),
+                (Art::Abschluss, &abschluss),
+                (Art::PapierFreigabe, "2026-11-04;1000000;einrichtung;dialog"),
+            ]);
+            let vermerk = vermerk_fuer(&alt, 0).ok_or("Vermerk")?;
+            fs::write(daten.join(JOURNAL), &alt).map_err(|e| e.to_string())?;
+            fs::write(daten.join("journal.vermerk"), &vermerk).map_err(|e| e.to_string())?;
+            assert!(
+                update_datenprobe(&daten).is_err_and(|e| e.contains("UTC-Zeit der Papierfreigabe"))
+            );
+            assert_eq!(
+                fs::read(daten.join(JOURNAL)).map_err(|e| e.to_string())?,
+                alt
+            );
+            assert_eq!(
+                fs::read_to_string(daten.join("journal.vermerk")).map_err(|e| e.to_string())?,
+                vermerk
+            );
+            assert_eq!(
+                fs::read(daten.join(PAPIERKONTO)).map_err(|e| e.to_string())?,
+                konto
+            );
+            Ok::<_, String>(())
+        })();
+        fs::remove_dir_all(&daten).map_err(|e| e.to_string())?;
+        test
+    }
 }

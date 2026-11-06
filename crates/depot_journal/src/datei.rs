@@ -355,6 +355,16 @@ fn nachrechnen(zeilen: &[String]) -> Result<(Vec<(Art, String)>, Stand), Journal
     Ok((eintraege, stand))
 }
 
+fn lies_vermerk(pfad: &Path) -> Result<Vermerk, JournalFehler> {
+    if !datei_da(pfad)? {
+        return Err(halt("Anhangsvermerk fehlt"));
+    }
+    fs::read_to_string(pfad)
+        .ok()
+        .and_then(|t| Vermerk::lies(&t))
+        .ok_or_else(|| halt("Anhangsvermerk unlesbar"))
+}
+
 impl Journal {
     /// Richtet ein Journal mit Kopfzeile und Vermerk ein. Nur ein ausdruecklicher Aufruf legt
     /// es an; gibt es Journal oder Vermerk schon, wird nichts veraendert.
@@ -407,6 +417,41 @@ impl Journal {
         Ok(false)
     }
 
+    /// Prüft einen vollständig bestätigten Stand ohne Wiederherstellung oder Schreibzugriff.
+    /// Ein noch geplanter Anhang verlangt zuerst die normale Wiederherstellung.
+    pub fn pruefe_lesend<R>(
+        pfad: &Path,
+        pruefe: impl FnOnce(&Stand) -> R,
+    ) -> Result<R, JournalFehler> {
+        if !Self::eingerichtet(pfad)? {
+            return Err(halt("nicht eingerichtet: Journal und Vermerk fehlen"));
+        }
+        let mut datei = File::open(pfad).map_err(|e| halt(format!("Journal lesen: {e}")))?;
+        match datei.try_lock_shared() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => return Err(JournalFehler::Belegt),
+            Err(TryLockError::Error(e)) => return Err(halt(format!("sperren: {e}"))),
+        }
+        let vermerk = lies_vermerk(&vermerk_pfad(pfad))?;
+        let mut inhalt = Vec::new();
+        datei
+            .read_to_end(&mut inhalt)
+            .map_err(|e| halt(format!("Journal lesen: {e}")))?;
+        if vermerk.geplant != 0 || als_u64(inhalt.len()).map_err(halt)? != vermerk.laenge {
+            return Err(halt(
+                "Journal hat einen offenen oder unvollständigen Anhang",
+            ));
+        }
+        let (zeilen, kette) = pruefe_zeilen(&inhalt, &kettenanfang()).map_err(halt)?;
+        if kette != vermerk.kette {
+            return Err(halt("Journal weicht vom bestätigten Stand ab"));
+        }
+        let (_, stand) = nachrechnen(&zeilen)?;
+        let ergebnis = pruefe(&stand);
+        let _ = datei.unlock();
+        Ok(ergebnis)
+    }
+
     /// Oeffnet exklusiv, prueft die ganze Kette gegen den Vermerk, behandelt einen vermerkten
     /// Anhang und rechnet den Stand nach. Jede Unstimmigkeit ist Halt.
     ///
@@ -428,13 +473,7 @@ impl Journal {
             Err(TryLockError::WouldBlock) => return Err(JournalFehler::Belegt),
             Err(TryLockError::Error(e)) => return Err(halt(format!("sperren: {e}"))),
         }
-        if !datei_da(&vermerk)? {
-            return Err(halt("Anhangsvermerk fehlt"));
-        }
-        let v = fs::read_to_string(&vermerk)
-            .ok()
-            .and_then(|t| Vermerk::lies(&t))
-            .ok_or_else(|| halt("Anhangsvermerk unlesbar"))?;
+        let v = lies_vermerk(&vermerk)?;
         let mut inhalt = Vec::new();
         datei
             .read_to_end(&mut inhalt)

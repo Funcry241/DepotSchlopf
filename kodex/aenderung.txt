@@ -1,6 +1,9 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Papierfreigabe verlangt eine kanonische UTC-Zeit, deren Frankfurter Datum am oder nach dem Abschlusstag liegt. Die Architektur beschreibt die Pruefung und den Zeitbeleg.
+zweck: Update-Kandidat liest eine Kopie der Papierdaten vor dem Einspielen. Der Updater sichert und verifiziert die Daten, der Dienst prueft sie vor der Bestaetigung. Der Windows-Dialogtest schreibt keine Papierdaten.
 pfade:
-crates/depot_journal/src/stand.rs
-docs/ARCHITEKTUR.md
+crates/depot_dienst/
+crates/depot_journal/src/datei.rs
+crates/depot_lage/
+crates/depot_lauf/
+docs/pruefberichte/papierfreigabe/README.md

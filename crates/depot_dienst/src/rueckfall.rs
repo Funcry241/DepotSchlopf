@@ -101,7 +101,7 @@ pub fn kurz(c: &str) -> &str {
     c.get(..10).unwrap_or(c)
 }
 
-/// Bestaetigt das offene Update, wenn der Projektordner auf seinem neuen Stand steht.
+/// Bestaetigt das offene Update auf dem neuen Stand mit lesbaren und abgeglichenen Papierdaten.
 ///
 /// # Errors
 /// Die Datei ist fremd, Git antwortet nicht, der Projektordner steht anders, oder die Datei
@@ -116,6 +116,8 @@ pub fn bestaetige(wurzel: &Path) -> Result<Option<Offen>, String> {
             kurz(&o.neu)
         ));
     }
+    depot_lage::update_datenprobe(&wurzel.join("daten"))
+        .map_err(|e| format!("Update nicht bestätigt: Papierdaten nicht verwendbar ({e})."))?;
     fs::remove_file(offen_pfad(wurzel)).map_err(|e| format!("update_offen.txt: {e}"))?;
     Ok(Some(o))
 }

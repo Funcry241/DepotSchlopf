@@ -442,10 +442,16 @@ impl Dienst {
         self.zustand.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn update_offen(&self) -> bool {
+        crate::rueckfall::offen_pfad(&self.wurzel)
+            .try_exists()
+            .unwrap_or(true)
+    }
+
     /// Nach dem Windows-Dialog die Freigabe bei ruhender Werkbank belegen.
     pub(crate) fn papier_freigeben(&self, gesehen: &str, bestaetigt_am: Zeitpunkt) -> &'static str {
         let mut z = self.sperre();
-        if z.laufend.is_some() || !z.warteschlange.is_empty() {
+        if z.laufend.is_some() || !z.warteschlange.is_empty() || self.update_offen() {
             return "papierfreigabe_belegt";
         }
         match depot_lage::papier_freigeben(&self.wurzel, gesehen, bestaetigt_am) {
@@ -515,6 +521,7 @@ impl Dienst {
     /// Nur der eine Arbeiter ruft `schritt`: So startet kein Auftrag, waehrend das Lagebild liest.
     pub fn schritt(&self, jetzt: Zeitpunkt) -> Option<(u64, Child)> {
         let mut z = self.sperre();
+        (!self.update_offen()).then_some(())?;
         self.zeitplan_pruefen(&mut z, jetzt);
         if z.laufend.is_none()
             && let Some((art, anlass)) = z.warteschlange.pop_front()
@@ -770,9 +777,15 @@ impl Dienst {
 }
 
 fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static str> {
-    // Das Update laeuft nur allein und nur einmal je Start: Danach startet der Dienst neu.
-    if art == Art::Update && (z.laufend.is_some() || !z.warteschlange.is_empty() || z.neustart) {
-        return Err("Update nur, wenn nichts laeuft oder wartet");
+    // Kein Auftrag darf zwischen dem Vorrücken und der Datenprüfung des neuen Dienstes laufen.
+    if z.neustart
+        || z.laufend.as_ref().is_some_and(|a| a.art == Art::Update)
+        || z.warteschlange.iter().any(|(a, _)| *a == Art::Update)
+    {
+        return Err("Update läuft, wartet oder startet den Dienst neu");
+    }
+    if art == Art::Update && (z.laufend.is_some() || !z.warteschlange.is_empty()) {
+        return Err("Update nur, wenn nichts läuft oder wartet");
     }
     if z.laufend.as_ref().is_some_and(|a| a.art == art)
         || z.warteschlange.iter().any(|(a, _)| *a == art)

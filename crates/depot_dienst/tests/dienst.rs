@@ -153,6 +153,10 @@ impl Umwelt for Attrappe {
             .and_then(Zeitpunkt::lies)
     }
 
+    fn papierdialog_testen(&self) -> depot_dienst::DialogErgebnis {
+        depot_dienst::DialogErgebnis::Ja
+    }
+
     fn autostart_setzen(&self, _wurzel: &Path, an: bool) -> Result<(), String> {
         *self
             .autostart
@@ -1094,6 +1098,35 @@ fn papierfreigabe_verlangt_bestaetigung_und_journalabdruck() -> Result<(), Strin
     assert!(post("").contains("papierfreigabe_unbestaetigt"));
     assert!(post("geprueft=ja&abdruck=ungültig").starts_with("HTTP/1.1 400"));
     assert!(!get(&d, "/einrichtung", t).contains("Papierhandel nach Verlustsperre freigeben"));
+    Ok(())
+}
+
+#[test]
+fn testdialog_ist_ohne_sperre_verfuegbar_und_schreibt_nichts() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let d = dienst(wurzel, true);
+    let t = donnerstag(12, 0)?;
+    assert!(get(&d, "/einrichtung", t).contains("Freigabedialog testen"));
+    for (name, inhalt) in [
+        ("journal.txt", "Originaljournal"),
+        ("journal.vermerk", "Originalvermerk"),
+        ("papierkonto.txt", "Originalkonto"),
+    ] {
+        fs::write(daten.join(name), inhalt).map_err(|e| e.to_string())?;
+    }
+    let a = formular_post("/papierdialog-test", &format!("t={TOKEN}"));
+    assert!(text(&behandle(&d, &Attrappe::default(), &a, t)).contains("dialogtest_ja"));
+    for (name, inhalt) in [
+        ("journal.txt", "Originaljournal"),
+        ("journal.vermerk", "Originalvermerk"),
+        ("papierkonto.txt", "Originalkonto"),
+    ] {
+        assert_eq!(
+            fs::read(daten.join(name)).map_err(|e| e.to_string())?,
+            inhalt.as_bytes()
+        );
+    }
     Ok(())
 }
 

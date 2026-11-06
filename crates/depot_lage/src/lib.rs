@@ -37,7 +37,9 @@ pub use depot_sim::papierlauf::{
     PapierFreigabeAngebot, PapierFreigabeFehler, papier_freigabe_angebot, papier_freigeben,
 };
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
-pub use zugang::{PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien};
+pub use zugang::{
+    PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien, update_datenprobe,
+};
 
 use depot_journal::Stand;
 use depot_journal::anbieter::{Eintrag, Wer};
