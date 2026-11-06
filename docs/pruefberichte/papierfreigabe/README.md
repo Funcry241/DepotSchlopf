@@ -1,11 +1,18 @@
 # Windows-Praxistest der Papierfreigabe
 
-**Die drei synthetischen Dateien gehören ausschließlich in einen separaten Prüfordner.**
+**Die drei synthetischen Prüfdateien gehören ausschließlich in eine separate Prüfinstallation.**
 
-1. Beende den laufenden DepotSchlopf-Dienst. Kopiere die drei Dateien aus dem Unterordner `daten` in den Ordner `daten` deiner separaten Prüfinstallation.
-2. Starte `DepotSchlopf.cmd` in der Prüfinstallation. Prüfe in der Einrichtung unter **Dienst** den angezeigten Projektordner. Das Freigabeformular zeigt 10.000 € Bargeld und 33,33 % Gesamtverlust.
-3. Öffne die Freigabe. Prüfe, ob der Windows-Dialog sichtbar ist und **Nein** vorausgewählt ist. Bestätige zuerst mit Enter und prüfe, dass die Sperre aktiv bleibt. Öffne den Dialog erneut und warte zwei Minuten. Auch dann bleibt die Sperre aktiv.
-4. Wähle zuletzt ausdrücklich **Ja**. Im Journal erscheint ein Eintrag `papier-freigabe` mit dem Weg `einrichtung;dialog` und dem UTC-Zeitpunkt. Nach einem Neustart bleibt die Freigabe erhalten.
-5. Wiederhole den Test mit Windows-Autostart in einem separaten Windows-Testkonto. Der Autostart-Eintrag gilt pro Windows-Konto. Beende den Prüfdienst und spiele vor dem zweiten Durchlauf alle drei Prüfdateien in der Prüfinstallation erneut ein.
+1. Beende den laufenden DepotSchlopf-Dienst und sichere den echten Ordner `daten\`. Lege einen frischen, eindeutig benannten Prüfordner mit einer eigenen Programmkopie an. Dort muss `daten\` fehlen oder leer sein. Falls dort bereits Dateien liegen, verwende einen anderen frischen Prüfordner.
+2. Starte `DepotSchlopf.cmd` aus dem Prüfordner. Prüfe in der Einrichtung unter **Dienst**, dass der angezeigte Projektordner wirklich der Prüfordner ist. Beende den Prüfdienst wieder.
+3. Lade [`journal.txt`](daten/journal.txt), [`journal.vermerk`](daten/journal.vermerk) und [`papierkonto.txt`](daten/papierkonto.txt) einzeln über **Raw** herunter. Speichere sie unverändert unter diesen Namen in `daten\` des Prüfordners. Öffne und speichere sie dabei nicht in einem Texteditor. Das Prüfjournal muss genau 606 Byte lang sein. Bei 612 Byte wurden die Zeilenenden umgeschrieben.
+4. Starte den Prüfdienst erneut und öffne nur **Einrichtung**. Lass den Zeitplan ausgeschaltet und starte weder einen Papiertag noch einen Abruf. Im selben Windows-Konto können die hinterlegten API-Schlüssel auch im Prüfordner verfügbar sein. Das Freigabeformular zeigt 10.000 € Bargeld und 33,33 % Gesamtverlust.
+5. Öffne die Freigabe. Prüfe, ob der Windows-Dialog sichtbar ist und **Nein** vorausgewählt ist. Drücke Enter. Die Sperre bleibt aktiv. Öffne den Dialog erneut und warte zwei Minuten. Auch dann bleibt die Sperre aktiv.
+6. Wähle zuletzt ausdrücklich **Ja**. Im Prüfjournal erscheint ein Eintrag `papier-freigabe` mit dem Weg `einrichtung;dialog` und dem UTC-Zeitpunkt. Nach einem Neustart bleibt die Freigabe erhalten.
 
-Die Dateien verwenden denselben synthetischen Ausgangsstand wie der automatisierte Diensttest `papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand`.
+## Zweiter Durchlauf über den Autostart
+
+1. Öffne im Windows-Dialog **Ausführen** den Ordner `shell:startup`. Sichere eine vorhandene `DepotSchlopf.cmd` außerhalb dieses Autostart-Ordners und merke dir, falls noch kein Eintrag vorhanden ist. Der Eintrag gilt für das ganze Windows-Konto.
+2. Beende den Prüfdienst. Setze ausschließlich im geprüften Prüfordner alle drei Prüfdateien auf den Ausgangsstand zurück. Starte den Prüfdienst wieder und richte den Autostart vorübergehend über dessen **Einrichtung** ein. Melde dich ab und wieder an.
+3. Prüfe unter **Dienst** erneut den Projektordner und wiederhole den Dialogtest. Beende danach den Prüfdienst. Stelle den gesicherten Autostart-Eintrag wieder her oder entferne den Testeintrag, wenn vorher keiner vorhanden war. Prüfe das Ergebnis in `shell:startup`.
+
+Die Dateien entsprechen dem Ausgangsstand des automatisierten Diensttests `papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand`.
