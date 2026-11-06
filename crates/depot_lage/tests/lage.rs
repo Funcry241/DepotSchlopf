@@ -904,7 +904,7 @@ fn papierdepot_nennt_die_simulation() -> Result<(), String> {
     let s = html::seite(&l);
     assert!(
         s.contains("Nur Papiergeld, simuliert")
-            && s.contains("zum Schlusskurs des Entscheidungstags ausgeführt"),
+            && s.contains("geprüften Schlusskurs nach ihrem Versand"),
         "{s}"
     );
     Ok(())

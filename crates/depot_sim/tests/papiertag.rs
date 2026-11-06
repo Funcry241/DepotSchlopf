@@ -282,10 +282,13 @@ fn papierkonto_text_nur_in_eigener_form() -> Result<(), String> {
     Ok(())
 }
 
-/// Dachs kauft SAP zu einem Schluss feiner als ein Cent; Maus stimmt zu. Ausgefuehrt wird zum
-/// aufgerundeten Cent, Journal und Papierkonto stimmen danach ueberein.
+/// Die Kauforder bleibt bis zum naechsten Schluss offen und uebersteht den Neustart.
+/// Der spaetere Kurs wird zum aufgerundeten Cent ausgefuehrt.
 #[test]
-fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
+fn kauf_wartet_auf_spaeteren_kurs_und_rundet_auf() -> Result<(), String> {
+    use depot_journal::Konto;
+    use depot_sim::Broker;
+
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let mut j = ort.oeffnen()?;
@@ -333,6 +336,33 @@ fn kauf_zu_feinem_kurs_wird_aufgerundet_ausgefuehrt() -> Result<(), String> {
         matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
         "Ausgang: {aus:?}"
     );
+    let l = some(j.stand().offene_auftraege().next(), "Offene Kauforder")?;
+    let nr = l.beleg.nr;
+    let versand = some(l.versand, "Versandzeit")?;
+    assert!(l.ausfuehrungen.is_empty());
+    drop(k);
+    drop(j);
+
+    let mut j = ort.oeffnen()?;
+    let mut k = konto(&ort, &j)?;
+    let alte_kurse = vorbedingung(depot_sim::tageskurse(j.stand(), &universum()?), "Alte Kurse")?;
+    k.markt(&alte_kurse.heute);
+    let order = some(k.order(nr), "Offene Order im Papierkonto")?;
+    assert_eq!(order.status, depot_journal::KontoStatus::Offen);
+    assert!(order.ausfuehrungen.is_empty());
+    // Der Vortag wird beim naechsten Abruf nochmals belegt. Sein Kurs liegt vor dem Versand.
+    belege(&mut j, 6, &[(&sap, "230.105", "230.106"), (&allianz, "351", "351")])?;
+    let aus = papiertag(
+        &mut j, tag(6)?, &universum()?, &start()?, &mut Stumm, &mut Stumm, &mut k,
+    );
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let l = some(j.stand().auftrag(nr), "Kauforder")?;
+    let fill = some(l.ausfuehrungen.first(), "Ausfuehrung")?;
+    let kurszeit = some(fill.kurszeit, "Kurszeit")?;
+    assert_eq!(l.versand, Some(versand));
+    assert_eq!(kurszeit.datum(), Some(tag(6)?));
+    assert!(kurszeit > versand);
+    assert_eq!(k.konto().sendungen(), 1, "kein zweiter Versand");
     let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A")?;
     let stueck = a.stueck(&sap);
     assert!(stueck > 0, "SAP gekauft");
@@ -716,25 +746,31 @@ fn kandidat_ohne_kurs_faellt_aus_gehaltener_wert_haelt_den_zyklus() -> Result<()
         !begr.iter().any(|(_, wer, _)| wer == "Daten"),
         "kein Ausfall: {begr:?}"
     );
-    assert!(
-        some(j.stand().toepfe().get(&TopfId::A), "Topf A")?.stueck(&sap) > 0,
-        "SAP gekauft"
-    );
-
-    // Am 06.11. fehlt der Kurs von SAP, das gehalten wird: Der Zyklus faellt aus.
-    belege(&mut j, 6, &[(&allianz, "350", "351")])?;
+    assert!(j.stand().offene_auftraege().any(|l| l.beleg.isin == sap));
+    // Zunaechst wird die Order am naechsten Schluss ausgefuehrt.
+    belege(&mut j, 6, &[(&sap, "231", "231"), (&allianz, "350", "351")])?;
+    drop(k);
     drop(j);
     let aus = stumm_tag(&ort, 6)?;
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let mut j = ort.oeffnen()?;
+    assert!(some(j.stand().toepfe().get(&TopfId::A), "Topf A")?.stueck(&sap) > 0);
+
+    // Am 09.11. fehlt der Kurs des nun gehaltenen SAP: Der Zyklus faellt aus.
+    belege(&mut j, 9, &[(&allianz, "350", "351")])?;
+    drop(j);
+    let aus = stumm_tag(&ort, 9)?;
     assert!(
         matches!(aus, Ok(Ausgang::Abgeschlossen { .. })),
         "Ausgang: {aus:?}"
     );
     let j = ort.oeffnen()?;
+    let montag = tag(9)?;
     let daten: Vec<&str> = j
         .stand()
         .begruendungen()
         .iter()
-        .filter(|(tag, wer, _)| *tag == d.plus_tage(1).unwrap_or(d) && wer == "Daten")
+        .filter(|(tag, wer, _)| *tag == montag && wer == "Daten")
         .map(|(_, _, t)| t.as_str())
         .collect();
     assert!(
@@ -993,12 +1029,16 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
     let start = [a, b];
     let universum = universum()?;
     let preise = [(&sap, "250", "250"), (&allianz, "200", "200")];
-    for t in [5, 6, 9] {
+    for t in [5, 6, 9, 10, 11] {
         let datum = tag(t)?;
         let mut j = ort.oeffnen()?;
         belege(&mut j, t, &preise)?;
         let (mut dachs, mut maus) = kaeufer(datum, &allianz);
-        if t == 6 {
+        if let Some(v) = dachs.antworten.get_mut(&datum).and_then(|a| a.vorschlag.as_mut()) {
+            v.zielgewichte_bp.insert(sap.clone(), 3_500);
+            v.begruendung.insert(sap.clone(), "Bestand halten".into());
+        }
+        if t == 9 {
             let text = vorbedingung(fs::read_to_string(&ort.konto), "Kontodatei")?;
             let ohne: String = text
                 .split_inclusive('\n')
@@ -1024,13 +1064,13 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
         );
         assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
         let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A nach dem Lauf")?;
-        assert!(a.bargeld() > Cent::NULL, "Verkaufserloes ist verbucht");
-        assert_eq!(a.stueck(&allianz) > 0, t == 9, "Kauf am Tag {t}");
+        assert_eq!(a.bargeld() > Cent::NULL, t != 5, "Verkaufserloes am Tag {t}");
+        assert_eq!(a.stueck(&allianz) > 0, t == 11, "Kauf am Tag {t}");
         assert_eq!(
             j.stand().begruendungen().iter().any(|(d, wer, text)| {
                 *d == datum && wer == "Kontowaechter" && text.contains("keine Deckung")
             }),
-            t != 9,
+            matches!(t, 6 | 9),
             "Kaufversuch im Journal am Tag {t}"
         );
         assert!(

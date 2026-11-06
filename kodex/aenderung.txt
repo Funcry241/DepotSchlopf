@@ -1,7 +1,9 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: EUR-Papierkonto mit Abrechnung offener Verkaufserloese. Kaeufe duerfen pro Topf nur abgerechnetes Bargeld nutzen. Journal und Papierkonto fuehren und vergleichen die Abrechnungsbelege unabhaengig. Nettoerloese werden am zweiten folgenden Xetra-Handelstag freigegeben, im EUR-Papiermodell auch bei NYSE-Werten. Keine Aenderung an festgeschriebenen Grenzen oder Abhaengigkeiten.
+zweck: Papiertag fuehrt bestaetigte Orders erst am ersten verwendbaren Schlusskurs nach ihrem Versand aus. Versandzeit und Kurszeit stehen im Journal und Papierkonto, Valuta folgt dem Tag der Ausfuehrung. Offene Orders bleiben reserviert, auch ueber Neustarts. Die Notbremse stoppt Kaeufe. Keine neuen Betragsgrenzen oder Abhaengigkeiten.
 pfade:
+crates/depot_berater/tests/berater.rs
 crates/depot_journal/
+crates/depot_lage/
 crates/depot_sim/
 CHANGELOG.md

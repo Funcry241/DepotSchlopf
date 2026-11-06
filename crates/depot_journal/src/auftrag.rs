@@ -16,7 +16,7 @@
 //! nicht belegen. Gefuellt ist ein Auftrag, wenn seine Ausfuehrungen genau die beauftragte Menge
 //! ergeben; mehr nimmt das Journal nicht an. Eine Ausfuehrung haelt das Limit ein.
 
-use depot_kern::Cent;
+use depot_kern::{Cent, Zeitpunkt};
 use depot_regelwerk::Richtung;
 
 use crate::stand::AuftragsBeleg;
@@ -66,12 +66,14 @@ pub struct Ausfuehrung {
     pub stueck: u64,
     pub kurs: Cent,
     pub gebuehr: Cent,
+    pub kurszeit: Option<Zeitpunkt>,
 }
 
 /// Was zu einem Auftrag gemeldet wird.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Meldung {
     Gesendet,
+    GesendetAm(Zeitpunkt),
     Unbekannt,
     Angenommen,
     Abgelehnt,
@@ -84,7 +86,7 @@ pub enum Meldung {
 impl Meldung {
     fn name(self) -> &'static str {
         match self {
-            Meldung::Gesendet => "gesendet",
+            Meldung::Gesendet | Meldung::GesendetAm(_) => "gesendet",
             Meldung::Unbekannt => "unbekannt",
             Meldung::Angenommen => "angenommen",
             Meldung::Abgelehnt => "abgelehnt",
@@ -102,6 +104,7 @@ pub struct AuftragsLage {
     pub beleg: AuftragsBeleg,
     pub zustand: AuftragsZustand,
     pub ausfuehrungen: Vec<Ausfuehrung>,
+    pub versand: Option<Zeitpunkt>,
 }
 
 impl AuftragsLage {
@@ -110,6 +113,7 @@ impl AuftragsLage {
             beleg,
             zustand: AuftragsZustand::Alt,
             ausfuehrungen: Vec::new(),
+            versand: None,
         }
     }
 
@@ -118,6 +122,7 @@ impl AuftragsLage {
             beleg,
             zustand: AuftragsZustand::Reserviert,
             ausfuehrungen: Vec::new(),
+            versand: None,
         }
     }
 
@@ -144,6 +149,10 @@ impl AuftragsLage {
         let mut neu = self.clone();
         neu.zustand = match (self.zustand, m) {
             (Z::Reserviert, Meldung::Gesendet) => Z::Gesendet,
+            (Z::Reserviert, Meldung::GesendetAm(zeit)) => {
+                neu.versand = Some(*zeit);
+                Z::Gesendet
+            }
             (Z::Reserviert, Meldung::Verworfen) => Z::Verworfen,
             (Z::Gesendet, Meldung::Unbekannt) => Z::Unbekannt,
             (Z::Gesendet | Z::Unbekannt, Meldung::Angenommen) => Z::Angenommen,
@@ -172,6 +181,11 @@ impl AuftragsLage {
     fn pruefe(&self, a: &Ausfuehrung) -> Result<(), String> {
         let b = &self.beleg;
         let nr = b.nr;
+        match (self.versand, a.kurszeit) {
+            (None, None) => {}
+            (Some(versand), Some(kurszeit)) if kurszeit > versand => {}
+            _ => return Err(format!("Auftrag {nr}: keine Kurszeit nach dem Versand")),
+        }
         if a.stueck == 0 || a.kurs.0 <= 0 || a.gebuehr.0 < 0 {
             return Err(format!("Auftrag {nr}: Ausfuehrung unplausibel"));
         }
@@ -201,13 +215,11 @@ impl AuftragsLage {
 
 pub(crate) fn meldung_text(nr: u64, m: &Meldung) -> String {
     match m {
-        Meldung::Ausfuehrung(a) => format!(
-            "{nr};{};{};{};{}",
-            m.name(),
-            a.stueck,
-            a.kurs.0,
-            a.gebuehr.0
-        ),
+        Meldung::GesendetAm(zeit) => format!("{nr};{};{zeit}", m.name()),
+        Meldung::Ausfuehrung(a) => {
+            let basis = format!("{nr};{};{};{};{}", m.name(), a.stueck, a.kurs.0, a.gebuehr.0);
+            a.kurszeit.map_or_else(|| basis.clone(), |zeit| format!("{basis};{zeit}"))
+        }
         _ => format!("{nr};{}", m.name()),
     }
 }
@@ -229,12 +241,18 @@ pub(crate) fn lies_meldung(inhalt: &str) -> Option<(u64, Meldung)> {
             .find(|m| m.name() == *name)?;
             (nr, m)
         }
-        [nr, "ausfuehrung", stueck, kurs, gebuehr] => (
+        [nr, "gesendet", zeit] => (nr, Meldung::GesendetAm(Zeitpunkt::lies(zeit)?)),
+        [nr, "ausfuehrung", stueck, kurs, gebuehr, rest @ ..] => (
             nr,
             Meldung::Ausfuehrung(Ausfuehrung {
                 stueck: stueck.parse().ok()?,
                 kurs: Cent(kurs.parse().ok()?),
                 gebuehr: Cent(gebuehr.parse().ok()?),
+                kurszeit: match rest {
+                    [] => None,
+                    [zeit] => Some(Zeitpunkt::lies(zeit)?),
+                    _ => return None,
+                },
             }),
         ),
         _ => return None,

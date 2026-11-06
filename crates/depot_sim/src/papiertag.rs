@@ -21,9 +21,8 @@
 //! Handelstag danach schon abgeschlossen, geschieht nichts. Ein angefangener Tag haelt an wie in
 //! der Simulation; niemand wird neu gefragt.
 //!
-//! **Ausfuehrung:** Das Papierkonto fuehrt zum Schlusskurs des Entscheidungstags aus (feine
-//! Kurse zur sicheren Seite gerundet). Das ist eine Vereinfachung: Wirklich ginge ein Auftrag
-//! erst nach dem Schluss an den Markt. Sie steht im Journal jedes Tages.
+//! **Ausfuehrung:** Bestaetigte Orders bleiben offen bis zum ersten im Papiertag verwendbaren
+//! Schlusskurs nach Versand. Ist dieser ausserhalb des Limits, verfallen sie.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -36,12 +35,12 @@ use depot_regelwerk::waehle_tageswerte;
 use sha2::{Digest, Sha256};
 
 use crate::lauf::{
-    Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal, pruefe_stoerung, rechnung,
+    Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal, notbremse_aktiv, pruefe_stoerung, rechnung,
 };
 use crate::papier::Broker;
 use crate::szenario::{Berater, Tag};
 
-const FASSUNG: &str = "depot_sim-papiertag-v1";
+const FASSUNG: &str = "depot_sim-papiertag-v2";
 const PAPIERTAG: &str = "Papiertag";
 /// Unter diesem Namen stehen Kandidaten, die heute nicht handelbar sind.
 pub const AUSWAHL: &str = "Auswahl";
@@ -344,6 +343,21 @@ pub fn papiertag(
     maus: &mut dyn Berater,
     konto: &mut dyn Broker,
 ) -> Result<Ausgang, LaufFehler> {
+    papiertag_mit_uhr(j, heute, universum, start, dachs, maus, konto, None)
+}
+
+/// Papiertag mit einer Uhr fuer den Zeitpunkt des Versands. Beim Wiederabspielen ohne Uhr
+/// gilt der belegte Stand der Entscheidungskurse als frueheste moegliche Versandzeit.
+pub fn papiertag_mit_uhr(
+    j: &mut Journal,
+    heute: Datum,
+    universum: &Universum,
+    start: &[Topf],
+    dachs: &mut dyn Berater,
+    maus: &mut dyn Berater,
+    konto: &mut dyn Broker,
+    uhr: Option<&dyn Fn() -> Option<Zeitpunkt>>,
+) -> Result<Ausgang, LaufFehler> {
     let k = kurse_von_heute(j.stand(), universum, heute)?;
     let neu = j.stand().toepfe().is_empty();
     if !neu {
@@ -358,7 +372,13 @@ pub fn papiertag(
             )));
         }
     }
-    if let Tageslage::Abgeschlossen(d) = tageslage(j.stand(), k.handelstag)? {
+    let lage = tageslage(j.stand(), k.handelstag)?;
+    if notbremse_aktiv(j)
+        && (matches!(lage, Tageslage::Abgeschlossen(_)) || j.stand().offene_auftraege().next().is_none())
+    {
+        return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
+    }
+    if let Tageslage::Abgeschlossen(d) = lage {
         return Ok(Ausgang::SchonAbgeschlossen(d));
     }
     let letzter = j.stand().abschluss().cloned();
@@ -383,7 +403,7 @@ pub fn papiertag(
     j.begruende(
         tag.datum,
         PAPIERTAG,
-        "Papiergeld; Ausfuehrung zum Schlusskurs des Entscheidungstags (Vereinfachung)",
+        "Papiergeld; Ausfuehrung erst zu einem geprueften Schlusskurs nach Versand",
     )
     .map_err(journal)?;
     let wahl = waehle_tageswerte(
@@ -404,6 +424,7 @@ pub fn papiertag(
         &k.vortag,
     );
     let nr = tagnummer(tag.datum).ok_or_else(|| rechnung("Tagnummer"))?;
+    let belegte_zeit = || Some(tag.kurse.stand());
     let z = Zyklus {
         grenzen: &grenzen,
         universum: &wahl.universum,
@@ -411,6 +432,7 @@ pub fn papiertag(
         vortag: &k.vortag,
         nr,
         abdruck: &ab,
+        uhr: Some(uhr.unwrap_or(&belegte_zeit)),
     };
     let mut beteiligte = Beteiligte { dachs, maus, konto };
     let hoechststand = ein_tag(j, &z, hoch, &wahl.fehler, &mut beteiligte)?;
