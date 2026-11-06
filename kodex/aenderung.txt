@@ -1,5 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: DokuOnly
-zweck: Synthetische Windows-Pruefdaten und Hinweise fuer die manuelle Papierfreigabe im separaten Pruefordner bereitstellen.
+klasse: Funktion
+zweck: Papierfreigabe verlangt eine kanonische UTC-Zeit, deren Frankfurter Datum am oder nach dem Abschlusstag liegt. Die Architektur beschreibt die Pruefung und den Zeitbeleg.
 pfade:
-docs/pruefberichte/papierfreigabe/
+crates/depot_journal/src/stand.rs
+docs/ARCHITEKTUR.md

@@ -628,26 +628,22 @@ impl Stand {
             return Err("Neue Papier-Verlustmessung ist nicht freigegeben".into());
         }
         let basis = papier_freigabe_text(tag, bargeld);
-        let zeit = if inhalt == basis {
-            // Belege aus #52 enthalten nur das Abschlussdatum.
-            None
-        } else {
-            let zeit = inhalt
-                .strip_prefix(&basis)
-                .and_then(|rest| rest.strip_prefix(';'))
-                .and_then(Zeitpunkt::lies)
-                .ok_or("UTC-Zeit der Papierfreigabe unlesbar")?;
-            kanonisch(&format!("{basis};{zeit}"), inhalt)?;
-            Some(zeit)
-        };
+        let zeit = inhalt
+            .strip_prefix(&basis)
+            .and_then(|rest| rest.strip_prefix(';'))
+            .and_then(Zeitpunkt::lies)
+            .ok_or("UTC-Zeit der Papierfreigabe fehlt oder ist unlesbar")?;
+        kanonisch(&format!("{basis};{zeit}"), inhalt)?;
+        if zeit.in_frankfurt().is_none_or(|(datum, ..)| datum < tag) {
+            return Err("Papierfreigabe vor dem Abschlusstag".into());
+        }
         self.papier_halt = None;
         self.papier_verlustreferenz = Some(bargeld);
         self.papier_neustart = Some(bargeld);
         self.notbremse_freigabe = Some(tag);
         self.prueft_wiederanlauf = false;
-        let zeit = zeit.map_or_else(String::new, |z| format!(" Bestätigt am {z}."));
         self.begruendungen.push((tag, "Einrichtung, Dialog".into(), format!(
-            "Papier-Gesamtverlustsperre in der Einrichtung freigegeben. Neue Verlustmessung ab {} Cent.{zeit}",
+            "Papier-Gesamtverlustsperre in der Einrichtung freigegeben. Neue Verlustmessung ab {} Cent. Bestätigt am {zeit}.",
             bargeld.0
         )));
         Ok(())
@@ -1170,4 +1166,37 @@ fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
         limit,
         anlass,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn papierfreigabe_verlangt_zeit_ab_abschlusstag_in_frankfurt() -> Result<(), String> {
+        let tag = Datum::lies("2026-11-04").ok_or("Abschlusstag")?;
+        let bargeld = Cent(1_000_000);
+        let topf = Topf::neu(TopfId::A, bargeld).map_err(|e| format!("{e:?}"))?;
+        let mut stand = Stand {
+            toepfe: BTreeMap::from([(TopfId::A, topf)]),
+            abschluss: Some(Abschluss {
+                datum: tag,
+                hoechststand: Cent(1_500_000),
+                abdruck: "a".repeat(64),
+            }),
+            papier_halt: Some(PapierHalt::Gesamtverlust),
+            ..Stand::default()
+        };
+        let basis = papier_freigabe_text(tag, bargeld);
+        assert!(stand.belege_papier_freigabe(&basis).is_err());
+        assert!(
+            stand
+                .belege_papier_freigabe(&format!("{basis};2026-11-03T22:59:59Z"))
+                .is_err()
+        );
+        assert!(stand.papier_verlustsperre_aktiv());
+        stand.belege_papier_freigabe(&format!("{basis};2026-11-03T23:00:00Z"))?;
+        assert!(!stand.papier_verlustsperre_aktiv());
+        Ok(())
+    }
 }
