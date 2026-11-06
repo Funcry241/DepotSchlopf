@@ -554,6 +554,9 @@ impl Journal {
             Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
                 "Abrechnungstag nur ueber beginne_abrechnung".into(),
             )),
+            Art::PapierHalt => Err(JournalFehler::Abgelehnt(
+                "Papier-Halt nur ueber belege_papier_halt".into(),
+            )),
             Art::NotbremseFreigabe => Err(JournalFehler::Abgelehnt(
                 "Notbremsenfreigabe nur ueber schliesse_wiederanlauf_ab".into(),
             )),
@@ -660,6 +663,15 @@ impl Journal {
                 abdruck: abdruck.to_string(),
             }),
         )
+    }
+
+    /// Belegt den Halt des laufenden Papiertags mit seiner dauerhaften Grundkennung.
+    pub fn belege_papier_halt(
+        &mut self,
+        datum: Datum,
+        grund: crate::PapierHalt,
+    ) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::PapierHalt, &format!("{datum};{}", grund.kennung()))
     }
 
     /// Schreibt nach erfolgreicher Pruefung den Abschluss und die Papier-Freigabe zusammen.

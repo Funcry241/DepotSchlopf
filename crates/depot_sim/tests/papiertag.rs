@@ -1174,7 +1174,11 @@ fn notbremse_oeffnet_erst_nach_einem_vollstaendig_geprueften_tag_wieder() -> Res
         }
         let vorher = tag(4)?;
         vorbedingung(
-            j.begruende(vorher, "Waechter", depot_journal::NOTBREMSE_AKTIV),
+            j.begruende(
+                vorher,
+                "Waechter",
+                "Notbremse aktiv: nur offene Verkaeufe weiter abgleichen",
+            ),
             "Aktive Notbremse nach Schutzverkauf",
         )?;
         vorbedingung(
@@ -1268,6 +1272,34 @@ fn gesamtverlust_sperrt_vor_beratung_und_bleibt_nach_neustart() -> Result<(), St
         assert_eq!(dachs.aufrufe, 0);
         assert_eq!(konto.konto().sendungen(), sendungen);
     }
+    let j = ort.oeffnen()?;
+    assert!(
+        j.eintraege()
+            .iter()
+            .any(|(art, inhalt)| { *art == Art::PapierHalt && inhalt.ends_with(";gesamtverlust") })
+    );
+    Ok(())
+}
+
+#[test]
+fn alte_verlustsperre_bleibt_beim_oeffnen_erhalten() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    {
+        let mut j = ort.oeffnen()?;
+        vorbedingung(
+            j.begruende(
+                tag(4)?,
+                "Waechter",
+                "Notbremse: 30 % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig",
+            ),
+            "Alte Verlustsperre belegen",
+        )?;
+        vorbedingung(
+            j.schliesse_ab(tag(4)?, Cent(1_000_000), &"a".repeat(64)),
+            "Abschluss",
+        )?;
+    }
+    assert!(ort.oeffnen()?.stand().papier_verlustsperre_aktiv());
     Ok(())
 }
 

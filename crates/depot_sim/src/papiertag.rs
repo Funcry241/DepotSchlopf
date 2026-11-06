@@ -28,7 +28,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use depot_journal::{Journal, KursBeleg, NachrichtBeleg, PAPIER_VERLUSTSPERRE, Stand};
+use depot_journal::{Journal, KursBeleg, NachrichtBeleg, PapierHalt, Stand};
 use depot_kern::{
     Cent, Datum, Grenzen, Herkunft, Isin, Kurs, Kurse, Rundung, Topf, Universum, Zeitpunkt,
 };
@@ -323,7 +323,7 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
     if let Some(a) = stand.abschluss() {
         if a.datum == handelstag {
             if stand.papier_verlustsperre_aktiv() {
-                return Err(halt(PAPIER_VERLUSTSPERRE));
+                return Err(halt(PapierHalt::Gesamtverlust.meldung()));
             }
             if stand.notbremse_aktiv() {
                 return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
@@ -348,7 +348,7 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
     if stand.notbremse_aktiv() {
         if stand.offene_auftraege().next().is_none() && stand.gehalten().is_empty() {
             if stand.papier_verlustsperre_aktiv() {
-                return Err(halt(PAPIER_VERLUSTSPERRE));
+                return Err(halt(PapierHalt::Gesamtverlust.meldung()));
             }
             return Ok(Tageslage::WartetAufWiederanlauf);
         }

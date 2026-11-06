@@ -20,11 +20,45 @@ use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
 
 use crate::weltprognose::PrognoseBeleg;
 
-/// Aktivierungsbeleg des Papier-Waechters, auch in bestehenden Journalen.
-pub const NOTBREMSE_AKTIV: &str = "Notbremse aktiv: nur offene Verkaeufe weiter abgleichen";
+// Historischer Wortlaut fuer Journale aus #48 und frueher.
+const ALTE_NOTBREMSE: &str = "Notbremse aktiv: nur offene Verkaeufe weiter abgleichen";
 
-/// Dauerhafter Halt der Papier-Notbremse nach Erreichen der Gesamtverlustgrenze.
-pub const PAPIER_VERLUSTSPERRE: &str = "Notbremse: 30 % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig";
+const ALTE_VERLUSTSPERRE: &str = "Notbremse: 30 % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig";
+
+/// Gespeicherter Zustand der Papier-Notbremse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PapierHalt {
+    Notbremse,
+    Gesamtverlust,
+}
+
+impl PapierHalt {
+    pub(crate) fn kennung(self) -> &'static str {
+        match self {
+            Self::Notbremse => "notbremse",
+            Self::Gesamtverlust => "gesamtverlust",
+        }
+    }
+
+    pub fn meldung(self) -> String {
+        match self {
+            Self::Notbremse => "Notbremse aktiv: Schutzverkaeufe laufen weiter".into(),
+            Self::Gesamtverlust => {
+                let bp = Grenzen::standard().papier_gesamtverlust_bp();
+                let ganz = bp.div_euclid(100);
+                let rest = bp.rem_euclid(100);
+                let prozent = if rest == 0 {
+                    ganz.to_string()
+                } else {
+                    format!("{ganz},{rest:02}")
+                };
+                format!(
+                    "Notbremse: {prozent} % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig"
+                )
+            }
+        }
+    }
+}
 
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +103,8 @@ pub enum Art {
     Abrechnungstag,
     /// Tagesabschluss, der zugleich die Papier-Notbremse zuruecksetzt.
     NotbremseFreigabe,
+    /// `datum;grundkennung`: typisierter Halt des Papierdepots.
+    PapierHalt,
     /// Handelstag und UTC-Wissensstichtag, vor der Entscheidung belegt.
     Wissensstichtag,
 }
@@ -91,6 +127,7 @@ impl Art {
             Art::Format => "format",
             Art::Abrechnungstag => "abrechnungstag",
             Art::NotbremseFreigabe => "notbremse-freigabe",
+            Art::PapierHalt => "papier-halt",
             Art::Wissensstichtag => "wissensstichtag",
         }
     }
@@ -111,6 +148,7 @@ impl Art {
             Art::Abschluss,
             Art::Abrechnungstag,
             Art::NotbremseFreigabe,
+            Art::PapierHalt,
             Art::Wissensstichtag,
             Art::Format,
         ]
@@ -165,6 +203,7 @@ pub struct Stand {
     begruendungen: Vec<(Datum, String, String)>,
     abschluss: Option<Abschluss>,
     historischer_hoechststand: Option<Cent>,
+    papier_halt: Option<PapierHalt>,
     notbremse_freigabe: Option<Datum>,
     prueft_wiederanlauf: bool,
     seit_abschluss: usize,
@@ -292,21 +331,26 @@ impl Stand {
         self.historischer_hoechststand
     }
 
+    pub fn papier_halt(&self) -> Option<PapierHalt> {
+        self.papier_halt
+    }
+
     pub fn notbremse_aktiv(&self) -> bool {
-        self.papier_verlustsperre_aktiv()
-            || self.begruendungen.iter().rev().any(|(datum, wer, text)| {
-                wer == "Waechter"
-                    && text == NOTBREMSE_AKTIV
-                    && self
-                        .notbremse_freigabe
-                        .is_none_or(|freigabe| *datum > freigabe)
-            })
+        self.papier_halt.is_some()
     }
 
     pub fn papier_verlustsperre_aktiv(&self) -> bool {
-        self.begruendungen
-            .iter()
-            .any(|(_, wer, text)| wer == "Waechter" && text == PAPIER_VERLUSTSPERRE)
+        self.papier_halt == Some(PapierHalt::Gesamtverlust)
+    }
+
+    /// Prueft den belegten Gesamtverlust. Beim ersten Tag liefert der Lauf den Startwert.
+    pub fn papier_gesamtverlust_erreicht(
+        &self,
+        wert: Cent,
+        startwert: Option<Cent>,
+    ) -> Option<bool> {
+        let hoch = self.historischer_hoechststand.max(startwert)?;
+        Some(Grenzen::standard().papier_gesamtverlust_erreicht(wert, hoch))
     }
 
     pub fn prueft_wiederanlauf(&self) -> bool {
@@ -405,6 +449,7 @@ impl Stand {
             Art::Begruendung => {
                 let b = lies_begruendung(inhalt).ok_or("Begruendung unlesbar")?;
                 kanonisch(&begruendung_text(b.0, &b.1, &b.2), inhalt)?;
+                self.lies_alten_papier_halt(b.0, &b.1, &b.2);
                 self.begruendungen.push(b);
             }
             Art::Format => {
@@ -422,6 +467,7 @@ impl Stand {
             }
             Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
             Art::NotbremseFreigabe => return self.belege_wiederanlauf(inhalt),
+            Art::PapierHalt => self.belege_papier_halt(inhalt)?,
             Art::Wissensstichtag => self.belege_wissensstichtag(inhalt)?,
             Art::Abschluss => {
                 return self.schliesse_ab(inhalt);
@@ -492,6 +538,47 @@ impl Stand {
         Ok(())
     }
 
+    fn lies_alten_papier_halt(&mut self, tag: Datum, wer: &str, text: &str) {
+        if wer == "Waechter" {
+            match text {
+                ALTE_VERLUSTSPERRE => self.papier_halt = Some(PapierHalt::Gesamtverlust),
+                ALTE_NOTBREMSE
+                    if self.papier_halt.is_none()
+                        && self
+                            .notbremse_freigabe
+                            .is_none_or(|freigabe| tag > freigabe) =>
+                {
+                    self.papier_halt = Some(PapierHalt::Notbremse);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn belege_papier_halt(&mut self, inhalt: &str) -> Result<(), String> {
+        let (tag, grund) = inhalt.split_once(';').ok_or("Papier-Halt unlesbar")?;
+        let tag = Datum::lies(tag).ok_or("Tag des Papier-Halts unlesbar")?;
+        let grund = match grund {
+            "notbremse" => PapierHalt::Notbremse,
+            "gesamtverlust" => PapierHalt::Gesamtverlust,
+            _ => return Err("Grundkennung des Papier-Halts unbekannt".into()),
+        };
+        kanonisch(&format!("{tag};{}", grund.kennung()), inhalt)?;
+        if self.abrechnungstag != Some(tag)
+            || self.abschluss.as_ref().is_some_and(|a| a.datum >= tag)
+            || !matches!(
+                (self.papier_halt, grund),
+                (None, _) | (Some(PapierHalt::Notbremse), PapierHalt::Gesamtverlust)
+            )
+        {
+            return Err("Papier-Halt unzulaessig".into());
+        }
+        self.papier_halt = Some(grund);
+        self.begruendungen
+            .push((tag, "Waechter".into(), grund.meldung()));
+        Ok(())
+    }
+
     fn belege_wiederanlauf(&mut self, inhalt: &str) -> Result<(), String> {
         let a = lies_abschluss(inhalt).ok_or("Notbremsenfreigabe unlesbar")?;
         if !self.prueft_wiederanlauf
@@ -500,14 +587,13 @@ impl Stand {
             || !self.gehalten().is_empty()
             || self.offene_auftraege().next().is_some()
             || self.papier_verlustsperre_aktiv()
-            || self.historischer_hoechststand.is_none_or(|hoch| {
-                Grenzen::standard().papier_gesamtverlust_erreicht(a.hoechststand, hoch)
-            })
+            || self.papier_gesamtverlust_erreicht(a.hoechststand, None) != Some(false)
             || self.papier_bargeld() != Some(a.hoechststand)
         {
             return Err("Notbremsenfreigabe unzulaessig".into());
         }
         self.schliesse_ab(inhalt)?;
+        self.papier_halt = None;
         self.notbremse_freigabe = Some(a.datum);
         self.prueft_wiederanlauf = false;
         self.begruendungen.push((

@@ -24,8 +24,7 @@
 //! zweite Frage fuer denselben Zyklus.
 
 use depot_journal::{
-    AuftragsZustand, Journal, JournalFehler, Meldung, NOTBREMSE_AKTIV, PAPIER_VERLUSTSPERRE,
-    PrognoseBeleg, Weltprognose,
+    AuftragsZustand, Journal, JournalFehler, Meldung, PapierHalt, PrognoseBeleg, Weltprognose,
 };
 use depot_kern::liste::papierorder_schluss;
 use depot_kern::{
@@ -386,10 +385,10 @@ pub(crate) fn ein_tag(
     kontowaechter(jr, tag, &*beteiligte.konto)?;
     beteiligte.konto.rechne_ab(tag.datum);
     pruefe_stoerung(&*beteiligte.konto)?;
-    if z.uhr.is_some() {
-        pruefe_papier_verlustsperre(jr, z, hoch, fehler.is_empty())?;
-    }
-    if z.uhr.is_some() && jr.stand().notbremse_aktiv() {
+    if z.uhr.is_some()
+        && (pruefe_papier_verlustsperre(jr, z, hoch, fehler.is_empty())?
+            || jr.stand().notbremse_aktiv())
+    {
         return papier_notbremse_fortsetzen(jr, z, hoch, &mut *beteiligte.konto, fehler.is_empty());
     }
     if !fehler.is_empty() {
@@ -498,6 +497,7 @@ fn stoppe_kaeufe(j: &mut Journal, tag: &Tag, konto: &mut dyn Broker) -> Result<(
 }
 
 /// Prueft vor der Marktverarbeitung und nach Ausfuehrungen inklusive Gebuehren.
+/// Ohne gepruefte Kurse laesst sich Bestand nicht bewerten; der Lauf sperrt Kaeufe an diesem Tag ohnehin.
 fn pruefe_papier_verlustsperre(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -508,16 +508,15 @@ fn pruefe_papier_verlustsperre(
         return Ok(true);
     }
     let stand = j.stand();
-    let historisch = stand
-        .historischer_hoechststand()
-        .map_or(hoch, |h| h.max(hoch));
     let wert = if kurse_ok || stand.gehalten().is_empty() {
         depotwert(stand.toepfe().values(), &z.tag.kurse, Rundung::Ab)
     } else {
         None
     };
-    if wert.is_some_and(|wert| z.grenzen.papier_gesamtverlust_erreicht(wert, historisch)) {
-        begruende(j, z.tag, WAECHTER, PAPIER_VERLUSTSPERRE)?;
+    if wert.is_some_and(|wert| stand.papier_gesamtverlust_erreicht(wert, Some(hoch)) == Some(true))
+    {
+        j.belege_papier_halt(z.tag.datum, PapierHalt::Gesamtverlust)
+            .map_err(journal)?;
         return Ok(true);
     }
     Ok(false)
@@ -551,7 +550,8 @@ fn papier_notbremse(
 ) -> Result<Cent, LaufFehler> {
     stoppe_kaeufe(j, z.tag, konto)?;
     if !j.stand().notbremse_aktiv() {
-        begruende(j, z.tag, WAECHTER, NOTBREMSE_AKTIV)?;
+        j.belege_papier_halt(z.tag.datum, PapierHalt::Notbremse)
+            .map_err(journal)?;
     }
     markt_offener_orders(j, z, konto, kurse_ok)?;
     pruefe_papier_verlustsperre(j, z, hoch, kurse_ok)?;
@@ -560,11 +560,12 @@ fn papier_notbremse(
     }
     j.schliesse_ab(z.tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
-    Err(halt(if j.stand().papier_verlustsperre_aktiv() {
-        PAPIER_VERLUSTSPERRE
-    } else {
-        NOTBREMSE_AKTIV
-    }))
+    Err(halt(
+        j.stand()
+            .papier_halt()
+            .unwrap_or(PapierHalt::Notbremse)
+            .meldung(),
+    ))
 }
 
 fn erneuere_schutzverkaeufe(
