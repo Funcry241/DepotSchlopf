@@ -15,12 +15,17 @@ use std::fs::{self, OpenOptions};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use depot_lage::DatenprobeFehler;
 
 /// Erste Zeile von `daten/update_offen.txt` (wie `depot_lauf::update::KOPF`).
 pub const KOPF: &str = "update-v1";
 /// So lange muss ein neuer Stand laufen, bis das Update als bestaetigt gilt.
 pub const BESTAETIGEN_NACH: Duration = Duration::from_secs(15);
+/// Ende der Wiederholungen etwa 90 Sekunden nach Dienststart, vor der Frist des Wächters.
+pub const BESTAETIGUNG_WIEDERHOLEN_FUER: Duration = Duration::from_secs(75);
+pub const BESTAETIGUNG_WIEDERHOLEN_ALLE: Duration = Duration::from_secs(2);
 /// Mit diesem Code endet der Dienst nach einem eingespielten Update; der Waechter startet ihn
 /// dann neu.
 pub const NEUSTART: u8 = 3;
@@ -107,6 +112,31 @@ pub fn kurz(c: &str) -> &str {
 /// Die Datei ist fremd, Git antwortet nicht, der Projektordner steht anders, oder die Datei
 /// laesst sich nicht loeschen. Dann bleibt sie liegen.
 pub fn bestaetige(wurzel: &Path) -> Result<Option<Offen>, String> {
+    bestaetige_einmal(wurzel).map_err(|e| e.to_string())
+}
+
+/// Wiederholt die Bestätigung innerhalb der Probezeit ausschließlich bei belegtem Journal.
+pub fn bestaetige_mit_wiederholung(
+    wurzel: &Path,
+    frist: Duration,
+    pause: Duration,
+) -> Result<Option<Offen>, String> {
+    let start = Instant::now();
+    loop {
+        match bestaetige_einmal(wurzel) {
+            Err(DatenprobeFehler::Belegt) => {
+                let rest = frist.saturating_sub(start.elapsed());
+                std::thread::sleep(pause.min(rest));
+                if start.elapsed() >= frist {
+                    return Err("Update nicht bestätigt: Journal war während der Datenprüfung durchgehend belegt.".into());
+                }
+            }
+            anderes => return anderes.map_err(|e| e.to_string()),
+        }
+    }
+}
+
+fn bestaetige_einmal(wurzel: &Path) -> Result<Option<Offen>, DatenprobeFehler> {
     let Some(o) = offen(wurzel)? else {
         return Ok(None);
     };
@@ -114,10 +144,15 @@ pub fn bestaetige(wurzel: &Path) -> Result<Option<Offen>, String> {
         return Err(format!(
             "Projektordner steht nicht auf dem eingespielten Stand {}; Update nicht bestaetigt.",
             kurz(&o.neu)
-        ));
+        )
+        .into());
     }
-    depot_lage::update_datenprobe(&wurzel.join("daten"))
-        .map_err(|e| format!("Update nicht bestätigt: Papierdaten nicht verwendbar ({e})."))?;
+    depot_lage::update_datenprobe(&wurzel.join("daten")).map_err(|e| match e {
+        DatenprobeFehler::Belegt => DatenprobeFehler::Belegt,
+        DatenprobeFehler::Fehler(e) => {
+            format!("Update nicht bestätigt: Papierdaten nicht verwendbar ({e}).").into()
+        }
+    })?;
     fs::remove_file(offen_pfad(wurzel)).map_err(|e| format!("update_offen.txt: {e}"))?;
     Ok(Some(o))
 }

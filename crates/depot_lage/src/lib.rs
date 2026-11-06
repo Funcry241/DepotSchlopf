@@ -38,7 +38,8 @@ pub use depot_sim::papierlauf::{
 };
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
 pub use zugang::{
-    PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien, update_datenprobe,
+    DatenprobeFehler, PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien,
+    update_datenprobe,
 };
 
 use depot_journal::Stand;

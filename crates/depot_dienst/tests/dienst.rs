@@ -1778,6 +1778,46 @@ fn nur_xetra(wurzel: PathBuf) -> Arc<Dienst> {
     d
 }
 
+#[test]
+fn zeitplan_holt_kursabruf_und_papiertag_nach_update_probe_nach() -> Result<(), String> {
+    let faellig = donnerstag(17, 45)?;
+    let spaeter = donnerstag(17, 47)?;
+    let tag = some(faellig.datum(), "Handelstag")?;
+    for (kurs_vorher, erwartet) in [
+        (None, Art::KurseVon(Boerse::Xetra)),
+        (Some(tag), Art::Papier),
+    ] {
+        let wurzel = eingeschaltet(ordner()?)?;
+        let erledigt = Erledigt {
+            termine: Some(tag),
+            kurse: kurs_vorher,
+            kurse_ok: kurs_vorher,
+            ..Erledigt::default()
+        };
+        let datei = wurzel.join("daten/dienst_erledigt.txt");
+        fs::write(&datei, erledigt.als_text()).map_err(|e| e.to_string())?;
+        let offen = depot_dienst::rueckfall::offen_pfad(&wurzel);
+        fs::write(&offen, "Update auf Probe").map_err(|e| e.to_string())?;
+        let d = nur_xetra(wurzel);
+        assert!(d.schritt(faellig).is_none());
+        assert!(d.schritt(spaeter).is_none());
+        assert!(wartend(&d).is_empty());
+        assert_eq!(
+            fs::read_to_string(datei).map_err(|e| e.to_string())?,
+            erledigt.als_text()
+        );
+
+        fs::remove_file(offen).map_err(|e| e.to_string())?;
+        let (nr, kind) = some(d.schritt(spaeter), "Fälliger Auftrag nach Bestätigung")?;
+        assert_eq!(
+            d.sperre().laufend.as_ref().map(|a| (a.art, a.anlass)),
+            Some((erwartet, Anlass::Zeitplan))
+        );
+        d.verfolge(nr, kind, || donnerstag(17, 48).ok());
+    }
+    Ok(())
+}
+
 /// Die Live-Ansicht nach einem Neustart: der Satz mit `id="neustart"`.
 fn neustart_satz(d: &Dienst, t: Zeitpunkt) -> Option<String> {
     let seite = seiten::live("s", &d.sperre(), t.datum());

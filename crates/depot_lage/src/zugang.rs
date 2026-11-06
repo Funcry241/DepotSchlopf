@@ -59,8 +59,30 @@ pub fn mit_journal<R>(daten: &Path, f: impl FnOnce(Zugang<'_>) -> R) -> R {
     }
 }
 
+/// Eine belegte Journalsperre ist vorübergehend. Andere Fehler verlangen einen Eingriff.
+#[derive(Debug)]
+pub enum DatenprobeFehler {
+    Belegt,
+    Fehler(String),
+}
+
+impl From<String> for DatenprobeFehler {
+    fn from(grund: String) -> Self {
+        Self::Fehler(grund)
+    }
+}
+
+impl std::fmt::Display for DatenprobeFehler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Belegt => f.write_str("Journal belegt"),
+            Self::Fehler(grund) => f.write_str(grund),
+        }
+    }
+}
+
 /// Prüft die Daten für einen Update-Kandidaten ohne Schreibzugriff oder Netz.
-pub fn update_datenprobe(daten: &Path) -> Result<(), String> {
+pub fn update_datenprobe(daten: &Path) -> Result<(), DatenprobeFehler> {
     use depot_journal::Konto as _;
     use depot_kern::{Topf, TopfId};
     use depot_sim::papierlauf::START_JE_TOPF;
@@ -69,13 +91,19 @@ pub fn update_datenprobe(daten: &Path) -> Result<(), String> {
     let konto = daten.join(PAPIERKONTO);
     let konto_da = match fs::symlink_metadata(&konto) {
         Ok(m) if m.is_file() => true,
-        Ok(_) => return Err("Papierkonto ist keine reguläre Datei".into()),
+        Ok(_) => {
+            return Err(DatenprobeFehler::Fehler(
+                "Papierkonto ist keine reguläre Datei".into(),
+            ));
+        }
         Err(e) if e.kind() == ErrorKind::NotFound => false,
-        Err(e) => return Err(format!("Papierkonto: {e}")),
+        Err(e) => return Err(format!("Papierkonto: {e}").into()),
     };
     if !Journal::eingerichtet(&journal).map_err(|e| fehler_text(&e))? {
         return if konto_da {
-            Err("Papierkonto ohne Journal und Vermerk".into())
+            Err(DatenprobeFehler::Fehler(
+                "Papierkonto ohne Journal und Vermerk".into(),
+            ))
         } else {
             Ok(())
         };
@@ -109,7 +137,11 @@ pub fn update_datenprobe(daten: &Path) -> Result<(), String> {
             ))
         }
     })
-    .map_err(|e| fehler_text(&e))?
+    .map_err(|e| match e {
+        JournalFehler::Belegt => DatenprobeFehler::Belegt,
+        e => fehler_text(&e).into(),
+    })?
+    .map_err(DatenprobeFehler::Fehler)
 }
 
 /// Sperrdateien im Datenordner: `*.sperre` (abgebrochener Lauf) und `*.halt` (etwa
@@ -157,7 +189,7 @@ mod tests {
         let daten = std::env::temp_dir().join(format!("depot-datenprobe-{}", std::process::id()));
         fs::create_dir(&daten).map_err(|e| e.to_string())?;
         let test = (|| {
-            update_datenprobe(&daten)?;
+            update_datenprobe(&daten).map_err(|e| e.to_string())?;
             let journal =
                 include_bytes!("../../../docs/pruefberichte/papierfreigabe/daten/journal.txt");
             let vermerk =
@@ -167,7 +199,7 @@ mod tests {
             fs::write(daten.join(JOURNAL), journal).map_err(|e| e.to_string())?;
             fs::write(daten.join("journal.vermerk"), vermerk).map_err(|e| e.to_string())?;
             fs::write(daten.join(PAPIERKONTO), konto).map_err(|e| e.to_string())?;
-            update_datenprobe(&daten)?;
+            update_datenprobe(&daten).map_err(|e| e.to_string())?;
             let abschluss = format!("2026-11-04;1500000;{}", "a".repeat(64));
             let alt = inhalt_fuer(&[
                 (Art::Topf, "A;500000;"),
@@ -181,7 +213,8 @@ mod tests {
             fs::write(daten.join(JOURNAL), &alt).map_err(|e| e.to_string())?;
             fs::write(daten.join("journal.vermerk"), &vermerk).map_err(|e| e.to_string())?;
             assert!(
-                update_datenprobe(&daten).is_err_and(|e| e.contains("UTC-Zeit der Papierfreigabe"))
+                update_datenprobe(&daten)
+                    .is_err_and(|e| e.to_string().contains("UTC-Zeit der Papierfreigabe"))
             );
             assert_eq!(
                 fs::read(daten.join(JOURNAL)).map_err(|e| e.to_string())?,

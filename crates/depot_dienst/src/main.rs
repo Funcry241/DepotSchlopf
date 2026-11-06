@@ -82,13 +82,20 @@ fn bestaetigen(d: &Arc<Dienst>) {
             let d = Arc::clone(d);
             thread::spawn(move || {
                 thread::sleep(rueckfall::BESTAETIGEN_NACH);
-                let m = match rueckfall::bestaetige(&d.wurzel) {
+                let m = match rueckfall::bestaetige_mit_wiederholung(
+                    &d.wurzel,
+                    rueckfall::BESTAETIGUNG_WIEDERHOLEN_FUER,
+                    rueckfall::BESTAETIGUNG_WIEDERHOLEN_ALLE,
+                ) {
                     Ok(Some(o)) => (
                         false,
                         format!("Update auf {} bestätigt.", rueckfall::kurz(&o.neu)),
                     ),
                     Ok(None) => (false, "Kein Update offen.".to_string()),
-                    Err(e) => (true, e),
+                    Err(e) => {
+                        eprintln!("[Update] {e}");
+                        (true, e)
+                    }
                 };
                 d.sperre().update_meldung = Some(m);
             });
