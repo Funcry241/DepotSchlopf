@@ -551,6 +551,9 @@ impl Journal {
             Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
                 "Abrechnungstag nur ueber beginne_abrechnung".into(),
             )),
+            Art::Wissensstichtag => Err(JournalFehler::Abgelehnt(
+                "Wissensstichtag nur ueber belege_wissensstichtag".into(),
+            )),
             Art::Format => Err(JournalFehler::Abgelehnt(
                 "Die Umstellung entsteht nur ueber stelle_um".into(),
             )),
@@ -723,6 +726,15 @@ impl Journal {
             return Ok(());
         }
         self.schreibe_eintrag(Art::Format, &FORMAT.to_string())
+    }
+
+    /// Fixiert die beim Start des Papiertags verfuegbare Weltlage.
+    pub fn belege_wissensstichtag(
+        &mut self,
+        tag: Datum,
+        zeit: depot_kern::Zeitpunkt,
+    ) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Wissensstichtag, &format!("{tag};{zeit}"))
     }
 
     /// Belegt den Handelstag vor der ersten Ausfuehrung und gibt faellige Erloese frei.
