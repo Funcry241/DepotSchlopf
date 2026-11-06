@@ -623,15 +623,19 @@ fn verkauft(j: &Journal, auftraege: &[GenehmigterAuftrag]) -> bool {
 }
 
 fn offener_erloes(j: &Journal, konto: &dyn Broker, id: TopfId) -> Result<Cent, LaufFehler> {
-    konto.offene_erloese().into_iter().flatten().try_fold(
-        Cent::NULL,
-        |summe, (nr, (_, netto))| {
+    konto
+        .offene_erloese()
+        .into_iter()
+        .flatten()
+        .try_fold(Cent::NULL, |summe, (nr, (_, netto))| {
             let l = j
                 .stand()
                 .auftrag(*nr)
                 .ok_or_else(|| halt(format!("Verkaufserloes zu unbekanntem Auftrag {nr}")))?;
             if l.beleg.richtung != Richtung::Verkauf || l.zustand != AuftragsZustand::Gefuellt {
-                return Err(halt(format!("Verkaufserloes ohne ausgefuehrten Auftrag {nr}")));
+                return Err(halt(format!(
+                    "Verkaufserloes ohne ausgefuehrten Auftrag {nr}"
+                )));
             }
             if l.beleg.topf == id {
                 summe
@@ -640,8 +644,7 @@ fn offener_erloes(j: &Journal, konto: &dyn Broker, id: TopfId) -> Result<Cent, L
             } else {
                 Ok(summe)
             }
-        },
-    )
+        })
 }
 
 fn kauf_abgerechnet(

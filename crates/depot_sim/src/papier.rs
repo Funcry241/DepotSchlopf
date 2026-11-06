@@ -117,7 +117,9 @@ impl Papierkonto {
     fn abgerechnetes_bargeld(&self) -> Option<Cent> {
         self.offene_erloese
             .values()
-            .try_fold(self.bargeld, |saldo, (_, erloes)| saldo.checked_sub(*erloes))
+            .try_fold(self.bargeld, |saldo, (_, erloes)| {
+                saldo.checked_sub(*erloes)
+            })
     }
 
     fn gedeckt(&self, a: &Order) -> Option<bool> {
