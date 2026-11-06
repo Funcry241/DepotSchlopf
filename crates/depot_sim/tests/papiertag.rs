@@ -1108,7 +1108,10 @@ fn notbremse_arbeitet_verkaeufe_nach_neustart_ab_und_bleibt_aktiv() -> Result<()
     let (sap, allianz) = (sap()?, allianz()?);
     let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf A")?;
     topf.setze_bestand(sap.clone(), 10);
-    let start = [topf, vorbedingung(Topf::neu(TopfId::B, Cent::NULL), "Topf B")?];
+    let start = [
+        topf,
+        vorbedingung(Topf::neu(TopfId::B, Cent::NULL), "Topf B")?,
+    ];
     let universum = universum()?;
     {
         Papierdatei::oeffnen(&ort.konto, false, &start)?;
@@ -1127,7 +1130,13 @@ fn notbremse_arbeitet_verkaeufe_nach_neustart_ab_und_bleibt_aktiv() -> Result<()
         let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
         let (mut dachs, mut maus) = kaeufer(tag(t)?, &allianz);
         let aus = papiertag(
-            &mut j, tag(t)?, &universum, &start, &mut dachs, &mut maus, &mut k,
+            &mut j,
+            tag(t)?,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut k,
         );
         assert!(matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Notbremse")));
         assert_eq!(dachs.aufrufe, 0);

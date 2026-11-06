@@ -66,7 +66,14 @@ pub fn papier(
         maus,
         konto: &mut konto,
     };
-    let ausgang = papiertag_mit_uhr(&mut j, heute, universum, &start, &mut beteiligte, Some(&uhr));
+    let ausgang = papiertag_mit_uhr(
+        &mut j,
+        heute,
+        universum,
+        &start,
+        &mut beteiligte,
+        Some(&uhr),
+    );
     if let Some(f) = konto.fehler() {
         return Err(format!(
             "Papierkonto nicht geschrieben: {f}. Papierkonto und Journal weichen ab; der naechste Lauf haelt an"

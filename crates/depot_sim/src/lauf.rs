@@ -413,7 +413,7 @@ pub(crate) fn ein_tag(
     match befund {
         WaechterBefund::InOrdnung => {}
         WaechterBefund::Notbremse { .. } if z.uhr.is_some() => {
-            return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto, toepfe);
+            return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto);
         }
         WaechterBefund::Notbremse { .. } => {
             begruende(
@@ -489,10 +489,11 @@ fn papier_notbremse(
     z: &Zyklus<'_>,
     hoch: Cent,
     konto: &mut dyn Broker,
-    toepfe: Vec<Topf>,
 ) -> Result<Cent, LaufFehler> {
     stoppe_kaeufe(j, z.tag, konto)?;
     begruende(j, z.tag, WAECHTER, NOTBREMSE_AKTIV)?;
+    markt_offener_orders(j, z, konto)?;
+    let toepfe: Vec<_> = j.stand().toepfe().values().cloned().collect();
     for mut topf in toepfe {
         // Bereits beauftragte Verkaeufe bleiben bestehen und binden ihren offenen Rest.
         for l in j
@@ -511,7 +512,6 @@ fn papier_notbremse(
             .ok_or_else(|| halt("Notbremse: Kurs fehlt; Halt ohne Verkauf"))?;
         fuehre_aus(j, z, topf.id(), &auftraege, konto)?;
     }
-    markt_offener_orders(j, z, konto)?;
     j.schliesse_ab(z.tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
     Err(halt(NOTBREMSE_AKTIV))
@@ -759,14 +759,6 @@ fn fuehre_aus(
     let mut gesendet = Vec::new();
     for a in auftraege {
         let nr = a.auftrag().kennung.nr();
-        let versand = z
-            .uhr
-            .map(|uhr| {
-                uhr()
-                    .filter(|zeit| *zeit >= tag.kurse.stand())
-                    .ok_or_else(|| halt("Keine verlaessliche Versandzeit"))
-            })
-            .transpose()?;
         match j.reserviere_auftrag(z.grenzen, id, a) {
             Ok(()) => {}
             Err(JournalFehler::Abgelehnt(grund)) => {
@@ -780,6 +772,14 @@ fn fuehre_aus(
             }
             Err(e) => return Err(journal(e)),
         }
+        let versand = z
+            .uhr
+            .map(|uhr| {
+                uhr()
+                    .filter(|zeit| *zeit >= tag.kurse.stand())
+                    .ok_or_else(|| halt("Keine verlaessliche Versandzeit"))
+            })
+            .transpose()?;
         let meldung = versand.map_or(Meldung::Gesendet, Meldung::GesendetAm);
         j.melde(nr, &meldung).map_err(journal)?;
         let antwort = match versand {
