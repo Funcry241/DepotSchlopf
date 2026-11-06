@@ -1,5 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: TestOnly
-zweck: Rueckfalltests unter Windows mit Git-Zeilenenden und cmd-Pfadquotierung ausfuehrbar machen.
+klasse: Funktion
+zweck: Laufende und abgeschlossene Protokolle lassen sich aus der Live-Ansicht kopieren.
 pfade:
-crates/depot_dienst/tests/update.rs
+crates/depot_dienst/

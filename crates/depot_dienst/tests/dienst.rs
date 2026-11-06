@@ -624,6 +624,9 @@ fn auftrag_laeuft_mit_protokoll_und_eindeutiger_kennung() -> Result<(), String> 
     assert_eq!(a.erfolg, Some(true));
     assert_eq!(a.protokoll, vec!["lauf termine".to_string()]);
     assert_eq!(a.kennung, format!("{}-{nr}", t.sekunden()));
+    let seite = seiten::live(TOKEN, "s", &z, t.datum());
+    assert!(seite.contains("data-protokoll-kopieren>Protokoll kopieren"));
+    assert!(seite.contains("<pre>lauf termine\n</pre>"));
     drop(z);
     assert!(d.schritt(t).is_none());
     assert!(d.sperre().lage.is_some(), "danach das Lagebild");

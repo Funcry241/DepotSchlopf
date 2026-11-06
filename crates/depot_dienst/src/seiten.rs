@@ -465,11 +465,16 @@ fn protokoll(id: &str, a: &Auftrag, offen: bool) -> String {
         text.push_str(&maskiere(z));
         text.push('\n');
     }
-    if text.is_empty() {
+    let kopieren = if text.is_empty() {
         text.push_str("(noch keine Ausgabe)");
-    }
+        ""
+    } else {
+        "<button type=\"button\" data-protokoll-kopieren>Protokoll kopieren</button> \
+         <span class=\"leise\" role=\"status\"></span>"
+    };
     format!(
-        "<details id=\"{id}-{}\"{}><summary>Protokoll ({} Zeilen)</summary><pre>{text}</pre></details>",
+        "<details id=\"{id}-{}\"{}><summary>Protokoll ({} Zeilen)</summary>\
+         {kopieren}<pre>{text}</pre></details>",
         maskiere(&a.kennung),
         if offen { " open" } else { "" },
         a.protokoll.len()
@@ -1245,6 +1250,29 @@ pub fn einrichtung(
 /// tragen dann das Token des neuen Starts.
 pub const APP_JS: &str = r#""use strict";
 (function () {
+  // Delegiert, da Live auch laufende Protokolle regelmäßig ersetzt.
+  document.addEventListener("click", async function (e) {
+    var b = e.target.closest("[data-protokoll-kopieren]");
+    if (!b) { return; }
+    var block = b.closest("details");
+    var log = block.querySelector("pre");
+    var status = block.querySelector("[role=status]");
+    try {
+      await navigator.clipboard.writeText(log.textContent);
+      status.textContent = "Kopiert.";
+    } catch (_) {
+      var auswahl = window.getSelection();
+      if (auswahl && log.isConnected) {
+        var bereich = document.createRange();
+        bereich.selectNodeContents(log);
+        auswahl.removeAllRanges();
+        auswahl.addRange(bereich);
+        status.textContent = "Text markiert. Drücke Strg+C zum Kopieren.";
+      } else {
+        status.textContent = "Bitte markiere und kopiere den Text von Hand.";
+      }
+    }
+  });
   // Doppelklicks: Ein abgesendetes Formular sperrt seinen Knopf. Der Dienst lehnt doppelte
   // Auftraege ohnehin ab; so sieht man sofort, dass der Klick angekommen ist.
   document.addEventListener("submit", function (e) {
