@@ -69,7 +69,7 @@ struct PapierOrder {
     auftrag: Order,
     status: KontoStatus,
     ausfuehrungen: Vec<Ausfuehrung>,
-    versand: Option<Zeitpunkt>,
+    versand: Option<(Zeitpunkt, Zeitpunkt)>,
 }
 
 /// Das erfundene Gesamtkonto.
@@ -168,10 +168,7 @@ impl Papierkonto {
         };
         let a = &o.auftrag;
         let mut eintrag = kurse.eintrag(&a.isin);
-        if let Some(versand) = o.versand {
-            let Some(schluss) = papierorder_schluss(&a.isin, versand) else {
-                return;
-            };
+        if let Some((_, schluss)) = o.versand {
             let stand = kurse.stand();
             if stand < schluss {
                 return;
@@ -289,9 +286,14 @@ impl Papierkonto {
             stueck: a.stueck,
             limit: a.limit,
         };
-        if versand.is_some_and(|zeit| papierorder_schluss(&o.isin, zeit).is_none()) {
-            return Sendeantwort::Abgelehnt("keine Frist der Boerse".into());
-        }
+        let versand = if let Some(zeit) = versand {
+            let Some(frist) = papierorder_schluss(&o.isin, zeit) else {
+                return Sendeantwort::Abgelehnt("keine Frist der Boerse".into());
+            };
+            Some((zeit, frist))
+        } else {
+            None
+        };
         let status = if self.gedeckt(&o) == Some(true) {
             KontoStatus::Offen
         } else {
@@ -412,8 +414,8 @@ impl Papierkonto {
                 a.limit.0,
                 status_text(o.status)
             );
-            if let Some(zeit) = o.versand {
-                let _ = writeln!(t, "versand;{nr};{zeit}");
+            if let Some((zeit, frist)) = o.versand {
+                let _ = writeln!(t, "versand;{nr};{zeit};{frist}");
             }
             for x in &o.ausfuehrungen {
                 let _ = write!(
@@ -476,23 +478,23 @@ impl Papierkonto {
                     };
                     k.orders.insert(nr.parse().map_err(|_| fehler())?, o);
                 }
-                ["versand", nr, zeit] => {
+                ["versand", nr, zeit, frist] => {
                     let nr = nr.parse().map_err(|_| fehler())?;
                     let o = k.orders.get_mut(&nr).ok_or_else(fehler)?;
                     let zeit = Zeitpunkt::lies(zeit).ok_or_else(fehler)?;
-                    papierorder_schluss(&o.auftrag.isin, zeit).ok_or_else(fehler)?;
-                    o.versand = Some(zeit);
+                    let frist = Zeitpunkt::lies(frist)
+                        .filter(|f| *f > zeit)
+                        .ok_or_else(fehler)?;
+                    o.versand = Some((zeit, frist));
                 }
                 ["ausfuehrung", nr, stueck, kurs, gebuehr, rest @ ..] => {
                     let nr: u64 = nr.parse().map_err(|_| fehler())?;
                     let o = k.orders.get_mut(&nr).ok_or_else(fehler)?;
                     let kurszeit = match (o.versand, rest) {
                         (None, []) => None,
-                        (Some(versand), [zeit]) => Some(
-                            Zeitpunkt::lies(zeit)
-                                .filter(|z| papierorder_schluss(&o.auftrag.isin, versand) == Some(*z))
-                                .ok_or_else(fehler)?,
-                        ),
+                        (Some((_, frist)), [zeit]) if Zeitpunkt::lies(zeit) == Some(frist) => {
+                            Some(frist)
+                        }
                         _ => return Err(fehler()),
                     };
                     o.ausfuehrungen.push(Ausfuehrung {

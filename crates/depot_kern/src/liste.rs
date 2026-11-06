@@ -152,7 +152,7 @@ pub fn beobachtungsliste() -> Result<Vec<Wert>, String> {
 /// Der erste Schluss der Boerse des Werts nach dem Versand. Nur dieser Schluss ist fuer
 /// eine zeitbelegte Papierorder erreichbar. Ohne bekannte Boerse gibt es keine Frist.
 pub fn papierorder_schluss(isin: &Isin, versand: Zeitpunkt) -> Option<Zeitpunkt> {
-    let (_, boerse, _, _) = WERTE.iter().find(|(id, ..)| *id == isin.as_str())?;
+    let (_, boerse, _, _) = WERTE.iter().find(|(id, ..)| *id == isin.als_str())?;
     let mut tag = versand.datum()?;
     loop {
         if boerse.handelstag(tag) {

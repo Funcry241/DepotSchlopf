@@ -803,7 +803,14 @@ fn fuehre_aus(
                     .ok_or_else(|| halt("Keine verlaessliche Versandzeit"))
             })
             .transpose()?;
-        let meldung = versand.map_or(Meldung::Gesendet, Meldung::GesendetAm);
+        let meldung = match versand {
+            Some(zeit) => {
+                let frist = papierorder_schluss(&a.auftrag().isin, zeit)
+                    .ok_or_else(|| halt("Keine Boersenfrist fuer den Auftrag"))?;
+                Meldung::GesendetAm(zeit, frist)
+            }
+            None => Meldung::Gesendet,
+        };
         j.melde(nr, &meldung).map_err(journal)?;
         let antwort = match versand {
             Some(zeit) => konto.sende_am(a, zeit),
@@ -866,12 +873,11 @@ fn protokolliere_ausfuehrungen(
             )?;
         }
         if l.zustand == AuftragsZustand::Verfallen {
-            let grund = match (papierkurse, l.versand) {
-                (Some(kurse), Some(versand)) => {
-                    let schluss = papierorder_schluss(&l.beleg.isin, versand);
-                    if schluss.and_then(Zeitpunkt::datum) != kurse.stand().datum() {
+            let grund = match (papierkurse, l.frist) {
+                (Some(kurse), Some(schluss)) => {
+                    if schluss.datum() != kurse.stand().datum() {
                         "Boersentag der Order bereits vorbei"
-                    } else if kurse.eintrag(&l.beleg.isin).map(depot_kern::Kurs::zeitpunkt) != schluss {
+                    } else if kurse.eintrag(&l.beleg.isin).map(depot_kern::Kurs::zeitpunkt) != Some(schluss) {
                         "kein gepruefter Kurs am Boersenschluss"
                     } else {
                         "Kurs ausserhalb des Limits"
