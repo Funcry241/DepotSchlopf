@@ -435,9 +435,11 @@ fn schluessel_ohne_textform() -> Result<(), String> {
 }
 
 fn weltmodell_attrappen() -> (Attrappe, Attrappe) {
-    let prognose = |richtung: &str| format!(
-        r#"{{"ereignis_nr":1,"isin":"DE0007164600","richtung":"{richtung}","handelstage":3,"begruendung":"Ausblick","widerlegung":"Prognose gesenkt"}}"#
-    );
+    let prognose = |richtung: &str| {
+        format!(
+            r#"{{"ereignis_nr":1,"isin":"DE0007164600","richtung":"{richtung}","handelstage":3,"begruendung":"Ausblick","widerlegung":"Prognose gesenkt"}}"#
+        )
+    };
     let dachs_antwort = format!(
         r#"{{"einschaetzung":"Zahlen gut","ziele":[{{"isin":"DE0007164600","gewicht_bp":3000,"begruendung":"Zahlen gut"}}],"prognose":{}}}"#,
         prognose("steigt")
@@ -447,9 +449,13 @@ fn weltmodell_attrappen() -> (Attrappe, Attrappe) {
         prognose("faellt")
     );
     let mut netz_dachs = Attrappe::default();
-    netz_dachs.antworten.push_back(claude(&dachs_antwort, 20_000, 1_500, 0));
+    netz_dachs
+        .antworten
+        .push_back(claude(&dachs_antwort, 20_000, 1_500, 0));
     let mut netz_maus = Attrappe::default();
-    netz_maus.antworten.push_back(gpt(&maus_antwort, 10_000, 800));
+    netz_maus
+        .antworten
+        .push_back(gpt(&maus_antwort, 10_000, 800));
     netz_maus.antworten.push_back(gpt(
         "{\"zustimmung\": true, \"begruendung\": \"Zahlen belegt\"}",
         10_000,
@@ -540,9 +546,19 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
         .count();
     assert_eq!(mit_kosten, 3, "jede Antwort mit Kosten im Journal");
     let ausgangskurs = some(Preis::lies_euro("230"), "Ausgangskurs")?;
-    let prognosen: Vec<_> = j.stand().weltprognosen().iter().map(|b| {
-        (b.berater, b.prognose.richtung, b.prognose.handelstage, b.ausgangskurs)
-    }).collect();
+    let prognosen: Vec<_> = j
+        .stand()
+        .weltprognosen()
+        .iter()
+        .map(|b| {
+            (
+                b.berater,
+                b.prognose.richtung,
+                b.prognose.handelstage,
+                b.ausgangskurs,
+            )
+        })
+        .collect();
     assert_eq!(
         prognosen,
         [
@@ -550,10 +566,14 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
             (BeraterId::Maus, Prognoserichtung::Faellt, 3, ausgangskurs),
         ]
     );
-    let erste_pruefung = j.eintraege().iter().position(|(art, text)| {
-        *art == Art::Begruendung && text.contains("Zustimmung:")
-    });
-    let zweite_prognose = j.eintraege().iter().rposition(|(art, _)| *art == Art::Weltprognose);
+    let erste_pruefung = j
+        .eintraege()
+        .iter()
+        .position(|(art, text)| *art == Art::Begruendung && text.contains("Zustimmung:"));
+    let zweite_prognose = j
+        .eintraege()
+        .iter()
+        .rposition(|(art, _)| *art == Art::Weltprognose);
     assert!(matches!((zweite_prognose, erste_pruefung), (Some(p), Some(u)) if p < u));
     assert!(!sperre.exists());
     Ok(())

@@ -493,7 +493,11 @@ impl<N: Netz> KiBerater<N> {
     fn ohne_geheimnis_antwort(&self, a: Antwort) -> Result<Antwort, String> {
         let mut texte = std::iter::once(&a.einschaetzung)
             .chain(a.vorschlag.iter().flat_map(|v| v.begruendung.values()))
-            .chain(a.prognose.iter().flat_map(|p| [&p.begruendung, &p.widerlegung]));
+            .chain(
+                a.prognose
+                    .iter()
+                    .flat_map(|p| [&p.begruendung, &p.widerlegung]),
+            );
         if texte.any(|t| self.enthaelt_schluessel(t)) {
             return Err(GEHEIMNIS.into());
         }

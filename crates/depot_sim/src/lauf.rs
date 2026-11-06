@@ -23,7 +23,9 @@
 //! Was ein angefangener Tag gekostet hat, steht im Journal; ihn zu wiederholen, waere eine
 //! zweite Frage fuer denselben Zyklus.
 
-use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung, PrognoseBeleg, Stand, Weltprognose};
+use depot_journal::{
+    AuftragsZustand, Journal, JournalFehler, Meldung, PrognoseBeleg, Stand, Weltprognose,
+};
 use depot_kern::liste::papierorder_schluss;
 use depot_kern::{
     BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
@@ -663,7 +665,10 @@ fn belege_prognose(
     berater: BeraterId,
     prognose: Weltprognose,
 ) -> Result<(), LaufFehler> {
-    let ereignis = prognose.ereignis_nr.checked_sub(1).and_then(|nr| lage.ereignisse.get(nr));
+    let ereignis = prognose
+        .ereignis_nr
+        .checked_sub(1)
+        .and_then(|nr| lage.ereignisse.get(nr));
     if let (Some(ereignis), Some(ausgangskurs)) = (ereignis, lage.kurse.kurs(&prognose.isin))
         && prognose.gueltig()
     {
@@ -731,7 +736,10 @@ fn topf_zyklus(
     pruefer: &mut dyn Berater,
     konto: &mut dyn Broker,
 ) -> Result<(), LaufFehler> {
-    let TopfAntwort { topf, mut vorschlag } = antwort;
+    let TopfAntwort {
+        topf,
+        mut vorschlag,
+    } = antwort;
     let (tag, zyklus) = (z.tag, z.nr);
     let id = topf.id();
     let zweiter = andere(id.berater());

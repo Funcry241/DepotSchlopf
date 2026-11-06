@@ -380,10 +380,20 @@ impl Stand {
         let b = PrognoseBeleg::lies(inhalt).ok_or("Weltprognose unlesbar")?;
         if self.abrechnungstag != Some(b.datum)
             || self.abschluss.as_ref().is_some_and(|a| a.datum >= b.datum)
-            || self.weltprognosen.iter().any(|alt| alt.datum == b.datum && alt.berater == b.berater)
-            || b.prognose.ereignis_nr.checked_sub(1).and_then(|nr| {
-                self.beobachtungen.iter().filter(|(tag, _)| *tag == b.datum).nth(nr)
-            }).is_none_or(|(_, e)| *e != b.ereignis)
+            || self
+                .weltprognosen
+                .iter()
+                .any(|alt| alt.datum == b.datum && alt.berater == b.berater)
+            || b.prognose
+                .ereignis_nr
+                .checked_sub(1)
+                .and_then(|nr| {
+                    self.beobachtungen
+                        .iter()
+                        .filter(|(tag, _)| *tag == b.datum)
+                        .nth(nr)
+                })
+                .is_none_or(|(_, e)| *e != b.ereignis)
             || !self.kurse.iter().any(|k| {
                 k.isin() == &b.prognose.isin
                     && k.kurs().handelstag() == b.datum

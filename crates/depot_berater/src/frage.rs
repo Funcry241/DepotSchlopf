@@ -138,7 +138,11 @@ fn ereignis_zeile(nr: usize, text: &str) -> String {
 }
 
 pub(crate) fn prognose_sichtbar(p: &Weltprognose, lage: &Lage<'_>, frage: &str) -> bool {
-    let Some(text) = p.ereignis_nr.checked_sub(1).and_then(|nr| lage.ereignisse.get(nr)) else {
+    let Some(text) = p
+        .ereignis_nr
+        .checked_sub(1)
+        .and_then(|nr| lage.ereignisse.get(nr))
+    else {
         return false;
     };
     let zeile = ereignis_zeile(p.ereignis_nr, text);

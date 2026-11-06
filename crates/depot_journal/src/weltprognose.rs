@@ -89,8 +89,18 @@ impl PrognoseBeleg {
 
     pub(crate) fn lies(text: &str) -> Option<Self> {
         let teile: Vec<_> = text.split(';').collect();
-        let [datum, berater, isin, richtung, tage, nr, preis, ereignis, grund, widerlegung] =
-            teile.as_slice()
+        let [
+            datum,
+            berater,
+            isin,
+            richtung,
+            tage,
+            nr,
+            preis,
+            ereignis,
+            grund,
+            widerlegung,
+        ] = teile.as_slice()
         else {
             return None;
         };
