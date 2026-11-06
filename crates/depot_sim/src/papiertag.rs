@@ -28,7 +28,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use depot_journal::{Journal, KursBeleg, NachrichtBeleg, Stand};
+use depot_journal::{Journal, KursBeleg, NachrichtBeleg, PAPIER_VERLUSTSPERRE, Stand};
 use depot_kern::{
     Cent, Datum, Grenzen, Herkunft, Isin, Kurs, Kurse, Rundung, Topf, Universum, Zeitpunkt,
 };
@@ -36,8 +36,7 @@ use depot_regelwerk::waehle_tageswerte;
 use sha2::{Digest, Sha256};
 
 use crate::lauf::{
-    Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal, notbremse_aktiv,
-    pruefe_stoerung, rechnung,
+    Beteiligte, LaufFehler, Zyklus, depotwert, ein_tag, halt, journal, pruefe_stoerung, rechnung,
 };
 use crate::papier::Broker;
 use crate::szenario::{Berater, Tag};
@@ -309,6 +308,8 @@ pub enum Tageslage {
     Offen,
     /// Notbremse: Nur bereits offene Verkaeufe koennen ausgefuehrt werden.
     NurSchutzverkaeufe,
+    /// Schutzverkaeufe sind erledigt; der Papiertag kann den Wiederanlauf pruefen.
+    WartetAufWiederanlauf,
     /// Der Tag ist schon abgeschlossen.
     Abgeschlossen(Datum),
 }
@@ -321,7 +322,10 @@ pub enum Tageslage {
 pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehler> {
     if let Some(a) = stand.abschluss() {
         if a.datum == handelstag {
-            if notbremse_aktiv(stand) {
+            if stand.papier_verlustsperre_aktiv() {
+                return Err(halt(PAPIER_VERLUSTSPERRE));
+            }
+            if stand.notbremse_aktiv() {
                 return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
             }
             return Ok(Tageslage::Abgeschlossen(a.datum));
@@ -341,9 +345,12 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
             stand.seit_abschluss()
         )));
     }
-    if notbremse_aktiv(stand) {
+    if stand.notbremse_aktiv() {
         if stand.offene_auftraege().next().is_none() && stand.gehalten().is_empty() {
-            return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
+            if stand.papier_verlustsperre_aktiv() {
+                return Err(halt(PAPIER_VERLUSTSPERRE));
+            }
+            return Ok(Tageslage::WartetAufWiederanlauf);
         }
         return Ok(Tageslage::NurSchutzverkaeufe);
     }
@@ -511,6 +518,7 @@ pub(crate) fn papiertag_mit_uhr(
         nr,
         abdruck: &ab,
         uhr: Some(&belegte_zeit),
+        vollstaendige_kurse: wahl.ausgelassen.is_empty(),
     };
     let hoechststand = ein_tag(j, &z, hoch, &wahl.fehler, beteiligte)?;
     Ok(Ausgang::Abgeschlossen {

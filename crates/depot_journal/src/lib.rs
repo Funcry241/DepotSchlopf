@@ -68,7 +68,9 @@ pub use konto::{
 };
 pub use kursbeleg::KursBeleg;
 pub use nachrichtbeleg::{MAX_NACHRICHT, NachrichtBeleg};
-pub use stand::{Abschluss, Art, AuftragsBeleg, FORMAT, FORMAT_ALT, Stand};
+pub use stand::{
+    Abschluss, Art, AuftragsBeleg, FORMAT, FORMAT_ALT, NOTBREMSE_AKTIV, PAPIER_VERLUSTSPERRE, Stand,
+};
 pub use terminbeleg::{Fortschreibung, TerminBeleg};
 pub use weltprognose::{PrognoseBeleg, Prognoserichtung, Weltprognose};
 

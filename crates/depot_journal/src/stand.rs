@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use depot_kern::{Cent, Datum, Herkunft, Isin, Rundung, Topf, TopfId, Zeitpunkt};
+use depot_kern::{Cent, Datum, Grenzen, Herkunft, Isin, Rundung, Topf, TopfId, Zeitpunkt};
 use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 
 use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
@@ -19,6 +19,12 @@ use crate::nachrichtbeleg::{NachrichtBeleg, lies_nachrichtbeleg, nachrichtbeleg_
 use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
 
 use crate::weltprognose::PrognoseBeleg;
+
+/// Aktivierungsbeleg des Papier-Waechters, auch in bestehenden Journalen.
+pub const NOTBREMSE_AKTIV: &str = "Notbremse aktiv: nur offene Verkaeufe weiter abgleichen";
+
+/// Dauerhafter Halt der Papier-Notbremse nach Erreichen der Gesamtverlustgrenze.
+pub const PAPIER_VERLUSTSPERRE: &str = "Notbremse: 30 % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig";
 
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +67,8 @@ pub enum Art {
     Abschluss,
     /// Handelstag fuer die Abrechnung nachfolgender Ausfuehrungen.
     Abrechnungstag,
+    /// Tagesabschluss, der zugleich die Papier-Notbremse zuruecksetzt.
+    NotbremseFreigabe,
     /// Handelstag und UTC-Wissensstichtag, vor der Entscheidung belegt.
     Wissensstichtag,
 }
@@ -82,6 +90,7 @@ impl Art {
             Art::Abschluss => "abschluss",
             Art::Format => "format",
             Art::Abrechnungstag => "abrechnungstag",
+            Art::NotbremseFreigabe => "notbremse-freigabe",
             Art::Wissensstichtag => "wissensstichtag",
         }
     }
@@ -101,6 +110,7 @@ impl Art {
             Art::Begruendung,
             Art::Abschluss,
             Art::Abrechnungstag,
+            Art::NotbremseFreigabe,
             Art::Wissensstichtag,
             Art::Format,
         ]
@@ -154,6 +164,9 @@ pub struct Stand {
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
     abschluss: Option<Abschluss>,
+    historischer_hoechststand: Option<Cent>,
+    notbremse_freigabe: Option<Datum>,
+    prueft_wiederanlauf: bool,
     seit_abschluss: usize,
     abrechnungstag: Option<Datum>,
     wissensstichtage: BTreeMap<Datum, Zeitpunkt>,
@@ -275,6 +288,37 @@ impl Stand {
         self.letzte_kennung
     }
 
+    pub fn historischer_hoechststand(&self) -> Option<Cent> {
+        self.historischer_hoechststand
+    }
+
+    pub fn notbremse_aktiv(&self) -> bool {
+        self.papier_verlustsperre_aktiv()
+            || self.begruendungen.iter().rev().any(|(datum, wer, text)| {
+                wer == "Waechter"
+                    && text == NOTBREMSE_AKTIV
+                    && self
+                        .notbremse_freigabe
+                        .is_none_or(|freigabe| *datum > freigabe)
+            })
+    }
+
+    pub fn papier_verlustsperre_aktiv(&self) -> bool {
+        self.begruendungen
+            .iter()
+            .any(|(_, wer, text)| wer == "Waechter" && text == PAPIER_VERLUSTSPERRE)
+    }
+
+    pub fn prueft_wiederanlauf(&self) -> bool {
+        self.prueft_wiederanlauf
+    }
+
+    pub(crate) fn papier_bargeld(&self) -> Option<Cent> {
+        self.toepfe
+            .values()
+            .try_fold(Cent::NULL, |summe, topf| summe.checked_add(topf.bargeld()))
+    }
+
     pub fn wissensstichtag(&self, tag: Datum) -> Option<Zeitpunkt> {
         self.wissensstichtage.get(&tag).copied()
     }
@@ -377,6 +421,7 @@ impl Stand {
                 return Ok(());
             }
             Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
+            Art::NotbremseFreigabe => return self.belege_wiederanlauf(inhalt),
             Art::Wissensstichtag => self.belege_wissensstichtag(inhalt)?,
             Art::Abschluss => {
                 return self.schliesse_ab(inhalt);
@@ -441,8 +486,38 @@ impl Stand {
         {
             return Err("Abschluss passt nicht zum Abrechnungstag".into());
         }
+        self.historischer_hoechststand = self.historischer_hoechststand.max(Some(a.hoechststand));
         self.abschluss = Some(a);
         self.seit_abschluss = 0;
+        Ok(())
+    }
+
+    fn belege_wiederanlauf(&mut self, inhalt: &str) -> Result<(), String> {
+        let a = lies_abschluss(inhalt).ok_or("Notbremsenfreigabe unlesbar")?;
+        if !self.prueft_wiederanlauf
+            || !self.notbremse_aktiv()
+            || self.abrechnungstag != Some(a.datum)
+            || !self.gehalten().is_empty()
+            || self.offene_auftraege().next().is_some()
+            || self.papier_verlustsperre_aktiv()
+            || self.historischer_hoechststand.is_none_or(|hoch| {
+                Grenzen::standard().papier_gesamtverlust_erreicht(a.hoechststand, hoch)
+            })
+            || self.papier_bargeld() != Some(a.hoechststand)
+        {
+            return Err("Notbremsenfreigabe unzulaessig".into());
+        }
+        self.schliesse_ab(inhalt)?;
+        self.notbremse_freigabe = Some(a.datum);
+        self.prueft_wiederanlauf = false;
+        self.begruendungen.push((
+            a.datum,
+            "Waechter".into(),
+            format!(
+                "Notbremse automatisch aufgehoben: Konto abgeglichen und Kurse geprueft. Neuer Referenzwert {} Cent; normaler Betrieb ab dem naechsten Papiertag.",
+                a.hoechststand.0
+            ),
+        ));
         Ok(())
     }
 
@@ -475,6 +550,9 @@ impl Stand {
         {
             return Err("Abrechnungstag unzulaessig".into());
         }
+        self.prueft_wiederanlauf = self.notbremse_aktiv()
+            && self.gehalten().is_empty()
+            && self.offene_auftraege().next().is_none();
         self.abrechnungstag = Some(tag);
         Ok(())
     }

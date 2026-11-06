@@ -75,6 +75,8 @@ versiegelt! {
         tagesverlust_bp: i64,
         /// Rueckgang vom Hoechststand, ab dem die Notbremse alles verkauft.
         notbremse_bp: i64,
+        /// Gesamtverlust vom historischen Hoechststand, der die Papierfreigabe sperrt.
+        papier_gesamtverlust_bp: i64,
         etf_freigegeben: bool,
         gebuehren: Gebuehren,
         /// Toleranz der Bestandsgrenze: Liegt ein Wert mehr als so viel ueber dem
@@ -102,6 +104,7 @@ impl Grenzen {
             max_kurssprung_bp: 1_500,
             tagesverlust_bp: 500,
             notbremse_bp: 2_000,
+            papier_gesamtverlust_bp: 3_000,
             etf_freigegeben: true,
             gebuehren: Gebuehren {
                 prozent_bp: 5,
@@ -111,6 +114,14 @@ impl Grenzen {
             bestand_toleranz_bp: 200,
             kurs_hoechstalter_s: 1_200,
         }
+    }
+
+    /// Ob der belegte Depotwert die Papier-Gesamtverlustgrenze erreicht oder unterschreitet.
+    pub fn papier_gesamtverlust_erreicht(&self, wert: Cent, hoch: Cent) -> bool {
+        let rest_bp = 10_000_i128.saturating_sub(i128::from(self.papier_gesamtverlust_bp));
+        hoch > Cent::NULL
+            && i128::from(wert.0).saturating_mul(10_000)
+                <= i128::from(hoch.0).saturating_mul(rest_bp)
     }
 
     /// SHA-256 ueber eine feste Textform aller Werte. Jede Aenderung ergibt einen anderen Abdruck.

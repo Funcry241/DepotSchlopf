@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Die Papier-Notbremse prüft den Wiederanlauf automatisch. Erst ein späterer, vollständig geprüfter Papiertag, der ohne Bestand und offene Orders beginnt, hebt den Halt zusammen mit dem Tagesabschluss auf. Neue Orders sind frühestens beim nächsten regulären Papiertag möglich. Der Kontowächter erhält einen neuen Referenzwert aus dem Papierbargeld. Ab 30 % Verlust gegenüber dem dauerhaft belegten historischen Höchststand stoppt der Papiertag neue Käufe und setzt die Sperre dauerhaft. Schutzverkäufe laufen weiter. Ein automatischer Wiederanlauf ist dann gesperrt.
+
 - Dachs und Maus können im Papiertag je eine eigenständige Weltprognose mit Ereignis, Wert, Richtung, Zeithorizont und Widerlegungskriterium hinterlegen. Der Papiertag holt beide Antworten vor der gegenseitigen Prüfung ein. Das Journal bindet die Prognose an das beobachtete Ereignis und den Ausgangskurs. Dazu sind keine zusätzlichen Anbieteraufrufe nötig.
 
 - Der Papiertag friert den Wissensstand für das Weltmodell ein. Er verwendet ausschließlich Kurse, Nachrichten und Terminversionen, die bis zu diesem Zeitpunkt belegt waren. Ein eigener Journaleintrag hält den Stichtag fest. Das Wiederabspielen verwendet genau diesen Stichtag und verlangt einen Beleg. Eine später abgerufene Meldung erscheint beim Rückblick nicht allein deshalb, weil sie früher veröffentlicht wurde.

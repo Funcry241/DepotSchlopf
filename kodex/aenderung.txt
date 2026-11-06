@@ -1,9 +1,11 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Funktion
-zweck: Weltmodell belegt die optionalen unabhaengigen Prognosen beider Berater vor der gegenseitigen Pruefung im Papiertag. Ein Beleg bindet Prognose, Ereignis und Ausgangskurs. Keine neuen Anbieteraufrufe, Betragsgrenzen oder Abhaengigkeiten.
+klasse: FestschreibungAenderung
+zweck: Papier-Notbremse bleibt bei 20 Prozent. Nach geprueftem Schutzverkauf nur unter 30 Prozent Gesamtverlust automatisch wieder anlaufen. Ab 30 Prozent unter dem historischen Hoechststand stoppt der Papiertag Kaeufe und sperrt dauerhaft den automatischen Wiederanlauf. Historischer Hoechststand bleibt im Journal erhalten. Grenzfreigabe von Wolfgang erteilt.
 pfade:
-crates/depot_berater/
+crates/depot_kern/
 crates/depot_journal/
-crates/depot_lage/tests/lage.rs
+crates/depot_lage/
 crates/depot_sim/
 CHANGELOG.md
+kodex/festschreibung.txt
+kodex/freigabe.txt

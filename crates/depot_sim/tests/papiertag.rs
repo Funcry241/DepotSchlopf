@@ -1161,6 +1161,117 @@ fn notbremse_arbeitet_verkaeufe_nach_neustart_ab_und_bleibt_aktiv() -> Result<()
 }
 
 #[test]
+fn notbremse_oeffnet_erst_nach_einem_vollstaendig_geprueften_tag_wieder() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let start = start()?;
+    let universum = universum()?;
+    {
+        Papierdatei::oeffnen(&ort.konto, false, &start)?;
+        let mut j = ort.oeffnen()?;
+        for topf in &start {
+            vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+        }
+        let vorher = tag(4)?;
+        vorbedingung(
+            j.begruende(vorher, "Waechter", depot_journal::NOTBREMSE_AKTIV),
+            "Aktive Notbremse nach Schutzverkauf",
+        )?;
+        vorbedingung(
+            j.schliesse_ab(vorher, Cent(1_250_000), &"a".repeat(64)),
+            "Historischer Hoechststand",
+        )?;
+    }
+    for (t, vollstaendig, bleibt_halt, aufrufe) in [
+        (5, false, true, 0),
+        (6, true, false, 0),
+        (9, true, false, 1),
+    ] {
+        let mut j = ort.oeffnen()?;
+        let preise = [(&sap, "250", "250"), (&allianz, "200", "200")];
+        let preise = if vollstaendig {
+            preise.as_slice()
+        } else {
+            preise.get(..1).ok_or("Vorbedingung: SAP-Kurs")?
+        };
+        belege(&mut j, t, preise)?;
+        let mut papierkonto = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+        let datum = tag(t)?;
+        let (mut dachs, mut maus) = kaeufer(datum, &allianz);
+        let aus = papiertag(
+            &mut j,
+            datum,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut papierkonto,
+        );
+        assert_eq!(aus.is_err(), bleibt_halt, "{aus:?}");
+        assert_eq!(j.stand().notbremse_aktiv(), bleibt_halt);
+        assert_eq!(dachs.aufrufe, aufrufe);
+        assert_eq!(j.stand().historischer_hoechststand(), Some(Cent(1_250_000)));
+        assert_eq!(papierkonto.konto().sendungen(), usize::from(t == 9));
+    }
+    let j = ort.oeffnen()?;
+    assert_eq!(
+        j.eintraege()
+            .iter()
+            .filter(|(art, _)| *art == Art::NotbremseFreigabe)
+            .count(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn gesamtverlust_sperrt_vor_beratung_und_bleibt_nach_neustart() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(450_000)), "Topf A")?;
+    topf.setze_bestand(sap.clone(), 10);
+    let start = [
+        topf,
+        vorbedingung(Topf::neu(TopfId::B, Cent::NULL), "Topf B")?,
+    ];
+    let universum = universum()?;
+    Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    {
+        let mut j = ort.oeffnen()?;
+        for topf in &start {
+            vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+        }
+        for (tag_nr, hoch) in [(3, 1_000_000), (4, 800_000)] {
+            vorbedingung(
+                j.schliesse_ab(tag(tag_nr)?, Cent(hoch), &"a".repeat(64)),
+                "Hoechststand belegen",
+            )?;
+        }
+    }
+    for (t, sendungen) in [(5, 1), (6, 1), (9, 1)] {
+        let mut j = ort.oeffnen()?;
+        belege(&mut j, t, &[(&sap, "250", "250"), (&allianz, "200", "200")])?;
+        let mut konto = Papierdatei::oeffnen(&ort.konto, true, &start)?;
+        let (mut dachs, mut maus) = kaeufer(tag(t)?, &allianz);
+        let aus = papiertag(
+            &mut j,
+            tag(t)?,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut konto,
+        );
+        assert!(matches!(aus, Err(LaufFehler::Halt(grund)) if grund.contains("30 %")));
+        assert!(j.stand().papier_verlustsperre_aktiv());
+        assert_eq!(j.stand().historischer_hoechststand(), Some(Cent(1_000_000)));
+        assert_eq!(dachs.aufrufe, 0);
+        assert_eq!(konto.konto().sendungen(), sendungen);
+    }
+    Ok(())
+}
+
+#[test]
 fn order_ohne_kurs_verfaellt_und_gibt_den_topf_wieder_frei() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);

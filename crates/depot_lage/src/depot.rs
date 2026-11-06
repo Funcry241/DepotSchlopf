@@ -123,7 +123,7 @@ pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
         toepfe,
         gesamt,
         letzter_abschluss: s.abschluss().map(|a| a.datum),
-        hoechststand: s.abschluss().map(|a| a.hoechststand),
+        hoechststand: s.historischer_hoechststand(),
         auftraege,
     }
 }
