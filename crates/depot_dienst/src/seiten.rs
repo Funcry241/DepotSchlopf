@@ -16,8 +16,14 @@ use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand}
 use crate::zeitplan::{Zeitplan, lies_uhrzeit, naechster_fuer, uhrzeit_text};
 
 const STIL_DIENST: &str = "\
-nav{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}nav a{color:inherit}\
-nav a.hier{font-weight:600;text-decoration:none}\
+nav{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;--nav-akzent:#005c97}\
+@media (prefers-color-scheme:dark){nav{--nav-akzent:#74c7ff}}\
+nav a{color:inherit;text-decoration:none;padding:6px 10px;border-bottom:3px solid transparent;\
+border-radius:6px 6px 0 0}\
+nav a:hover{background:var(--flaeche)}\
+nav a[aria-current=page]{font-weight:700;background:var(--flaeche);border-bottom-color:var(--nav-akzent)}\
+nav a:focus-visible{outline:2px solid currentColor;outline-offset:2px}\
+.version{margin-inline-start:auto;white-space:nowrap}\
 form.knopf{display:inline;margin:0}\
 a.aktion{display:inline-block;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;color:inherit}\
 button{font:inherit;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;\
@@ -323,12 +329,32 @@ pub fn rahmen(
     teil: Option<&str>,
     meldung: Option<(&str, &str)>,
     inhalt: &str,
+    commit: Option<&str>,
 ) -> String {
     let mut s = String::with_capacity(inhalt.len().saturating_add(4096));
     let nav = |pfad: &str, text: &str| {
-        let klasse = if pfad == hier { " class=\"hier\"" } else { "" };
-        format!("<a href=\"{pfad}\"{klasse}>{text}</a>")
+        let aktuell = if pfad == hier {
+            " aria-current=\"page\""
+        } else {
+            ""
+        };
+        format!("<a href=\"{pfad}\"{aktuell}>{text}</a>")
     };
+    let version = commit.map_or_else(
+        || {
+            format!(
+                "<span class=\"version leise\">Version {} · Commit unbekannt</span>",
+                env!("CARGO_PKG_VERSION")
+            )
+        },
+        |sha| {
+            format!(
+                "<span class=\"version leise\" title=\"{}\">Version {}</span>",
+                maskiere(sha),
+                maskiere(crate::rueckfall::kurz(sha))
+            )
+        },
+    );
     let _ = write!(
         s,
         "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
@@ -337,7 +363,8 @@ pub fn rahmen(
          <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt, etwa \
          beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu. Wenn du das schwarze \
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div><main>\
-         <nav><h1>DepotSchlopf</h1>{}{}<span class=\"leise\">Nur Papiergeld.</span></nav>\
+         <nav aria-label=\"Hauptnavigation\"><h1>DepotSchlopf</h1>{}{}\
+         <span class=\"leise\">Nur Papiergeld.</span>{version}</nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit der Zeitplan läuft. \
          Du kannst es minimieren.</p>",
         nav("/", "Live"),
@@ -455,7 +482,7 @@ pub fn fehler(status: u16, text: &str) -> Vec<u8> {
     crate::http::antwort(
         status,
         "text/html; charset=utf-8",
-        rahmen("", None, None, &inhalt).as_bytes(),
+        rahmen("", None, None, &inhalt, None).as_bytes(),
     )
 }
 

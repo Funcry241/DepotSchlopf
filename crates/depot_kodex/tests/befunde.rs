@@ -98,6 +98,9 @@ impl Baum {
             fs::copy(&quelle, &ziel).map_err(|e| format!("{rel}: {e}"))?;
         }
         git(&pfad, &["init", "-q"])?;
+        // Die Gegenproben arbeiten wie die Prüfkopie mit unveränderten LF-Dateien.
+        git(&pfad, &["config", "--local", "core.autocrlf", "false"])?;
+        git(&pfad, &["config", "--local", "core.eol", "lf"])?;
         git(&pfad, &["add", "-A"])?;
         git(&pfad, &["commit", "-q", "-m", "basis"])?;
         git(&pfad, &["branch", "basis"])?;
