@@ -55,7 +55,7 @@ pub trait Umwelt: Send + Sync {
     /// # Errors
     /// Ungueltig oder abgelehnt; die Meldung nennt den Schluessel nie.
     fn schluessel_ablegen(&self, wer: Wer, text: &str) -> Result<(), String>;
-    fn autostart(&self, wurzel: &Path) -> bool;
+    fn autostart(&self, wurzel: &Path) -> autostart::Stand;
     /// Verlangt eine Bestaetigung ausserhalb der lokalen Webseite.
     fn papierfreigabe_bestaetigen(
         &self,
@@ -85,8 +85,8 @@ impl Umwelt for System {
         schluessel::ablegen(wer, text)
     }
 
-    fn autostart(&self, wurzel: &Path) -> bool {
-        autostart::an(wurzel)
+    fn autostart(&self, wurzel: &Path) -> autostart::Stand {
+        autostart::stand(wurzel)
     }
 
     fn papierfreigabe_bestaetigen(
@@ -108,19 +108,19 @@ impl Umwelt for System {
         if an {
             autostart::einrichten(wurzel)
         } else {
-            autostart::entfernen()
+            autostart::entfernen(wurzel)
         }
     }
 }
 
 /// Das Lagebild fuer den Dienst: dieselbe Rechnung wie `run.cmd lage`, dazu der Stand der
 /// Schluessel und Knoepfe, die Auftraege einreihen.
-pub fn lagerechner(token: String, umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerechner {
+pub fn lagerechner(umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerechner {
     Box::new(move |wurzel: &Path, jetzt: Zeitpunkt| {
         let daten = wurzel.join("daten");
         let sperren = sperrdateien(&daten);
         let (anbieter, anbieter_unlesbar) = anbieterprotokoll(&daten);
-        let l = mit_journal(&daten, |journal| {
+        mit_journal(&daten, |journal| {
             lagebild(&Umgebung {
                 jetzt,
                 journal,
@@ -141,9 +141,7 @@ pub fn lagerechner(token: String, umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerec
                 anbieter_unlesbar,
                 ki_halt: ki_halt(&daten),
             })
-        });
-        let html = depot_lage::html::inhalt_mit(&l, &|a| seiten::abhilfe_knopf(&token, a), false);
-        (l, html)
+        })
     })
 }
 
@@ -185,20 +183,26 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let meldung = seiten::meldung(&a.abfrage);
     match a.pfad.as_str() {
         "/" => {
-            let inhalt = seiten::live(&d.start, &d.sperre(), tag);
+            let inhalt = seiten::live(&d.token, &d.start, &d.sperre(), tag);
             let s = seiten::rahmen("/", Some("/teil/live"), meldung, &inhalt);
             antwort(200, HTML, s.as_bytes())
         }
         "/teil/live" => antwort(
             200,
             HTML,
-            seiten::live(&d.start, &d.sperre(), tag).as_bytes(),
+            seiten::live(&d.token, &d.start, &d.sperre(), tag).as_bytes(),
         ),
         "/teil/status" => antwort(
             200,
             HTML,
             seiten::status(&d.start, &d.sperre(), tag).as_bytes(),
         ),
+        "/teil/update" => antwort(
+            200,
+            HTML,
+            seiten::update_aktionen(&d.token, &d.start, &d.sperre()).as_bytes(),
+        ),
+        "/bestaetigen" => auftrag_bestaetigen(d, a),
         "/einrichtung" => {
             // Erst ausserhalb der Sperre nachsehen, was gespeichert ist.
             let datei = werkbank::lies_falls_da(&d.wurzel.join("daten").join("zeitplan.txt"));
@@ -252,7 +256,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             "text/javascript; charset=utf-8",
             seiten::APP_JS.as_bytes(),
         ),
-        _ => http::text(404, "Nicht gefunden"),
+        _ => seiten::fehler(404, "Nicht gefunden"),
     }
 }
 
@@ -263,7 +267,7 @@ fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
         Some(_) => None,
     };
     Some(Zeitplan {
-        an: haken("an")?,
+        an: false,
         termine: lies_uhrzeit(feld(f, "termine")?)?,
         kurse: lies_uhrzeit(feld(f, "kurse")?)?,
         papier_danach: haken("papier_danach")?,
@@ -272,7 +276,7 @@ fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
 
 fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     if !herkunft_erlaubt(a.kopf("origin")) {
-        return http::text(403, "Abgelehnt: fremde Herkunft");
+        return seiten::fehler(403, "Abgelehnt: fremde Herkunft");
     }
     let typ_passt = a.kopf("content-type").is_some_and(|typ| {
         typ.split(';').next().is_some_and(|teil| {
@@ -281,35 +285,27 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         })
     });
     if !typ_passt {
-        return http::text(400, "Abgelehnt: nur Formulare");
+        return seiten::fehler(400, "Abgelehnt: nur Formulare");
     }
     let Some(f) = formular(&a.rumpf) else {
-        return http::text(400, "Abgelehnt: Formular unlesbar");
+        return seiten::fehler(400, "Abgelehnt: Formular unlesbar");
     };
     if !feld(&f, "t").is_some_and(|token| gleich(token, &d.token)) {
-        return http::text(
+        return seiten::fehler(
             403,
-            "Abgelehnt: Seite veraltet oder fremd. Bitte neu laden.",
+            "Diese Seite ist veraltet. Öffne Live oder die Einrichtung erneut und wiederhole die Aktion.",
         );
     }
     match a.pfad.as_str() {
-        "/ausfuehren" => {
-            let Some(art) = feld(&f, "art").and_then(Art::aus_kurz) else {
-                return http::text(400, "Abgelehnt: Auftrag unbekannt");
-            };
-            let update = matches!(art, Art::Update | Art::UpdatePruefen);
-            match (d.von_hand(art, jetzt), update) {
-                (Ok(()), false) => http::umleitung("/?m=auftrag"),
-                (Err(_), false) => http::umleitung("/?m=auftrag_belegt"),
-                (Ok(()), true) => http::umleitung("/einrichtung?m=update#update"),
-                (Err(_), true) => http::umleitung("/einrichtung?m=update_belegt#update"),
-            }
-        }
+        "/ausfuehren" => auftrag_einreihen(d, &f, jetzt),
         "/schluessel" => {
             let (Some(wer), Some(wert)) =
                 (feld(&f, "wer").and_then(Wer::aus_kurz), feld(&f, "wert"))
             else {
-                return http::text(400, "Abgelehnt: Schluessel unbekannt");
+                return seiten::fehler(
+                    400,
+                    "Schlüssel unbekannt. Wähle den Anbieter erneut in der Einrichtung.",
+                );
             };
             if wer.pruefe(wert).is_err() {
                 return http::umleitung("/einrichtung?m=schluessel_ungueltig#schluessel");
@@ -335,24 +331,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 Err(_) => http::umleitung("/einrichtung?m=schluessel_fehler#schluessel"),
             }
         }
-        "/zeitplan" => {
-            // Bei jeder Ablehnung bleiben die gueltigen Eingaben im Formular stehen.
-            let zurueck = |m: &str| {
-                http::umleitung(&format!(
-                    "/einrichtung?m={m}{}#zeitplan",
-                    seiten::Entwurf::aus_formular(&f).als_abfrage()
-                ))
-            };
-            let Some(plan) = zeitplan_aus_formular(&f) else {
-                return zurueck("zeitplan_ungueltig");
-            };
-            match d.setze_zeitplan(plan) {
-                Ok(()) => http::umleitung("/einrichtung?m=zeitplan#zeitplan"),
-                Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => zurueck("zeitplan_einrichtung"),
-                Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => zurueck("zeitplan_lage"),
-                Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => zurueck("zeitplan_fehler"),
-            }
-        }
+        "/zeitplan" => zeitplan_aendern(d, &f),
         "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kurse),
         "/papierfreigabe" => papier_freigeben(d, u, &f),
@@ -361,16 +340,106 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             let an = match feld(&f, "an") {
                 Some("an") => true,
                 Some("aus") => false,
-                _ => return http::text(400, "Abgelehnt: an oder aus erwartet"),
+                _ => return seiten::fehler(400, "Abgelehnt: an oder aus erwartet"),
             };
+            if !an && feld(&f, "geprueft") != Some("ja") {
+                return http::umleitung("/einrichtung?m=autostart_bestaetigen#autostart");
+            }
+            let _z = d.sperre();
             match u.autostart_setzen(&d.wurzel, an) {
                 Ok(()) if an => http::umleitung("/einrichtung?m=autostart_an#autostart"),
                 Ok(()) => http::umleitung("/einrichtung?m=autostart_aus#autostart"),
                 Err(_) => http::umleitung("/einrichtung?m=autostart_fehler#autostart"),
             }
         }
-        _ => http::text(404, "Nicht gefunden"),
+        _ => seiten::fehler(404, "Nicht gefunden"),
     }
+}
+
+fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
+    let f = formular(a.abfrage.as_bytes()).unwrap_or_default();
+    let (art, sha, ziel) = match feld(&f, "art").and_then(Art::aus_kurz) {
+        Some(Art::Papier) => (Art::Papier, None, "/"),
+        Some(Art::Update) => {
+            let z = d.sperre();
+            let Some((sha, _)) = z
+                .update_angebot()
+                .filter(|(sha, _)| feld(&f, "sha") == Some(*sha))
+            else {
+                return http::umleitung("/einrichtung?m=update_suche#update");
+            };
+            (Art::Update, Some(sha.to_string()), "/einrichtung")
+        }
+        _ => return seiten::fehler(404, "Diese Aktion gibt es nicht."),
+    };
+    let inhalt = seiten::auftrag_bestaetigen(&d.token, art, sha.as_deref());
+    let seite = seiten::rahmen(ziel, None, None, &inhalt);
+    antwort(200, HTML, seite.as_bytes())
+}
+
+fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {
+    let Some(art) = feld(f, "art").and_then(Art::aus_kurz) else {
+        return seiten::fehler(400, "Diese Aktion gibt es nicht.");
+    };
+    let bestaetigt = feld(f, "geprueft") == Some("ja");
+    let ort = match art {
+        Art::Papier if !bestaetigt => "/?m=papier_bestaetigen",
+        Art::Update if !bestaetigt => "/einrichtung?m=update_bestaetigen#update",
+        Art::Update => {
+            let sha = feld(f, "sha").unwrap_or_default();
+            let m = d.update_von_hand(sha).err().unwrap_or("update");
+            return http::umleitung(&format!("/einrichtung?m={m}#update"));
+        }
+        Art::UpdatePruefen => {
+            if d.von_hand(art, jetzt).is_ok() {
+                "/einrichtung?m=update#update"
+            } else {
+                "/einrichtung?m=update_belegt#update"
+            }
+        }
+        _ => {
+            if d.von_hand(art, jetzt).is_ok() {
+                "/?m=auftrag"
+            } else {
+                "/?m=auftrag_belegt"
+            }
+        }
+    };
+    http::umleitung(ort)
+}
+
+fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
+    let (meldung, entwurf, ergebnis) = match feld(f, "aktion") {
+        Some("speichern") => {
+            let entwurf = seiten::Entwurf::aus_formular(f).als_abfrage();
+            let Some(plan) = zeitplan_aus_formular(f) else {
+                return http::umleitung(&format!(
+                    "/einrichtung?m=zeitplan_ungueltig{entwurf}#zeitplan"
+                ));
+            };
+            (
+                "zeitplan",
+                entwurf,
+                d.aendere_zeitplan(|alt| Zeitplan { an: alt.an, ..plan }),
+            )
+        }
+        Some(aktion @ ("an" | "aus")) => {
+            let an = aktion == "an";
+            (
+                if an { "zeitplan_an" } else { "zeitplan_aus" },
+                String::new(),
+                d.aendere_zeitplan(|alt| Zeitplan { an, ..alt }),
+            )
+        }
+        _ => return http::umleitung("/einrichtung?m=zeitplan_neu_laden#zeitplan"),
+    };
+    let fehler = match ergebnis {
+        Ok(()) => return http::umleitung(&format!("/einrichtung?m={meldung}#zeitplan")),
+        Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => "zeitplan_einrichtung",
+        Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => "zeitplan_lage",
+        Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => "zeitplan_fehler",
+    };
+    http::umleitung(&format!("/einrichtung?m={fehler}{entwurf}#zeitplan"))
 }
 
 fn papierdialog_testen(d: &Dienst, u: &dyn Umwelt) -> Vec<u8> {
@@ -395,7 +464,10 @@ fn papier_freigeben(d: &Dienst, u: &dyn Umwelt, f: &[(String, String)]) -> Vec<u
     let Some(gesehen) =
         feld(f, "abdruck").filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
     else {
-        return http::text(400, "Abgelehnt: Journalabdruck fehlt oder ist ungueltig");
+        return seiten::fehler(
+            400,
+            "Die Freigabe ist veraltet. Öffne die Einrichtung und prüfe den aktuellen Stand.",
+        );
     };
     let Ok(_dialog) = d.papierdialog.try_lock() else {
         return zurueck("papierfreigabe_belegt");
@@ -435,7 +507,10 @@ fn kostenschutz_aufheben(
         return ziel("unbestaetigt");
     }
     let Some(gesehen) = feld(f, "abdruck") else {
-        return http::text(400, "Abgelehnt: Abdruck fehlt");
+        return seiten::fehler(
+            400,
+            "Die Sperre hat sich möglicherweise geändert. Öffne die Einrichtung erneut.",
+        );
     };
     // Unter der Sperre des Zustands: Waehrenddessen startet kein Auftrag.
     let mut z = d.sperre();
@@ -460,12 +535,12 @@ fn kostenschutz_aufheben(
 /// Beantwortet eine gelesene Anfrage. Erst der Host, dann je nach Methode.
 pub fn behandle(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     if !host_erlaubt(a.kopf("host")) {
-        return http::text(403, "Abgelehnt: fremder Host");
+        return seiten::fehler(403, "Abgelehnt: fremder Host");
     }
     match a.methode.as_str() {
         "GET" => get(d, u, a, jetzt),
         "POST" => post(d, u, a, jetzt),
-        _ => http::text(405, "Nur GET und POST"),
+        _ => seiten::fehler(405, "Nur GET und POST"),
     }
 }
 

@@ -1,9 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Update-Kandidat liest eine Kopie der Papierdaten vor dem Einspielen. Der Updater sichert und verifiziert die Daten, der Dienst prueft sie vor der Bestaetigung. Der Windows-Dialogtest schreibt keine Papierdaten.
+zweck: Einrichtung und Auftraege zeigen Bedienhinweise, aktuelle Zustaende und Rueckwege. Zeitplan trennt Speichern vom Schalten. Autostart schuetzt fremde Eintraege. Papiertag und konkreter Update-Kandidat erfordern eine Bestaetigung.
 pfade:
+DepotSchlopf.cmd
 crates/depot_dienst/
-crates/depot_journal/src/datei.rs
-crates/depot_lage/
-crates/depot_lauf/
-docs/pruefberichte/papierfreigabe/README.md
+crates/depot_lauf/src/update.rs

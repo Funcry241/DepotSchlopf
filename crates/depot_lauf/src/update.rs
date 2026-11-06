@@ -318,9 +318,10 @@ fn einspielen(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
 
 /// `run.cmd update [pruefen]`.
 pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
-    let nur_pruefen = match optionen {
-        [] => false,
-        [o] if o == "pruefen" => true,
+    let (nur_pruefen, erwartet) = match optionen {
+        [] => (false, None),
+        [o] if o == "pruefen" => (true, None),
+        [sha] if ist_commit(sha) => (false, Some(sha)),
         _ => {
             eprintln!("[Update] FEHLER: erlaubt sind nur `update` und `update pruefen`.");
             return ExitCode::from(2);
@@ -338,9 +339,14 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if erwartet.is_some_and(|sha| sha != &k.neu) {
+        eprintln!("[Update] Seit der Suche gibt es einen anderen Stand. Bitte suche erneut.");
+        return ExitCode::FAILURE;
+    }
     zeige(&k);
     if nur_pruefen {
         println!("[Update] Nur geprueft; eingespielt wird mit `run.cmd update`.");
+        println!("[Update] Kandidat: {}", k.neu);
         return ExitCode::SUCCESS;
     }
     let ergebnis = crate::updatedaten::update_sperren(&wurzel.join("daten")).and_then(|sperre| {
@@ -457,6 +463,18 @@ mod tests {
         g(&a.andere, &["commit", "-q", "-am", text])?;
         g(&a.andere, &["push", "-q", "origin", "main"])?;
         g(&a.andere, &["rev-parse", "HEAD"])
+    }
+
+    #[test]
+    fn einspielen_lehnt_neueren_als_den_bestaetigten_commit_ab() -> Result<(), String> {
+        let a = aufbau()?;
+        let alt = g(&a.projekt, &["rev-parse", "HEAD"])?;
+        let erwartet = neuer_stand(&a, "zwei")?;
+        neuer_stand(&a, "drei")?;
+        assert_eq!(lauf(&a.projekt, &[erwartet]), ExitCode::FAILURE);
+        assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, alt);
+        assert!(!offen_pfad(&a.projekt).exists());
+        Ok(())
     }
 
     #[test]

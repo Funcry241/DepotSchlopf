@@ -18,7 +18,7 @@ use std::thread;
 
 use depot_kern::{Boerse, Datum, Zeitpunkt};
 use depot_lage::anbieter::Wer as Quelle;
-use depot_lage::{Ampel, Betrieb, Lagebild, SchluesselStand, ortszeit};
+use depot_lage::{Betrieb, Lagebild, SchluesselStand, ortszeit};
 
 use crate::zeitplan::{Erledigt, Zeitplan, faellig_fuer};
 
@@ -133,17 +133,11 @@ pub struct Auftrag {
     pub frueher: Frueher,
 }
 
-/// Das zuletzt gerechnete Lagebild, schon als HTML.
+/// Das zuletzt gerechnete Lagebild.
 #[derive(Clone, Debug)]
 pub struct Lage {
     pub stand: Zeitpunkt,
-    pub gesamt: Ampel,
-    pub naechster_schritt: String,
-    /// Gesamtstatus aus dem Lagebild; die Oberflaeche ergaenzt den Zeitplan.
-    pub betrieb: Betrieb,
-    /// Stand jedes Schluessels aus dem Lagebild.
-    pub schluessel: Vec<(Quelle, SchluesselStand)>,
-    pub html: String,
+    pub bild: Lagebild,
 }
 
 /// Hoechstens so viele Zeilen Protokoll je Auftrag, so viele Zeichen je Zeile.
@@ -156,12 +150,20 @@ pub const WARTEN_MAX: usize = 4;
 /// So alt darf das Lagebild hoechstens werden, wenn nichts laeuft.
 pub const LAGE_SEKUNDEN: i64 = 5;
 
+/// Ein Auftrag in der Warteschlange. Ein Update trägt den bereits bestätigten Commit.
+#[derive(Debug)]
+pub struct WartenderAuftrag {
+    pub art: Art,
+    pub anlass: Anlass,
+    update_commit: Option<String>,
+}
+
 /// Der veraenderliche Zustand.
 #[derive(Debug)]
 pub struct Zustand {
     pub naechste_nr: u64,
     pub laufend: Option<Auftrag>,
-    pub warteschlange: VecDeque<(Art, Anlass)>,
+    pub warteschlange: VecDeque<WartenderAuftrag>,
     pub verlauf: VecDeque<Auftrag>,
     pub zeitplan: Zeitplan,
     /// Warum der Zeitplan nicht gilt (unlesbare Datei); dann ist er aus.
@@ -212,10 +214,43 @@ fn quelle_name(w: Quelle) -> &'static str {
 pub const DOPPELT_SEKUNDEN: i64 = 30;
 
 impl Zustand {
+    /// Stand des Auftrags für die Bedienelemente.
+    pub fn auftrag_stand(&self, art: Art) -> Option<&'static str> {
+        if self.laufend.as_ref().is_some_and(|a| a.art == art) {
+            Some("läuft …")
+        } else if self.warteschlange.iter().any(|a| a.art == art) {
+            Some("wartet …")
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn letzter_update_lauf(&self) -> Option<&Auftrag> {
+        self.verlauf
+            .iter()
+            .find(|a| matches!(a.art, Art::Update | Art::UpdatePruefen))
+    }
+
+    /// Der letzte erfolgreiche Suchlauf kann einen konkreten Commit anbieten.
+    pub(crate) fn update_angebot(&self) -> Option<(&str, &[String])> {
+        let a = self.letzter_update_lauf()?;
+        if a.art != Art::UpdatePruefen
+            || a.erfolg != Some(true)
+            || a.frueher != Frueher::Nein
+            || self.auftrag_stand(Art::UpdatePruefen).is_some()
+            || self.neustart
+        {
+            return None;
+        }
+        let (kandidat, titel) = a.protokoll.split_last()?;
+        let sha = kandidat.strip_prefix("[Update] Kandidat: ")?;
+        crate::rueckfall::ist_commit(sha).then_some((sha, titel))
+    }
+
     /// Der Gesamtstatus: der des Lagebilds, ergaenzt um den Zeitplan des Dienstes. `None`,
     /// solange das Lagebild noch nicht berechnet ist.
     pub fn gesamtstatus(&self) -> Option<Betrieb> {
-        let b = self.lage.as_ref()?.betrieb.clone();
+        let b = self.lage.as_ref()?.bild.betrieb.clone();
         let zeitplan_fehler = self
             .erledigt_fehler
             .as_ref()
@@ -249,6 +284,7 @@ impl Zustand {
         // Ausdruecklich jede noetige Einstellung (Maus zu #32): jeder Schluessel hinterlegt und
         // nicht abgelehnt, dazu kein Eingriff. „Läuft ohne KI“ reicht nicht.
         let mut fehlt: Vec<String> = l
+            .bild
             .schluessel
             .iter()
             .filter(|(_, st)| {
@@ -259,10 +295,10 @@ impl Zustand {
             })
             .map(|(w, st)| format!("{}: Schlüssel {}", quelle_name(*w), st.text()))
             .collect();
-        if l.schluessel.is_empty() {
+        if l.bild.schluessel.is_empty() {
             fehlt.push("Stand der Schlüssel unbekannt".into());
         }
-        if let Betrieb::EingriffNoetig(g) = &l.betrieb {
+        if let Betrieb::EingriffNoetig(g) = &l.bild.betrieb {
             fehlt.extend(g.iter().cloned());
         }
         if fehlt.is_empty() {
@@ -277,8 +313,8 @@ impl Zustand {
 /// harmloser Befehl.
 pub type Starter = Box<dyn Fn(Art, &Path) -> Command + Send + Sync>;
 
-/// Rechnet das Lagebild als HTML; bekommt den Projektordner und die Uhr.
-pub type Lagerechner = Box<dyn Fn(&Path, Zeitpunkt) -> (Lagebild, String) + Send + Sync>;
+/// Rechnet das Lagebild; bekommt den Projektordner und die Uhr.
+pub type Lagerechner = Box<dyn Fn(&Path, Zeitpunkt) -> Lagebild + Send + Sync>;
 
 /// Der Dienst.
 pub struct Dienst {
@@ -474,7 +510,7 @@ impl Dienst {
     /// Dieselbe Art laeuft oder wartet schon, oder die Warteschlange ist voll.
     pub fn einreihen(&self, art: Art, anlass: Anlass) -> Result<(), &'static str> {
         let mut z = self.sperre();
-        einreihen(&mut z, art, anlass)
+        einreihen(&mut z, art, anlass, None)
     }
 
     /// Reiht einen Auftrag von Hand ein. Wie `einreihen`, dazu: Derselbe Auftrag, der vor
@@ -495,7 +531,16 @@ impl Dienst {
         if gerade {
             return Err("gerade erst erledigt");
         }
-        einreihen(&mut z, art, Anlass::Hand)
+        einreihen(&mut z, art, Anlass::Hand, None)
+    }
+
+    pub(crate) fn update_von_hand(&self, sha: &str) -> Result<(), &'static str> {
+        let mut z = self.sperre();
+        if z.update_angebot().is_none_or(|(angebot, _)| angebot != sha) {
+            return Err("update_suche");
+        }
+        einreihen(&mut z, Art::Update, Anlass::Hand, Some(sha.to_owned()))
+            .map_err(|_| "update_belegt")
     }
 
     /// Speichert und aktiviert einen neuen Zeitplan. Einschalten (aus wird an) geht nur, wenn
@@ -505,7 +550,15 @@ impl Dienst {
     /// Einschalten nicht erlaubt, oder die Datei laesst sich nicht schreiben; dann gilt der alte
     /// weiter.
     pub fn setze_zeitplan(&self, plan: Zeitplan) -> Result<(), ZeitplanAbgelehnt> {
+        self.aendere_zeitplan(|_| plan)
+    }
+
+    pub(crate) fn aendere_zeitplan(
+        &self,
+        aenderung: impl FnOnce(Zeitplan) -> Zeitplan,
+    ) -> Result<(), ZeitplanAbgelehnt> {
         let mut z = self.sperre();
+        let plan = aenderung(z.zeitplan);
         if plan.an && !z.zeitplan.an {
             z.einschalten_erlaubt()?;
         }
@@ -524,8 +577,13 @@ impl Dienst {
         (!self.update_offen()).then_some(())?;
         self.zeitplan_pruefen(&mut z, jetzt);
         if z.laufend.is_none()
-            && let Some((art, anlass)) = z.warteschlange.pop_front()
+            && let Some(wartend) = z.warteschlange.pop_front()
         {
+            let WartenderAuftrag {
+                art,
+                anlass,
+                update_commit,
+            } = wartend;
             if art == Art::Papier && anlass == Anlass::Zeitplan {
                 let noch_faellig = ortszeit(jetzt).is_some_and(|(tag, h, m, _, _)| {
                     faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen)
@@ -580,12 +638,7 @@ impl Dienst {
                 ablegen(&mut z, auftrag);
                 return None;
             }
-            let mut befehl = (self.starter)(art, &self.wurzel);
-            befehl
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            match befehl.spawn() {
+            match self.starte_auftrag(art, update_commit.as_deref()) {
                 Ok(kind) => {
                     z.laufend = Some(auftrag);
                     return Some((nr, kind));
@@ -612,19 +665,27 @@ impl Dienst {
         if noetig {
             // Ohne Sperre rechnen: Die Oberflaeche bleibt bedienbar. Ein Auftrag startet nur hier
             // im Arbeiter, also nicht, solange das Lagebild das Journal liest.
-            let (bild, html) = (self.lagerechner)(&self.wurzel, jetzt);
+            let bild = (self.lagerechner)(&self.wurzel, jetzt);
             let mut z = self.sperre();
-            z.lage = Some(Lage {
-                stand: jetzt,
-                gesamt: bild.gesamt,
-                naechster_schritt: bild.naechster_schritt,
-                betrieb: bild.betrieb,
-                schluessel: bild.schluessel,
-                html,
-            });
+            z.lage = Some(Lage { stand: jetzt, bild });
             z.lage_veraltet = false;
         }
         None
+    }
+
+    fn starte_auftrag(&self, art: Art, update_commit: Option<&str>) -> std::io::Result<Child> {
+        if art == Art::Update && update_commit.is_none_or(|sha| !crate::rueckfall::ist_commit(sha))
+        {
+            return Err(std::io::Error::other(
+                "Kein bestätigter Commit. Bitte suche erneut nach einem Update.",
+            ));
+        }
+        (self.starter)(art, &self.wurzel)
+            .args(update_commit)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
     }
 
     fn zeitplan_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
@@ -640,12 +701,12 @@ impl Dienst {
         // Der Papiertag wird erst bei seinem Start vermerkt (`schritt`); wartet er schon, bleibt
         // es bei dem einen.
         if art == Art::Papier {
-            let _ = einreihen(z, art, Anlass::Zeitplan);
+            let _ = einreihen(z, art, Anlass::Zeitplan, None);
             return;
         }
         // Bei voller Warteschlange bleibt der Abruf faellig. Vor der Ausfuehrung wird
         // er dauerhaft vermerkt, damit ein Neustart ihn nicht doppelt startet.
-        if einreihen(z, art, Anlass::Zeitplan).is_err() {
+        if einreihen(z, art, Anlass::Zeitplan, None).is_err() {
             return;
         }
         let mut neu = z.erledigt;
@@ -776,11 +837,19 @@ impl Dienst {
     }
 }
 
-fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static str> {
+fn einreihen(
+    z: &mut Zustand,
+    art: Art,
+    anlass: Anlass,
+    update_commit: Option<String>,
+) -> Result<(), &'static str> {
+    if art == Art::Update && update_commit.is_none() {
+        return Err("Kein bestätigter Commit. Bitte suche erneut nach einem Update.");
+    }
     // Kein Auftrag darf zwischen dem Vorrücken und der Datenprüfung des neuen Dienstes laufen.
     if z.neustart
         || z.laufend.as_ref().is_some_and(|a| a.art == Art::Update)
-        || z.warteschlange.iter().any(|(a, _)| *a == Art::Update)
+        || z.warteschlange.iter().any(|a| a.art == Art::Update)
     {
         return Err("Update läuft, wartet oder startet den Dienst neu");
     }
@@ -788,14 +857,18 @@ fn einreihen(z: &mut Zustand, art: Art, anlass: Anlass) -> Result<(), &'static s
         return Err("Update nur, wenn nichts läuft oder wartet");
     }
     if z.laufend.as_ref().is_some_and(|a| a.art == art)
-        || z.warteschlange.iter().any(|(a, _)| *a == art)
+        || z.warteschlange.iter().any(|a| a.art == art)
     {
         return Err("laeuft schon oder wartet schon");
     }
     if z.warteschlange.len() >= WARTEN_MAX {
         return Err("zu viele wartende Auftraege");
     }
-    z.warteschlange.push_back((art, anlass));
+    z.warteschlange.push_back(WartenderAuftrag {
+        art,
+        anlass,
+        update_commit,
+    });
     Ok(())
 }
 
@@ -843,7 +916,9 @@ pub fn nach_neustart(z: &Zustand, tag: Datum) -> Option<(bool, String)> {
         .map(|a| if a.ende.is_none() { None } else { a.erfolg })
         .or_else(|| {
             (z.erledigt.kurse_ok == Some(tag)
-                && z.warteschlange.contains(&(Art::Papier, Anlass::Zeitplan)))
+                && z.warteschlange
+                    .iter()
+                    .any(|a| a.art == Art::Papier && a.anlass == Anlass::Zeitplan))
             .then_some(None)
         });
     let kurse_vorher = frueher(&kurse, Frueher::Beendet) || frueher(&kurse, Frueher::Unterbrochen);
