@@ -33,7 +33,9 @@ mod zugang;
 pub use betrieb::{AnbieterHinweis, Betrieb, SchluesselStand};
 pub use budget::{BudgetStatus, KiBudget, ki_budget, mit_verbrauch};
 pub use depot::{AuftragZeile, DepotLage, Position, TopfLage};
-pub use depot_sim::papierlauf::papier_freigabe_angebot;
+pub use depot_sim::papierlauf::{
+    PapierFreigabeAngebot, PapierFreigabeFehler, papier_freigabe_angebot, papier_freigeben,
+};
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
 pub use zugang::{PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien};
 

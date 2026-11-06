@@ -123,6 +123,7 @@ fn dienst(wurzel: PathBuf, erfolg: bool) -> Arc<Dienst> {
 struct Attrappe {
     abgelegt: Mutex<Vec<(Wer, String)>>,
     autostart: Mutex<Option<bool>>,
+    papierfreigabe: bool,
 }
 
 impl Umwelt for Attrappe {
@@ -141,6 +142,10 @@ impl Umwelt for Attrappe {
 
     fn autostart(&self, _wurzel: &Path) -> bool {
         false
+    }
+
+    fn papierfreigabe_bestaetigen(&self, _angebot: &depot_lage::PapierFreigabeAngebot) -> bool {
+        self.papierfreigabe
     }
 
     fn autostart_setzen(&self, _wurzel: &Path, an: bool) -> Result<(), String> {
@@ -1084,6 +1089,62 @@ fn papierfreigabe_verlangt_bestaetigung_und_journalabdruck() -> Result<(), Strin
     assert!(post("").contains("papierfreigabe_unbestaetigt"));
     assert!(post("geprueft=ja&abdruck=ungültig").starts_with("HTTP/1.1 400"));
     assert!(!get(&d, "/einrichtung", t).contains("Papierhandel nach Verlustsperre freigeben"));
+    Ok(())
+}
+
+#[test]
+fn papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    // Kanonisches Journal mit zwei Papier-Toepfen, Gesamtverlustsperre und Tagesabschluss.
+    for (name, inhalt) in [
+        (
+            "journal.txt",
+            concat!(
+                "10;277cd26269b17f0a01f2d37944a7b625b839c8e433f0a1c7b8de229fc619ca67;journal-v2\n",
+                "14;7b07d15e2cdbee2e29d32e6c3aaf5b49ff371bee867e3cf54d435e3ded8b6b03;topf;A;500000;\n",
+                "14;fe147cc4e9a53116352cd71f6356db399e4320dd5ed3e60f74189c928f5b6871;topf;B;500000;\n",
+                "25;284202d38e87a7d710bea9c848eeb6f46ddd11bccfa81fa08cafc800d72726b2;abrechnungstag;2026-11-04\n",
+                "36;ecfa1ce0c24ac8bed0ccce2b440f8bf8c4c3454d579131113d54498cf7bc55fc;papier-halt;2026-11-04;gesamtverlust\n",
+                "93;5e56b0f77370678f32322b1fe88395cad52a46b2a9bc91369339af7092cd38e4;abschluss;2026-11-04;1500000;aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            ),
+        ),
+        (
+            "journal.vermerk",
+            "vermerk-v1;606;5e56b0f77370678f32322b1fe88395cad52a46b2a9bc91369339af7092cd38e4;0\n",
+        ),
+        (
+            "papierkonto.txt",
+            concat!("papierkonto-v1\n", "bargeld;1000000\n", "sendungen;0\n",),
+        ),
+    ] {
+        fs::write(daten.join(name), inhalt).map_err(|e| e.to_string())?;
+    }
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(12, 0)?;
+    assert!(get(&d, "/einrichtung", t).contains("33,33 %"));
+    let angebot = some(
+        depot_lage::papier_freigabe_angebot(&wurzel),
+        "Freigabeangebot",
+    )?;
+    let umw = Attrappe {
+        papierfreigabe: true,
+        ..Attrappe::default()
+    };
+    let formular = |abdruck: &str| {
+        formular_post(
+            "/papierfreigabe",
+            &format!("t={TOKEN}&geprueft=ja&abdruck={abdruck}"),
+        )
+    };
+    let r = |a: &Anfrage, umwelt: &Attrappe| text(&behandle(&d, umwelt, a, t));
+    assert!(r(&formular(&"a".repeat(64)), &umw).contains("papierfreigabe_geaendert"));
+    let anfrage = formular(&angebot.abdruck);
+    assert!(r(&anfrage, &Attrappe::default()).contains("papierfreigabe_unbestaetigt"));
+    assert!(r(&anfrage, &umw).contains("papierfreigabe_ok"));
+    assert!(depot_lage::papier_freigabe_angebot(&wurzel).is_none());
+    let journal = fs::read_to_string(daten.join("journal.txt")).map_err(|e| e.to_string())?;
+    assert!(journal.contains("papier-freigabe;2026-11-04;1000000;einrichtung;Wolfgang"));
     Ok(())
 }
 

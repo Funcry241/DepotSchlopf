@@ -1367,20 +1367,43 @@ fn ausdrueckliche_papierfreigabe_bindet_konto_und_startet_neue_verlustmessung() 
 
     let (sap, allianz) = (sap()?, allianz()?);
     belege(&mut j, 5, &[(&sap, "250", "250"), (&allianz, "200", "200")])?;
-    let (mut dachs, mut maus) = kaeufer(tag(5)?, &allianz);
     vorbedingung(
         papiertag(
             &mut j,
             tag(5)?,
             &universum()?,
             &start,
-            &mut dachs,
-            &mut maus,
+            &mut Stumm,
+            &mut Stumm,
             &mut konto,
         ),
         "Erster regulaerer Papiertag nach Freigabe",
     )?;
-    assert_eq!(dachs.aufrufe, 1);
+    assert_eq!(j.stand().historischer_hoechststand(), Some(historisch));
+
+    // Ein belegter Hoechststand der neuen Phase liegt unter dem historischen Hoechststand.
+    // Der anschliessende echte Papiertag bewertet das reale Testkonto bei 1.000.000 Cent.
+    vorbedingung(j.beginne_abrechnung(tag(6)?), "Tag mit neuem Hoechststand")?;
+    vorbedingung(
+        j.schliesse_ab(tag(6)?, Cent(1_428_572), &ab),
+        "Hoechststand der neuen Phase",
+    )?;
+    drop(j);
+    let mut j = ort.oeffnen()?;
+    belege(&mut j, 9, &[(&sap, "250", "250"), (&allianz, "200", "200")])?;
+    let (mut dachs, mut maus) = kaeufer(tag(9)?, &allianz);
+    let aus = papiertag(
+        &mut j,
+        tag(9)?,
+        &universum()?,
+        &start,
+        &mut dachs,
+        &mut maus,
+        &mut konto,
+    );
+    assert!(matches!(aus, Err(LaufFehler::Halt(grund)) if grund.contains("30 %")));
+    assert_eq!(dachs.aufrufe, 0);
+    assert!(j.stand().papier_verlustsperre_aktiv());
     assert_eq!(j.stand().historischer_hoechststand(), Some(historisch));
     Ok(())
 }

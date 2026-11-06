@@ -693,7 +693,10 @@ impl Journal {
             .abschluss()
             .ok_or_else(|| JournalFehler::Abgelehnt("Papierfreigabe ohne Abschluss".into()))?
             .datum;
-        self.schreibe_eintrag(Art::PapierFreigabe, &format!("{tag};{}", bargeld.0))
+        self.schreibe_eintrag(
+            Art::PapierFreigabe,
+            &crate::stand::papier_freigabe_text(tag, bargeld),
+        )
     }
 
     /// Belegt den Halt des laufenden Papiertags mit seiner dauerhaften Grundkennung.

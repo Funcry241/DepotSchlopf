@@ -107,17 +107,11 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let ergebnis = match args.as_slice() {
-        [befehl] if befehl == "papier" => lauf(&wurzel),
-        [befehl, modus, gesehen] if befehl == "papier" && modus == "freigeben" => {
-            depot_sim::papierlauf::papier_freigeben(&wurzel, gesehen)
-        }
-        _ => {
-            eprintln!("[Papier] Aufruf: run.cmd papier");
-            return ExitCode::from(2);
-        }
-    };
-    match ergebnis {
+    if args.as_slice() != ["papier"] {
+        eprintln!("[Papier] Aufruf: run.cmd papier");
+        return ExitCode::from(2);
+    }
+    match lauf(&wurzel) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("[Papier] HALT: {e}");

@@ -154,6 +154,10 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "offen",
             "Die Sperre gilt weiter. Warte, bis der laufende oder wartende Auftrag abgeschlossen ist.",
         ),
+        "papierfreigabe_geaendert" => (
+            "halt",
+            "Der Journalstand hat sich geändert. Lade die Einrichtung neu und prüfe die aktuellen Beträge.",
+        ),
         "papierfreigabe_fehler" => (
             "halt",
             "Die Freigabe konnte nicht bestätigt werden. Lade die Einrichtung neu und prüfe Journal und Papierkonto.",
@@ -601,7 +605,7 @@ pub struct Einrichtung {
     /// Inhalt von `daten/kurse.halt`, falls die Kurssperre liegt.
     pub kurse_halt: Result<Option<String>, String>,
     /// Journalabdruck und Bargeld fuer eine freigabefaehige Papier-Sperre.
-    pub papier_freigabe: Option<(String, depot_kern::Cent)>,
+    pub papier_freigabe: Option<depot_lage::PapierFreigabeAngebot>,
     /// `Some(true)`: Datei stimmt mit dem aktiven Zeitplan ueberein; `Some(false)`: weicht ab
     /// oder ist unlesbar; `None`: keine Datei (Voreinstellung).
     pub zeitplan_gespeichert: Option<bool>,
@@ -957,28 +961,26 @@ fn grenzen_teil(e: &Einrichtung, s: &mut String) {
 }
 
 fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
-    let Some((abdruck, bargeld)) = &e.papier_freigabe else {
+    let Some(angebot) = &e.papier_freigabe else {
         return;
     };
-    let betrag = depot_kern::Preis::aus_cent(*bargeld).map_or_else(
-        || format!("{} Cent", bargeld.0),
-        |p| format!("{} EUR", p.euro_text()),
-    );
     let _ = write!(
         s,
         "<section id=\"papierfreigabe\"><h2>Papierhandel nach Verlustsperre freigeben</h2>\
          <p>Die neue Verlustmessung beginnt nach dem Kontenabgleich bei <strong>{}</strong>. \
-         Der bisherige historische Höchststand bleibt im Journal und in der Anzeige erhalten. \
-         Die Freigabe startet keinen Papiertag.</p>\
+         Gesamtverlust seit dem historischen Höchststand: <strong>{}</strong>. \
+         Der historische Höchststand bleibt erhalten. Nach dem Absenden musst du die Freigabe \
+         im separaten Windows-Dialog bestätigen.</p>\
          <form method=\"post\" action=\"/papierfreigabe\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
          <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
          Ich bestätige die neue Verlustmessung für den Papierhandel.</label>\
          <button type=\"submit\">Papierhandel freigeben</button></form></section>",
-        maskiere(&betrag),
+        maskiere(&angebot.neuer_start_text()),
+        maskiere(&angebot.gesamtverlust_text()),
         maskiere(token),
-        maskiere(abdruck)
+        maskiere(&angebot.abdruck)
     );
 }
 

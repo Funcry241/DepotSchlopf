@@ -2,7 +2,7 @@
 //!
 //! Er lauscht nur auf 127.0.0.1 (Kodex `NETZ_LOKAL`, Wolfgang 05.11.2026 „Ja, nur 127.0.0.1“),
 //! zeigt live, was DepotSchlopf tut, und buendelt die ganze Einrichtung auf einer Seite. Er
-//! schreibt nie ins Journal: Jede Arbeit ist ein eigener Lauf wie `run.cmd kurse` (Werkbank).
+//! startet Arbeiten als eigene Laeufe. Einzige Ausnahme ist die vor Ort bestaetigte Papierfreigabe.
 //!
 //! Schutz gegen fremde Webseiten: siehe `http`. Jede Anfrage braucht den eigenen Host; jede
 //! aendernde Anfrage (POST) die eigene Herkunft und den Zufallswert dieses Dienststarts.
@@ -22,6 +22,7 @@
 pub mod autostart;
 pub mod http;
 pub mod kostenschutz;
+mod papierdialog;
 pub mod programmstand;
 pub mod rueckfall;
 pub mod schluessel;
@@ -53,6 +54,10 @@ pub trait Umwelt: Send + Sync {
     /// Ungueltig oder abgelehnt; die Meldung nennt den Schluessel nie.
     fn schluessel_ablegen(&self, wer: Wer, text: &str) -> Result<(), String>;
     fn autostart(&self, wurzel: &Path) -> bool;
+    /// Verlangt eine Bestaetigung ausserhalb der lokalen Webseite.
+    fn papierfreigabe_bestaetigen(&self, _angebot: &depot_lage::PapierFreigabeAngebot) -> bool {
+        false
+    }
     /// # Errors
     /// Ordner oder Pfad ungeeignet, Schreibfehler.
     fn autostart_setzen(&self, wurzel: &Path, an: bool) -> Result<(), String>;
@@ -73,6 +78,10 @@ impl Umwelt for System {
 
     fn autostart(&self, wurzel: &Path) -> bool {
         autostart::an(wurzel)
+    }
+
+    fn papierfreigabe_bestaetigen(&self, angebot: &depot_lage::PapierFreigabeAngebot) -> bool {
+        papierdialog::bestaetigen(angebot)
     }
 
     fn autostart_setzen(&self, wurzel: &Path, an: bool) -> Result<(), String> {
@@ -320,7 +329,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         }
         "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kurse),
-        "/papierfreigabe" => papier_freigeben(d, &f),
+        "/papierfreigabe" => papier_freigeben(d, u, &f),
         "/autostart" => {
             let an = match feld(&f, "an") {
                 Some("an") => true,
@@ -337,17 +346,28 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     }
 }
 
-fn papier_freigeben(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
+fn papier_freigeben(d: &Dienst, u: &dyn Umwelt, f: &[(String, String)]) -> Vec<u8> {
+    let zurueck = |code| http::umleitung(&format!("/einrichtung?m={code}#papierfreigabe"));
     if feld(f, "geprueft") != Some("ja") {
-        return http::umleitung("/einrichtung?m=papierfreigabe_unbestaetigt#papierfreigabe");
+        return zurueck("papierfreigabe_unbestaetigt");
     }
     let Some(gesehen) =
         feld(f, "abdruck").filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
     else {
         return http::text(400, "Abgelehnt: Journalabdruck fehlt oder ist ungueltig");
     };
-    let meldung = d.papier_freigeben(gesehen);
-    http::umleitung(&format!("/einrichtung?m={meldung}#papierfreigabe"))
+    let Ok(_dialog) = d.papierdialog.try_lock() else {
+        return zurueck("papierfreigabe_belegt");
+    };
+    let Some(angebot) =
+        depot_lage::papier_freigabe_angebot(&d.wurzel).filter(|angebot| angebot.abdruck == gesehen)
+    else {
+        return zurueck("papierfreigabe_geaendert");
+    };
+    if !u.papierfreigabe_bestaetigen(&angebot) {
+        return zurueck("papierfreigabe_unbestaetigt");
+    }
+    zurueck(d.papier_freigeben(gesehen))
 }
 
 /// Welche Sperrdatei ein Formular aufhebt.
