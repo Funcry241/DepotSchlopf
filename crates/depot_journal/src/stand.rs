@@ -61,6 +61,8 @@ pub enum Art {
     Abschluss,
     /// Handelstag fuer die Abrechnung nachfolgender Ausfuehrungen.
     Abrechnungstag,
+    /// Handelstag und UTC-Wissensstichtag, vor der Entscheidung belegt.
+    Wissensstichtag,
 }
 
 impl Art {
@@ -80,6 +82,7 @@ impl Art {
             Art::Abschluss => "abschluss",
             Art::Format => "format",
             Art::Abrechnungstag => "abrechnungstag",
+            Art::Wissensstichtag => "wissensstichtag",
         }
     }
 
@@ -98,6 +101,7 @@ impl Art {
             Art::Begruendung,
             Art::Abschluss,
             Art::Abrechnungstag,
+            Art::Wissensstichtag,
             Art::Format,
         ]
         .into_iter()
@@ -152,6 +156,7 @@ pub struct Stand {
     abschluss: Option<Abschluss>,
     seit_abschluss: usize,
     abrechnungstag: Option<Datum>,
+    wissensstichtage: BTreeMap<Datum, Zeitpunkt>,
     abrechnungen: Abrechnungen,
 }
 
@@ -270,6 +275,10 @@ impl Stand {
         self.letzte_kennung
     }
 
+    pub fn wissensstichtag(&self, tag: Datum) -> Option<Zeitpunkt> {
+        self.wissensstichtage.get(&tag).copied()
+    }
+
     pub fn abrechnungstag(&self) -> Option<Datum> {
         self.abrechnungstag
     }
@@ -368,6 +377,7 @@ impl Stand {
                 return Ok(());
             }
             Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
+            Art::Wissensstichtag => self.belege_wissensstichtag(inhalt)?,
             Art::Abschluss => {
                 return self.schliesse_ab(inhalt);
             }
@@ -433,6 +443,23 @@ impl Stand {
         }
         self.abschluss = Some(a);
         self.seit_abschluss = 0;
+        Ok(())
+    }
+
+    fn belege_wissensstichtag(&mut self, inhalt: &str) -> Result<(), String> {
+        let (tag, zeit) = inhalt.split_once(';').ok_or("Wissensstichtag unlesbar")?;
+        let tag = Datum::lies(tag).ok_or("Tag des Wissensstichtags unlesbar")?;
+        let zeit = Zeitpunkt::lies(zeit).ok_or("Zeit des Wissensstichtags unlesbar")?;
+        kanonisch(&format!("{tag};{zeit}"), inhalt)?;
+        if self.format != FORMAT
+            || zeit.in_frankfurt().map(|(d, ..)| d) != Some(tag)
+            || self.seit_abschluss != 0
+            || self.abschluss.as_ref().is_some_and(|a| a.datum >= tag)
+            || self.wissensstichtage.contains_key(&tag)
+        {
+            return Err("Wissensstichtag unzulaessig".into());
+        }
+        self.wissensstichtage.insert(tag, zeit);
         Ok(())
     }
 
