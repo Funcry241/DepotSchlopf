@@ -3,4 +3,5 @@ klasse: Funktion
 zweck: Gate und Datenprobe legen LF fuer ihre Git-Kindprozesse fest, auch bei abweichender Git-Konfiguration des Nutzers.
 pfade:
 crates/depot_lauf/src/abbild.rs
+crates/depot_lauf/src/export.rs
 crates/depot_lauf/src/update.rs
