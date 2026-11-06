@@ -466,6 +466,39 @@ mod tests {
     }
 
     #[test]
+    fn gate_checkout_behaelt_lf_trotz_globaler_git_einstellung() -> Result<(), String> {
+        let a = aufbau()?;
+        let config = a.projekt.join("daten/gitconfig");
+        fs::write(&config, "[core]\n    autocrlf = true\n    eol = crlf\n")
+            .map_err(|e| e.to_string())?;
+        let gate = abbild::gate_befehl(&a.projekt, &a.projekt.join("bau"), &[]);
+        let mut git = Command::new("git");
+        // Die von Cargo an Git vererbte Umgebung übernehmen und eine Nutzerconfig simulieren.
+        for (schluessel, wert) in gate.get_envs() {
+            if let Some(wert) = wert {
+                git.env(schluessel, wert);
+            } else {
+                git.env_remove(schluessel);
+            }
+        }
+        let datei = a.projekt.join("a.txt");
+        fs::remove_file(&datei).map_err(|e| e.to_string())?;
+        let aus = git
+            .current_dir(&a.projekt)
+            .env("GIT_CONFIG_GLOBAL", config)
+            .args(["checkout", "--", "a.txt"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        assert!(
+            aus.status.success(),
+            "{}",
+            String::from_utf8_lossy(&aus.stderr)
+        );
+        assert_eq!(fs::read(&datei).map_err(|e| e.to_string())?, b"eins\n");
+        Ok(())
+    }
+
+    #[test]
     fn einspielen_lehnt_neueren_als_den_bestaetigten_commit_ab() -> Result<(), String> {
         let a = aufbau()?;
         let alt = g(&a.projekt, &["rev-parse", "HEAD"])?;
