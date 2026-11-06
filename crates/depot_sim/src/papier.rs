@@ -21,6 +21,7 @@ use depot_journal::{
     Abrechnungen, Ausfuehrung, Konto, KontoOrder, KontoStatus, Kontoauszug, papier_valuta,
 };
 use depot_kern::{Cent, Datum, Gebuehren, Grenzen, Isin, Kurse, Rundung, Topf, Zeitpunkt};
+use depot_kern::liste::papierorder_schluss;
 use depot_regelwerk::{GenehmigterAuftrag, Richtung};
 
 /// Antwort des Brokers auf einen Versand.
@@ -166,11 +167,17 @@ impl Papierkonto {
             return;
         };
         let a = &o.auftrag;
-        let eintrag = kurse.eintrag(&a.isin);
-        if let Some(versand) = o.versand
-            && eintrag.is_none_or(|k| k.zeitpunkt() <= versand)
-        {
-            return;
+        let mut eintrag = kurse.eintrag(&a.isin);
+        if let Some(versand) = o.versand {
+            let Some(schluss) = papierorder_schluss(&a.isin, versand) else {
+                return;
+            };
+            let stand = kurse.stand();
+            if stand < schluss {
+                return;
+            }
+            eintrag = eintrag
+                .filter(|k| stand.datum() == schluss.datum() && k.zeitpunkt() == schluss);
         }
         let ausfuehrung = eintrag.and_then(|eintrag| {
             let exakt = eintrag.preis();
@@ -282,6 +289,9 @@ impl Papierkonto {
             stueck: a.stueck,
             limit: a.limit,
         };
+        if versand.is_some_and(|zeit| papierorder_schluss(&o.isin, zeit).is_none()) {
+            return Sendeantwort::Abgelehnt("keine Frist der Boerse".into());
+        }
         let status = if self.gedeckt(&o) == Some(true) {
             KontoStatus::Offen
         } else {
@@ -469,7 +479,9 @@ impl Papierkonto {
                 ["versand", nr, zeit] => {
                     let nr = nr.parse().map_err(|_| fehler())?;
                     let o = k.orders.get_mut(&nr).ok_or_else(fehler)?;
-                    o.versand = Some(Zeitpunkt::lies(zeit).ok_or_else(fehler)?);
+                    let zeit = Zeitpunkt::lies(zeit).ok_or_else(fehler)?;
+                    papierorder_schluss(&o.auftrag.isin, zeit).ok_or_else(fehler)?;
+                    o.versand = Some(zeit);
                 }
                 ["ausfuehrung", nr, stueck, kurs, gebuehr, rest @ ..] => {
                     let nr: u64 = nr.parse().map_err(|_| fehler())?;
@@ -478,7 +490,7 @@ impl Papierkonto {
                         (None, []) => None,
                         (Some(versand), [zeit]) => Some(
                             Zeitpunkt::lies(zeit)
-                                .filter(|z| *z > versand)
+                                .filter(|z| papierorder_schluss(&o.auftrag.isin, versand) == Some(*z))
                                 .ok_or_else(fehler)?,
                         ),
                         _ => return Err(fehler()),

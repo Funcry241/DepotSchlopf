@@ -22,7 +22,8 @@
 //! der Simulation; niemand wird neu gefragt.
 //!
 //! **Ausfuehrung:** Bestaetigte Orders bleiben offen bis zum ersten im Papiertag verwendbaren
-//! Schlusskurs nach Versand. Ist dieser ausserhalb des Limits, verfallen sie.
+//! Schlusskurs nach Versand. Fehlt an diesem Boersentag ein gepruefter Kurs oder liegt er
+//! ausserhalb des Limits, verfallen sie.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -332,7 +333,7 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
         )));
     }
     if notbremse_aktiv(stand) {
-        if stand.offene_auftraege().next().is_none() {
+        if stand.offene_auftraege().next().is_none() && stand.gehalten().is_empty() {
             return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
         }
         return Ok(Tageslage::NurSchutzverkaeufe);

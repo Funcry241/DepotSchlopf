@@ -28,6 +28,7 @@ use depot_kern::{
     BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
     Zeitpunkt,
 };
+use depot_kern::liste::papierorder_schluss;
 use depot_ki::Sperre;
 use depot_regelwerk::{
     DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide,
@@ -382,15 +383,12 @@ pub(crate) fn ein_tag(
     beteiligte.konto.rechne_ab(tag.datum);
     pruefe_stoerung(&*beteiligte.konto)?;
     if z.uhr.is_some() && notbremse_aktiv(jr.stand()) {
-        if fehler.is_empty() {
-            stoppe_kaeufe(jr, tag, &mut *beteiligte.konto)?;
-            markt_offener_orders(jr, z, &mut *beteiligte.konto)?;
-        }
-        jr.schliesse_ab(tag.datum, hoch, z.abdruck)
-            .map_err(journal)?;
-        return Err(halt(NOTBREMSE_AKTIV));
+        return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto, fehler.is_empty());
     }
     if !fehler.is_empty() {
+        if z.uhr.is_some() {
+            markt_offener_orders(jr, z, &mut *beteiligte.konto, false)?;
+        }
         for f in fehler {
             begruende(jr, tag, DATEN, &format!("{f:?}"))?;
         }
@@ -413,7 +411,7 @@ pub(crate) fn ein_tag(
     match befund {
         WaechterBefund::InOrdnung => {}
         WaechterBefund::Notbremse { .. } if z.uhr.is_some() => {
-            return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto);
+            return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto, true);
         }
         WaechterBefund::Notbremse { .. } => {
             begruende(
@@ -444,7 +442,7 @@ pub(crate) fn ein_tag(
         }
     }
     if z.uhr.is_some() {
-        markt_offener_orders(jr, z, &mut *beteiligte.konto)?;
+        markt_offener_orders(jr, z, &mut *beteiligte.konto, true)?;
     }
     // Fuer den Hoechststand zaehlt der aufgerundete Wert (siehe `depotwert`).
     let heute = depotwert(jr.stand().toepfe().values(), &tag.kurse, Rundung::Auf)
@@ -489,10 +487,26 @@ fn papier_notbremse(
     z: &Zyklus<'_>,
     hoch: Cent,
     konto: &mut dyn Broker,
+    kurse_ok: bool,
 ) -> Result<Cent, LaufFehler> {
     stoppe_kaeufe(j, z.tag, konto)?;
-    begruende(j, z.tag, WAECHTER, NOTBREMSE_AKTIV)?;
-    markt_offener_orders(j, z, konto)?;
+    if !notbremse_aktiv(j.stand()) {
+        begruende(j, z.tag, WAECHTER, NOTBREMSE_AKTIV)?;
+    }
+    markt_offener_orders(j, z, konto, kurse_ok)?;
+    if kurse_ok {
+        erneuere_schutzverkaeufe(j, z, konto)?;
+    }
+    j.schliesse_ab(z.tag.datum, hoch, z.abdruck)
+        .map_err(journal)?;
+    Err(halt(NOTBREMSE_AKTIV))
+}
+
+fn erneuere_schutzverkaeufe(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    konto: &mut dyn Broker,
+) -> Result<(), LaufFehler> {
     let toepfe: Vec<_> = j.stand().toepfe().values().cloned().collect();
     for mut topf in toepfe {
         let topf_id = topf.id();
@@ -513,15 +527,14 @@ fn papier_notbremse(
             .ok_or_else(|| halt("Notbremse: Kurs fehlt; Halt ohne Verkauf"))?;
         fuehre_aus(j, z, topf.id(), &auftraege, konto)?;
     }
-    j.schliesse_ab(z.tag.datum, hoch, z.abdruck)
-        .map_err(journal)?;
-    Err(halt(NOTBREMSE_AKTIV))
+    Ok(())
 }
 
 fn markt_offener_orders(
     j: &mut Journal,
     z: &Zyklus<'_>,
     konto: &mut dyn Broker,
+    kurse_ok: bool,
 ) -> Result<(), LaufFehler> {
     let offen: Vec<_> = j.stand().offene_auftraege().map(|l| l.beleg.nr).collect();
     if offen.is_empty() {
@@ -531,14 +544,19 @@ fn markt_offener_orders(
     let handelbar = z.universum.isins();
     let eintraege = kurse
         .alle()
-        .filter(|(isin, _)| handelbar.contains(*isin))
+        .filter(|(isin, _)| kurse_ok && handelbar.contains(*isin))
         .filter_map(|(isin, kurs)| Some((isin.clone(), kurs.clone(), kurse.abruf(isin)?)))
         .collect();
-    let kurse = Kurse::mit_abrufen(kurse.stand(), eintraege)
+    let stand = z
+        .uhr
+        .and_then(|uhr| uhr())
+        .filter(|zeit| *zeit >= kurse.stand())
+        .ok_or_else(|| halt("Keine verlaessliche Marktzeit"))?;
+    let kurse = Kurse::mit_abrufen(stand, eintraege)
         .map_err(|e| halt(format!("Kurse fuer offene Orders: {e:?}")))?;
     konto.markt(&kurse);
     kontowaechter(j, z.tag, &*konto)?;
-    protokolliere_ausfuehrungen(j, z.tag, &offen)
+    protokolliere_ausfuehrungen(j, z.tag, &offen, Some(&kurse))
 }
 
 /// Fragt einen Berater, wenn der Kostenschutz es erlaubt. `None` heisst: nicht gefragt; der
@@ -646,13 +664,17 @@ fn topf_zyklus(
         kurse: &tag.kurse,
         ereignisse: &tag.ereignisse,
     };
-    let wartet = z.uhr.is_some() && j.stand().offene_auftraege().any(|l| l.beleg.topf == id);
-    let mut vorschlag = if wartet {
+    let wartet = j
+        .stand()
+        .offene_auftraege()
+        .find(|l| l.versand.is_some() && l.beleg.topf == id)
+        .map(|l| l.beleg.nr);
+    let mut vorschlag = if let Some(nr) = wartet {
         begruende(
             j,
             tag,
             AUFTRAGSSTELLE,
-            &format!("{t}: wartet auf offene Orders"),
+            &format!("{t}: wartet auf offenen Auftrag {nr}"),
         )?;
         None
     } else {
@@ -818,13 +840,14 @@ fn fuehre_aus(
         konto.markt(&tag.kurse);
     }
     kontowaechter(j, tag, &*konto)?;
-    protokolliere_ausfuehrungen(j, tag, &gesendet)
+    protokolliere_ausfuehrungen(j, tag, &gesendet, None)
 }
 
 fn protokolliere_ausfuehrungen(
     j: &mut Journal,
     tag: &Tag,
     nummern: &[u64],
+    papierkurse: Option<&Kurse>,
 ) -> Result<(), LaufFehler> {
     for nr in nummern {
         let Some(l) = j.stand().auftrag(*nr).cloned() else {
@@ -843,11 +866,24 @@ fn protokolliere_ausfuehrungen(
             )?;
         }
         if l.zustand == AuftragsZustand::Verfallen {
+            let grund = match (papierkurse, l.versand) {
+                (Some(kurse), Some(versand)) => {
+                    let schluss = papierorder_schluss(&l.beleg.isin, versand);
+                    if schluss.and_then(Zeitpunkt::datum) != kurse.stand().datum() {
+                        "Boersentag der Order bereits vorbei"
+                    } else if kurse.eintrag(&l.beleg.isin).map(depot_kern::Kurs::zeitpunkt) != schluss {
+                        "kein gepruefter Kurs am Boersenschluss"
+                    } else {
+                        "Kurs ausserhalb des Limits"
+                    }
+                }
+                _ => "Kurs ausserhalb des Limits",
+            };
             begruende(
                 j,
                 tag,
                 SIMULATION,
-                &format!("{t}: Auftrag {nr} verfaellt: Kurs ausserhalb des Limits"),
+                &format!("{t}: Auftrag {nr} verfaellt: {grund}"),
             )?;
         }
     }

@@ -6,7 +6,7 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
-- Der Papiertag speichert die Versandzeit neuer Orders. Nach einem Neustart bleiben sie reserviert und warten auf den ersten im Papiertag geprüften Schlusskurs nach ihrem Versand. Liegt dieser Kurs außerhalb des Limits, verfällt die Order. Journal und Papierkonto belegen die Kurszeit, aus deren Handelstag die Valuta folgt. Die Notbremse storniert offene Käufe und lässt nur noch offene Verkäufe zum späteren Kurs abarbeiten. Neue zeitbelegte Orders schreiben das Papierkonto als `papierkonto-v2`. Alte Dateien lassen sich mit der neuen Version lesen.
+- Der Papiertag speichert die Versandzeit neuer Orders. Nach einem Neustart bleiben sie reserviert und warten bis zum ersten Börsenschluss nach ihrem Versand. Fehlt dafür ein geprüfter Kurs oder liegt er außerhalb des Limits, verfällt die Order. Journal und Papierkonto belegen die Kurszeit, aus deren Handelstag die Valuta folgt. Die Notbremse storniert offene Käufe und lässt nur noch offene Verkäufe zum späteren Kurs abarbeiten. Neue zeitbelegte Orders schreiben das Papierkonto als `papierkonto-v2`. Alte Dateien lassen sich mit der neuen Version lesen.
 
 - Das EUR-Papierkonto trennt verbuchte Verkaufserlöse von der Kaufkraft. Nettoerlöse werden erst am zweiten folgenden Xetra-Handelstag für Käufe frei. Diese Modellregel gilt auch für NYSE-Werte. Das Journal berechnet die Abrechnungen je Topf unabhängig vom Papierkonto. Fehlende oder abweichende Abrechnungsbelege führen beim Abgleich zum Halt. Alte Journale und Kontodateien bleiben lesbar.
 

@@ -16,7 +16,7 @@
 //! nicht belegen. Gefuellt ist ein Auftrag, wenn seine Ausfuehrungen genau die beauftragte Menge
 //! ergeben; mehr nimmt das Journal nicht an. Eine Ausfuehrung haelt das Limit ein.
 
-use depot_kern::{Cent, Zeitpunkt};
+use depot_kern::{Cent, Zeitpunkt, liste::papierorder_schluss};
 use depot_regelwerk::Richtung;
 
 use crate::stand::AuftragsBeleg;
@@ -150,6 +150,8 @@ impl AuftragsLage {
         neu.zustand = match (self.zustand, m) {
             (Z::Reserviert, Meldung::Gesendet) => Z::Gesendet,
             (Z::Reserviert, Meldung::GesendetAm(zeit)) => {
+                papierorder_schluss(&self.beleg.isin, *zeit)
+                    .ok_or_else(|| format!("Auftrag {nr}: keine Frist der Boerse"))?;
                 neu.versand = Some(*zeit);
                 Z::Gesendet
             }
@@ -183,8 +185,9 @@ impl AuftragsLage {
         let nr = b.nr;
         match (self.versand, a.kurszeit) {
             (None, None) => {}
-            (Some(versand), Some(kurszeit)) if kurszeit > versand => {}
-            _ => return Err(format!("Auftrag {nr}: keine Kurszeit nach dem Versand")),
+            (Some(versand), Some(kurszeit))
+                if papierorder_schluss(&b.isin, versand) == Some(kurszeit) => {}
+            _ => return Err(format!("Auftrag {nr}: Kurszeit liegt nicht am ersten Boersenschluss nach dem Versand")),
         }
         if a.stueck == 0 || a.kurs.0 <= 0 || a.gebuehr.0 < 0 {
             return Err(format!("Auftrag {nr}: Ausfuehrung unplausibel"));
