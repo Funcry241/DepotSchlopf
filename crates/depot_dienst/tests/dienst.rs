@@ -1102,6 +1102,29 @@ fn get(d: &Dienst, ziel: &str, t: Zeitpunkt) -> String {
 }
 
 #[test]
+fn navigation_markiert_aktuelle_seite_und_zeigt_laufenden_stand() -> Result<(), String> {
+    let mut d = Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        echo_starter(true),
+        leeres_lagebild(),
+    );
+    let t = donnerstag(12, 0)?;
+    assert!(get(&d, "/", t).contains("Commit unbekannt"));
+    let sha = "a".repeat(40);
+    d.version = Some(sha.clone());
+    for (pfad, titel) in [("/", "Live"), ("/einrichtung", "Einrichtung")] {
+        let html = get(&d, pfad, t);
+        assert_eq!(html.matches("aria-current=\"page\"").count(), 1);
+        assert!(html.contains(&format!(
+            "<a href=\"{pfad}\" aria-current=\"page\">{titel}</a>"
+        )));
+        assert!(html.contains(&format!("title=\"{sha}\">Version aaaaaaaaaa</span>")));
+    }
+    Ok(())
+}
+
+#[test]
 fn papierfreigabe_verlangt_bestaetigung_und_journalabdruck() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let umw = Attrappe::default();

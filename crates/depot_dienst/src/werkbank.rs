@@ -323,6 +323,8 @@ pub struct Dienst {
     pub token: String,
     /// Kennung dieses Starts, nicht geheim. Die Seite laedt sich neu, wenn sie wechselt.
     pub start: String,
+    /// Commit des laufenden Programms, einmal beim Dienststart ermittelt.
+    pub version: Option<String>,
     pub zustand: Mutex<Zustand>,
     pub(crate) papierdialog: Mutex<()>,
     starter: Starter,
@@ -450,6 +452,7 @@ impl Dienst {
             wurzel,
             token,
             start,
+            version: None,
             zustand: Mutex::new(Zustand {
                 naechste_nr: 1,
                 laufend: None,

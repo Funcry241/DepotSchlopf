@@ -116,7 +116,11 @@ enum Herkunft {
 fn starter_fuer(
     wurzel: &std::path::Path,
     h: &Herkunft,
-) -> (depot_dienst::werkbank::Starter, (bool, String)) {
+) -> (
+    depot_dienst::werkbank::Starter,
+    (bool, String),
+    Option<String>,
+) {
     match h {
         Herkunft::Stand => match programmstand::startklar(wurzel) {
             Ok(s) => (
@@ -128,19 +132,22 @@ fn starter_fuer(
                         s.kurz()
                     ),
                 ),
+                programmstand::commit_fuer_baum(wurzel, &s.baum),
             ),
             Err(e) => (
                 cargo_starter(),
                 (true, format!("Programmstand nicht verwendbar ({e}); Aufträge über Cargo.")),
+                None,
             ),
         },
-        Herkunft::Gebaut(_) => (
+        Herkunft::Gebaut(baum) => (
             cargo_starter(),
             (
                 false,
                 "Mit Cargo gebaut. Läuft der Dienst gleich eine Weile, wird dieser Stand für den nächsten Start gesichert."
                     .into(),
             ),
+            programmstand::commit_fuer_baum(wurzel, baum),
         ),
         Herkunft::Unbekannt => (
             cargo_starter(),
@@ -148,6 +155,7 @@ fn starter_fuer(
                 true,
                 "Ohne Wächter gestartet: Kein Programmstand für einen Start ohne Cargo.".into(),
             ),
+            None,
         ),
     }
 }
@@ -235,13 +243,10 @@ fn main() -> ExitCode {
     };
     let token = neues_token();
     let umwelt: Arc<dyn Umwelt> = Arc::new(System);
-    let (starter, meldung) = starter_fuer(&wurzel, &herkunft);
-    let dienst = Arc::new(Dienst::neu(
-        wurzel,
-        token,
-        starter,
-        lagerechner(Arc::clone(&umwelt)),
-    ));
+    let (starter, meldung, version) = starter_fuer(&wurzel, &herkunft);
+    let mut dienst = Dienst::neu(wurzel, token, starter, lagerechner(Arc::clone(&umwelt)));
+    dienst.version = version;
+    let dienst = Arc::new(dienst);
     dienst.sperre().programm_meldung = Some(meldung);
     bestaetigen(&dienst);
     if let Herkunft::Gebaut(baum) = herkunft {

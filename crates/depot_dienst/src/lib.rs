@@ -184,7 +184,13 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     match a.pfad.as_str() {
         "/" => {
             let inhalt = seiten::live(&d.token, &d.start, &d.sperre(), tag);
-            let s = seiten::rahmen("/", Some("/teil/live"), meldung, &inhalt);
+            let s = seiten::rahmen(
+                "/",
+                Some("/teil/live"),
+                meldung,
+                &inhalt,
+                d.version.as_deref(),
+            );
             antwort(200, HTML, s.as_bytes())
         }
         "/teil/live" => antwort(
@@ -248,7 +254,8 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             };
             let inhalt = seiten::einrichtung(&d.token, &d.start, &zustand, tag, &gespeichert);
             drop(zustand);
-            let seite = seiten::rahmen("/einrichtung", None, meldung, &inhalt);
+            let seite =
+                seiten::rahmen("/einrichtung", None, meldung, &inhalt, d.version.as_deref());
             antwort(200, HTML, seite.as_bytes())
         }
         "/app.js" => antwort(
@@ -373,7 +380,7 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
         _ => return seiten::fehler(404, "Diese Aktion gibt es nicht."),
     };
     let inhalt = seiten::auftrag_bestaetigen(&d.token, art, sha.as_deref());
-    let seite = seiten::rahmen(ziel, None, None, &inhalt);
+    let seite = seiten::rahmen(ziel, None, None, &inhalt, d.version.as_deref());
     antwort(200, HTML, seite.as_bytes())
 }
 

@@ -1,5 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: KodexAenderung
-zweck: Die Kodex-Gegenproben legen die Zeilenenden ihrer Test-Repositories fest, damit auch ein bisheriger Updater den neuen Stand unter Windows pruefen kann.
+klasse: Funktion
+zweck: Aktiven Tab in der Hauptnavigation hervorheben und den Commit des laufenden Dienstes anzeigen.
 pfade:
-crates/depot_kodex/tests/befunde.rs
+crates/depot_dienst/
