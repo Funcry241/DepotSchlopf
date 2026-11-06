@@ -91,10 +91,8 @@ pub fn tageskurse(stand: &Stand, universum: &Universum) -> Result<Tageskurse, La
     tageskurse_bis(stand, universum, None)
 }
 
-/// Die Kurse, die ein Papiertag am Tag `tag` gesehen haette: nur Belege, die bis zum Ende dieses
-/// Tages (Frankfurt) abgerufen waren, und nur, wenn ihr juengster Handelstag `tag` ist. So
-/// laesst sich fuer einen vergangenen Tag dieselbe Kurspruefung wiederholen, ohne spaetere
-/// Abrufe mitzuzaehlen.
+/// Kurse am belegten Stichtag. Fuer einen Tag ohne Papiertag dient der Tagesabschluss als
+/// Obergrenze der Kursdiagnose. Fuer ein historisches Wiederabspielen gilt `papiertag_wiederabspielen`.
 ///
 /// # Errors
 /// `Halt`, wenn es fuer `tag` keine Kurse gab; sonst wie `tageskurse`.
@@ -103,7 +101,9 @@ pub fn tageskurse_am(
     universum: &Universum,
     tag: Datum,
 ) -> Result<Tageskurse, LaufFehler> {
-    let ende = Zeitpunkt::frankfurt(tag, 23, 59, 59)
+    let ende = stand
+        .wissensstichtag(tag)
+        .or_else(|| Zeitpunkt::frankfurt(tag, 23, 59, 59))
         .ok_or_else(|| halt(format!("Kein Tagesende fuer den {}", datum_text(tag))))?;
     let k = tageskurse_bis(stand, universum, Some(ende))?;
     if k.handelstag != tag {
@@ -350,6 +350,24 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
     Ok(Tageslage::Offen)
 }
 
+/// Rekonstruiert die Quellenlage eines Papiertags zum damals belegten Stichtag, ohne
+/// Kontobewegung oder Beratung. Bei aelteren Tagen ohne Stichtag liefert der Aufruf Halt.
+pub fn papiertag_wiederabspielen(
+    stand: &Stand,
+    universum: &Universum,
+    tag: Datum,
+) -> Result<Tag, LaufFehler> {
+    let wissen_bis = stand
+        .wissensstichtag(tag)
+        .ok_or_else(|| halt(format!("Kein belegter Wissensstichtag fuer {tag}")))?;
+    let kurse = pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, tag)?;
+    Ok(Tag {
+        datum: tag,
+        kurse: kurse.heute,
+        ereignisse: weltlage_am(stand, tag, wissen_bis),
+    })
+}
+
 /// Ein Papiertag. `heute` ist das Datum der Uhr; `start` sind die Toepfe, mit denen ein neues
 /// Papierdepot beginnt. `konto` ist das Papierkonto, das unabhaengig vom Journal weiterlebt.
 ///
@@ -375,17 +393,32 @@ fn belegte_lage(
     heute: Datum,
     uhr: Option<&dyn Fn() -> Option<Zeitpunkt>>,
 ) -> Result<(Tageskurse, Zeitpunkt), LaufFehler> {
-    let wissen_bis = match uhr {
-        Some(uhr) => uhr(),
-        None => Zeitpunkt::frankfurt(heute, 23, 59, 59),
+    let jetzt = match uhr {
+        Some(uhr) => uhr().ok_or_else(|| halt("Keine verlaessliche Zeit fuer den Wissensstand"))?,
+        // Ein neuer Papiertag ohne reale Uhr dient Szenarien. Seine simulierte Uhr steht
+        // beim letzten an diesem Tag bezeugten Abruf.
+        None => letzter_abruf_am(stand, heute).ok_or_else(|| halt("Keine Abrufe fuer den Papiertag"))?,
+    };
+    let wissen_bis = stand.wissensstichtag(heute).unwrap_or(jetzt);
+    if wissen_bis > jetzt {
+        return Err(halt("Wissensstichtag liegt nach der aktuellen Uhrzeit"));
     }
-    .ok_or_else(|| halt("Keine verlaessliche Zeit fuer den Wissensstand"))?;
     let kurse = pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, heute)?;
     Ok((kurse, wissen_bis))
 }
 
-/// Papiertag mit einer Uhr fuer den Zeitpunkt des Versands. Beim Wiederabspielen ohne Uhr
-/// gilt der belegte Stand der Entscheidungskurse als frueheste moegliche Versandzeit.
+fn letzter_abruf_am(stand: &Stand, tag: Datum) -> Option<Zeitpunkt> {
+    stand
+        .kurse()
+        .iter()
+        .map(KursBeleg::abruf)
+        .chain(stand.termine().iter().map(depot_journal::TerminBeleg::abruf))
+        .chain(stand.nachrichten().iter().map(NachrichtBeleg::abruf))
+        .filter(|zeit| zeit.in_frankfurt().is_some_and(|(d, ..)| d == tag))
+        .max()
+}
+
+/// Papiertag mit einer Uhr fuer den Zeitpunkt des Versands.
 pub(crate) fn papiertag_mit_uhr(
     j: &mut Journal,
     heute: Datum,
@@ -413,6 +446,7 @@ pub(crate) fn papiertag_mit_uhr(
     }
     let letzter = j.stand().abschluss().cloned();
     j.stelle_um().map_err(journal)?;
+    j.belege_wissensstichtag(heute, wissen_bis).map_err(journal)?;
     let hoch = if neu {
         for t in start {
             j.setze_topf(t).map_err(journal)?;

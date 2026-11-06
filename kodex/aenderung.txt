@@ -1,6 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Erster Weltmodell-Baustein. Der Papiertag fixiert seinen Wissensstichtag und verwendet nur bis dahin belegte Kurse, Nachrichten und Terminversionen. Der Stichtag steht im Journal und im Abschlussabdruck. Keine neuen Datenquellen oder Abhaengigkeiten.
+zweck: Erster Weltmodell-Baustein. Der Papiertag fixiert seinen Wissensstichtag und verwendet nur bis dahin belegte Kurse, Nachrichten und Terminversionen. Der Stichtag steht im eigenen Journaleintrag und im Abschlussabdruck. Wiederabspielen verlangt den belegten Stichtag. Keine neuen Datenquellen oder Abhaengigkeiten.
 pfade:
+crates/depot_journal/
 crates/depot_sim/
 CHANGELOG.md
