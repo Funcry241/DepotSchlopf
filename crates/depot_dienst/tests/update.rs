@@ -350,10 +350,8 @@ fn rueckfall_setzt_auf_den_alten_stand_zurueck_und_lehnt_den_neuen_ab() -> Resul
     assert!(m.contains("zurueckgesetzt"), "{m}");
     assert_eq!(g(&w, &["rev-parse", "HEAD"])?, vorher);
     assert_eq!(g(&w, &["symbolic-ref", "--short", "HEAD"])?, "main");
-    assert_eq!(
-        fs::read_to_string(w.join("a.txt")).map_err(|e| e.to_string())?,
-        "alt\n"
-    );
+    let inhalt = fs::read_to_string(w.join("a.txt")).map_err(|e| e.to_string())?;
+    assert!(matches!(inhalt.as_str(), "alt\n" | "alt\r\n"), "{inhalt:?}");
     assert!(w.join("eigen.txt").exists());
     assert!(!rueckfall::offen_pfad(&w).exists());
     assert_eq!(
@@ -492,21 +490,26 @@ fn kind(
     skript_windows: &str,
     offen: &Path,
 ) -> Result<std::process::Child, String> {
-    let p = offen.display().to_string();
     #[cfg(windows)]
     let mut c = {
+        use std::os::windows::process::CommandExt as _;
+
         let _ = skript_unix;
-        let mut c = Command::new("cmd");
-        c.args(["/C", &skript_windows.replace("{offen}", &p)]);
+        let mut c = Command::new("cmd.exe");
+        // cmd liest den Rest hinter /C selbst. Die normalen Argument-Escapes würden
+        // die Anführungszeichen für den Pfad mit einem Backslash versehen.
+        c.args(["/D", "/V:OFF", "/C"])
+            .raw_arg(skript_windows.replace("{offen}", "%DEPOT_TEST_OFFEN%"));
         c
     };
     #[cfg(not(windows))]
     let mut c = {
         let _ = skript_windows;
         let mut c = Command::new("sh");
-        c.args(["-c", &skript_unix.replace("{offen}", &p)]);
+        c.args(["-c", &skript_unix.replace("{offen}", "$DEPOT_TEST_OFFEN")]);
         c
     };
+    c.env("DEPOT_TEST_OFFEN", offen);
     c.spawn().map_err(|e| format!("Vorbedingung Kind: {e}"))
 }
 
@@ -553,8 +556,8 @@ fn haengender_neuer_stand_wird_nach_der_frist_beendet() -> Result<(), String> {
 fn nach_der_bestaetigung_zaehlt_der_code() -> Result<(), String> {
     let offen = markierung()?;
     let mut k = kind(
-        "rm -f '{offen}'; sleep 0.3; exit 3",
-        "del /q \"{offen}\" & ping -n 2 127.0.0.1 >nul & exit /b 3",
+        "rm \"{offen}\" || exit 91; exit 3",
+        "del /q \"{offen}\" || exit /b 91 & if exist \"{offen}\" exit /b 91 & exit /b 3",
         &offen,
     )?;
     let a = waechter::begleite(&mut k, &offen, std::time::Duration::from_secs(30), KURZ);
