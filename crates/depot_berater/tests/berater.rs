@@ -469,7 +469,7 @@ fn weltmodell_attrappen() -> (Attrappe, Attrappe) {
 /// Antwort steht mit ihren Kosten im Journal.
 #[test]
 fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
-    use depot_journal::{Art, KursBeleg, NachrichtBeleg, Prognoserichtung};
+    use depot_journal::{KursBeleg, NachrichtBeleg};
     use depot_kern::{Preis, liste};
     use depot_sim::{Ausgang, Papierdatei, papiertag};
 
@@ -545,6 +545,15 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
         .filter(|(_, _, t)| t.contains("Cent reserviert"))
         .count();
     assert_eq!(mit_kosten, 3, "jede Antwort mit Kosten im Journal");
+    pruefe_weltprognosen(j)?;
+    assert!(!sperre.exists());
+    Ok(())
+}
+
+fn pruefe_weltprognosen(j: &Journal) -> Result<(), String> {
+    use depot_journal::{Art, Prognoserichtung};
+    use depot_kern::Preis;
+
     let ausgangskurs = some(Preis::lies_euro("230"), "Ausgangskurs")?;
     let prognosen: Vec<_> = j
         .stand()
@@ -575,7 +584,6 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
         .iter()
         .rposition(|(art, _)| *art == Art::Weltprognose);
     assert!(matches!((zweite_prognose, erste_pruefung), (Some(p), Some(u)) if p < u));
-    assert!(!sperre.exists());
     Ok(())
 }
 
