@@ -551,6 +551,9 @@ impl Journal {
             Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
                 "Abrechnungstag nur ueber beginne_abrechnung".into(),
             )),
+            Art::NotbremseFreigabe => Err(JournalFehler::Abgelehnt(
+                "Notbremsenfreigabe nur ueber schliesse_wiederanlauf_ab".into(),
+            )),
             Art::Format => Err(JournalFehler::Abgelehnt(
                 "Die Umstellung entsteht nur ueber stelle_um".into(),
             )),
@@ -651,6 +654,26 @@ impl Journal {
                 abdruck: abdruck.to_string(),
             }),
         )
+    }
+
+    /// Schreibt nach erfolgreicher Pruefung den Abschluss und die Papier-Freigabe zusammen.
+    pub fn schliesse_wiederanlauf_ab(
+        &mut self,
+        datum: Datum,
+        abdruck: &str,
+    ) -> Result<Cent, JournalFehler> {
+        let hoechststand = self.stand().papier_bargeld().ok_or_else(|| {
+            JournalFehler::Abgelehnt("Notbremsenfreigabe: Bargeld nicht berechenbar".into())
+        })?;
+        self.schreibe_eintrag(
+            Art::NotbremseFreigabe,
+            &abschluss_text(&Abschluss {
+                datum,
+                hoechststand,
+                abdruck: abdruck.to_string(),
+            }),
+        )?;
+        Ok(hoechststand)
     }
 
     /// Belegt einen Kurs mit Quelle, Abrufzeit und Abdruck der rohen Antwort, bevor er

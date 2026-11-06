@@ -67,7 +67,7 @@ pub use konto::{
 };
 pub use kursbeleg::KursBeleg;
 pub use nachrichtbeleg::{MAX_NACHRICHT, NachrichtBeleg};
-pub use stand::{Abschluss, Art, AuftragsBeleg, FORMAT, FORMAT_ALT, Stand};
+pub use stand::{Abschluss, Art, AuftragsBeleg, FORMAT, FORMAT_ALT, NOTBREMSE_AKTIV, Stand};
 pub use terminbeleg::{Fortschreibung, TerminBeleg};
 
 #[cfg(test)]

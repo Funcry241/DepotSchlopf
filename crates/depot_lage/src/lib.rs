@@ -497,6 +497,13 @@ fn termin_und_tag(s: &Stand, heute: Datum, kurse_heute: &Heute, punkte: &mut Vec
         ),
     });
     punkte.push(match (tageslage(s, heute), kurse_heute) {
+        (Ok(Tageslage::WartetAufWiederanlauf), _) => punkt(
+            "Papiertag",
+            Ampel::Halt,
+            "Notbremse aktiv. Der nächste Papiertag prüft den automatischen Wiederanlauf."
+                .into(),
+            None,
+        ),
         (Ok(Tageslage::NurSchutzverkaeufe), _) => punkt(
             "Papiertag",
             Ampel::Halt,

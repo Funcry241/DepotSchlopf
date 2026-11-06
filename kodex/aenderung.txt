@@ -1,9 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Papiertag fuehrt bestaetigte Orders erst am ersten verwendbaren Schlusskurs nach ihrem Versand aus. Versandzeit und Kurszeit stehen im Journal und Papierkonto, Valuta folgt dem Tag der Ausfuehrung. Offene Orders bleiben reserviert, auch ueber Neustarts. Nach dem ersten Boersenschluss ohne verwendbaren Kurs verfaellt die Order. Die Notbremse stoppt Kaeufe und erneuert faellige Schutzverkaeufe fuer ungebundenen Restbestand. Keine neuen Betragsgrenzen oder Abhaengigkeiten.
+zweck: Automatischer Wiederanlauf nach der Papier-Notbremse. Nach einem spaeteren vollstaendig geprueften Papiertag ohne Bestand und offene Auftraege schreibt der Lauf Freigabe und Tagesabschluss zusammen. Nur die Waechterreferenz wird neu gesetzt; der historische Hoechststand bleibt sichtbar. Keine neuen Betragsgrenzen oder Abhaengigkeiten.
 pfade:
-crates/depot_berater/tests/berater.rs
-crates/depot_kern/src/liste.rs
 crates/depot_journal/
 crates/depot_lage/
 crates/depot_sim/

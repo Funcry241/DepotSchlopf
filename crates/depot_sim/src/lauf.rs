@@ -23,7 +23,7 @@
 //! Was ein angefangener Tag gekostet hat, steht im Journal; ihn zu wiederholen, waere eine
 //! zweite Frage fuer denselben Zyklus.
 
-use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung, Stand};
+use depot_journal::{AuftragsZustand, Journal, JournalFehler, Meldung, NOTBREMSE_AKTIV};
 use depot_kern::liste::papierorder_schluss;
 use depot_kern::{
     BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
@@ -42,7 +42,6 @@ use crate::szenario::{Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Szenario, Tag};
 /// Wer im Journal begruendet, ausser Dachs und Maus.
 const DATEN: &str = "Daten";
 const WAECHTER: &str = "Waechter";
-const NOTBREMSE_AKTIV: &str = "Notbremse aktiv: nur offene Verkaeufe weiter abgleichen";
 const KOSTENSCHUTZ: &str = "Kostenschutz";
 const REGELWERK: &str = "Regelwerk";
 const SIMULATION: &str = "Simulation";
@@ -297,6 +296,7 @@ pub fn lauf(
                 nr,
                 abdruck,
                 uhr: None,
+                vollstaendige_kurse: false,
             };
             hoch = ein_tag(j, &z, hoch, &fehler, &mut beteiligte)?;
         }
@@ -363,6 +363,7 @@ pub(crate) struct Zyklus<'a> {
     pub(crate) abdruck: &'a str,
     /// Reale Versandzeit im Papiertag. Die historische Beispielszenario-Simulation hat keine Uhr.
     pub(crate) uhr: Option<&'a dyn Fn() -> Option<Zeitpunkt>>,
+    pub(crate) vollstaendige_kurse: bool,
 }
 
 /// Ein Tag. Liefert den Hoechststand nach dem Tag.
@@ -382,7 +383,12 @@ pub(crate) fn ein_tag(
     kontowaechter(jr, tag, &*beteiligte.konto)?;
     beteiligte.konto.rechne_ab(tag.datum);
     pruefe_stoerung(&*beteiligte.konto)?;
-    if z.uhr.is_some() && notbremse_aktiv(jr.stand()) {
+    if z.uhr.is_some() && jr.stand().notbremse_aktiv() {
+        if jr.stand().prueft_wiederanlauf() && fehler.is_empty() && z.vollstaendige_kurse {
+            return jr
+                .schliesse_wiederanlauf_ab(tag.datum, z.abdruck)
+                .map_err(journal);
+        }
         return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto, fehler.is_empty());
     }
     if !fehler.is_empty() {
@@ -456,13 +462,6 @@ pub(crate) fn ein_tag(
     Ok(hoch)
 }
 
-pub(crate) fn notbremse_aktiv(stand: &Stand) -> bool {
-    stand
-        .begruendungen()
-        .iter()
-        .any(|(_, wer, text)| wer == WAECHTER && text == NOTBREMSE_AKTIV)
-}
-
 fn stoppe_kaeufe(j: &mut Journal, tag: &Tag, konto: &mut dyn Broker) -> Result<(), LaufFehler> {
     if j.stand()
         .offene_auftraege()
@@ -490,7 +489,7 @@ fn papier_notbremse(
     kurse_ok: bool,
 ) -> Result<Cent, LaufFehler> {
     stoppe_kaeufe(j, z.tag, konto)?;
-    if !notbremse_aktiv(j.stand()) {
+    if !j.stand().notbremse_aktiv() {
         begruende(j, z.tag, WAECHTER, NOTBREMSE_AKTIV)?;
     }
     markt_offener_orders(j, z, konto, kurse_ok)?;

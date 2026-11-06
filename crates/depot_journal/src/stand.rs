@@ -18,6 +18,9 @@ use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
 use crate::nachrichtbeleg::{NachrichtBeleg, lies_nachrichtbeleg, nachrichtbeleg_text};
 use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
 
+/// Aktivierungsbeleg des Papier-Waechters, auch in bestehenden Journalen.
+pub const NOTBREMSE_AKTIV: &str = "Notbremse aktiv: nur offene Verkaeufe weiter abgleichen";
+
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Art {
@@ -57,6 +60,8 @@ pub enum Art {
     Abschluss,
     /// Handelstag fuer die Abrechnung nachfolgender Ausfuehrungen.
     Abrechnungstag,
+    /// Tagesabschluss, der zugleich die Papier-Notbremse zuruecksetzt.
+    NotbremseFreigabe,
 }
 
 impl Art {
@@ -75,6 +80,7 @@ impl Art {
             Art::Abschluss => "abschluss",
             Art::Format => "format",
             Art::Abrechnungstag => "abrechnungstag",
+            Art::NotbremseFreigabe => "notbremse-freigabe",
         }
     }
 
@@ -92,6 +98,7 @@ impl Art {
             Art::Begruendung,
             Art::Abschluss,
             Art::Abrechnungstag,
+            Art::NotbremseFreigabe,
             Art::Format,
         ]
         .into_iter()
@@ -143,6 +150,9 @@ pub struct Stand {
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
     abschluss: Option<Abschluss>,
+    historischer_hoechststand: Option<Cent>,
+    notbremse_freigabe: Option<Datum>,
+    prueft_wiederanlauf: bool,
     seit_abschluss: usize,
     abrechnungstag: Option<Datum>,
     abrechnungen: Abrechnungen,
@@ -259,6 +269,28 @@ impl Stand {
         self.letzte_kennung
     }
 
+    pub fn historischer_hoechststand(&self) -> Option<Cent> {
+        self.historischer_hoechststand
+    }
+
+    pub fn notbremse_aktiv(&self) -> bool {
+        self.begruendungen.iter().rev().any(|(datum, wer, text)| {
+            wer == "Waechter"
+                && text == NOTBREMSE_AKTIV
+                && self.notbremse_freigabe.is_none_or(|freigabe| *datum > freigabe)
+        })
+    }
+
+    pub fn prueft_wiederanlauf(&self) -> bool {
+        self.prueft_wiederanlauf
+    }
+
+    pub(crate) fn papier_bargeld(&self) -> Option<Cent> {
+        self.toepfe.values().try_fold(Cent::NULL, |summe, topf| {
+            summe.checked_add(topf.bargeld())
+        })
+    }
+
     pub fn abrechnungstag(&self) -> Option<Datum> {
         self.abrechnungstag
     }
@@ -356,9 +388,8 @@ impl Stand {
                 return Ok(());
             }
             Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
-            Art::Abschluss => {
-                return self.schliesse_ab(inhalt);
-            }
+            Art::Abschluss => return self.schliesse_ab(inhalt),
+            Art::NotbremseFreigabe => return self.belege_wiederanlauf(inhalt),
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
         Ok(())
@@ -388,8 +419,34 @@ impl Stand {
         {
             return Err("Abschluss passt nicht zum Abrechnungstag".into());
         }
+        self.historischer_hoechststand = self.historischer_hoechststand.max(Some(a.hoechststand));
         self.abschluss = Some(a);
         self.seit_abschluss = 0;
+        Ok(())
+    }
+
+    fn belege_wiederanlauf(&mut self, inhalt: &str) -> Result<(), String> {
+        let a = lies_abschluss(inhalt).ok_or("Notbremsenfreigabe unlesbar")?;
+        if !self.prueft_wiederanlauf
+            || !self.notbremse_aktiv()
+            || self.abrechnungstag != Some(a.datum)
+            || !self.gehalten().is_empty()
+            || self.offene_auftraege().next().is_some()
+            || self.papier_bargeld() != Some(a.hoechststand)
+        {
+            return Err("Notbremsenfreigabe unzulaessig".into());
+        }
+        self.schliesse_ab(inhalt)?;
+        self.notbremse_freigabe = Some(a.datum);
+        self.prueft_wiederanlauf = false;
+        self.begruendungen.push((
+            a.datum,
+            "Waechter".into(),
+            format!(
+                "Notbremse automatisch aufgehoben: Konto abgeglichen und Kurse geprueft. Neuer Referenzwert {} Cent; normaler Betrieb ab dem naechsten Papiertag.",
+                a.hoechststand.0
+            ),
+        ));
         Ok(())
     }
 
@@ -405,6 +462,9 @@ impl Stand {
         {
             return Err("Abrechnungstag unzulaessig".into());
         }
+        self.prueft_wiederanlauf = self.notbremse_aktiv()
+            && self.gehalten().is_empty()
+            && self.offene_auftraege().next().is_none();
         self.abrechnungstag = Some(tag);
         Ok(())
     }
