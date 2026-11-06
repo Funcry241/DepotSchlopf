@@ -397,7 +397,9 @@ fn belegte_lage(
         Some(uhr) => uhr().ok_or_else(|| halt("Keine verlaessliche Zeit fuer den Wissensstand"))?,
         // Ein neuer Papiertag ohne reale Uhr dient Szenarien. Seine simulierte Uhr steht
         // beim letzten an diesem Tag bezeugten Abruf.
-        None => letzter_abruf_am(stand, heute).ok_or_else(|| halt("Keine Abrufe fuer den Papiertag"))?,
+        None => {
+            letzter_abruf_am(stand, heute).ok_or_else(|| halt("Keine Abrufe fuer den Papiertag"))?
+        }
     };
     let wissen_bis = stand.wissensstichtag(heute).unwrap_or(jetzt);
     if wissen_bis > jetzt {
@@ -412,7 +414,12 @@ fn letzter_abruf_am(stand: &Stand, tag: Datum) -> Option<Zeitpunkt> {
         .kurse()
         .iter()
         .map(KursBeleg::abruf)
-        .chain(stand.termine().iter().map(depot_journal::TerminBeleg::abruf))
+        .chain(
+            stand
+                .termine()
+                .iter()
+                .map(depot_journal::TerminBeleg::abruf),
+        )
         .chain(stand.nachrichten().iter().map(NachrichtBeleg::abruf))
         .filter(|zeit| zeit.in_frankfurt().is_some_and(|(d, ..)| d == tag))
         .max()
@@ -446,7 +453,8 @@ pub(crate) fn papiertag_mit_uhr(
     }
     let letzter = j.stand().abschluss().cloned();
     j.stelle_um().map_err(journal)?;
-    j.belege_wissensstichtag(heute, wissen_bis).map_err(journal)?;
+    j.belege_wissensstichtag(heute, wissen_bis)
+        .map_err(journal)?;
     let hoch = if neu {
         for t in start {
             j.setze_topf(t).map_err(journal)?;
