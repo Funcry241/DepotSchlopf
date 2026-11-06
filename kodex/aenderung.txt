@@ -1,7 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Funktion
-zweck: Einrichtung und Auftraege zeigen Bedienhinweise, aktuelle Zustaende und Rueckwege. Zeitplan trennt Speichern vom Schalten. Autostart schuetzt fremde Eintraege. Papiertag und konkreter Update-Kandidat erfordern eine Bestaetigung.
+klasse: TestOnly
+zweck: Rueckfalltests unter Windows mit Git-Zeilenenden und cmd-Pfadquotierung ausfuehrbar machen.
 pfade:
-DepotSchlopf.cmd
-crates/depot_dienst/
-crates/depot_lauf/src/update.rs
+crates/depot_dienst/tests/update.rs
