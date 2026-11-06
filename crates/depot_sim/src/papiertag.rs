@@ -468,9 +468,8 @@ pub(crate) fn papiertag_mit_uhr(
         }
         depotwert(start.iter(), &k.vortag, Rundung::Auf).ok_or_else(|| rechnung("Startwert"))?
     } else {
-        letzter
-            .as_ref()
-            .map(|a| a.hoechststand)
+        j.stand()
+            .papier_waechterreferenz()
             .ok_or_else(|| halt("Toepfe ohne Abschluss im Journal"))?
     };
     let grenzen = Grenzen::standard();

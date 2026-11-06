@@ -180,6 +180,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                     .collect(),
                 ki_halt: werkbank::lies_falls_da(&kostenschutz::pfad(&d.wurzel)),
                 kurse_halt: werkbank::lies_falls_da(&kostenschutz::kurse_pfad(&d.wurzel)),
+                papier_freigabe: depot_lage::papier_freigabe_angebot(&d.wurzel),
                 zeitplan_gespeichert: None,
                 entwurf: formular(a.abfrage.as_bytes())
                     .map(|f| seiten::Entwurf::aus_formular(&f))
@@ -319,6 +320,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         }
         "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kurse),
+        "/papierfreigabe" => papier_freigeben(d, &f),
         "/autostart" => {
             let an = match feld(&f, "an") {
                 Some("an") => true,
@@ -333,6 +335,19 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         }
         _ => http::text(404, "Nicht gefunden"),
     }
+}
+
+fn papier_freigeben(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
+    if feld(f, "geprueft") != Some("ja") {
+        return http::umleitung("/einrichtung?m=papierfreigabe_unbestaetigt#papierfreigabe");
+    }
+    let Some(gesehen) =
+        feld(f, "abdruck").filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+    else {
+        return http::text(400, "Abgelehnt: Journalabdruck fehlt oder ist ungueltig");
+    };
+    let meldung = d.papier_freigeben(gesehen);
+    http::umleitung(&format!("/einrichtung?m={meldung}#papierfreigabe"))
 }
 
 /// Welche Sperrdatei ein Formular aufhebt.

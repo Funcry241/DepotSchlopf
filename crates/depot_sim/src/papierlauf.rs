@@ -21,6 +21,21 @@ fn euro(c: Cent) -> String {
         .map_or_else(|| format!("{} Cent", c.0), depot_kern::Preis::euro_text)
 }
 
+/// Der freigabefaehige Papierstand fuer die lokale Einrichtung.
+pub fn papier_freigabe_angebot(wurzel: &Path) -> Option<(String, Cent)> {
+    let j = Journal::oeffnen(&wurzel.join("daten").join("journal.txt")).ok()?;
+    Some((j.bestaetigt().1, j.stand().papier_freigabe_bargeld()?))
+}
+
+/// Bestaetigt den angezeigten Stand unter derselben Journalsperre wie ein Papiertag.
+pub fn papier_freigeben(wurzel: &Path, gesehen: &str) -> Result<(), String> {
+    let daten = wurzel.join("daten");
+    let mut j = Journal::oeffnen(&daten.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
+    let konto = Papierdatei::oeffnen(&daten.join("papierkonto.txt"), true, &[])?;
+    j.gebe_papier_frei(gesehen, &konto)
+        .map_err(|e| format!("{e:?}"))
+}
+
 /// Ein Papiertag mit den heute belegten Schlusskursen: Journal `daten/journal.txt`,
 /// Papierkonto `daten/papierkonto.txt`. Liefert die Zeilen fuer die Ausgabe.
 ///

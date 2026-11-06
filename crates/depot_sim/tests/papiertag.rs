@@ -1304,6 +1304,88 @@ fn alte_verlustsperre_bleibt_beim_oeffnen_erhalten() -> Result<(), String> {
 }
 
 #[test]
+fn ausdrueckliche_papierfreigabe_bindet_konto_und_startet_neue_verlustmessung() -> Result<(), String>
+{
+    let ort = Ort::neu()?;
+    let start = start()?;
+    let bargeld = Cent(1_000_000);
+    let historisch = Cent(1_500_000);
+    let mut konto = Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    let ab = "a".repeat(64);
+    let tag_vorher = tag(4)?;
+    let mut j = ort.oeffnen()?;
+    for topf in &start {
+        vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+    }
+    vorbedingung(j.beginne_abrechnung(tag_vorher), "Tag starten")?;
+    vorbedingung(
+        j.belege_papier_halt(tag_vorher, depot_journal::PapierHalt::Gesamtverlust),
+        "Sperre",
+    )?;
+    assert!(
+        j.gebe_papier_frei(&j.bestaetigt().1, &konto).is_err(),
+        "Tag noch offen"
+    );
+    vorbedingung(j.schliesse_ab(tag_vorher, historisch, &ab), "Abschluss")?;
+    let anker = j.bestaetigt();
+    let falsches_konto = Papierdatei::oeffnen(
+        &ort.dir.join("falsch.txt"),
+        false,
+        &[vorbedingung(
+            Topf::neu(TopfId::A, Cent(900_000)),
+            "Abweichendes Bargeld",
+        )?],
+    )?;
+    assert!(
+        j.gebe_papier_frei(&ab, &konto).is_err(),
+        "Fremder Journalstand"
+    );
+    assert!(
+        j.gebe_papier_frei(&anker.1, &falsches_konto).is_err(),
+        "Konto weicht ab"
+    );
+    assert_eq!(j.bestaetigt(), anker);
+    vorbedingung(j.gebe_papier_frei(&anker.1, &konto), "Papierfreigabe")?;
+    assert!(
+        j.gebe_papier_frei(&anker.1, &konto).is_err(),
+        "Doppelte Freigabe"
+    );
+    drop(j);
+
+    let mut j = ort.oeffnen()?;
+    assert!(!j.stand().notbremse_aktiv());
+    assert_eq!(j.stand().historischer_hoechststand(), Some(historisch));
+    assert_eq!(j.stand().papier_waechterreferenz(), Some(bargeld));
+    assert_eq!(
+        j.stand().papier_gesamtverlust_erreicht(Cent(700_001), None),
+        Some(false)
+    );
+    assert_eq!(
+        j.stand().papier_gesamtverlust_erreicht(Cent(700_000), None),
+        Some(true)
+    );
+
+    let (sap, allianz) = (sap()?, allianz()?);
+    belege(&mut j, 5, &[(&sap, "250", "250"), (&allianz, "200", "200")])?;
+    let (mut dachs, mut maus) = kaeufer(tag(5)?, &allianz);
+    vorbedingung(
+        papiertag(
+            &mut j,
+            tag(5)?,
+            &universum()?,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut konto,
+        ),
+        "Erster regulaerer Papiertag nach Freigabe",
+    )?;
+    assert_eq!(dachs.aufrufe, 1);
+    assert_eq!(j.stand().historischer_hoechststand(), Some(historisch));
+    Ok(())
+}
+
+#[test]
 fn order_ohne_kurs_verfaellt_und_gibt_den_topf_wieder_frei() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);

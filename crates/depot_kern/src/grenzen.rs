@@ -77,6 +77,8 @@ versiegelt! {
         notbremse_bp: i64,
         /// Gesamtverlust vom historischen Hoechststand, der die Papierfreigabe sperrt.
         papier_gesamtverlust_bp: i64,
+        /// Ausdrueckliche Papierfreigabe beginnt eine neue Gesamtverlustmessung.
+        papier_freigabe_neue_messung: bool,
         etf_freigegeben: bool,
         gebuehren: Gebuehren,
         /// Toleranz der Bestandsgrenze: Liegt ein Wert mehr als so viel ueber dem
@@ -105,6 +107,7 @@ impl Grenzen {
             tagesverlust_bp: 500,
             notbremse_bp: 2_000,
             papier_gesamtverlust_bp: 3_000,
+            papier_freigabe_neue_messung: true,
             etf_freigegeben: true,
             gebuehren: Gebuehren {
                 prozent_bp: 5,

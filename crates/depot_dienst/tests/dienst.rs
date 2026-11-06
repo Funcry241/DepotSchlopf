@@ -1073,6 +1073,21 @@ fn get(d: &Dienst, ziel: &str, t: Zeitpunkt) -> String {
 }
 
 #[test]
+fn papierfreigabe_verlangt_bestaetigung_und_journalabdruck() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let umw = Attrappe::default();
+    let t = donnerstag(12, 0)?;
+    let post = |f: &str| {
+        let a = formular_post("/papierfreigabe", &format!("t={TOKEN}&{f}"));
+        text(&behandle(&d, &umw, &a, t))
+    };
+    assert!(post("").contains("papierfreigabe_unbestaetigt"));
+    assert!(post("geprueft=ja&abdruck=ungültig").starts_with("HTTP/1.1 400"));
+    assert!(!get(&d, "/einrichtung", t).contains("Papierhandel nach Verlustsperre freigeben"));
+    Ok(())
+}
+
+#[test]
 fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), String> {
     let wurzel = ordner()?;
     let d = dienst(wurzel.clone(), true);

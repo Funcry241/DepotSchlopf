@@ -554,6 +554,9 @@ impl Journal {
             Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
                 "Abrechnungstag nur ueber beginne_abrechnung".into(),
             )),
+            Art::PapierFreigabe => Err(JournalFehler::Abgelehnt(
+                "Papierfreigabe nur ueber gebe_papier_frei".into(),
+            )),
             Art::PapierHalt => Err(JournalFehler::Abgelehnt(
                 "Papier-Halt nur ueber belege_papier_halt".into(),
             )),
@@ -663,6 +666,34 @@ impl Journal {
                 abdruck: abdruck.to_string(),
             }),
         )
+    }
+
+    /// Loest genau die ausdruecklich bestaetigte Papier-Sperre nach erneutem Kontoabgleich.
+    pub fn gebe_papier_frei(
+        &mut self,
+        gesehen: &str,
+        konto: &dyn crate::Konto,
+    ) -> Result<(), JournalFehler> {
+        if self.kette != gesehen {
+            return Err(JournalFehler::Abgelehnt(
+                "Papierfreigabe: Journalstand hat sich geaendert".into(),
+            ));
+        }
+        let bargeld = self.stand.papier_freigabe_bargeld().ok_or_else(|| {
+            JournalFehler::Abgelehnt("Papierfreigabe: keine freigabefaehige Sperre".into())
+        })?;
+        let abweichungen = crate::konto::abweichungen(&self.stand, &konto.auszug());
+        if !abweichungen.is_empty() {
+            return Err(JournalFehler::Abgelehnt(format!(
+                "Papierfreigabe: Kontowächter {abweichungen:?}"
+            )));
+        }
+        let tag = self
+            .stand
+            .abschluss()
+            .ok_or_else(|| JournalFehler::Abgelehnt("Papierfreigabe ohne Abschluss".into()))?
+            .datum;
+        self.schreibe_eintrag(Art::PapierFreigabe, &format!("{tag};{}", bargeld.0))
     }
 
     /// Belegt den Halt des laufenden Papiertags mit seiner dauerhaften Grundkennung.

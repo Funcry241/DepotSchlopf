@@ -142,6 +142,22 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "halt",
             "Schlüssel nicht gespeichert: Die Anmeldeinformationsverwaltung hat abgelehnt.",
         ),
+        "papierfreigabe_ok" => (
+            "gut",
+            "Papierhandel freigegeben. Die neue Verlustmessung beginnt beim bestätigten Bargeld. Der nächste reguläre Papiertag kann wieder handeln.",
+        ),
+        "papierfreigabe_unbestaetigt" => (
+            "halt",
+            "Die Sperre gilt weiter. Bitte bestätige die neue Verlustmessung ausdrücklich.",
+        ),
+        "papierfreigabe_belegt" => (
+            "offen",
+            "Die Sperre gilt weiter. Warte, bis der laufende oder wartende Auftrag abgeschlossen ist.",
+        ),
+        "papierfreigabe_fehler" => (
+            "halt",
+            "Die Freigabe konnte nicht bestätigt werden. Lade die Einrichtung neu und prüfe Journal und Papierkonto.",
+        ),
         "zeitplan" => ("gut", "Zeitplan gespeichert und aktiv."),
         "zeitplan_ungueltig" => (
             "halt",
@@ -584,6 +600,8 @@ pub struct Einrichtung {
     pub ki_halt: Result<Option<String>, String>,
     /// Inhalt von `daten/kurse.halt`, falls die Kurssperre liegt.
     pub kurse_halt: Result<Option<String>, String>,
+    /// Journalabdruck und Bargeld fuer eine freigabefaehige Papier-Sperre.
+    pub papier_freigabe: Option<(String, depot_kern::Cent)>,
     /// `Some(true)`: Datei stimmt mit dem aktiven Zeitplan ueberein; `Some(false)`: weicht ab
     /// oder ist unlesbar; `None`: keine Datei (Voreinstellung).
     pub zeitplan_gespeichert: Option<bool>,
@@ -938,6 +956,32 @@ fn grenzen_teil(e: &Einrichtung, s: &mut String) {
     s.push_str("</table></section>");
 }
 
+fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
+    let Some((abdruck, bargeld)) = &e.papier_freigabe else {
+        return;
+    };
+    let betrag = depot_kern::Preis::aus_cent(*bargeld).map_or_else(
+        || format!("{} Cent", bargeld.0),
+        |p| format!("{} EUR", p.euro_text()),
+    );
+    let _ = write!(
+        s,
+        "<section id=\"papierfreigabe\"><h2>Papierhandel nach Verlustsperre freigeben</h2>\
+         <p>Die neue Verlustmessung beginnt nach dem Kontenabgleich bei <strong>{}</strong>. \
+         Der bisherige historische Höchststand bleibt im Journal und in der Anzeige erhalten. \
+         Die Freigabe startet keinen Papiertag.</p>\
+         <form method=\"post\" action=\"/papierfreigabe\">\
+         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
+         <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
+         Ich bestätige die neue Verlustmessung für den Papierhandel.</label>\
+         <button type=\"submit\">Papierhandel freigeben</button></form></section>",
+        maskiere(&betrag),
+        maskiere(token),
+        maskiere(abdruck)
+    );
+}
+
 /// Der Inhalt der Einrichtung.
 pub fn einrichtung(
     token: &str,
@@ -955,6 +999,7 @@ pub fn einrichtung(
     schluessel_teil(token, e, &mut s);
     kostenschutz_teil(token, e, &mut s);
     kurssperre_teil(token, e, &mut s);
+    papierfreigabe_teil(token, e, &mut s);
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);
     autostart_teil(token, e, &mut s);

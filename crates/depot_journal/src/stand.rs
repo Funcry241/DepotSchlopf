@@ -105,6 +105,8 @@ pub enum Art {
     NotbremseFreigabe,
     /// `datum;grundkennung`: typisierter Halt des Papierdepots.
     PapierHalt,
+    /// `abschlussdatum;bargeld`: ausdrueckliche Freigabe nach der Gesamtverlustsperre.
+    PapierFreigabe,
     /// Handelstag und UTC-Wissensstichtag, vor der Entscheidung belegt.
     Wissensstichtag,
 }
@@ -128,6 +130,7 @@ impl Art {
             Art::Abrechnungstag => "abrechnungstag",
             Art::NotbremseFreigabe => "notbremse-freigabe",
             Art::PapierHalt => "papier-halt",
+            Art::PapierFreigabe => "papier-freigabe",
             Art::Wissensstichtag => "wissensstichtag",
         }
     }
@@ -149,6 +152,7 @@ impl Art {
             Art::Abrechnungstag,
             Art::NotbremseFreigabe,
             Art::PapierHalt,
+            Art::PapierFreigabe,
             Art::Wissensstichtag,
             Art::Format,
         ]
@@ -204,6 +208,8 @@ pub struct Stand {
     abschluss: Option<Abschluss>,
     historischer_hoechststand: Option<Cent>,
     papier_halt: Option<PapierHalt>,
+    papier_verlustreferenz: Option<Cent>,
+    papier_neustart: Option<Cent>,
     notbremse_freigabe: Option<Datum>,
     prueft_wiederanlauf: bool,
     seit_abschluss: usize,
@@ -349,8 +355,29 @@ impl Stand {
         wert: Cent,
         startwert: Option<Cent>,
     ) -> Option<bool> {
-        let hoch = self.historischer_hoechststand.max(startwert)?;
+        let hoch = self
+            .papier_verlustreferenz
+            .or(self.historischer_hoechststand)
+            .max(startwert)?;
         Some(Grenzen::standard().papier_gesamtverlust_erreicht(wert, hoch))
+    }
+
+    pub fn papier_waechterreferenz(&self) -> Option<Cent> {
+        self.papier_neustart
+            .or_else(|| self.abschluss.as_ref().map(|a| a.hoechststand))
+    }
+
+    /// Kandidat fuer eine ausdrueckliche Freigabe. Der Kontoabgleich folgt vor dem Schreiben.
+    pub fn papier_freigabe_bargeld(&self) -> Option<Cent> {
+        if self.papier_verlustsperre_aktiv()
+            && self.seit_abschluss == 0
+            && self.abschluss.is_some()
+            && self.gehalten().is_empty()
+            && self.offene_auftraege().next().is_none()
+        {
+            return self.papier_bargeld().filter(|c| *c > Cent::NULL);
+        }
+        None
     }
 
     pub fn prueft_wiederanlauf(&self) -> bool {
@@ -468,6 +495,7 @@ impl Stand {
             Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
             Art::NotbremseFreigabe => return self.belege_wiederanlauf(inhalt),
             Art::PapierHalt => self.belege_papier_halt(inhalt)?,
+            Art::PapierFreigabe => return self.belege_papier_freigabe(inhalt),
             Art::Wissensstichtag => self.belege_wissensstichtag(inhalt)?,
             Art::Abschluss => {
                 return self.schliesse_ab(inhalt);
@@ -533,6 +561,10 @@ impl Stand {
             return Err("Abschluss passt nicht zum Abrechnungstag".into());
         }
         self.historischer_hoechststand = self.historischer_hoechststand.max(Some(a.hoechststand));
+        self.papier_verlustreferenz = self
+            .papier_verlustreferenz
+            .map(|hoch| hoch.max(a.hoechststand));
+        self.papier_neustart = None;
         self.abschluss = Some(a);
         self.seit_abschluss = 0;
         Ok(())
@@ -576,6 +608,31 @@ impl Stand {
         self.papier_halt = Some(grund);
         self.begruendungen
             .push((tag, "Waechter".into(), grund.meldung()));
+        Ok(())
+    }
+
+    fn belege_papier_freigabe(&mut self, inhalt: &str) -> Result<(), String> {
+        let tag = self
+            .abschluss
+            .as_ref()
+            .ok_or("Papierfreigabe ohne Abschluss")?
+            .datum;
+        let bargeld = self
+            .papier_freigabe_bargeld()
+            .ok_or("Papierfreigabe unzulaessig")?;
+        if !Grenzen::standard().papier_freigabe_neue_messung() {
+            return Err("Neue Papier-Verlustmessung ist nicht freigegeben".into());
+        }
+        kanonisch(&format!("{tag};{}", bargeld.0), inhalt)?;
+        self.papier_halt = None;
+        self.papier_verlustreferenz = Some(bargeld);
+        self.papier_neustart = Some(bargeld);
+        self.notbremse_freigabe = Some(tag);
+        self.prueft_wiederanlauf = false;
+        self.begruendungen.push((tag, "Waechter".into(), format!(
+            "Papier-Gesamtverlustsperre ausdruecklich freigegeben. Neue Verlustmessung ab {} Cent.",
+            bargeld.0
+        )));
         Ok(())
     }
 

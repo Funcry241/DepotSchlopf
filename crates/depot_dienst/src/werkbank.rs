@@ -440,6 +440,25 @@ impl Dienst {
         self.zustand.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Fuehrt die ausdrueckliche Papierfreigabe im eigenen Prozess aus und haelt die Werkbank frei
+    /// von weiteren Auftraegen, bis Journal und Konto geprueft sind.
+    pub(crate) fn papier_freigeben(&self, gesehen: &str) -> &'static str {
+        let mut z = self.sperre();
+        if z.laufend.is_some() || !z.warteschlange.is_empty() {
+            return "papierfreigabe_belegt";
+        }
+        let erfolg = (self.starter)(Art::Papier, &self.wurzel)
+            .args(["freigeben", gesehen])
+            .status()
+            .is_ok_and(|status| status.success());
+        z.lage_veraltet = true;
+        if erfolg {
+            "papierfreigabe_ok"
+        } else {
+            "papierfreigabe_fehler"
+        }
+    }
+
     /// Reiht einen Auftrag ein.
     ///
     /// # Errors
