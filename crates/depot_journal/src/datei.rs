@@ -21,7 +21,7 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write as _};
 use std::path::{Component, Path, PathBuf};
 
-use depot_kern::{BeraterId, Cent, Datum, Topf, TopfId};
+use depot_kern::{BeraterId, Cent, Datum, Topf, TopfId, Zeitpunkt};
 use depot_ki::{Sperre, grenzabdruck};
 use depot_regelwerk::{GenehmigterAuftrag, Kennungsvergabe};
 use sha2::{Digest, Sha256};
@@ -681,6 +681,7 @@ impl Journal {
         &mut self,
         gesehen: &str,
         konto: &dyn crate::Konto,
+        bestaetigt_am: Zeitpunkt,
     ) -> Result<(), JournalFehler> {
         if self.kette != gesehen {
             return Err(JournalFehler::Abgelehnt(
@@ -701,10 +702,8 @@ impl Journal {
             .abschluss()
             .ok_or_else(|| JournalFehler::Abgelehnt("Papierfreigabe ohne Abschluss".into()))?
             .datum;
-        self.schreibe_eintrag(
-            Art::PapierFreigabe,
-            &crate::stand::papier_freigabe_text(tag, bargeld),
-        )
+        let basis = crate::stand::papier_freigabe_text(tag, bargeld);
+        self.schreibe_eintrag(Art::PapierFreigabe, &format!("{basis};{bestaetigt_am}"))
     }
 
     /// Belegt den Halt des laufenden Papiertags mit seiner dauerhaften Grundkennung.

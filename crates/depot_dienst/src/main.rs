@@ -21,22 +21,17 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use depot_dienst::programmstand;
 use depot_dienst::rueckfall::{self, NEUSTART};
 use depot_dienst::werkbank::{Dienst, cargo_starter};
 use depot_dienst::{
-    System, Umwelt, behandle, finde_wurzel, http, lagerechner, neues_token, oeffne_browser,
+    System, Umwelt, behandle, finde_wurzel, http, jetzt, lagerechner, neues_token, oeffne_browser,
 };
-use depot_kern::Zeitpunkt;
 
 /// So viele Verbindungen werden hoechstens zugleich bedient; weitere werden geschlossen.
 const VERBINDUNGEN_MAX: usize = 32;
-fn jetzt() -> Option<Zeitpunkt> {
-    let s = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    Zeitpunkt::aus_sekunden(i64::try_from(s).ok()?)
-}
 
 fn bediene(d: &Dienst, u: &dyn Umwelt, mut strom: TcpStream) {
     let _ = strom.set_read_timeout(Some(Duration::from_secs(10)));

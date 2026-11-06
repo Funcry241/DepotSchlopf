@@ -1,12 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Papier-Halte typisiert belegen und bestehende Halte weiter lesen. Nach ausdruecklicher Freigabe der Gesamtverlustsperre und Kontenabgleich beginnt die Verlustmessung beim bestaetigten Papierbargeld. Der historische Hoechststand bleibt erhalten. Wolfgang hat diese Papierregel ausdruecklich freigegeben.
+klasse: Funktion
+zweck: Zeitpunkt der manuellen Papierfreigabe unmittelbar nach dem Dialog in UTC belegen. Vorhandene Journalbelege bleiben lesbar.
 pfade:
 crates/depot_dienst/
 crates/depot_journal/
-crates/depot_kern/src/grenzen.rs
-crates/depot_lage/src/lib.rs
 crates/depot_sim/
-docs/ARCHITEKTUR.md
-kodex/festschreibung.txt
-kodex/freigabe.txt
