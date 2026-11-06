@@ -1,7 +1,9 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Erster Weltmodell-Baustein. Der Papiertag fixiert seinen Wissensstichtag und verwendet nur bis dahin belegte Kurse, Nachrichten und Terminversionen. Der Stichtag steht im eigenen Journaleintrag und im Abschlussabdruck. Wiederabspielen verlangt den belegten Stichtag. Keine neuen Datenquellen oder Abhaengigkeiten.
+zweck: Weltmodell belegt die optionalen unabhaengigen Prognosen beider Berater vor der gegenseitigen Pruefung im Papiertag. Ein Beleg bindet Prognose, Ereignis und Ausgangskurs. Keine neuen Anbieteraufrufe, Betragsgrenzen oder Abhaengigkeiten.
 pfade:
+crates/depot_berater/
 crates/depot_journal/
+crates/depot_lage/tests/lage.rs
 crates/depot_sim/
 CHANGELOG.md

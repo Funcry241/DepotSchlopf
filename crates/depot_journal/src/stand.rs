@@ -18,6 +18,8 @@ use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
 use crate::nachrichtbeleg::{NachrichtBeleg, lies_nachrichtbeleg, nachrichtbeleg_text};
 use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
 
+use crate::weltprognose::PrognoseBeleg;
+
 /// Die Arten von Eintraegen. Ein Eintrag steht im Journal als `art;inhalt`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Art {
@@ -34,6 +36,8 @@ pub enum Art {
     /// `quelle;abruf;roh;zeit;text`: eine Nachricht von aussen (`nachrichtbeleg`, R40). Nur im
     /// Format 2; die Abrufe fallen nie zurueck.
     Nachricht,
+    /// Fixierte, unabhaengige Prognose eines Beraters im Papiertag.
+    Weltprognose,
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
     /// Rechner verlaesst (R12, R24). Damit ist er reserviert (R37).
     Auftrag,
@@ -69,6 +73,7 @@ impl Art {
             Art::Kurs => "kurs",
             Art::Termin => "termin",
             Art::Nachricht => "nachricht",
+            Art::Weltprognose => "weltprognose",
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
             Art::Ki => "ki",
@@ -88,6 +93,7 @@ impl Art {
             Art::Kurs,
             Art::Termin,
             Art::Nachricht,
+            Art::Weltprognose,
             Art::Auftrag,
             Art::Zustand,
             Art::Ki,
@@ -143,6 +149,7 @@ pub struct Stand {
     kurse: Vec<KursBeleg>,
     termine: Vec<TerminBeleg>,
     nachrichten: Vec<NachrichtBeleg>,
+    weltprognosen: Vec<PrognoseBeleg>,
     letzte_kennung: u64,
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
@@ -192,6 +199,10 @@ impl Stand {
     /// Die Auftraege, die noch keinen Endzustand haben.
     pub fn offene_auftraege(&self) -> impl Iterator<Item = &AuftragsLage> {
         self.auftraege.iter().filter(|l| l.zustand.offen())
+    }
+
+    pub fn weltprognosen(&self) -> &[PrognoseBeleg] {
+        &self.weltprognosen
     }
 
     pub fn beobachtungen(&self) -> &[(Datum, String)] {
@@ -313,6 +324,7 @@ impl Stand {
                 self.belege_nachricht(inhalt)?;
                 return Ok(());
             }
+            Art::Weltprognose => self.belege_weltprognose(inhalt)?,
             Art::Auftrag => {
                 let b = lies_auftrag(inhalt).ok_or("Auftrag unlesbar")?;
                 kanonisch(&auftrag_text(&b), inhalt)?;
@@ -371,6 +383,37 @@ impl Stand {
             }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    fn belege_weltprognose(&mut self, inhalt: &str) -> Result<(), String> {
+        let b = PrognoseBeleg::lies(inhalt).ok_or("Weltprognose unlesbar")?;
+        if self.abrechnungstag != Some(b.datum)
+            || self.abschluss.as_ref().is_some_and(|a| a.datum >= b.datum)
+            || self
+                .weltprognosen
+                .iter()
+                .any(|alt| alt.datum == b.datum && alt.berater == b.berater)
+            || b.prognose
+                .ereignis_nr
+                .checked_sub(1)
+                .and_then(|nr| {
+                    self.beobachtungen
+                        .iter()
+                        .filter(|(tag, _)| *tag == b.datum)
+                        .nth(nr)
+                })
+                .is_none_or(|(_, e)| *e != b.ereignis)
+            || !self.kurse.iter().any(|k| {
+                k.isin() == &b.prognose.isin
+                    && k.kurs().handelstag() == b.datum
+                    && k.kurs().preis() == b.ausgangskurs
+                    && k.kurs().herkunft() == Herkunft::Quelle
+            })
+        {
+            return Err("Weltprognose passt nicht zu Papiertag, Ereignis oder Ausgangskurs".into());
+        }
+        self.weltprognosen.push(b);
         Ok(())
     }
 
