@@ -1,5 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Aktiven Tab in der Hauptnavigation hervorheben und den Commit des laufenden Dienstes anzeigen.
+zweck: Laufende und abgeschlossene Protokolle lassen sich aus der Live-Ansicht kopieren.
 pfade:
 crates/depot_dienst/
