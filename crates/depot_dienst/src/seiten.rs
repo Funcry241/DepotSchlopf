@@ -15,8 +15,13 @@ use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand}
 use crate::zeitplan::{Zeitplan, lies_uhrzeit, naechster_fuer, uhrzeit_text};
 
 const STIL_DIENST: &str = "\
-nav{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap}nav a{color:inherit}\
-nav a.hier{font-weight:600;text-decoration:none}\
+nav{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;--nav-akzent:#005c97}\
+@media (prefers-color-scheme:dark){nav{--nav-akzent:#74c7ff}}\
+nav a{color:inherit;text-decoration:none;padding:6px 10px;border-bottom:3px solid transparent;\
+border-radius:6px 6px 0 0}\
+nav a:hover{background:var(--flaeche)}\
+nav a[aria-current=page]{font-weight:700;background:var(--flaeche);border-bottom-color:var(--nav-akzent)}\
+nav a:focus-visible{outline:2px solid currentColor;outline-offset:2px}\
 form.knopf{display:inline;margin:0}\
 button{font:inherit;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;\
 background:var(--flaeche);color:var(--text);cursor:pointer}\
@@ -194,8 +199,12 @@ pub fn rahmen(
 ) -> String {
     let mut s = String::with_capacity(inhalt.len().saturating_add(4096));
     let nav = |pfad: &str, text: &str| {
-        let klasse = if pfad == hier { " class=\"hier\"" } else { "" };
-        format!("<a href=\"{pfad}\"{klasse}>{text}</a>")
+        let aktuell = if pfad == hier {
+            " aria-current=\"page\""
+        } else {
+            ""
+        };
+        format!("<a href=\"{pfad}\"{aktuell}>{text}</a>")
     };
     let _ = write!(
         s,
@@ -204,7 +213,7 @@ pub fn rahmen(
          <title>DepotSchlopf</title><style>{STIL}{STIL_DIENST}</style></head><body>\
          <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt, etwa \
          beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu.</div><main>\
-         <nav><h1>DepotSchlopf</h1>{}{}<span class=\"leise\">Nur Papiergeld.</span></nav>",
+         <nav aria-label=\"Hauptnavigation\"><h1>DepotSchlopf</h1>{}{}<span class=\"leise\">Nur Papiergeld.</span></nav>",
         nav("/", "Live"),
         nav("/einrichtung", "Einrichtung")
     );

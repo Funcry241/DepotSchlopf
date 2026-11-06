@@ -1073,6 +1073,20 @@ fn get(d: &Dienst, ziel: &str, t: Zeitpunkt) -> String {
 }
 
 #[test]
+fn navigation_markiert_nur_die_aktuelle_seite() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(12, 0)?;
+    for (pfad, titel) in [("/", "Live"), ("/einrichtung", "Einrichtung")] {
+        let html = get(&d, pfad, t);
+        assert_eq!(html.matches("aria-current=\"page\"").count(), 1);
+        assert!(html.contains(&format!(
+            "<a href=\"{pfad}\" aria-current=\"page\">{titel}</a>"
+        )));
+    }
+    Ok(())
+}
+
+#[test]
 fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), String> {
     let wurzel = ordner()?;
     let d = dienst(wurzel.clone(), true);

@@ -1,11 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Papier-Notbremse bleibt bei 20 Prozent. Nach geprueftem Schutzverkauf nur unter 30 Prozent Gesamtverlust automatisch wieder anlaufen. Ab 30 Prozent unter dem historischen Hoechststand stoppt der Papiertag Kaeufe und sperrt dauerhaft den automatischen Wiederanlauf. Historischer Hoechststand bleibt im Journal erhalten. Grenzfreigabe von Wolfgang erteilt.
+klasse: Funktion
+zweck: Aktuelle Seite in der Hauptnavigation sichtbar und fuer Screenreader kennzeichnen. Tastaturfokus von der Seitenmarkierung unterscheiden.
 pfade:
-crates/depot_kern/
-crates/depot_journal/
-crates/depot_lage/
-crates/depot_sim/
-CHANGELOG.md
-kodex/festschreibung.txt
-kodex/freigabe.txt
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/dienst.rs
