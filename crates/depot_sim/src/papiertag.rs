@@ -42,7 +42,7 @@ use crate::lauf::{
 use crate::papier::Broker;
 use crate::szenario::{Berater, Tag};
 
-const FASSUNG: &str = "depot_sim-papiertag-v2";
+const FASSUNG: &str = "depot_sim-papiertag-v3";
 const PAPIERTAG: &str = "Papiertag";
 /// Unter diesem Namen stehen Kandidaten, die heute nicht handelbar sind.
 pub const AUSWAHL: &str = "Auswahl";
@@ -170,17 +170,21 @@ fn datum_text(d: Datum) -> String {
     format!("{:02}.{:02}.{}", d.tag(), d.monat(), d.jahr())
 }
 
-/// Die belegten Termine vom Handelstag bis `TERMINE_VORAUS_TAGE` voraus, nach Datum; danach die
-/// belegten Nachrichten (`nachrichten`).
-fn ereignisse(stand: &Stand, handelstag: Datum) -> Vec<String> {
+/// Die zum Wissensstichtag bekannten Termine und Nachrichten eines Papiertags.
+pub fn weltlage_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
     let Some(von) = tagesbeginn(handelstag) else {
         return Vec::new();
     };
     let bis = TERMINE_VORAUS_TAGE
         .checked_mul(SEKUNDEN_JE_TAG)
         .and_then(|d| von.checked_add(d));
-    let mut aus: Vec<(Datum, String)> = stand
-        .aktuelle_termine()
+    let termine: BTreeMap<_, _> = stand
+        .termine()
+        .iter()
+        .filter(|b| b.abruf() <= wissen_bis)
+        .map(|b| (b.termin().kennung(), b))
+        .collect();
+    let mut aus: Vec<(Datum, String)> = termine
         .values()
         .filter_map(|b| {
             let t = b.termin();
@@ -201,14 +205,14 @@ fn ereignisse(stand: &Stand, handelstag: Datum) -> Vec<String> {
         .collect();
     aus.sort();
     let mut aus: Vec<String> = aus.into_iter().map(|(_, t)| t).collect();
-    aus.extend(nachrichten(stand, handelstag));
+    aus.extend(nachrichten(stand, handelstag, wissen_bis));
     aus
 }
 
 /// Die belegten Nachrichten (R40), veroeffentlicht vom Beginn des Vortags bis zum Ende des
 /// Handelstags (UTC): hoechstens `MAX_NACHRICHTEN_LAGE`, die neueste zuerst. Wird es dem
 /// Berater zu viel, faellt so die aelteste weg.
-fn nachrichten(stand: &Stand, handelstag: Datum) -> Vec<String> {
+fn nachrichten(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
     let Some(beginn) = tagesbeginn(handelstag) else {
         return Vec::new();
     };
@@ -217,6 +221,7 @@ fn nachrichten(stand: &Stand, handelstag: Datum) -> Vec<String> {
     let mut aus: Vec<&NachrichtBeleg> = stand
         .nachrichten()
         .iter()
+        .filter(|n| n.abruf() <= wissen_bis)
         .filter(|n| {
             let s = n.zeit().sekunden();
             von.is_some_and(|von| s >= von) && bis.is_some_and(|bis| s < bis)
@@ -247,11 +252,12 @@ fn feld(h: &mut Sha256, text: &str) {
 
 /// Abdruck des Tages: haengt am Abdruck des letzten Abschlusses und an allen Kursen und
 /// Ereignissen, mit denen entschieden wird.
-fn abdruck(vorher: Option<&str>, tag: &Tag, vortag: &Kurse) -> String {
+fn abdruck(vorher: Option<&str>, tag: &Tag, vortag: &Kurse, wissen_bis: Zeitpunkt) -> String {
     let mut h = Sha256::new();
     feld(&mut h, FASSUNG);
     feld(&mut h, vorher.unwrap_or("anfang"));
     feld(&mut h, &datum_text(tag.datum));
+    feld(&mut h, &wissen_bis.to_string());
     for k in [&tag.kurse, vortag] {
         feld(&mut h, &k.stand().sekunden().to_string());
         for (isin, kurs) in k.alle() {
@@ -281,7 +287,10 @@ pub fn kurse_von_heute(
     universum: &Universum,
     heute: Datum,
 ) -> Result<Tageskurse, LaufFehler> {
-    let k = tageskurse(stand, universum)?;
+    pruefe_kurstag(tageskurse(stand, universum)?, heute)
+}
+
+fn pruefe_kurstag(k: Tageskurse, heute: Datum) -> Result<Tageskurse, LaufFehler> {
     if k.handelstag != heute {
         return Err(halt(format!(
             "Die neuesten Schlusskurse sind vom {}, heute ist der {}: Ein Tag wird nur mit \
@@ -360,6 +369,21 @@ pub fn papiertag(
     papiertag_mit_uhr(j, heute, universum, start, &mut beteiligte, None)
 }
 
+fn belegte_lage(
+    stand: &Stand,
+    universum: &Universum,
+    heute: Datum,
+    uhr: Option<&dyn Fn() -> Option<Zeitpunkt>>,
+) -> Result<(Tageskurse, Zeitpunkt), LaufFehler> {
+    let wissen_bis = match uhr {
+        Some(uhr) => uhr(),
+        None => Zeitpunkt::frankfurt(heute, 23, 59, 59),
+    }
+    .ok_or_else(|| halt("Keine verlaessliche Zeit fuer den Wissensstand"))?;
+    let kurse = pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, heute)?;
+    Ok((kurse, wissen_bis))
+}
+
 /// Papiertag mit einer Uhr fuer den Zeitpunkt des Versands. Beim Wiederabspielen ohne Uhr
 /// gilt der belegte Stand der Entscheidungskurse als frueheste moegliche Versandzeit.
 pub(crate) fn papiertag_mit_uhr(
@@ -370,7 +394,7 @@ pub(crate) fn papiertag_mit_uhr(
     beteiligte: &mut Beteiligte<'_, '_, '_>,
     uhr: Option<&dyn Fn() -> Option<Zeitpunkt>>,
 ) -> Result<Ausgang, LaufFehler> {
-    let k = kurse_von_heute(j.stand(), universum, heute)?;
+    let (k, wissen_bis) = belegte_lage(j.stand(), universum, heute, uhr)?;
     let neu = j.stand().toepfe().is_empty();
     if !neu {
         // Wiederanlauf: zuerst der Abgleich, auch wenn der Tag schon abgeschlossen ist
@@ -404,12 +428,14 @@ pub(crate) fn papiertag_mit_uhr(
     let tag = Tag {
         datum: k.handelstag,
         kurse: k.heute,
-        ereignisse: ereignisse(j.stand(), k.handelstag),
+        ereignisse: weltlage_am(j.stand(), k.handelstag, wissen_bis),
     };
     j.begruende(
         tag.datum,
         PAPIERTAG,
-        "Papiergeld; Ausfuehrung erst zu einem geprueften Schlusskurs nach Versand",
+        &format!(
+            "Papiergeld; Ausfuehrung erst zu einem geprueften Schlusskurs nach Versand. Weltmodell: Wissensstand {wissen_bis}."
+        ),
     )
     .map_err(journal)?;
     let wahl = waehle_tageswerte(
@@ -428,6 +454,7 @@ pub(crate) fn papiertag_mit_uhr(
         letzter.as_ref().map(|a| a.abdruck.as_str()),
         &tag,
         &k.vortag,
+        wissen_bis,
     );
     let nr = tagnummer(tag.datum).ok_or_else(|| rechnung("Tagnummer"))?;
     let belegte_zeit = || Some(tag.kurse.stand());

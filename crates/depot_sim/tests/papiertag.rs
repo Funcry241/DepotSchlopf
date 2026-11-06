@@ -892,7 +892,18 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
             &format!("gestern {i:02}"),
         )?;
     }
-    belege(some(Zeitpunkt::neu(tag(5)?, 15, 14, 0), "Zeit")?, "heute")?;
+    let publiziert = some(Zeitpunkt::neu(tag(5)?, 15, 14, 0), "Zeit")?;
+    belege(publiziert, "heute")?;
+    let spaeter = some(Zeitpunkt::neu(tag(6)?, 10, 0, 0), "Spaeterer Abruf")?;
+    let nachgereicht = vorbedingung(
+        NachrichtBeleg::neu("alphavantage-news", spaeter, b"nachtrag", publiziert, "Nachtrag"),
+        "Nachgereichte Nachricht",
+    )?;
+    vorbedingung(j.belege_nachricht(&nachgereicht), "Nachtrag belegen")?;
+    let wissensstand = depot_sim::weltlage_am(j.stand(), tag(5)?, abruf);
+    assert!(!wissensstand.iter().any(|t| t.contains("Nachtrag")));
+    let spaeterer_stand = depot_sim::weltlage_am(j.stand(), tag(5)?, spaeter);
+    assert!(spaeterer_stand.iter().any(|t| t.contains("Nachtrag")));
     let mut k = konto(&ort, &j)?;
     let mut dachs = Leser::default();
     let aus = papiertag(
@@ -921,6 +932,10 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
         Some("Nachricht 04.11.2026 05:30 UTC (alphavantage-news): gestern 11")
     );
     assert!(!dachs.gesehen.iter().any(|t| t.contains("zu alt")));
+    assert!(!dachs.gesehen.iter().any(|t| t.contains("Nachtrag")));
+    assert!(j.stand().begruendungen().iter().any(|(_, wer, text)| {
+        wer == "Papiertag" && text.contains("Weltmodell: Wissensstand")
+    }));
     Ok(())
 }
 
