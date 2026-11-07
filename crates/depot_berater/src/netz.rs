@@ -78,15 +78,14 @@ impl Netz for Https {
             ureq::Error::HostNotFound
             | ureq::Error::ConnectionFailed
             | ureq::Error::BadUri(_)
-            | ureq::Error::RequireHttpsOnly(_) => NetzFehler::NichtGesendet(e.to_string()),
+            | ureq::Error::RequireHttpsOnly(_)
+            | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect) => {
+                NetzFehler::NichtGesendet(depot_kern::geheimnis::maskiere(&e.to_string()))
+            }
             ureq::Error::Io(ref io) if io.kind() == std::io::ErrorKind::ConnectionRefused => {
-                NetzFehler::NichtGesendet(e.to_string())
+                NetzFehler::NichtGesendet(depot_kern::geheimnis::maskiere(&e.to_string()))
             }
-            // Name oder Verbindungsaufbau samt TLS liefen ab: Die Anfrage ging nie hinaus.
-            ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect) => {
-                NetzFehler::NichtGesendet(e.to_string())
-            }
-            anders => NetzFehler::Unklar(anders.to_string()),
+            anders => NetzFehler::Unklar(depot_kern::geheimnis::maskiere(&anders.to_string())),
         })?;
         let status = antwort.status().as_u16();
         let warten = antwort
@@ -101,7 +100,7 @@ impl Netz for Https {
             .with_config()
             .limit(MAX_ANTWORT)
             .read_to_vec()
-            .map_err(|e| NetzFehler::Unklar(e.to_string()))?;
+            .map_err(|e| NetzFehler::Unklar(depot_kern::geheimnis::maskiere(&e.to_string())))?;
         Ok(Rueckmeldung {
             status,
             inhalt,

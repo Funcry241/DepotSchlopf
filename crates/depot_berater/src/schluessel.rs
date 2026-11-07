@@ -51,7 +51,7 @@ impl Schluessel {
 
     /// Ersetzt jedes Vorkommen des Schluessels durch `***`.
     pub fn bereinige(&self, text: &str) -> String {
-        text.replace(self.0.as_str(), "***")
+        depot_kern::geheimnis::mit_schluessel(text, &self.0)
     }
 
     /// Liest den Schluessel eines Anbieters aus der Windows-Anmeldeinformationsverwaltung.
