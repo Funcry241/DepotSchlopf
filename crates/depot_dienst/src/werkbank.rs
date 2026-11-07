@@ -32,6 +32,7 @@ pub enum Art {
     /// Nur die Werte einer Boerse, kurz nach ihrem Schluss (Zeitplan).
     KurseVon(Boerse),
     Termine,
+    Nachrichten,
     Papier,
     /// Neue Staende auf `main` nennen (`run.cmd update pruefen`).
     UpdatePruefen,
@@ -39,12 +40,13 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 8] = [
+const ALLE_ARTEN: [Art; 9] = [
     Art::Einrichten,
     Art::Kurse,
     Art::KurseVon(Boerse::Xetra),
     Art::KurseVon(Boerse::Nyse),
     Art::Termine,
+    Art::Nachrichten,
     Art::Papier,
     Art::UpdatePruefen,
     Art::Update,
@@ -58,6 +60,7 @@ impl Art {
             Art::KurseVon(Boerse::Xetra) => "Kurse Xetra abrufen",
             Art::KurseVon(Boerse::Nyse) => "Kurse NYSE abrufen",
             Art::Termine => "Termine abrufen",
+            Art::Nachrichten => "Schlagzeilen abrufen",
             Art::Papier => "Papiertag",
             Art::UpdatePruefen => "Nach Update suchen",
             Art::Update => "Update einspielen",
@@ -72,6 +75,7 @@ impl Art {
             Art::KurseVon(Boerse::Xetra) => "kurse_xetra",
             Art::KurseVon(Boerse::Nyse) => "kurse_nyse",
             Art::Termine => "termine",
+            Art::Nachrichten => "nachrichten",
             Art::Papier => "papier",
             Art::UpdatePruefen => "update_pruefen",
             Art::Update => "update",
@@ -90,6 +94,7 @@ impl Art {
             Art::KurseVon(Boerse::Xetra) => &["kurse", "xetra"],
             Art::KurseVon(Boerse::Nyse) => &["kurse", "nyse"],
             Art::Termine => &["termine"],
+            Art::Nachrichten => &["nachrichten"],
             Art::Papier => &["papier"],
             Art::UpdatePruefen => &["update", "pruefen"],
             Art::Update => &["update"],
@@ -689,6 +694,10 @@ impl Dienst {
                     return None;
                 }
             }
+            if art == Art::Nachrichten && anlass == Anlass::Zeitplan && !rss_zeitplan_an(&z, jetzt)
+            {
+                return None;
+            }
             let nr = z.naechste_nr;
             z.naechste_nr = nr.saturating_add(1);
             let mut auftrag = Auftrag {
@@ -795,6 +804,22 @@ impl Dienst {
             return;
         };
         let Some(art) = faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen) else {
+            // Auch am Wochenende Weltgeschehen lesen, aber nur bei bewusst eingeschaltetem
+            // Zeitplan. Keine Kurse, keine KI, kein Papiertag durch diesen Auftrag.
+            if z.zeitplan.an
+                && z.zeitplan.nachrichten_an
+                && z.laufend.is_none()
+                && z.warteschlange.is_empty()
+                && z.verlauf_fehler.is_none()
+                && z.zeitplan_fehler.is_none()
+                && (8..23).contains(&h)
+                && z.verlauf
+                    .iter()
+                    .filter(|a| a.art == Art::Nachrichten)
+                    .all(|a| jetzt.sekunden_seit(a.start).is_some_and(|s| s >= 5400))
+            {
+                let _ = einreihen(z, Art::Nachrichten, Anlass::Zeitplan, None);
+            }
             return;
         };
         // Der Papiertag wird erst bei seinem Start vermerkt (`schritt`); wartet er schon, bleibt
@@ -1075,4 +1100,10 @@ pub fn nach_neustart(z: &Zustand, tag: Datum) -> Option<(bool, String)> {
         ));
     }
     None
+}
+
+fn rss_zeitplan_an(z: &Zustand, jetzt: Zeitpunkt) -> bool {
+    z.zeitplan.an
+        && z.zeitplan.nachrichten_an
+        && ortszeit(jetzt).is_some_and(|(_, h, ..)| (8..23).contains(&h))
 }

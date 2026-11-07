@@ -1,359 +1,262 @@
-//! Nachrichten ueber den Sammler (R40, Wolfgang 05.11.2026). Die Antwort hat die Form der echten
-//! Antwort von `NEWS_SENTIMENT` (abgerufen am 05.11.2026), mit erfundenen Nachrichten. Der Lauf
-//! bekommt sie von einer erfundenen Quelle statt aus dem Netz. Jede Vorbereitung prueft ihren
-//! Erfolg ausdruecklich und endet sonst mit „Vorbedingung …“.
-
-use std::fmt::Write as _;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
-
+//! RSS mit erfundenen Antworten: Quellenlimit, Wiederanlauf, Schluesselschutz und Journal.
 use depot_journal::Journal;
-use depot_kern::json::zitiere;
 use depot_kern::{Datum, Zeitpunkt};
-use depot_sammler::nachrichten::{
-    MAX_NACHRICHTEN, MAX_ZEICHEN, QUELLE_NACHRICHTEN, lies_nachrichten,
+use depot_sammler::nachrichten::MAX_NACHRICHTEN;
+use depot_sammler::{Netz, NetzFehler, Schluessel, Zugang, sammle_nachrichten};
+use std::fmt::Write as _;
+use std::{
+    fs,
+    path::PathBuf,
+    sync::atomic::{AtomicU32, Ordering},
 };
-use depot_sammler::{NachrichtenBericht, Netz, SammelFehler, Schluessel, sammle_nachrichten};
 
-const SCHLUESSEL: &str = "TESTSCHLUESSEL42";
-
-static ZAEHLER: AtomicU32 = AtomicU32::new(0);
-
-fn vorbedingung<T, E: std::fmt::Debug>(r: Result<T, E>, was: &str) -> Result<T, String> {
-    r.map_err(|e| format!("Vorbedingung {was}: {e:?}"))
-}
-
-fn ordner() -> Result<(PathBuf, PathBuf), String> {
-    let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("depot_nachrichten_{}_{n}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    vorbedingung(fs::create_dir_all(&dir), "Testverzeichnis")?;
-    let journal = dir.join("journal.txt");
-    vorbedingung(Journal::einrichten(&journal), "Einrichtung")?;
-    Ok((journal, dir.join("roh")))
-}
-
-fn um(t: u8, h: u8, m: u8) -> Result<Zeitpunkt, String> {
-    Datum::neu(2026, 11, t)
+static NR: AtomicU32 = AtomicU32::new(0);
+const KEY: &str = "TESTSCHLUESSEL42";
+fn um(h: u8, m: u8) -> Result<Zeitpunkt, String> {
+    Datum::neu(2026, 11, 7)
         .and_then(|d| Zeitpunkt::neu(d, h, m, 0))
-        .ok_or_else(|| "Vorbedingung: Zeitpunkt".into())
+        .ok_or("Zeit fehlt".into())
 }
-
-/// Eine Nachricht in der Form der Quelle.
-fn eintrag(titel: &str, zeit: &str, inhalt: &str, werte: &[&str]) -> String {
-    let werte: Vec<String> = werte
-        .iter()
-        .map(|w| {
-            format!(
-                "{{\"ticker\":{},\"relevance_score\":\"0.9\",\"ticker_sentiment_score\":\"0.1\",\"ticker_sentiment_label\":\"Neutral\"}}",
-                zitiere(w)
-            )
-        })
-        .collect();
+fn ordner() -> Result<PathBuf, String> {
+    let p = std::env::temp_dir().join(format!(
+        "depot_rss_{}_{}",
+        std::process::id(),
+        NR.fetch_add(1, Ordering::SeqCst)
+    ));
+    fs::create_dir_all(&p).map_err(|e| e.to_string())?;
+    Journal::einrichten(&p.join("journal.txt")).map_err(|e| format!("Vorbedingung: {e:?}"))?;
+    Ok(p)
+}
+fn item(titel: &str, zeit: &str, quelle: &str) -> String {
+    let host = if quelle == "tagesschau" {
+        "www.tagesschau.de"
+    } else {
+        "www.bbc.com"
+    };
     format!(
-        concat!(
-            "{{\"title\":{},\"url\":\"https://example.com/a\",\"time_published\":{},",
-            "\"authors\":[\"A\"],\"summary\":{},\"source\":\"Benzinga\",",
-            "\"topics\":[{{\"topic\":\"financial_markets\",\"relevance_score\":\"0.9\"}}],",
-            "\"overall_sentiment_score\":0.28,\"overall_sentiment_label\":\"Somewhat-Bullish\",",
-            "\"ticker_sentiment\":[{}]}}"
-        ),
-        zitiere(titel),
-        zitiere(zeit),
-        zitiere(inhalt),
-        werte.join(",")
+        "<item><title>{titel}</title><link>https://{host}/artikel</link><pubDate>{zeit}</pubDate><description>Nur Titel speichern</description></item>"
     )
 }
-
-fn antwort(eintraege: &[String]) -> String {
-    format!(
-        "{{\"items\":\"{}\",\"sentiment_score_definition\":\"x\",\"relevance_score_definition\":\"y\",\"feed\":[{}]}}",
-        eintraege.len(),
-        eintraege.join(",")
-    )
+fn feed(items: &str) -> String {
+    format!("<rss version=\"2.0\"><channel>{items}</channel></rss>")
 }
-
-const TIINGO_TEST: &str = "0123456789abcdef0123456789abcdef01234567";
-
-struct Erfunden {
-    antwort: Result<Vec<u8>, depot_sammler::NetzFehler>,
-    abgerufen: Vec<String>,
+fn normal(quelle: &str) -> String {
+    feed(&item(
+        "Politik &amp; Wirtschaft",
+        "Sat, 07 Nov 2026 12:00:00 GMT",
+        quelle,
+    ))
 }
-
-impl Netz for Erfunden {
-    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, depot_sammler::NetzFehler> {
-        self.abgerufen.push(adresse.to_string());
-        self.antwort.clone()
+struct Fake {
+    antworten: Vec<Result<Vec<u8>, NetzFehler>>,
+    adressen: Vec<String>,
+}
+impl Netz for Fake {
+    fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler> {
+        self.adressen.push(adresse.into());
+        if self.antworten.is_empty() {
+            return Err(NetzFehler::endgueltig("Unerwarteter Abruf"));
+        }
+        self.antworten.remove(0)
     }
 }
-
-fn lauf(
-    journal: &Path,
-    roh: &Path,
-    antwort: Result<&str, &str>,
-    zeit: Zeitpunkt,
-) -> Result<Result<NachrichtenBericht, SammelFehler>, String> {
-    let mut j = vorbedingung(Journal::oeffnen(journal), "Journal oeffnen")?;
-    let s = vorbedingung(Schluessel::neu(SCHLUESSEL), "Schluessel")?;
-    let tiingo = vorbedingung(
-        Schluessel::fuer(depot_sammler::Anbieter::Tiingo, TIINGO_TEST),
-        "Tiingo-Schluessel",
-    )?;
-    let zugang =
-        depot_sammler::Zugang::alpha_vantage(s).mit(depot_sammler::Anbieter::Tiingo, tiingo);
-    let mut netz = Erfunden {
-        antwort: antwort
-            .map(|t| t.as_bytes().to_vec())
-            .map_err(depot_sammler::NetzFehler::endgueltig),
-        abgerufen: Vec::new(),
-    };
-    let mut zeiten = vec![zeit].into_iter();
-    let mut uhr = move || zeiten.next();
-    let b = sammle_nachrichten(&mut j, &mut netz, &zugang, &mut uhr, roh);
-    assert_eq!(netz.abgerufen.len(), 1, "genau ein Abruf");
-    let a = netz.abgerufen.first().map_or("", String::as_str);
-    assert!(a.starts_with("https://www.alphavantage.co/query?function=NEWS_SENTIMENT&"));
-    assert!(a.ends_with(&format!("&apikey={SCHLUESSEL}")));
-    Ok(b)
+fn netz(a: &str, b: &str) -> Fake {
+    Fake {
+        antworten: vec![Ok(a.as_bytes().to_vec()), Ok(b.as_bytes().to_vec())],
+        adressen: Vec::new(),
+    }
+}
+fn zugang() -> Result<Zugang, String> {
+    Schluessel::neu(KEY).map(Zugang::alpha_vantage)
+}
+fn oeffnen(p: &std::path::Path) -> Result<Journal, String> {
+    Journal::oeffnen(&p.join("journal.txt")).map_err(|e| format!("Vorbedingung: {e:?}"))
 }
 
-/// Die belegten Nachrichten: Zeit der Veroeffentlichung und Text.
-fn belegt(journal: &Path) -> Result<Vec<(String, String)>, String> {
-    Ok(vorbedingung(Journal::oeffnen(journal), "Journal oeffnen")?
+#[test]
+fn kostenlos_ohne_schluessel_mit_quelle_link_zeit_und_rohhash() -> Result<(), String> {
+    let p = ordner()?;
+    let mut j = oeffnen(&p)?;
+    let mut n = netz(&normal("tagesschau"), &normal("bbc-world"));
+    let b = sammle_nachrichten(
+        &mut j,
+        &mut n,
+        &Zugang::default(),
+        &mut || um(14, 0).ok(),
+        &p.join("roh"),
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(b.neu, 2);
+    assert_eq!(n.adressen.len(), 2);
+    assert!(
+        n.adressen
+            .iter()
+            .all(|a| !a.contains("apikey") && !a.contains("alphavantage"))
+    );
+    for x in j.stand().nachrichten() {
+        assert!(x.text().contains("Politik & Wirtschaft"));
+        assert!(x.text().contains("https://"));
+        assert!(!x.text().contains("Nur Titel speichern"));
+        assert_eq!(x.zeit(), um(12, 0)?);
+        assert_eq!(x.abruf(), um(14, 0)?);
+        assert_eq!(x.roh().len(), 64);
+    }
+    Ok(())
+}
+
+#[test]
+fn abrufpause_ueberlebt_neustart_und_uhrsprung_nach_hinten() -> Result<(), String> {
+    let p = ordner()?;
+    for (h, m, erwartet) in [(14, 0, 2), (14, 1, 0), (13, 0, 0), (15, 29, 0), (15, 30, 2)] {
+        let mut j = oeffnen(&p)?;
+        let mut n = netz(&normal("tagesschau"), &normal("bbc-world"));
+        let b = sammle_nachrichten(
+            &mut j,
+            &mut n,
+            &zugang()?,
+            &mut || um(h, m).ok(),
+            &p.join("roh"),
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        assert_eq!(n.adressen.len(), erwartet);
+        if h == 15 && m == 30 {
+            assert_eq!(b.bekannt, 2);
+            assert_eq!(b.neu, 0);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn sicherheitsabbruch_auch_im_zweiten_feed_und_hinter_xml_entities() -> Result<(), String> {
+    let kodiert = KEY.chars().fold(String::new(), |mut s, c| {
+        let _ = write!(s, "&#{};", u32::from(c));
+        s
+    });
+    for text in [
+        KEY.to_string(),
+        kodiert.clone(),
+        kodiert.replace('&', "&amp;"),
+    ] {
+        for mehrdeutig in [false, true] {
+            let p = ordner()?;
+            let mut j = oeffnen(&p)?;
+            // Auch ein ignoriertes Feld wird dekodiert geprueft, nicht nur die Schlagzeile.
+            let mut boese = normal("bbc-world").replace("Nur Titel speichern", &text);
+            if mehrdeutig {
+                boese = boese.replace("</title>", "</title><title>Mehrdeutiger Titel</title>");
+            }
+            let mut n = netz(&normal("tagesschau"), &boese);
+            let b = sammle_nachrichten(
+                &mut j,
+                &mut n,
+                &zugang()?,
+                &mut || um(14, 0).ok(),
+                &p.join("roh"),
+            )
+            .map_err(|e| format!("{e:?}"))?;
+            assert!(b.sicherheitsabbruch);
+            assert!(j.stand().nachrichten().is_empty());
+            assert!(!p.join("roh").exists());
+            assert!(!format!("{b:?}").contains(KEY));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn eine_quelle_faellt_aus_und_fehler_werden_maskiert() -> Result<(), String> {
+    let p = ordner()?;
+    let mut j = oeffnen(&p)?;
+    let mut n = netz("", &normal("bbc-world"));
+    if let Some(a) = n.antworten.first_mut() {
+        *a = Err(NetzFehler::endgueltig(format!("apikey={KEY}")));
+    }
+    let b = sammle_nachrichten(
+        &mut j,
+        &mut n,
+        &zugang()?,
+        &mut || um(14, 0).ok(),
+        &p.join("roh"),
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(b.neu, 1);
+    assert!(b.fehler.is_none());
+    assert!(!format!("{b:?}").contains(KEY));
+    assert!(b.quellen.iter().any(|s| s.starts_with("tagesschau:")));
+    Ok(())
+}
+
+#[test]
+fn beide_quellen_kommen_unter_dem_gemeinsamen_limit_vor() -> Result<(), String> {
+    let p = ordner()?;
+    let mut j = oeffnen(&p)?;
+    let items = |q: &str| {
+        (0..30)
+            .map(|i| item(&format!("Titel {i}"), "Sat, 07 Nov 2026 12:00:00 GMT", q))
+            .collect::<String>()
+    };
+    let mut n = netz(&feed(&items("tagesschau")), &feed(&items("bbc-world")));
+    let b = sammle_nachrichten(
+        &mut j,
+        &mut n,
+        &zugang()?,
+        &mut || um(14, 0).ok(),
+        &p.join("roh"),
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(b.neu, MAX_NACHRICHTEN);
+    for q in ["tagesschau", "bbc-world"] {
+        assert!(j.stand().nachrichten().iter().any(|n| n.quelle() == q));
+    }
+    Ok(())
+}
+
+#[test]
+fn kaputter_feed_wird_als_ganzes_verworfen() -> Result<(), String> {
+    let p = ordner()?;
+    let mut j = oeffnen(&p)?;
+    let mut n = netz(&normal("tagesschau").replace("</rss>", ""), "kein XML");
+    let b = sammle_nachrichten(
+        &mut j,
+        &mut n,
+        &zugang()?,
+        &mut || um(14, 0).ok(),
+        &p.join("roh"),
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    assert!(b.fehler.is_some());
+    assert_eq!(b.neu, 0);
+    assert!(!p.join("roh").exists());
+    Ok(())
+}
+
+#[test]
+fn verschiedene_abrufzeiten_fallen_im_journal_nicht_zurueck() -> Result<(), String> {
+    let p = ordner()?;
+    let mut j = oeffnen(&p)?;
+    let mut n = netz(
+        &normal("tagesschau"),
+        &normal("bbc-world").replace("12:00:00", "11:00:00"),
+    );
+    let mut zeiten = [um(14, 0)?, um(14, 1)?, um(14, 2)?, um(14, 3)?].into_iter();
+    let b = sammle_nachrichten(
+        &mut j,
+        &mut n,
+        &zugang()?,
+        &mut || zeiten.next(),
+        &p.join("roh"),
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(b.neu, 2);
+    let abrufe: Vec<_> = j
         .stand()
         .nachrichten()
         .iter()
-        .map(|n| (n.zeit().to_string(), n.text().to_string()))
-        .collect())
-}
-
-fn dateien(roh: &Path) -> Vec<PathBuf> {
-    fs::read_dir(roh.join(QUELLE_NACHRICHTEN))
-        .map(|r| r.filter_map(|e| e.ok().map(|e| e.path())).collect())
-        .unwrap_or_default()
-}
-
-/// Erster Lauf: die rohe Antwort liegt unter `roh/alphavantage-news/`, jede Nachricht der
-/// letzten 24 Stunden steht als Nachricht im Journal. Ein
-/// zweiter Lauf mit derselben Antwort belegt nichts doppelt.
-#[test]
-fn nachrichten_werden_belegt() -> Result<(), String> {
-    let (journal, roh) = ordner()?;
-    let text = antwort(&[
-        eintrag(
-            "EZB laesst Zinsen unveraendert",
-            "20261105T131500",
-            "Die Notenbank haelt den Leitzins.",
-            &[],
-        ),
-        eintrag(
-            "SAP hebt Prognose an",
-            "20261105T151458",
-            "Cloud waechst staerker.",
-            &["SAP", "FOREX:USD"],
-        ),
-        eintrag("Zu alt", "20261103T120000", "x", &[]),
-        eintrag("Ohne Zeit", "gestern", "x", &[]),
-        eintrag("", "20261105T150000", "ohne Titel", &[]),
-        eintrag("Nach dem Abruf", "20261105T190000", "x", &[]),
-    ]);
-    let zeit = um(5, 17, 40)?;
-    let b = lauf(&journal, &roh, Ok(&text), zeit)?.map_err(|e| format!("{e:?}"))?;
-    assert_eq!(b.fehler, None);
-    assert_eq!((b.neu, b.bekannt), (2, 0));
-    let datei = b.rohdatei.ok_or("keine Rohdatei")?;
-    assert_eq!(dateien(&roh), vec![datei.clone()]);
-    assert_eq!(vorbedingung(fs::read_to_string(&datei), "Rohdatei")?, text);
-    // Die aelteste zuerst, mit Abruf und Abdruck der rohen Antwort.
-    assert_eq!(
-        belegt(&journal)?,
-        vec![
-            (
-                um(5, 13, 15)?.to_string(),
-                "Benzinga: EZB laesst Zinsen unveraendert. Die Notenbank haelt den Leitzins."
-                    .to_string()
-            ),
-            (
-                "2026-11-05T15:14:58Z".to_string(),
-                "Benzinga [Werte: SAP, FOREX:USD]: SAP hebt Prognose an. Cloud waechst staerker."
-                    .to_string()
-            ),
-        ]
-    );
-    let j = vorbedingung(Journal::oeffnen(&journal), "Journal oeffnen")?;
-    for n in j.stand().nachrichten() {
-        assert_eq!(n.quelle(), QUELLE_NACHRICHTEN);
-        assert_eq!(n.abruf(), zeit);
-        assert_eq!(n.roh().len(), 64);
-    }
-    // Belege von aussen beginnen keinen Tag.
-    assert_eq!(j.stand().seit_abschluss(), 0);
-    drop(j);
-    let b = lauf(&journal, &roh, Ok(&text), um(5, 17, 50)?)?.map_err(|e| format!("{e:?}"))?;
-    assert_eq!((b.neu, b.bekannt), (0, 2));
-    assert_eq!(belegt(&journal)?.len(), 2);
-    Ok(())
-}
-
-/// Hoechstens `MAX_NACHRICHTEN`, jede hoechstens `MAX_ZEICHEN` Zeichen, ohne Steuerzeichen.
-#[test]
-fn nachrichten_bleiben_klein() -> Result<(), String> {
-    let lang = "Wort\nmit\tSteuerzeichen ".repeat(100);
-    let eintraege: Vec<String> = (0..40)
-        .map(|i| {
-            eintrag(
-                &format!("Titel {i:02}"),
-                &format!("20261105T10{i:02}00"),
-                &lang,
-                &[],
-            )
-        })
+        .map(depot_journal::NachrichtBeleg::abruf)
         .collect();
-    let n = lies_nachrichten(&antwort(&eintraege), um(5, 17, 40)?)?;
-    assert_eq!(n.len(), MAX_NACHRICHTEN);
-    for x in &n {
-        assert!(x.text.chars().count() <= MAX_ZEICHEN, "{}", x.text);
-        assert!(!x.text.chars().any(char::is_control), "{}", x.text);
-        assert!(x.text.ends_with(" …"), "{}", x.text);
-    }
-    // Die neuesten zuerst: 10:39 bis 10:25.
-    assert!(n.first().is_some_and(|x| x.text.contains("Titel 39")));
-    assert!(n.last().is_some_and(|x| x.text.contains("Titel 25")));
-    Ok(())
-}
-
-/// Meldet die Quelle statt Nachrichten einen Hinweis, wird nichts belegt; die rohe Antwort
-/// bleibt zur Durchsicht liegen.
-#[test]
-fn hinweis_der_quelle_belegt_nichts() -> Result<(), String> {
-    let (journal, roh) = ordner()?;
-    let text = "{\"Information\": \"We have detected your API key and our standard API rate limit is 25 requests per day.\"}";
-    let b = lauf(&journal, &roh, Ok(text), um(5, 17, 40)?)?.map_err(|e| format!("{e:?}"))?;
-    assert!(
-        b.fehler
-            .as_deref()
-            .is_some_and(|f| f.starts_with("Hinweis der Quelle: We have detected")),
-        "{b:?}"
-    );
-    assert_eq!(b.neu, 0);
-    assert!(b.rohdatei.is_some());
-    assert!(belegt(&journal)?.is_empty());
-    let b = lauf(&journal, &roh, Ok("kein json"), um(5, 17, 41)?)?.map_err(|e| format!("{e:?}"))?;
-    assert!(b.fehler.is_some(), "{b:?}");
-    assert!(belegt(&journal)?.is_empty());
-    Ok(())
-}
-
-/// Gibt die Quelle den Schluessel zurueck, gleich in welcher Schreibweise, wird die Antwort
-/// weder abgelegt noch gelesen (K19-01). Ein Fehler beim Abruf nennt ihn nicht.
-#[test]
-fn schluessel_in_der_antwort_wird_nicht_abgelegt() -> Result<(), String> {
-    let (journal, roh) = ordner()?;
-    let text = antwort(&[eintrag(
-        "Leck",
-        "20261105T150000",
-        &SCHLUESSEL.to_lowercase(),
-        &[],
-    )]);
-    let b = lauf(&journal, &roh, Ok(&text), um(5, 17, 40)?)?.map_err(|e| format!("{e:?}"))?;
-    assert!(b.fehler.is_some());
-    assert_eq!(b.rohdatei, None);
-    assert!(dateien(&roh).is_empty());
-    assert!(belegt(&journal)?.is_empty());
-    let fehler = format!("https://www.alphavantage.co/query?apikey={SCHLUESSEL}: timeout");
-    let b = lauf(&journal, &roh, Err(&fehler), um(5, 17, 41)?)?.map_err(|e| format!("{e:?}"))?;
-    assert!(
-        b.fehler.as_deref().is_some_and(|f| !f.contains(SCHLUESSEL)),
-        "{b:?}"
-    );
-    assert!(dateien(&roh).is_empty());
-    Ok(())
-}
-
-/// Gegenprobe von Maus (K28-01): Gibt die Quelle den Schluessel als Unicode-Escapes zurueck,
-/// etwa `\u0054` fuer `T`, wird die Antwort weder abgelegt noch belegt. Ebenso, wenn erst eine
-/// zweite Schicht Escapes ihn verbirgt.
-#[test]
-fn schluessel_hinter_escapes_wird_nicht_abgelegt() -> Result<(), String> {
-    let maskiert: String = SCHLUESSEL.chars().fold(String::new(), |mut m, c| {
-        let _ = write!(m, "\\u{:04x}", u32::from(c));
-        m
-    });
-    let einfach = antwort(&[]).replace("\"feed\":[]", &format!(
-        "\"feed\":[{{\"title\":\"Leck {maskiert}\",\"time_published\":\"20261105T150000\",\"source\":\"X\",\"summary\":\"\"}}]"
-    ));
-    let doppelt = einfach.replace(&maskiert, &maskiert.replace('\\', "\\\\"));
-    for (fall, text) in [("einfach", &einfach), ("doppelt", &doppelt)] {
-        let (journal, roh) = ordner()?;
-        assert!(
-            !text.contains(SCHLUESSEL),
-            "{fall}: Vorbedingung, roh verborgen"
-        );
-        let b = lauf(&journal, &roh, Ok(text), um(5, 17, 40)?)?.map_err(|e| format!("{e:?}"))?;
-        assert!(b.fehler.is_some(), "{fall}: {b:?}");
-        assert_eq!(b.rohdatei, None, "{fall}");
-        assert!(dateien(&roh).is_empty(), "{fall}");
-        assert!(belegt(&journal)?.is_empty(), "{fall}");
-        let j = vorbedingung(fs::read_to_string(&journal), "Journal")?;
-        assert!(!j.contains(SCHLUESSEL), "{fall}");
-    }
-    Ok(())
-}
-
-#[test]
-fn nachrichtenantwort_mit_tiingo_schluessel_wird_verworfen() -> Result<(), String> {
-    let (journal, roh) = ordner()?;
-    let text = antwort(&[eintrag("Leck", "20261105T150000", TIINGO_TEST, &[])]);
-    let b = lauf(&journal, &roh, Ok(&text), um(5, 17, 40)?)?.map_err(|e| format!("{e:?}"))?;
-    assert!(b.sicherheitsabbruch, "{b:?}");
-    assert!(dateien(&roh).is_empty());
-    assert!(belegt(&journal)?.is_empty());
-    Ok(())
-}
-
-#[test]
-fn nachrichtenfehler_verraten_in_ausgaben_und_journal_keine_fragmente() -> Result<(), String> {
-    if std::env::var_os("DEPOT_TEST_NEWS_MASKIERUNG").is_none() {
-        let aus = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
-            .args([
-                "--exact",
-                "nachrichtenfehler_verraten_in_ausgaben_und_journal_keine_fragmente",
-                "--nocapture",
-            ])
-            .env("DEPOT_TEST_NEWS_MASKIERUNG", "ja")
-            .output()
-            .map_err(|e| e.to_string())?;
-        assert!(
-            aus.status.success(),
-            "{}",
-            String::from_utf8_lossy(&aus.stderr)
-        );
-        for daten in [&aus.stdout, &aus.stderr] {
-            assert!(!daten.windows(12).any(|w| {
-                SCHLUESSEL
-                    .as_bytes()
-                    .windows(12)
-                    .any(|k| w.eq_ignore_ascii_case(k))
-            }));
-        }
-        return Ok(());
-    }
-    let (journal, roh) = ordner()?;
-    let fehler = format!(
-        "https://example.com/news?apikey={SCHLUESSEL}&x=1 Debug {}",
-        SCHLUESSEL.get(..12).ok_or("Fragment fehlt")?
-    );
-    let b =
-        lauf(&journal, &roh, Err(&fehler), um(5, 17, 41)?)?.map_err(|e| format!("Lauf: {e:?}"))?;
-    let j = fs::read(&journal).map_err(|e| e.to_string())?;
-    assert!(!j.windows(12).any(|w| {
-        SCHLUESSEL
-            .as_bytes()
-            .windows(12)
-            .any(|k| w.eq_ignore_ascii_case(k))
-    }));
-    println!("{b:?}");
-    eprintln!("{b:?}");
+    assert_eq!(abrufe, vec![um(14, 1)?, um(14, 3)?]);
+    drop(j);
+    assert_eq!(oeffnen(&p)?.stand().nachrichten().len(), 2);
     Ok(())
 }
