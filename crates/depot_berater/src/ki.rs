@@ -310,9 +310,11 @@ impl<N: Netz> KiBerater<N> {
             if let Some(start) = self.vorbereitung {
                 let jetzt = self.protokoll.as_ref().and_then(|(_, uhr)| uhr());
                 if jetzt.is_none_or(|j| {
-                    j.datum() != start.datum() || depot_sim::vorbereitung::tag_jetzt(j).is_none()
+                    j < start
+                        || j.datum() != start.datum()
+                        || depot_sim::vorbereitung::tag_jetzt(j).is_none()
                 }) {
-                    return Err("nicht gesendet: Zeitfenster der Vorbereitung abgelaufen".into());
+                    return Err("nicht gesendet: Zeitfenster der Vorbereitung abgelaufen oder Rechneruhr zurückgestellt".into());
                 }
             }
             match self

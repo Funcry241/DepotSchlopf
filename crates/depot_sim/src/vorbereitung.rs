@@ -123,6 +123,11 @@ pub fn vorbereiten<'a>(
             text: String::new(),
             prognose: None,
         };
+        if a.zeit < zeit {
+            return Err(
+                "Uhr liegt vor dem gespeicherten Wissensstichtag; keine neue Anfrage".into(),
+            );
+        }
         if tag_jetzt(a.zeit) != Some(tag) {
             a.text = "Nicht gefragt: Zeitfenster abgelaufen.".into();
         } else if b.angebunden() {

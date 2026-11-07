@@ -59,7 +59,8 @@ Einschätzung ist kein Nachweis einer richtigen oder profitablen Vorhersage.
 - Samstag und Karfreitag bleiben sichtbar; später erhaltene Nachrichten bleiben
   beim Wiederabspielen unbekannt; Thesen verfallen nach ihrem Horizont.
 - Anbieterclient akzeptiert Prognosen ohne Kurs und verwirft Handelsziele.
-- Zeitfenster wird unmittelbar vor dem Versand und vor sicheren Neuversuchen geprüft.
+- Zeitfenster und ein nicht rückwärts laufender Wissensstichtag werden unmittelbar
+  vor dem Versand und vor sicheren Neuversuchen geprüft.
 - Automatik folgt RSS, bleibt nach Neustart einmalig und lässt sich vor Start ausschalten.
 - Manuelle Rückfrage, gespeicherte Einstellungen und erhaltene Formulareingaben.
 - Live maskiert fremde Texte und zeigt nur tatsächlich verwertbare Antworten grün.

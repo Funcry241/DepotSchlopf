@@ -29,6 +29,9 @@ const SCHLUESSEL: &str = "testschluessel-0123456789abcdef";
 fn samstagsuhr() -> Option<Zeitpunkt> {
     Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0))
 }
+fn vor_dem_wissensstichtag() -> Option<Zeitpunkt> {
+    Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 11, 0, 0))
+}
 fn nach_dem_zeitfenster() -> Option<Zeitpunkt> {
     Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 23, 0, 0))
 }
@@ -127,22 +130,25 @@ fn vorbereitungsclient_akzeptiert_these_ohne_kurs_aber_keine_handelsziele() -> R
 
 #[test]
 fn vorbereitung_prueft_zeitfenster_direkt_vor_dem_versand() -> Result<(), String> {
-    let mut ort = Ort::neu()?;
-    let zeit = samstagsuhr().ok_or("Zeit")?;
-    let montag = Datum::neu(2026, 11, 9).ok_or("Montag")?;
-    ort.journal
-        .starte_vorbereitung(zeit, montag, vec!["Ereignis".into()])
-        .map_err(|e| format!("{e:?}"))?;
-    let mut maus = berater(&ort, BeraterId::Maus, Attrappe::default())?
-        .mit_protokoll(ort.dir.join("anbieter.txt"), nach_dem_zeitfenster)
-        .fuer_vorbereitung(zeit);
-    let erlaubt = ort
-        .journal
-        .reserviere_vorbereitung(zeit, BeraterId::Maus)
-        .map_err(|e| format!("{e:?}"))?;
-    let antwort = mit_lage(|l| maus.vorschlagen(erlaubt, l))?;
-    assert!(!antwort.verwertbar && antwort.einschaetzung.contains("Zeitfenster"));
-    assert!(maus.netz().gesendet.is_empty());
+    let zeiten: [fn() -> Option<Zeitpunkt>; 2] = [nach_dem_zeitfenster, vor_dem_wissensstichtag];
+    for uhr in zeiten {
+        let mut ort = Ort::neu()?;
+        let zeit = samstagsuhr().ok_or("Zeit")?;
+        let montag = Datum::neu(2026, 11, 9).ok_or("Montag")?;
+        ort.journal
+            .starte_vorbereitung(zeit, montag, vec!["Ereignis".into()])
+            .map_err(|e| format!("{e:?}"))?;
+        let mut maus = berater(&ort, BeraterId::Maus, Attrappe::default())?
+            .mit_protokoll(ort.dir.join("anbieter.txt"), uhr)
+            .fuer_vorbereitung(zeit);
+        let erlaubt = ort
+            .journal
+            .reserviere_vorbereitung(zeit, BeraterId::Maus)
+            .map_err(|e| format!("{e:?}"))?;
+        let antwort = mit_lage(|l| maus.vorschlagen(erlaubt, l))?;
+        assert!(!antwort.verwertbar && antwort.einschaetzung.contains("Zeitfenster"));
+        assert!(maus.netz().gesendet.is_empty());
+    }
     Ok(())
 }
 
