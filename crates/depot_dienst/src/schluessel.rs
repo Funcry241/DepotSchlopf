@@ -1,5 +1,5 @@
 //! Schluessel in der Windows-Anmeldeinformationsverwaltung: nur ablegen und fragen, ob einer da
-//! ist. Für den Protokollschutz liest der Dienst hinterlegte Schlüssel ausschließlich im Speicher.
+//! ist. Für den Protokollschutz liest der Dienst Schlüssel kurz zum Hashen; nur Prüfsummen bleiben im Speicher.
 //!
 //! Adressen und Regeln sind dieselben wie in den Laeufen, die die Schluessel benutzen:
 //! - Kursquelle `DepotSchlopf/alphavantage`: 8 bis 64 Grossbuchstaben und Ziffern

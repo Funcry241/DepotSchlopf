@@ -1,5 +1,6 @@
 //! Dauerhafte, begrenzte Diagnoseprotokolle. Geschäftsdaten stehen weiterhin im Journal.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -14,22 +15,15 @@ const ENDE_RESERVE: u64 = 1024;
 /// Geheimnisse werden weder formatiert noch in Fehlermeldungen übernommen.
 #[derive(Default)]
 pub(crate) struct Schutz {
-    schluessel: Vec<String>,
+    abdruecke: BTreeMap<usize, BTreeSet<String>>,
     gesperrt: bool,
 }
 
 impl Schutz {
     pub(crate) fn laden() -> Self {
-        match crate::schluessel::fuer_protokoll() {
-            Ok(schluessel) => Self {
-                schluessel,
-                gesperrt: false,
-            },
-            Err(()) => Self {
-                schluessel: Vec::new(),
-                gesperrt: true,
-            },
-        }
+        let mut schutz = Self::default();
+        schutz.auffrischen();
+        schutz
     }
 
     pub(crate) fn auffrischen(&mut self) {
@@ -45,31 +39,74 @@ impl Schutz {
     }
 
     pub(crate) fn merken(&mut self, text: &str) {
-        if !self.schluessel.iter().any(|s| s == text) {
-            self.schluessel.push(text.to_string());
+        let gross = text.to_ascii_uppercase();
+        let laenge = gross.len().min(12);
+        if laenge == 0 {
+            return;
         }
+        let abdruecke = self.abdruecke.entry(laenge).or_default();
+        for fenster in gross.as_bytes().windows(laenge) {
+            abdruecke.insert(depot_kern::abdruck::sha256_hex(fenster));
+        }
+    }
+
+    fn enthaelt(&self, text: &str) -> bool {
+        let gross = text.to_ascii_uppercase();
+        if geheimnismuster(&gross) {
+            return true;
+        }
+        // Schlüssel enthalten nur ASCII-Buchstaben, Ziffern, '_' und '-'.
+        // Tokenweise scannen spart Hashes für Leerraum und normale kurze Wörter.
+        gross
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-')
+            .any(|wort| {
+                self.abdruecke.iter().any(|(laenge, abdruecke)| {
+                    wort.as_bytes().windows(*laenge).any(|fenster| {
+                        abdruecke.contains(&depot_kern::abdruck::sha256_hex(fenster))
+                    })
+                })
+            })
     }
 
     pub(crate) fn bereinige(&self, text: &str) -> String {
         if self.gesperrt {
             return "[Ausgabe unterdrückt. Schlüsselschutz nicht verfügbar.]".into();
         }
-        let enthaelt = |text: &str| {
-            let gross = text.to_ascii_uppercase();
-            self.schluessel
-                .iter()
-                .any(|s| gross.contains(&s.to_ascii_uppercase()))
-        };
-        if enthaelt(text)
+        if self.enthaelt(text)
             || depot_kern::json::alle_texte(text)
                 .iter()
-                .any(|t| enthaelt(t))
+                .any(|t| self.enthaelt(t))
         {
             "[Ausgabe mit Zugangsdaten entfernt.]".into()
         } else {
             text.to_string()
         }
     }
+}
+
+// Unabhängig vom Schlüsselspeicher: auch Präfixe, fremde Schlüssel und Basic-Auth.
+fn geheimnismuster(gross: &str) -> bool {
+    if gross.contains("SK-") || gross.contains("BEARER ") {
+        return true;
+    }
+    let kompakt: String = gross
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace() && *c != '"' && *c != '\'')
+        .collect();
+    [
+        "APIKEY=",
+        "APIKEY:",
+        "API_KEY=",
+        "API_KEY:",
+        "API-KEY=",
+        "API-KEY:",
+        "TOKEN=",
+        "TOKEN:",
+        "AUTHORIZATION:",
+        "AUTHORIZATION=",
+    ]
+    .iter()
+    .any(|m| kompakt.contains(m))
 }
 
 pub fn gueltige_kennung(kennung: &str) -> bool {
@@ -137,7 +174,7 @@ fn aufraeumen(wurzel: &Path, aktuell: &str) -> Result<(), String> {
                 .split_once('-')
                 .and_then(|(_, n)| n.parse::<u64>().ok())
                 .unwrap_or(0);
-            dateien.push((zeit, nr, kennung.to_string(), e.path()));
+            dateien.push((nr, zeit, kennung.to_string(), e.path()));
         }
     }
     dateien.sort();
@@ -326,7 +363,7 @@ mod tests {
     #[test]
     fn unlesbare_schluessel_unterdruecken_ausgabe() {
         let schutz = Schutz {
-            schluessel: Vec::new(),
+            abdruecke: BTreeMap::new(),
             gesperrt: true,
         };
         assert_eq!(
@@ -374,6 +411,62 @@ mod tests {
         assert!(text.contains("Lauf abgebrochen"));
         assert!(!text.contains("geheimer"));
         assert!(!text.contains("auch nicht"));
+        fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[test]
+    fn fremde_geheimnisse_und_gekuerzte_schluessel_werden_entfernt() {
+        let mut schutz = Schutz::default();
+        schutz.merken(&["GEHEIM", "SCHLUESSEL", "WEITER"].concat());
+        schutz.merken("ABCDEFGH");
+        for text in [
+            "Präfix GEHEIMSCHLUE…",
+            "mitte EIMSCHLUESSEL",
+            "kurz ABCDEFGH",
+            "unbekannt sk-ant-api03-AbCd…",
+            "sk-proj-Beispiel",
+            "sk-fremd",
+            "apikey=anderer",
+            "api_key = anderer",
+            "token = anderer",
+            "Authorization: Basic dXNlcjpwYXNz",
+            "Bearer unbekannt",
+            r#"{"token": "unbekannt"}"#,
+            r#"{"x":"s\u006b-ant-api03-fremd"}"#,
+        ] {
+            assert_eq!(
+                schutz.bereinige(text),
+                "[Ausgabe mit Zugangsdaten entfernt.]",
+                "{text}"
+            );
+        }
+        assert!(
+            schutz
+                .abdruecke
+                .values()
+                .flatten()
+                .all(|hash| hash.len() == 64)
+        );
+        assert_eq!(
+            schutz.bereinige("Kurs SAP 210.75, 74 Tests grün"),
+            "Kurs SAP 210.75, 74 Tests grün"
+        );
+    }
+
+    #[test]
+    fn rotation_folgt_laufnummer_auch_bei_zurueckgestellter_uhr() -> Result<(), String> {
+        let wurzel = std::env::temp_dir().join(format!("depot_log_uhr_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&wurzel);
+        let zeit = depot_kern::Datum::neu(2026, 11, 5)
+            .and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0))
+            .ok_or("Testzeit fehlt")?;
+        for n in 0..AUFBEWAHREN.saturating_add(2) {
+            let kennung = format!("{}-{n}", 100_usize.saturating_sub(n));
+            Datei::neu(&wurzel, &kennung, None, zeit, "Test")?.abschliessen(zeit, true)?;
+        }
+        assert!(lesen(&wurzel, "100-0").is_err());
+        assert!(lesen(&wurzel, "80-20").is_ok());
+        assert!(lesen(&wurzel, "79-21").is_ok());
         fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
         Ok(())
     }

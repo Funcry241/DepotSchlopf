@@ -4,3 +4,4 @@ zweck: Diagnoseprotokolle je Lauf mit Zeitstempel und Version speichern, nach Ne
 pfade:
 crates/depot_dienst/
 README.md
+docs/ARCHITEKTUR.md
