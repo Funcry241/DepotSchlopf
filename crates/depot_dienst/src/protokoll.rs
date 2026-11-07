@@ -52,7 +52,7 @@ impl Schutz {
 
     fn enthaelt(&self, text: &str) -> bool {
         let gross = text.to_ascii_uppercase();
-        if geheimnismuster(&gross) {
+        if depot_kern::geheimnis::maskiere(text) != text {
             return true;
         }
         // Schlüssel enthalten nur ASCII-Buchstaben, Ziffern, '_' und '-'.
@@ -99,34 +99,6 @@ impl Schutz {
             text.to_string()
         }
     }
-}
-
-// Unabhängig vom Schlüsselspeicher: auch Präfixe, fremde Schlüssel und Basic-Auth.
-fn geheimnismuster(gross: &str) -> bool {
-    let schluesselpraefix = gross
-        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-')
-        .any(|wort| wort.starts_with("SK-"));
-    if schluesselpraefix || gross.contains("BEARER ") {
-        return true;
-    }
-    let kompakt: String = gross
-        .chars()
-        .filter(|c| !c.is_ascii_whitespace() && *c != '"' && *c != '\'')
-        .collect();
-    [
-        "APIKEY=",
-        "APIKEY:",
-        "API_KEY=",
-        "API_KEY:",
-        "API-KEY=",
-        "API-KEY:",
-        "TOKEN=",
-        "TOKEN:",
-        "AUTHORIZATION:",
-        "AUTHORIZATION=",
-    ]
-    .iter()
-    .any(|m| kompakt.contains(m))
 }
 
 pub fn gueltige_kennung(kennung: &str) -> bool {

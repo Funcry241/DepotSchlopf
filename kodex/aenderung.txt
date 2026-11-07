@@ -1,7 +1,10 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Diagnoseprotokolle je Lauf mit Zeitstempel und Version speichern, nach Neustarts anzeigen und begrenzt aufbewahren.
+zweck: Zugangsdaten in Adressen, Headern und Fehlermeldungen vor Ausgabe an der Quelle gemeinsam maskieren.
 pfade:
+crates/depot_kern/
+crates/depot_sammler/
+crates/depot_berater/
 crates/depot_dienst/
-README.md
 docs/ARCHITEKTUR.md
+README.md

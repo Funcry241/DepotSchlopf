@@ -40,14 +40,14 @@ impl NetzFehler {
     pub fn voruebergehend(text: impl Into<String>) -> NetzFehler {
         NetzFehler {
             voruebergehend: true,
-            text: text.into(),
+            text: depot_kern::geheimnis::maskiere(&text.into()),
         }
     }
 
     pub fn endgueltig(text: impl Into<String>) -> NetzFehler {
         NetzFehler {
             voruebergehend: false,
-            text: text.into(),
+            text: depot_kern::geheimnis::maskiere(&text.into()),
         }
     }
 }

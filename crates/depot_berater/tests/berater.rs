@@ -1116,3 +1116,53 @@ fn schluessel_hinter_escapes_gelangt_nie_ins_ergebnis() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[test]
+fn ki_fehler_verraten_in_ausgaben_und_journal_keine_fragmente() -> Result<(), String> {
+    if std::env::var_os("DEPOT_TEST_KI_MASKIERUNG").is_none() {
+        let aus = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
+            .args([
+                "--exact",
+                "ki_fehler_verraten_in_ausgaben_und_journal_keine_fragmente",
+                "--nocapture",
+            ])
+            .env("DEPOT_TEST_KI_MASKIERUNG", "ja")
+            .output()
+            .map_err(|e| e.to_string())?;
+        assert!(
+            aus.status.success(),
+            "{}",
+            String::from_utf8_lossy(&aus.stderr)
+        );
+        for daten in [&aus.stdout, &aus.stderr] {
+            assert!(!daten.windows(12).any(|w| {
+                SCHLUESSEL
+                    .as_bytes()
+                    .windows(12)
+                    .any(|k| w.eq_ignore_ascii_case(k))
+            }));
+        }
+        return Ok(());
+    }
+    for wer in [BeraterId::Dachs, BeraterId::Maus] {
+        let mut ort = Ort::neu()?;
+        let mut netz = Attrappe::default();
+        netz.antworten.push_back(Err(NetzFehler::Unklar(format!(
+            "Authorization: Bearer {SCHLUESSEL}\nDebug {}",
+            SCHLUESSEL.get(..12).ok_or("Fragment fehlt")?
+        ))));
+        let mut ki = berater(&ort, wer, netz)?;
+        let erlaubnis = ort.erlaubnis(wer, 1)?;
+        let antwort = mit_lage(|lage| ki.vorschlagen(erlaubnis, lage))?;
+        println!("{antwort:?}");
+        eprintln!("{antwort:?}");
+        let journal = format!("{:?}", ort.journal.eintraege());
+        assert!(!journal.as_bytes().windows(12).any(|w| {
+            SCHLUESSEL
+                .as_bytes()
+                .windows(12)
+                .any(|k| w.eq_ignore_ascii_case(k))
+        }));
+    }
+    Ok(())
+}
