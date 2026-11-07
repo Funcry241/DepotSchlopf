@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Oberflächenupdates: getrennte wiederverwendbare Bauordner schützen den laufenden Windows-Wächter. Dauerhafte Abschlussbelege und korrigierte Verlaufs-/Protokolleinträge unterscheiden Einspielen, Bestätigung und Rückfall. Alle Browser-Seiten prüfen mit Zeitgrenze die Verbindung, warten auf den bestätigten neuen Dienst und laden genau einmal mit erhaltener Position und Protokollkennung neu. Verhaltensprüfungen des ausgelieferten JavaScripts laufen in Linux- und Windows-CI.
+
 - Sichere Kurssperren-Diagnose direkt in der Einrichtung: ausdrücklich gestarteter Prüfabruf trotz Sperre, mit Quelle, erkanntem Zugang und Antwortart, ohne Schlüssel oder Antworttext. Kein Speichern von Kursen/Rohantworten, kein Entsperren, keine KI. Neue Sicherheitsabbrüche halten dieselben bereinigten Metadaten im Sperrgrund fest.
 
 - Vorbereitung auf kommende Handelstage: optionale, budgetgeschützte Erstmeinungen von Dachs und Maus an börsenfreien Tagen, mit eingefrorenem Wissensstand und Live-Anzeige. Wochenendmeldungen bleiben für den nächsten Handelstag erhalten; frühere Thesen werden als Hypothesen erneut geprüft. Keine Orders durch die Vorbereitung.

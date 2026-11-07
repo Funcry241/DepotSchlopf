@@ -194,6 +194,7 @@ pub struct Zustand {
     pub neustart: bool,
     /// Stand des letzten Updates fuer die Seite; `true` heisst Fehler.
     pub update_meldung: Option<(bool, String)>,
+    pub update_ergebnisse: Vec<crate::aktualisierung::Ergebnis>,
     /// Woher die Programme kommen und ob der Stand fuer einen Start ohne Cargo gesichert ist;
     /// `true` heisst Fehler.
     pub programm_meldung: Option<(bool, String)>,
@@ -487,6 +488,18 @@ impl Dienst {
                 }
             }
         }
+        let (update_ergebnisse, mut update_meldung) = match crate::aktualisierung::laden(&wurzel) {
+            Ok(e) => {
+                let m = e.last().map(crate::aktualisierung::Ergebnis::meldung);
+                (e, m)
+            }
+            Err(e) => (Vec::new(), Some((true, e))),
+        };
+        if let Some(a) = verlauf.iter().find(|a| a.art == Art::Update)
+            && !update_ergebnisse.iter().any(|e| e.lauf == a.kennung)
+        {
+            update_meldung = Some((true, "Für das letzte Update liegt keine bestätigte Aktivierung vor. Details stehen unter Tätigkeit im Protokoll.".into()));
+        }
         Dienst {
             wurzel,
             token,
@@ -504,7 +517,8 @@ impl Dienst {
                 lage: None,
                 lage_veraltet: true,
                 neustart: false,
-                update_meldung: None,
+                update_meldung,
+                update_ergebnisse,
                 programm_meldung: None,
                 verlauf_hinweis,
                 verlauf_fehler: None,
@@ -878,6 +892,24 @@ impl Dienst {
         }
         let eingespielt =
             erfolg && a.art == Art::Update && crate::rueckfall::offen_pfad(&self.wurzel).exists();
+        if eingespielt && let Ok(Some(o)) = crate::rueckfall::offen(&self.wurzel) {
+            match crate::aktualisierung::vermerke(
+                &self.wurzel,
+                &o,
+                crate::aktualisierung::Phase::Probe,
+                "Einspielen beendet; Bestätigung des neuen Dienstes steht aus.",
+                Some(&a.kennung),
+            ) {
+                Ok(e) => {
+                    z.update_ergebnisse.retain(|alt| alt.neu != e.neu);
+                    z.update_ergebnisse.push(e);
+                }
+                Err(e) => z.verlauf_hinweis = Some(e),
+            }
+        }
+        if a.art == Art::Update && !eingespielt {
+            z.update_meldung = Some((!erfolg, if erfolg { "Keine neue Version eingespielt. Der bisherige Stand läuft weiter." } else { "Update abgebrochen. Der bisherige Stand läuft weiter; Details stehen im Protokoll." }.into()));
+        }
         self.protokoll_beenden(&mut z, &mut a);
         ende_vermerken(&self.wurzel, &mut z, &a);
         ablegen(&mut z, a);

@@ -75,6 +75,17 @@ fn bestaetigen(d: &Arc<Dienst>) {
     match rueckfall::offen(&d.wurzel) {
         Ok(None) => {}
         Ok(Some(o)) => {
+            if let Ok(e) = depot_dienst::aktualisierung::vermerke(
+                &d.wurzel,
+                &o,
+                depot_dienst::aktualisierung::Phase::Probe,
+                "Neuer Dienst läuft zur Probe; Abschlussprüfung steht aus.",
+                None,
+            ) {
+                let mut z = d.sperre();
+                z.update_ergebnisse.retain(|alt| alt.neu != e.neu);
+                z.update_ergebnisse.push(e);
+            }
             d.sperre().update_meldung = Some((
                 false,
                 format!("Update auf {} läuft zur Probe.", rueckfall::kurz(&o.neu)),
@@ -94,9 +105,21 @@ fn bestaetigen(d: &Arc<Dienst>) {
                     Ok(None) => (false, "Kein Update offen.".to_string()),
                     Err(e) => {
                         eprintln!("[Update] {e}");
+                        if let Ok(Some(o)) = rueckfall::offen(&d.wurzel) {
+                            let _ = depot_dienst::aktualisierung::vermerke(
+                                &d.wurzel,
+                                &o,
+                                depot_dienst::aktualisierung::Phase::Probe,
+                                &e,
+                                None,
+                            );
+                        }
                         (true, e)
                     }
                 };
+                if let Ok(e) = depot_dienst::aktualisierung::laden(&d.wurzel) {
+                    d.sperre().update_ergebnisse = e;
+                }
                 d.sperre().update_meldung = Some(m);
             });
         }

@@ -122,3 +122,11 @@ Schutz gegen fremde Webseiten: Jede Anfrage braucht `Host` 127.0.0.1 oder localh
 ## Lizenz
 
 [MIT](LICENSE) © 2026 Funcry241
+
+### Update und Browser-Wiederverbindung
+
+Die Oberfläche unterscheidet Einspielen, Neustart zur Probe, bestätigtes Update und Rückfall. Erst nach der Prüfung des neuen Dienstes und der Papierdaten gilt das Update als bestätigt. Die letzten 20 Abschlussbelege bleiben unter `daten/update_ergebnisse.txt` erhalten; der vorhandene Verlauf und das kopierbare Protokoll bekommen ebenfalls den endgültigen Ausgang. Bei einem Rückfall stehen Version und Grund in der Einrichtung.
+
+Alle Seiten prüfen die Verbindung, auch Bestätigung und Protokoll. Hängende HTTP-Anfragen und Antwortkörper werden nach fünf Sekunden abgebrochen und erneut versucht. Nach einem Dienstwechsel wartet die Seite auf dessen Bestätigung und lädt genau einmal neu. Die Position `#update` sowie notwendige Protokollparameter bleiben erhalten. Vorläufige Meldungen verschwinden. Eine Browser-Seite aus dem Zurück-Speicher nimmt die Verbindungsprüfung wieder auf.
+
+Der Wächter baut in getrennten, wiederverwendbaren Bauordnern und überschreibt seine laufende Programmdatei nicht. Beim ersten Einspielen dieser Korrektur läuft noch der alte Wächter: Scheitert schon dieser Übergang an einer gesperrten EXE, muss einmal der alte Dienst beendet und der neue Stand über Git und `DepotSchlopf.cmd` gestartet werden. Der neue Browser-Code kann ebenfalls erst nach dem Laden der neuen Version wirken. Datenprüfungen und Rückfallschutz bleiben bestehen.

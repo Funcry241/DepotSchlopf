@@ -593,7 +593,20 @@ fn protokoll(id: &str, a: &Auftrag, offen: bool) -> String {
     )
 }
 
-fn ergebnis(a: &Auftrag) -> (&'static str, &'static str) {
+fn ergebnis(a: &Auftrag, z: &Zustand) -> (&'static str, &'static str) {
+    if a.art == Art::Update {
+        if let Some(e) = z
+            .update_ergebnisse
+            .iter()
+            .rev()
+            .find(|e| e.lauf == a.kennung)
+        {
+            return e.phase.ergebnis();
+        }
+        if a.erfolg == Some(true) {
+            return ("offen", "Einspielen beendet; Abschluss unbekannt");
+        }
+    }
     if a.frueher == Frueher::Unterbrochen {
         return ("halt", "unterbrochen");
     }
@@ -680,7 +693,7 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
              <th>Ende</th><th>Ergebnis</th></tr>",
         );
         for a in &z.verlauf {
-            let (klasse, text) = ergebnis(a);
+            let (klasse, text) = ergebnis(a, z);
             let _ = write!(
                 s,
                 "<tr><td>{}<br><span class=\"leise\">{}</span></td><td>{}</td><td>{}</td><td>{}</td>\
@@ -736,7 +749,19 @@ fn update_hinweis(z: &Zustand) -> String {
     match &z.update_meldung {
         Some((fehler, text)) => format!(
             "<p class=\"kopf {}\">{}</p>",
-            if *fehler { "halt" } else { "offen" },
+            if *fehler {
+                "halt"
+            } else if z
+                .update_ergebnisse
+                .last()
+                .is_some_and(|e| e.phase == crate::aktualisierung::Phase::Bestaetigt)
+                && !z.neustart
+                && z.auftrag_stand(Art::Update).is_none()
+            {
+                "gut"
+            } else {
+                "offen"
+            },
             maskiere(text)
         ),
         None => String::new(),
@@ -1079,7 +1104,7 @@ fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
         let zuletzt = z.verlauf.iter().find(|a| gleich(a.art)).map_or_else(
             || "<span class=\"leise\">seit Dienststart nicht</span>".into(),
             |a| {
-                let (klasse, text) = ergebnis(a);
+                let (klasse, text) = ergebnis(a, z);
                 format!(
                     "<span class=\"{klasse}\">{text}</span> {}",
                     maskiere(&zeit_text(a.start))
@@ -1234,6 +1259,15 @@ fn autostart_teil(token: &str, e: &Einrichtung, s: &mut String) {
 
 pub(crate) fn update_aktionen(token: &str, start: &str, z: &Zustand) -> String {
     let mut s = marke(start);
+    s.push_str(&update_hinweis(z));
+    if let Some((fehler, text)) = &z.programm_meldung {
+        let _ = write!(
+            s,
+            "<p id=\"programmstand\"><span class=\"{}\">Start nach einem Neustart:</span> {}</p>",
+            if *fehler { "offen" } else { "gut" },
+            maskiere(text)
+        );
+    }
     let _ = write!(
         s,
         "<p>{}</p>",
@@ -1287,15 +1321,6 @@ fn update_teil(token: &str, start: &str, z: &Zustand, e: &Einrichtung, s: &mut S
          Falls der Dienst mit der neuen Version nicht startet, kehrt er zum alten Stand zurück.</p>",
         update_aktionen(token, start, z)
     );
-    s.push_str(&update_hinweis(z));
-    if let Some((fehler, text)) = &z.programm_meldung {
-        let _ = write!(
-            s,
-            "<p id=\"programmstand\"><span class=\"{}\">Start nach einem Neustart:</span> {}</p>",
-            if *fehler { "offen" } else { "gut" },
-            maskiere(text)
-        );
-    }
     match &e.abgelehnt {
         Ok(l) if l.is_empty() => {}
         Ok(l) => {
@@ -1527,51 +1552,116 @@ pub const APP_JS: &str = r#""use strict";
       setTimeout(function () { b.disabled = true; b.textContent = "wird gesendet …"; }, 0);
     }
   }, true);
-  // Zurueck im Browser zeigt die Seite aus dem Speicher: Knoepfe wieder freigeben.
-  window.addEventListener("pageshow", function () {
+  // Eine Verbindungsprüfung gilt für jede Seite, auch Bestätigung und Protokoll.
+  var banner = document.getElementById("getrennt");
+  var marke = document.querySelector("[data-start]");
+  var start = marke ? marke.getAttribute("data-start") : null;
+  var neuladen = false;
+  var pausiert = false;
+  var generation = 0;
+  var timer = new Set();
+  var anfragen = new Set();
+  function spaeter(f, ms) {
+    if (pausiert || neuladen) { return; }
+    var id = setTimeout(function () { timer.delete(id); f(); }, ms);
+    timer.add(id);
+  }
+  async function lade(url) {
+    var steuerung = new AbortController();
+    anfragen.add(steuerung);
+    var frist = setTimeout(function () { steuerung.abort(); }, 5000);
+    try {
+      var r = await fetch(url, { cache: "no-store", credentials: "same-origin", signal: steuerung.signal });
+      if (!r.ok) { throw new Error(String(r.status)); }
+      return await r.text();
+    } finally {
+      clearTimeout(frist);
+      anfragen.delete(steuerung);
+    }
+  }
+  function kennung(t) {
+    var m = /data-start="([^"]*)"/.exec(t);
+    return m ? m[1] : null;
+  }
+  async function verbindung() {
+    var g = generation;
+    var fehler = false;
+    try {
+      var t = await lade("/teil/status");
+      if (g !== generation || pausiert) { return; }
+      var neu = kennung(t);
+      if (!neu) { throw new Error("Startkennung fehlt"); }
+      // Ältere Rückfallstände kennen nur data-start; sie bleiben erreichbar.
+      var bereit = t.indexOf('data-bereit="nein"') === -1;
+      if (!bereit) {
+        banner.textContent = "DepotSchlopf startet und prüft die neue Version. Diese Seite wartet auf die Bestätigung.";
+        banner.hidden = false;
+      } else if (start && neu !== start) {
+        if (!neuladen) {
+          neuladen = true;
+          // Wesentliche Parameter (z.B. Protokollkennung) und die Position bleiben erhalten.
+          var ziel = new URL(window.location.href);
+          ziel.searchParams.delete("m");
+          window.location.replace(ziel.pathname + ziel.search + ziel.hash);
+        }
+      } else {
+        start = neu;
+        banner.hidden = true;
+      }
+    } catch (_) {
+      if (g !== generation || pausiert) { return; }
+      fehler = true;
+      banner.textContent = "Verbindung zu DepotSchlopf unterbrochen. Die Seite versucht es automatisch erneut. Lass das DepotSchlopf-Fenster offen.";
+      banner.hidden = false;
+    } finally {
+      if (g === generation) { spaeter(verbindung, fehler ? 5000 : 2000); }
+    }
+  }
+  var teile = Array.from(document.querySelectorAll("[data-teil]")).map(function (ziel) {
+    var url = ziel.getAttribute("data-teil");
+    var zuletzt = null;
+    return async function hole() {
+      var g = generation;
+      var fehler = false;
+      try {
+        var t = await lade(url);
+        if (g !== generation || pausiert || neuladen) { return; }
+        var neu = kennung(t);
+        // Der zentrale Verbindungstest wartet auf die Bestätigung und lädt genau einmal neu.
+        if (start && neu && neu !== start) { return; }
+        if (t !== zuletzt) {
+          var offen = {};
+          ziel.querySelectorAll("details[id]").forEach(function (d) { offen[d.id] = d.open; });
+          ziel.innerHTML = t;
+          zuletzt = t;
+          Object.keys(offen).forEach(function (id) {
+            var d = document.getElementById(id);
+            if (d) { d.open = offen[id]; }
+          });
+        }
+      } catch (_) { fehler = true; }
+      finally { if (g === generation) { spaeter(hole, fehler ? 5000 : 2000); } }
+    };
+  });
+  function starte() {
+    spaeter(verbindung, 0);
+    teile.forEach(function (f) { spaeter(f, 2000); });
+  }
+  window.addEventListener("pagehide", function () {
+    pausiert = true;
+    generation += 1;
+    timer.forEach(function (id) { clearTimeout(id); });
+    timer.clear();
+    anfragen.forEach(function (a) { a.abort(); });
+  });
+  window.addEventListener("pageshow", function (e) {
     document.querySelectorAll("button[data-gesendet]").forEach(function (b) {
       b.textContent = b.dataset.gesendet;
       delete b.dataset.gesendet;
       b.disabled = false;
     });
+    if (e.persisted) { pausiert = false; generation += 1; starte(); }
   });
-  document.querySelectorAll("[data-teil]").forEach(function (ziel, nr) {
-    var banner = document.getElementById("getrennt");
-    var url = ziel.getAttribute("data-teil");
-    var marke = document.querySelector("[data-start]");
-    var start = marke ? marke.getAttribute("data-start") : null;
-    var zuletzt = null;
-    var fehler = 0;
-    function offen() {
-      var s = {};
-      ziel.querySelectorAll("details[id]").forEach(function (d) { s[d.id] = d.open; });
-      return s;
-    }
-    function hole() {
-      fetch(url, { cache: "no-store", credentials: "same-origin" })
-        .then(function (r) { if (!r.ok) { throw new Error(String(r.status)); } return r.text(); })
-        .then(function (t) {
-          var m = /data-start="([^"]*)"/.exec(t);
-          if (start && m && m[1] !== start) {
-            window.location.replace(window.location.pathname);
-            return;
-          }
-          if (t !== zuletzt) {
-            var s = offen();
-            ziel.innerHTML = t;
-            zuletzt = t;
-            Object.keys(s).forEach(function (id) {
-              var d = document.getElementById(id);
-              if (d) { d.open = s[id]; }
-            });
-          }
-          if (nr === 0) { banner.hidden = true; }
-          fehler = 0;
-        })
-        .catch(function () { if (nr === 0) { banner.hidden = false; } fehler += 1; })
-        .then(function () { setTimeout(hole, fehler ? Math.min(10000, 2000 * fehler) : 2000); });
-    }
-    setTimeout(hole, 2000);
-  });
+  starte();
 })();
 "#;

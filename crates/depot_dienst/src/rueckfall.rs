@@ -153,7 +153,24 @@ fn bestaetige_einmal(wurzel: &Path) -> Result<Option<Offen>, DatenprobeFehler> {
             format!("Update nicht bestätigt: Papierdaten nicht verwendbar ({e}).").into()
         }
     })?;
-    fs::remove_file(offen_pfad(wurzel)).map_err(|e| format!("update_offen.txt: {e}"))?;
+    crate::aktualisierung::vermerke(
+        wurzel,
+        &o,
+        crate::aktualisierung::Phase::Bestaetigt,
+        "Neuer Dienst und Papierdaten erfolgreich geprüft.",
+        None,
+    )?;
+    if let Err(e) = fs::remove_file(offen_pfad(wurzel)) {
+        let grund = format!("Update noch nicht bestätigt: update_offen.txt nicht löschbar: {e}");
+        let _ = crate::aktualisierung::vermerke(
+            wurzel,
+            &o,
+            crate::aktualisierung::Phase::Probe,
+            &grund,
+            None,
+        );
+        return Err(grund.into());
+    }
     Ok(Some(o))
 }
 
@@ -163,6 +180,10 @@ fn bestaetige_einmal(wurzel: &Path) -> Result<Option<Offen>, DatenprobeFehler> {
 /// Die Datei ist fremd, Git scheitert, oder der Projektordner steht weder auf `vorher` noch
 /// auf `neu`; dann bleibt alles, wie es ist.
 pub fn zuruecksetzen(wurzel: &Path) -> Result<Option<String>, String> {
+    zuruecksetzen_mit_grund(wurzel, "Neuer Stand wurde nicht bestätigt.")
+}
+
+pub fn zuruecksetzen_mit_grund(wurzel: &Path, grund: &str) -> Result<Option<String>, String> {
     let Some(o) = offen(wurzel)? else {
         return Ok(None);
     };
@@ -197,6 +218,24 @@ pub fn zuruecksetzen(wurzel: &Path) -> Result<Option<String>, String> {
             kurz(&o.neu)
         ));
     };
+    let vorher = crate::aktualisierung::laden(wurzel).ok().and_then(|alle| {
+        alle.into_iter()
+            .find(|e| e.neu == o.neu && e.phase == crate::aktualisierung::Phase::Probe)
+    });
+    let grund = vorher.map_or_else(
+        || grund.to_string(),
+        |e| format!("{grund} Letzte Prüfung: {}", e.grund),
+    );
+    // Ein Diagnose-Schreibfehler darf den Rückfall auf den alten Stand nie verhindern.
+    if let Err(e) = crate::aktualisierung::vermerke(
+        wurzel,
+        &o,
+        crate::aktualisierung::Phase::Rueckfall,
+        &grund,
+        None,
+    ) {
+        eprintln!("[Update] Rückfall erfolgt, Abschlussbeleg nicht schreibbar: {e}");
+    }
     fs::remove_file(offen_pfad(wurzel)).map_err(|e| format!("update_offen.txt: {e}"))?;
     Ok(Some(meldung))
 }
