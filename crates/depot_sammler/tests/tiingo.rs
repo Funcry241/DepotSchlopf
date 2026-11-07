@@ -583,3 +583,70 @@ fn tiingo_protokoll_unterscheidet_ablehnung_und_limit() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[test]
+fn normalisierung_steht_vor_dem_kurs_im_journal_und_nie_nach_sicherheitsabbruch()
+-> Result<(), String> {
+    let alle = werte()?;
+    let aapl = alle.get(1).ok_or("Apple fehlt")?.clone();
+    let sap = alle.first().ok_or("SAP fehlt")?.clone();
+    let antwort = "date,close,high,low,adjClose\n2026-11-04,224.47999999999998,226,223.1,112.24\n";
+    for abbrechen in [false, true] {
+        let (journal, roh) = ordner()?;
+        let mut netz = Erfunden::neu(&[
+            ("ezb", Ok(ezb(&[("2026-11-04", "1.1224")]))),
+            ("aapl", Ok(antwort.to_string())),
+            ("SAP.DEX", Ok(format!("Schluessel {AV}"))),
+        ]);
+        let liste = if abbrechen {
+            vec![aapl.clone(), sap.clone()]
+        } else {
+            vec![aapl.clone()]
+        };
+        let b = lauf(
+            &journal,
+            &roh,
+            &mut netz,
+            &zugang()?,
+            vec![utc(11, 4, 21, 4)?, utc(11, 4, 21, 5)?],
+            &liste,
+        )?
+        .map_err(|e| format!("Lauf: {e:?}"))?;
+        let j = vorbedingung(Journal::oeffnen(&journal), "Journal erneut öffnen")?;
+        let notiz = j
+            .eintraege()
+            .iter()
+            .position(|(_, t)| t.contains("Tiingo-Normalisierung"));
+        if abbrechen {
+            assert!(b.sicherheitsabbruch);
+            assert!(notiz.is_none());
+            assert!(j.stand().kurse().is_empty());
+        } else {
+            assert!(!b.sicherheitsabbruch);
+            let index = notiz.ok_or("Normalisierungsbeleg fehlt")?;
+            let text = &j.eintraege().get(index).ok_or("Beleg fehlt")?.1;
+            for teil in [
+                "original=224.47999999999998",
+                "nach-millionstel-usd=224480000",
+                "rundung=halb-gerade",
+                "roh=",
+                "feld=close",
+                "zeile=2",
+                "abruf=",
+            ] {
+                assert!(text.contains(teil), "{text}");
+            }
+            assert_eq!(
+                j.stand().kurse().first().map(|k| k.kurs().preis()),
+                Some(euro("200")?)
+            );
+            let kurs = j
+                .eintraege()
+                .iter()
+                .position(|(art, _)| *art == depot_journal::Art::Kurs)
+                .ok_or("Kurs fehlt")?;
+            assert!(index < kurs);
+        }
+    }
+    Ok(())
+}

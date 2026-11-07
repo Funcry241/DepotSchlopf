@@ -221,7 +221,10 @@ fn kursdatei_fehler() {
         Err(QuellenFehler::Spanne(2))
     );
     assert_eq!(fall("2026-11-03,1,1,x,1,1\n"), Err(QuellenFehler::Preis(2)));
-    assert!(fall("2026-11-03,1,1.0000001,1,1,1\n").is_ok());
+    assert_eq!(
+        fall("2026-11-03,1,1.0000001,1,1,1\n"),
+        Err(QuellenFehler::Preis(2))
+    );
     assert_eq!(fall("2026-11-03,1,1,0,1,1\n"), Err(QuellenFehler::Preis(2)));
     // Exakt verglichen: ein Zehntausendstel Cent ueber dem Schluss ist zu hoch.
     assert_eq!(
@@ -482,39 +485,4 @@ fn schluss_mit_bruchteil_eines_cents() -> Result<(), String> {
         vec![Some(Cent(21_125)), Some(Cent(21_050)), Some(Cent(20_665))]
     );
     Ok(())
-}
-
-#[test]
-fn tiingo_preisgrenzen_mit_vielen_dezimalstellen_werden_exakt_verglichen() {
-    let kopf = "date,close,high,low\n";
-    let fall = |zeile: &str| lies_tageskurse(&format!("{kopf}{zeile}\n"));
-    assert!(fall("2026-11-02,179.67,184.58599999999998,179.67").is_ok());
-    assert!(fall("2026-11-03,177.46,180.3,177.19799999999998").is_ok());
-    assert_eq!(
-        fall("2026-11-03,1,0.9999999999999999,0.5"),
-        Err(QuellenFehler::Spanne(2))
-    );
-    assert_eq!(
-        fall("2026-11-03,1,2,1.0000000000000001"),
-        Err(QuellenFehler::Spanne(2))
-    );
-    assert!(fall("2026-11-03,1,1.0000000000000000,0.9999999999999999").is_ok());
-    for grenze in [
-        "NaN",
-        "inf",
-        "-1.0000000001",
-        "1.0000001x",
-        "0.000000000",
-        "1.2.0000000",
-    ] {
-        assert_eq!(
-            fall(&format!("2026-11-03,1,{grenze},0.5")),
-            Err(QuellenFehler::Preis(2)),
-            "{grenze}"
-        );
-    }
-    assert_eq!(
-        fall("2026-11-03,1.0000000000000001,2,0.5"),
-        Err(QuellenFehler::Preis(2))
-    );
 }
