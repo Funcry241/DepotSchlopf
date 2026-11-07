@@ -1,5 +1,4 @@
-# Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: DokuOnly
-zweck: Aktuelle Papiergrenzen in der README angleichen und fehlende Trennung der Echtgeld-Grenzen ausdrücklich festhalten.
+klasse: KodexAenderung
+zweck: RSS-Quellenliste gegen unfreigegebene Aenderung und Entfernung schuetzen.
 pfade:
-README.md
+crates/depot_kodex/

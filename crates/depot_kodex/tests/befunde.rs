@@ -1472,3 +1472,33 @@ fn netz_bleibt_im_blatt() -> Result<(), String> {
         ],
     )
 }
+
+#[test]
+fn rss_quellen_aendern_nur_mit_festschreibung() -> Result<(), String> {
+    let b = Baum::neu()?;
+    let pfad = "crates/depot_sammler/src/rss_quellen.txt";
+    b.schreibe(pfad, "https://example.com/erlaubt\n")?;
+    let fest = depot_kodex::festschreibung::berechne(&b.pfad)?;
+    b.schreibe(
+        "kodex/festschreibung.txt",
+        &depot_kodex::festschreibung::als_text(&fest),
+    )?;
+    let pruefe = || {
+        depot_kodex::festschreibung::pruefe(
+            &b.pfad,
+            depot_kodex::deklaration::Klasse::Funktion,
+            &Default::default(),
+        )
+    };
+    assert!(pruefe().is_empty());
+    b.schreibe(pfad, "https://example.com/erlaubt\r\n")?;
+    assert!(
+        pruefe().is_empty(),
+        "Windows-Zeilenenden aendern die Liste nicht"
+    );
+    b.schreibe(pfad, "https://example.com/fremd\n")?;
+    assert!(pruefe().iter().any(|f| f.contains("rss_quellen")));
+    fs::remove_file(b.datei(pfad)).map_err(|e| e.to_string())?;
+    assert!(pruefe().iter().any(|f| f.contains("rss_quellen")));
+    Ok(())
+}
