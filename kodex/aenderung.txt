@@ -1,12 +1,8 @@
 klasse: Funktion
-zweck: Nächste Handelstage an börsenfreien Tagen mit getrennten KI-Einschätzungen vorbereiten, Wochenendwissen erhalten und Kosten gemeinsam begrenzen.
+zweck: Kurssperren ohne Antwortinhalte diagnostizieren und gesperrte Quellen ausdrücklich rein lesend prüfen, ohne Kursbelege oder Entsperren.
 pfade:
-crates/depot_berater/
+crates/depot_sammler/
 crates/depot_dienst/
-crates/depot_journal/
-crates/depot_lage/
-crates/depot_lauf/
-crates/depot_sim/
 README.md
 CHANGELOG.md
-docs/befunde/vorbereitung.md
+docs/befunde/boersen.md

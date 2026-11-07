@@ -301,9 +301,12 @@ pub fn starter(stand: &Stand) -> Starter {
     let cargo = cargo_starter();
     Box::new(move |art: Art, wurzel: &Path| {
         let (programm, args): (&Path, &[&str]) = match art {
-            Art::Kurse | Art::KurseVon(_) | Art::Termine | Art::Nachrichten | Art::Einrichten => {
-                (&sammler, art.argumente())
-            }
+            Art::Kurse
+            | Art::Kursdiagnose
+            | Art::KurseVon(_)
+            | Art::Termine
+            | Art::Nachrichten
+            | Art::Einrichten => (&sammler, art.argumente()),
             Art::Papier | Art::Vorbereiten => (&berater, art.argumente()),
             Art::UpdatePruefen | Art::Update => return cargo(art, wurzel),
         };

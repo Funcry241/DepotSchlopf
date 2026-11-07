@@ -451,6 +451,11 @@ fn schluessel_in_antwort_ist_sicherheitsabbruch() -> Result<(), String> {
         .map_err(|e| format!("Lauf: {e:?}"))?;
         assert!(b.sicherheitsabbruch);
         assert!(!b.verwendbar());
+        let diagnose = b.abbruch.as_deref().ok_or("Diagnose fehlt")?;
+        assert!(diagnose.contains("Quelle der Antwort:"));
+        assert!(diagnose.contains("Erkannter gespeicherter Zugang:"));
+        assert!(diagnose.contains("Antwortart:"));
+        assert!(!diagnose.contains(AV) && !diagnose.contains(TI));
         let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
         assert!(j.stand().kurse().is_empty());
         for ordner in [QUELLE, QUELLE_US, ABLAGE_DEVISEN] {

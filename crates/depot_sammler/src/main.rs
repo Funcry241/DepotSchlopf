@@ -107,10 +107,12 @@ fn gesperrt(wurzel: &Path) -> bool {
 
 /// Nach einem Sicherheitsabbruch: Kurssperre anlegen, damit auch ein Papiertag von Hand die
 /// Teilkurse dieses Abrufs nie verwendet.
-fn sperre(wurzel: &Path) {
+fn sperre(wurzel: &Path, diagnose: Option<&str>, zugang: &Zugang) {
     let grund = "Sicherheitsabbruch: Die Kursquelle gab den Schluessel zurueck. Teilkurse dieses \
                  Abrufs nicht verwenden; Schluessel pruefen und bei Bedarf erneuern";
-    match kurssperre::sperre_kurse(&wurzel.join("daten"), grund) {
+    let grund = diagnose.map_or_else(|| grund.to_string(), |d| format!("{grund}. {d}"));
+    let grund = zugang.bereinige(&grund);
+    match kurssperre::sperre_kurse(&wurzel.join("daten"), &grund) {
         Ok(()) => eprintln!(
             "[Sammler] Kurssperre daten/{} angelegt.",
             kurssperre::KURSSPERRE
@@ -208,7 +210,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
     };
     let verwendbar = bericht.verwendbar();
     if bericht.sicherheitsabbruch {
-        sperre(wurzel);
+        sperre(wurzel, bericht.abbruch.as_deref(), &schluessel);
     }
     vermerke(wurzel, &bericht);
     zeige_werte(&bericht.werte);
@@ -319,7 +321,7 @@ fn nachrichten_holen(
     ) {
         Ok(b) => {
             if b.sicherheitsabbruch {
-                sperre(wurzel);
+                sperre(wurzel, None, schluessel);
                 return NachrichtenAusgang::Sicherheitsabbruch;
             }
             for text in &b.quellen {
@@ -413,6 +415,32 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Die einzige Ausnahme vom Abrufhalt: ausdrücklich gestartete, rein lesende Diagnose.
+/// Sie öffnet weder Journal noch Rohablage und ändert die bestehende Sperre nicht.
+fn kursdiagnose(wurzel: &Path) -> ExitCode {
+    if kurssperre::kurssperre(&wurzel.join("daten")).is_none() {
+        println!("[Sammler] Keine Kurssperre vorhanden: kein Prüfabruf nötig, nichts abgerufen.");
+        return ExitCode::SUCCESS;
+    }
+    println!(
+        "[Sammler] Prüfabruf: bis zu 15 Werte, 15 Sekunden Abstand, ein Versuch je Wert. \
+              Verbraucht Abrufkontingent. Keine Kurse oder Antworten werden gespeichert; die Sperre bleibt bestehen."
+    );
+    let Ok(werte) = beobachtungsliste() else {
+        eprintln!("[Sammler] FEHLER: Beobachtungsliste ungültig, nichts abgerufen.");
+        return ExitCode::FAILURE;
+    };
+    let (zugang, _) = zugang_laden(&werte, Schluessel::aus_anmeldeverwaltung);
+    depot_sammler::diagnose::pruefabruf(
+        &mut Https::neu(),
+        &zugang,
+        &werte,
+        &mut std::thread::sleep,
+        &mut |text| println!("[Sammler] {}", zugang.bereinige(text)),
+    );
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let Some(wurzel) = wurzel() else {
         eprintln!(
@@ -429,6 +457,7 @@ fn main() -> ExitCode {
         .as_slice()
     {
         [] | ["kurse"] => kurse(&wurzel, &journal, None),
+        ["kurse", "diagnose"] => kursdiagnose(&wurzel),
         ["kurse", "xetra"] => kurse(&wurzel, &journal, Some(Boerse::Xetra)),
         ["kurse", "nyse"] => kurse(&wurzel, &journal, Some(Boerse::Nyse)),
         ["einrichten"] | ["kurse", "einrichten"] => einrichten(&journal),
@@ -436,7 +465,7 @@ fn main() -> ExitCode {
         ["nachrichten"] => nachrichten(&wurzel, &journal),
         _ => {
             eprintln!(
-                "Aufruf: run.cmd kurse [xetra|nyse] | run.cmd kurse einrichten | run.cmd nachrichten | run.cmd termine"
+                "Aufruf: run.cmd kurse [xetra|nyse|diagnose] | run.cmd kurse einrichten | run.cmd nachrichten | run.cmd termine"
             );
             ExitCode::from(2)
         }

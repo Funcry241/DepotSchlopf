@@ -2451,3 +2451,33 @@ fn wartende_schlagzeilen_starten_nach_ausschalten_nicht_mehr() -> Result<(), Str
     assert!(d.sperre().laufend.is_none());
     Ok(())
 }
+
+/// Auch eine alte, unspezifische Kurssperre kann ohne Aufheben untersucht werden.
+#[test]
+fn kurssperre_pruefabruf_ist_getrennt_und_doppelklickfest() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let umw = Attrappe::default();
+    let t = donnerstag(18, 0)?;
+    let seite = anfrage("GET", "/einrichtung", &[("Host", HOST)], "");
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(!s.contains("value=\"kursdiagnose\""));
+    let halt = kostenschutz::kurse_pfad(&wurzel);
+    let grund = "Sicherheitsabbruch: Die Kursquelle gab den Schluessel zurueck\n";
+    fs::write(&halt, grund).map_err(|e| e.to_string())?;
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(s.contains("value=\"kursdiagnose\""));
+    assert!(s.contains("Kurssperre sicher untersuchen"));
+    assert!(s.contains("Sperre bleibt bestehen") && s.contains("Quellenkontingent"));
+    let post = formular_post("/ausfuehren", &format!("t={TOKEN}&art=kursdiagnose"));
+    for _ in 0..2 {
+        let _ = behandle(&d, &umw, &post, t);
+    }
+    assert_eq!(d.sperre().warteschlange.len(), 1);
+    let s = text(&behandle(&d, &umw, &seite, t));
+    assert!(s.contains("disabled>Kurssperre sicher untersuchen"));
+    assert_eq!(fs::read_to_string(&halt).map_err(|e| e.to_string())?, grund);
+    assert_eq!(Art::Kursdiagnose.argumente(), &["kurse", "diagnose"]);
+    assert_eq!(Art::aus_kurz("kursdiagnose"), Some(Art::Kursdiagnose));
+    Ok(())
+}

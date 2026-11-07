@@ -283,10 +283,8 @@ fn hole_devisen(
             return Ok(fehlt(text));
         }
     };
-    if zugang.steht_in(&roh) {
-        bericht.abbruch = Some(
-            "Die Antwort der EZB enthaelt einen Schluessel: nicht abgelegt, Lauf beendet".into(),
-        );
+    if let Some(text) = crate::diagnose::sicherheitsabbruch(zugang, "ezb", &roh) {
+        bericht.abbruch = Some(text);
         bericht.sicherheitsabbruch = true;
         return Ok(fehlt("Sicherheitsabbruch".into()));
     }
@@ -421,10 +419,11 @@ fn lies_wert(
     };
     // Gibt die Quelle einen Schluessel zurueck, wird die Antwort weder abgelegt noch gelesen,
     // und der Lauf endet: Keine Datei des Rahmens enthaelt ihn (K19-01).
-    if zugang.steht_in(&roh) {
+    if let Some(text) =
+        crate::diagnose::sicherheitsabbruch(zugang, Anbieter::fuer(wert.boerse).dienst(), &roh)
+    {
         return Ok(Schritt::Abbruch {
-            text: "Die Antwort enthaelt den Schluessel: nicht abgelegt, nicht belegt, Lauf beendet"
-                .into(),
+            text,
             sicherheit: true,
         });
     }
