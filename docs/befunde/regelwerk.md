@@ -30,7 +30,7 @@ Am ersten Commit des Schnitts (`6dc1fe9`, nur Tests) zeigt `cargo test --locked 
 | 1·F04 | `befund_1_f04_zu_viele_positionen_erzeugen_abbaupflicht` | rot: 9 Werte, Vorschlag nur verworfen | grün: der überzählige Wert wird ganz verkauft |
 | 1·F04 | `befund_1_f04_kauf_erzeugt_keine_neunte_position` | rot: Kauf erzeugt den neunten Wert | grün: `PositionsgrenzeErreicht` |
 | 1·F05 | `befund_1_f05_umschlag_am_limit_ueber_der_grenze_wird_gekuerzt` | rot | grün: Umschlag am Limit gekürzt |
-| 1·F06 | `befund_1_f06_teilverkauf_unter_mindestorder_am_limit_abgelehnt` | rot: 495 € Teilverkauf | grün |
+| 1·F06 | `befund_1_f06_teilverkauf_unter_mindestorder_am_limit_abgelehnt` | rot: 99 € Teilverkauf | grün |
 | 1·F08 | `befund_1_f08_fehlender_vortag_ist_kein_bestandener_sprungtest` | rot | grün: `DatenFehler::KeinVergleichskurs` |
 | 1·F09 | `befund_1_f09_notbremse_und_umschichtung_vergeben_verschiedene_kennungen` | rot: doppelte Kennungen | grün: eine gemeinsame Vergabe, fortlaufend ohne Lücke |
 | 2·A04 | `befund_2_a04_halt_sperrt_den_zwingenden_ausstieg_nicht` | rot | grün |

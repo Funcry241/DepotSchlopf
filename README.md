@@ -21,7 +21,7 @@ Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 | KI erfindet Werte oder verlangt Unmögliches | Vorschlag wird ganz verworfen; nur Werte der Positivliste |
 | Zu viel in einem Wert | höchstens 25 % je Wert, höchstens 8 Werte |
 | Produkte mit Verlust über dem Einsatz | nur Aktien (ETFs vorbereitet, gesperrt); keine Derivate, kein Hebel, kein Leerverkauf, nur Bargeld |
-| Gebühren fressen den Ertrag | Mindestorder 500 €, Umschichtung erst ab 5 Prozentpunkten, höchstens 4 Orders je Topf und Zyklus, Umschlag höchstens 50 % |
+| Gebühren fressen den Ertrag | Mindestorder 100 € im Papierhandel, Umschichtung erst ab 5 Prozentpunkten, höchstens 4 Orders je Topf und Zyklus, Umschlag höchstens 50 % |
 | Absturz des Marktes | Tagesverlust 5 % = Halt; 20 % unter Höchststand = Notbremse, alles verkaufen |
 | KI-Kosten laufen aus dem Ruder | Erlaubnis erst nach dauerhafter Buchung der Höchstkosten; je KI 2 Aufrufe je Zyklus, 1 Zyklus je Tag, 4 Aufrufe und 4 € je Monat, 50 € je Jahr |
 | Grenzen werden heimlich gelockert | Kodex vergleicht jede Änderung mit `kodex/festschreibung.txt` und lehnt ab |

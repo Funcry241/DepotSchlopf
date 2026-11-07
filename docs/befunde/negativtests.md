@@ -77,7 +77,7 @@ Die Gegenproben belegen einzelne Tests, keinen vollständigen Mutantenlauf.
 | 1·F04 | `depot_regelwerk` `befund_1_f04_zu_viele_positionen_erzeugen_abbaupflicht` | rot: 9 Werte statt höchstens 8, Vorschlag nur verworfen |
 | 1·F04 | `depot_regelwerk` `befund_1_f04_kauf_erzeugt_keine_neunte_position` | rot: aus acht zulässigen Werten wird durch einen Kauf von 20 Stück ein neunter |
 | 1·F05 | `depot_regelwerk` `befund_1_f05_umschlag_am_limit_ueber_der_grenze_wird_gekuerzt` | rot: 5.050 € über erlaubten 5.000 € |
-| 1·F06 | `depot_regelwerk` `befund_1_f06_teilverkauf_unter_mindestorder_am_limit_abgelehnt` | rot: 5 × 99 € = 495 € unter Mindestorder |
+| 1·F06 | `depot_regelwerk` `befund_1_f06_teilverkauf_unter_mindestorder_am_limit_abgelehnt` | rot: 5 × 19,80 € = 99 € unter Mindestorder |
 | 1·F08 | `depot_regelwerk` `befund_1_f08_fehlender_vortag_ist_kein_bestandener_sprungtest` | rot: fehlender Vortagskurs still akzeptiert |
 | 1·F09 | `depot_regelwerk` `befund_1_f09_notbremse_und_umschichtung_vergeben_verschiedene_kennungen` | rot: doppelte Kennungen |
 | 2·A04 | `depot_regelwerk` `befund_2_a04_halt_sperrt_den_zwingenden_ausstieg_nicht` | rot: zwingender Ausstieg fehlt, nur „Halt“ |
@@ -86,7 +86,7 @@ Die Gegenproben belegen einzelne Tests, keinen vollständigen Mutantenlauf.
 | 2·A04 | `depot_regelwerk` `befund_2_a04_kombination_sperrt_zwingende_ausstiege_nicht` | rot: kein Ausstieg unter Halt |
 | 2·A04 | `depot_regelwerk` `grenzfall_2_a04_kleiner_rest_wird_zwingend_verkauft` | grün: Rest unter Mindestorder ohne Halt |
 | 1·T01 | `depot_regelwerk` `grenzfall_hoechstanteil_gilt_am_limit` | rot: nach dem Kauf 25,2 % bei vorhandenem Bestand |
-| 1·T01 | `depot_regelwerk` `grenzfall_mindestorder_kauf_am_limit` (stückgenau: 4, 5, 5, 6 Stück), `grenzfall_deckung_mit_gebuehr_am_limit`, `grenzfall_orderzahl_genau_an_der_grenze`, `grenzfall_kurssprung_genau_an_der_grenze`, `grenzfall_limit_abstand`, `grenzfall_gesamtverkauf_unter_mindestorder_bleibt_erlaubt` | grün |
+| 1·T01 | `depot_regelwerk` `grenzfall_mindestorder_kauf_am_limit` (stückgenau: 9, 10, 10, 11 Stück), `grenzfall_deckung_mit_gebuehr_am_limit`, `grenzfall_orderzahl_genau_an_der_grenze`, `grenzfall_kurssprung_genau_an_der_grenze`, `grenzfall_limit_abstand`, `grenzfall_gesamtverkauf_unter_mindestorder_bleibt_erlaubt` | grün |
 
 Außerdem verspricht der Zufallstest im Namen nur noch, was er prüft: `zufallstest_grenzen_am_schlusskurs` (R27).
 
