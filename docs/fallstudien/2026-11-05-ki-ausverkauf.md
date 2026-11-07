@@ -90,4 +90,3 @@ Die Backticks im ursprünglichen Motley-Fool-Link sind ein Formatierungsfehler.
 Der lesbare Link lautet:
 [Motley Fool, 05.11.2026](https://www.fool.com/investing/2026/11/05/the-ai-selloff-is-getting-worse-nvidia-dell-and-data-center-stocks-are-plunging-hard-is-it-time-to-buy-the-dip/).
 Das Original oben bleibt zur Nachvollziehbarkeit unverändert.
-

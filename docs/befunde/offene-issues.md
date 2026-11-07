@@ -43,7 +43,7 @@ keinen sichtbaren Dialogtest im angemeldeten Benutzerkonto.
 | U10 Kleine Bildschirme | Schlüsselzeilen unter 600 px untereinander, Felder mit 100 % Breite und eigenem zugänglichem Namen; kein Abschneiden durch eine breite Tabelle |
 | U11 Uhrzeit | Frankfurter Zeit und 24 Stunden direkt an jedem Uhrzeitfeld; natives Eingabeformat folgt weiterhin dem Browser |
 | U12 Automatischer Papiertag | Direkt am Häkchen steht, dass es nur bei eingeschaltetem Zeitplan gilt |
-| U13 Meldungen | Erfolgsmeldung bleibt außerhalb der automatisch ersetzten Bereiche erhalten, ist als Status ausgezeichnet und bleibt auch beim Sprung zum Formular oben sichtbar |
+| U13 Meldungen | Rücksprungziele für aufgehobene Sperren bleiben unter Werkzeuge vorhanden, keine doppelten IDs bei aktiver KI-Sperre. Erfolgsmeldung bleibt außerhalb der automatisch ersetzten Bereiche erhalten, ist als Status ausgezeichnet und bleibt auch beim Sprung zum Formular oben sichtbar |
 
 Das Journal-Formular akzeptiert als Rückziel nur den festen Wert
 `einrichtung`; fremde Werte werden niemals als Adresse verwendet. Die
@@ -53,4 +53,3 @@ Der neue Diensttest prüft auch zweimaliges Absenden und ein fremdes Rückziel.
 Der persönliche Durchgang **Journal → Schlüssel → Zeitplan → Autostart** mit
 Wolfgang und der sichtbare Windows-Dialogtest bleiben ehrliche Praxisprüfungen,
 keine hier behaupteten Testergebnisse.
-

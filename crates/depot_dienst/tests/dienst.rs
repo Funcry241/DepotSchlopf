@@ -985,6 +985,11 @@ fn sperre_des_kostenschutzes_gefuehrt_aufheben() -> Result<(), String> {
     let seite = anfrage("GET", "/einrichtung", &[("Host", HOST)], "");
     let s = text(&behandle(&d, &umw, &seite, t));
     assert!(s.contains("id=\"kostenschutz\""), "{s}");
+    assert_eq!(
+        s.matches("id=\"ki-verbindung\"").count(),
+        1,
+        "Aktive Sperre: keine doppelten Abschnitte"
+    );
     assert!(
         s.contains("Antwort fehlte (Dachs) &lt;b&gt;"),
         "maskiert: {s}"
@@ -1026,9 +1031,15 @@ fn sperre_des_kostenschutzes_gefuehrt_aufheben() -> Result<(), String> {
     let r = text(&behandle(&d, &umw, &aufheben(&abdruck, true), t));
     assert!(r.contains("m=kostenschutz_frei"), "{r}");
     let s = text(&behandle(&d, &umw, &seite, t));
-    assert!(
-        !s.contains("<section id=\"kostenschutz\">"),
-        "Eine aufgehobene Sperre braucht kein eigenes Formular: {s}"
+    let werkzeuge = s.find("id=\"werkzeuge\"").ok_or("Werkzeuge fehlen")?;
+    let frei = s
+        .find("id=\"kostenschutz\"")
+        .ok_or("Rücksprung nach Aufheben fehlt")?;
+    assert!(frei > werkzeuge && s.contains("Keine Sperre"), "{s}");
+    assert_eq!(
+        s.matches("id=\"ki-verbindung\"").count(),
+        1,
+        "Freie Sperre: keine doppelten Abschnitte"
     );
     assert!(
         s.contains("id=\"ki-verbindung\""),
@@ -1048,8 +1059,12 @@ fn kurssperre_gefuehrt_aufheben() -> Result<(), String> {
     let seite = anfrage("GET", "/einrichtung", &[("Host", HOST)], "");
     let s = text(&behandle(&d, &umw, &seite, t));
     assert!(
-        !s.contains("id=\"kurssperre\""),
-        "ohne Sperre kein Abschnitt"
+        s.contains("id=\"kurssperre\""),
+        "Rücksprung bleibt ohne Sperre vorhanden"
+    );
+    assert!(
+        !s.contains("action=\"/kurssperre\""),
+        "Keine Aufhebung ohne Sperre"
     );
 
     let halt = kostenschutz::kurse_pfad(&wurzel);
@@ -1350,6 +1365,18 @@ fn einrichten_bleibt_auf_der_config_seite_und_zeigt_den_arbeitsstand() -> Result
     assert!(pos("id=\"zeitplan\"")? < pos("id=\"autostart\"")?);
     assert!(pos("id=\"autostart\"")? < pos("id=\"werkzeuge\"")?);
     assert!(html.contains("name=\"ziel\" value=\"einrichtung\""));
+    for anker in [
+        "kostenschutz",
+        "kurssperre",
+        "papierfreigabe",
+        "ki-verbindung",
+    ] {
+        assert_eq!(
+            html.matches(&format!("id=\"{anker}\"")).count(),
+            1,
+            "Rücksprung fehlt oder ist doppelt: {anker}"
+        );
+    }
     let post = formular_post(
         "/ausfuehren",
         &format!("t={TOKEN}&art=einrichten&ziel=einrichtung"),

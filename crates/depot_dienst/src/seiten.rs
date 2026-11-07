@@ -1377,7 +1377,19 @@ pub fn einrichtung(
     autostart_teil(token, e, &mut s);
     update_teil(token, start, z, e, &mut s);
     s.push_str("<section id=\"werkzeuge\"><h2>Werkzeuge</h2><p>Diese Prüfungen brauchst du nur bei der ersten Einrichtung oder wenn etwas nicht funktioniert.</p>");
-    s.push_str(KI_VERBINDUNG);
+    if matches!(&e.ki_halt, Ok(None)) {
+        // Freie Schutzfunktionen bleiben unten erreichbar, auch nach einer erfolgreichen
+        // Aufhebung. Bei einer aktiven Sperre steht derselbe Abschnitt bereits oben.
+        kostenschutz_teil(token, e, &mut s);
+    } else if e.ki_halt.is_err() {
+        s.push_str(KI_VERBINDUNG);
+    }
+    if matches!(&e.kurse_halt, Ok(None)) {
+        s.push_str("<p id=\"kurssperre\">Kurssperre: keine Sperre.</p>");
+    }
+    if e.papier_freigabe.is_none() {
+        s.push_str("<p id=\"papierfreigabe\" class=\"leise\">Derzeit wird keine Papierfreigabe angeboten. Den Betriebszustand siehst du oben.</p>");
+    }
     let _ = write!(
         s,
         "<div id=\"papierdialog-test\"><h3>Windows-Dialog prüfen</h3>\
