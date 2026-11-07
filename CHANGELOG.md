@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Die Mindestorder für freiwillige Aufträge im Papierhandel beträgt 100 € am Limit.
+
 - Kontingent von Alpha Vantage mit Nachrichten (nach dem Merge von #28): Der Xetra-Lauf holt mit demselben Schlüssel einmal die Nachrichten. `pruefe_liste` lässt deshalb für Alpha Vantage höchstens 24 Werte zu statt 25, damit Kurse und Nachrichten zusammen in die 25 Abrufe am Tag passen (`liste::ABRUFE_ALPHA_VANTAGE`, `WEITERE_ABRUFE_ALPHA_VANTAGE`). Die Liste hat heute 10 Xetra-Werte, es ändert sich am Ablauf nichts. Keine Grenze, keine neue Abhängigkeit.
 
 - Die Papier-Notbremse prüft den Wiederanlauf automatisch. Erst ein späterer, vollständig geprüfter Papiertag, der ohne Bestand und offene Orders beginnt, hebt den Halt zusammen mit dem Tagesabschluss auf. Neue Orders sind frühestens beim nächsten regulären Papiertag möglich. Der Kontowächter erhält einen neuen Referenzwert aus dem Papierbargeld. Ab 30 % Verlust gegenüber dem dauerhaft belegten historischen Höchststand stoppt der Papiertag neue Käufe und setzt die Sperre dauerhaft. Schutzverkäufe laufen weiter. Ein automatischer Wiederanlauf ist dann gesperrt.

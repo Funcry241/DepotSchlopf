@@ -264,24 +264,24 @@ fn kleine_aenderung_unter_5_punkten_wird_nicht_gehandelt() {
 }
 
 #[test]
-fn kleiner_kauf_unter_500_euro_entfaellt() {
+fn kleiner_kauf_unter_100_euro_entfaellt() {
     let g = Grenzen::standard();
-    let topf = topf_neu(TopfId::A, Cent(500_000));
-    let v = vorschlag(&[(0, 600)]); // 300 €
-    let ent = lauf(&g, &topf, &kurse_alle(5_000), Some(&v), false);
+    let topf = topf_neu(TopfId::A, Cent(150_000));
+    let v = vorschlag(&[(0, 600)]); // 90 €
+    let ent = lauf(&g, &topf, &kurse_alle(3_000), Some(&v), false);
     assert!(ent.kaeufe.is_empty());
     assert!(ent.befunde.contains(&Befund::UnterMindestorder(isin(0))));
 }
 
 #[test]
-fn restposition_wird_komplett_verkauft_auch_unter_500_euro() {
+fn restposition_wird_komplett_verkauft_auch_unter_100_euro() {
     let g = Grenzen::standard();
-    let mut topf = topf_neu(TopfId::A, Cent(470_000));
-    topf.setze_bestand(isin(0), 6); // 300 € = 6 %
+    let mut topf = topf_neu(TopfId::A, Cent(94_000));
+    topf.setze_bestand(isin(0), 6); // 60 € = 6 %
     let v = vorschlag(&[]);
-    let ent = lauf(&g, &topf, &kurse_alle(5_000), Some(&v), false);
+    let ent = lauf(&g, &topf, &kurse_alle(1_000), Some(&v), false);
     let verkauf = ent.verkaeufe.first().map(GenehmigterAuftrag::auftrag);
-    assert_eq!(verkauf.map(|a| (a.stueck, a.limit)), Some((6, Cent(4_950))));
+    assert_eq!(verkauf.map(|a| (a.stueck, a.limit)), Some((6, Cent(990))));
 }
 
 #[test]

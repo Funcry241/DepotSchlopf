@@ -1,5 +1,12 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: TestOnly
-zweck: Der Waechtertest verwendet einen Rust-Kindprozess fuer die Bestaetigung und einen eindeutigen Exitcode.
+klasse: FestschreibungAenderung
+zweck: Wolfgang hat die Mindestorder im Papierhandel von 500 Euro auf 100 Euro am Limit freigegeben.
 pfade:
-crates/depot_dienst/tests/update.rs
+CHANGELOG.md
+README.md
+crates/depot_kern/src/grenzen.rs
+crates/depot_regelwerk/tests/
+docs/befunde/negativtests.md
+docs/befunde/regelwerk.md
+kodex/festschreibung.txt
+kodex/freigabe.txt
