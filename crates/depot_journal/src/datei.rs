@@ -299,10 +299,18 @@ fn sichere(ziel: &Path, rest: &[u8]) -> Result<(), JournalFehler> {
     if !datei_da(ziel)? {
         schreibe_atomar(ziel, rest).map_err(halt)?;
     }
-    let da = File::open(ziel).and_then(|f| {
-        f.sync_all()?;
-        fs::read(ziel)
-    });
+    // Windows verlangt Schreibrechte für sync_all. Über denselben Zugriff lesen,
+    // bevor das Journal gekürzt wird; eine vorhandene Datei wird nie überschrieben.
+    let da = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(ziel)
+        .and_then(|mut f| {
+            f.sync_all()?;
+            let mut bytes = Vec::new();
+            f.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        });
     match da {
         Ok(da) if da == rest => Ok(()),
         Ok(_) => Err(halt(format!(

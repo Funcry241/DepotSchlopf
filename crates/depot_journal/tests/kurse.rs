@@ -258,10 +258,15 @@ fn abruf_faellt_nie_zurueck() -> Result<(), String> {
     let mut j = oeffnen(&p)?;
     let erster = neu.first().ok_or("Vorbedingung: Beleg")?;
     vorbedingung(j.belege_kurs(erster), "belegen")?;
+    drop(j);
     let vorher = vorbedingung(fs::read(&p), "lesen")?;
+    let mut j = oeffnen(&p)?;
     let r = j.belege_kurs(alt.first().ok_or("Vorbedingung: Beleg")?);
     assert!(matches!(r, Err(JournalFehler::Abgelehnt(_))), "{r:?}");
+    drop(j);
     assert_eq!(vorbedingung(fs::read(&p), "lesen")?, vorher);
+    let mut j = oeffnen(&p)?;
+    let _ = j.belege_kurs(alt.first().ok_or("Vorbedingung: Beleg")?);
     // Derselbe Abruf darf mehrere Kurse belegen.
     vorbedingung(j.belege_kurs(erster), "derselbe Abruf")?;
     Ok(())

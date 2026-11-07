@@ -1,6 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: RefactorOnly
-zweck: Journal-Fehlergegenprobe unter Windows über den eigenen gesperrten Dateizugriff lesen, ohne die Produktionslogik zu ändern.
+klasse: Funktion
+zweck: Windows-Journalgegenproben bei Dateisperren korrigieren und Quarantaenedateien mit Schreibrecht synchronisieren, bevor das Journal gekuerzt wird.
 pfade:
-crates/depot_journal/src/lib.rs
-crates/depot_journal/src/datei.rs
+crates/depot_journal/
