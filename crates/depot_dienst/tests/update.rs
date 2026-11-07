@@ -587,3 +587,316 @@ fn programmdatei_aus_der_bauausgabe() {
         None
     );
 }
+
+#[test]
+fn update_abschluss_bleibt_nach_bestaetigung_und_rueckfall_sichtbar() -> Result<(), String> {
+    use depot_dienst::aktualisierung::{self, Phase};
+    for bestaetigen in [true, false] {
+        let (w, vorher, neu) = zwei_staende()?;
+        let d = dienst(w.clone());
+        let t = mittag()?;
+        suche_update(&d, t)?;
+        bestaetige_update(&d)?;
+        let (nr, kind) = some(d.schritt(t), "Update startet")?;
+        offen_schreiben(&w, &vorher, &neu)?;
+        d.verfolge(nr, kind, || mittag().ok());
+        let pending = get(&d, "/teil/live")?;
+        assert!(pending.contains("Neustart noch nicht bestätigt"));
+        let kennung = aktualisierung::laden(&w)?
+            .last()
+            .ok_or("Beleg fehlt")?
+            .lauf
+            .clone();
+        let neu_gestartet = dienst(w.clone());
+        assert!(get(&neu_gestartet, "/teil/live")?.contains("Neustart noch nicht bestätigt"));
+        assert!(get(&neu_gestartet, "/teil/verbindung")?.contains("data-bereit=\"nein\""));
+        if bestaetigen {
+            rueckfall::bestaetige(&w)?;
+        } else {
+            rueckfall::zuruecksetzen_mit_grund(&w, "Erfundener Startfehler <i>")?;
+        }
+        let belege = aktualisierung::laden(&w)?;
+        let e = belege.last().ok_or("Abschluss fehlt")?;
+        assert_eq!(e.lauf, kennung);
+        assert_eq!(
+            e.phase,
+            if bestaetigen {
+                Phase::Bestaetigt
+            } else {
+                Phase::Rueckfall
+            }
+        );
+        let alt_lesbar = depot_dienst::verlauf::lies(
+            &fs::read_to_string(depot_dienst::verlauf::pfad(&w)).map_err(|e| e.to_string())?,
+        );
+        assert_eq!(
+            alt_lesbar
+                .auftraege
+                .iter()
+                .find(|a| a.kennung == kennung)
+                .and_then(|a| a.erfolg),
+            Some(bestaetigen)
+        );
+        let fertig = dienst(w.clone());
+        let live = get(&fertig, "/teil/live")?;
+        let update = get(&fertig, "/teil/update")?;
+        assert!(get(&fertig, "/teil/verbindung")?.contains("data-bereit=\"ja\""));
+        if bestaetigen {
+            assert!(live.contains("Update bestätigt") && update.contains("bestätigt"));
+            assert_eq!(g(&w, &["rev-parse", "HEAD"])?, neu);
+        } else {
+            assert!(
+                live.contains("zurückgesetzt")
+                    && update.contains("Erfundener Startfehler &lt;i&gt;")
+            );
+            assert_eq!(g(&w, &["rev-parse", "HEAD"])?, vorher);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn abschlussschreibfehler_bestaetigt_nichts_und_fremde_belege_werden_nicht_gruen()
+-> Result<(), String> {
+    use depot_dienst::aktualisierung;
+    let (w, vorher, neu) = zwei_staende()?;
+    offen_schreiben(&w, &vorher, &neu)?;
+    let p = aktualisierung::pfad(&w);
+    fs::create_dir(&p).map_err(|e| e.to_string())?;
+    assert!(rueckfall::bestaetige(&w).is_err());
+    assert!(rueckfall::offen_pfad(&w).exists());
+    assert!(get(&dienst(w.clone()), "/teil/update")?.contains("halt"));
+    fs::remove_dir(&p).map_err(|e| e.to_string())?;
+    for text in ["kaputt", "{\"typ\":\"update-ergebnis-v1\"}"] {
+        fs::write(&p, text).map_err(|e| e.to_string())?;
+        assert!(aktualisierung::laden(&w).is_err());
+        assert!(rueckfall::bestaetige(&w).is_err());
+        assert!(rueckfall::offen_pfad(&w).exists());
+    }
+    assert!(rueckfall::zuruecksetzen_mit_grund(&w, "Beleg beschädigt")?.is_some());
+    assert_eq!(g(&w, &["rev-parse", "HEAD"])?, vorher);
+    assert!(
+        !rueckfall::offen_pfad(&w).exists(),
+        "Diagnosefehler blockiert Rückfall nicht"
+    );
+    Ok(())
+}
+
+#[test]
+fn verbindungspruefung_ist_auf_bestaetigung_und_protokoll_mit_startkennung_moeglich()
+-> Result<(), String> {
+    let d = dienst(ordner()?);
+    suche_update(&d, mittag()?)?;
+    let s = get(&d, &format!("/bestaetigen?art=update&sha={UPDATE_SHA}"))?;
+    assert!(s.contains(&format!("data-start=\"{}\"", d.start)));
+    assert!(s.contains("Cache-Control: no-store"));
+    let s = get(&d, "/teil/verbindung")?;
+    assert!(s.contains(&format!("data-start=\"{}\"", d.start)));
+    assert!(s.contains("Cache-Control: no-store"));
+    let a = d
+        .sperre()
+        .verlauf
+        .front()
+        .cloned()
+        .ok_or("Suchlauf fehlt")?;
+    let s = get(&d, &format!("/protokoll?lauf={}", a.kennung))?;
+    assert!(s.contains(&format!("data-start=\"{}\"", d.start)));
+    Ok(())
+}
+
+#[test]
+fn waechter_baut_stets_ausserhalb_des_urspruenglichen_bauordners() -> Result<(), String> {
+    let (w, vorher, _) = zwei_staende()?;
+    let neu = waechter::bau_ordner(&w);
+    g(&w, &["reset", "--hard", &vorher])?;
+    let alt = waechter::bau_ordner(&w);
+    assert_eq!(
+        alt, neu,
+        "Baucache bleibt über Programmstände wiederverwendbar"
+    );
+    assert!(neu.starts_with(w.join("target")));
+    assert_ne!(neu.join("debug"), w.join("target/debug"));
+    let c = waechter::baubefehl(&w);
+    assert_eq!(
+        c.get_envs()
+            .find(|(k, _)| *k == "CARGO_TARGET_DIR")
+            .and_then(|(_, v)| v),
+        Some(alt.as_os_str())
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_laufender_waechter_stub() {
+    if std::env::var_os("DEPOT_WAECHTER_STUB").is_some() {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+}
+
+/// Ein echtes laufendes Windows-EXE belegt target/debug, während der Produktionsbefehl
+/// dieselben vier Programmziele in einem kleinen, paketfreien Testprojekt neu baut.
+#[cfg(windows)]
+#[test]
+fn windows_bau_beruehrt_den_laufenden_waechter_nicht() -> Result<(), String> {
+    let w = ordner()?;
+    fs::write(w.join("Cargo.toml"), "[workspace]\nmembers = [\"depot_dienst\",\"depot_sammler\",\"depot_berater\"]\nresolver = \"2\"\n").map_err(|e| e.to_string())?;
+    for name in ["depot_dienst", "depot_sammler", "depot_berater"] {
+        let p = w.join(name);
+        fs::create_dir_all(p.join("src")).map_err(|e| e.to_string())?;
+        fs::write(
+            p.join("Cargo.toml"),
+            format!("[package]\nname=\"{name}\"\nversion=\"0.1.0\"\nedition=\"2021\"\n"),
+        )
+        .map_err(|e| e.to_string())?;
+        fs::write(p.join("src/main.rs"), "fn main() {}\n").map_err(|e| e.to_string())?;
+        if name == "depot_dienst" {
+            fs::create_dir_all(p.join("src/bin")).map_err(|e| e.to_string())?;
+            fs::write(p.join("src/bin/depot_waechter.rs"), "fn main() {}\n")
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    let alt = w.join("target/debug/depot_waechter.exe");
+    fs::create_dir_all(w.join("target/debug")).map_err(|e| e.to_string())?;
+    fs::copy(std::env::current_exe().map_err(|e| e.to_string())?, &alt)
+        .map_err(|e| e.to_string())?;
+    let bytes = fs::read(&alt).map_err(|e| e.to_string())?;
+    let mut kind = Command::new(&alt)
+        .args(["--exact", "windows_laufender_waechter_stub"])
+        .env("DEPOT_WAECHTER_STUB", "ja")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let aus = waechter::baubefehl(&w).output();
+    let lief = kind.try_wait().map_err(|e| e.to_string())?.is_none();
+    let _ = kind.kill();
+    let _ = kind.wait();
+    let aus = aus.map_err(|e| e.to_string())?;
+    assert!(lief);
+    assert!(
+        aus.status.success(),
+        "{}",
+        String::from_utf8_lossy(&aus.stderr)
+    );
+    assert_eq!(fs::read(&alt).map_err(|e| e.to_string())?, bytes);
+    assert!(waechter::programm_aus_bau(&String::from_utf8_lossy(&aus.stdout)).is_some());
+    for name in [
+        "depot_dienst",
+        "depot_waechter",
+        "depot_sammler",
+        "depot_berater",
+    ] {
+        assert!(
+            waechter::bau_ordner(&w)
+                .join("debug")
+                .join(format!("{name}.exe"))
+                .is_file()
+        );
+    }
+    Ok(())
+}
+
+/// Das Gate führt Verhaltenstests des tatsächlich ausgelieferten Skripts aus. GitHub stellt
+/// Node bereit; ein reiner Rust-Rechner braucht es nicht zum Betrieb oder Update.
+#[test]
+fn browser_verhalten_bei_update_und_neustart() -> Result<(), String> {
+    let test = ordner()?.join("browser.cjs");
+    let code = format!(
+        "const script = {};\n{}",
+        depot_kern::json::zitiere(depot_dienst::seiten::APP_JS),
+        BROWSER_TESTS
+    );
+    fs::write(&test, code).map_err(|e| e.to_string())?;
+    match Command::new("node").arg("--test").arg(test).output() {
+        Ok(a) => {
+            assert!(
+                a.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&a.stdout),
+                String::from_utf8_lossy(&a.stderr)
+            );
+            println!("{}", String::from_utf8_lossy(&a.stdout));
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && std::env::var_os("CI").is_none() => {
+            eprintln!(
+                "Browser-Verhalten nicht geprüft: Node fehlt (nur Entwicklung/CI, keine Voraussetzung zum Betrieb)."
+            );
+            Ok(())
+        }
+        Err(e) => Err(format!("Browser-Verhalten in CI nicht prüfbar: {e}")),
+    }
+}
+
+const BROWSER_TESTS: &str = r#"// Verhaltensprüfungen des ausgelieferten Skripts, ohne Browser-/Paketabhängigkeit.
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const vm=require('node:vm');
+const reply=t=>Promise.resolve({ok:true,text:()=>Promise.resolve(t)});
+const health=(start='alt',bereit=true)=>`<span data-start="${start}"></span><span data-bereit="${bereit?'ja':'nein'}"></span>`;
+function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt'}={}) {
+  let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={};
+  const banner={hidden:true,textContent:''};
+  const elements=Array.from({length:parts},(_,i)=>({innerHTML:'alt',getAttribute:()=>['/teil/status','/teil/update','/teil/journal'][i],querySelectorAll:()=>[]}));
+  const document={addEventListener(){},getElementById:()=>banner,querySelector:()=>known?{getAttribute:()=>known}:null,querySelectorAll:s=>s==='[data-teil]'?elements:[]};
+  vm.runInNewContext(script,{document,navigator:{},URL,AbortController,Set,
+    window:{addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
+    setTimeout:(f,delay)=>{const id=++nr;timers.set(id,{f,at:now+delay});return id},clearTimeout:id=>timers.delete(id),
+    fetch:(url,options)=>{requests.push({url,options});return response(url,options)}
+  });
+  return {banner,elements,requests,navigations,events,get timers(){return timers},
+    async advance(ms){const end=now+ms;for(let i=0;i<200;i++){const due=[...timers.entries()].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;timers.delete(due[0]);now=due[1].at;due[1].f();await new Promise(r=>setImmediate(r));}now=end;}
+  };
+}
+test('auch Protokoll und Bestätigung ohne Live-Bereich prüfen die Verbindung',async()=>{
+  for(const href of ['http://127.0.0.1:47410/protokoll?lauf=123-4#ende','http://127.0.0.1:47410/bestaetigen?art=update&sha=abc']){
+    const b=browser({href,response:()=>reply(health('neu'))});await b.advance(0);
+    assert.equal(b.requests[0].url,'/teil/status');
+    const u=new URL(href);assert.deepEqual(b.navigations,[u.pathname+u.search+u.hash]);
+  }
+});
+test('nur ein Neuladen, Anker und fachliche Parameter bleiben, flüchtige Meldung entfällt',async()=>{
+  const b=browser({parts:3,response:u=>reply(u==='/teil/status'?health('neu'):health('neu'))});
+  await b.advance(12000);assert.deepEqual(b.navigations,['/einrichtung#update']);
+});
+test('neuer Dienst in Probe wird erst nach Bestätigung geladen',async()=>{
+  let bereit=false;const b=browser({parts:3,response:u=>reply(u==='/teil/status'?health('neu',bereit):health('neu'))});
+  await b.advance(4000);assert.equal(b.navigations.length,0);assert.equal(b.banner.hidden,false);
+  assert.ok(b.elements.every(e=>e.innerHTML==='alt'));
+  bereit=true;await b.advance(2000);assert.deepEqual(b.navigations,['/einrichtung#update']);
+});
+test('abgewiesene Verbindung erholt sich und erkennt auch den Rückfall',async()=>{
+  let offline=true;const b=browser({response:()=>offline?Promise.reject(Error('offline')):reply(health('rueckfall'))});
+  await b.advance(0);assert.equal(b.banner.hidden,false);assert.equal(b.navigations.length,0);
+  offline=false;await b.advance(5000);assert.deepEqual(b.navigations,['/einrichtung#update']);
+});
+test('auch hängender Abruf und hängender Antwortkörper werden abgebrochen und erneut versucht',async()=>{
+  for(const body of [false,true]){
+    let haengt=true;
+    const b=browser({response:(_,o)=>{
+      if(!haengt)return reply(health());
+      const pending=new Promise((_,reject)=>o.signal.addEventListener('abort',()=>reject(Error('aborted'))));
+      return body?Promise.resolve({ok:true,text:()=>pending}):pending;
+    }});
+    await b.advance(5000);assert.equal(b.banner.hidden,false);assert.equal(b.requests[0].options.signal.aborted,true);
+    haengt=false;await b.advance(5000);assert.equal(b.banner.hidden,true);assert.ok(b.requests.length>=2);
+  }
+});
+test('Zurück aus dem Seitenspeicher startet genau einen neuen Prüfzyklus',async()=>{
+  const b=browser({parts:1});await b.advance(0);b.events.pagehide();
+  const vorher=b.requests.length;await b.advance(20000);assert.equal(b.requests.length,vorher);
+  b.events.pageshow({persisted:true});await b.advance(2000);
+  assert.equal(b.requests.length,vorher+3); // Gesundheit sofort und nach 2s, Teil nach 2s.
+});
+test('Teilaktualisierung läuft weiter und alle Abrufe umgehen den Cache',async()=>{
+  const b=browser({parts:2,response:u=>reply(u==='/teil/status'?health():'aktuell')});
+  const detail={id:'log',open:true};b.elements[0].querySelectorAll=()=>[detail];
+  await b.advance(2000);assert.equal(b.elements[1].innerHTML,'aktuell');
+  assert.ok(b.requests.every(r=>r.options.cache==='no-store'&&r.options.credentials==='same-origin'&&r.options.signal));
+});
+
+test('Rückfall auf älteren Dienst ohne Bereitschaftsmarker wird erkannt',async()=>{
+  const b=browser({response:()=>reply('<span data-start="alter-rueckfall"></span>')});
+  await b.advance(0);assert.deepEqual(b.navigations,['/einrichtung#update']);
+});
+"#;

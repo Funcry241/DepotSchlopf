@@ -1,8 +1,7 @@
 klasse: Funktion
-zweck: Kurssperren ohne Antwortinhalte diagnostizieren und gesperrte Quellen ausdrücklich rein lesend prüfen, ohne Kursbelege oder Entsperren.
+zweck: Oberflächenupdates mit getrenntem Wächter-Bau, dauerhaftem Abschluss und robuster Browser-Wiederverbindung absichern.
 pfade:
-crates/depot_sammler/
 crates/depot_dienst/
 README.md
 CHANGELOG.md
-docs/befunde/boersen.md
+docs/befunde/update.md

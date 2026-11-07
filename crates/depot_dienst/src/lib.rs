@@ -19,6 +19,7 @@
     clippy::cast_sign_loss
 )]
 
+pub mod aktualisierung;
 pub mod autostart;
 pub mod http;
 pub mod kostenschutz;
@@ -194,15 +195,11 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             );
             antwort(200, HTML, s.as_bytes())
         }
+        "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
         "/teil/live" => antwort(
             200,
             HTML,
             seiten::live(&d.token, &d.start, &d.sperre(), tag).as_bytes(),
-        ),
-        "/teil/status" => antwort(
-            200,
-            HTML,
-            seiten::status(&d.token, &d.start, &d.sperre(), tag).as_bytes(),
         ),
         "/teil/journal" => antwort(
             200,
@@ -274,6 +271,19 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     }
 }
 
+/// Der bereits vor diesen Korrekturen vorhandene Statuspfad bleibt der Herzschlag.
+fn verbindungsstatus(d: &Dienst, tag: Option<depot_kern::Datum>) -> Vec<u8> {
+    let bereit = !rueckfall::offen_pfad(&d.wurzel)
+        .try_exists()
+        .unwrap_or(true);
+    let text = format!(
+        "{}<span hidden data-bereit=\"{}\"></span>",
+        seiten::status(&d.token, &d.start, &d.sperre(), tag),
+        if bereit { "ja" } else { "nein" }
+    );
+    antwort(200, HTML, text.as_bytes())
+}
+
 fn protokoll_lesen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
     let formular = formular(a.abfrage.as_bytes()).unwrap_or_default();
     let Some(kennung) = feld(&formular, "lauf").filter(|k| protokoll::gueltige_kennung(k)) else {
@@ -285,7 +295,11 @@ fn protokoll_lesen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
             if a.pfad == "/protokoll.txt" {
                 return antwort(200, "text/plain; charset=utf-8", text.as_bytes());
             }
-            let inhalt = seiten::protokoll_seite(kennung, &text);
+            let inhalt = format!(
+                "{}{}",
+                seiten::marke(&d.start),
+                seiten::protokoll_seite(kennung, &text)
+            );
             let html = seiten::rahmen("/", None, None, &inhalt, d.version.as_deref());
             antwort(200, HTML, html.as_bytes())
         }
@@ -411,7 +425,11 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
         }
         _ => return seiten::fehler(404, "Diese Aktion gibt es nicht."),
     };
-    let inhalt = seiten::auftrag_bestaetigen(&d.token, art, sha.as_deref());
+    let inhalt = format!(
+        "{}{}",
+        seiten::marke(&d.start),
+        seiten::auftrag_bestaetigen(&d.token, art, sha.as_deref())
+    );
     let seite = seiten::rahmen(ziel, None, None, &inhalt, d.version.as_deref());
     antwort(200, HTML, seite.as_bytes())
 }

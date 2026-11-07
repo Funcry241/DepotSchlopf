@@ -110,7 +110,7 @@ pub fn gueltige_kennung(kennung: &str) -> bool {
         && nr.parse::<u64>().is_ok_and(|n| n.to_string() == nr)
 }
 
-fn ordner(wurzel: &Path) -> PathBuf {
+pub(crate) fn ordner(wurzel: &Path) -> PathBuf {
     wurzel.join("daten").join("protokolle")
 }
 

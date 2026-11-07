@@ -45,20 +45,7 @@ const NEUSTARTS_MAX: u32 = 20;
 /// Baut den Dienst und nennt seine Programmdatei. Der Waechter startet sie direkt, nicht ueber
 /// `cargo run`: So beendet er bei abgelaufener Frist wirklich den Dienst und nicht nur Cargo.
 fn baue(wurzel: &Path) -> Option<PathBuf> {
-    let aus = Command::new("cargo")
-        .current_dir(wurzel)
-        .args([
-            "build",
-            "--quiet",
-            "-p",
-            "depot_dienst",
-            "-p",
-            "depot_sammler",
-            "-p",
-            "depot_berater",
-            "--bins",
-            "--message-format=json-render-diagnostics",
-        ])
+    let aus = depot_dienst::waechter::baubefehl(wurzel)
         .stderr(Stdio::inherit())
         .output();
     match aus {
@@ -112,7 +99,7 @@ fn starte(wurzel: &Path, programm: &Path, ohne_browser: bool, quelle: &Quelle) -
 
 /// Setzt ein offenes Update zurueck. `true`: Es gab eins und es ist zurueckgesetzt.
 fn zuruecksetzen(wurzel: &Path, warum: &str) -> bool {
-    match rueckfall::zuruecksetzen(wurzel) {
+    match rueckfall::zuruecksetzen_mit_grund(wurzel, warum) {
         Ok(Some(m)) => {
             eprintln!("[Waechter] {warum}. {m}");
             true

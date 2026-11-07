@@ -106,3 +106,47 @@ fn json_text_nach(zeile: &str, schluessel: &str) -> Option<String> {
         }
     }
 }
+
+/// Wiederverwendbarer Bau getrennt vom laufenden Wächter. Zwei feste Plätze verhindern
+/// sowohl das Überschreiben einer laufenden EXE als auch neue Baukopien bei jedem Update.
+pub fn bau_ordner(wurzel: &Path) -> PathBuf {
+    let a = wurzel.join("target/dienst-bau-a");
+    let aktuell = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.canonicalize().ok());
+    let belegt = a.canonicalize().ok().zip(aktuell).is_some_and(|(a, exe)| {
+        if cfg!(windows) {
+            exe.to_string_lossy()
+                .to_lowercase()
+                .starts_with(&format!("{}\\", a.to_string_lossy().to_lowercase()))
+        } else {
+            exe.starts_with(a)
+        }
+    });
+    if belegt {
+        wurzel.join("target/dienst-bau-b")
+    } else {
+        a
+    }
+}
+
+/// Genau dieser Befehl baut beim Erststart und nach einem Dienstwechsel. Der laufende
+/// Wächter kann noch in target/debug liegen und bleibt unangetastet.
+pub fn baubefehl(wurzel: &Path) -> std::process::Command {
+    let mut c = std::process::Command::new("cargo");
+    c.current_dir(wurzel)
+        .env("CARGO_TARGET_DIR", bau_ordner(wurzel))
+        .args([
+            "build",
+            "--quiet",
+            "-p",
+            "depot_dienst",
+            "-p",
+            "depot_sammler",
+            "-p",
+            "depot_berater",
+            "--bins",
+            "--message-format=json-render-diagnostics",
+        ]);
+    c
+}
