@@ -1360,9 +1360,11 @@ fn einrichten_bleibt_auf_der_config_seite_und_zeigt_den_arbeitsstand() -> Result
             .ok_or_else(|| format!("Abschnitt fehlt: {anker}"))
     };
     assert!(pos("id=\"journal\"")? < pos("id=\"schluessel\"")?);
-    assert!(pos("id=\"schluessel\"")? < pos("id=\"quellen\"")?);
     assert!(pos("id=\"quellen\"")? < pos("id=\"zeitplan\"")?);
-    assert!(pos("id=\"zeitplan\"")? < pos("id=\"autostart\"")?);
+    assert!(pos("id=\"zeitplan\"")? < pos("id=\"update\"")?);
+    assert!(pos("id=\"update\"")? < pos("id=\"selten\"")?);
+    assert!(pos("id=\"selten\"")? < pos("id=\"journal\"")?);
+    assert!(pos("id=\"schluessel\"")? < pos("id=\"autostart\"")?);
     assert!(pos("id=\"autostart\"")? < pos("id=\"werkzeuge\"")?);
     assert!(html.contains("name=\"ziel\" value=\"einrichtung\""));
     for anker in [
@@ -1387,7 +1389,7 @@ fn einrichten_bleibt_auf_der_config_seite_und_zeigt_den_arbeitsstand() -> Result
         "{antwort}"
     );
     assert_eq!(wartend(&d), vec![(Art::Einrichten, Anlass::Hand)]);
-    let html = get(&d, "/teil/status", t);
+    let html = get(&d, "/teil/journal", t);
     assert!(
         html.contains("disabled>Journal einrichten · wartet"),
         "{html}"

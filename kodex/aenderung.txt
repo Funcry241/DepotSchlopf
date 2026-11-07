@@ -1,7 +1,5 @@
 klasse: Funktion
-zweck: Einrichtung verständlich führen, offene Bedienbefunde schließen und Update- sowie Prognosenachweise sichern.
+zweck: Seltene Einstellungen und Zugangsdaten am Seitenende rot abgrenzen.
 pfade:
 crates/depot_dienst/
-crates/depot_lage/
-docs/befunde/offene-issues.md
-docs/fallstudien/2026-11-05-ki-ausverkauf.md
+docs/befunde/fehlbedienung.md
