@@ -1,4 +1,5 @@
 klasse: KodexAenderung
-zweck: RSS-Quellenliste gegen unfreigegebene Aenderung und Entfernung schuetzen.
+zweck: Pruefbaeume exklusiv ausserhalb des Build-Ordners reservieren und fremde Testkopien nie loeschen.
 pfade:
-crates/depot_kodex/
+crates/depot_kodex/tests/befunde.rs
+docs/befunde/kodex.md
