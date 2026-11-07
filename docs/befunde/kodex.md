@@ -124,3 +124,13 @@ Gegenproben, jeweils neu übersetzt: Ohne den Eintrag in `NETZ_LOKAL` scheitern 
 Der Starter `DepotSchlopf.cmd` im Projektordner zählt wie `run.cmd` als Werkzeug: Ein Doppelklick startet den Dienst ohne Konsole. Test `rollen`: `DepotSchlopf.cmd` ist Werkzeug, jede andere neue `.cmd`-Datei bleibt unbekannt und wird abgelehnt.
 
 Grenze wie beim Sammler: Ein Programmstart über `std::process` bleibt außerhalb der reinen Crates erlaubt und wird in der Durchsicht geprüft.
+
+## Exklusive Prüfbäume statt Löschen bestehender Testkopien (07.11.2026)
+
+`Baum::neu` reserviert seine Kopie atomisch per `create_dir` im System-Tempordner außerhalb des Projekt-/Buildbaums. Ein bereits vorhandener Name wird nicht entfernt oder wiederverwendet; die Reservierung wählt einen freien Zusatz. PID und Prozesszähler bleiben lesbare Namensbestandteile, entscheiden aber nicht mehr allein über den Besitz einer Kopie. Das verhindert gegenseitiges Löschen bei Namenskollisionen, etwa zwischen getrennten PID-Namensräumen oder wiederverwendeten Kennungen.
+
+Die bisherige Vorbereitung `remove_dir_all` gefolgt von `create_dir_all` konnte eine vorhandene Testkopie löschen bzw. teilen. Die kontrollierte Gegenprobe ersetzt die Reservierung vorübergehend durch genau diese Lösch-/Anlegefolge: Beide neuen Tests werden rot. Mit der atomischen Reservierung bleiben ein bestehender Eigentümerbeleg und die acht gleichzeitig angelegten Prüfbäume getrennt erhalten. Der ursprüngliche sporadische Fehler wurde nicht mit einem gemeinsam genutzten Pfad aufgezeichnet; die Gegenprobe belegt die Kollisionslücke, nicht rückwirkend den genauen Ablauf des früheren Fehlers.
+
+`befund_1_r03_lesefehler_beim_scan_macht_den_kodex_rot` führt dieselben Prüfungen auf Datei statt Verzeichnis, Symlink und fehlendes Leserecht weiter aus. Seine Fehlermeldungen unterscheiden jetzt Entfernen des Verzeichnisses, Anlegen der Testdatei und Entfernen dieser Datei und nennen bei Abweichungen Pfad und Dateityp. Keine Testwiederholung bis zum Erfolg, keine Serialisierung des Gates und keine abgeschwächte Schutzprüfung.
+
+Nachweise: `vorhandener_pruefbaum_wird_nicht_geloescht` und `parallele_pruefbaeume_mit_gleicher_kennung_bleiben_getrennt` in `crates/depot_kodex/tests/befunde.rs`; vollständige Gegenproben und das reguläre Projekt-Gate laufen weiterhin parallel.

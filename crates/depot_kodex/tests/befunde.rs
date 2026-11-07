@@ -1,6 +1,6 @@
 //! Negativtests zu den Kodex-Befunden aus `docs/BEFUNDE.md` (Stufe 2, Kodex-Schritt).
 //!
-//! Jeder Test baut eine Kopie des Arbeitsbaums in `target/kodex-befunde/`, legt dort ein
+//! Jeder Test reserviert exklusiv eine Kopie des Arbeitsbaums im System-Tempordner, legt dort ein
 //! Git-Repository mit der Basis `basis` an und fuehrt dann genau einen Verstoss aus dem Befund
 //! ein. Der Kodex muss ihn ablehnen, und zwar aus dem richtigen Grund: Die Ablehnung muss ein
 //! erwartetes Stichwort nennen. Vor jedem Verstoss prueft eine Kontrolle, dass dieselbe Kopie
@@ -61,6 +61,21 @@ fn sha_hex(bytes: &[u8]) -> String {
         })
 }
 
+/// Reserviert einen eigenen Ordner atomisch. Ein gleicher Name (auch bei wiederverwendeter
+/// PID oder getrennten PID-Namensraeumen) darf keinen fremden Pruefbaum loeschen.
+fn reserviere_ordner(basis: &Path, kennung: &str) -> Result<PathBuf, String> {
+    fs::create_dir_all(basis).map_err(|e| format!("{}: {e}", basis.display()))?;
+    for versuch in 0..1000 {
+        let pfad = basis.join(format!("{kennung}_{versuch}"));
+        match fs::create_dir(&pfad) {
+            Ok(()) => return Ok(pfad),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("Pruefbaum {} reservieren: {e}", pfad.display())),
+        }
+    }
+    Err(format!("Keine freie Pruefbaumkennung fuer {kennung}"))
+}
+
 /// Eine Kopie des Arbeitsbaums mit eigenem Git-Repository; die Basis heisst `basis`.
 struct Baum {
     pfad: PathBuf,
@@ -70,11 +85,10 @@ impl Baum {
     fn neu() -> Result<Baum, String> {
         let ws = workspace();
         let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
-        let pfad = ws
-            .join("target/kodex-befunde")
-            .join(format!("baum_{}_{n}", std::process::id()));
-        let _ = fs::remove_dir_all(&pfad);
-        fs::create_dir_all(&pfad).map_err(|e| format!("{}: {e}", pfad.display()))?;
+        let pfad = reserviere_ordner(
+            &std::env::temp_dir().join("depotschlopf-kodex-befunde"),
+            &format!("baum_{}_{n}", std::process::id()),
+        )?;
         let liste = git(
             &ws,
             &[
@@ -941,13 +955,26 @@ fn befund_1_r03_lesefehler_beim_scan_macht_den_kodex_rot() -> Result<(), String>
 
     // Ein Verzeichnis, das keins ist: `tests` als Datei.
     let tests = baum.datei("crates/depot_kern/tests");
-    fs::remove_dir_all(&tests).map_err(|e| format!("tests: {e}"))?;
-    fs::write(&tests, "keine Liste\n").map_err(|e| format!("tests: {e}"))?;
+    fs::remove_dir_all(&tests)
+        .map_err(|e| format!("Testverzeichnis entfernen {}: {e}", tests.display()))?;
+    fs::write(&tests, "keine Liste\n").map_err(|e| {
+        format!(
+            "Testdatei anlegen {}: {e}; Typ={:?}",
+            tests.display(),
+            fs::symlink_metadata(&tests).map(|m| m.file_type())
+        )
+    })?;
     let fehler = depot_kodex::pruefe_ohne_diff(&baum.pfad);
     if let Err(e) = abgelehnt("tests ist kein Verzeichnis", &fehler, "nicht lesbar") {
         offen.push(e);
     }
-    fs::remove_file(&tests).map_err(|e| format!("tests: {e}"))?;
+    fs::remove_file(&tests).map_err(|e| {
+        format!(
+            "Testdatei entfernen {}: {e}; Typ={:?}",
+            tests.display(),
+            fs::symlink_metadata(&tests).map(|m| m.file_type())
+        )
+    })?;
     baum.zuruecksetzen()?;
 
     #[cfg(unix)]
@@ -1500,5 +1527,69 @@ fn rss_quellen_aendern_nur_mit_festschreibung() -> Result<(), String> {
     assert!(pruefe().iter().any(|f| f.contains("rss_quellen")));
     fs::remove_file(b.datei(pfad)).map_err(|e| e.to_string())?;
     assert!(pruefe().iter().any(|f| f.contains("rss_quellen")));
+    Ok(())
+}
+
+#[test]
+fn vorhandener_pruefbaum_wird_nicht_geloescht() -> Result<(), String> {
+    let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
+    let basis = reserviere_ordner(
+        &std::env::temp_dir(),
+        &format!("kodex-reservierung-{}-{n}", std::process::id()),
+    )?;
+    let alt = reserviere_ordner(&basis, "gleiche-kennung")?;
+    fs::write(alt.join("eigentuemer.txt"), "erster Test").map_err(|e| e.to_string())?;
+    let neu = reserviere_ordner(&basis, "gleiche-kennung")?;
+    assert_ne!(alt, neu);
+    assert_eq!(
+        fs::read_to_string(alt.join("eigentuemer.txt")).map_err(|e| e.to_string())?,
+        "erster Test"
+    );
+    fs::remove_dir_all(basis).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[test]
+fn parallele_pruefbaeume_mit_gleicher_kennung_bleiben_getrennt() -> Result<(), String> {
+    use std::sync::{Arc, Barrier};
+    let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
+    let basis = reserviere_ordner(
+        &std::env::temp_dir(),
+        &format!("kodex-parallel-{}-{n}", std::process::id()),
+    )?;
+    let barriere = Arc::new(Barrier::new(8));
+    let pfade = std::thread::scope(|scope| -> Result<Vec<PathBuf>, String> {
+        let mut auftraege = Vec::new();
+        for i in 0..8 {
+            let basis = &basis;
+            let barriere = Arc::clone(&barriere);
+            auftraege.push(scope.spawn(move || -> Result<PathBuf, String> {
+                barriere.wait();
+                let p = reserviere_ordner(basis, "gleiche-kennung");
+                // Auch bei einem Schreibfehler muessen alle Arbeiter die Barriere erreichen.
+                let geschrieben = p.as_ref().map_err(Clone::clone).and_then(|p| {
+                    fs::write(p.join("eigentuemer.txt"), i.to_string()).map_err(|e| e.to_string())
+                });
+                barriere.wait();
+                geschrieben?;
+                let p = p?;
+                assert_eq!(
+                    fs::read_to_string(p.join("eigentuemer.txt")).map_err(|e| e.to_string())?,
+                    i.to_string()
+                );
+                Ok(p)
+            }));
+        }
+        auftraege
+            .into_iter()
+            .map(|a| {
+                a.join()
+                    .map_err(|_| "Pruefbaum-Arbeiter abgebrochen".to_string())?
+            })
+            .collect()
+    })?;
+    let eindeutig: std::collections::BTreeSet<_> = pfade.into_iter().collect();
+    assert_eq!(eindeutig.len(), 8);
+    fs::remove_dir_all(basis).map_err(|e| e.to_string())?;
     Ok(())
 }
