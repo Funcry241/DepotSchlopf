@@ -151,29 +151,7 @@ impl Schluessel {
 
     /// Ersetzt jedes Vorkommen des Schluessels durch `***`, gleich in welcher Schreibweise.
     pub fn bereinige(&self, text: &str) -> String {
-        // Der Schluessel ist ASCII; Grossschreibung von ASCII laesst jede Byteposition gleich.
-        // Verglichen wird gross mit gross, gleich wie der Schluessel geschrieben ist.
-        let gross = text.to_ascii_uppercase();
-        let gesucht = self.0.to_ascii_uppercase();
-        let mut aus = String::with_capacity(text.len());
-        let mut rest = text;
-        let mut rest_gross = gross.as_str();
-        while let Some(pos) = rest_gross.find(gesucht.as_str()) {
-            let (Some(vor), Some(nach), Some(nach_gross)) = (
-                rest.get(..pos),
-                pos.checked_add(self.0.len()).and_then(|e| rest.get(e..)),
-                pos.checked_add(self.0.len())
-                    .and_then(|e| rest_gross.get(e..)),
-            ) else {
-                return "***".into();
-            };
-            aus.push_str(vor);
-            aus.push_str("***");
-            rest = nach;
-            rest_gross = nach_gross;
-        }
-        aus.push_str(rest);
-        aus
+        depot_kern::geheimnis::mit_schluessel(text, &self.0)
     }
 
     /// Liest den Schluessel einer Quelle aus der Windows-Anmeldeinformationsverwaltung.
@@ -258,7 +236,9 @@ impl Zugang {
     pub fn bereinige(&self, text: &str) -> String {
         self.schluessel
             .values()
-            .fold(text.to_string(), |t, s| s.bereinige(&t))
+            .fold(depot_kern::geheimnis::maskiere(text), |t, s| {
+                s.bereinige(&t)
+            })
     }
 }
 

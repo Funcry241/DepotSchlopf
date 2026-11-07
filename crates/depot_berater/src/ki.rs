@@ -233,10 +233,10 @@ impl<N: Netz> KiBerater<N> {
     /// Ein Text fuer Meldung und Journal: ohne Schluessel. Steht er nur verborgen darin, etwa
     /// hinter Escapes, gilt der ganze Text als Geheimnis.
     fn bereinigt(&self, text: &str) -> String {
-        let roh = self
-            .schluessel
-            .as_ref()
-            .map_or_else(|| text.to_string(), |s| s.bereinige(text));
+        let roh = self.schluessel.as_ref().map_or_else(
+            || depot_kern::geheimnis::maskiere(text),
+            |s| s.bereinige(text),
+        );
         if self.enthaelt_schluessel(&roh) {
             return GEHEIMNIS.into();
         }

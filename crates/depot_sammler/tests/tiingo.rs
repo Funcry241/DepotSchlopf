@@ -583,3 +583,71 @@ fn tiingo_protokoll_unterscheidet_ablehnung_und_limit() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[test]
+fn kursfehler_verraten_in_ausgaben_und_journal_keine_fragmente() -> Result<(), String> {
+    if std::env::var_os("DEPOT_TEST_KURS_MASKIERUNG").is_none() {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let aus = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "kursfehler_verraten_in_ausgaben_und_journal_keine_fragmente",
+                "--nocapture",
+            ])
+            .env("DEPOT_TEST_KURS_MASKIERUNG", "ja")
+            .output()
+            .map_err(|e| e.to_string())?;
+        assert!(
+            aus.status.success(),
+            "{}",
+            String::from_utf8_lossy(&aus.stderr)
+        );
+        for daten in [&aus.stdout, &aus.stderr] {
+            for key in [AV, TI] {
+                assert!(!daten.windows(12).any(|w| {
+                    key.as_bytes()
+                        .windows(12)
+                        .any(|k| w.eq_ignore_ascii_case(k))
+                }));
+            }
+        }
+        return Ok(());
+    }
+    let alle = werte()?;
+    for boerse in Boerse::ALLE {
+        let (journal, roh) = ordner()?;
+        let av_fehler = format!(
+            "https://example.com/query?apikey={AV}&x=1 Debug {}",
+            AV.get(..12).ok_or("Fragment fehlt")?
+        );
+        let ti_fehler = format!(
+            "https://example.com/prices?token={TI}&x=1 Debug {}",
+            TI.get(..12).ok_or("Fragment fehlt")?
+        );
+        let mut netz = Erfunden::neu(&[
+            ("ezb", Ok(ezb(&[("2026-11-04", "1.1224")]))),
+            ("SAP.DEX", Err(av_fehler.as_str())),
+            ("aapl", Err(ti_fehler.as_str())),
+        ]);
+        let b = lauf(
+            &journal,
+            &roh,
+            &mut netz,
+            &zugang()?,
+            vec![utc(11, 4, 21, 4)?, utc(11, 4, 21, 5)?],
+            &nur(&alle, boerse),
+        )?
+        .map_err(|e| format!("Lauf: {e:?}"))?;
+        let j = fs::read(&journal).map_err(|e| e.to_string())?;
+        for key in [AV, TI] {
+            assert!(!j.windows(12).any(|w| {
+                key.as_bytes()
+                    .windows(12)
+                    .any(|k| w.eq_ignore_ascii_case(k))
+            }));
+        }
+        println!("{b:?}");
+        eprintln!("{b:?}");
+    }
+    Ok(())
+}
