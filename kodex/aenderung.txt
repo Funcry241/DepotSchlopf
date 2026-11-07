@@ -1,12 +1,7 @@
-klasse: FestschreibungAenderung
-zweck: Kostenlose feste RSS-Quellen mit sparsamen Abrufen und sicherer GUI-Anbindung statt Premium-Nachrichten.
+klasse: Funktion
+zweck: Einrichtung verständlich führen, offene Bedienbefunde schließen und Update- sowie Prognosenachweise sichern.
 pfade:
-Cargo.toml
-Cargo.lock
-crates/depot_sammler/
 crates/depot_dienst/
-README.md
-CHANGELOG.md
-docs/befunde/nachrichten.md
-kodex/festschreibung.txt
-kodex/freigabe.txt
+crates/depot_lage/
+docs/befunde/offene-issues.md
+docs/fallstudien/2026-11-05-ki-ausverkauf.md

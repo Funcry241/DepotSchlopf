@@ -945,7 +945,7 @@ fn gesamtstatus_ergaenzt_den_zeitplan() -> Result<(), String> {
         "{s}"
     );
     d.sperre().zeitplan_fehler = Some("Zeitplan: Kopfzeile fehlt".into());
-    let s = seiten::status("s", &d.sperre(), heute);
+    let s = seiten::status(TOKEN, "s", &d.sperre(), heute);
     assert!(
         s.contains("Eingriff nötig") && s.contains("Kopfzeile fehlt"),
         "{s}"
@@ -985,6 +985,11 @@ fn sperre_des_kostenschutzes_gefuehrt_aufheben() -> Result<(), String> {
     let seite = anfrage("GET", "/einrichtung", &[("Host", HOST)], "");
     let s = text(&behandle(&d, &umw, &seite, t));
     assert!(s.contains("id=\"kostenschutz\""), "{s}");
+    assert_eq!(
+        s.matches("id=\"ki-verbindung\"").count(),
+        1,
+        "Aktive Sperre: keine doppelten Abschnitte"
+    );
     assert!(
         s.contains("Antwort fehlte (Dachs) &lt;b&gt;"),
         "maskiert: {s}"
@@ -1026,7 +1031,20 @@ fn sperre_des_kostenschutzes_gefuehrt_aufheben() -> Result<(), String> {
     let r = text(&behandle(&d, &umw, &aufheben(&abdruck, true), t));
     assert!(r.contains("m=kostenschutz_frei"), "{r}");
     let s = text(&behandle(&d, &umw, &seite, t));
-    assert!(s.contains("Keine Sperre"), "{s}");
+    let werkzeuge = s.find("id=\"werkzeuge\"").ok_or("Werkzeuge fehlen")?;
+    let frei = s
+        .find("id=\"kostenschutz\"")
+        .ok_or("Rücksprung nach Aufheben fehlt")?;
+    assert!(frei > werkzeuge && s.contains("Keine Sperre"), "{s}");
+    assert_eq!(
+        s.matches("id=\"ki-verbindung\"").count(),
+        1,
+        "Freie Sperre: keine doppelten Abschnitte"
+    );
+    assert!(
+        s.contains("id=\"ki-verbindung\""),
+        "Die Erklärung bleibt unter Werkzeuge erreichbar: {s}"
+    );
     Ok(())
 }
 
@@ -1041,8 +1059,12 @@ fn kurssperre_gefuehrt_aufheben() -> Result<(), String> {
     let seite = anfrage("GET", "/einrichtung", &[("Host", HOST)], "");
     let s = text(&behandle(&d, &umw, &seite, t));
     assert!(
-        !s.contains("id=\"kurssperre\""),
-        "ohne Sperre kein Abschnitt"
+        s.contains("id=\"kurssperre\""),
+        "Rücksprung bleibt ohne Sperre vorhanden"
+    );
+    assert!(
+        !s.contains("action=\"/kurssperre\""),
+        "Keine Aufhebung ohne Sperre"
     );
 
     let halt = kostenschutz::kurse_pfad(&wurzel);
@@ -1324,6 +1346,66 @@ fn ungueltige_eingabe_laesst_die_gueltigen_stehen() -> Result<(), String> {
         !seite.contains("&lt;b&gt;") && !seite.contains("99:99"),
         "{seite}"
     );
+    Ok(())
+}
+
+#[test]
+fn einrichten_bleibt_auf_der_config_seite_und_zeigt_den_arbeitsstand() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(12, 0)?;
+    assert!(d.schritt(t).is_none());
+    let html = get(&d, "/einrichtung", t);
+    let pos = |anker| {
+        html.find(anker)
+            .ok_or_else(|| format!("Abschnitt fehlt: {anker}"))
+    };
+    assert!(pos("id=\"journal\"")? < pos("id=\"schluessel\"")?);
+    assert!(pos("id=\"schluessel\"")? < pos("id=\"quellen\"")?);
+    assert!(pos("id=\"quellen\"")? < pos("id=\"zeitplan\"")?);
+    assert!(pos("id=\"zeitplan\"")? < pos("id=\"autostart\"")?);
+    assert!(pos("id=\"autostart\"")? < pos("id=\"werkzeuge\"")?);
+    assert!(html.contains("name=\"ziel\" value=\"einrichtung\""));
+    for anker in [
+        "kostenschutz",
+        "kurssperre",
+        "papierfreigabe",
+        "ki-verbindung",
+    ] {
+        assert_eq!(
+            html.matches(&format!("id=\"{anker}\"")).count(),
+            1,
+            "Rücksprung fehlt oder ist doppelt: {anker}"
+        );
+    }
+    let post = formular_post(
+        "/ausfuehren",
+        &format!("t={TOKEN}&art=einrichten&ziel=einrichtung"),
+    );
+    let antwort = text(&behandle(&d, &Attrappe::default(), &post, t));
+    assert!(
+        antwort.contains("/einrichtung?m=auftrag#journal"),
+        "{antwort}"
+    );
+    assert_eq!(wartend(&d), vec![(Art::Einrichten, Anlass::Hand)]);
+    let html = get(&d, "/teil/status", t);
+    assert!(
+        html.contains("disabled>Journal einrichten · wartet"),
+        "{html}"
+    );
+    assert!(html.contains("Bitte warte auf den Abschluss."), "{html}");
+    let antwort = text(&behandle(&d, &Attrappe::default(), &post, t));
+    assert!(
+        antwort.contains("/einrichtung?m=auftrag_belegt#journal"),
+        "{antwort}"
+    );
+    assert_eq!(wartend(&d).len(), 1);
+    // Ein frei eingesandtes Ziel wird nicht als Umleitungsadresse uebernommen.
+    let fremd = formular_post(
+        "/ausfuehren",
+        &format!("t={TOKEN}&art=einrichten&ziel=https://fremd.test"),
+    );
+    let antwort = text(&behandle(&d, &Attrappe::default(), &fremd, t));
+    assert!(!antwort.contains("fremd.test"), "{antwort}");
     Ok(())
 }
 

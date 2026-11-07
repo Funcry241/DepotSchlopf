@@ -34,12 +34,13 @@ impl SchluesselStand {
         }
     }
 
-    /// Klasse fuer die Anzeige: gut, offen oder halt.
+    /// Klasse fuer die Anzeige: gut, offen, halt oder leise (unbekannt).
     pub fn klasse(self) -> &'static str {
         match self {
             SchluesselStand::Geprueft(_) => "gut",
             SchluesselStand::Abgelehnt(_) | SchluesselStand::Fehlt => "halt",
-            SchluesselStand::Hinterlegt | SchluesselStand::Unbekannt => "offen",
+            SchluesselStand::Hinterlegt => "offen",
+            SchluesselStand::Unbekannt => "leise",
         }
     }
 }
