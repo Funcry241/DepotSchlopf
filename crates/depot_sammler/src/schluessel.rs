@@ -232,6 +232,14 @@ impl Zugang {
         self.schluessel.values().any(|s| s.steht_in(bytes))
     }
 
+    /// Liefert nur die festen Quellennamen, niemals den gefundenen Schluessel.
+    pub(crate) fn treffer(&self, bytes: &[u8]) -> Vec<Anbieter> {
+        self.schluessel
+            .iter()
+            .filter_map(|(a, s)| s.steht_in(bytes).then_some(*a))
+            .collect()
+    }
+
     /// Ersetzt jeden Schluessel durch `***`.
     pub fn bereinige(&self, text: &str) -> String {
         self.schluessel

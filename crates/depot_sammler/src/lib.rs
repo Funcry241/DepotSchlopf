@@ -23,6 +23,7 @@
     clippy::cast_sign_loss
 )]
 
+pub mod diagnose;
 pub mod ezb;
 pub use depot_kern::liste;
 pub mod nachrichten;

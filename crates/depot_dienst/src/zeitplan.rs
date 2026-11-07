@@ -286,6 +286,7 @@ impl Erledigt {
             Art::Papier => self.papier = Some(tag),
             Art::Einrichten
             | Art::Kurse
+            | Art::Kursdiagnose
             | Art::Nachrichten
             | Art::Vorbereiten
             | Art::UpdatePruefen

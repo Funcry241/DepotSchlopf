@@ -1013,7 +1013,7 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
     );
 }
 
-fn kurssperre_teil(token: &str, e: &Einrichtung, s: &mut String) {
+fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
     let inhalt = match &e.kurse_halt {
         // Ohne Kurssperre kein eigener Abschnitt: Sie kommt nur nach einem Sicherheitsabbruch vor.
         Ok(None) => return,
@@ -1032,8 +1032,13 @@ fn kurssperre_teil(token: &str, e: &Einrichtung, s: &mut String) {
         s,
         "<section id=\"kurssperre\"><h2>Kurssperre</h2>\
          <p><span class=\"halt\">gesperrt</span>: Ein Kursabruf endete aus Sicherheitsgründen, \
-         weil die Kursquelle den Schlüssel zurückgab. Bis zur Prüfung ruft der Sammler nichts ab, \
+         weil eine Antwort einen hinterlegten Schlüssel enthielt. Bis zur Prüfung gibt es keine regulären Abrufe, \
          und kein Papiertag beginnt, auch nicht von Hand.</p><pre>{}</pre>\
+         <p>Empfohlen: Zuerst <b>Kurssperre sicher untersuchen</b>. Der Prüfabruf zeigt nur \
+         Quelle, erkannten Zugang und Antwortart. Keine Antwort und keine Kurse werden gespeichert, \
+         die Sperre bleibt bestehen. Bis zu 15 Abrufe mit 15 Sekunden Abstand verbrauchen \
+         Quellenkontingent und können mehrere Minuten dauern. Das Ergebnis steht auf Live \
+         unter Tätigkeit im kopierbaren Protokoll.</p>{}\
          <p class=\"leise\">So prüfen: Beim Anbieter nachsehen, ob der Schlüssel noch gilt, und \
          ihn bei Zweifel neu ausstellen und unter Schlüssel neu hinterlegen. Aufheben ändert nichts \
          am Journal. Der nächste Abruf holt alle Kurse neu und prüft sie wie immer. Der Grund \
@@ -1045,6 +1050,7 @@ fn kurssperre_teil(token: &str, e: &Einrichtung, s: &mut String) {
          Ich habe den Schlüssel der Kursquelle geprüft und bei Bedarf erneuert.</label>\
          <button type=\"submit\">Kurssperre aufheben</button></form></section>",
         maskiere(inhalt),
+        auftrag_knopf(token, z, Art::Kursdiagnose, "Kurssperre sicher untersuchen"),
         maskiere(token),
         kostenschutz::abdruck(inhalt)
     );
@@ -1433,7 +1439,7 @@ pub fn einrichtung(
     if !matches!(&e.ki_halt, Ok(None)) {
         kostenschutz_teil(token, e, &mut s);
     }
-    kurssperre_teil(token, e, &mut s);
+    kurssperre_teil(token, z, e, &mut s);
     papierfreigabe_teil(token, e, &mut s);
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);

@@ -29,6 +29,8 @@ pub enum Art {
     Einrichten,
     /// Alle Werte der Liste (von Hand).
     Kurse,
+    /// Rein lesender Prüfabruf trotz Kurssperre, ohne Kurse oder Rohablage.
+    Kursdiagnose,
     /// Nur die Werte einer Boerse, kurz nach ihrem Schluss (Zeitplan).
     KurseVon(Boerse),
     Termine,
@@ -41,9 +43,10 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 10] = [
+const ALLE_ARTEN: [Art; 11] = [
     Art::Einrichten,
     Art::Kurse,
+    Art::Kursdiagnose,
     Art::KurseVon(Boerse::Xetra),
     Art::KurseVon(Boerse::Nyse),
     Art::Termine,
@@ -59,6 +62,7 @@ impl Art {
         match self {
             Art::Einrichten => "Journal einrichten",
             Art::Kurse => "Kurse abrufen",
+            Art::Kursdiagnose => "Kurssperre sicher untersuchen",
             Art::KurseVon(Boerse::Xetra) => "Kurse Xetra abrufen",
             Art::KurseVon(Boerse::Nyse) => "Kurse NYSE abrufen",
             Art::Termine => "Termine abrufen",
@@ -75,6 +79,7 @@ impl Art {
         match self {
             Art::Einrichten => "einrichten",
             Art::Kurse => "kurse",
+            Art::Kursdiagnose => "kursdiagnose",
             Art::KurseVon(Boerse::Xetra) => "kurse_xetra",
             Art::KurseVon(Boerse::Nyse) => "kurse_nyse",
             Art::Termine => "termine",
@@ -95,6 +100,7 @@ impl Art {
         match self {
             Art::Einrichten => &["kurse", "einrichten"],
             Art::Kurse => &["kurse"],
+            Art::Kursdiagnose => &["kurse", "diagnose"],
             Art::KurseVon(Boerse::Xetra) => &["kurse", "xetra"],
             Art::KurseVon(Boerse::Nyse) => &["kurse", "nyse"],
             Art::Termine => &["termine"],
