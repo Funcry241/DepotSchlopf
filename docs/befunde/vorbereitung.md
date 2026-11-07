@@ -53,6 +53,7 @@ Einschätzung ist kein Nachweis einer richtigen oder profitablen Vorhersage.
 - Bytebegrenzung und Textbereinigung stimmen mit der tatsächlichen Frage überein.
 - Keine Handelszustände; reguläre Montagsreservierung nach Samstagsvorbereitung möglich.
 - Wiederöffnen und erneuter Aufruf nach Erfolg bzw. Abbruch erzeugen keine neue Anfrage.
+- Eine kurz belegte Journaldatei wird vor dem Start einige Male erneut geöffnet, ohne Reservierung oder KI-Aufruf während des Wartens.
 - Volles Monatsbudget verhindert beide Vorbereitungsaufrufe.
 - Ungültige Mitwirkung, doppelte Reservierung und direkte Journal-Umwege werden abgelehnt.
 - Synchronisationsfehler gibt keine Aufruferlaubnis.

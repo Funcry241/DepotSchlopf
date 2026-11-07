@@ -182,6 +182,19 @@ pub fn vorbereiten<'a>(
     ))
 }
 
+fn oeffnen(pfad: &Path) -> Result<Journal, String> {
+    for versuch in 0..10 {
+        match Journal::oeffnen(pfad) {
+            Ok(j) => return Ok(j),
+            Err(depot_journal::JournalFehler::Belegt) if versuch < 9 => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => return Err(format!("{e:?}")),
+        }
+    }
+    Err("Journal weiterhin belegt".into())
+}
+
 pub fn lauf<'a>(
     wurzel: &Path,
     zeit: Zeitpunkt,
@@ -195,7 +208,6 @@ pub fn lauf<'a>(
             "Quellensperre aktiv: {grund}. Keine Vorbereitung, bis die Quelle geprüft ist."
         ));
     }
-    let mut j =
-        Journal::oeffnen(&wurzel.join("daten/journal.txt")).map_err(|e| format!("{e:?}"))?;
+    let mut j = oeffnen(&wurzel.join("daten/journal.txt"))?;
     vorbereiten(&mut j, zeit, universum, dachs, maus, uhr)
 }

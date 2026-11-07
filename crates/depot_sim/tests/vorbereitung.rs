@@ -29,11 +29,12 @@ impl Ort {
         let n = NR.fetch_add(1, Ordering::SeqCst);
         let p = std::env::temp_dir().join(format!("depot_vorbereitung_{}_{n}", std::process::id()));
         fs::create_dir(&p).map_err(|e| e.to_string())?;
-        Journal::einrichten(&p.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
+        fs::create_dir(p.join("daten")).map_err(|e| e.to_string())?;
+        Journal::einrichten(&p.join("daten/journal.txt")).map_err(|e| format!("{e:?}"))?;
         Ok(Self(p))
     }
     fn journal(&self) -> Result<Journal, String> {
-        Journal::oeffnen(&self.0.join("journal.txt")).map_err(|e| format!("{e:?}"))
+        Journal::oeffnen(&self.0.join("daten/journal.txt")).map_err(|e| format!("{e:?}"))
     }
 }
 impl Drop for Ort {
@@ -275,5 +276,23 @@ fn journal_lehnt_umwege_doppelte_reservierung_und_falsche_mitwirkung_ab() -> Res
     drop(j);
     let j = ort.journal()?;
     assert_eq!(vorher, j.bestaetigt());
+    Ok(())
+}
+
+#[test]
+fn kurze_journalsperre_beim_start_wird_ohne_neue_reservierung_abgewartet() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.journal()?;
+    let t = zeit(7)?;
+    nachricht(&mut j, t, t, "Ereignis")?;
+    let freigabe = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        drop(j);
+    });
+    let (mut dachs, mut maus, fragen) = modelle()?;
+    depot_sim::vorbereitung::lauf(&ort.0, t, &universum()?, &mut dachs, &mut maus, || Some(t))?;
+    freigabe.join().map_err(|_| "Freigabe-Thread")?;
+    assert_eq!(fragen.borrow().len(), 2);
+    assert_eq!(ort.journal()?.stand().ki().buchungen().len(), 2);
     Ok(())
 }
