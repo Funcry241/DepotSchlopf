@@ -81,6 +81,13 @@ struct Baum {
     pfad: PathBuf,
 }
 
+impl Drop for Baum {
+    fn drop(&mut self) {
+        // Nur die exklusiv reservierte eigene Kopie entfernen, nie einen fremden Namen.
+        let _ = fs::remove_dir_all(&self.pfad);
+    }
+}
+
 impl Baum {
     fn neu() -> Result<Baum, String> {
         let ws = workspace();
@@ -89,6 +96,8 @@ impl Baum {
             &std::env::temp_dir().join("depotschlopf-kodex-befunde"),
             &format!("baum_{}_{n}", std::process::id()),
         )?;
+        let baum = Baum { pfad };
+        let pfad = &baum.pfad;
         let liste = git(
             &ws,
             &[
@@ -111,14 +120,14 @@ impl Baum {
             }
             fs::copy(&quelle, &ziel).map_err(|e| format!("{rel}: {e}"))?;
         }
-        git(&pfad, &["init", "-q"])?;
+        git(pfad, &["init", "-q"])?;
         // Die Gegenproben arbeiten wie die Prüfkopie mit unveränderten LF-Dateien.
-        git(&pfad, &["config", "--local", "core.autocrlf", "false"])?;
-        git(&pfad, &["config", "--local", "core.eol", "lf"])?;
-        git(&pfad, &["add", "-A"])?;
-        git(&pfad, &["commit", "-q", "-m", "basis"])?;
-        git(&pfad, &["branch", "basis"])?;
-        Ok(Baum { pfad })
+        git(pfad, &["config", "--local", "core.autocrlf", "false"])?;
+        git(pfad, &["config", "--local", "core.eol", "lf"])?;
+        git(pfad, &["add", "-A"])?;
+        git(pfad, &["commit", "-q", "-m", "basis"])?;
+        git(pfad, &["branch", "basis"])?;
+        Ok(baum)
     }
 
     fn datei(&self, rel: &str) -> PathBuf {
@@ -1541,6 +1550,12 @@ fn vorhandener_pruefbaum_wird_nicht_geloescht() -> Result<(), String> {
     fs::write(alt.join("eigentuemer.txt"), "erster Test").map_err(|e| e.to_string())?;
     let neu = reserviere_ordner(&basis, "gleiche-kennung")?;
     assert_ne!(alt, neu);
+    assert_eq!(
+        fs::read_to_string(alt.join("eigentuemer.txt")).map_err(|e| e.to_string())?,
+        "erster Test"
+    );
+    drop(Baum { pfad: neu.clone() });
+    assert!(!neu.exists(), "Eigene Kopie wird aufgeraeumt");
     assert_eq!(
         fs::read_to_string(alt.join("eigentuemer.txt")).map_err(|e| e.to_string())?,
         "erster Test"
