@@ -1,5 +1,5 @@
 //! Schluessel in der Windows-Anmeldeinformationsverwaltung: nur ablegen und fragen, ob einer da
-//! ist. Der Dienst liest nie einen Schluessel aus, zeigt ihn nie und schreibt ihn nirgends hin.
+//! ist. Für den Protokollschutz liest der Dienst hinterlegte Schlüssel ausschließlich im Speicher.
 //!
 //! Adressen und Regeln sind dieselben wie in den Laeufen, die die Schluessel benutzen:
 //! - Kursquelle `DepotSchlopf/alphavantage`: 8 bis 64 Grossbuchstaben und Ziffern
@@ -178,4 +178,27 @@ pub fn ablegen(wer: Wer, text: &str) -> Result<(), String> {
     wer.pruefe(text)?;
     let _ = BENUTZER;
     Err("Schluessel liegen nur in der Windows-Anmeldeinformationsverwaltung.".into())
+}
+
+/// Lädt ausschließlich zum Entfernen von Geheimnissen aus Diagnoseausgaben.
+#[cfg(windows)]
+pub(crate) fn fuer_protokoll() -> Result<Vec<String>, ()> {
+    let mut alle = Vec::new();
+    for wer in ALLE {
+        match eintrag(wer).map_err(|_| ())?.get_password() {
+            Ok(text) => alle.push(wer.pruefe(&text).map_err(|_| ())?),
+            Err(keyring_core::Error::NoEntry) => {}
+            Err(_) => return Err(()),
+        }
+    }
+    Ok(alle)
+}
+
+#[cfg(not(windows))]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "Gleiche fehlbare Schnittstelle wie unter Windows"
+)]
+pub(crate) fn fuer_protokoll() -> Result<Vec<String>, ()> {
+    Ok(Vec::new())
 }

@@ -486,6 +486,18 @@ pub fn fehler(status: u16, text: &str) -> Vec<u8> {
     )
 }
 
+pub(crate) fn protokoll_seite(kennung: &str, text: &str) -> String {
+    format!(
+        "<section><h2>Protokoll {0}</h2><p><a href=\"/\">Zurück zu Live</a> · \
+         <a href=\"/protokoll.txt?lauf={0}\" download=\"DepotSchlopf-{0}.log\">Herunterladen</a></p>\
+         <details open><summary>Vollständiges gespeichertes Protokoll</summary>\
+         <button type=\"button\" data-protokoll-kopieren>Protokoll kopieren</button> \
+         <span class=\"leise\" role=\"status\"></span><pre>{1}</pre></details></section>",
+        maskiere(kennung),
+        maskiere(text)
+    )
+}
+
 fn protokoll(id: &str, a: &Auftrag, offen: bool) -> String {
     let mut text = String::new();
     for z in &a.protokoll {
@@ -496,12 +508,16 @@ fn protokoll(id: &str, a: &Auftrag, offen: bool) -> String {
         text.push_str("(noch keine Ausgabe)");
         ""
     } else {
-        "<button type=\"button\" data-protokoll-kopieren>Protokoll kopieren</button> \
+        "<button type=\"button\" data-protokoll-kopieren>Auszug kopieren</button> \
          <span class=\"leise\" role=\"status\"></span>"
     };
     format!(
         "<details id=\"{id}-{}\"{}><summary>Protokoll ({} Zeilen)</summary>\
-         {kopieren}<pre>{text}</pre></details>",
+         {kopieren}<p><a href=\"/protokoll?lauf={0}\">Vollständiges Protokoll öffnen und kopieren</a> · \
+         <a href=\"/protokoll.txt?lauf={0}\" download=\"DepotSchlopf-{0}.log\">Herunterladen</a></p>\
+         <p class=\"leise\">Auszug mit den letzten 500 Zeilen. Es bleiben höchstens 20 Protokolle, \
+         je bis zu 16 MiB. Überlange Zeilen und eine erreichte Größenbegrenzung werden im Protokoll vermerkt.</p>\
+         <pre>{text}</pre></details>",
         maskiere(&a.kennung),
         if offen { " open" } else { "" },
         a.protokoll.len()
@@ -588,6 +604,7 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
         "<p>Nächster geplanter Lauf: {}</p>",
         maskiere(&naechster_text(z, heute))
     );
+    letzter_fehler_hinweis(&mut s, z);
     if !z.verlauf.is_empty() {
         s.push_str(
             "<div class=\"breit\"><table><tr><th>Auftrag</th><th>Anlass</th><th>Start</th>\
@@ -621,6 +638,22 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
     }
     s.push_str("</section>");
     s
+}
+
+fn letzter_fehler_hinweis(s: &mut String, z: &Zustand) {
+    if let Some(a) = z.verlauf.iter().find(|a| a.erfolg == Some(false))
+        && let Some(fehler) = crate::protokoll::letzter_fehler(&a.protokoll)
+    {
+        let _ = write!(
+            s,
+            "<p class=\"halt\"><b>Letzter fehlgeschlagener Lauf</b> · {} · {}\
+            <br>{}<br><a href=\"/protokoll?lauf={}\">Protokoll öffnen</a></p>",
+            maskiere(a.art.name()),
+            maskiere(&zeit_text(a.start)),
+            maskiere(fehler),
+            maskiere(&a.kennung)
+        );
+    }
 }
 
 /// Die Kennung des Starts im Inhalt; `/app.js` laedt die Seite neu, wenn sie wechselt (neue
