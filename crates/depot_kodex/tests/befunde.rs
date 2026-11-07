@@ -1487,7 +1487,7 @@ fn rss_quellen_aendern_nur_mit_festschreibung() -> Result<(), String> {
         depot_kodex::festschreibung::pruefe(
             &b.pfad,
             depot_kodex::deklaration::Klasse::Funktion,
-            &Default::default(),
+            &std::collections::BTreeSet::default(),
         )
     };
     assert!(pruefe().is_empty());
