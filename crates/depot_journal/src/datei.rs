@@ -594,6 +594,9 @@ impl Journal {
     /// Journal gesperrt.
     pub fn anhaengen(&mut self, art: Art, inhalt: &str) -> Result<(), JournalFehler> {
         match art {
+            Art::Vorbereitung => Err(JournalFehler::Abgelehnt(
+                "Vorbereitung nur ueber ihre geprueften Methoden".into(),
+            )),
             Art::Ki | Art::KiGrenzen => Err(JournalFehler::Abgelehnt(
                 "KI-Eintraege entstehen nur ueber reserviere".into(),
             )),
@@ -879,6 +882,53 @@ impl Journal {
     /// Schreibt den naechsten Zustand eines Auftrags.
     pub(crate) fn schreibe_meldung(&mut self, nr: u64, m: &Meldung) -> Result<(), JournalFehler> {
         self.schreibe_eintrag(Art::Zustand, &meldung_text(nr, m))
+    }
+
+    pub fn starte_vorbereitung(
+        &mut self,
+        zeit: Zeitpunkt,
+        fuer: Datum,
+        ereignisse: Vec<String>,
+    ) -> Result<(), JournalFehler> {
+        if self.stand.seit_abschluss() > 0 {
+            return Err(JournalFehler::Abgelehnt(
+                "Papiertag nicht abgeschlossen".into(),
+            ));
+        }
+        let e = crate::vorbereitung::Eintrag::Start {
+            zeit,
+            fuer,
+            ereignisse,
+        };
+        self.schreibe_eintrag(Art::Vorbereitung, &e.text())
+    }
+
+    pub fn reserviere_vorbereitung(
+        &mut self,
+        start: Zeitpunkt,
+        berater: BeraterId,
+    ) -> Result<AufrufErlaubnis, Sperre> {
+        let datum = start.datum().ok_or(Sperre::Rechenfehler)?;
+        let zyklus =
+            u32::try_from(start.sekunden().div_euclid(86_400)).map_err(|_| Sperre::Rechenfehler)?;
+        let (buchung, deckel) = naechste(self.stand.ki(), berater, datum, zyklus)?;
+        let e = crate::vorbereitung::Eintrag::Budget {
+            start,
+            abdruck: grenzabdruck(),
+            buchung: buchung.clone(),
+        };
+        self.schreibe_eintrag(Art::Vorbereitung, &e.text())
+            .map_err(|e| Sperre::Kassenbuch(format!("{e:?}")))?;
+        Ok(AufrufErlaubnis::neu(buchung, deckel))
+    }
+
+    pub fn belege_vorbereitungsantwort(
+        &mut self,
+        start: Zeitpunkt,
+        antwort: crate::VorbereitungsAntwort,
+    ) -> Result<(), JournalFehler> {
+        let e = crate::vorbereitung::Eintrag::Antwort { start, antwort };
+        self.schreibe_eintrag(Art::Vorbereitung, &e.text())
     }
 
     /// Prueft die KI-Grenzen, bucht die Hoechstkosten dauerhaft und gibt erst dann die

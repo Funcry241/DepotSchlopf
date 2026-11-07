@@ -124,6 +124,87 @@ fn punkte(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
     s.push_str("</table></div></section>");
 }
 
+fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
+    s.push_str("<section id=\"vorbereitung\"><h2>Vorbereitung auf den nächsten Handelstag</h2>");
+    if let Some(p) = &l.vorbereitung {
+        let _ = write!(
+            s,
+            "<p>Für <b>{}</b> · Wissensstand {} · {} belegte Ereignisse.</p>",
+            datum_text(p.fuer),
+            zeit_text(p.zeit),
+            p.ereignisse.len()
+        );
+        if l.jetzt.datum().is_some_and(|d| d > p.fuer) {
+            s.push_str("<p class=\"leise\">Das Ziel-Datum ist vergangen. Bei neuen Entscheidungen werden die Thesen erneut geprüft.</p>");
+        }
+        for b in [BeraterId::Dachs, BeraterId::Maus] {
+            let _ = write!(s, "<h3>{}</h3>", berater_text(b));
+            if let Some(a) = p.antworten.iter().find(|a| a.berater == b) {
+                let (klasse, stand) = if a.verwertbar {
+                    ("gut", "Einschätzung vorhanden")
+                } else if a.gefragt {
+                    ("offen", "Keine verwertbare Antwort")
+                } else {
+                    ("offen", "Nicht gefragt")
+                };
+                let _ = write!(
+                    s,
+                    "<p class=\"{klasse}\">{stand} · {}</p><p>{}</p>",
+                    zeit_text(a.zeit),
+                    maskiere(&a.text)
+                );
+                if let Some(w) = &a.prognose {
+                    let richtung = match w.richtung {
+                        depot_journal::Prognoserichtung::Steigt => "steigt",
+                        depot_journal::Prognoserichtung::Faellt => "fällt",
+                    };
+                    let _ = write!(
+                        s,
+                        "<p><b>Beobachtung:</b> {} {richtung}, Horizont {} Handelstage.<br>\
+                        Wirkung: {}<br>Gegenargument / Widerlegung: {}</p>",
+                        maskiere(w.isin.als_str()),
+                        w.handelstage,
+                        maskiere(&w.begruendung),
+                        maskiere(&w.widerlegung)
+                    );
+                    if let Some(e) = w
+                        .ereignis_nr
+                        .checked_sub(1)
+                        .and_then(|n| p.ereignisse.get(n))
+                    {
+                        let _ = write!(
+                            s,
+                            "<details><summary>Ursprünglicher Beleg</summary><p>{}</p></details>",
+                            maskiere(e)
+                        );
+                    }
+                }
+            } else {
+                let text = if p.reserviert.contains(&b) {
+                    "Keine Antwort belegt. Falls der Lauf unterbrochen wurde, bleibt die Reservierung gebucht; heute wird nicht erneut gefragt."
+                } else {
+                    "Noch keine Antwort belegt. Ein begonnener Lauf wird nach einer Unterbrechung heute nicht wiederholt."
+                };
+                let _ = write!(s, "<p class=\"offen\">{text}</p>");
+            }
+        }
+        s.push_str("<details><summary>Gemeinsamer Wissensstand beider KIs</summary><ol>");
+        for e in &p.ereignisse {
+            let _ = write!(s, "<li>{}</li>", maskiere(e));
+        }
+        s.push_str("</ol></details>");
+    } else {
+        s.push_str("<p>Noch keine Vorbereitung belegt. An börsenfreien Tagen können Dachs und Maus \
+            die nächsten Handelstage vorbereiten. <a href=\"/einrichtung#zeitplan\">Automatik einrichten</a>.</p>");
+    }
+    s.push_str("<p class=\"leise\">Zwei getrennte Erstmeinungen, keine Orders. KI-Aufrufe zählen zum vorhandenen Budget. \
+        An Handelstagen fließen die Hypothesen in die reguläre Beratung ein.</p>");
+    if let Some(k) = knopf(Abhilfe::Vorbereiten) {
+        s.push_str(&k);
+    }
+    s.push_str("</section>");
+}
+
 fn budget(l: &Lagebild, s: &mut String) {
     if l.budget.is_empty() {
         return;
@@ -335,6 +416,7 @@ pub fn inhalt_mit(l: &Lagebild, knopf: Knopf<'_>, mit_betrieb: bool) -> String {
     if mit_betrieb {
         kopf(l, &mut s);
     }
+    vorbereitung(l, knopf, &mut s);
     punkte(l, knopf, &mut s);
     tage(l, &mut s);
     budget(l, &mut s);

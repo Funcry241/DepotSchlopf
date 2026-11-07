@@ -78,6 +78,8 @@ pub enum Art {
     Nachricht,
     /// Fixierte, unabhaengige Prognose eines Beraters im Papiertag.
     Weltprognose,
+    /// Wissensstand, Budget und Antworten einer Vorbereitung ohne Handel.
+    Vorbereitung,
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
     /// Rechner verlaesst (R12, R24). Damit ist er reserviert (R37).
     Auftrag,
@@ -120,6 +122,7 @@ impl Art {
             Art::Termin => "termin",
             Art::Nachricht => "nachricht",
             Art::Weltprognose => "weltprognose",
+            Art::Vorbereitung => "vorbereitung",
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
             Art::Ki => "ki",
@@ -143,6 +146,7 @@ impl Art {
             Art::Termin,
             Art::Nachricht,
             Art::Weltprognose,
+            Art::Vorbereitung,
             Art::Auftrag,
             Art::Zustand,
             Art::Ki,
@@ -202,6 +206,7 @@ pub struct Stand {
     termine: Vec<TerminBeleg>,
     nachrichten: Vec<NachrichtBeleg>,
     weltprognosen: Vec<PrognoseBeleg>,
+    vorbereitungen: Vec<crate::Vorbereitung>,
     letzte_kennung: u64,
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
@@ -261,6 +266,10 @@ impl Stand {
     /// Die Auftraege, die noch keinen Endzustand haben.
     pub fn offene_auftraege(&self) -> impl Iterator<Item = &AuftragsLage> {
         self.auftraege.iter().filter(|l| l.zustand.offen())
+    }
+
+    pub fn vorbereitungen(&self) -> &[crate::Vorbereitung] {
+        &self.vorbereitungen
     }
 
     pub fn weltprognosen(&self) -> &[PrognoseBeleg] {
@@ -441,6 +450,13 @@ impl Stand {
             }
             Art::Nachricht => {
                 self.belege_nachricht(inhalt)?;
+                return Ok(());
+            }
+            Art::Vorbereitung => {
+                if self.seit_abschluss > 0 {
+                    return Err("Vorbereitung waehrend eines offenen Papiertags".into());
+                }
+                crate::vorbereitung::anwenden(&mut self.vorbereitungen, &mut self.ki, inhalt)?;
                 return Ok(());
             }
             Art::Weltprognose => self.belege_weltprognose(inhalt)?,

@@ -33,6 +33,7 @@ pub enum Art {
     KurseVon(Boerse),
     Termine,
     Nachrichten,
+    Vorbereiten,
     Papier,
     /// Neue Staende auf `main` nennen (`run.cmd update pruefen`).
     UpdatePruefen,
@@ -40,13 +41,14 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 9] = [
+const ALLE_ARTEN: [Art; 10] = [
     Art::Einrichten,
     Art::Kurse,
     Art::KurseVon(Boerse::Xetra),
     Art::KurseVon(Boerse::Nyse),
     Art::Termine,
     Art::Nachrichten,
+    Art::Vorbereiten,
     Art::Papier,
     Art::UpdatePruefen,
     Art::Update,
@@ -61,6 +63,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => "Kurse NYSE abrufen",
             Art::Termine => "Termine abrufen",
             Art::Nachrichten => "Schlagzeilen abrufen",
+            Art::Vorbereiten => "Nächsten Handelstag vorbereiten",
             Art::Papier => "Papiertag",
             Art::UpdatePruefen => "Nach Update suchen",
             Art::Update => "Update einspielen",
@@ -76,6 +79,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => "kurse_nyse",
             Art::Termine => "termine",
             Art::Nachrichten => "nachrichten",
+            Art::Vorbereiten => "vorbereiten",
             Art::Papier => "papier",
             Art::UpdatePruefen => "update_pruefen",
             Art::Update => "update",
@@ -95,6 +99,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => &["kurse", "nyse"],
             Art::Termine => &["termine"],
             Art::Nachrichten => &["nachrichten"],
+            Art::Vorbereiten => &["vorbereiten"],
             Art::Papier => &["papier"],
             Art::UpdatePruefen => &["update", "pruefen"],
             Art::Update => &["update"],
@@ -685,17 +690,7 @@ impl Dienst {
                 anlass,
                 update_commit,
             } = wartend;
-            if art == Art::Papier && anlass == Anlass::Zeitplan {
-                let noch_faellig = ortszeit(jetzt).is_some_and(|(tag, h, m, _, _)| {
-                    faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen)
-                        == Some(Art::Papier)
-                });
-                if z.erledigt_fehler.is_some() || !noch_faellig {
-                    return None;
-                }
-            }
-            if art == Art::Nachrichten && anlass == Anlass::Zeitplan && !rss_zeitplan_an(&z, jetzt)
-            {
+            if anlass == Anlass::Zeitplan && !zeitplan_auftrag_erlaubt(&z, art, jetzt) {
                 return None;
             }
             let nr = z.naechste_nr;
@@ -819,6 +814,9 @@ impl Dienst {
                     .all(|a| jetzt.sekunden_seit(a.start).is_some_and(|s| s >= 5400))
             {
                 let _ = einreihen(z, Art::Nachrichten, Anlass::Zeitplan, None);
+            }
+            if z.laufend.is_none() && z.warteschlange.is_empty() && vorbereitung_faellig(z, jetzt) {
+                let _ = einreihen(z, Art::Vorbereiten, Anlass::Zeitplan, None);
             }
             return;
         };
@@ -1106,4 +1104,41 @@ fn rss_zeitplan_an(z: &Zustand, jetzt: Zeitpunkt) -> bool {
     z.zeitplan.an
         && z.zeitplan.nachrichten_an
         && ortszeit(jetzt).is_some_and(|(_, h, ..)| (8..23).contains(&h))
+}
+
+fn vorbereitung_faellig(z: &Zustand, jetzt: Zeitpunkt) -> bool {
+    let Some((tag, ..)) = ortszeit(jetzt) else {
+        return false;
+    };
+    rss_zeitplan_an(z, jetzt)
+        && z.zeitplan.vorbereitung.aktiv()
+        && !crate::zeitplan::handelstag(tag)
+        && z.erledigt_fehler.is_none()
+        && z.zeitplan_fehler.is_none()
+        && z.verlauf_fehler.is_none()
+        && !z
+            .verlauf
+            .iter()
+            .any(|a| a.art == Art::Vorbereiten && ortszeit(a.start).is_some_and(|(t, ..)| t == tag))
+        && z.verlauf.iter().any(|a| {
+            a.art == Art::Nachrichten
+                && a.erfolg == Some(true)
+                && ortszeit(a.start).is_some_and(|(t, ..)| t == tag)
+                && jetzt.sekunden_seit(a.start).is_some_and(|s| s < 5_400)
+        })
+}
+
+fn zeitplan_auftrag_erlaubt(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> bool {
+    match art {
+        Art::Papier => {
+            z.erledigt_fehler.is_none()
+                && ortszeit(jetzt).is_some_and(|(tag, h, m, _, _)| {
+                    faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen)
+                        == Some(Art::Papier)
+                })
+        }
+        Art::Nachrichten => rss_zeitplan_an(z, jetzt),
+        Art::Vorbereiten => vorbereitung_faellig(z, jetzt),
+        _ => true,
+    }
 }

@@ -123,6 +123,7 @@ pub enum Abhilfe {
     KurseAbrufen,
     TermineAbrufen,
     PapiertagStarten,
+    Vorbereiten,
     /// Nur ein Mensch kann helfen: pruefen, was im Text steht.
     Pruefen,
     /// Abwarten, etwa bis ein laufender Schritt fertig ist oder das Budget wieder frei ist.
@@ -145,6 +146,7 @@ impl Abhilfe {
             Abhilfe::SchluesselBerater(_)
             | Abhilfe::KurseAbrufen
             | Abhilfe::TermineAbrufen
+            | Abhilfe::Vorbereiten
             | Abhilfe::PapiertagStarten
             | Abhilfe::Warten => false,
         }
@@ -196,6 +198,7 @@ pub struct Lagebild {
     pub schluessel: Vec<(Wer, SchluesselStand)>,
     /// Die letzten Handelstage seit dem ersten Papiertag, neueste zuerst.
     pub tage: Vec<TagErgebnis>,
+    pub vorbereitung: Option<depot_journal::Vorbereitung>,
 }
 
 /// So viele Beitraege zeigt das Lagebild hoechstens.
@@ -729,8 +732,10 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut depot_lage = None;
     let mut gespraech = Vec::new();
     let mut tage = Vec::new();
+    let mut vorbereitung = None;
     match (u.journal, heute, &werte) {
         (Zugang::Offen(s), Some(heute), Ok(werte)) => {
+            vorbereitung = s.vorbereitungen().last().cloned();
             tag_punkte(s, heute, werte, &mut punkte);
             budget = [BeraterId::Dachs, BeraterId::Maus]
                 .into_iter()
@@ -798,6 +803,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         betrieb,
         schluessel,
         tage,
+        vorbereitung,
     }
 }
 

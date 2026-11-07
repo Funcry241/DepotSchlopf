@@ -26,6 +26,132 @@ static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 /// Ein erfundener Schluessel; er darf nirgends ausser im Kopf der Anfrage erscheinen.
 const SCHLUESSEL: &str = "testschluessel-0123456789abcdef";
 
+fn samstagsuhr() -> Option<Zeitpunkt> {
+    Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0))
+}
+fn vor_dem_wissensstichtag() -> Option<Zeitpunkt> {
+    Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 11, 0, 0))
+}
+fn nach_dem_zeitfenster() -> Option<Zeitpunkt> {
+    Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 23, 0, 0))
+}
+
+#[test]
+fn eingefrorene_vorbereitung_entspricht_auch_bei_langen_texten_der_gesendeten_auswahl()
+-> Result<(), String> {
+    let zeit = samstagsuhr().ok_or("Zeit")?;
+    let roh = vec![format!("Beleg {}", "\"\t🌍".repeat(1_000)); 100];
+    let aus = depot_sim::vorbereitung::sichtbare_ereignisse(&roh);
+    assert!(!aus.is_empty() && aus.len() < roh.len());
+    let topf = Topf::neu(TopfId::A, Cent(0)).map_err(|e| format!("{e:?}"))?;
+    let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
+    let lage = Lage {
+        datum: Datum::neu(2026, 11, 9).ok_or("Datum")?,
+        topf: &topf,
+        kurse: &kurse,
+        ereignisse: &aus,
+    };
+    let frage = depot_berater::frage::vorbereitung_frage(&lage, &universum()?, zeit);
+    for (nr, e) in aus.iter().enumerate() {
+        assert!(
+            frage
+                .lines()
+                .any(|l| l == format!("- Ereignis {}: {e}", nr.saturating_add(1)))
+        );
+    }
+    assert_eq!(
+        frage
+            .lines()
+            .filter(|l| l.starts_with("- Ereignis "))
+            .count(),
+        aus.len()
+    );
+    Ok(())
+}
+
+#[test]
+fn vorbereitungsclient_akzeptiert_these_ohne_kurs_aber_keine_handelsziele() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let zeit = samstagsuhr().ok_or("Zeit")?;
+    let montag = Datum::neu(2026, 11, 9).ok_or("Montag")?;
+    ort.journal
+        .starte_vorbereitung(zeit, montag, vec!["Nachricht Politisches Ereignis".into()])
+        .map_err(|e| format!("{e:?}"))?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(gpt("{\"einschaetzung\":\"Beobachten\",\"ziele\":null,\"prognose\":{\"ereignis_nr\":1,\"isin\":\"DE0007164600\",\"richtung\":\"steigt\",\"handelstage\":3,\"begruendung\":\"Wirkung\",\"widerlegung\":\"Gegenbelege\"}}",100,100));
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?
+        .mit_protokoll(ort.dir.join("anbieter.txt"), samstagsuhr)
+        .fuer_vorbereitung(zeit);
+    let topf = Topf::neu(TopfId::A, Cent(0)).map_err(|e| format!("{e:?}"))?;
+    let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
+    let ereignisse = vec!["Nachricht Politisches Ereignis".into()];
+    let lage = Lage {
+        datum: montag,
+        topf: &topf,
+        kurse: &kurse,
+        ereignisse: &ereignisse,
+    };
+    let erlaubt = ort
+        .journal
+        .reserviere_vorbereitung(zeit, BeraterId::Maus)
+        .map_err(|e| format!("{e:?}"))?;
+    let antwort = maus.vorschlagen(erlaubt, &lage);
+    assert!(
+        antwort.verwertbar && antwort.prognose.is_some() && antwort.vorschlag.is_none(),
+        "{antwort:?}"
+    );
+    assert!(
+        maus.netz()
+            .gesendet
+            .first()
+            .is_some_and(|(_, _, t)| t.contains("keine aktuellen Kurse"))
+    );
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(claude(
+        "{\"einschaetzung\":\"Kaufen\",\"ziele\":[]}",
+        100,
+        100,
+        0,
+    ));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?
+        .mit_protokoll(ort.dir.join("anbieter.txt"), samstagsuhr)
+        .fuer_vorbereitung(zeit);
+    let erlaubt = ort
+        .journal
+        .reserviere_vorbereitung(zeit, BeraterId::Dachs)
+        .map_err(|e| format!("{e:?}"))?;
+    let antwort = dachs.vorschlagen(erlaubt, &lage);
+    assert!(
+        !antwort.verwertbar && antwort.vorschlag.is_none(),
+        "{antwort:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn vorbereitung_prueft_zeitfenster_direkt_vor_dem_versand() -> Result<(), String> {
+    let zeiten: [fn() -> Option<Zeitpunkt>; 2] = [nach_dem_zeitfenster, vor_dem_wissensstichtag];
+    for uhr in zeiten {
+        let mut ort = Ort::neu()?;
+        let zeit = samstagsuhr().ok_or("Zeit")?;
+        let montag = Datum::neu(2026, 11, 9).ok_or("Montag")?;
+        ort.journal
+            .starte_vorbereitung(zeit, montag, vec!["Ereignis".into()])
+            .map_err(|e| format!("{e:?}"))?;
+        let mut maus = berater(&ort, BeraterId::Maus, Attrappe::default())?
+            .mit_protokoll(ort.dir.join("anbieter.txt"), uhr)
+            .fuer_vorbereitung(zeit);
+        let erlaubt = ort
+            .journal
+            .reserviere_vorbereitung(zeit, BeraterId::Maus)
+            .map_err(|e| format!("{e:?}"))?;
+        let antwort = mit_lage(|l| maus.vorschlagen(erlaubt, l))?;
+        assert!(!antwort.verwertbar && antwort.einschaetzung.contains("Zeitfenster"));
+        assert!(maus.netz().gesendet.is_empty());
+    }
+    Ok(())
+}
+
 fn vorbedingung<T, E: std::fmt::Debug>(r: Result<T, E>, was: &str) -> Result<T, String> {
     r.map_err(|e| format!("Vorbedingung {was}: {e:?}"))
 }

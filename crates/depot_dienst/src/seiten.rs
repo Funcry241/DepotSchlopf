@@ -67,7 +67,27 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
             maskiere(text)
         );
     }
-    if art == Art::Papier {
+    if art == Art::Vorbereiten
+        && let Some(l) = &z.lage
+    {
+        if l.bild
+            .jetzt
+            .datum()
+            .is_some_and(depot_kern::liste::handelstag)
+        {
+            return "<button type=\"button\" disabled>Vorbereitung heute im Papiertag</button>"
+                .into();
+        }
+        if l.bild
+            .vorbereitung
+            .as_ref()
+            .is_some_and(|p| p.zeit.datum() == l.bild.jetzt.datum())
+        {
+            return "<button type=\"button\" disabled>Vorbereitung heute bereits begonnen</button>"
+                .into();
+        }
+    }
+    if matches!(art, Art::Papier | Art::Vorbereiten) {
         return bestaetigungslink(art, text, None);
     }
     let ziel = if art == Art::Einrichten {
@@ -96,7 +116,14 @@ fn bestaetigungslink(art: Art, text: &str, sha: Option<&str>) -> String {
 }
 
 pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> String {
-    let (text, ziel, knopf, haken) = if sha.is_some() {
+    let (text, ziel, knopf, haken) = if art == Art::Vorbereiten {
+        (
+            "Dachs und Maus bereiten den nächsten Handelstag unabhängig vor. Das verbraucht echtes KI-Budget innerhalb der bisherigen Grenzen. Keine Orders. Höchstens einmal je börsenfreiem Tag zwischen 08 und 23 Uhr Frankfurt.",
+            "/",
+            "Vorbereitung starten",
+            "Ich nutze das vorhandene KI-Budget für diese Vorbereitung.",
+        )
+    } else if sha.is_some() {
         (
             "Das Update sichert deine Papierdaten und prüft die neue Version. Das dauert ein paar Minuten. Danach startet DepotSchlopf neu.",
             "/einrichtung#update",
@@ -133,6 +160,12 @@ fn abhilfe_knopf(token: &str, z: &Zustand, a: Abhilfe) -> Option<String> {
     match a {
         Abhilfe::JournalEinrichten => Some(auftrag_knopf(token, z, Art::Einrichten, "Einrichten")),
         Abhilfe::KurseAbrufen => Some(auftrag_knopf(token, z, Art::Kurse, "Kurse abrufen")),
+        Abhilfe::Vorbereiten => Some(auftrag_knopf(
+            token,
+            z,
+            Art::Vorbereiten,
+            "Vorbereitung starten",
+        )),
         Abhilfe::TermineAbrufen => Some(auftrag_knopf(token, z, Art::Termine, "Termine abrufen")),
         Abhilfe::PapiertagStarten => {
             Some(auftrag_knopf(token, z, Art::Papier, "Papiertag starten"))
@@ -313,6 +346,14 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "halt",
             "Die Freigabe konnte nicht bestätigt werden. Lade die Einrichtung neu und prüfe Journal und Papierkonto.",
         ),
+        "vorbereitung_bestaetigen" => (
+            "offen",
+            "Bitte bestätige zuerst die Vorbereitung und ihre KI-Kosten.",
+        ),
+        "vorbereitung_quellen" => (
+            "offen",
+            "Bitte für die automatische Vorbereitung auch die Schlagzeilen einschalten. Deine Eingaben sind noch nicht gespeichert.",
+        ),
         "papier_bestaetigen" => (
             "offen",
             "Papiertag unverändert. Öffne den Bestätigungsschritt und setze den Haken.",
@@ -466,7 +507,7 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     let Some(heute) = heute else {
         return "Uhrzeit unklar (Zeitumstellung); der Zeitplan wartet.".into();
     };
-    match naechster_fuer(&z.zeitplan, &z.erledigt, heute, &z.boersen) {
+    let boersenlauf = match naechster_fuer(&z.zeitplan, &z.erledigt, heute, &z.boersen) {
         Some((art, d, u)) => {
             let mut t = format!(
                 "{} am {} {} um {}",
@@ -484,6 +525,19 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
             t
         }
         None => "Kein Lauf in den nächsten Tagen geplant.".into(),
+    };
+    if z.zeitplan.nachrichten_an {
+        let vorbereitung = if z.zeitplan.vorbereitung.aktiv() && !crate::zeitplan::handelstag(heute)
+        {
+            " Danach einmal die Vorbereitung des nächsten Handelstags."
+        } else {
+            ""
+        };
+        format!(
+            "Schlagzeilen täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten.{vorbereitung} Nächster Börsenlauf: {boersenlauf}"
+        )
+    } else {
+        boersenlauf
     }
 }
 
@@ -794,6 +848,7 @@ pub struct Entwurf {
     pub kurse: Option<(u8, u8)>,
     pub papier_danach: Option<bool>,
     pub nachrichten_an: Option<bool>,
+    pub vorbereitung_an: Option<bool>,
 }
 
 impl Entwurf {
@@ -815,12 +870,16 @@ impl Entwurf {
             kurse: zeit("kurse"),
             papier_danach: haken("papier_danach"),
             nachrichten_an: haken("nachrichten_an"),
+            vorbereitung_an: haken("vorbereitung_an"),
         }
     }
 
     /// Als Teil einer Abfrage (`&entwurf=ja&...`), nur mit gueltigen Werten.
     pub fn als_abfrage(&self) -> String {
         let mut q = String::from("&entwurf=ja");
+        if self.vorbereitung_an == Some(true) {
+            q.push_str("&vorbereitung_an=ja");
+        }
         if self.nachrichten_an == Some(true) {
             q.push_str("&nachrichten_an=ja");
         }
@@ -1112,11 +1171,15 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <label><input type=\"checkbox\" name=\"nachrichten_an\" value=\"ja\"{}> \
          Zusätzlich tagsüber Schlagzeilen abrufen (empfohlen für das Weltmodell, kostenlos, \
          keine zusätzlichen KI-Aufrufe; gilt nur bei eingeschaltetem Zeitplan)</label>\
+         <label><input type=\"checkbox\" name=\"vorbereitung_an\" value=\"ja\"{}> \
+         An börsenfreien Tagen den nächsten Handelstag vorbereiten (empfohlen; braucht Schlagzeilen und eingeschalteten Zeitplan; höchstens ein Aufruf je KI und Tag zwischen 08 und 23 Uhr). \
+         Die Aufrufe zählen zum bisherigen Monatsbudget und können es früher aufbrauchen. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
          <button type=\"submit\">Einstellungen speichern</button></form></section>",
         uhrzeit_text(ent.termine.unwrap_or(p.termine)),
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),
         haken(ent.papier_danach.unwrap_or(p.papier_danach)),
-        haken(ent.nachrichten_an.unwrap_or(p.nachrichten_an))
+        haken(ent.nachrichten_an.unwrap_or(p.nachrichten_an)),
+        haken(ent.vorbereitung_an.unwrap_or(p.vorbereitung.aktiv()))
     );
 }
 

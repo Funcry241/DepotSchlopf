@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Vorbereitung auf kommende Handelstage: optionale, budgetgeschützte Erstmeinungen von Dachs und Maus an börsenfreien Tagen, mit eingefrorenem Wissensstand und Live-Anzeige. Wochenendmeldungen bleiben für den nächsten Handelstag erhalten; frühere Thesen werden als Hypothesen erneut geprüft. Keine Orders durch die Vorbereitung.
+
 - Kostenlose RSS-Nachrichten statt Alpha-Vantage-Premium: zwei festgeschriebene Feeds (tagesschau und BBC World), Titel/Quelle/Link/Veröffentlichungs- und Abrufzeit mit Rohdatenhash. Höchstens 15 Meldungen pro Lauf, 24 Stunden Alter, 90 Minuten Abrufpause auch nach Neustart und Doppelklick. Ein Sicherheitsabbruch verwirft alle Antworten und Meldungen des Laufs, auch bei in XML versteckten Schlüsseln. Eigener Prüfknopf in der Einrichtung und optionale zusätzliche Abrufe tagsüber ohne KI oder Handel. Neue Abhängigkeit quick-xml mit memchr; Quellenliste und Abhängigkeiten benötigen Grenzfreigabe.
 
 - Die Mindestorder für freiwillige Aufträge im Papierhandel beträgt 100 € am Limit.
