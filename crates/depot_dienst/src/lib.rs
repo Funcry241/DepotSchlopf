@@ -202,7 +202,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/teil/status" => antwort(
             200,
             HTML,
-            seiten::status(&d.start, &d.sperre(), tag).as_bytes(),
+            seiten::status(&d.token, &d.start, &d.sperre(), tag).as_bytes(),
         ),
         "/teil/update" => antwort(
             200,
@@ -428,6 +428,13 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
                 "/einrichtung?m=update#update"
             } else {
                 "/einrichtung?m=update_belegt#update"
+            }
+        }
+        Art::Einrichten if feld(f, "ziel") == Some("einrichtung") => {
+            if d.von_hand(art, jetzt).is_ok() {
+                "/einrichtung?m=auftrag#journal"
+            } else {
+                "/einrichtung?m=auftrag_belegt#journal"
             }
         }
         _ => {

@@ -35,11 +35,14 @@ fn ampel_klasse(a: Ampel) -> &'static str {
     }
 }
 
-fn ampel_text(a: Ampel) -> &'static str {
-    match a {
-        Ampel::Gut => "bereit",
-        Ampel::Offen => "offen",
-        Ampel::Halt => "Halt",
+/// Eine offene Voraussetzung kann eine Handlung, Warten oder fehlendes Wissen bedeuten.
+fn punkt_status(p: &crate::Punkt) -> (&'static str, &'static str) {
+    match (p.ampel, p.abhilfe) {
+        (Ampel::Gut, _) => ("gut", "bereit"),
+        (Ampel::Halt, _) => ("halt", "Halt"),
+        (Ampel::Offen, None) => ("leise", "unbekannt"),
+        (Ampel::Offen, Some(Abhilfe::Warten)) => ("leise", "wartet"),
+        (Ampel::Offen, Some(_)) => ("offen", "bitte erledigen"),
     }
 }
 
@@ -78,17 +81,7 @@ td.z,th.z{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 ol.gespraech{list-style:none;padding:0;margin:0}ol.gespraech li{padding:6px 0;\
 border-bottom:1px solid var(--linie)}ol.gespraech b{display:inline-block;min-width:90px}";
 
-fn kopf(l: &Lagebild, mit_betrieb: bool, s: &mut String) {
-    if !mit_betrieb {
-        let _ = write!(
-            s,
-            "<section><div class=\"kopf {}\">{}</div><div class=\"leise\">Stand {}</div></section>",
-            ampel_klasse(l.gesamt),
-            maskiere(&l.naechster_schritt),
-            maskiere(&zeit_text(l.jetzt))
-        );
-        return;
-    }
+fn kopf(l: &Lagebild, s: &mut String) {
     let _ = write!(
         s,
         "<section id=\"betrieb\"><div class=\"kopf {}\">{}</div>",
@@ -115,19 +108,20 @@ fn kopf(l: &Lagebild, mit_betrieb: bool, s: &mut String) {
 pub type Knopf<'a> = &'a dyn Fn(Abhilfe) -> Option<String>;
 
 fn punkte(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
-    s.push_str("<section><h2>Bereitschaft</h2><table>");
+    s.push_str("<section><h2>Bereitschaft</h2><div class=\"breit\"><table>");
     for p in &l.punkte {
         let k = p.abhilfe.and_then(knopf).unwrap_or_default();
+        let (klasse, text) = punkt_status(p);
         let _ = write!(
             s,
             "<tr><td><span class=\"marke {}\">{}</span></td><td>{}</td><td>{}</td><td>{k}</td></tr>",
-            ampel_klasse(p.ampel),
-            ampel_text(p.ampel),
+            klasse,
+            text,
             maskiere(p.name),
             maskiere(&p.text)
         );
     }
-    s.push_str("</table></section>");
+    s.push_str("</table></div></section>");
 }
 
 fn budget(l: &Lagebild, s: &mut String) {
@@ -338,7 +332,9 @@ pub fn inhalt(l: &Lagebild, knopf: Knopf<'_>) -> String {
 /// Wie `inhalt`; ohne Gesamtstatus, wenn die Oberflaeche ihn selbst zeigt (mit dem Zeitplan).
 pub fn inhalt_mit(l: &Lagebild, knopf: Knopf<'_>, mit_betrieb: bool) -> String {
     let mut s = String::with_capacity(16_384);
-    kopf(l, mit_betrieb, &mut s);
+    if mit_betrieb {
+        kopf(l, &mut s);
+    }
     punkte(l, knopf, &mut s);
     tage(l, &mut s);
     budget(l, &mut s);

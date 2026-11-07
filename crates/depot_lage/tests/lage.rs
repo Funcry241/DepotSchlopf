@@ -147,6 +147,35 @@ fn stummer_tag(ort: &Ort, t: u8) -> Result<Ausgang, String> {
 }
 
 #[test]
+fn bereitschaft_trennt_handlung_warten_und_unbekannt() -> Result<(), String> {
+    let mut u = umgebung(abends(5)?, Zugang::NichtEingerichtet);
+    u.kursquelle = Hinterlegt::Unbekannt;
+    let l = lagebild(&u);
+    let html = html::inhalt(&l, &|_| None);
+    assert!(
+        html.contains("class=\"marke offen\">bitte erledigen</span></td><td>Journal"),
+        "{html}"
+    );
+    assert!(
+        html.contains("class=\"marke leise\">unbekannt</span>"),
+        "{html}"
+    );
+    let l = lagebild(&umgebung(abends(5)?, Zugang::Belegt));
+    let html = html::inhalt(&l, &|_| None);
+    assert!(
+        html.contains("class=\"marke leise\">wartet</span></td><td>Journal"),
+        "{html}"
+    );
+    let teil = html::inhalt_mit(&l, &|_| None, false);
+    assert!(!teil.contains("id=\"betrieb\""));
+    assert!(
+        !teil.contains(&l.naechster_schritt),
+        "Die Dienst-Zusammenfassung steht nur einmal da"
+    );
+    Ok(())
+}
+
+#[test]
 fn ohne_journal_ist_einrichten_der_naechste_schritt() -> Result<(), String> {
     let l = lagebild(&umgebung(abends(5)?, Zugang::NichtEingerichtet));
     let j = punkt(&l, "Journal")?;

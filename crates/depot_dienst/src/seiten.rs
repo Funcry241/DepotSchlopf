@@ -33,9 +33,16 @@ input[type=password],input[type=time]{font:inherit;padding:3px 6px;border:1px so
 border-radius:6px;background:var(--grund);color:var(--text);max-width:100%}\
 pre{white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,Consolas,monospace;\
 margin:6px 0}\
-.banner{position:sticky;top:0;background:var(--halt);color:#fff;padding:8px 16px;font-weight:600}\
-.meldung{border-left:4px solid currentColor;padding-left:10px}\
-label{display:block;margin:6px 0}";
+.banner{position:sticky;top:0;z-index:3;background:var(--halt);color:#fff;padding:8px 16px;font-weight:600}\
+.meldung{position:sticky;top:8px;z-index:2;background:var(--flaeche);border-left:4px solid currentColor;padding-left:10px}\
+label{display:block;margin:6px 0}\
+.schluessel-tabelle input{width:100%}.schluessel-tabelle td{overflow-wrap:anywhere}\
+@media(max-width:600px){.schluessel-tabelle,.schluessel-tabelle tbody,\
+.schluessel-tabelle tr,.schluessel-tabelle td{display:block;width:100%}\
+.schluessel-tabelle tr:first-child{display:none}.schluessel-tabelle td{border:0}\
+.schluessel-tabelle tr{border-bottom:1px solid var(--linie);padding:8px 0}\
+.schluessel-tabelle td[data-titel]::before{content:attr(data-titel) \": \";font-weight:600}\
+.schluessel-tabelle button{margin-top:6px}}";
 
 /// Ein Bedienelement zu einem Auftrag und seinem aktuellen Stand.
 fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
@@ -60,11 +67,16 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
     if art == Art::Papier {
         return bestaetigungslink(art, text, None);
     }
+    let ziel = if art == Art::Einrichten {
+        "<input type=\"hidden\" name=\"ziel\" value=\"einrichtung\">"
+    } else {
+        ""
+    };
     format!(
         "<form class=\"knopf\" method=\"post\" action=\"/ausfuehren\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"art\" value=\"{}\">\
-         <button type=\"submit\">{}</button></form>",
+         {ziel}<button type=\"submit\">{}</button></form>",
         maskiere(token),
         art.kurz(),
         maskiere(text)
@@ -157,12 +169,12 @@ fn sperr_meldung(code: &str) -> Option<(&'static str, &'static str)> {
         ),
         ("unbestaetigt", false) => (
             "offen",
-            "Nicht aufgehoben: Bitte zuerst bestätigen, dass Sie die Kosten beim Anbieter geprüft haben.",
+            "Nicht aufgehoben: Bitte zuerst bestätigen, dass du die Kosten beim Anbieter geprüft hast.",
         ),
         ("unbestaetigt", true) => (
             "offen",
-            "Nicht aufgehoben: Bitte zuerst bestätigen, dass Sie den Schlüssel der Kursquelle \
-             geprüft und bei Bedarf erneuert haben.",
+            "Nicht aufgehoben: Bitte zuerst bestätigen, dass du den Schlüssel der Kursquelle \
+             geprüft und bei Bedarf erneuert hast.",
         ),
         ("belegt", _) => (
             "offen",
@@ -373,7 +385,7 @@ pub fn rahmen(
     if let Some((klasse, text)) = meldung {
         let _ = write!(
             s,
-            "<section class=\"meldung {klasse}\">{}</section>",
+            "<section role=\"status\" class=\"meldung {klasse}\">{}</section>",
             maskiere(text)
         );
     }
@@ -674,7 +686,7 @@ fn update_hinweis(z: &Zustand) -> String {
     }
 }
 
-fn gesamtstatus_teil(z: &Zustand, lagezeile: &str) -> String {
+fn gesamtstatus_teil(token: &str, z: &Zustand) -> String {
     let Some(b) = z.gesamtstatus() else {
         return String::new();
     };
@@ -695,17 +707,32 @@ fn gesamtstatus_teil(z: &Zustand, lagezeile: &str) -> String {
         "<section id=\"betrieb\"><div class=\"kopf {klasse}\">{}</div>",
         maskiere(titel)
     );
-    let lagezeile = lagezeile.strip_prefix("Halt – ").unwrap_or(lagezeile);
     let mut gruende = String::new();
     for g in b.gruende() {
         if let Some((_, status)) = journal.as_ref().filter(|(grund, _)| grund == g) {
             let _ = write!(gruende, "<li>Journal einrichten {status}</li>");
-        } else if g != lagezeile {
+        } else {
             let _ = write!(gruende, "<li>{}</li>", maskiere(g));
         }
     }
     if !gruende.is_empty() {
         let _ = write!(s, "<ul>{gruende}</ul>");
+    }
+    if let Some(l) = &z.lage {
+        if let Some(k) = l
+            .bild
+            .punkte
+            .iter()
+            .filter(|p| p.ampel != depot_lage::Ampel::Gut)
+            .find_map(|p| p.abhilfe.and_then(|a| abhilfe_knopf(token, z, a)))
+        {
+            s.push_str(&k);
+        }
+        let _ = write!(
+            s,
+            "<div class=\"leise\">Stand {}</div>",
+            maskiere(&zeit_text(l.bild.jetzt))
+        );
     }
     s.push_str("</section>");
     s
@@ -715,11 +742,7 @@ fn gesamtstatus_teil(z: &Zustand, lagezeile: &str) -> String {
 pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> String {
     let mut s = marke(start);
     s.push_str(&taetigkeit(z, heute));
-    let lagezeile = z
-        .lage
-        .as_ref()
-        .map_or("", |l| l.bild.naechster_schritt.as_str());
-    s.push_str(&gesamtstatus_teil(z, lagezeile));
+    s.push_str(&gesamtstatus_teil(token, z));
     s.push_str(&update_hinweis(z));
     if z.laufend.is_some() && z.lage.is_some() {
         s.push_str("<p class=\"leise\">Das Lagebild zeigt den Stand vor dem laufenden Auftrag und wird danach aktualisiert.</p>");
@@ -736,25 +759,20 @@ pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> Stri
 }
 
 /// Kurzer Stand fuer die Einrichtung (auch `/teil/status`).
-pub fn status(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
+pub fn status(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> String {
     let jetzt = match &z.laufend {
         Some(a) => format!("Läuft: {} ({}).", a.art.name(), anlass_text(a.anlass)),
         None => "Gerade läuft nichts.".into(),
     };
-    let lage = z
-        .lage
-        .as_ref()
-        .map(|l| l.bild.naechster_schritt.clone())
-        .unwrap_or_default();
     format!(
-        "{}{}<section>{}<div class=\"kopf\">{}</div><div>{}</div>\
-         <div class=\"leise\">Nächster geplanter Lauf: {}</div></section>",
+        "{}{}<section>{}<div class=\"kopf\">{}</div>\
+         <div class=\"leise\">Nächster geplanter Lauf: {}</div></section>{}",
         marke(start),
-        gesamtstatus_teil(z, &lage),
+        gesamtstatus_teil(token, z),
         update_hinweis(z),
         maskiere(&jetzt),
-        maskiere(&lage),
-        maskiere(&naechster_text(z, heute))
+        maskiere(&naechster_text(z, heute)),
+        journal_teil(token, z)
     )
 }
 
@@ -850,7 +868,7 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
          der Windows-Anmeldeinformationsverwaltung, nie im Projektordner. Die Seite zeigt keinen \
          Schlüssel, nur ob einer hinterlegt ist und was der Anbieter beim letzten Aufruf dazu \
          sagte. Geprüft wird nur bei echten Läufen, nie mit eigenen, kostenpflichtigen \
-         Testaufrufen. <b>Speichern heißt hier zugleich aktiv:</b> Der nächste Lauf liest ihn.</p><div class=\"breit\"><table>\
+         Testaufrufen. <b>Speichern heißt hier zugleich aktiv:</b> Der nächste Lauf liest ihn.</p><table class=\"schluessel-tabelle\">\
          <tr><th>Wofür</th><th>Stand</th><th>Neu hinterlegen</th></tr>",
     );
     for (w, st) in &e.schluessel {
@@ -859,21 +877,22 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
         let _ = write!(
             s,
             "<tr><td>{}<br><span class=\"leise\">{}</span></td>\
-             <td><span class=\"{klasse}\">{text}</span></td><td>\
+             <td data-titel=\"Stand\"><span class=\"{klasse}\">{text}</span></td><td data-titel=\"Neu hinterlegen\">\
              <form method=\"post\" action=\"/schluessel\">\
              <input type=\"hidden\" name=\"t\" value=\"{}\">\
              <input type=\"hidden\" name=\"wer\" value=\"{}\">\
-             <input type=\"password\" name=\"wert\" autocomplete=\"off\" required> \
+             <input aria-label=\"Schlüssel für {}\" type=\"password\" name=\"wert\" autocomplete=\"off\" required> \
              <button type=\"submit\">Speichern</button>\
              <div class=\"leise\">{}</div></form></td></tr>",
             maskiere(w.name()),
             maskiere(w.adresse()),
             maskiere(token),
             w.kurz(),
+            maskiere(w.name()),
             regel(*w)
         );
     }
-    s.push_str("</table></div></section>");
+    s.push_str("</table></section>");
 }
 
 /// Was bei einer abgebrochenen KI-Anfrage geschieht, in Alltagssprache (Maus, 05.11.2026).
@@ -1081,13 +1100,13 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <form method=\"post\" action=\"/zeitplan\">\
          <input type=\"hidden\" name=\"t\" value=\"{token}\">\
          <input type=\"hidden\" name=\"aktion\" value=\"speichern\">\
-         <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required></label>\
-         <label>Kurse Xetra abrufen um <input type=\"time\" name=\"kurse\" value=\"{}\" required></label>\
+         <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
+         <label>Kurse Xetra abrufen um <input type=\"time\" name=\"kurse\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
          <p class=\"leise\">Jede andere Börse der Liste wird zehn Minuten nach ihrem eigenen \
          Schluss abgerufen (NYSE meist 22:10 Uhr, mit Sommerzeit und verkürzten Tagen).</p>\
          <label><input type=\"checkbox\" name=\"papier_danach\" value=\"ja\"{}> \
          Nach dem letzten Kursabruf des Tages den Papiertag starten (wenn ein Abruf des Tages \
-         erfolgreich war)</label>\
+         erfolgreich war; gilt nur bei eingeschaltetem Zeitplan)</label>\
          <label><input type=\"checkbox\" name=\"nachrichten_an\" value=\"ja\"{}> \
          Zusätzlich tagsüber Schlagzeilen abrufen (empfohlen für das Weltmodell, kostenlos, \
          keine zusätzlichen KI-Aufrufe; gilt nur bei eingeschaltetem Zeitplan)</label>\
@@ -1225,8 +1244,8 @@ fn update_teil(token: &str, start: &str, z: &Zustand, e: &Einrichtung, s: &mut S
 fn grenzen_teil(e: &Einrichtung, s: &mut String) {
     s.push_str(
         "<section id=\"grenzen\"><h2>Grenzen und Budgets</h2><p class=\"leise\">Nur zur Ansicht. \
-         Diese Werte stehen in der Festschreibung und ändern sich nur über eine Grenzfreigabe, \
-         nie über diese Seite. Verbrauch und Rest je KI stehen auf Live.</p><table>",
+         Diese Schutzgrenzen gelten für jeden Lauf. Änderungen brauchen deine ausdrückliche Freigabe \
+         und werden außerhalb dieses Formulars geprüft. Verbrauch und Rest je KI stehen auf Live.</p><table>",
     );
     for g in &e.grenzen {
         let _ = write!(
@@ -1263,6 +1282,75 @@ fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
     );
 }
 
+/// Der erste Einrichtungsschritt bleibt im automatisch erneuerten Statusbereich.
+fn journal_teil(token: &str, z: &Zustand) -> String {
+    let mut s = String::from(
+        "<section id=\"journal\"><h2>1. Journal</h2><p>Hier hält DepotSchlopf seine Läufe und Papierdaten dauerhaft fest.</p>",
+    );
+    match z
+        .lage
+        .as_ref()
+        .and_then(|l| l.bild.punkte.iter().find(|p| p.name == "Journal"))
+    {
+        Some(p) => {
+            if let Some(stand) = z.auftrag_stand(Art::Einrichten) {
+                let _ = write!(
+                    s,
+                    "<p>Journal einrichten {stand}. Bitte warte auf den Abschluss.</p>"
+                );
+            } else {
+                let _ = write!(s, "<p>{}</p>", maskiere(&p.text));
+            }
+            if p.abhilfe == Some(Abhilfe::JournalEinrichten) {
+                let knopf = auftrag_knopf(token, z, Art::Einrichten, "Journal einrichten");
+                s.push_str(&knopf);
+            }
+        }
+        None => s.push_str("<p class=\"leise\">Wird geprüft. Bitte warte einen Moment.</p>"),
+    }
+    s.push_str("</section>");
+    s
+}
+
+fn erste_schritte(z: &Zustand, e: &Einrichtung) -> String {
+    let schluessel = if e.schluessel.is_empty()
+        || e.schluessel
+            .iter()
+            .any(|(_, st)| *st == SchluesselStand::Unbekannt)
+    {
+        "unbekannt"
+    } else if e.schluessel.iter().all(|(_, st)| {
+        matches!(
+            st,
+            SchluesselStand::Geprueft(_) | SchluesselStand::Hinterlegt
+        )
+    }) {
+        "hinterlegt; die Verbindung wird beim echten Lauf geprüft"
+    } else {
+        "bitte ergänzen oder prüfen"
+    };
+    let plan = if z.zeitplan.an {
+        "eingeschaltet"
+    } else {
+        "aus; erst nach dem manuellen Test empfohlen"
+    };
+    let autostart = match e.autostart {
+        autostart::Stand::An => "eingeschaltet",
+        autostart::Stand::Aus => "aus; optional für den Dauerbetrieb",
+        _ => "bitte unten prüfen",
+    };
+    format!(
+        "<section id=\"erste-schritte\"><h2>Erste Schritte</h2><ol>\
+        <li><a href=\"#journal\">Journal einrichten</a>: Den aktuellen Stand siehst du oben.</li>\
+        <li><a href=\"#schluessel\">Schlüssel</a>: {schluessel}.</li>\
+        <li><a href=\"#quellen\">Datenquellen prüfen</a>: Kurse und Termine einmal von Hand abrufen. \
+        Danach auf <a href=\"/\">Live</a> Ergebnis und KI-Budget ansehen und einen Papiertag testen.</li>\
+        <li><a href=\"#zeitplan\">Zeitplan</a>: {plan}.</li>\
+        <li><a href=\"#autostart\">Autostart</a>: {autostart}.</li></ol>\
+        <p><a href=\"#update\">Zum Update</a> · <a href=\"#werkzeuge\">Zu den Werkzeugen</a></p></section>"
+    )
+}
+
 /// Der Inhalt der Einrichtung.
 pub fn einrichtung(
     token: &str,
@@ -1275,37 +1363,30 @@ pub fn einrichtung(
     let _ = write!(
         s,
         "<div id=\"stand\" data-teil=\"/teil/status\">{}</div>",
-        status(start, z, heute)
+        status(token, start, z, heute)
     );
-    s.push_str(
-        "<section><h2>So fängst du an</h2><ol>\
-         <li>Auf <a href=\"/\">Live</a> das Journal einrichten, falls es noch fehlt.</li>\
-         <li><a href=\"#schluessel\">Schlüssel einrichten</a>, die <a href=\"#quellen\">Datenquellen prüfen</a> \
-         und auf <a href=\"/\">Live</a> einen manuellen Papiertag testen.</li>\
-         <li>Wenn der manuelle Test klappt, kannst du den <a href=\"#zeitplan\">Zeitplan</a> \
-         für automatische Läufe einschalten.</li>\
-         <li><a href=\"#autostart\">Autostart</a> ist optional. Schalte ihn ein, wenn DepotSchlopf \
-         bei deiner Windows-Anmeldung von selbst starten soll.</li></ol>\
-         <p><a href=\"#update\">Zum Update</a> · \
-         <a href=\"#papierdialog-test\">Freigabedialog gefahrlos testen</a></p></section>",
-    );
-    schluessel_teil(token, e, &mut s);
-    kostenschutz_teil(token, e, &mut s);
+    s.push_str(&erste_schritte(z, e));
+    if !matches!(&e.ki_halt, Ok(None)) {
+        kostenschutz_teil(token, e, &mut s);
+    }
     kurssperre_teil(token, e, &mut s);
     papierfreigabe_teil(token, e, &mut s);
-    let _ = write!(
-        s,
-        "<section id=\"papierdialog-test\"><h2>Windows-Dialog prüfen</h2>\
-         <p>Zeigt den Freigabedialog als Test. Es wird nichts freigegeben oder gespeichert.</p>\
-         <form method=\"post\" action=\"/papierdialog-test\">\
-         <input type=\"hidden\" name=\"t\" value=\"{}\">\
-         <button type=\"submit\">Freigabedialog testen</button></form></section>",
-        maskiere(token)
-    );
+    schluessel_teil(token, e, &mut s);
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);
     autostart_teil(token, e, &mut s);
     update_teil(token, start, z, e, &mut s);
+    s.push_str("<section id=\"werkzeuge\"><h2>Werkzeuge</h2><p>Diese Prüfungen brauchst du nur bei der ersten Einrichtung oder wenn etwas nicht funktioniert.</p>");
+    s.push_str(KI_VERBINDUNG);
+    let _ = write!(
+        s,
+        "<div id=\"papierdialog-test\"><h3>Windows-Dialog prüfen</h3>\
+         <p>Zeigt den Freigabedialog als Test. Es wird nichts freigegeben oder gespeichert.</p>\
+         <form method=\"post\" action=\"/papierdialog-test\">\
+         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <button type=\"submit\">Freigabedialog testen</button></form></div></section>",
+        maskiere(token)
+    );
     grenzen_teil(e, &mut s);
     let _ = write!(
         s,
