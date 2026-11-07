@@ -13,7 +13,7 @@ pub const ZEILE_MAX: usize = 64 * 1024;
 const ENDE_RESERVE: u64 = 1024;
 
 /// Geheimnisse werden weder formatiert noch in Fehlermeldungen übernommen.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Schutz {
     abdruecke: BTreeMap<usize, BTreeSet<String>>,
     gesperrt: bool,
@@ -66,6 +66,23 @@ impl Schutz {
                     })
                 })
             })
+    }
+
+    /// Ein Treffer darf nie die anderen Zeilen eines gespeicherten Protokolls verdecken.
+    pub(crate) fn bereinige_zeilen(&self, text: &str) -> String {
+        let mut ausgabe = String::with_capacity(text.len());
+        for zeile in text.split_inclusive('\n') {
+            let (inhalt, ende) = if let Some(inhalt) = zeile.strip_suffix("\r\n") {
+                (inhalt, "\r\n")
+            } else if let Some(inhalt) = zeile.strip_suffix('\n') {
+                (inhalt, "\n")
+            } else {
+                (zeile, "")
+            };
+            ausgabe.push_str(&self.bereinige(inhalt));
+            ausgabe.push_str(ende);
+        }
+        ausgabe
     }
 
     pub(crate) fn bereinige(&self, text: &str) -> String {
@@ -472,5 +489,15 @@ mod tests {
         assert!(lesen(&wurzel, "79-21").is_ok());
         fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
         Ok(())
+    }
+    #[test]
+    fn mehrere_zeilen_werden_einzeln_geprueft() {
+        let schutz = Schutz::default();
+        assert_eq!(
+            schutz.bereinige_zeilen(
+                "Anfang bleibt\r\nAuthorization: Basic beispiel\r\nEnde bleibt ohne Zeilenende"
+            ),
+            "Anfang bleibt\r\n[Ausgabe mit Zugangsdaten entfernt.]\r\nEnde bleibt ohne Zeilenende"
+        );
     }
 }

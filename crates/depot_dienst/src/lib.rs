@@ -276,7 +276,7 @@ fn protokoll_lesen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
     };
     match protokoll::lesen(&d.wurzel, kennung) {
         Ok(text) => {
-            let text = d.protokoll_bereinigen(&text);
+            let text = d.protokoll_datei_bereinigen(&text);
             if a.pfad == "/protokoll.txt" {
                 return antwort(200, "text/plain; charset=utf-8", text.as_bytes());
             }

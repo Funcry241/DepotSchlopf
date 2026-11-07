@@ -2099,3 +2099,28 @@ fn fehlendes_diagnoselog_wird_erklaert_ohne_lauf_zu_verhindern() -> Result<(), S
     fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[test]
+fn gespeichertes_protokoll_entfernt_nur_die_trefferzeile() -> Result<(), String> {
+    let wurzel = ordner()?;
+    fs::create_dir(wurzel.join("daten/protokolle")).map_err(|e| e.to_string())?;
+    // Ein älteres Log, das noch nicht mit der heutigen Musterschicht geschrieben wurde.
+    let text = "Anfang bleibt\r\nAuthorization: Basic beispiel\r\nEnde bleibt ohne Zeilenende";
+    fs::write(wurzel.join("daten/protokolle/123-1.log"), text).map_err(|e| e.to_string())?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(12, 0)?;
+    for adresse in ["/protokoll?lauf=123-1", "/protokoll.txt?lauf=123-1"] {
+        let antwort = get(&d, adresse, t);
+        assert!(antwort.starts_with("HTTP/1.1 200"));
+        assert!(antwort.contains(
+            "Anfang bleibt\r\n[Ausgabe mit Zugangsdaten entfernt.]\r\nEnde bleibt ohne Zeilenende"
+        ), "{adresse}: {antwort:?}");
+        assert!(!antwort.contains("beispiel"));
+    }
+    assert_eq!(
+        fs::read_to_string(wurzel.join("daten/protokolle/123-1.log")).map_err(|e| e.to_string())?,
+        text
+    );
+    fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+    Ok(())
+}

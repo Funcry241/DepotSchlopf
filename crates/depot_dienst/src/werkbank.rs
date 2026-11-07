@@ -527,6 +527,16 @@ impl Dienst {
             .bereinige(text)
     }
 
+    pub(crate) fn protokoll_datei_bereinigen(&self, text: &str) -> String {
+        // Nur die Prüfsummen kopieren. Lange Dateien blockieren weder Live noch den Arbeiter.
+        let schutz = self
+            .protokoll_schutz
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        schutz.bereinige_zeilen(text)
+    }
+
     fn protokoll_beginnen(&self, z: &mut Zustand, a: &Auftrag) {
         z.protokoll_fehler = None;
         self.protokoll_schutz
