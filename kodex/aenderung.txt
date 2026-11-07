@@ -1,10 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Funktion
-zweck: Zugangsdaten in Adressen, Headern und Fehlermeldungen vor Ausgabe an der Quelle gemeinsam maskieren.
+klasse: RefactorOnly
+zweck: Journal-Fehlergegenprobe unter Windows über den eigenen gesperrten Dateizugriff lesen, ohne die Produktionslogik zu ändern.
 pfade:
-crates/depot_kern/
-crates/depot_sammler/
-crates/depot_berater/
-crates/depot_dienst/
-docs/ARCHITEKTUR.md
-README.md
+crates/depot_journal/src/lib.rs
+crates/depot_journal/src/datei.rs
