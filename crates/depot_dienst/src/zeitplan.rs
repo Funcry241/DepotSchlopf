@@ -32,6 +32,8 @@ pub struct Zeitplan {
     pub kurse: (u8, u8),
     /// Nach erfolgreichem Kursabruf des Zeitplans den Papiertag starten.
     pub papier_danach: bool,
+    /// Zusaetzliche kostenlose RSS-Abrufe tagsueber. Altinstallationen bleiben aus.
+    pub nachrichten_an: bool,
 }
 
 impl Default for Zeitplan {
@@ -44,6 +46,7 @@ impl Default for Zeitplan {
             termine: (17, 40),
             kurse: (17, 45),
             papier_danach: true,
+            nachrichten_an: false,
         }
     }
 }
@@ -84,13 +87,18 @@ pub fn uhrzeit_text((h, m): (u8, u8)) -> String {
 
 impl Zeitplan {
     pub fn als_text(&self) -> String {
-        format!(
+        let basis = format!(
             "{KOPF}\nan={}\ntermine={}\nkurse={}\npapier_danach={}\n",
             ja_nein(self.an),
             uhrzeit_text(self.termine),
             uhrzeit_text(self.kurse),
             ja_nein(self.papier_danach)
-        )
+        );
+        if self.nachrichten_an {
+            format!("{basis}nachrichten_an=ja\n")
+        } else {
+            basis
+        }
     }
 
     /// Liest genau die eigene Form.
@@ -114,6 +122,11 @@ impl Zeitplan {
         let termine = lies_uhrzeit(&wert("termine")?).ok_or("Zeitplan: termine")?;
         let kurse = lies_uhrzeit(&wert("kurse")?).ok_or("Zeitplan: kurse")?;
         let papier_danach = lies_ja_nein(&wert("papier_danach")?).ok_or("Zeitplan: papier")?;
+        let nachrichten_an = match z.next() {
+            None => false,
+            Some("nachrichten_an=ja") => true,
+            Some(_) => return Err("Zeitplan: RSS-Einstellung ungueltig".into()),
+        };
         if z.next().is_some() {
             return Err("Zeitplan: Zeile zu viel".into());
         }
@@ -122,6 +135,7 @@ impl Zeitplan {
             termine,
             kurse,
             papier_danach,
+            nachrichten_an,
         };
         if plan.als_text() != text {
             return Err("Zeitplan: nicht in eigener Form".into());
@@ -244,7 +258,7 @@ impl Erledigt {
             Art::KurseVon(Boerse::Xetra) => self.kurse = Some(tag),
             Art::KurseVon(Boerse::Nyse) => self.kurse_nyse = Some(tag),
             Art::Papier => self.papier = Some(tag),
-            Art::Einrichten | Art::Kurse | Art::UpdatePruefen | Art::Update => {}
+            Art::Einrichten | Art::Kurse | Art::Nachrichten | Art::UpdatePruefen | Art::Update => {}
         }
     }
 }

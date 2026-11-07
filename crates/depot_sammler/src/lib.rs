@@ -4,7 +4,7 @@
 //! NYSE: Tiingo, umgerechnet mit den Referenzkursen der EZB),
 //! legt jede rohe Antwort unter `daten/roh/` ab, belegt jeden Kurs vor seiner Verwendung im
 //! Journal und prueft die Kurse danach wie jeden Kurs (`pruefe_kurse`). Ebenso belegt er Termine
-//! der EZB (`termine`) und einmal am Tag Marktnachrichten (`nachrichten`). Er sendet keine
+//! der EZB (`termine`) und kostenlose RSS-Schlagzeilen (`nachrichten`). Er sendet keine
 //! Auftraege und fragt keine KI.
 //!
 //! Netzzugang hat nur dieses Crate (Kodex, `NETZ_ERLAUBT`), und kein anderes Crate haengt von
@@ -27,6 +27,8 @@ pub mod ezb;
 pub use depot_kern::liste;
 pub mod nachrichten;
 pub mod netz;
+pub mod rss;
+mod rss_quellen;
 pub mod sammeln;
 pub mod schluessel;
 pub mod termine;

@@ -783,6 +783,7 @@ fn zeitplan_ueber_die_seite_speichern_und_aktivieren() -> Result<(), String> {
         termine: (8, 0),
         kurse: (18, 5),
         papier_danach: false,
+        nachrichten_an: false,
     };
     assert_eq!(d.sperre().zeitplan, erwartet);
     let datei = fs::read_to_string(wurzel.join("daten").join("zeitplan.txt"))
@@ -2175,5 +2176,93 @@ fn dienst_maskiert_vor_speicherung_und_meldet_das_zweite_netz() -> Result<(), St
     assert!(download.contains("prices?token=***&x=1"));
     assert!(download.contains("Ende bleibt"));
     fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[test]
+fn rss_intraday_ist_opt_in_spart_abrufe_und_uebersteht_neustart() -> Result<(), String> {
+    let wurzel = eingeschaltet(ordner()?)?;
+    let t = some(
+        Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0)),
+        "Samstag",
+    )?;
+    let d = dienst(wurzel.clone(), true);
+    assert!(
+        d.schritt(t).is_none(),
+        "kein neuer Netzzugriff ohne Einschalten"
+    );
+    {
+        let mut z = d.sperre();
+        z.zeitplan.nachrichten_an = true;
+        fs::write(wurzel.join("daten/zeitplan.txt"), z.zeitplan.als_text())
+            .map_err(|e| e.to_string())?;
+    }
+    let (nr, kind) = some(d.schritt(t), "RSS auch am Wochenende")?;
+    assert_eq!(
+        d.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Nachrichten)
+    );
+    d.verfolge(nr, kind, || {
+        Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0))
+    });
+    assert!(d.schritt(t).is_none());
+    drop(d);
+    let neu = dienst(wurzel, true);
+    assert!(
+        neu.schritt(t).is_none(),
+        "Neustart setzt die Pause nicht zurueck"
+    );
+    let spaeter = some(
+        Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 13, 30, 0)),
+        "spaeter",
+    )?;
+    let (_, mut kind) = some(neu.schritt(spaeter), "RSS nach 90 Minuten")?;
+    assert_eq!(
+        neu.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Nachrichten)
+    );
+    let _ = kind.wait();
+    Ok(())
+}
+
+#[test]
+fn rss_checkbox_bleibt_bei_fehlern_erhalten_und_wird_dauerhaft_gespeichert() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let u = Attrappe::default();
+    let t = donnerstag(12, 0)?;
+    let falsch = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&aktion=speichern&termine=kaputt&kurse=17%3A45&nachrichten_an=ja"),
+    );
+    let antwort = text(&behandle(&d, &u, &falsch, t));
+    assert!(antwort.contains("nachrichten_an=ja"), "{antwort}");
+    assert!(!d.sperre().zeitplan.nachrichten_an);
+    let richtig = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&aktion=speichern&termine=17%3A40&kurse=17%3A45&nachrichten_an=ja"),
+    );
+    assert!(text(&behandle(&d, &u, &richtig, t)).contains("m=zeitplan#zeitplan"));
+    assert!(d.sperre().zeitplan.nachrichten_an);
+    let inhalt =
+        fs::read_to_string(wurzel.join("daten/zeitplan.txt")).map_err(|e| e.to_string())?;
+    assert!(Zeitplan::lies(&inhalt)?.nachrichten_an);
+    let seite = text(&behandle(
+        &d,
+        &u,
+        &anfrage("GET", "/einrichtung", &[("Host", HOST)], ""),
+        t,
+    ));
+    assert!(seite.contains("name=\"nachrichten_an\""));
+    Ok(())
+}
+
+#[test]
+fn wartende_schlagzeilen_starten_nach_ausschalten_nicht_mehr() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    d.einreihen(Art::Nachrichten, Anlass::Zeitplan)
+        .map_err(str::to_string)?;
+    assert!(d.schritt(donnerstag(12, 0)?).is_none());
+    assert!(d.sperre().laufend.is_none());
     Ok(())
 }

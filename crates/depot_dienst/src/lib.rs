@@ -302,6 +302,7 @@ fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
         termine: lies_uhrzeit(feld(f, "termine")?)?,
         kurse: lies_uhrzeit(feld(f, "kurse")?)?,
         papier_danach: haken("papier_danach")?,
+        nachrichten_an: haken("nachrichten_an")?,
     })
 }
 

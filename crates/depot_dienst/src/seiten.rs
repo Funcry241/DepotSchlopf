@@ -773,6 +773,7 @@ pub struct Entwurf {
     pub termine: Option<(u8, u8)>,
     pub kurse: Option<(u8, u8)>,
     pub papier_danach: Option<bool>,
+    pub nachrichten_an: Option<bool>,
 }
 
 impl Entwurf {
@@ -793,12 +794,16 @@ impl Entwurf {
             termine: zeit("termine"),
             kurse: zeit("kurse"),
             papier_danach: haken("papier_danach"),
+            nachrichten_an: haken("nachrichten_an"),
         }
     }
 
     /// Als Teil einer Abfrage (`&entwurf=ja&...`), nur mit gueltigen Werten.
     pub fn als_abfrage(&self) -> String {
         let mut q = String::from("&entwurf=ja");
+        if self.nachrichten_an == Some(true) {
+            q.push_str("&nachrichten_an=ja");
+        }
         if self.papier_danach == Some(true) {
             q.push_str("&papier_danach=ja");
         }
@@ -978,6 +983,10 @@ fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
              EZB-Referenzkursen; je mit Schlüssel)",
         ),
         (Art::Termine, "Termine der EZB (ohne Schlüssel)"),
+        (
+            Art::Nachrichten,
+            "Schlagzeilen: tagesschau und BBC World (kostenlos, ohne Schlüssel; mindestens 90 Minuten Abrufpause)",
+        ),
     ] {
         // Ein Kursabruf je Boerse zaehlt fuer die Kursquellen mit.
         let gleich = |a: Art| a == art || (art == Art::Kurse && matches!(a, Art::KurseVon(_)));
@@ -1066,7 +1075,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <button type=\"submit\"{gesperrt}>{knopf}</button></form>\
          <h3>Uhrzeiten und automatische Läufe</h3>\
          <p>Änderungen unten gelten erst nach dem Speichern. Der Schalter oben nutzt die zuletzt \
-         gespeicherten Einstellungen. Läufe sind montags bis freitags, nach Frankfurter Zeit. \
+         gespeicherten Einstellungen. Kurs- und Terminläufe sind montags bis freitags, nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten. Das löst keine zusätzlichen KI-Aufrufe aus. \
          Für Xetra ist 17:45 Uhr voreingestellt, kurz nach Börsenschluss.</p>\
          {entwurf_hinweis}\
          <form method=\"post\" action=\"/zeitplan\">\
@@ -1079,10 +1088,14 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <label><input type=\"checkbox\" name=\"papier_danach\" value=\"ja\"{}> \
          Nach dem letzten Kursabruf des Tages den Papiertag starten (wenn ein Abruf des Tages \
          erfolgreich war)</label>\
+         <label><input type=\"checkbox\" name=\"nachrichten_an\" value=\"ja\"{}> \
+         Zusätzlich tagsüber Schlagzeilen abrufen (empfohlen für das Weltmodell, kostenlos, \
+         keine zusätzlichen KI-Aufrufe; gilt nur bei eingeschaltetem Zeitplan)</label>\
          <button type=\"submit\">Einstellungen speichern</button></form></section>",
         uhrzeit_text(ent.termine.unwrap_or(p.termine)),
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),
-        haken(ent.papier_danach.unwrap_or(p.papier_danach))
+        haken(ent.papier_danach.unwrap_or(p.papier_danach)),
+        haken(ent.nachrichten_an.unwrap_or(p.nachrichten_an))
     );
 }
 

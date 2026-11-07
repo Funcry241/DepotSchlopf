@@ -28,6 +28,7 @@ authors = ["Funcry241"]
 publish = false
 
 [workspace.dependencies]
+quick-xml = { version = "0.42", default-features = false }
 sha2 = "0.10"
 # Nur depot_sammler und depot_berater: HTTPS ohne C-Bibliothek ausser ring, ohne Kompression.
 ureq = { version = "3.5", default-features = false, features = ["rustls"] }

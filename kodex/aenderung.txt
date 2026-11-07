@@ -1,5 +1,11 @@
-klasse: KodexAenderung
-zweck: Pruefbaeume exklusiv ausserhalb des Build-Ordners reservieren und fremde Testkopien nie loeschen.
+klasse: FestschreibungAenderung
+zweck: Kostenlose feste RSS-Quellen mit sparsamen Abrufen und sicherer GUI-Anbindung statt Premium-Nachrichten.
 pfade:
-crates/depot_kodex/tests/befunde.rs
-docs/befunde/kodex.md
+Cargo.toml
+Cargo.lock
+crates/depot_sammler/
+crates/depot_dienst/
+README.md
+CHANGELOG.md
+docs/befunde/nachrichten.md
+kodex/festschreibung.txt

@@ -226,19 +226,14 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         "[Sammler] Belegt im Journal {}, rohe Antworten unter daten/roh/.",
         journal_pfad.display()
     );
-    // Danach die Nachrichten mit demselben Schluessel. Sie aendern den Ausgang nicht: Ohne
+    // Danach kostenlose RSS-Schlagzeilen, unabhaengig von Kursschluesseln. Ohne
     // Nachrichten entscheiden die Berater aus Kursen und Terminen.
-    if boerse != Some(Boerse::Nyse)
-        && bericht.abbruch.is_none()
+    if bericht.abbruch.is_none()
         && bericht.verbindung.is_none()
-        && schluessel.von(Anbieter::AlphaVantage).is_some()
-    {
-        std::thread::sleep(PAUSE);
-        if nachrichten_holen(&mut journal, &schluessel, wurzel)
+        && nachrichten_holen(&mut journal, &schluessel, wurzel)
             == NachrichtenAusgang::Sicherheitsabbruch
-        {
-            return ExitCode::FAILURE;
-        }
+    {
+        return ExitCode::FAILURE;
     }
     // Erfolg nur mit verwendbaren Kursen: Ein spaeterer Lauf darf sich auf den Ausgang
     // verlassen (K19-02).
@@ -314,7 +309,7 @@ fn nachrichten_holen(
     schluessel: &Zugang,
     wurzel: &Path,
 ) -> NachrichtenAusgang {
-    println!("[Sammler] Hole die Nachrichten von Alpha Vantage ...");
+    println!("[Sammler] Hole kostenlose Schlagzeilen von tagesschau und BBC World ...");
     match sammle_nachrichten(
         journal,
         &mut Https::neu(),
@@ -326,6 +321,9 @@ fn nachrichten_holen(
             if b.sicherheitsabbruch {
                 sperre(wurzel);
                 return NachrichtenAusgang::Sicherheitsabbruch;
+            }
+            for text in &b.quellen {
+                println!("[Sammler] {text}");
             }
             if let Some(d) = &b.rohdatei {
                 println!("[Sammler] Rohe Antwort: {}", d.display());
