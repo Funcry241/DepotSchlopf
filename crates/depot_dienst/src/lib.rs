@@ -308,6 +308,7 @@ fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
         kurse: lies_uhrzeit(feld(f, "kurse")?)?,
         papier_danach: haken("papier_danach")?,
         nachrichten_an: haken("nachrichten_an")?,
+        vorbereitung: zeitplan::VorbereitungsPlan::aus_bool(haken("vorbereitung_an")?),
     })
 }
 
@@ -397,7 +398,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
 fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
     let f = formular(a.abfrage.as_bytes()).unwrap_or_default();
     let (art, sha, ziel) = match feld(&f, "art").and_then(Art::aus_kurz) {
-        Some(Art::Papier) => (Art::Papier, None, "/"),
+        Some(art @ (Art::Papier | Art::Vorbereiten)) => (art, None, "/"),
         Some(Art::Update) => {
             let z = d.sperre();
             let Some((sha, _)) = z
@@ -421,6 +422,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
     };
     let bestaetigt = feld(f, "geprueft") == Some("ja");
     let ort = match art {
+        Art::Vorbereiten if !bestaetigt => "/?m=vorbereitung_bestaetigen",
         Art::Papier if !bestaetigt => "/?m=papier_bestaetigen",
         Art::Update if !bestaetigt => "/einrichtung?m=update_bestaetigen#update",
         Art::Update => {
@@ -462,6 +464,11 @@ fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
                     "/einrichtung?m=zeitplan_ungueltig{entwurf}#zeitplan"
                 ));
             };
+            if plan.vorbereitung.aktiv() && !plan.nachrichten_an {
+                return http::umleitung(&format!(
+                    "/einrichtung?m=vorbereitung_quellen{entwurf}#zeitplan"
+                ));
+            }
             (
                 "zeitplan",
                 entwurf,

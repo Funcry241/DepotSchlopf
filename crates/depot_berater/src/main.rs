@@ -53,7 +53,7 @@ fn schluessel(wer: BeraterId) -> Option<Schluessel> {
     }
 }
 
-fn lauf(wurzel: &Path) -> Result<(), String> {
+fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
     let werte = beobachtungsliste()?;
     let universum = als_universum(&werte);
     let heute = heute().ok_or("Uhr liefert kein Datum")?;
@@ -81,6 +81,15 @@ fn lauf(wurzel: &Path) -> Result<(), String> {
         sperre.clone(),
     )
     .mit_protokoll(protokoll, jetzt);
+    if vorbereitung {
+        let zeit = jetzt().ok_or("Uhr liefert keine Zeit")?;
+        dachs = dachs.fuer_vorbereitung(zeit);
+        maus = maus.fuer_vorbereitung(zeit);
+        let text =
+            depot_sim::vorbereitung::lauf(wurzel, zeit, &universum, &mut dachs, &mut maus, jetzt)?;
+        println!("[Vorbereitung] {text}");
+        return Ok(());
+    }
     for (name, b) in [("Dachs", &dachs), ("Maus", &maus)] {
         if let Some(p) = b.pause() {
             eprintln!("[Papier] {name} pausiert ({p}): wird nicht gefragt, nichts reserviert.");
@@ -107,11 +116,11 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.as_slice() != ["papier"] {
-        eprintln!("[Papier] Aufruf: run.cmd papier");
+    if args.as_slice() != ["papier"] && args.as_slice() != ["vorbereiten"] {
+        eprintln!("[Papier] Aufruf: run.cmd papier oder run.cmd vorbereiten");
         return ExitCode::from(2);
     }
-    match lauf(&wurzel) {
+    match lauf(&wurzel, args.as_slice() == ["vorbereiten"]) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("[Papier] HALT: {e}");

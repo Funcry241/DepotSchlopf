@@ -22,6 +22,21 @@ use crate::werkbank::Art;
 /// 17:45 Uhr nach 17:35 Uhr, gut innerhalb des Hoechstalters von 20 Minuten.
 pub const NACHLAUF_MIN: i64 = 10;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VorbereitungsPlan {
+    #[default]
+    Aus,
+    An,
+}
+impl VorbereitungsPlan {
+    pub fn aktiv(self) -> bool {
+        self == Self::An
+    }
+    pub fn aus_bool(an: bool) -> Self {
+        if an { Self::An } else { Self::Aus }
+    }
+}
+
 /// Der Zeitplan, wie er in `daten/zeitplan.txt` steht.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Zeitplan {
@@ -34,6 +49,8 @@ pub struct Zeitplan {
     pub papier_danach: bool,
     /// Zusaetzliche kostenlose RSS-Abrufe tagsueber. Altinstallationen bleiben aus.
     pub nachrichten_an: bool,
+    /// Einmal je boersenfreiem Tag, innerhalb des bestehenden KI-Budgets.
+    pub vorbereitung: VorbereitungsPlan,
 }
 
 impl Default for Zeitplan {
@@ -47,6 +64,7 @@ impl Default for Zeitplan {
             kurse: (17, 45),
             papier_danach: true,
             nachrichten_an: false,
+            vorbereitung: VorbereitungsPlan::Aus,
         }
     }
 }
@@ -94,11 +112,14 @@ impl Zeitplan {
             uhrzeit_text(self.kurse),
             ja_nein(self.papier_danach)
         );
+        let mut text = basis;
         if self.nachrichten_an {
-            format!("{basis}nachrichten_an=ja\n")
-        } else {
-            basis
+            text.push_str("nachrichten_an=ja\n");
         }
+        if self.vorbereitung.aktiv() {
+            text.push_str("vorbereitung_an=ja\n");
+        }
+        text
     }
 
     /// Liest genau die eigene Form.
@@ -122,13 +143,17 @@ impl Zeitplan {
         let termine = lies_uhrzeit(&wert("termine")?).ok_or("Zeitplan: termine")?;
         let kurse = lies_uhrzeit(&wert("kurse")?).ok_or("Zeitplan: kurse")?;
         let papier_danach = lies_ja_nein(&wert("papier_danach")?).ok_or("Zeitplan: papier")?;
-        let nachrichten_an = match z.next() {
-            None => false,
-            Some("nachrichten_an=ja") => true,
-            Some(_) => return Err("Zeitplan: RSS-Einstellung ungueltig".into()),
-        };
-        if z.next().is_some() {
-            return Err("Zeitplan: Zeile zu viel".into());
+        let mut nachrichten_an = false;
+        let mut vorbereitung_an = false;
+        for zeile in z {
+            match zeile {
+                "nachrichten_an=ja" if !nachrichten_an => nachrichten_an = true,
+                "vorbereitung_an=ja" if !vorbereitung_an => vorbereitung_an = true,
+                _ => return Err("Zeitplan: Einstellung ungueltig oder doppelt".into()),
+            }
+        }
+        if vorbereitung_an && !nachrichten_an {
+            return Err("Vorbereitung braucht Schlagzeilen".into());
         }
         let plan = Zeitplan {
             an,
@@ -136,6 +161,7 @@ impl Zeitplan {
             kurse,
             papier_danach,
             nachrichten_an,
+            vorbereitung: VorbereitungsPlan::aus_bool(vorbereitung_an),
         };
         if plan.als_text() != text {
             return Err("Zeitplan: nicht in eigener Form".into());
@@ -258,7 +284,12 @@ impl Erledigt {
             Art::KurseVon(Boerse::Xetra) => self.kurse = Some(tag),
             Art::KurseVon(Boerse::Nyse) => self.kurse_nyse = Some(tag),
             Art::Papier => self.papier = Some(tag),
-            Art::Einrichten | Art::Kurse | Art::Nachrichten | Art::UpdatePruefen | Art::Update => {}
+            Art::Einrichten
+            | Art::Kurse
+            | Art::Nachrichten
+            | Art::Vorbereiten
+            | Art::UpdatePruefen
+            | Art::Update => {}
         }
     }
 }

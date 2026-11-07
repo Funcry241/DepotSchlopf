@@ -59,6 +59,7 @@ pub struct KiBerater<N: Netz> {
     limit_im_lauf: bool,
     /// Wartet vor einem neuen Versand; in Tests ohne echtes Warten.
     schlafe: fn(Duration),
+    vorbereitung: Option<Zeitpunkt>,
 }
 
 impl<N: Netz> fmt::Debug for KiBerater<N> {
@@ -100,7 +101,15 @@ impl<N: Netz> KiBerater<N> {
             protokoll: None,
             limit_im_lauf: false,
             schlafe: std::thread::sleep,
+            vorbereitung: None,
         }
+    }
+
+    /// Derselbe Kostenschutz, aber ein reiner Beobachtungsauftrag ohne Handelsziele.
+    #[must_use]
+    pub fn fuer_vorbereitung(mut self, zeit: Zeitpunkt) -> Self {
+        self.vorbereitung = Some(zeit);
+        self
     }
 
     /// Wartet mit `schlafe` statt echt (fuer Tests).
@@ -298,6 +307,14 @@ impl<N: Netz> KiBerater<N> {
         let mut warten = WARTEZEITEN.iter();
         let mut versuch = 1_usize;
         loop {
+            if let Some(start) = self.vorbereitung {
+                let jetzt = self.protokoll.as_ref().and_then(|(_, uhr)| uhr());
+                if jetzt.is_none_or(|j| {
+                    j.datum() != start.datum() || depot_sim::vorbereitung::tag_jetzt(j).is_none()
+                }) {
+                    return Err("nicht gesendet: Zeitfenster der Vorbereitung abgelaufen".into());
+                }
+            }
             match self
                 .netz
                 .sende(self.anbieter.url(), kopf, inhalt.as_bytes())
@@ -529,16 +546,33 @@ impl<N: Netz> Berater for KiBerater<N> {
     }
 
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
-        let system = frage::system(self.wer, &self.grenzen);
-        let f = frage::vorschlag_frage(lage, &self.universum);
+        let system = self.vorbereitung.map_or_else(
+            || frage::system(self.wer, &self.grenzen),
+            |_| frage::vorbereitung_system(self.wer),
+        );
+        let f = self.vorbereitung.map_or_else(
+            || frage::vorschlag_frage(lage, &self.universum),
+            |zeit| frage::vorbereitung_frage(lage, &self.universum, zeit),
+        );
         let e = self.fragen(&erlaubnis, &system, &f);
         match e
             .text
             .and_then(|t| frage::lies_vorschlag(&t, self.wer, &self.universum))
-            .and_then(|a| self.ohne_geheimnis_antwort(a))
-        {
+            .and_then(|a| {
+                if self.vorbereitung.is_some() && a.vorschlag.is_some() {
+                    Err("Vorbereitung enthält unerlaubte Handelsziele".into())
+                } else {
+                    self.ohne_geheimnis_antwort(a)
+                }
+            }) {
             Ok(mut a) => {
-                a.prognose = a.prognose.filter(|p| frage::prognose_sichtbar(p, lage, &f));
+                a.prognose = a.prognose.filter(|p| {
+                    if self.vorbereitung.is_some() {
+                        frage::prognose_ereignis_sichtbar(p, lage, &f)
+                    } else {
+                        frage::prognose_sichtbar(p, lage, &f)
+                    }
+                });
                 a.einschaetzung = format!("{} [{}]", a.einschaetzung, e.kosten);
                 a
             }

@@ -784,6 +784,7 @@ fn zeitplan_ueber_die_seite_speichern_und_aktivieren() -> Result<(), String> {
         kurse: (18, 5),
         papier_danach: false,
         nachrichten_an: false,
+        vorbereitung: depot_dienst::zeitplan::VorbereitungsPlan::Aus,
     };
     assert_eq!(d.sperre().zeitplan, erwartet);
     let datei = fs::read_to_string(wurzel.join("daten").join("zeitplan.txt"))
@@ -2306,6 +2307,106 @@ fn rss_intraday_ist_opt_in_spart_abrufe_und_uebersteht_neustart() -> Result<(), 
         Some(Art::Nachrichten)
     );
     let _ = kind.wait();
+    Ok(())
+}
+
+#[test]
+fn vorbereitungsautomatik_folgt_erfolgreichen_nachrichten_und_bleibt_nach_neustart_einmalig()
+-> Result<(), String> {
+    let wurzel = eingeschaltet(ordner()?)?;
+    let t = Datum::neu(2026, 11, 7)
+        .and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0))
+        .ok_or("Samstag")?;
+    let d = dienst(wurzel.clone(), true);
+    {
+        let mut z = d.sperre();
+        z.zeitplan.nachrichten_an = true;
+        z.zeitplan.vorbereitung = depot_dienst::zeitplan::VorbereitungsPlan::An;
+        fs::write(wurzel.join("daten/zeitplan.txt"), z.zeitplan.als_text())
+            .map_err(|e| e.to_string())?;
+    }
+    for erwartet in [Art::Nachrichten, Art::Vorbereiten] {
+        let (nr, kind) = d.schritt(t).ok_or("Auftrag fehlt")?;
+        assert_eq!(d.sperre().laufend.as_ref().map(|a| a.art), Some(erwartet));
+        d.verfolge(nr, kind, || {
+            Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0))
+        });
+    }
+    assert!(d.schritt(t).is_none());
+    drop(d);
+    let neu = dienst(wurzel, true);
+    assert!(
+        neu.schritt(t).is_none(),
+        "Neustart startet weder RSS noch Vorbereitung doppelt"
+    );
+    let spaeter = Zeitpunkt::frankfurt(t.datum().ok_or("Datum")?, 13, 30, 0).ok_or("Zeit")?;
+    let (nr, kind) = neu.schritt(spaeter).ok_or("Neuer RSS-Abruf")?;
+    assert_eq!(
+        neu.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Nachrichten)
+    );
+    neu.verfolge(nr, kind, || {
+        Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 13, 30, 0))
+    });
+    assert!(
+        neu.schritt(spaeter).is_none(),
+        "Weitere Schlagzeilen lösen keine zweite Vorbereitung aus"
+    );
+    Ok(())
+}
+
+#[test]
+fn vorbereiten_braucht_bestaetigung_und_automatik_braucht_schlagzeilen() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = Datum::neu(2026, 11, 7)
+        .and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0))
+        .ok_or("Samstag")?;
+    let seite = get(&d, "/bestaetigen?art=vorbereiten", t);
+    assert!(
+        seite.contains("echtes KI-Budget")
+            && seite.contains("geprueft")
+            && seite.contains("Abbrechen")
+    );
+    let post = formular_post("/ausfuehren", &format!("t={TOKEN}&art=vorbereiten"));
+    assert!(
+        text(&behandle(&d, &Attrappe::default(), &post, t)).contains("m=vorbereitung_bestaetigen")
+    );
+    assert!(wartend(&d).is_empty());
+    let plan = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&aktion=speichern&termine=17%3A40&kurse=17%3A45&vorbereitung_an=ja"),
+    );
+    let antwort = text(&behandle(&d, &Attrappe::default(), &plan, t));
+    assert!(antwort.contains("m=vorbereitung_quellen"));
+    assert!(get(&d, &ort(&antwort), t).contains("name=\"vorbereitung_an\" value=\"ja\" checked"));
+    assert!(!d.sperre().zeitplan.vorbereitung.aktiv());
+    let post = formular_post(
+        "/ausfuehren",
+        &format!("t={TOKEN}&art=vorbereiten&geprueft=ja"),
+    );
+    assert!(text(&behandle(&d, &Attrappe::default(), &post, t)).contains("m=auftrag"));
+    assert_eq!(wartend(&d), vec![(Art::Vorbereiten, Anlass::Hand)]);
+    Ok(())
+}
+
+#[test]
+fn vorbereitung_vor_start_ausschalten_und_alte_zeitplaene_bleiben_aus() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = Datum::neu(2026, 11, 7)
+        .and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0))
+        .ok_or("Samstag")?;
+    d.einreihen(Art::Vorbereiten, Anlass::Zeitplan)?;
+    assert!(d.schritt(t).is_none());
+    assert!(d.sperre().laufend.is_none());
+    let alter = Zeitplan::default().als_text();
+    assert!(!Zeitplan::lies(&alter)?.vorbereitung.aktiv());
+    let plan = Zeitplan {
+        nachrichten_an: true,
+        vorbereitung: depot_dienst::zeitplan::VorbereitungsPlan::An,
+        ..Zeitplan::default()
+    };
+    assert_eq!(Zeitplan::lies(&plan.als_text())?, plan);
+    assert!(Zeitplan::lies(&(plan.als_text() + "vorbereitung_an=ja\n")).is_err());
     Ok(())
 }
 

@@ -57,6 +57,7 @@ pub mod kurssperre;
 pub mod nachrichtbeleg;
 pub mod stand;
 pub mod terminbeleg;
+pub mod vorbereitung;
 pub mod weltprognose;
 
 pub use auftrag::{AuftragsLage, AuftragsZustand, Ausfuehrung, Meldung};
@@ -70,6 +71,7 @@ pub use kursbeleg::KursBeleg;
 pub use nachrichtbeleg::{MAX_NACHRICHT, NachrichtBeleg};
 pub use stand::{Abschluss, Art, AuftragsBeleg, FORMAT, FORMAT_ALT, PapierHalt, Stand};
 pub use terminbeleg::{Fortschreibung, TerminBeleg};
+pub use vorbereitung::{Vorbereitung, VorbereitungsAntwort};
 pub use weltprognose::{PrognoseBeleg, Prognoserichtung, Weltprognose};
 
 #[cfg(test)]
@@ -116,6 +118,35 @@ mod tests {
     }
 
     static NR: AtomicU32 = AtomicU32::new(0);
+
+    #[test]
+    fn vorbereitung_gibt_bei_schreibfehler_keine_aufruferlaubnis() -> Result<(), String> {
+        let datum = Datum::neu(2026, 11, 7).ok_or("Samstag")?;
+        let zeit = depot_kern::Zeitpunkt::frankfurt(datum, 12, 0, 0).ok_or("Zeit")?;
+        for fehler in 1..=3 {
+            let pfad = eingerichtet()?;
+            let mut j = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+            j.starte_vorbereitung(
+                zeit,
+                Datum::neu(2026, 11, 9).ok_or("Montag")?,
+                vec!["Beleg".into()],
+            )
+            .map_err(|e| format!("{e:?}"))?;
+            SYNC_FEHLER.with(|f| f.set(fehler));
+            let e = j.reserviere_vorbereitung(zeit, depot_kern::BeraterId::Dachs);
+            SYNC_FEHLER.with(|f| f.set(0));
+            assert!(matches!(e, Err(depot_ki::Sperre::Kassenbuch(_))));
+            assert!(
+                j.reserviere_vorbereitung(zeit, depot_kern::BeraterId::Maus)
+                    .is_err()
+            );
+            drop(j);
+            let j = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+            assert!(j.stand().ki().buchungen().len() <= 1);
+            assert_eq!(j.stand().seit_abschluss(), 0);
+        }
+        Ok(())
+    }
 
     fn eingerichtet() -> Result<PathBuf, String> {
         let n = NR.fetch_add(1, Ordering::SeqCst);

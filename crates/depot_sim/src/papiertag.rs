@@ -170,7 +170,7 @@ fn datum_text(d: Datum) -> String {
 }
 
 /// Die zum Wissensstichtag bekannten Termine und Nachrichten eines Papiertags.
-pub fn weltlage_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
+pub fn weltbelege_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
     let Some(von) = tagesbeginn(handelstag) else {
         return Vec::new();
     };
@@ -208,14 +208,61 @@ pub fn weltlage_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> V
     aus
 }
 
-/// Die belegten Nachrichten (R40), veroeffentlicht vom Beginn des Vortags bis zum Ende des
+/// Quellenbelege plus vorher fixierte Hypothesen; diese sind ausdruecklich keine Fakten.
+pub fn weltlage_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
+    let mut aus = weltbelege_am(stand, handelstag, wissen_bis);
+    for p in stand
+        .vorbereitungen()
+        .iter()
+        .filter(|p| p.zeit < wissen_bis && p.fuer <= handelstag)
+        .rev()
+    {
+        let alter = (0..=64)
+            .filter_map(|n| p.fuer.plus_tage(n))
+            .take_while(|d| *d <= handelstag)
+            .filter(|d| depot_kern::liste::handelstag(*d))
+            .count();
+        for a in p
+            .antworten
+            .iter()
+            .filter(|a| a.verwertbar && a.zeit <= wissen_bis)
+        {
+            let gueltig = a.prognose.as_ref().map_or(p.fuer == handelstag, |w| {
+                alter <= usize::from(w.handelstage)
+            });
+            if !gueltig {
+                continue;
+            }
+            aus.push(format!(
+                "Frühere KI-Hypothese {:?} für {} (kein Quellenbeleg, neu prüfen): {}",
+                a.berater, p.fuer, a.text
+            ));
+            if let Some(w) = &a.prognose
+                && let Some(e) = w
+                    .ereignis_nr
+                    .checked_sub(1)
+                    .and_then(|n| p.ereignisse.get(n))
+            {
+                aus.push(format!("Frühere Hypothese {:?}: {} {:?}; Wirkung: {}; Widerlegung/Beobachtung: {}. Ursprünglicher Beleg: {}", a.berater, w.isin, w.richtung, w.begruendung, w.widerlegung, e));
+            }
+        }
+    }
+    aus
+}
+
+/// Die belegten Nachrichten (R40), seit Beginn des vorherigen Handelstags bis zum Ende des
 /// Handelstags (UTC): hoechstens `MAX_NACHRICHTEN_LAGE`, die neueste zuerst. Wird es dem
 /// Berater zu viel, faellt so die aelteste weg.
 fn nachrichten(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
     let Some(beginn) = tagesbeginn(handelstag) else {
         return Vec::new();
     };
-    let von = beginn.checked_sub(SEKUNDEN_JE_TAG);
+    // Seit dem vorigen echten Handelstag: Samstag und Feiertage duerfen nicht am Montag
+    // verschwinden. Veroeffentlichung UND Abruf bleiben am Wissensstichtag begrenzt.
+    let von = (1..=31)
+        .filter_map(|n: i64| n.checked_neg().and_then(|n| handelstag.plus_tage(n)))
+        .find(|d| depot_kern::liste::handelstag(*d))
+        .and_then(tagesbeginn);
     let bis = beginn.checked_add(SEKUNDEN_JE_TAG);
     let mut aus: Vec<&NachrichtBeleg> = stand
         .nachrichten()

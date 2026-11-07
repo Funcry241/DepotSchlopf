@@ -192,6 +192,50 @@ fn ohne_journal_ist_einrichten_der_naechste_schritt() -> Result<(), String> {
 }
 
 #[test]
+fn vorbereitung_zeigt_beide_ergebnisse_maskiert_und_nur_echte_antworten_gruen() -> Result<(), String>
+{
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let zeit = abends(7)?;
+    j.starte_vorbereitung(zeit, tag(9)?, vec!["Quelle <script> mit Ereignis".into()])
+        .map_err(|e| format!("{e:?}"))?;
+    let _ = j
+        .reserviere_vorbereitung(zeit, BeraterId::Dachs)
+        .map_err(|e| format!("{e:?}"))?;
+    j.belege_vorbereitungsantwort(
+        zeit,
+        depot_journal::VorbereitungsAntwort {
+            zeit,
+            berater: BeraterId::Dachs,
+            gefragt: true,
+            verwertbar: true,
+            text: "These <script>".into(),
+            prognose: None,
+        },
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    j.belege_vorbereitungsantwort(
+        zeit,
+        depot_journal::VorbereitungsAntwort {
+            zeit,
+            berater: BeraterId::Maus,
+            gefragt: false,
+            verwertbar: false,
+            text: "Anbieterpause".into(),
+            prognose: None,
+        },
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    let l = lagebild(&umgebung(zeit, Zugang::Offen(j.stand())));
+    let html = html::inhalt(&l, &|_| None);
+    assert!(html.contains("09.11.2026"));
+    assert_eq!(html.matches("Einschätzung vorhanden").count(), 1);
+    assert!(html.contains("Nicht gefragt") && html.contains("Anbieterpause"));
+    assert!(html.contains("These &lt;script&gt;") && !html.contains("<script>"));
+    Ok(())
+}
+
+#[test]
 fn belegtes_journal_wartet_und_unlesbares_haelt() -> Result<(), String> {
     let l = lagebild(&umgebung(abends(5)?, Zugang::Belegt));
     assert_eq!(punkt(&l, "Journal")?.abhilfe, Some(Abhilfe::Warten));

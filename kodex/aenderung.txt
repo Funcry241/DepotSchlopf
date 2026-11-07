@@ -1,5 +1,12 @@
 klasse: Funktion
-zweck: Seltene Einstellungen und Zugangsdaten am Seitenende rot abgrenzen.
+zweck: Nächste Handelstage an börsenfreien Tagen mit getrennten KI-Einschätzungen vorbereiten, Wochenendwissen erhalten und Kosten gemeinsam begrenzen.
 pfade:
+crates/depot_berater/
 crates/depot_dienst/
-docs/befunde/fehlbedienung.md
+crates/depot_journal/
+crates/depot_lage/
+crates/depot_lauf/
+crates/depot_sim/
+README.md
+CHANGELOG.md
+docs/befunde/vorbereitung.md

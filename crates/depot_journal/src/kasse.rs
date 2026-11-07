@@ -80,7 +80,7 @@ pub(crate) fn buchung_text(b: &Buchung) -> String {
     )
 }
 
-fn lies_buchung(text: &str) -> Option<Buchung> {
+pub(crate) fn lies_buchung(text: &str) -> Option<Buchung> {
     let teile: Vec<&str> = text.split(';').collect();
     let [berater, datum, zyklus, cent] = teile.as_slice() else {
         return None;
