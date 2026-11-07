@@ -380,6 +380,7 @@ enum Schritt {
         abruf: Zeitpunkt,
         roh: Vec<u8>,
         rohdatei: PathBuf,
+        normalisierungen: Vec<(Datum, String)>,
         heute: Kurse,
         vortag: Kurse,
     },
@@ -442,21 +443,45 @@ fn lies_wert(
             }
         });
     }
+    let mut normalisierungen = Vec::new();
     let gelesen = String::from_utf8(roh.clone())
         .map_err(|_| "Antwort ist kein UTF-8".to_string())
-        .and_then(|t| lies_tageskurse(&t).map_err(|e| format!("Antwort unlesbar: {e:?}")))
+        .and_then(|t| {
+            if wert.boerse != Boerse::Nyse {
+                return lies_tageskurse(&t).map_err(|e| format!("Antwort unlesbar: {e:?}"));
+            }
+            let gelesen = depot_kern::tiingo::lies_tageskurse(&t)
+                .map_err(|e| format!("Antwort unlesbar: {e:?}"))?;
+            for r in gelesen.rundungen {
+                normalisierungen.push((r.datum, format!(
+                    "Tiingo-Normalisierung: isin={}; abruf={abruf}; roh={}; zeile={}; feld={}; original={}; nach-millionstel-usd={}; rundung=halb-gerade; abweichung-hoechstens=0.000000001-USD",
+                    wert.isin, depot_kern::abdruck::sha256_hex(&roh), r.zeile, r.feld, r.original, r.preis.fein()
+                )));
+            }
+            Ok(gelesen.kurse)
+        })
         .and_then(|tage| {
             schlusskurse_in_euro(abruf, vec![(wert.isin.clone(), wert.boerse, tage)], devisen)
                 .map_err(|e| format!("Schlusskurse: {e:?}"))
         });
     Ok(match gelesen {
-        Ok((heute, vortag)) => Schritt::Gelesen {
-            abruf,
-            roh,
-            rohdatei,
-            heute,
-            vortag,
-        },
+        Ok((heute, vortag)) => {
+            // Nur tatsächlich verwendete Tage belegen, nicht die ganze Abrufhistorie.
+            normalisierungen.retain(|(tag, _)| {
+                [&heute, &vortag].iter().any(|k| {
+                    k.eintrag(&wert.isin)
+                        .is_some_and(|kurs| kurs.handelstag() == *tag)
+                })
+            });
+            Schritt::Gelesen {
+                abruf,
+                roh,
+                rohdatei,
+                normalisierungen,
+                heute,
+                vortag,
+            }
+        }
         Err(text) => Schritt::Fehler(text),
     })
 }
@@ -486,6 +511,7 @@ pub fn sammle(
         ausgelassen: Vec::new(),
         verbindung: None,
     };
+    let mut normalisierungen = Vec::new();
     let mut heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)> = Vec::new();
     let mut vortag: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
     let mut letzter_abruf: Option<Zeitpunkt> = None;
@@ -514,15 +540,16 @@ pub fn sammle(
             (takt.schlafe)(pause);
         }
         abgerufen = true;
-        let (abruf, roh, rohdatei, h, v) =
+        let (abruf, roh, rohdatei, h, v, notizen) =
             match lies_wert(netz, zugang, schluessel, wert, &vorbereitung, takt, ablage)? {
                 Schritt::Gelesen {
                     abruf,
                     roh,
                     rohdatei,
+                    normalisierungen,
                     heute,
                     vortag,
-                } => (abruf, roh, rohdatei, heute, vortag),
+                } => (abruf, roh, rohdatei, heute, vortag, normalisierungen),
                 Schritt::Fehler(text) => {
                     bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
                     continue;
@@ -542,6 +569,7 @@ pub fn sammle(
                     continue;
                 }
             };
+        normalisierungen.extend(notizen);
         let quelle = Anbieter::fuer(wert.boerse).dienst();
         // Belegt wird nach dem Lauf, bevor irgendetwas die Kurse verwendet (R12): je Wert erst
         // der Vortag, dann heute.
@@ -571,6 +599,7 @@ pub fn sammle(
     }
 
     let gelesen = Gelesen {
+        normalisierungen,
         offen,
         letzter_abruf,
         heute,
@@ -581,6 +610,7 @@ pub fn sammle(
 
 /// Was ein Lauf gelesen, aber noch nicht belegt hat.
 struct Gelesen {
+    normalisierungen: Vec<(Datum, String)>,
     offen: Vec<KursBeleg>,
     letzter_abruf: Option<Zeitpunkt>,
     heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)>,
@@ -605,6 +635,11 @@ fn abschliessen(
             }
         }
         return Ok(bericht);
+    }
+    for (datum, text) in &g.normalisierungen {
+        journal
+            .beobachte(*datum, text)
+            .map_err(SammelFehler::Journal)?;
     }
     for beleg in &g.offen {
         journal.belege_kurs(beleg).map_err(SammelFehler::Journal)?;

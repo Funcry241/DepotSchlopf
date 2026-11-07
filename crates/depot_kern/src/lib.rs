@@ -35,6 +35,7 @@ pub mod liste;
 pub mod preis;
 pub mod quelle;
 pub mod termin;
+pub mod tiingo;
 pub mod zeit;
 
 pub use boerse::Boerse;
