@@ -299,10 +299,18 @@ fn sichere(ziel: &Path, rest: &[u8]) -> Result<(), JournalFehler> {
     if !datei_da(ziel)? {
         schreibe_atomar(ziel, rest).map_err(halt)?;
     }
-    let da = File::open(ziel).and_then(|f| {
-        f.sync_all()?;
-        fs::read(ziel)
-    });
+    // Windows verlangt Schreibrechte für sync_all. Über denselben Zugriff lesen,
+    // bevor das Journal gekürzt wird; eine vorhandene Datei wird nie überschrieben.
+    let da = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(ziel)
+        .and_then(|mut f| {
+            f.sync_all()?;
+            let mut bytes = Vec::new();
+            f.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        });
     match da {
         Ok(da) if da == rest => Ok(()),
         Ok(_) => Err(halt(format!(
@@ -894,5 +902,20 @@ impl Journal {
         self.schreibe_eintrag(Art::Ki, &buchung_text(&buchung))
             .map_err(sperre)?;
         Ok(AufrufErlaubnis::neu(buchung, deckel))
+    }
+}
+
+/// Nur für Fehlergegenproben: über den eigenen, weiterhin gesperrten Zugriff lesen.
+#[cfg(test)]
+impl Journal {
+    pub(crate) fn test_dateiinhalt(&mut self) -> std::io::Result<Vec<u8>> {
+        let position = self.datei.stream_position()?;
+        self.datei.rewind()?;
+        let mut bytes = Vec::new();
+        let gelesen = self.datei.read_to_end(&mut bytes);
+        let zurueck = self.datei.seek(SeekFrom::Start(position));
+        gelesen?;
+        zurueck?;
+        Ok(bytes)
     }
 }

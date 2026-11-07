@@ -657,6 +657,7 @@ fn befund_1_f09_kennungen_ueberstehen_den_neustart() -> Result<(), String> {
     )?;
     vorbedingung(j.melde(7, &Meldung::Verworfen), "Auftrag 7 verworfen")?;
     drop(j);
+    let vorher = vorbedingung(fs::read(&p), "lesen")?;
     let mut j = oeffnen(&p)?;
     if j.kennungsvergabe().letzte() != 7 || j.stand().auftraege().len() != 1 {
         return Err(format!(
@@ -664,7 +665,6 @@ fn befund_1_f09_kennungen_ueberstehen_den_neustart() -> Result<(), String> {
             j.kennungsvergabe().letzte()
         ));
     }
-    let vorher = vorbedingung(fs::read(&p), "lesen")?;
     let mut offen = Vec::new();
     for nr in [7, 3] {
         match j.reserviere_auftrag(&g, TopfId::A, &genehmigt(nr)?) {
@@ -672,8 +672,14 @@ fn befund_1_f09_kennungen_ueberstehen_den_neustart() -> Result<(), String> {
             anders => offen.push(format!("Kennung {nr}: {anders:?}")),
         }
     }
+    drop(j);
     if vorbedingung(fs::read(&p), "lesen")? != vorher {
         offen.push("abgelehnte Kennung geschrieben".into());
+    }
+    let mut j = oeffnen(&p)?;
+    // Ablehnung und gültiger Folgeauftrag bleiben auch in derselben Sitzung geprüft.
+    for nr in [7, 3] {
+        let _ = j.reserviere_auftrag(&g, TopfId::A, &genehmigt(nr)?);
     }
     if j.reserviere_auftrag(&g, TopfId::A, &genehmigt(8)?).is_err() {
         offen.push("naechste Kennung nach Ablehnung nicht angenommen".into());
@@ -773,8 +779,8 @@ fn unzulaessige_eintraege_werden_abgelehnt() -> Result<(), String> {
         ),
     ];
     let p = eingerichtet()?;
-    let mut j = oeffnen(&p)?;
     let vorher = vorbedingung(fs::read(&p), "lesen")?;
+    let mut j = oeffnen(&p)?;
     let mut offen = Vec::new();
     for (fall, art, inhalt) in faelle {
         match j.anhaengen(art, inhalt) {
@@ -789,8 +795,13 @@ fn unzulaessige_eintraege_werden_abgelehnt() -> Result<(), String> {
             }
         }
     }
+    drop(j);
     if vorbedingung(fs::read(&p), "lesen")? != vorher {
         offen.push("Abgelehntes geschrieben".into());
+    }
+    let mut j = oeffnen(&p)?;
+    for (_, art, inhalt) in faelle {
+        let _ = j.anhaengen(art, inhalt);
     }
     if j.beobachte(tag(2)?, "gueltig").is_err() {
         offen.push("nach Ablehnung gesperrt".into());
@@ -951,6 +962,7 @@ fn befund_k12_01_zwischendatei_veraendert_keine_fremde_datei() -> Result<(), Str
 #[test]
 fn befund_1_r02_vermerkfehler_sperrt_das_journal() -> Result<(), String> {
     let p = eingerichtet()?;
+    let vorher = vorbedingung(fs::read(&p), "lesen")?;
     let mut j = oeffnen(&p)?;
     let tmp = p.with_extension("vermerk.tmp");
     vorbedingung(
@@ -961,13 +973,13 @@ fn befund_1_r02_vermerkfehler_sperrt_das_journal() -> Result<(), String> {
         return Err("Vorbedingung: Fehler tritt nicht ein".into());
     }
     vorbedingung(fs::remove_dir(&tmp), "Verzeichnis entfernen")?;
-    let vorher = vorbedingung(fs::read(&p), "lesen")?;
     let zweiter = j.beobachte(tag(2)?, "zweite");
+    let leer = j.eintraege().is_empty();
+    drop(j);
     let nachher = vorbedingung(fs::read(&p), "lesen")?;
-    if zweiter.is_ok() || vorher != nachher || !j.eintraege().is_empty() {
+    if zweiter.is_ok() || vorher != nachher || !leer {
         return Err(format!("nach dem Fehler weitergeschrieben: {zweiter:?}"));
     }
-    drop(j);
     let mut j = oeffnen(&p)?;
     if !j.eintraege().is_empty() || j.beobachte(tag(2)?, "dritte").is_err() {
         return Err("nach dem Neustart falscher Stand".into());
@@ -1021,16 +1033,16 @@ fn befund_k13_02_journal_prueft_ki_buchungen_selbst() -> Result<(), String> {
         // Beim Anhaengen.
         let p = neuer_pfad()?;
         bestaetigt_geschrieben(&p, &inhalt_fuer(vorher))?;
-        let mut j = oeffnen(&p)?;
         let datei = vorbedingung(fs::read(&p), "lesen")?;
+        let mut j = oeffnen(&p)?;
         match j.anhaengen(*art, inhalt) {
             Err(JournalFehler::Abgelehnt(_)) => {}
             anders => offen.push(format!("{fall}, anhaengen: {anders:?}")),
         }
+        drop(j);
         if vorbedingung(fs::read(&p), "lesen")? != datei {
             offen.push(format!("{fall}: geschrieben"));
         }
-        drop(j);
         // Als vollstaendiger, unbestaetigter Anhang: Halt, der Vermerk rueckt nicht vor.
         let q = neuer_pfad()?;
         let mut mit: Vec<(Art, &str)> = vorher.clone();
@@ -1093,12 +1105,13 @@ fn befund_k13_03_ki_eintraege_nur_ueber_reserviere() -> Result<(), String> {
     for (fall, vorher, (art, inhalt)) in &faelle {
         let p = neuer_pfad()?;
         bestaetigt_geschrieben(&p, &inhalt_fuer(vorher))?;
-        let mut j = oeffnen(&p)?;
         let datei = vorbedingung(fs::read(&p), "lesen")?;
+        let mut j = oeffnen(&p)?;
         match j.anhaengen(*art, inhalt) {
             Err(JournalFehler::Abgelehnt(_)) => {}
             anders => offen.push(format!("{fall}: {anders:?}")),
         }
+        drop(j);
         if vorbedingung(fs::read(&p), "lesen")? != datei {
             offen.push(format!("{fall}: geschrieben"));
         }

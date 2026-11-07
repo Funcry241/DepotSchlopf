@@ -173,6 +173,28 @@ fn zustand(j: &Journal, nr: u64) -> Option<AuftragsZustand> {
 // Zustandsmaschine (R37)
 // ---------------------------------------------------------------------------------------------
 
+/// Ungültige Meldung prüfen und unveränderte Bytes außerhalb der Dateisperre vergleichen.
+fn pruefe_abgelehnt(
+    j: Journal,
+    p: &Path,
+    fall: &str,
+    m: &Meldung,
+    offen: &mut Vec<String>,
+) -> Result<Journal, String> {
+    drop(j);
+    let vorher = lesen(p)?;
+    let mut j = oeffnen(p)?;
+    match j.melde(1, m) {
+        Err(JournalFehler::Abgelehnt(_)) => {}
+        anders => offen.push(format!("{fall}: {anders:?}")),
+    }
+    drop(j);
+    if lesen(p)? != vorher {
+        offen.push(format!("{fall}: geschrieben"));
+    }
+    oeffnen(p)
+}
+
 /// Jeder Schritt ausserhalb der Zustandsmaschine wird abgelehnt und nichts geschrieben: ein
 /// zweiter Versand, eine Ausfuehrung vor der Annahme, ausserhalb des Limits oder ueber die
 /// Menge, ein Abschluss mit offenem Auftrag. Dieselben Eintraege in der Datei sind Halt.
@@ -188,48 +210,32 @@ fn zustandsmaschine_laesst_nur_erlaubte_schritte_zu() -> Result<(), String> {
     let tag = vorbedingung(Datum::neu(2026, 11, 2).ok_or(()), "Datum")?;
     let abschluss = "0".repeat(64);
     let mut offen = Vec::new();
-    let mut pruefe = |j: &mut Journal, fall: &str, m: Meldung| {
-        let vorher = fs::read(&p).ok();
-        match j.melde(1, &m) {
-            Err(JournalFehler::Abgelehnt(_)) => {}
-            anders => offen.push(format!("{fall}: {anders:?}")),
-        }
-        if fs::read(&p).ok() != vorher {
-            offen.push(format!("{fall}: geschrieben"));
-        }
-    };
-    pruefe(&mut j, "angenommen vor dem Versand", Meldung::Angenommen);
-    pruefe(
-        &mut j,
+    let mut pruefe =
+        |j: Journal, fall: &str, m: Meldung| pruefe_abgelehnt(j, &p, fall, &m, &mut offen);
+    j = pruefe(j, "angenommen vor dem Versand", Meldung::Angenommen)?;
+    j = pruefe(
+        j,
         "Ausfuehrung vor dem Versand",
         Meldung::Ausfuehrung(aus(1, LIMIT, 0)),
-    );
+    )?;
     vorbedingung(j.melde(1, &Meldung::Gesendet), "gesendet")?;
-    pruefe(&mut j, "zweiter Versand", Meldung::Gesendet);
-    pruefe(&mut j, "verworfen nach dem Versand", Meldung::Verworfen);
-    pruefe(
-        &mut j,
+    j = pruefe(j, "zweiter Versand", Meldung::Gesendet)?;
+    j = pruefe(j, "verworfen nach dem Versand", Meldung::Verworfen)?;
+    j = pruefe(
+        j,
         "Ausfuehrung vor der Annahme",
         Meldung::Ausfuehrung(aus(1, LIMIT, 0)),
-    );
+    )?;
     vorbedingung(j.melde(1, &Meldung::Unbekannt), "unbekannt")?;
-    pruefe(&mut j, "Versand nach unbekannt", Meldung::Gesendet);
+    j = pruefe(j, "Versand nach unbekannt", Meldung::Gesendet)?;
     vorbedingung(j.melde(1, &Meldung::Angenommen), "angenommen")?;
-    pruefe(
-        &mut j,
-        "unter dem Limit",
-        Meldung::Ausfuehrung(aus(1, 9_899, 0)),
-    );
-    pruefe(
-        &mut j,
+    j = pruefe(j, "unter dem Limit", Meldung::Ausfuehrung(aus(1, 9_899, 0)))?;
+    j = pruefe(
+        j,
         "mehr als beauftragt",
         Meldung::Ausfuehrung(aus(11, LIMIT, 0)),
-    );
-    pruefe(
-        &mut j,
-        "null Stueck",
-        Meldung::Ausfuehrung(aus(0, LIMIT, 0)),
-    );
+    )?;
+    j = pruefe(j, "null Stueck", Meldung::Ausfuehrung(aus(0, LIMIT, 0)))?;
     match j.schliesse_ab(tag, Cent(1), &abschluss) {
         Err(JournalFehler::Abgelehnt(m)) if m.contains("offenem Auftrag") => {}
         anders => offen.push(format!("Abschluss mit offenem Auftrag: {anders:?}")),
@@ -637,12 +643,15 @@ fn befund_2_a09_teilausfuehrung_mit_neustart() -> Result<(), String> {
         offen.push("Abschluss trotz Teilausfuehrung".into());
     }
     // Eine schon gebuchte Ausfuehrung meldet das Konto anders: Abweichung, nichts gebucht.
+    drop(j);
     let vorher = lesen(&p)?;
+    let mut j = oeffnen(&p)?;
     let anders = Skript::mit_order(
         KontoStatus::Gefuellt,
         &[aus(5, 10_000, 150), aus(5, 9_950, 150)],
     )?;
     let abw = vorbedingung(j.gleiche_ab(&anders), "Abgleich anders")?;
+    drop(j);
     if !abw
         .iter()
         .any(|a| matches!(a, Abweichung::Unbuchbar { nr: 1, .. }))
@@ -650,6 +659,7 @@ fn befund_2_a09_teilausfuehrung_mit_neustart() -> Result<(), String> {
     {
         offen.push(format!("abweichende Ausfuehrung: {abw:?}"));
     }
+    let mut j = oeffnen(&p)?;
     // Der Rest kommt: nur er wird gebucht.
     let ganz = Skript::mit_order(
         KontoStatus::Gefuellt,
@@ -717,7 +727,9 @@ fn befund_6_n01_widerspruechliche_bestaende_sind_abweichungen() -> Result<(), St
     if !stimmt.is_empty() {
         return Err(format!("Vorbedingung: Startstand stimmt nicht: {stimmt:?}"));
     }
+    drop(j);
     let vorher = lesen(&p)?;
+    let mut j = oeffnen(&p)?;
     for (fall, aendere) in faelle {
         let mut konto = Skript::start()?;
         aendere(&mut konto.auszug)?;
@@ -726,6 +738,7 @@ fn befund_6_n01_widerspruechliche_bestaende_sind_abweichungen() -> Result<(), St
             offen.push(format!("{fall}: keine Abweichung"));
         }
     }
+    drop(j);
     if lesen(&p)? != vorher {
         offen.push("Abgleich hat geschrieben".into());
     }

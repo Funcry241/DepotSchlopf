@@ -371,9 +371,11 @@ fn befund_6_n01_fremde_belastung_haelt_den_lauf() -> Result<(), String> {
     let sendungen = pk.innen.sendungen();
     let mut j = ort.oeffnen()?;
     let erg = lauf(&mut j, &s, &mut dachs, &mut maus, &mut pk);
+    let danach = j.stand().auftraege().len();
+    drop(j);
     if !matches!(erg, Err(LaufFehler::Halt(_)))
         || ort.bytes()? != vorher
-        || j.stand().auftraege().len() != auftraege
+        || danach != auftraege
         || pk.innen.sendungen() != sendungen
         || dachs.aufrufe.saturating_add(maus.aufrufe) != fragen
     {

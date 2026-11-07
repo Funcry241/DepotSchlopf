@@ -1,10 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
 klasse: Funktion
-zweck: Zugangsdaten in Adressen, Headern und Fehlermeldungen vor Ausgabe an der Quelle gemeinsam maskieren.
+zweck: Windows-Journalgegenproben bei Dateisperren korrigieren und Quarantaenedateien mit Schreibrecht synchronisieren, bevor das Journal gekuerzt wird.
 pfade:
-crates/depot_kern/
-crates/depot_sammler/
-crates/depot_berater/
-crates/depot_dienst/
-docs/ARCHITEKTUR.md
-README.md
+crates/depot_journal/
+crates/depot_sim/tests/konto.rs

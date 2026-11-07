@@ -142,9 +142,11 @@ mod tests {
             let erster = j.beobachte(tag, "erste");
             SYNC_FEHLER.with(|f| f.set(0));
             assert!(erster.is_err(), "{fall}: Fehler nicht eingetreten");
-            let vorher = fs::read(&p).map_err(|e| e.to_string())?;
+            // Windows erlaubt keinen zweiten Zugriff auf die exklusiv gesperrten Bytes.
+            // Die Sperre bleibt bestehen; der Test liest über den eigenen Dateizugriff.
+            let vorher = j.test_dateiinhalt().map_err(|e| e.to_string())?;
             let zweiter = j.beobachte(tag, "zweite");
-            let nachher = fs::read(&p).map_err(|e| e.to_string())?;
+            let nachher = j.test_dateiinhalt().map_err(|e| e.to_string())?;
             assert!(
                 matches!(&zweiter, Err(JournalFehler::Halt(m)) if m.contains("gesperrt")),
                 "{fall}: {zweiter:?}"
