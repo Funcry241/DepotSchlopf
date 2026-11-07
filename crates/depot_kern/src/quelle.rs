@@ -32,7 +32,7 @@ pub enum QuellenFehler {
     Felder(usize),
     /// Kein Datum der Form `JJJJ-MM-TT` im Kalender.
     Datum(usize),
-    /// Ein Preis ist kein positiver Betrag mit hoechstens sechs Nachkommastellen.
+    /// Kein positiver Dezimalbetrag, oder ein Schlusskurs ist nicht exakt als Preis darstellbar.
     Preis(usize),
     /// Der Schluss liegt nicht zwischen Tief und Hoch derselben Zeile.
     Spanne(usize),
@@ -66,6 +66,28 @@ pub fn lies_preis(text: &str) -> Option<Preis> {
     Preis::lies_euro(text).filter(|p| p.fein() > 0)
 }
 
+/// Hoch und Tief dienen nur zum Vergleich. Zusätzliche Nachkommastellen werden
+/// dabei exakt berücksichtigt, auch wenn die Quelle Fließkomma-Artefakte ausgibt.
+fn vergleiche_preisgrenze(text: &str, schluss: Preis) -> Option<std::cmp::Ordering> {
+    let Some((ganz, bruch)) = text.split_once('.').filter(|(_, b)| b.len() > 6) else {
+        return lies_preis(text).map(|p| p.cmp(&schluss));
+    };
+    if !bruch.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let fein = bruch.get(..6)?;
+    let rest = bruch.get(6..)?.bytes().any(|b| b != b'0');
+    let basis = Preis::lies_euro(&format!("{ganz}.{fein}"))?;
+    if basis.fein() < 0 || (basis.fein() == 0 && !rest) {
+        return None;
+    }
+    Some(basis.cmp(&schluss).then(if rest {
+        std::cmp::Ordering::Greater
+    } else {
+        std::cmp::Ordering::Equal
+    }))
+}
+
 /// Liest die Tageskurse eines Werts, alle Zeilen der Datei, aeltester Tag zuerst.
 ///
 /// Erwartet wird eine Kopfzeile mit Komma als Trenner, mit genau einer Datumsspalte (`date`
@@ -74,8 +96,8 @@ pub fn lies_preis(text: &str) -> Option<Preis> {
 /// Stooq (`Date,Open,High,Low,Close,Volume`) und von Alpha Vantage mit `datatype=csv`
 /// (`timestamp,open,high,low,close,volume`). Die Tage steigen oder fallen streng durch die
 /// ganze Datei; Alpha Vantage liefert den neuesten zuerst. Schluss, Tief und Hoch werden exakt
-/// gelesen, auch feiner als ein Cent (bis sechs Nachkommastellen; Xetra notiert etwa auf halbe
-/// Cent), und exakt verglichen.
+/// gelesen, auch feiner als ein Cent. Schlusskurse haben höchstens sechs bedeutende
+/// Nachkommastellen. Für den Vergleich mit Hoch und Tief zählen auch weitere Stellen exakt.
 pub fn lies_tageskurse(text: &str) -> Result<Vec<Tageskurs>, QuellenFehler> {
     let mut zeilen = text.lines().map(|z| z.strip_suffix('\r').unwrap_or(z));
     let kopf: Vec<String> = zeilen
@@ -112,15 +134,16 @@ pub fn lies_tageskurse(text: &str) -> Result<Vec<Tageskurs>, QuellenFehler> {
         }
         let feld = |s: usize| felder.get(s).copied().unwrap_or("");
         let datum = lies_datum(feld(datum_s)).ok_or(QuellenFehler::Datum(nr))?;
-        let preis = |s: usize| lies_preis(feld(s)).ok_or(QuellenFehler::Preis(nr));
-        let schluss = preis(schluss_s)?;
+        let schluss = lies_preis(feld(schluss_s)).ok_or(QuellenFehler::Preis(nr))?;
+        let grenze =
+            |s: usize| vergleiche_preisgrenze(feld(s), schluss).ok_or(QuellenFehler::Preis(nr));
         if let Some(s) = tief_s
-            && preis(s)? > schluss
+            && grenze(s)? == std::cmp::Ordering::Greater
         {
             return Err(QuellenFehler::Spanne(nr));
         }
         if let Some(s) = hoch_s
-            && preis(s)? < schluss
+            && grenze(s)? == std::cmp::Ordering::Less
         {
             return Err(QuellenFehler::Spanne(nr));
         }

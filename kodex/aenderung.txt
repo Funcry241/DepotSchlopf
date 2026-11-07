@@ -1,12 +1,6 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Wolfgang hat die Mindestorder im Papierhandel von 500 Euro auf 100 Euro am Limit freigegeben.
+klasse: Funktion
+zweck: Tageshoch und Tagestief mit langen Dezimalstellen exakt gegen den Schlusskurs vergleichen.
 pfade:
-CHANGELOG.md
-README.md
-crates/depot_kern/src/grenzen.rs
-crates/depot_regelwerk/tests/
-docs/befunde/negativtests.md
-docs/befunde/regelwerk.md
-kodex/festschreibung.txt
-kodex/freigabe.txt
+crates/depot_kern/src/quelle.rs
+crates/depot_kern/tests/quelle.rs
