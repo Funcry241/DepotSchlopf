@@ -1,12 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Wolfgang hat die Mindestorder im Papierhandel von 500 Euro auf 100 Euro am Limit freigegeben.
+klasse: Funktion
+zweck: Diagnoseprotokolle je Lauf mit Zeitstempel und Version speichern, nach Neustarts anzeigen und begrenzt aufbewahren.
 pfade:
-CHANGELOG.md
+crates/depot_dienst/
 README.md
-crates/depot_kern/src/grenzen.rs
-crates/depot_regelwerk/tests/
-docs/befunde/negativtests.md
-docs/befunde/regelwerk.md
-kodex/festschreibung.txt
-kodex/freigabe.txt
+docs/ARCHITEKTUR.md

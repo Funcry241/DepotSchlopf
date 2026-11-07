@@ -25,6 +25,7 @@ pub mod kostenschutz;
 mod papierdialog;
 pub use papierdialog::DialogErgebnis;
 pub mod programmstand;
+pub mod protokoll;
 pub mod rueckfall;
 pub mod schluessel;
 pub mod seiten;
@@ -209,6 +210,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             seiten::update_aktionen(&d.token, &d.start, &d.sperre()).as_bytes(),
         ),
         "/bestaetigen" => auftrag_bestaetigen(d, a),
+        "/protokoll" | "/protokoll.txt" => protokoll_lesen(d, a),
         "/einrichtung" => {
             // Erst ausserhalb der Sperre nachsehen, was gespeichert ist.
             let datei = werkbank::lies_falls_da(&d.wurzel.join("daten").join("zeitplan.txt"));
@@ -267,6 +269,28 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     }
 }
 
+fn protokoll_lesen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
+    let formular = formular(a.abfrage.as_bytes()).unwrap_or_default();
+    let Some(kennung) = feld(&formular, "lauf").filter(|k| protokoll::gueltige_kennung(k)) else {
+        return seiten::fehler(400, "Wähle ein Protokoll unter Live aus.");
+    };
+    match protokoll::lesen(&d.wurzel, kennung) {
+        Ok(text) => {
+            let text = d.protokoll_datei_bereinigen(&text);
+            if a.pfad == "/protokoll.txt" {
+                return antwort(200, "text/plain; charset=utf-8", text.as_bytes());
+            }
+            let inhalt = seiten::protokoll_seite(kennung, &text);
+            let html = seiten::rahmen("/", None, None, &inhalt, d.version.as_deref());
+            antwort(200, HTML, html.as_bytes())
+        }
+        Err(_) => seiten::fehler(
+            404,
+            "Dieses Protokoll ist nicht verfügbar. Ältere Läufe oder Läufe vor Einführung der Protokolldateien haben keine vollständige Datei. Unter Live steht der noch bekannte Verlauf.",
+        ),
+    }
+}
+
 fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
     let haken = |n: &str| match feld(f, n) {
         None => Some(false),
@@ -319,6 +343,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             }
             match u.schluessel_ablegen(wer, wert) {
                 Ok(()) => {
+                    d.protokoll_schluessel_merken(wert.trim());
                     // Der neue Schluessel ist nur hinterlegt, bis ein Aufruf ihn bestaetigt.
                     let neu = anbieter::Eintrag::neu(
                         jetzt,
