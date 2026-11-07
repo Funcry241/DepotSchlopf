@@ -625,7 +625,7 @@ fn auftrag_laeuft_mit_protokoll_und_eindeutiger_kennung() -> Result<(), String> 
     assert_eq!(a.protokoll, vec!["lauf termine".to_string()]);
     assert_eq!(a.kennung, format!("{}-{nr}", t.sekunden()));
     let seite = seiten::live(TOKEN, "s", &z, t.datum());
-    assert!(seite.contains("data-protokoll-kopieren>Protokoll kopieren"));
+    assert!(seite.contains("data-protokoll-kopieren>Auszug kopieren"));
     assert!(seite.contains("<pre>lauf termine\n</pre>"));
     drop(z);
     assert!(d.schritt(t).is_none());
@@ -2004,5 +2004,123 @@ fn wartender_papiertag_startet_bei_ausgeschaltetem_zeitplan_nicht() -> Result<()
     assert!(d.schritt(donnerstag(17, 48)?).is_none());
     assert!(wartend(&d).is_empty());
     assert_eq!(d.sperre().erledigt.papier, None);
+    Ok(())
+}
+
+/// Der Kindprozess liefert dieselbe lange Ausgabe unter Windows und Linux.
+#[test]
+fn diagnose_kindprozess() {
+    if std::env::var_os("DEPOT_DIAGNOSE_KIND").is_some() {
+        println!("FEHLER: Beispiel vor langem Folgeprotokoll");
+        for n in 0..600 {
+            println!("Diagnosezeile {n}");
+        }
+        std::process::exit(3);
+    }
+}
+
+#[test]
+fn lange_diagnose_bleibt_nach_neustart_kopierbar() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut d = Dienst::neu(
+        wurzel.clone(),
+        TOKEN.into(),
+        Box::new(move |_, _| {
+            let mut c = Command::new(&exe);
+            c.args(["--exact", "diagnose_kindprozess", "--nocapture"])
+                .env("DEPOT_DIAGNOSE_KIND", "ja");
+            c
+        }),
+        leeres_lagebild(),
+    );
+    d.version = Some("abcdef0123456789".into());
+    let d = Arc::new(d);
+    let t = donnerstag(12, 0)?;
+    d.einreihen(Art::Termine, Anlass::Hand)
+        .map_err(std::string::ToString::to_string)?;
+    let (nr, kind) = some(d.schritt(t), "Start")?;
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+    let kennung = {
+        let z = d.sperre();
+        let a = some(z.verlauf.front(), "Verlauf")?;
+        assert_eq!(a.erfolg, Some(false));
+        assert_eq!(a.protokoll.len(), 500);
+        assert!(a.protokoll.iter().any(|l| l.contains("Diagnosezeile 599")));
+        a.kennung.clone()
+    };
+    let gespeichert = depot_dienst::protokoll::lesen(&wurzel, &kennung)?;
+    for teil in [
+        "Diagnosezeile 0\n",
+        "Diagnosezeile 599",
+        "FEHLER: Beispiel",
+        "Version abcdef0123456789",
+        "Lauf abgebrochen",
+    ] {
+        assert!(gespeichert.contains(teil), "fehlt: {teil}");
+    }
+    drop(d);
+    let neu = dienst(wurzel.clone(), true);
+    assert!(
+        neu.sperre()
+            .verlauf
+            .front()
+            .is_some_and(|a| a.protokoll.iter().any(|l| l.contains("Diagnosezeile 599")))
+    );
+    let live = get(&neu, "/", t);
+    assert!(live.contains("Letzter fehlgeschlagener Lauf"));
+    let html = get(&neu, &format!("/protokoll?lauf={kennung}"), t);
+    assert!(html.contains("data-protokoll-kopieren>Protokoll kopieren"));
+    assert!(html.contains("Diagnosezeile 0\n"));
+    let download = get(&neu, &format!("/protokoll.txt?lauf={kennung}"), t);
+    assert!(download.contains(&gespeichert));
+    assert!(get(&neu, "/protokoll.txt?lauf=..%2Fjournal", t).starts_with("HTTP/1.1 400"));
+    fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[test]
+fn fehlendes_diagnoselog_wird_erklaert_ohne_lauf_zu_verhindern() -> Result<(), String> {
+    let wurzel = ordner()?;
+    fs::write(wurzel.join("daten/protokolle"), "kein Ordner").map_err(|e| e.to_string())?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(12, 0)?;
+    d.einreihen(Art::Termine, Anlass::Hand)
+        .map_err(std::string::ToString::to_string)?;
+    let (nr, kind) = some(d.schritt(t), "Start")?;
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+    assert_eq!(
+        d.sperre().verlauf.front().and_then(|a| a.erfolg),
+        Some(true)
+    );
+    assert!(get(&d, "/", t).contains("Diagnoseprotokoll nicht gespeichert"));
+    let kennung = format!("{}-{nr}", t.sekunden());
+    assert!(get(&d, &format!("/protokoll?lauf={kennung}"), t).starts_with("HTTP/1.1 404"));
+    fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[test]
+fn gespeichertes_protokoll_entfernt_nur_die_trefferzeile() -> Result<(), String> {
+    let wurzel = ordner()?;
+    fs::create_dir(wurzel.join("daten/protokolle")).map_err(|e| e.to_string())?;
+    // Ein älteres Log, das noch nicht mit der heutigen Musterschicht geschrieben wurde.
+    let text = "Anfang bleibt\r\nAuthorization: Basic beispiel\r\nEnde bleibt ohne Zeilenende";
+    fs::write(wurzel.join("daten/protokolle/123-1.log"), text).map_err(|e| e.to_string())?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(12, 0)?;
+    for adresse in ["/protokoll?lauf=123-1", "/protokoll.txt?lauf=123-1"] {
+        let antwort = get(&d, adresse, t);
+        assert!(antwort.starts_with("HTTP/1.1 200"));
+        assert!(antwort.contains(
+            "Anfang bleibt\r\n[Ausgabe mit Zugangsdaten entfernt.]\r\nEnde bleibt ohne Zeilenende"
+        ), "{adresse}: {antwort:?}");
+        assert!(!antwort.contains("beispiel"));
+    }
+    assert_eq!(
+        fs::read_to_string(wurzel.join("daten/protokolle/123-1.log")).map_err(|e| e.to_string())?,
+        text
+    );
+    fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
     Ok(())
 }

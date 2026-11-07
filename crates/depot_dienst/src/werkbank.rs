@@ -10,7 +10,7 @@
 
 use std::collections::VecDeque;
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -187,6 +187,8 @@ pub struct Zustand {
     pub verlauf_fehler: Option<String>,
     /// Die Boersen der Liste (`depot_kern::liste::boersen`), je eine mit eigenem Kursabruf.
     pub boersen: Vec<Boerse>,
+    pub(crate) protokoll_datei: Option<crate::protokoll::Datei>,
+    protokoll_fehler: Option<String>,
 }
 
 /// Warum ein Zeitplan nicht gespeichert wurde.
@@ -327,6 +329,7 @@ pub struct Dienst {
     pub version: Option<String>,
     pub zustand: Mutex<Zustand>,
     pub(crate) papierdialog: Mutex<()>,
+    protokoll_schutz: Mutex<crate::protokoll::Schutz>,
     starter: Starter,
     lagerechner: Lagerechner,
 }
@@ -433,7 +436,10 @@ impl Dienst {
             ..zeitplan
         };
         let start: String = crate::neues_token().chars().take(16).collect();
-        let (verlauf, verlauf_hinweis) = match crate::verlauf::laden(&wurzel) {
+        let protokoll_schutz = crate::protokoll::Schutz::laden();
+        let (mut verlauf, verlauf_hinweis): (VecDeque<Auftrag>, _) = match crate::verlauf::laden(
+            &wurzel,
+        ) {
             Ok(g) => (
                 g.auftraege.into_iter().collect(),
                 (g.unlesbar > 0).then(|| {
@@ -448,6 +454,23 @@ impl Dienst {
                 Some(format!("Verlauf früherer Starts: {e}")),
             ),
         };
+        for a in &mut verlauf {
+            if let Ok(text) = crate::protokoll::lesen(&wurzel, &a.kennung) {
+                a.protokoll = text
+                    .lines()
+                    .rev()
+                    .take(PROTOKOLL_ZEILEN)
+                    .map(|z| kuerze(protokoll_schutz.bereinige(z)))
+                    .collect();
+                a.protokoll.reverse();
+                if a.frueher == Frueher::Unterbrochen {
+                    if a.protokoll.len() >= PROTOKOLL_ZEILEN {
+                        a.protokoll.remove(0);
+                    }
+                    a.protokoll.push("Der Dienst endete während dieses Laufs. Das gespeicherte Protokoll ist unvollständig.".into());
+                }
+            }
+        }
         Dienst {
             wurzel,
             token,
@@ -470,8 +493,11 @@ impl Dienst {
                 verlauf_hinweis,
                 verlauf_fehler: None,
                 boersen: depot_kern::liste::boersen(),
+                protokoll_datei: None,
+                protokoll_fehler: None,
             }),
             papierdialog: Mutex::new(()),
+            protokoll_schutz: Mutex::new(protokoll_schutz),
             starter,
             lagerechner,
         }
@@ -485,6 +511,73 @@ impl Dienst {
         crate::rueckfall::offen_pfad(&self.wurzel)
             .try_exists()
             .unwrap_or(true)
+    }
+
+    pub(crate) fn protokoll_schluessel_merken(&self, text: &str) {
+        self.protokoll_schutz
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .merken(text);
+    }
+
+    pub(crate) fn protokoll_bereinigen(&self, text: &str) -> String {
+        self.protokoll_schutz
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .bereinige(text)
+    }
+
+    pub(crate) fn protokoll_datei_bereinigen(&self, text: &str) -> String {
+        // Nur die Prüfsummen kopieren. Lange Dateien blockieren weder Live noch den Arbeiter.
+        let schutz = self
+            .protokoll_schutz
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        schutz.bereinige_zeilen(text)
+    }
+
+    fn protokoll_beginnen(&self, z: &mut Zustand, a: &Auftrag) {
+        z.protokoll_fehler = None;
+        self.protokoll_schutz
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .auffrischen();
+        match crate::protokoll::Datei::neu(
+            &self.wurzel,
+            &a.kennung,
+            self.version.as_deref(),
+            a.start,
+            a.art.name(),
+        ) {
+            Ok(log) => z.protokoll_datei = Some(log),
+            Err(e) => {
+                z.protokoll_datei = None;
+                z.verlauf_hinweis = Some(format!("Diagnoseprotokoll nicht gespeichert. {e}"));
+            }
+        }
+    }
+
+    fn protokoll_beenden(&self, z: &mut Zustand, a: &mut Auftrag) {
+        if let Some(fehler) = z.protokoll_fehler.take()
+            && !a.protokoll.contains(&fehler)
+        {
+            if a.protokoll.len() >= PROTOKOLL_ZEILEN {
+                a.protokoll.remove(0);
+            }
+            a.protokoll.push(fehler);
+        }
+        if let Some(mut log) = z.protokoll_datei.take() {
+            let zeit = a.ende.unwrap_or(a.start);
+            if let Some(f) = crate::protokoll::letzter_fehler(&a.protokoll)
+                && let Err(e) = log.zeile(zeit, &self.protokoll_bereinigen(f))
+            {
+                z.verlauf_hinweis = Some(e);
+            }
+            if let Err(e) = log.abschliessen(zeit, a.erfolg == Some(true)) {
+                z.verlauf_hinweis = Some(e);
+            }
+        }
     }
 
     /// Nach dem Windows-Dialog die Freigabe bei ruhender Werkbank belegen.
@@ -628,6 +721,7 @@ impl Dienst {
                 return None;
             }
             z.verlauf_fehler = None;
+            self.protokoll_beginnen(&mut z, &auftrag);
             // Den Papiertag des Zeitplans erst beim Start als gestartet vermerken: Endet der
             // Dienst, waehrend er nur wartet, holt der naechste Start ihn nach.
             if art == Art::Papier
@@ -637,6 +731,7 @@ impl Dienst {
                 auftrag.protokoll.push(format!("Nicht gestartet: {e}"));
                 auftrag.ende = Some(jetzt);
                 auftrag.erfolg = Some(false);
+                self.protokoll_beenden(&mut z, &mut auftrag);
                 ende_vermerken(&self.wurzel, &mut z, &auftrag);
                 ablegen(&mut z, auftrag);
                 return None;
@@ -650,6 +745,7 @@ impl Dienst {
                     auftrag.protokoll.push(format!("Start fehlgeschlagen: {e}"));
                     auftrag.ende = Some(jetzt);
                     auftrag.erfolg = Some(false);
+                    self.protokoll_beenden(&mut z, &mut auftrag);
                     ende_vermerken(&self.wurzel, &mut z, &auftrag);
                     ablegen(&mut z, auftrag);
                 }
@@ -731,21 +827,11 @@ impl Dienst {
         let fehler_leser = kind.stderr.take().map(|e| {
             let d = Arc::clone(self);
             thread::spawn(move || {
-                for zeile in BufReader::new(e).lines() {
-                    match zeile {
-                        Ok(t) => d.protokolliere(nr, t),
-                        Err(_) => break,
-                    }
-                }
+                crate::protokoll::zeilen(BufReader::new(e), |t| d.protokolliere(nr, &t, uhr()));
             })
         });
         if let Some(o) = kind.stdout.take() {
-            for zeile in BufReader::new(o).lines() {
-                match zeile {
-                    Ok(t) => self.protokolliere(nr, t),
-                    Err(_) => break,
-                }
-            }
+            crate::protokoll::zeilen(BufReader::new(o), |t| self.protokolliere(nr, &t, uhr()));
         }
         if let Some(h) = fehler_leser {
             let _ = h.join();
@@ -763,6 +849,7 @@ impl Dienst {
         }
         let eingespielt =
             erfolg && a.art == Art::Update && crate::rueckfall::offen_pfad(&self.wurzel).exists();
+        self.protokoll_beenden(&mut z, &mut a);
         ende_vermerken(&self.wurzel, &mut z, &a);
         ablegen(&mut z, a);
         z.lage_veraltet = true;
@@ -825,17 +912,28 @@ impl Dienst {
         z.neustart && z.laufend.is_none() && z.warteschlange.is_empty()
     }
 
-    fn protokolliere(&self, nr: u64, zeile: String) {
+    fn protokolliere(&self, nr: u64, zeile: &str, zeit: Option<Zeitpunkt>) {
+        let zeile = self.protokoll_bereinigen(zeile);
         let mut z = self.sperre();
         let Some(a) = z.laufend.as_mut().filter(|a| a.nr == nr) else {
             return;
         };
-        // Ein Hinweis zaehlt auch, wenn das Protokoll schon voll ist: Er sagt, was jetzt gilt.
+        let zeit = zeit.unwrap_or(a.start);
         if let Some(h) = depot_kern::hinweis::lies(&zeile) {
             a.hinweis = Some(kuerze(h.to_string()));
         }
-        if a.protokoll.len() < PROTOKOLL_ZEILEN {
-            a.protokoll.push(kuerze(zeile));
+        if a.protokoll.len() >= PROTOKOLL_ZEILEN {
+            a.protokoll.remove(0);
+        }
+        a.protokoll.push(kuerze(zeile.clone()));
+        if crate::protokoll::letzter_fehler(std::slice::from_ref(&zeile)).is_some() {
+            z.protokoll_fehler = Some(kuerze(zeile.clone()));
+        }
+        if let Some(log) = z.protokoll_datei.as_mut()
+            && let Err(e) = log.zeile(zeit, &zeile)
+        {
+            z.protokoll_datei = None;
+            z.verlauf_hinweis = Some(e);
         }
     }
 }

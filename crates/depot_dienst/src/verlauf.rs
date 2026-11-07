@@ -159,7 +159,7 @@ pub fn lies(text: &str) -> Geladen {
                     ende,
                     erfolg,
                     Frueher::Beendet,
-                    "Vor dem letzten Neustart des Dienstes; das Protokoll ist nicht mehr da.",
+                    "Vor dem letzten Neustart des Dienstes. Für diesen Lauf liegt kein gespeichertes Diagnoseprotokoll vor.",
                 ),
                 None => (
                     None,
