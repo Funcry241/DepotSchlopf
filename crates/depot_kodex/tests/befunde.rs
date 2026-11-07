@@ -538,7 +538,10 @@ fn produktiv_targets(ws: &Path) -> Result<Vec<Target>, String> {
                 .feld("src_path")
                 .and_then(json::Wert::text)
                 .ok_or("Target ohne src_path")?;
-            let rel = Path::new(pfad)
+            // canonicalize kann unter Windows einen Verbatim-Praefix und lange Namen
+            // liefern. Beide Seiten auflösen, bevor Workspace und Cargo verglichen werden.
+            let voll = fs::canonicalize(pfad).map_err(|e| format!("Target {pfad}: {e}"))?;
+            let rel = voll
                 .strip_prefix(&basis)
                 .map_err(|_| format!("Target {pfad} liegt nicht im Workspace"))?
                 .to_string_lossy()

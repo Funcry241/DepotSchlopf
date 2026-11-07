@@ -112,7 +112,7 @@ fn main() -> ExitCode {
                 "-D",
                 "warnings",
             ],
-            &["test", "--workspace"],
+            &["test", "--workspace", "--no-fail-fast"],
         ];
         for s in schritte {
             if !cargo(s) {

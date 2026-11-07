@@ -1,6 +1,7 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: Funktion
-zweck: Windows-Journalgegenproben bei Dateisperren korrigieren und Quarantaenedateien mit Schreibrecht synchronisieren, bevor das Journal gekuerzt wird.
+klasse: KodexAenderung
+zweck: Das Gate nativ unter Windows ausführen, Cargo-Targetpfade beidseitig kanonisieren und nach einem Testfehler die übrigen Testprogramme weiter prüfen.
 pfade:
-crates/depot_journal/
-crates/depot_sim/tests/konto.rs
+.github/workflows/kodex.yml
+crates/depot_kodex/src/main.rs
+crates/depot_kodex/tests/befunde.rs
