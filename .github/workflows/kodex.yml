@@ -33,3 +33,32 @@ jobs:
           path: assistant_export_latest.zip
           if-no-files-found: warn
           retention-days: 30
+
+  kodex-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Zeilenenden beim Checkout festlegen
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rust-Werkzeugkette aus rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Gate und Assistenten-Export unter Windows
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "pull_request") {
+            $basis = "origin/${{ github.base_ref }}"
+          } else {
+            $basis = "${{ github.event.before }}"
+          }
+          cargo run --locked -p depot_lauf -- alles --basis $basis
+          exit $LASTEXITCODE
+      - name: Windows-Assistenten-Export bereitstellen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assistant_export_windows
+          path: assistant_export_latest.zip
+          if-no-files-found: warn
+          retention-days: 30
