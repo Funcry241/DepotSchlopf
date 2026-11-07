@@ -14,19 +14,23 @@ Rust-Rahmen, in dem zwei KIs je einen Topf eines echten Aktiendepots beraten: **
 
 Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 
-## Was DepotSchlopf garantiert (Standardwerte)
+## Schutzregeln im derzeitigen Papierbetrieb (Standardwerte)
 
 | Gefahr | Was im Code dagegen steht |
 |---|---|
 | KI erfindet Werte oder verlangt Unmögliches | Vorschlag wird ganz verworfen; nur Werte der Positivliste |
-| Zu viel in einem Wert | höchstens 25 % je Wert, höchstens 8 Werte |
-| Produkte mit Verlust über dem Einsatz | nur Aktien (ETFs vorbereitet, gesperrt); keine Derivate, kein Hebel, kein Leerverkauf, nur Bargeld |
-| Gebühren fressen den Ertrag | Mindestorder 100 € im Papierhandel, Umschichtung erst ab 5 Prozentpunkten, höchstens 4 Orders je Topf und Zyklus, Umschlag höchstens 50 % |
+| Zu viel in einem Wert | höchstens 40 % je Wert, höchstens 4 Werte |
+| Produkte mit Verlust über dem Einsatz | Aktien und freigegebene physische UCITS-ETFs; keine Derivate, kein Hebel, kein Leerverkauf, nur Bargeld |
+| Gebühren fressen den Ertrag | Mindestorder 100 € im Papierhandel, Umschichtung erst ab 5 Prozentpunkten, höchstens 4 Orders je Topf und Zyklus, Umschlag höchstens 100 % |
 | Absturz des Marktes | Tagesverlust 5 % = Halt; 20 % unter Höchststand = Notbremse, alles verkaufen |
 | KI-Kosten laufen aus dem Ruder | Erlaubnis erst nach dauerhafter Buchung der Höchstkosten; je KI 2 Aufrufe je Zyklus, 1 Zyklus je Tag, 4 Aufrufe und 4 € je Monat, 50 € je Jahr |
 | Grenzen werden heimlich gelockert | Kodex vergleicht jede Änderung mit `kodex/festschreibung.txt` und lehnt ab |
 | Neue KI-Sitzung kennt die Vorgeschichte nicht | jeder Lauf schreibt `assistant_export_latest.zip` mit Übergabe und Quellstand |
 | Unklare Lage | fail-closed: Halt statt Raten |
+
+Die aktuellen Grenzen kommen technisch aus einem gemeinsamen Paket (`Grenzen::standard()`), einschließlich 100 € Mindestorder. Es gibt noch kein getrenntes Echtgeld-Grenzpaket. Vor einer Echtgeld-Anbindung müssen dessen Grenzen getrennt festgelegt und ausdrücklich freigegeben werden. Die Freigabe der 100-€-Mindestorder aktiviert keinen Echtgeldhandel.
+
+Bei den derzeit angesetzten Mindestkosten von 1,50 € je Order entsprechen 100 € Ordervolumen 1,5 % Kosten je Kauf bzw. Verkauf, zusammen etwa 3 % bei gleichem Volumen. Das ist eine Kostenannahme des Papierkontos, keine Zusage eines Brokertarifs.
 
 ## Aufbau
 
