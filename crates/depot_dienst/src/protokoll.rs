@@ -86,7 +86,10 @@ impl Schutz {
 
 // Unabhängig vom Schlüsselspeicher: auch Präfixe, fremde Schlüssel und Basic-Auth.
 fn geheimnismuster(gross: &str) -> bool {
-    if gross.contains("SK-") || gross.contains("BEARER ") {
+    let schluesselpraefix = gross
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-')
+        .any(|wort| wort.starts_with("SK-"));
+    if schluesselpraefix || gross.contains("BEARER ") {
         return true;
     }
     let kompakt: String = gross
@@ -448,8 +451,8 @@ mod tests {
                 .all(|hash| hash.len() == 64)
         );
         assert_eq!(
-            schutz.bereinige("Kurs SAP 210.75, 74 Tests grün"),
-            "Kurs SAP 210.75, 74 Tests grün"
+            schutz.bereinige("Kurs SAP 210.75, Risk-Management, 74 Tests grün"),
+            "Kurs SAP 210.75, Risk-Management, 74 Tests grün"
         );
     }
 
