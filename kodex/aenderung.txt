@@ -1,12 +1,5 @@
 # Deklaration der aktuellen Aenderung. Fuer jede Aenderung neu schreiben.
-klasse: FestschreibungAenderung
-zweck: Wolfgang hat die Mindestorder im Papierhandel von 500 Euro auf 100 Euro am Limit freigegeben.
+klasse: DokuOnly
+zweck: Aktuelle Papiergrenzen in der README angleichen und fehlende Trennung der Echtgeld-Grenzen ausdrücklich festhalten.
 pfade:
-CHANGELOG.md
 README.md
-crates/depot_kern/src/grenzen.rs
-crates/depot_regelwerk/tests/
-docs/befunde/negativtests.md
-docs/befunde/regelwerk.md
-kodex/festschreibung.txt
-kodex/freigabe.txt
