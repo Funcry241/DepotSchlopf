@@ -2124,3 +2124,56 @@ fn gespeichertes_protokoll_entfernt_nur_die_trefferzeile() -> Result<(), String>
     fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[test]
+fn maskierungs_kindprozess() {
+    if std::env::var_os("DEPOT_TEST_DIENST_MASKIERUNG").is_some() {
+        println!("Anfang bleibt");
+        println!("https://example.com/prices?token=unbekannt&x=1");
+        println!("Debug EIMSCHLUESSEL");
+        println!("Ende bleibt");
+    }
+}
+
+#[test]
+fn dienst_maskiert_vor_speicherung_und_meldet_das_zweite_netz() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let d = Arc::new(Dienst::neu(
+        wurzel.clone(),
+        TOKEN.into(),
+        Box::new(move |_, _| {
+            let mut c = Command::new(&exe);
+            c.args(["--exact", "maskierungs_kindprozess", "--nocapture"])
+                .env("DEPOT_TEST_DIENST_MASKIERUNG", "ja");
+            c
+        }),
+        leeres_lagebild(),
+    ));
+    let t = donnerstag(12, 0)?;
+    let key = ["GEHEIM", "SCHLUESSEL", "WEITER"].concat();
+    let speichern = formular_post(
+        "/schluessel",
+        &format!("t={TOKEN}&wer=anthropic&wert={key}"),
+    );
+    assert_eq!(
+        status(&behandle(&d, &Attrappe::default(), &speichern, t))?,
+        303
+    );
+    d.einreihen(Art::Termine, Anlass::Hand)
+        .map_err(std::string::ToString::to_string)?;
+    let (nr, kind) = some(d.schritt(t), "Start")?;
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+    let kennung = format!("{}-{nr}", t.sekunden());
+    let log = depot_dienst::protokoll::lesen(&wurzel, &kennung)?;
+    assert!(log.contains("prices?token=***&x=1"));
+    assert!(!log.contains("token=unbekannt"));
+    assert!(!log.contains("EIMSCHLUESSEL"));
+    assert!(log.contains("Anfang bleibt") && log.contains("Ende bleibt"));
+    assert!(get(&d, "/", t).contains("Ein Lauf hat Zugangsdaten ausgegeben"));
+    let download = get(&d, &format!("/protokoll.txt?lauf={kennung}"), t);
+    assert!(download.contains("prices?token=***&x=1"));
+    assert!(download.contains("Ende bleibt"));
+    fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+    Ok(())
+}

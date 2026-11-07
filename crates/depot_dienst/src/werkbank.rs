@@ -913,7 +913,9 @@ impl Dienst {
     }
 
     fn protokolliere(&self, nr: u64, zeile: &str, zeit: Option<Zeitpunkt>) {
-        let zeile = self.protokoll_bereinigen(zeile);
+        let maskiert = depot_kern::geheimnis::maskiere(zeile);
+        let zeile = self.protokoll_bereinigen(&maskiert);
+        let leck = zeile == "[Ausgabe mit Zugangsdaten entfernt.]";
         let mut z = self.sperre();
         let Some(a) = z.laufend.as_mut().filter(|a| a.nr == nr) else {
             return;
@@ -926,6 +928,9 @@ impl Dienst {
             a.protokoll.remove(0);
         }
         a.protokoll.push(kuerze(zeile.clone()));
+        if leck {
+            z.verlauf_hinweis = Some("Ein Lauf hat Zugangsdaten ausgegeben, Zeile entfernt. Bitte das Diagnoseprotokoll zur Prüfung öffnen.".into());
+        }
         if crate::protokoll::letzter_fehler(std::slice::from_ref(&zeile)).is_some() {
             z.protokoll_fehler = Some(kuerze(zeile.clone()));
         }
