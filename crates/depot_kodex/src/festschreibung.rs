@@ -102,6 +102,15 @@ pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
         )),
     );
     f.insert("produktarten".into(), produktarten(wurzel)?);
+    // Vor der ersten RSS-Einrichtung gibt es keine Liste. Danach werden auch Entfernung
+    // und jede Aenderung durch den Vergleich mit der Festschreibung erkannt.
+    match fs::read(wurzel.join("crates/depot_sammler/src/rss_quellen.rs")) {
+        Ok(bytes) => {
+            f.insert("rss_quellen".into(), sha_bytes(&normalisiert(&bytes)));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("RSS-Quellenliste nicht lesbar: {e}")),
+    }
     let wurzel_toml = manifest::lies(&wurzel.join("Cargo.toml"))?;
     f.insert("lints".into(), lints(&wurzel_toml));
     f.insert(
