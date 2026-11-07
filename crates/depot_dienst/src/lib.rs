@@ -204,6 +204,11 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             HTML,
             seiten::status(&d.token, &d.start, &d.sperre(), tag).as_bytes(),
         ),
+        "/teil/journal" => antwort(
+            200,
+            HTML,
+            seiten::journal_teil(&d.token, &d.sperre()).as_bytes(),
+        ),
         "/teil/update" => antwort(
             200,
             HTML,

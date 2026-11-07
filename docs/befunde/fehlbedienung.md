@@ -73,3 +73,7 @@ Die Ablehnung liefert die Liste dessen, was fehlt. Die Einrichtung zeigt diese L
 **Gegenproben** (jeweils rot):
 - Schlüssel nicht ausdrücklich geprüft (`einschalten_verlangt_jeden_schluessel`).
 - Start trotz Schreibfehler (`ohne_schreibbaren_verlauf_startet_nichts`).
+
+## Seltene Einstellungen am Seitenende
+
+Wolfgang am 07.11.2026: Zugangsdaten und andere selten geänderte Angaben sollen unten in einen roten Bereich. Die Einrichtung zeigt deshalb zuerst aktive Sperren, Datenquellen, Zeitplan und Update. Am Ende fasst ein rot umrandeter und leicht rot hinterlegter Bereich die erste Einrichtung, Journal, Zugangsdaten, Autostart, Werkzeuge, feste Grenzen und technische Dienstangaben zusammen. Der Journal-Abschnitt wird dort weiter automatisch aktualisiert; Rücksprungziele und Doppelklickschutz bleiben erhalten. Aktive Sperren stehen oberhalb des roten Bereichs. Das KI-Budget bleibt auf Live sichtbar.

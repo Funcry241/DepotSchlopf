@@ -36,6 +36,9 @@ margin:6px 0}\
 .banner{position:sticky;top:0;z-index:3;background:var(--halt);color:#fff;padding:8px 16px;font-weight:600}\
 .meldung{position:sticky;top:8px;z-index:2;background:var(--flaeche);border-left:4px solid currentColor;padding-left:10px}\
 label{display:block;margin:6px 0}\
+.selten{border:2px solid var(--halt);background:#fff1f0}\
+@media(prefers-color-scheme:dark){.selten{background:#2b1d1d}}\
+.selten>h2{color:var(--halt)}\
 .schluessel-tabelle input{width:100%}.schluessel-tabelle td{overflow-wrap:anywhere}\
 @media(max-width:600px){.schluessel-tabelle,.schluessel-tabelle tbody,\
 .schluessel-tabelle tr,.schluessel-tabelle td{display:block;width:100%}\
@@ -766,13 +769,12 @@ pub fn status(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> St
     };
     format!(
         "{}{}<section>{}<div class=\"kopf\">{}</div>\
-         <div class=\"leise\">Nächster geplanter Lauf: {}</div></section>{}",
+         <div class=\"leise\">Nächster geplanter Lauf: {}</div></section>",
         marke(start),
         gesamtstatus_teil(token, z),
         update_hinweis(z),
         maskiere(&jetzt),
-        maskiere(&naechster_text(z, heute)),
-        journal_teil(token, z)
+        maskiere(&naechster_text(z, heute))
     )
 }
 
@@ -864,7 +866,7 @@ pub struct Einrichtung {
 
 fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
     s.push_str(
-        "<section id=\"schluessel\"><h2>Schlüssel</h2><p class=\"leise\">Gespeichert wird nur in \
+        "<section id=\"schluessel\"><h2>Zugangsdaten (API-Schlüssel)</h2><p class=\"leise\">Gespeichert wird nur in \
          der Windows-Anmeldeinformationsverwaltung, nie im Projektordner. Die Seite zeigt keinen \
          Schlüssel, nur ob einer hinterlegt ist und was der Anbieter beim letzten Aufruf dazu \
          sagte. Geprüft wird nur bei echten Läufen, nie mit eigenen, kostenpflichtigen \
@@ -1282,8 +1284,8 @@ fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
     );
 }
 
-/// Der erste Einrichtungsschritt bleibt im automatisch erneuerten Statusbereich.
-fn journal_teil(token: &str, z: &Zustand) -> String {
+/// Das Journal bleibt in seinem eigenen Abschnitt automatisch aktuell.
+pub(crate) fn journal_teil(token: &str, z: &Zustand) -> String {
     let mut s = String::from(
         "<section id=\"journal\"><h2>1. Journal</h2><p>Hier hält DepotSchlopf seine Läufe und Papierdaten dauerhaft fest.</p>",
     );
@@ -1341,8 +1343,8 @@ fn erste_schritte(z: &Zustand, e: &Einrichtung) -> String {
     };
     format!(
         "<section id=\"erste-schritte\"><h2>Erste Schritte</h2><ol>\
-        <li><a href=\"#journal\">Journal einrichten</a>: Den aktuellen Stand siehst du oben.</li>\
-        <li><a href=\"#schluessel\">Schlüssel</a>: {schluessel}.</li>\
+        <li><a href=\"#journal\">Journal einrichten</a>: Der Stand wird dort automatisch aktualisiert.</li>\
+        <li><a href=\"#schluessel\">Zugangsdaten</a>: {schluessel}.</li>\
         <li><a href=\"#quellen\">Datenquellen prüfen</a>: Kurse und Termine einmal von Hand abrufen. \
         Danach auf <a href=\"/\">Live</a> Ergebnis und KI-Budget ansehen und einen Papiertag testen.</li>\
         <li><a href=\"#zeitplan\">Zeitplan</a>: {plan}.</li>\
@@ -1365,17 +1367,23 @@ pub fn einrichtung(
         "<div id=\"stand\" data-teil=\"/teil/status\">{}</div>",
         status(token, start, z, heute)
     );
-    s.push_str(&erste_schritte(z, e));
     if !matches!(&e.ki_halt, Ok(None)) {
         kostenschutz_teil(token, e, &mut s);
     }
     kurssperre_teil(token, e, &mut s);
     papierfreigabe_teil(token, e, &mut s);
-    schluessel_teil(token, e, &mut s);
     quellen_teil(token, z, &mut s);
     zeitplan_teil(token, z, e, &mut s);
-    autostart_teil(token, e, &mut s);
     update_teil(token, start, z, e, &mut s);
+    s.push_str("<section id=\"selten\" class=\"selten\" aria-labelledby=\"selten-titel\"><h2 id=\"selten-titel\">Seltene Einstellungen</h2><p>Für die erste Einrichtung oder wenn sich etwas ändert: Zugangsdaten, Datenspeicherung, Windows-Start und technische Prüfungen.</p>");
+    s.push_str(&erste_schritte(z, e));
+    let _ = write!(
+        s,
+        "<div data-teil=\"/teil/journal\">{}</div>",
+        journal_teil(token, z)
+    );
+    schluessel_teil(token, e, &mut s);
+    autostart_teil(token, e, &mut s);
     s.push_str("<section id=\"werkzeuge\"><h2>Werkzeuge</h2><p>Diese Prüfungen brauchst du nur bei der ersten Einrichtung oder wenn etwas nicht funktioniert.</p>");
     if matches!(&e.ki_halt, Ok(None)) {
         // Freie Schutzfunktionen bleiben unten erreichbar, auch nach einer erfolgreichen
@@ -1403,7 +1411,7 @@ pub fn einrichtung(
     let _ = write!(
         s,
         "<section><h2>Dienst</h2><p>Erreichbar nur auf diesem Rechner: \
-         http://127.0.0.1:{}/ · Projektordner {}</p></section>",
+         http://127.0.0.1:{}/ · Projektordner {}</p></section></section>",
         crate::http::PORT,
         maskiere(&e.wurzel)
     );
