@@ -104,7 +104,7 @@ pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
     f.insert("produktarten".into(), produktarten(wurzel)?);
     // Vor der ersten RSS-Einrichtung gibt es keine Liste. Danach werden auch Entfernung
     // und jede Aenderung durch den Vergleich mit der Festschreibung erkannt.
-    match fs::read(wurzel.join("crates/depot_sammler/src/rss_quellen.txt")) {
+    match fs::read(wurzel.join("crates/depot_sammler/src/rss_quellen.rs")) {
         Ok(bytes) => {
             f.insert("rss_quellen".into(), sha_bytes(&normalisiert(&bytes)));
         }

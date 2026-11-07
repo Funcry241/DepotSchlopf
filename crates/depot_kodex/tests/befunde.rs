@@ -1476,7 +1476,7 @@ fn netz_bleibt_im_blatt() -> Result<(), String> {
 #[test]
 fn rss_quellen_aendern_nur_mit_festschreibung() -> Result<(), String> {
     let b = Baum::neu()?;
-    let pfad = "crates/depot_sammler/src/rss_quellen.txt";
+    let pfad = "crates/depot_sammler/src/rss_quellen.rs";
     b.schreibe(pfad, "https://example.com/erlaubt\n")?;
     let fest = depot_kodex::festschreibung::berechne(&b.pfad)?;
     b.schreibe(
