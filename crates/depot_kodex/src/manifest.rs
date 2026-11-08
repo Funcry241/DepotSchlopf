@@ -99,7 +99,7 @@ pub fn produktiv_wurzeln(crate_dir: &Path, m: &Wert) -> Result<Vec<String>, Stri
                         nimm("src/main.rs".into(), &mut aus)?;
                     }
                 }
-                _ => return Err("bin ohne Namen oder mit ungueltigem Pfad".into()),
+                _ => return Err("bin ohne Namen oder mit ungültigem Pfad".into()),
             }
         }
     }

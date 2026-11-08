@@ -140,7 +140,7 @@ pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
 
 pub fn als_text(f: &BTreeMap<String, String>) -> String {
     let mut s = String::from(
-        "# DepotSchlopf – Festschreibung. Aendern nur mit Grenzfreigabe des Eigentuemers in\n\
+        "# DepotSchlopf – Festschreibung. Ändern nur mit Grenzfreigabe des Eigentümers in\n\
          # kodex/freigabe.txt (R30). Neu erzeugen: run.cmd festschreibung\n",
     );
     for (k, v) in f {
@@ -173,7 +173,7 @@ pub fn pruefe(wurzel: &Path, klasse: Klasse, diff: &BTreeSet<String>) -> Vec<Str
         if b != s {
             fehler.push(format!(
                 "Festschreibung verletzt bei {k}: festgeschrieben {:?}, im Baum {:?}. \
-                 Nur mit Klasse FestschreibungAenderung und Freigabe des Eigentuemers.",
+                 Nur mit Klasse FestschreibungAenderung und Freigabe des Eigentümers.",
                 s.map_or("-", String::as_str),
                 b.map_or("-", String::as_str)
             ));

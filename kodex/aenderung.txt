@@ -1,14 +1,6 @@
-klasse: Funktion
-zweck: Sichtbare Texte gemäß Issue 83 mit Umlauten ausgeben und historische Journaltexte, Maschinenkennungen und Wiederabspielhashes erhalten.
+klasse: KodexAenderung
+zweck: Kodex-Ausgaben mit Umlauten schreiben und typische ASCII-Rückfälle in sichtbaren Zeichenketten prüfen, ohne Maschinenformate oder historische Belege umzuschreiben.
 pfade:
-crates/depot_berater/
-crates/depot_dienst/
-crates/depot_journal/
-crates/depot_kern/
-crates/depot_lauf/
-crates/depot_sammler/
-crates/depot_sim/
-README.md
+crates/depot_kodex/
 CHANGELOG.md
-docs/ARCHITEKTUR.md
 docs/befunde/sprache.md

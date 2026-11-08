@@ -283,7 +283,7 @@ pub fn importe(t: &[Token]) -> Result<Vec<Import>, String> {
             };
             l.baum(&[], &mut aus)?;
             if !l.tok().is_some_and(|x| x.ist(";")) {
-                return Err("use ohne abschliessendes Semikolon".into());
+                return Err("use ohne abschließendes Semikolon".into());
             }
         } else if tok.ist_wort("extern")
             && t.get(i.saturating_add(1))

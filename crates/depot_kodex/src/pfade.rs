@@ -103,12 +103,12 @@ pub fn pruefe_rollen(
 ) -> Vec<String> {
     let mut fehler = Vec::new();
     if klasse == Klasse::Gruendung && basis_hat_kodex {
-        fehler.push("Gruendung ist nur erlaubt, solange die Basis keinen Kodex hat".into());
+        fehler.push("Gründung ist nur erlaubt, solange die Basis keinen Kodex hat".into());
     }
     for pfad in diff {
         let r = rolle(pfad);
         if !erlaubt(klasse, r) {
-            fehler.push(format!("{klasse:?} darf {pfad} ({r:?}) nicht aendern"));
+            fehler.push(format!("{klasse:?} darf {pfad} ({r:?}) nicht ändern"));
         }
     }
     fehler

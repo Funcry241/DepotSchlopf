@@ -187,7 +187,7 @@ pub fn finde(text: &str) -> Vec<Treffer> {
             });
         };
         if privater_schluessel(zeile) {
-            fund("privater Schluessel");
+            fund("privater Schlüssel");
         }
         if praefix_schluessel(zeile) {
             fund("Zugangsschluessel");
@@ -196,7 +196,7 @@ pub fn finde(text: &str) -> Vec<Treffer> {
             fund("IBAN");
         }
         if zuweisung(zeile) {
-            fund("Passwort- oder Schluesselzuweisung");
+            fund("Passwort- oder Schlüsselzuweisung");
         }
     }
     treffer
@@ -240,7 +240,7 @@ pub fn dekodiere(inhalt: &[u8]) -> Option<String> {
 pub fn pruefe_inhalt(anzeige: &str, inhalt: &[u8]) -> Vec<String> {
     let Some(text) = dekodiere(inhalt) else {
         return vec![format!(
-            "{anzeige}: nicht pruefbar, weder UTF-8 noch UTF-16 mit BOM. Ungepruefte Inhalte \
+            "{anzeige}: nicht prüfbar, weder UTF-8 noch UTF-16 mit BOM. Ungeprüfte Inhalte \
              gelten nicht als geheimnisfrei (R28)."
         )];
     };
@@ -366,9 +366,9 @@ mod tests {
         let anfang = "-----BEGIN RSA ";
         let ende = "PRIVATE KEY-----";
         let pem = [anfang, ende].concat();
-        assert_eq!(arten(&pem), ["privater Schluessel"]);
+        assert_eq!(arten(&pem), ["privater Schlüssel"]);
         let zuweisung = ["API_", "KEY=", "x8Kq2Lm9Zt4Vw7Ny"].concat();
-        assert_eq!(arten(&zuweisung), ["Passwort- oder Schluesselzuweisung"]);
+        assert_eq!(arten(&zuweisung), ["Passwort- oder Schlüsselzuweisung"]);
         let zeilen = format!("a\nb\n{}\n", iban.concat());
         assert_eq!(finde(&zeilen).first().map(|t| t.zeile), Some(3));
     }
@@ -415,7 +415,7 @@ mod tests {
         assert!(
             pruefe_inhalt("x", &[0xC3, 0x28])
                 .iter()
-                .all(|m| m.contains("nicht pruefbar"))
+                .all(|m| m.contains("nicht prüfbar"))
         );
     }
 
