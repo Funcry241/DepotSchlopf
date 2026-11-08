@@ -12,3 +12,5 @@ CHANGELOG.md
 docs/ARCHITEKTUR.md
 docs/befunde/berater.md
 docs/befunde/ki-dialog.md
+kodex/festschreibung.txt
+kodex/freigabe.txt
