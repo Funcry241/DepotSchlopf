@@ -947,11 +947,22 @@ fn gegenprobe_doppelstart_bei_portluecke_beruehrt_update_nicht() -> Result<(), S
     );
     assert!(String::from_utf8_lossy(&aus.stdout).contains("startet bereits"));
     assert!(waechter::prozess_sperre()?.is_none());
+    // Andere parallel laufende Tests können gerade einen Kindprozess erzeugen. Ein
+    // geerbter Deskriptor hält den Lock bis exec kurz weiter; auf tatsächliche Freigabe warten.
+    let uebernehmen = || -> Result<fs::File, String> {
+        for _ in 0..100 {
+            if let Some(f) = waechter::prozess_sperre()? {
+                return Ok(f);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        Err("Sperre blieb nach Prozessende belegt".into())
+    };
     drop(sperre);
-    let wieder = waechter::prozess_sperre()?.ok_or("Sperre blieb nach Prozessende belegt")?;
+    let wieder = uebernehmen()?;
     assert!(waechter::prozess_sperre()?.is_none());
     drop(wieder);
-    assert!(waechter::prozess_sperre()?.is_some());
+    drop(uebernehmen()?);
     Ok(())
 }
 
