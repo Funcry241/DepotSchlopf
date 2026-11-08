@@ -979,3 +979,40 @@ fn gegenprobe_lange_abschlussgruende_bleiben_wieder_lesbar() -> Result<(), Strin
     }
     Ok(())
 }
+
+#[test]
+fn gegenprobe_volles_diagnoseprotokoll_blockiert_bestaetigung_nicht() -> Result<(), String> {
+    let (w, vorher, neu) = zwei_staende()?;
+    let d = dienst(w.clone());
+    let t = mittag()?;
+    suche_update(&d, t)?;
+    bestaetige_update(&d)?;
+    let (nr, kind) = some(d.schritt(t), "Update startet")?;
+    offen_schreiben(&w, &vorher, &neu)?;
+    d.verfolge(nr, kind, || mittag().ok());
+    let kennung = depot_dienst::aktualisierung::laden(&w)?
+        .last()
+        .ok_or("Beleg fehlt")?
+        .lauf
+        .clone();
+    let p = w.join("daten/protokolle").join(format!("{kennung}.log"));
+    let log = fs::OpenOptions::new()
+        .write(true)
+        .open(p)
+        .map_err(|e| e.to_string())?;
+    log.set_len(depot_dienst::protokoll::DATEI_MAX)
+        .map_err(|e| e.to_string())?;
+    drop(log);
+    assert!(
+        rueckfall::bestaetige(&w)?.is_some(),
+        "volles Diagnoseprotokoll ist kein Fehler der neuen Version oder der Papierdaten"
+    );
+    assert!(!rueckfall::offen_pfad(&w).exists());
+    assert_eq!(
+        depot_dienst::aktualisierung::laden(&w)?
+            .last()
+            .map(|e| e.phase),
+        Some(depot_dienst::aktualisierung::Phase::Bestaetigt)
+    );
+    Ok(())
+}

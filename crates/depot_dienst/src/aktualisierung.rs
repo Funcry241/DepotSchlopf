@@ -157,7 +157,6 @@ pub fn vermerke(
     if lies_zeile(&e.text()).is_none() {
         return Err("Update-Abschlussbeleg ist ungültig.".into());
     }
-    verlauf_abschliessen(wurzel, &e)?;
     alle.retain(|r| r.neu != o.neu || r.vorher != o.vorher);
     alle.push(e.clone());
     let zeilen = alle
@@ -171,6 +170,13 @@ pub fn vermerke(
         let text = format!("{}\n", zeilen.get(start..).unwrap_or_default().join("\n"));
         if u64::try_from(text.len()).unwrap_or(u64::MAX) <= MAX_DATEI {
             schreibe_ganz(&pfad(wurzel), &text)?;
+            // Der maßgebliche Abschlussbeleg ist dauerhaft gespeichert. Ein volles oder
+            // unlesbares zusätzliches Diagnoseprotokoll darf ihn nicht zurücknehmen.
+            if let Err(fehler) = verlauf_abschliessen(wurzel, &e) {
+                eprintln!(
+                    "[Update] Abschlussbeleg gespeichert; zusätzlicher Diagnoseeintrag nicht möglich: {fehler}"
+                );
+            }
             return Ok(e);
         }
     }

@@ -69,9 +69,11 @@ Das Update läuft nur allein: Es lässt sich nur einreihen, wenn nichts läuft o
 
 ## Selbstgegenprüfung nach #79
 
-Zwei zusätzliche Gegenproben scheiterten auf dem gemergten Stand und bestehen nach der Korrektur:
+Drei zusätzliche Gegenproben scheiterten auf dem gemergten Stand und bestehen nach der Korrektur:
 
 1. Bei freiem Dienst-Port konnte ein zweiter Wächter während Bau oder Neustart starten. Ein Fehler dieses konkurrierenden Starts konnte den Stand des ersten Wächters zurücksetzen. Der Wächter hält jetzt eine exklusive Betriebssystem-Dateisperre über seine gesamte Laufzeit, einschließlich Bau, Probe, Rückfall und Neustart. Sie liegt im temporären Ordner und gilt auch für verschiedene Projektkopien desselben Benutzers. Ein zweiter Aufruf baut nichts und setzt nichts zurück. Nur eine tatsächlich belegte Sperre bedeutet „läuft oder startet bereits“; Zugriffsfehler brechen den Start mit Fehler ab. Die Datei wird nicht gelöscht, und der Kernel gibt die Sperre bei Prozessende frei. Gegenprobe: echte Wächter-Programmdatei bei freiem Port und bereits gehaltener Sperre starten; Commit, offene Markierung und Ablehnungsliste bleiben unverändert. Nach Freigabe kann wieder genau ein Besitzer übernehmen.
 2. 2.048 Zeichen je Grund konnten nach JSON-Escaping mehr als 128 KiB für zwanzig Belege ergeben. Der Schreiber erzeugte dadurch eine Datei, die der Leser selbst ablehnte. Jetzt gelten beim Schreiben dieselben Byte-Grenzen wie beim Lesen. Älteste Belege werden nötigenfalls entfernt; der neueste bleibt erhalten. Gegenprobe: 25 lange Gründe mit JSON-Steuerzeichen, nach jedem Schreiben erneut laden und Dateigröße prüfen.
 
 Das ergänzt die bestehenden Browser- und Windows-Prüfungen. Keine Netzwerkquelle, Abhängigkeit oder Handelsgrenze wurde geändert. Ein schon vor dieser Korrektur laufender Wächter kennt die neue Prozesssperre noch nicht. Nach dem ersten Einspielen muss er einmal über `DepotSchlopf.cmd` neu gestartet werden.
+
+3. Ein Diagnoseprotokoll an seiner erlaubten Größenobergrenze verhinderte die Bestätigung trotz einwandfreier neuer Version und lesbarer Papierdaten. Der maßgebliche Abschlussbeleg wird jetzt zuerst dauerhaft gespeichert. Der zusätzliche Eintrag im alten Verlauf/Protokoll erfolgt danach; dessen Fehler wird gemeldet und nimmt den gültigen Abschluss nicht zurück. Gegenprobe: Einspielauftrag durchführen, Diagnoseprotokoll bis zur erlaubten Obergrenze füllen und Bestätigung mit dauerhaftem Abschlussbeleg prüfen. Fehler beim maßgeblichen Abschlussbeleg verweigern die Bestätigung weiterhin.
