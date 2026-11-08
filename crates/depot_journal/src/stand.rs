@@ -552,11 +552,11 @@ impl Stand {
         let b = lies_beobachtung(inhalt).ok_or("Beobachtung unlesbar")?;
         kanonisch(&beobachtung_text(b.0, &b.1), inhalt)?;
         let rss = crate::rss_abruf::RssAbruf::aus_alt(b.0, &b.1);
-        self.beobachtungen.push(b);
         if let Some(a) = rss {
             self.merke_rss_abruf(a);
             Ok(true)
         } else {
+            self.beobachtungen.push(b);
             Ok(false)
         }
     }

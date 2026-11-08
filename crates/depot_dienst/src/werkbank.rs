@@ -211,6 +211,8 @@ pub struct Zustand {
 /// Warum ein Zeitplan nicht gespeichert wurde.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ZeitplanAbgelehnt {
+    /// Eine neue Version ist noch nicht bestätigt.
+    UpdateOffen,
     /// Einschalten erst, wenn die Einrichtung vollstaendig ist: was fehlt.
     Einrichtung(Vec<String>),
     /// Das Lagebild ist noch nicht berechnet; gleich noch einmal.
@@ -537,7 +539,7 @@ impl Dienst {
         self.zustand.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn update_offen(&self) -> bool {
+    pub(crate) fn update_offen(&self) -> bool {
         crate::rueckfall::offen_pfad(&self.wurzel)
             .try_exists()
             .unwrap_or(true)
@@ -646,6 +648,9 @@ impl Dienst {
     /// # Errors
     /// Wie `einreihen`, oder gerade erst erledigt.
     pub fn von_hand(&self, art: Art, jetzt: Zeitpunkt) -> Result<(), &'static str> {
+        if art == Art::Vorbereiten && self.update_offen() {
+            return Err("update_offen");
+        }
         let mut z = self.sperre();
         let gerade = z.verlauf.iter().any(|a| {
             a.art == art
@@ -685,6 +690,9 @@ impl Dienst {
     ) -> Result<(), ZeitplanAbgelehnt> {
         let mut z = self.sperre();
         let plan = aenderung(z.zeitplan);
+        if plan.vorbereitung.aktiv() && !z.zeitplan.vorbereitung.aktiv() && self.update_offen() {
+            return Err(ZeitplanAbgelehnt::UpdateOffen);
+        }
         if plan.an && !z.zeitplan.an {
             z.einschalten_erlaubt()?;
         }

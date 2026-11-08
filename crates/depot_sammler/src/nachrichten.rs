@@ -39,21 +39,32 @@ struct Gelesen {
     nachrichten: Vec<Nachricht>,
 }
 
-fn versuch(journal: &mut Journal, quelle: &str, jetzt: Zeitpunkt) -> Result<bool, SammelFehler> {
+fn versuch(
+    journal: &mut Journal,
+    quelle: &str,
+    jetzt: Zeitpunkt,
+) -> Result<Option<&'static str>, SammelFehler> {
     let letzter = journal.stand().rss_abruf(quelle).map(Zeitpunkt::sekunden);
+    if letzter.is_some_and(|s| s.saturating_sub(jetzt.sekunden()) > 86_400) {
+        return Ok(Some(
+            "Uhr oder Journal prüfen: Der letzte RSS-Abruf liegt mehr als einen Tag in der Zukunft. Kein Netzabruf.",
+        ));
+    }
     if letzter.is_some_and(|s| {
         jetzt
             .sekunden()
             .checked_sub(s)
             .is_none_or(|d| d < ABSTAND_SEKUNDEN)
     }) {
-        return Ok(false);
+        return Ok(Some(
+            "Abrufpause (mindestens 90 Minuten), vorhandene Nachrichten bleiben erhalten.",
+        ));
     }
     // Vor dem Netz dauerhaft belegen: auch nach Absturz kein sofortiger zweiter Abruf.
     journal
         .belege_rss_abruf(quelle, jetzt)
         .map_err(SammelFehler::Journal)?;
-    Ok(true)
+    Ok(None)
 }
 
 /// Auch mehrfach als XML-Referenz geschriebene Zugangsdaten erkennen, bevor Rohdaten bleiben.
@@ -110,8 +121,8 @@ pub fn sammle_nachrichten(
             .split_once('|')
             .ok_or_else(|| SammelFehler::Ablage("RSS-Quellenliste ungueltig".into()))?;
         let start = uhr().ok_or(SammelFehler::Uhr)?;
-        if !versuch(journal, quelle, start)? {
-            b.quellen.push(format!("{quelle}: Abrufpause (mindestens 90 Minuten), vorhandene Nachrichten bleiben erhalten."));
+        if let Some(grund) = versuch(journal, quelle, start)? {
+            b.quellen.push(format!("{quelle}: {grund}"));
             continue;
         }
         let roh = match netz.hole(adresse) {

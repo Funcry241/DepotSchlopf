@@ -350,6 +350,10 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "offen",
             "Bitte bestätige zuerst die Vorbereitung und ihre KI-Kosten.",
         ),
+        "vorbereitung_update" => (
+            "offen",
+            "Das Update wird noch geprüft. Die Vorbereitung ist erst nach bestätigtem Update verfügbar.",
+        ),
         "vorbereitung_quellen" => (
             "offen",
             "Bitte für die automatische Vorbereitung auch die Schlagzeilen einschalten. Deine Eingaben sind noch nicht gespeichert.",
@@ -1204,7 +1208,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          keine zusätzlichen KI-Aufrufe; gilt nur bei eingeschaltetem Zeitplan)</label>\
          <label><input type=\"checkbox\" name=\"vorbereitung_an\" value=\"ja\"{}> \
          An börsenfreien Tagen den nächsten Handelstag vorbereiten (empfohlen; braucht Schlagzeilen und eingeschalteten Zeitplan; höchstens ein Aufruf je KI und Tag zwischen 08 und 23 Uhr). \
-         Die Aufrufe zählen zum bisherigen Monatsbudget und können es früher aufbrauchen. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
+         Erst nach bestätigtem Update verfügbar. Die Aufrufe zählen zum bisherigen Monatsbudget und können es früher aufbrauchen. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
          <button type=\"submit\">Einstellungen speichern</button></form></section>",
         uhrzeit_text(ent.termine.unwrap_or(p.termine)),
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),

@@ -203,6 +203,15 @@ pub fn lauf<'a>(
     maus: &'a mut (dyn Berater + 'a),
     uhr: impl FnMut() -> Option<Zeitpunkt>,
 ) -> Result<String, String> {
+    if wurzel
+        .join("daten/update_offen.txt")
+        .try_exists()
+        .map_err(|e| e.to_string())?
+    {
+        return Err(
+            "Das Update ist noch nicht bestätigt. Keine Vorbereitung während der Probezeit.".into(),
+        );
+    }
     if let Some(grund) = depot_journal::kurssperre::kurssperre(&wurzel.join("daten")) {
         return Err(format!(
             "Quellensperre aktiv: {grund}. Keine Vorbereitung, bis die Quelle geprüft ist."

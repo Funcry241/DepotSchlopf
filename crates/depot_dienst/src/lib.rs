@@ -440,6 +440,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
     };
     let bestaetigt = feld(f, "geprueft") == Some("ja");
     let ort = match art {
+        Art::Vorbereiten if d.update_offen() => "/?m=vorbereitung_update",
         Art::Vorbereiten if !bestaetigt => "/?m=vorbereitung_bestaetigen",
         Art::Papier if !bestaetigt => "/?m=papier_bestaetigen",
         Art::Update if !bestaetigt => "/einrichtung?m=update_bestaetigen#update",
@@ -506,6 +507,7 @@ fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
     let fehler = match ergebnis {
         Ok(()) => return http::umleitung(&format!("/einrichtung?m={meldung}#zeitplan")),
         Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => "zeitplan_einrichtung",
+        Err(werkbank::ZeitplanAbgelehnt::UpdateOffen) => "vorbereitung_update",
         Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => "zeitplan_lage",
         Err(werkbank::ZeitplanAbgelehnt::Datei(_)) => "zeitplan_fehler",
     };

@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- RSS-Nachprüfung: Historische Quellkennungen bleiben lesbar, ferne Zukunftsbelege erhalten eine sichtbare Uhrwarnung und Verwaltungszeilen erscheinen nicht als Beobachtungen. Vorbereitung erst nach bestätigtem Update; manueller Updateweg mit Gate, Datenprobe und Sicherung dokumentiert.
+
 - RSS-Abrufvermerke zählen nicht mehr als unvollständiger Papiertag. Alte Vermerke werden beim Lesen exakt erkannt; bestehende Journaldateien bleiben unverändert. Neue Abrufe erhalten einen eigenen Verwaltungsbeleg. Die dauerhafte Abrufpause und die Sperre echter offener Handelsläufe bleiben erhalten. Nach neuen RSS-Belegen kann eine ältere Programmversion das Journal nicht lesen.
 
 - Selbstgegenprüfung des Oberflächenupdates: Eine Prozesssperre verhindert konkurrierende Wächter während der Port-Lücke beim Bauen und Neustarten. Der Update-Belegschreiber berücksichtigt die tatsächliche JSON-/UTF-8-Dateigröße und entfernt nötigenfalls älteste Belege, bevor seine Ausgabe die eigene Lesegrenze überschreitet. Ein volles zusätzliches Diagnoseprotokoll verhindert keinen bereits dauerhaft belegten Update-Abschluss.
