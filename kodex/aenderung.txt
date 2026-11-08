@@ -1,7 +1,9 @@
 klasse: Funktion
-zweck: Konkurrierende Wächter beim Oberflächenupdate verhindern und Update-Abschlussbelege lesbar halten, ohne Bestätigung von zusätzlichen Diagnoseeinträgen abhängig zu machen.
+zweck: RSS-Abrufverwaltung von offenen Papiertagen trennen, bestehende Journale ohne Umschreiben lesen und echte unvollständige Handelsläufe weiter sperren.
 pfade:
-crates/depot_dienst/
+crates/depot_journal/
+crates/depot_sammler/
+crates/depot_sim/
 README.md
 CHANGELOG.md
-docs/befunde/update.md
+docs/befunde/nachrichten.md

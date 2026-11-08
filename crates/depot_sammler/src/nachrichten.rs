@@ -40,16 +40,7 @@ struct Gelesen {
 }
 
 fn versuch(journal: &mut Journal, quelle: &str, jetzt: Zeitpunkt) -> Result<bool, SammelFehler> {
-    let anfang = format!("rss-abruf: {quelle};");
-    let letzter = journal
-        .stand()
-        .beobachtungen()
-        .iter()
-        .rev()
-        .find_map(|(_, text)| {
-            text.strip_prefix(&anfang)
-                .and_then(|s| s.parse::<i64>().ok())
-        });
+    let letzter = journal.stand().rss_abruf(quelle).map(Zeitpunkt::sekunden);
     if letzter.is_some_and(|s| {
         jetzt
             .sekunden()
@@ -58,10 +49,9 @@ fn versuch(journal: &mut Journal, quelle: &str, jetzt: Zeitpunkt) -> Result<bool
     }) {
         return Ok(false);
     }
-    let datum = jetzt.datum().ok_or(SammelFehler::Uhr)?;
     // Vor dem Netz dauerhaft belegen: auch nach Absturz kein sofortiger zweiter Abruf.
     journal
-        .beobachte(datum, &format!("{anfang}{}", jetzt.sekunden()))
+        .belege_rss_abruf(quelle, jetzt)
         .map_err(SammelFehler::Journal)?;
     Ok(true)
 }

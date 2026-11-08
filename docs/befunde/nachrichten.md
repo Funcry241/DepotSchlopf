@@ -32,3 +32,13 @@ Einrichtung → Datenquellen: eigener Prüfknopf. Der Verlauf zeigt Abrufpause, 
 ## Abgrenzung
 
 Dies liefert zeitgestempelte Belege an das vorhandene Weltmodell. Automatische neue KI-Handelsentscheidungen tagsüber sowie zusätzliche KI-Aufrufe werden hier nicht aktiviert. Fehlende Nachrichten verhindern weiterhin keine ansonsten verwendbaren Kurse. Die Aussagekraft der Prognosen muss im Papierbetrieb gemessen werden.
+
+## Korrektur: RSS-Verwaltung und offener Papiertag (08.11.2026)
+
+Der bisherige Sammler schrieb seine Abrufpause als freie Beobachtung. Dadurch galt bereits ein RSS-Abruf als offener Papiertag und blockierte die Vorbereitung. Neue Versuche verwenden den eigenen Journaltyp `rss-abruf`. Nur exakt kanonische alte Beobachtungen mit `rss-abruf: `, einer der beiden festen Quellen und einem zum Belegdatum passenden Zeitpunkt werden ebenfalls als Verwaltung gelesen. Andere Beobachtungen zählen unverändert als Handelszustand. Keine Datei wird migriert, umgeschrieben oder zurückgesetzt.
+
+Die letzte Abrufzeit je Quelle ist das Maximum der gültigen alten und neuen Belege. Neustart und rückwärts gestellte Uhr verkürzen die bestehende 90-Minuten-Pause nicht. Verwaltungsbelege löschen oder bestätigen keinen offenen Handelslauf.
+
+Regressionen: `depot_journal/tests/rss_abruf.rs` prüft alte Dateien samt unveränderten Bytes und Vermerk, neue Belege nach Neustart sowie echte und nur ähnlich aussehende Beobachtungen. `depot_sammler/tests/nachrichten.rs` prüft weiterhin Abrufpause und Neustart. `depot_sim/tests/vorbereitung.rs` führt die Vorbereitung mit alten und neuen Verwaltungsbelegen durch, ohne Handel oder echte Anbieteraufrufe. Alle Beispieldaten sind synthetisch.
+
+Kompatibilität: Bestehende Journale bleiben unverändert lesbar. Nach dem ersten neuen `rss-abruf`-Beleg können ältere Versionen das Journal nicht lesen; daher dann nicht manuell auf eine ältere Version zurückgehen. Die Updateprüfung und Bestätigung müssen weiterhin vor regulären Laufaufträgen erfolgen. Keine neue Quelle, Bibliothek oder finanzielle Grenze.
