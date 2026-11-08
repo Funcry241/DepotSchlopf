@@ -395,6 +395,19 @@ mod tests {
                 "-c",
                 "user.email=test@depotschlopf.invalid",
             ])
+            .args([
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "core.eol=lf",
+                "-c",
+                "protocol.file.allow=always",
+            ])
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                if cfg!(windows) { "NUL" } else { "/dev/null" },
+            )
+            .env("GIT_CONFIG_NOSYSTEM", "1")
             .args(args)
             .output()
             .map_err(|e| format!("git: {e}"))?;
@@ -440,18 +453,18 @@ mod tests {
         fs::write(andere.join("a.txt"), "eins\n").map_err(|e| e.to_string())?;
         g(&andere, &["add", "a.txt"])?;
         g(&andere, &["commit", "-q", "-m", "eins"])?;
-        g(
-            &andere,
-            &["remote", "add", "origin", &ursprung.to_string_lossy()],
-        )?;
+        g(&andere, &["remote", "add", "origin", "../ursprung.git"])?;
         g(&andere, &["push", "-q", "origin", "main"])?;
         g(
             &dir,
             &[
                 "clone",
                 "-q",
-                &ursprung.to_string_lossy(),
-                &projekt.to_string_lossy(),
+                "--local",
+                "--no-hardlinks",
+                "--",
+                "ursprung.git",
+                "projekt",
             ],
         )?;
         fs::create_dir_all(projekt.join("daten")).map_err(|e| e.to_string())?;
@@ -527,6 +540,19 @@ mod tests {
         assert!(!ist_commit(&"F".repeat(40)));
         assert!(!ist_commit("abc"));
         assert!(!ist_commit(&format!("{}-", "0".repeat(39))));
+    }
+
+    #[test]
+    fn testursprung_bleibt_lokal_und_verzichtet_auf_laufwerkspfade() -> Result<(), String> {
+        let a = aufbau()?;
+        assert_eq!(
+            g(&a.andere, &["remote", "get-url", "origin"])?,
+            "../ursprung.git"
+        );
+        let neu = neuer_stand(&a, "lokaler Nachweis\n")?;
+        let kandidat = hole(&a.projekt)?.ok_or("Lokaler Kandidat fehlt")?;
+        assert_eq!(kandidat.neu, neu);
+        Ok(())
     }
 
     #[test]

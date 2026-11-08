@@ -1,7 +1,6 @@
 klasse: Funktion
-zweck: Einrichtungsänderungen sichtbar speichern, Zeitplan mit aktuellen Eingaben einschalten und Fehler mit passenden nächsten Schritten begleiten.
+zweck: Update-Gegenproben von der laufenden Wächtersperre und Git-Testtransporte von absoluten Windows-Pfaden trennen.
 pfade:
-crates/depot_dienst/
-README.md
-CHANGELOG.md
-docs/befunde/bedienbarkeit.md
+crates/depot_dienst/tests/update.rs
+crates/depot_lauf/src/update.rs
+docs/befunde/update.md

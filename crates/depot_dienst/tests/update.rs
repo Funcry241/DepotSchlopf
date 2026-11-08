@@ -1018,11 +1018,83 @@ test('Rückfall auf älteren Dienst ohne Bereitschaftsmarker wird erkannt',async
 });
 "#;
 
+/// Die Probe startet in einem eigenen Prozess mit privaten temporären Dateien. Auch
+/// bei einem echten laufenden Wächter darf sie dessen Sperre und Port nicht übernehmen.
+fn doppelstart_kind(temp: &Path) -> Result<Command, String> {
+    let mut kind = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+    kind.args([
+        "--exact",
+        "gegenprobe_doppelstart_bei_portluecke_beruehrt_update_nicht",
+        "--nocapture",
+    ])
+    .env("TEMP", temp)
+    .env("TMP", temp)
+    .env("TMPDIR", temp)
+    .env(
+        "GIT_CONFIG_GLOBAL",
+        if cfg!(windows) { "NUL" } else { "/dev/null" },
+    )
+    .env("GIT_CONFIG_NOSYSTEM", "1");
+    Ok(kind)
+}
+
+#[test]
+fn doppelstart_probe_laesst_eine_bestehende_waechtersperre_unveraendert() -> Result<(), String> {
+    use std::fs::OpenOptions;
+    let temp = ordner()?;
+    let pfad = temp.join("depotschlopf-waechter-47410.lock");
+    fs::write(&pfad, "bestehender Wächter").map_err(|e| e.to_string())?;
+    let sperre = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&pfad)
+        .map_err(|e| e.to_string())?;
+    sperre.try_lock().map_err(|e| e.to_string())?;
+    let aus = doppelstart_kind(&temp)?
+        .output()
+        .map_err(|e| e.to_string())?;
+    assert!(
+        aus.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&aus.stdout),
+        String::from_utf8_lossy(&aus.stderr)
+    );
+    let zweite = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&pfad)
+        .map_err(|e| e.to_string())?;
+    assert!(matches!(
+        zweite.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    drop(sperre);
+    assert_eq!(
+        fs::read_to_string(&pfad).map_err(|e| e.to_string())?,
+        "bestehender Wächter"
+    );
+    Ok(())
+}
+
 /// Ein zweiter Start bei freiem Dienst-Port darf während eines Updates weder neu bauen noch
 /// den ersten Wächter zurücksetzen. Die Prozesssperre gilt auch für andere Projektkopien.
 #[test]
 fn gegenprobe_doppelstart_bei_portluecke_beruehrt_update_nicht() -> Result<(), String> {
     use std::fs::OpenOptions;
+    if std::env::var_os("DEPOT_DOPPELSTART_KIND").is_none() {
+        let temp = ordner()?;
+        let aus = doppelstart_kind(&temp)?
+            .env("DEPOT_DOPPELSTART_KIND", "ja")
+            .output()
+            .map_err(|e| e.to_string())?;
+        assert!(
+            aus.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&aus.stdout),
+            String::from_utf8_lossy(&aus.stderr)
+        );
+        return Ok(());
+    }
     let (w, vorher, neu) = zwei_staende()?;
     fs::create_dir_all(w.join("kodex")).map_err(|e| e.to_string())?;
     fs::write(
@@ -1040,10 +1112,8 @@ fn gegenprobe_doppelstart_bei_portluecke_beruehrt_update_nicht() -> Result<(), S
         .open(&pfad)
         .map_err(|e| e.to_string())?;
     sperre.try_lock().map_err(|e| e.to_string())?;
-    let frei =
-        std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, depot_dienst::http::PORT))
-            .map_err(|e| format!("Vorbedingung freier Port: {e}"))?;
-    drop(frei);
+    // Die gesperrte zweite Instanz muss vor jedem Portzugriff aussteigen. Ein echter
+    // Dienst darf Port 47410 während dieser Probe weiterhin belegen.
     let aus = Command::new(env!("CARGO_BIN_EXE_depot_waechter"))
         .arg("--ohne-browser")
         .current_dir(&w)
