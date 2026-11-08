@@ -7,6 +7,8 @@ use crate::{
 use depot_kern::{Zeitpunkt, json};
 use std::path::{Path, PathBuf};
 
+const MAX_DATEI: u64 = 128 * 1024;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     Probe,
@@ -103,7 +105,7 @@ fn lies_zeile(text: &str) -> Option<Ergebnis> {
 /// Höchstens zwanzig Abschlussbelege. Unlesbare oder fremde Daten werden nicht als Erfolg gewertet.
 pub fn laden(wurzel: &Path) -> Result<Vec<Ergebnis>, String> {
     let p = pfad(wurzel);
-    if p.metadata().is_ok_and(|m| m.len() > 128 * 1024) {
+    if p.metadata().is_ok_and(|m| m.len() > MAX_DATEI) {
         return Err("Update-Abschlussbelege sind zu groß.".into());
     }
     let Some(text) = crate::werkbank::lies_falls_da(&p)? else {
@@ -155,17 +157,30 @@ pub fn vermerke(
     if lies_zeile(&e.text()).is_none() {
         return Err("Update-Abschlussbeleg ist ungültig.".into());
     }
-    verlauf_abschliessen(wurzel, &e)?;
     alle.retain(|r| r.neu != o.neu || r.vorher != o.vorher);
     alle.push(e.clone());
-    let text = alle
+    let zeilen = alle
         .iter()
         .skip(alle.len().saturating_sub(20))
         .map(Ergebnis::text)
-        .collect::<Vec<_>>()
-        .join("\n");
-    schreibe_ganz(&pfad(wurzel), &format!("{text}\n"))?;
-    Ok(e)
+        .collect::<Vec<_>>();
+    // JSON-Escapes und UTF-8 können mehr Bytes als Zeichen benötigen. Die eigene
+    // Ausgabe muss innerhalb derselben Grenze bleiben, die beim Lesen geprüft wird.
+    for start in 0..zeilen.len() {
+        let text = format!("{}\n", zeilen.get(start..).unwrap_or_default().join("\n"));
+        if u64::try_from(text.len()).unwrap_or(u64::MAX) <= MAX_DATEI {
+            schreibe_ganz(&pfad(wurzel), &text)?;
+            // Der maßgebliche Abschlussbeleg ist dauerhaft gespeichert. Ein volles oder
+            // unlesbares zusätzliches Diagnoseprotokoll darf ihn nicht zurücknehmen.
+            if let Err(fehler) = verlauf_abschliessen(wurzel, &e) {
+                eprintln!(
+                    "[Update] Abschlussbeleg gespeichert; zusätzlicher Diagnoseeintrag nicht möglich: {fehler}"
+                );
+            }
+            return Ok(e);
+        }
+    }
+    Err("Ein Update-Abschlussbeleg überschreitet die Dateigröße.".into())
 }
 
 /// Auch ältere Rückfallstände lesen den bestehenden Verlauf und das bestehende Protokoll.

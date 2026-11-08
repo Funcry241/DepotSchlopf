@@ -150,3 +150,24 @@ pub fn baubefehl(wurzel: &Path) -> std::process::Command {
         ]);
     c
 }
+
+/// Prozessübergreifend, auch über verschiedene Projektordner hinweg. Die Datei bleibt
+/// liegen; nur die vom Betriebssystem gehaltene Sperre zählt und endet beim Prozessende.
+pub fn prozess_sperre() -> Result<Option<std::fs::File>, String> {
+    let p = std::env::temp_dir().join(format!("depotschlopf-waechter-{}.lock", crate::http::PORT));
+    if std::fs::symlink_metadata(&p).is_ok_and(|m| !m.is_file()) {
+        return Err("Wächtersperre ist keine reguläre Datei.".into());
+    }
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(p)
+        .map_err(|e| format!("Wächtersperre nicht verfügbar: {e}"))?;
+    match f.try_lock() {
+        Ok(()) => Ok(Some(f)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(format!("Wächtersperre nicht verwendbar: {e}")),
+    }
+}

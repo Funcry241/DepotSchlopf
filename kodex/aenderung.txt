@@ -1,5 +1,5 @@
 klasse: Funktion
-zweck: Oberflächenupdates mit getrenntem Wächter-Bau, dauerhaftem Abschluss und robuster Browser-Wiederverbindung absichern.
+zweck: Konkurrierende Wächter beim Oberflächenupdate verhindern und Update-Abschlussbelege lesbar halten, ohne Bestätigung von zusätzlichen Diagnoseeinträgen abhängig zu machen.
 pfade:
 crates/depot_dienst/
 README.md

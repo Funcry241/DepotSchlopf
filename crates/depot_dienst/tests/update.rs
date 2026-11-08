@@ -900,3 +900,130 @@ test('Rückfall auf älteren Dienst ohne Bereitschaftsmarker wird erkannt',async
   await b.advance(0);assert.deepEqual(b.navigations,['/einrichtung#update']);
 });
 "#;
+
+/// Ein zweiter Start bei freiem Dienst-Port darf während eines Updates weder neu bauen noch
+/// den ersten Wächter zurücksetzen. Die Prozesssperre gilt auch für andere Projektkopien.
+#[test]
+fn gegenprobe_doppelstart_bei_portluecke_beruehrt_update_nicht() -> Result<(), String> {
+    use std::fs::OpenOptions;
+    let (w, vorher, neu) = zwei_staende()?;
+    fs::create_dir_all(w.join("kodex")).map_err(|e| e.to_string())?;
+    fs::write(
+        w.join("kodex/festschreibung.txt"),
+        "Wurzelmarker der Gegenprobe",
+    )
+    .map_err(|e| e.to_string())?;
+    offen_schreiben(&w, &vorher, &neu)?;
+    let pfad = std::env::temp_dir().join("depotschlopf-waechter-47410.lock");
+    let sperre = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&pfad)
+        .map_err(|e| e.to_string())?;
+    sperre.try_lock().map_err(|e| e.to_string())?;
+    let frei =
+        std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, depot_dienst::http::PORT))
+            .map_err(|e| format!("Vorbedingung freier Port: {e}"))?;
+    drop(frei);
+    let aus = Command::new(env!("CARGO_BIN_EXE_depot_waechter"))
+        .arg("--ohne-browser")
+        .current_dir(&w)
+        .output()
+        .map_err(|e| e.to_string())?;
+    assert_eq!(
+        g(&w, &["rev-parse", "HEAD"])?,
+        neu,
+        "zweiter Start hat trotz laufendem Wächter zurückgesetzt: {}",
+        String::from_utf8_lossy(&aus.stderr)
+    );
+    assert!(rueckfall::offen_pfad(&w).exists());
+    assert!(!rueckfall::abgelehnt_pfad(&w).exists());
+    assert!(
+        aus.status.success(),
+        "{}",
+        String::from_utf8_lossy(&aus.stderr)
+    );
+    assert!(String::from_utf8_lossy(&aus.stdout).contains("startet bereits"));
+    assert!(waechter::prozess_sperre()?.is_none());
+    // Andere parallel laufende Tests können gerade einen Kindprozess erzeugen. Ein
+    // geerbter Deskriptor hält den Lock bis exec kurz weiter; auf tatsächliche Freigabe warten.
+    let uebernehmen = || -> Result<fs::File, String> {
+        for _ in 0..100 {
+            if let Some(f) = waechter::prozess_sperre()? {
+                return Ok(f);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        Err("Sperre blieb nach Prozessende belegt".into())
+    };
+    drop(sperre);
+    let wieder = uebernehmen()?;
+    assert!(waechter::prozess_sperre()?.is_none());
+    drop(wieder);
+    drop(uebernehmen()?);
+    Ok(())
+}
+
+#[test]
+fn gegenprobe_lange_abschlussgruende_bleiben_wieder_lesbar() -> Result<(), String> {
+    use depot_dienst::aktualisierung::{self, Phase};
+    let w = ordner()?;
+    let grund = "\u{0001}".repeat(2048);
+    for n in 0..25 {
+        let o = Offen {
+            vorher: "f".repeat(40),
+            neu: format!("{n:040x}"),
+        };
+        aktualisierung::vermerke(&w, &o, Phase::Probe, &grund, None)?;
+        let alle = aktualisierung::laden(&w)?;
+        assert!(alle.len() <= 20);
+        assert_eq!(alle.last().map(|e| e.neu.as_str()), Some(o.neu.as_str()));
+        assert!(
+            aktualisierung::pfad(&w)
+                .metadata()
+                .map_err(|e| e.to_string())?
+                .len()
+                <= 128 * 1024
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn gegenprobe_volles_diagnoseprotokoll_blockiert_bestaetigung_nicht() -> Result<(), String> {
+    let (w, vorher, neu) = zwei_staende()?;
+    let d = dienst(w.clone());
+    let t = mittag()?;
+    suche_update(&d, t)?;
+    bestaetige_update(&d)?;
+    let (nr, kind) = some(d.schritt(t), "Update startet")?;
+    offen_schreiben(&w, &vorher, &neu)?;
+    d.verfolge(nr, kind, || mittag().ok());
+    let kennung = depot_dienst::aktualisierung::laden(&w)?
+        .last()
+        .ok_or("Beleg fehlt")?
+        .lauf
+        .clone();
+    let p = w.join("daten/protokolle").join(format!("{kennung}.log"));
+    let log = fs::OpenOptions::new()
+        .write(true)
+        .open(p)
+        .map_err(|e| e.to_string())?;
+    log.set_len(depot_dienst::protokoll::DATEI_MAX)
+        .map_err(|e| e.to_string())?;
+    drop(log);
+    assert!(
+        rueckfall::bestaetige(&w)?.is_some(),
+        "volles Diagnoseprotokoll ist kein Fehler der neuen Version oder der Papierdaten"
+    );
+    assert!(!rueckfall::offen_pfad(&w).exists());
+    assert_eq!(
+        depot_dienst::aktualisierung::laden(&w)?
+            .last()
+            .map(|e| e.phase),
+        Some(depot_dienst::aktualisierung::Phase::Bestaetigt)
+    );
+    Ok(())
+}
