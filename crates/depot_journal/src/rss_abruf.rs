@@ -8,7 +8,12 @@ pub struct RssAbruf {
 }
 impl RssAbruf {
     pub fn neu(quelle: &str, zeit: Zeitpunkt) -> Option<Self> {
-        ["tagesschau", "bbc-world"].contains(&quelle).then(|| Self {
+        (!quelle.is_empty()
+            && quelle.len() <= 32
+            && quelle
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
+        .then(|| Self {
             quelle: quelle.into(),
             zeit,
         })
@@ -25,6 +30,7 @@ impl RssAbruf {
     /// Datum, feste Quelle und Zeitpunkt müssen zusammenpassen; freie Beobachtungen bleiben frei.
     pub(crate) fn aus_alt(datum: Datum, text: &str) -> Option<Self> {
         let a = Self::lies(text.strip_prefix("rss-abruf: ")?)?;
-        (a.zeit.datum() == Some(datum)).then_some(a)
+        (["tagesschau", "bbc-world"].contains(&a.quelle.as_str()) && a.zeit.datum() == Some(datum))
+            .then_some(a)
     }
 }

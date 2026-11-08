@@ -34,7 +34,7 @@ fn alte_rss_vermerke_werden_ohne_dateiumschreiben_als_verwaltung_gelesen() -> Re
     assert_eq!(j.stand().seit_abschluss(), 0);
     assert_eq!(j.stand().rss_abruf("tagesschau"), Some(t));
     assert_eq!(j.stand().rss_abruf("bbc-world"), Some(t));
-    assert_eq!(j.stand().beobachtungen().len(), 2);
+    assert!(j.stand().beobachtungen().is_empty());
     assert_eq!(j.eintraege().len(), 2);
     drop(j);
     assert_eq!(fs::read(&p).map_err(|e| e.to_string())?, bytes);
@@ -53,7 +53,9 @@ fn typisierte_rss_abrufe_bleiben_beim_neustart_ohne_handelszustand() -> Result<(
         let mut j = Journal::oeffnen(&p).map_err(|e| format!("{e:?}"))?;
         j.belege_rss_abruf("tagesschau", t)
             .map_err(|e| format!("{e:?}"))?;
-        assert!(j.belege_rss_abruf("unbekannte-quelle", t).is_err());
+        j.belege_rss_abruf("fruehere-quelle", t)
+            .map_err(|e| format!("{e:?}"))?;
+        assert!(j.belege_rss_abruf("Ungültige Quelle", t).is_err());
         for falsch in [
             "tagesschau;+1794121200",
             "tagesschau;01794121200",
@@ -66,6 +68,7 @@ fn typisierte_rss_abrufe_bleiben_beim_neustart_ohne_handelszustand() -> Result<(
     let j = Journal::oeffnen(&p).map_err(|e| format!("{e:?}"))?;
     assert_eq!(j.stand().seit_abschluss(), 0);
     assert_eq!(j.stand().rss_abruf("tagesschau"), Some(t));
+    assert_eq!(j.stand().rss_abruf("fruehere-quelle"), Some(t));
     assert!(j.stand().beobachtungen().is_empty());
     assert!(j.stand().toepfe().is_empty() && j.stand().auftraege().is_empty());
     Ok(())

@@ -1,9 +1,11 @@
 klasse: Funktion
-zweck: RSS-Abrufverwaltung von offenen Papiertagen trennen, bestehende Journale ohne Umschreiben lesen und echte unvollständige Handelsläufe weiter sperren.
+zweck: Historische RSS-Quellen lesbar halten, Uhrfehler sichtbar machen und Vorbereitung während unbestätigter Updates verhindern.
 pfade:
 crates/depot_journal/
 crates/depot_sammler/
 crates/depot_sim/
+crates/depot_dienst/
 README.md
 CHANGELOG.md
 docs/befunde/nachrichten.md
+docs/befunde/update.md

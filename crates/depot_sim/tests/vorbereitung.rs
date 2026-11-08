@@ -330,3 +330,19 @@ fn rss_abrufe_aus_altem_und_neuem_sammler_blockieren_die_vorbereitung_nicht() ->
     }
     Ok(())
 }
+
+#[test]
+fn offenes_update_verhindert_vorbereitung_ohne_journalaenderung() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let pfad = ort.0.join("daten/journal.txt");
+    let vorher = fs::read(&pfad).map_err(|e| e.to_string())?;
+    fs::write(ort.0.join("daten/update_offen.txt"), "Probe").map_err(|e| e.to_string())?;
+    let (mut dachs, mut maus, fragen) = modelle()?;
+    let t = zeit(8)?;
+    let e =
+        depot_sim::vorbereitung::lauf(&ort.0, t, &universum()?, &mut dachs, &mut maus, || Some(t));
+    assert!(e.is_err_and(|e| e.contains("Update")));
+    assert!(fragen.borrow().is_empty());
+    assert_eq!(fs::read(pfad).map_err(|e| e.to_string())?, vorher);
+    Ok(())
+}

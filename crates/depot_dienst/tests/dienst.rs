@@ -2481,3 +2481,33 @@ fn kurssperre_pruefabruf_ist_getrennt_und_doppelklickfest() -> Result<(), String
     assert_eq!(Art::aus_kurz("kursdiagnose"), Some(Art::Kursdiagnose));
     Ok(())
 }
+
+#[test]
+fn vorbereitung_erst_nach_updatebestaetigung_einschalten_und_starten() -> Result<(), String> {
+    let p = ordner()?;
+    let d = dienst(p.clone(), true);
+    let t = donnerstag(12, 0)?;
+    let offen = p.join("daten/update_offen.txt");
+    fs::write(&offen, "Probe").map_err(|e| e.to_string())?;
+    let post = formular_post(
+        "/ausfuehren",
+        &format!("t={TOKEN}&art=vorbereiten&geprueft=ja"),
+    );
+    let antwort = text(&behandle(&d, &Attrappe::default(), &post, t));
+    assert!(antwort.contains("m=vorbereitung_update"));
+    assert!(wartend(&d).is_empty());
+    let plan = Zeitplan {
+        nachrichten_an: true,
+        vorbereitung: depot_dienst::zeitplan::VorbereitungsPlan::An,
+        ..Zeitplan::default()
+    };
+    assert_eq!(
+        d.setze_zeitplan(plan),
+        Err(depot_dienst::werkbank::ZeitplanAbgelehnt::UpdateOffen)
+    );
+    assert!(!d.sperre().zeitplan.vorbereitung.aktiv());
+    fs::remove_file(offen).map_err(|e| e.to_string())?;
+    d.setze_zeitplan(plan).map_err(|e| format!("{e:?}"))?;
+    assert!(d.von_hand(Art::Vorbereiten, t).is_ok());
+    Ok(())
+}

@@ -267,3 +267,35 @@ fn verschiedene_abrufzeiten_fallen_im_journal_nicht_zurueck() -> Result<(), Stri
     assert_eq!(oeffnen(&p)?.stand().nachrichten().len(), 2);
     Ok(())
 }
+
+#[test]
+fn ferner_zukunftsbeleg_erklaert_die_pause_ohne_netzabruf() -> Result<(), String> {
+    let p = ordner()?;
+    let mut j = oeffnen(&p)?;
+    let heute = um(14, 0)?;
+    let zukunft =
+        Zeitpunkt::aus_sekunden(heute.sekunden().saturating_add(172_800)).ok_or("Zeit")?;
+    for q in ["tagesschau", "bbc-world"] {
+        j.belege_rss_abruf(q, zukunft)
+            .map_err(|e| format!("{e:?}"))?;
+    }
+    let vorher = j.bestaetigt();
+    let mut n = netz("", "");
+    let b = sammle_nachrichten(
+        &mut j,
+        &mut n,
+        &Zugang::default(),
+        &mut || Some(heute),
+        &p.join("roh"),
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    assert!(n.adressen.is_empty());
+    assert_eq!(b.quellen.len(), 2);
+    assert!(
+        b.quellen
+            .iter()
+            .all(|t| t.contains("Uhr oder Journal prüfen"))
+    );
+    assert_eq!(j.bestaetigt(), vorher);
+    Ok(())
+}
