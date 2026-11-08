@@ -51,13 +51,13 @@ label{display:block;margin:6px 0}\
 .selten{border:2px solid var(--halt);background:#fff1f0}\
 @media(prefers-color-scheme:dark){.selten{background:#2b1d1d}}\
 .selten>h2{color:var(--halt)}\
-.schluessel-tabelle input{width:100%}.schluessel-tabelle td{overflow-wrap:anywhere}\
-@media(max-width:600px){.schluessel-tabelle,.schluessel-tabelle tbody,\
-.schluessel-tabelle tr,.schluessel-tabelle td{display:block;width:100%}\
-.schluessel-tabelle tr:first-child{display:none}.schluessel-tabelle td{border:0}\
-.schluessel-tabelle tr{border-bottom:1px solid var(--linie);padding:8px 0}\
-.schluessel-tabelle td[data-titel]::before{content:attr(data-titel) \": \";font-weight:600}\
-.schluessel-tabelle button{margin-top:6px}}";
+.zugang-tabelle input{width:100%}.zugang-tabelle td{overflow-wrap:anywhere}\
+@media(max-width:600px){.zugang-tabelle,.zugang-tabelle tbody,\
+.zugang-tabelle tr,.zugang-tabelle td{display:block;width:100%}\
+.zugang-tabelle tr:first-child{display:none}.zugang-tabelle td{border:0}\
+.zugang-tabelle tr{border-bottom:1px solid var(--linie);padding:8px 0}\
+.zugang-tabelle td[data-titel]::before{content:attr(data-titel) \": \";font-weight:600}\
+.zugang-tabelle button{margin-top:6px}}";
 
 /// Ein Bedienelement zu einem Auftrag und seinem aktuellen Stand.
 fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
@@ -1024,7 +1024,7 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
          der Windows-Anmeldeinformationsverwaltung, nie im Projektordner. Die Seite zeigt keinen \
          Schlüssel, nur ob einer hinterlegt ist und was der Anbieter beim letzten Aufruf dazu \
          sagte. Geprüft wird nur bei echten Läufen, nie mit eigenen, kostenpflichtigen \
-         Testaufrufen. <b>Speichern heißt hier zugleich aktiv:</b> Der nächste Lauf liest ihn.</p><table class=\"schluessel-tabelle\">\
+         Testaufrufen. <b>Speichern heißt hier zugleich aktiv:</b> Der nächste Lauf liest ihn.</p><table class=\"zugang-tabelle\">\
          <tr><th>Wofür</th><th>Stand</th><th>Neu hinterlegen</th></tr>",
     );
     for (w, st) in &e.schluessel {
