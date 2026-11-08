@@ -433,12 +433,12 @@ Nach einem Neustart wird jeder offene Zustand samt seinen Reservierungen aus dem
 
 | Ebene | Grenze | Durchgesetzt durch |
 | --- | --- | --- |
-| 1 Aufrufart | eine Frage, eine Antwort; keine Agenten-Schleifen, keine Werkzeuge, kein Verlauf | Code kennt nur diesen Aufruf |
+| 1 Aufrufart | eine Frage, eine Antwort; keine Werkzeuge. Nach fixierten unabhängigen Erstmeinungen und Zweitmeinungen sind begrenzte Abstimmungsrunden erlaubt; Abbruch bei Fehler, Einigkeit oder Budgetende | Zweckgebundene Reservierung und belegte Runde |
 | 2 je Aufruf | Höchstzahl an Eingabe- und Ausgabe-Token je KI | Zählung vor dem Senden, `max_tokens` |
 | 3 je Anfrage | höchstens eine Wiederholung ohne verwertbare Antwort | Kassenbuch |
-| 4 je Tag | Höchstzahl an Anfragen je Bereich | Kassenbuch |
-| 5 je Monat | Euro-Grenze je Bereich und Berater und für Dachs und Maus zusammen, harter Stopp | Budgetwächter |
-| 6 je Jahr | eine gemeinsame Euro-Grenze für Dachs und Maus | Budgetwächter |
+| 4 je Tag | höchstens 30 Aufrufe je KI; Tagesrahmen aus Monatsrest am Tagesanfang geteilt durch verbleibende Handelstage, abzüglich heutiger Kosten | Kassenbuch |
+| 5 je Monat | je KI 20 € und 690 Aufrufe, harter Stopp | Budgetwächter |
+| 6 je Jahr | 240 € je KI, harter Stopp | Budgetwächter |
 | 7 beim Anbieter | Prepaid-Guthaben je Anbieter ohne automatisches Aufladen | Anthropic- und OpenAI-Konto, außerhalb des Programms |
 
 Ist das Monatsbudget eines Bereichs oder eines Beraters erreicht, wird in diesem Bereich bis Monatsende nicht mehr gefragt. Fehlt das Budget für die Prüfung durch Maus, gilt der Vorschlag als nicht geprüft (R31). Es entstehen dann keine neuen Aufträge. Stopps, Kontowächter und Halt arbeiten weiter (R7). API-Schlüssel liegen in der Windows-Anmeldeinformationsverwaltung, nie in Konfiguration, Journal oder Export. Für den Diagnoseprotokollschutz liest der lokale Dienst die vier hinterlegten Schlüssel kurzzeitig beim Start und vor jedem Lauf. Er behält ausschließlich SHA-256-Prüfsummen der Schlüssel bis 12 Zeichen bzw. aller 12-Zeichen-Fenster längerer Schlüssel. Über die Einrichtung ersetzte Schlüssel werden ebenso berücksichtigt; frühere Prüfsummen bleiben bis zum Dienstende wirksam. Klartext-Schlüssel werden nicht als Cache gehalten. Die Prüfsummen ersetzen keinen Schutz vor einem Angreifer mit Zugriff auf den Prozessspeicher. Gespeicherte Diagnoseprotokolle werden beim Öffnen und Herunterladen zeilenweise mit einer Kopie der Prüfsummen außerhalb der Zustandssperren bereinigt. Kursquellen, Nachrichtensammler, Berater und Dienst verwenden vor der Ausgabe einen gemeinsamen Maskierer: Werte in Schlüsselparametern und Zugangsköpfen werden durch `***` ersetzt. Bekannte Schlüssel und ihre Fragmente ab zwölf Zeichen werden ebenso maskiert. Anfragekörper und Anfrageköpfe der KI werden nicht protokolliert. Die Prüfsummen bleiben eine zusätzliche Kontrolle; schlägt sie an, wird die betroffene Ausgabezeile entfernt und die Oberfläche meldet einen Fehler im Quellenschutz; bei Lesefehlern im Schlüsselspeicher wird die Prozessausgabe unterdrückt.
@@ -761,3 +761,11 @@ Gewählt ist IBKR: offizielle Order-Schnittstelle, kostenloses Papierkonto mit d
 - [ ] API-Schlüssel für Anthropic und OpenAI anlegen, je höchstens 25 € Prepaid-Guthaben, automatisches Aufladen aus.
 - [ ] Den Betrag nennen, spätestens vor dem ersten Echtgeld.
 - [ ] Das Paket aus Kapitel 21 freigeben, wenn Dachs und Maus es begründet vorlegen.
+
+### Ergänzung 08.11.2026: KI-Abrechnung und Abstimmung (#82)
+
+Die Freigabe von Wolfgang in [Issue #82, endgültiger Kommentar](https://github.com/Funcry241/DepotSchlopf/issues/82#issuecomment-6723333602) ersetzt die früheren 92/3 durch 690/30 Aufrufe je KI und Monat/Tag. Eurogrenzen und Kostensperre bleiben unverändert. Der kurze Ausgabedeckel für Vorbereitung und Abstimmung beträgt 2.000 Token und steht in den festgeschriebenen KI-Grenzen.
+
+Das Journal erhält genau eine Minderkostenabrechnung je Reservierung; sie vermindert nur, verändert die ursprünglichen Dateizeilen nicht und beginnt keinen Papiertag. Ohne passenden bestätigten Beleg bleibt der Höchstbetrag erhalten. Alte Buchungen unter früheren Grenzabdrücken zählen unverändert mit. Erst- und Zweitmeinungen gehen vor der Abstimmung; zusätzliche Fragen lassen im Monats- und Jahresbudget die Höchstkosten der nächsten Erstmeinung frei.
+
+Beide Erstmeinungen müssen unabhängig und verwertbar feststehen, bevor ein Dialog beginnt. Jede Runde erhält den fixierten vorherigen Stand und die fremden Begründungen als zitierte Daten. Die zweite Antwort einer Runde sieht die erste noch nicht. Eine Zustimmung gilt nur für den gesehenen Vorschlag; Änderungen brauchen eine weitere Zustimmung. Bei fehlender, ungültiger oder nicht bezahlbarer Antwort endet die Abstimmung. Ungeprüfte Änderungen gelangen nie ins Regelwerk. Einigkeit beendet weitere Fragen.

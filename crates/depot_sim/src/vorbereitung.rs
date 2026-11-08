@@ -149,6 +149,9 @@ pub fn vorbereiten<'a>(
                             ereignisse: &ereignisse,
                         },
                     );
+                    if let Some(kosten) = b.abrechnung() {
+                        j.rechne_ki_ab(&kosten).map_err(|e| format!("{e:?}"))?;
+                    }
                     a.zeit = uhr().ok_or("Uhr liefert keine Zeit")?;
                     a.verwertbar = antwort.verwertbar && antwort.vorschlag.is_none();
                     a.text = sauber(&antwort.einschaetzung);

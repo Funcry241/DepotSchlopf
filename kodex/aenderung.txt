@@ -1,11 +1,14 @@
-klasse: Funktion
-zweck: Historische RSS-Quellen lesbar halten, Uhrfehler sichtbar machen und Vorbereitung während unbestätigter Updates verhindern.
+klasse: FestschreibungAenderung
+zweck: Wolfgangs endgültige Vorgabe aus Issue 82 mit 30/690 Aufrufen, unveränderten Eurogrenzen, bestätigter Tokenabrechnung, Tagesrahmen und begrenzter Abstimmung umsetzen.
 pfade:
+crates/depot_ki/
 crates/depot_journal/
-crates/depot_sammler/
 crates/depot_sim/
+crates/depot_berater/
+crates/depot_lage/
 crates/depot_dienst/
 README.md
 CHANGELOG.md
-docs/befunde/nachrichten.md
-docs/befunde/update.md
+docs/ARCHITEKTUR.md
+docs/befunde/berater.md
+docs/befunde/ki-dialog.md

@@ -194,16 +194,18 @@ fn unterbrechung_nach_reservierung_fragt_nach_neustart_niemanden_nochmal() -> Re
 #[test]
 fn erschoepftes_monatsbudget_verhindert_auch_vorbereitungsaufrufe() -> Result<(), String> {
     let ort = Ort::neu()?;
+    let inhalt = depot_journal::inhalt_fuer(&[
+        (Art::KiGrenzen, &"0".repeat(64)),
+        (Art::Ki, "Dachs;2026-11-01;1;2000"),
+        (Art::Ki, "Maus;2026-11-01;1;2000"),
+    ]);
+    fs::write(ort.0.join("daten/journal.txt"), &inhalt).map_err(|e| e.to_string())?;
+    fs::write(
+        ort.0.join("daten/journal.vermerk"),
+        depot_journal::vermerk_fuer(&inhalt, 0).ok_or("Vermerk")?,
+    )
+    .map_err(|e| e.to_string())?;
     let mut j = ort.journal()?;
-    for n in 1..=23 {
-        let tag = datum(2026, 11, n)?;
-        let zyklus = tagnummer(tag).ok_or("Zyklus")?;
-        for wer in [BeraterId::Dachs, BeraterId::Maus] {
-            for _ in 0..2 {
-                let _ = j.reserviere(wer, tag, zyklus);
-            }
-        }
-    }
     j.schliesse_ab(datum(2026, 11, 23)?, Cent(500_000), &"a".repeat(64))
         .map_err(|e| format!("{e:?}"))?;
     let t = zeit(28)?;

@@ -142,6 +142,9 @@ impl Anbieter {
     pub fn lies(self, inhalt: &[u8]) -> Result<Gelesen, String> {
         let text = std::str::from_utf8(inhalt).map_err(|_| "Antwort ist kein UTF-8")?;
         let w = json::lies(text)?;
+        if w.doppelte_felder() || w.feld("usage").is_some_and(Json::doppelte_felder) {
+            return Err("Mehrdeutige Anbieterabrechnung".into());
+        }
         match self {
             Anbieter::Anthropic => lies_anthropic(&w),
             Anbieter::OpenAi => lies_openai(&w),
@@ -157,13 +160,21 @@ fn zahl(w: &Json, pfad: &[&str]) -> Option<u64> {
     x.anzahl()
 }
 
+fn optionale_anzahl(w: &Json, feld: &str) -> Result<u64, String> {
+    w.feld(feld).map_or(Ok(0), |v| {
+        v.anzahl()
+            .ok_or_else(|| format!("Ungültiger Verbrauch: {feld}"))
+    })
+}
+
 fn lies_anthropic(w: &Json) -> Result<Gelesen, String> {
     let usage = w.feld("usage").ok_or("Antwort ohne Verbrauch")?;
     let ein = zahl(usage, &["input_tokens"]).ok_or("Verbrauch ohne input_tokens")?;
-    // Zwischengespeicherte Eingaben zaehlen voll zum Eingabepreis: das ueberschaetzt nur.
-    let cache = zahl(usage, &["cache_creation_input_tokens"])
-        .unwrap_or(0)
-        .saturating_add(zahl(usage, &["cache_read_input_tokens"]).unwrap_or(0));
+    // Cache-Erstellung wird nicht angefordert. Unerwartete Zusatzabrechnung bleibt unklar.
+    if optionale_anzahl(usage, "cache_creation_input_tokens")? != 0 {
+        return Err("Unerwartete Cache-Abrechnung; Höchstkosten bleiben reserviert".into());
+    }
+    let cache = optionale_anzahl(usage, "cache_read_input_tokens")?;
     let aus = zahl(usage, &["output_tokens"]).ok_or("Verbrauch ohne output_tokens")?;
     let suchen = zahl(usage, &["server_tool_use", "web_search_requests"]).unwrap_or(0);
     let verbrauch = Verbrauch {

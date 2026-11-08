@@ -67,21 +67,25 @@ fn hoechstkosten_je_aufruf() {
     );
 }
 
-/// Eine Schleife fragt einen ganzen Tag lang jede Sekunde: genau zwei Erlaubnisse.
+/// Eine Schleife fragt einen ganzen Tag lang jede Sekunde: genau 30 Erlaubnisse bei bestätigten Nullkosten.
 #[test]
-fn jede_sekunde_fragen_bringt_nur_zwei_aufrufe() {
+fn jede_sekunde_fragen_bringt_hoechstens_dreissig_aufrufe() {
     let p = neuer_pfad();
     let mut j = journal(&p);
     let k = &mut j;
     let mut erlaubt = 0_u32;
     for _sekunde in 0..86_400 {
         match k.reserviere(DACHS, tag(2), 1) {
-            Ok(_) => erlaubt = erlaubt.saturating_add(1),
+            Ok(e) => {
+                let a = e.abrechnung(0, 0).unwrap_or_else(|| panic!("Abrechnung"));
+                k.rechne_ki_ab(&a).unwrap_or_else(|e| panic!("{e:?}"));
+                erlaubt = erlaubt.saturating_add(1);
+            }
             Err(e) => assert_eq!(e, Sperre::ZyklusVoll),
         }
     }
-    assert_eq!(erlaubt, 2);
-    assert_eq!(k.stand().ki().buchungen().len(), 2);
+    assert_eq!(erlaubt, 30);
+    assert_eq!(k.stand().ki().buchungen().len(), 30);
 }
 
 /// Die Schleife zaehlt den Zyklus hoch, um die Grenze zu umgehen: der Tag ist trotzdem voll.
@@ -99,9 +103,9 @@ fn neuer_zyklus_am_selben_tag_gesperrt() {
     }
 }
 
-/// Jeden Tag ein neuer Zyklus, einen Monat lang: hoechstens 46 Aufrufe, hoechstens 20 €.
+/// Jeden Tag ein neuer Zyklus, einen Monat lang: höchstens 690 Aufrufe, hoechstens 20 €.
 #[test]
-fn monat_hoechstens_46_aufrufe() {
+fn monat_hoechstens_690_aufrufe() {
     let p = neuer_pfad();
     let mut j = journal(&p);
     let k = &mut j;
@@ -109,7 +113,10 @@ fn monat_hoechstens_46_aufrufe() {
     for t in 1..=30 {
         zyklus = zyklus.saturating_add(1);
         for _ in 0..100 {
-            let _ = k.reserviere(BeraterId::Maus, tag(t), zyklus);
+            if let Ok(e) = k.reserviere(BeraterId::Maus, tag(t), zyklus) {
+                let a = e.abrechnung(0, 0).unwrap_or_else(|| panic!("Abrechnung"));
+                k.rechne_ki_ab(&a).unwrap_or_else(|e| panic!("{e:?}"));
+            }
         }
     }
     let summe: i64 = k
@@ -119,7 +126,7 @@ fn monat_hoechstens_46_aufrufe() {
         .iter()
         .map(|b| b.reserviert.0)
         .sum();
-    assert_eq!(k.stand().ki().buchungen().len(), 46);
+    assert_eq!(k.stand().ki().buchungen().len(), 690);
     assert!(
         summe <= KiGrenzen::standard().kosten_je_monat().0,
         "{summe}"
@@ -133,12 +140,17 @@ fn neustart_setzt_nichts_zurueck() {
     {
         let mut j = journal(&p);
         let k = &mut j;
-        assert!(k.reserviere(DACHS, tag(3), 5).is_ok());
-        assert!(k.reserviere(DACHS, tag(3), 5).is_ok());
+        for _ in 0..30 {
+            let e = k
+                .reserviere(DACHS, tag(3), 5)
+                .unwrap_or_else(|e| panic!("{e:?}"));
+            k.rechne_ki_ab(&e.abrechnung(0, 0).unwrap_or_else(|| panic!("Abrechnung")))
+                .unwrap_or_else(|e| panic!("{e:?}"));
+        }
     }
     let mut j = journal(&p);
     let k = &mut j;
-    assert_eq!(k.stand().ki().buchungen().len(), 2);
+    assert_eq!(k.stand().ki().buchungen().len(), 30);
     assert_eq!(
         k.reserviere(DACHS, tag(3), 5).err(),
         Some(Sperre::ZyklusVoll)
@@ -213,6 +225,9 @@ fn getrennte_konten() {
     let k = &mut j;
     assert!(k.reserviere(DACHS, tag(4), 1).is_ok());
     assert!(k.reserviere(DACHS, tag(4), 1).is_ok());
+    for _ in 0..30 {
+        let _ = k.reserviere(DACHS, tag(4), 1);
+    }
     assert!(k.reserviere(DACHS, tag(4), 1).is_err());
     assert!(k.reserviere(BeraterId::Maus, tag(4), 1).is_ok());
 }
@@ -231,34 +246,30 @@ fn eingabe_deckel() {
     assert!(!erl.eingabe_passt(&"a".repeat(40_001)));
 }
 
-fn reservieren(k: &mut Journal, t: Datum, zyklus: u32) {
-    if let Err(e) = k.reserviere(DACHS, t, zyklus) {
-        panic!("Reservierung {t:?}/{zyklus}: {e:?}");
-    }
-}
-
 /// Ist das Monatsbudget erschoepft, bleibt die KI bis zum Monatsende gesperrt, auch nach einem
 /// Neustart. Im Folgemonat darf sie wieder.
 #[test]
 fn erschoepfter_monat_bleibt_bis_zum_folgemonat_gesperrt() {
-    let p = neuer_pfad();
+    let p = leerer_pfad();
+    schreib(
+        &p,
+        &[
+            (Art::KiGrenzen, &"0".repeat(64)),
+            (Art::Ki, "Dachs;2026-11-01;1;2000"),
+        ],
+    );
     {
         let mut j = journal(&p);
-        let k = &mut j;
-        for t in 1..=23 {
-            reservieren(k, tag(t), u32::from(t));
-            reservieren(k, tag(t), u32::from(t));
-        }
         assert_eq!(
-            k.reserviere(DACHS, tag(24), 24).err(),
-            Some(Sperre::MonatVoll)
+            j.reserviere(DACHS, tag(24), 24).err(),
+            Some(Sperre::MonatsbudgetErschoepft)
         );
     }
     let mut j = journal(&p);
     let k = &mut j;
     assert_eq!(
         k.reserviere(DACHS, tag(30), 30).err(),
-        Some(Sperre::MonatVoll)
+        Some(Sperre::MonatsbudgetErschoepft)
     );
     let dezember = Datum::neu(2026, 12, 1).unwrap_or_else(|| panic!("Datum"));
     assert!(k.reserviere(DACHS, dezember, 31).is_ok());

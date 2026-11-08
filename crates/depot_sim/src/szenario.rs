@@ -68,6 +68,21 @@ pub struct Urteil {
 /// Ein Berater. Jede Frage kostet eine `AufrufErlaubnis`; die gibt es nur, wenn das Journal die
 /// Hoechstkosten vorher gebucht hat (R8). Der Berater verbraucht sie.
 pub trait Berater {
+    fn kann_abstimmen(&self) -> bool {
+        false
+    }
+    fn abstimmen(
+        &mut self,
+        _erlaubnis: AufrufErlaubnis,
+        _lage: &Lage<'_>,
+        _stand: &crate::abstimmung::AbstimmungsStand,
+    ) -> crate::abstimmung::AbstimmungsAntwort {
+        crate::abstimmung::AbstimmungsAntwort::unverwertbar()
+    }
+    /// Einmalig abholen und vor einer weiteren Anfrage dauerhaft im Journal abrechnen.
+    fn abrechnung(&mut self) -> Option<depot_journal::KiAbrechnung> {
+        None
+    }
     /// Ist der Berater erreichbar? Ein Berater ohne Anbindung wird nicht gefragt; fuer ihn
     /// wird keine Erlaubnis reserviert und nichts gebucht.
     fn angebunden(&self) -> bool {

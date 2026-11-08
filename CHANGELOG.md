@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Freigegebenes KI-Kontingent aus #82: 30 Aufrufe je Tag und 690 je Monat, weiterhin 20 € monatlich und 240 € jährlich je KI. Dauerhafte Tokenabrechnung gibt bestätigte Minderkosten frei; unklare Abrechnung und Absturz behalten die volle Reservierung. Tagesrahmen und Reserve der nächsten Erstmeinung schützen das Monatsbudget. Dachs und Maus können begründet und budgetbegrenzt abstimmen; ungesehene Änderungen bekommen keine automatische Zustimmung. Live zeigt Tagesrahmen und restliche Handelstage.
+
 - RSS-Nachprüfung: Historische Quellkennungen bleiben lesbar, ferne Zukunftsbelege erhalten eine sichtbare Uhrwarnung und Verwaltungszeilen erscheinen nicht als Beobachtungen. Vorbereitung erst nach bestätigtem Update; manueller Updateweg mit Gate, Datenprobe und Sicherung dokumentiert.
 
 - RSS-Abrufvermerke zählen nicht mehr als unvollständiger Papiertag. Alte Vermerke werden beim Lesen exakt erkannt; bestehende Journaldateien bleiben unverändert. Neue Abrufe erhalten einen eigenen Verwaltungsbeleg. Die dauerhafte Abrufpause und die Sperre echter offener Handelsläufe bleiben erhalten. Nach neuen RSS-Belegen kann eine ältere Programmversion das Journal nicht lesen.

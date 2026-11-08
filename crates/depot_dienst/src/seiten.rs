@@ -1208,7 +1208,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          keine zusätzlichen KI-Aufrufe; gilt nur bei eingeschaltetem Zeitplan)</label>\
          <label><input type=\"checkbox\" name=\"vorbereitung_an\" value=\"ja\"{}> \
          An börsenfreien Tagen den nächsten Handelstag vorbereiten (empfohlen; braucht Schlagzeilen und eingeschalteten Zeitplan; höchstens ein Aufruf je KI und Tag zwischen 08 und 23 Uhr). \
-         Erst nach bestätigtem Update verfügbar. Die Aufrufe zählen zum bisherigen Monatsbudget und können es früher aufbrauchen. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
+         Erst nach bestätigtem Update verfügbar. Die Aufrufe zählen zum Monatsbudget; der Tagesrahmen und die Reserve der nächsten Erstmeinung haben Vorrang. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
          <button type=\"submit\">Einstellungen speichern</button></form></section>",
         uhrzeit_text(ent.termine.unwrap_or(p.termine)),
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),

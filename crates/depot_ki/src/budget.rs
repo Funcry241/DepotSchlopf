@@ -4,6 +4,7 @@
 //! Felder sind privat, es gibt keine Setzer. Frei einstellbare Werte gibt es nur in den Tests
 //! dieses Moduls.
 
+use crate::tagesrahmen;
 use depot_kern::{BeraterId, Cent};
 
 pub use depot_kern::Datum;
@@ -79,6 +80,14 @@ impl KiDeckel {
         }
     }
 
+    /// Kurze Vorbereitung/Abstimmung: gleiche Preise und Eingabegrenze, 2.000 Ausgabetoken.
+    pub fn kurz(berater: BeraterId) -> KiDeckel {
+        Self {
+            max_token_aus: KiGrenzen::standard().kurz_max_token_aus(),
+            ..Self::standard(berater)
+        }
+    }
+
     pub fn max_token_ein(&self) -> u32 {
         self.max_token_ein
     }
@@ -117,21 +126,25 @@ pub struct KiGrenzen {
     aufrufe_je_monat: u32,
     kosten_je_monat: Cent,
     kosten_je_jahr: Cent,
+    kurz_max_token_aus: u32,
 }
 
 impl KiGrenzen {
-    /// Papierhandel ab 05.11.2026, je KI: 2 Aufrufe je Zyklus (eigener Vorschlag und
-    /// Zweitmeinung zum anderen Topf), 1 Zyklus je Tag, 46 Aufrufe und 20 € je Monat,
-    /// 240 € je Jahr (Wolfgang, 05.11.2026: je KI hoechstens 20 € im Monat). 46 Aufrufe
-    /// reichen fuer 23 Handelstage; gebucht werden die Hoechstkosten.
+    /// Je KI höchstens 30 Aufrufe am Tag und 690 im Monat als Schleifenschutz.
+    /// Verbindliche Eurogrenzen bleiben 20 € im Monat und 240 € im Jahr.
     pub fn standard() -> KiGrenzen {
         KiGrenzen {
-            aufrufe_je_zyklus: 2,
+            aufrufe_je_zyklus: 30,
             zyklen_je_tag: 1,
-            aufrufe_je_monat: 46,
+            aufrufe_je_monat: 690,
             kosten_je_monat: Cent(2_000),
             kosten_je_jahr: Cent(24_000),
+            kurz_max_token_aus: 2_000,
         }
+    }
+
+    pub fn kurz_max_token_aus(&self) -> u32 {
+        self.kurz_max_token_aus
     }
 
     pub fn aufrufe_je_zyklus(&self) -> u32 {
@@ -176,6 +189,8 @@ pub enum Sperre {
     /// Ein frueherer Zyklus soll erneut fragen.
     ZyklusRueckwaerts,
     Rechenfehler,
+    TagesrahmenErschoepft,
+    ErstmeinungReserviert,
     /// Kassenbuch oder Journal unstimmig, nicht schreibbar oder nach einem Fehler gesperrt.
     /// Halt bis zum geprueften Wiederanlauf (R25, R29).
     Kassenbuch(String),
@@ -255,6 +270,9 @@ pub fn pruefe(
     if jahr > grenzen.kosten_je_jahr {
         return Err(Sperre::JahresbudgetErschoepft);
     }
+    if kosten > tagesrahmen(grenzen, buchungen, berater, datum)? {
+        return Err(Sperre::TagesrahmenErschoepft);
+    }
     Ok(kosten)
 }
 
@@ -264,10 +282,12 @@ pub fn grenzabdruck() -> String {
     use sha2::{Digest, Sha256};
     use std::fmt::Write as _;
     let text = format!(
-        "{:?}|{:?}|{:?}",
+        "{:?}|{:?}|{:?}|{:?}|{:?}",
         KiGrenzen::standard(),
         KiDeckel::standard(BeraterId::Dachs),
-        KiDeckel::standard(BeraterId::Maus)
+        KiDeckel::standard(BeraterId::Maus),
+        KiDeckel::kurz(BeraterId::Dachs),
+        KiDeckel::kurz(BeraterId::Maus)
     );
     Sha256::digest(text.as_bytes())
         .iter()
@@ -355,7 +375,7 @@ mod tests {
         Ok(())
     }
 
-    /// Die Hoechstkosten jedes Deckels passen 46-mal in das Monatsbudget: je KI hoechstens
+    /// Anzahl und Eurobudget werden unabhängig geprüft: je KI höchstens
     /// 20 € im Monat (Wolfgang, 05.11.2026).
     #[test]
     fn zwanzig_euro_im_monat() {
@@ -364,8 +384,7 @@ mod tests {
             let h = KiDeckel::standard(b)
                 .hoechstkosten()
                 .map_or(i64::MAX, |c| c.0);
-            let monat = h.saturating_mul(i64::from(g.aufrufe_je_monat));
-            assert!(monat <= g.kosten_je_monat.0, "{b:?}: {monat}");
+            assert!(h <= g.kosten_je_monat.0, "{b:?}: {h}");
         }
         assert!(g.kosten_je_monat.0 <= 2_000);
         assert_eq!(

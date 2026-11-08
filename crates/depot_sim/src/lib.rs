@@ -23,6 +23,7 @@
 )]
 
 mod abdruck;
+pub mod abstimmung;
 pub mod lauf;
 pub mod papier;
 pub mod papierdatei;
