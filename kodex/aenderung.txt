@@ -1,5 +1,5 @@
 klasse: Funktion
-zweck: Den weiterhin scheiternden Klon aus der lokalen Update-Testfixture entfernen, ohne Prüfungen auszulassen, und Git-Fehler nachvollziehbar protokollieren.
+zweck: Update-Testversionen mit Git-Bundles ohne lokalen Shell-Transport liefern; alle Update- und Schutzprüfungen erhalten.
 pfade:
 crates/depot_lauf/src/update.rs
 docs/befunde/update.md

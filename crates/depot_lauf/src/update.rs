@@ -431,7 +431,7 @@ mod tests {
         Ok(String::from_utf8_lossy(&aus.stdout).trim().to_string())
     }
 
-    /// Ein Ursprung (`origin`) und zwei getrennte Arbeitsstände, einer davon liefert neue Versionen.
+    /// Zwei Arbeitsstände; ein Git-Bundle liefert die Versionen ohne lokalen Shell-Transport.
     struct Aufbau {
         projekt: PathBuf,
         andere: PathBuf,
@@ -442,20 +442,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("depot_update_{}_{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let ursprung = dir.join("ursprung.git");
         let projekt = dir.join("projekt");
         let andere = dir.join("andere");
-        g(
-            &dir,
-            &[
-                "init",
-                "-q",
-                "--bare",
-                "-b",
-                "main",
-                &ursprung.to_string_lossy(),
-            ],
-        )?;
         g(
             &dir,
             &["init", "-q", "-b", "main", &andere.to_string_lossy()],
@@ -463,12 +451,12 @@ mod tests {
         fs::write(andere.join("a.txt"), "eins\n").map_err(|e| e.to_string())?;
         g(&andere, &["add", "a.txt"])?;
         g(&andere, &["commit", "-q", "-m", "eins"])?;
-        g(&andere, &["remote", "add", "origin", "../ursprung.git"])?;
-        g(&andere, &["push", "-q", "origin", "main"])?;
-        // Der Produktiv-Updater klont nicht. Der Test braucht nur einen zweiten Stand
-        // mit demselben lokalen Ursprung: init + fetch vermeidet den unnötigen Klonpfad.
+        g(&andere, &["bundle", "create", "../ursprung.bundle", "main"])?;
+        // Git liest Bundles unmittelbar. Ein lokales Repository startet dagegen auch
+        // bei fetch/push die Git-Bash-Shell und upload-pack/receive-pack.
+        // Der echte Updater bleibt unverändert und holt hier weiterhin origin/main.
         g(&dir, &["init", "-q", "-b", "main", "projekt"])?;
-        g(&projekt, &["remote", "add", "origin", "../ursprung.git"])?;
+        g(&projekt, &["remote", "add", "origin", "../ursprung.bundle"])?;
         g(
             &projekt,
             &[
@@ -489,7 +477,10 @@ mod tests {
     fn neuer_stand(a: &Aufbau, text: &str) -> Result<String, String> {
         fs::write(a.andere.join("a.txt"), text).map_err(|e| e.to_string())?;
         g(&a.andere, &["commit", "-q", "-am", text])?;
-        g(&a.andere, &["push", "-q", "origin", "main"])?;
+        g(
+            &a.andere,
+            &["bundle", "create", "../ursprung.bundle", "main"],
+        )?;
         g(&a.andere, &["rev-parse", "HEAD"])
     }
 
@@ -558,12 +549,22 @@ mod tests {
     }
 
     #[test]
-    fn testursprung_bleibt_lokal_und_verzichtet_auf_laufwerkspfade() -> Result<(), String> {
+    fn testursprung_liefert_neue_staende_ohne_upload_pack() -> Result<(), String> {
         let a = aufbau()?;
         assert_eq!(
-            g(&a.andere, &["remote", "get-url", "origin"])?,
-            "../ursprung.git"
+            g(&a.projekt, &["remote", "get-url", "origin"])?,
+            "../ursprung.bundle"
         );
+        // Gegenprobe: Ein Repository-Transport müsste dieses fehlende Programm
+        // starten und scheitern. Der Bundle-Abruf braucht es auch im Produktivpfad nicht.
+        g(
+            &a.projekt,
+            &[
+                "config",
+                "remote.origin.uploadpack",
+                "depotschlopf-test-kein-upload-pack",
+            ],
+        )?;
         assert_eq!(g(&a.projekt, &["symbolic-ref", "--short", "HEAD"])?, "main");
         assert_eq!(
             g(&a.projekt, &["rev-parse", "--abbrev-ref", "@{upstream}"])?,
