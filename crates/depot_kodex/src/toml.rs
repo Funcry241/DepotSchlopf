@@ -171,7 +171,7 @@ impl Leser {
                     self.weiter(1);
                 }
                 if s.is_empty() {
-                    return Err(self.fehler("Schluessel erwartet"));
+                    return Err(self.fehler("Schlüssel erwartet"));
                 }
                 Ok(s)
             }
@@ -220,8 +220,8 @@ impl Leser {
             hex.push(self.an(0).ok_or_else(|| self.fehler("Escape zu kurz"))?);
             self.weiter(1);
         }
-        let zahl = u32::from_str_radix(&hex, 16).map_err(|_| self.fehler("Escape ungueltig"))?;
-        s.push(char::from_u32(zahl).ok_or_else(|| self.fehler("Escape ungueltig"))?);
+        let zahl = u32::from_str_radix(&hex, 16).map_err(|_| self.fehler("Escape ungültig"))?;
+        s.push(char::from_u32(zahl).ok_or_else(|| self.fehler("Escape ungültig"))?);
         Ok(())
     }
 
@@ -435,7 +435,7 @@ impl Leser {
 /// Setzt einen gepunkteten Schluessel; Zwischentabellen entstehen bei Bedarf.
 fn setze(t: &mut BTreeMap<String, Wert>, k: &[String], w: Wert) -> Result<(), String> {
     let Some((letzter, weg)) = k.split_last() else {
-        return Err("leerer Schluessel".into());
+        return Err("leerer Schlüssel".into());
     };
     let mut ziel = t;
     for s in weg {
@@ -444,11 +444,11 @@ fn setze(t: &mut BTreeMap<String, Wert>, k: &[String], w: Wert) -> Result<(), St
             .or_insert_with(|| Wert::Tabelle(BTreeMap::new()));
         ziel = match eintrag {
             Wert::Tabelle(x) => x,
-            _ => return Err(format!("Schluessel {s} ist schon ein Wert")),
+            _ => return Err(format!("Schlüssel {s} ist schon ein Wert")),
         };
     }
     if ziel.contains_key(letzter) {
-        return Err(format!("Schluessel {} doppelt", k.join(".")));
+        return Err(format!("Schlüssel {} doppelt", k.join(".")));
     }
     ziel.insert(letzter.clone(), w);
     Ok(())

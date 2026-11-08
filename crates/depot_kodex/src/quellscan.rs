@@ -114,7 +114,7 @@ fn rs_dateien(dir: &Path, aus: &mut Vec<std::path::PathBuf>, fehler: &mut Vec<St
                     // Cargo baut auch Dateien mit anderer Endung (Targetpfad, `#[path]`). Im
                     // Quellbaum liegt deshalb nur Rust-Code, und der wird vollstaendig geprueft.
                     fehler.push(format!(
-                        "{}: keine .rs-Datei im Quellbaum (geprueft wird, was kompiliert werden kann)",
+                        "{}: keine .rs-Datei im Quellbaum (geprüft wird, was kompiliert werden kann)",
                         p.display()
                     ));
                 }
@@ -472,7 +472,7 @@ fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
         if !matches!(name.as_str(), "Cargo.toml" | "src" | "tests") {
             fehler.push(format!(
                 "crates/{krate}/{name}: unbekannter Eintrag im Crate (nur Cargo.toml, src/, tests/; \
-                 Cargo baut sonst z. B. examples/ und benches/ ungeprueft)"
+                 Cargo baut sonst z. B. examples/ und benches/ ungeprüft)"
             ));
         }
     }

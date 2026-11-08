@@ -73,7 +73,7 @@ pub fn pruefe(wurzel: &Path, diff: &BTreeSet<String>) -> Vec<String> {
     if !festschreibung {
         return if freigabe {
             vec![format!(
-                "Grenzfreigabe {FREIGABE} geaendert, aber die Festschreibung nicht: eine Freigabe gilt nur fuer ihre eigene Aenderung"
+                "Grenzfreigabe {FREIGABE} geändert, aber die Festschreibung nicht: eine Freigabe gilt nur für ihre eigene Änderung"
             )]
         } else {
             Vec::new()
@@ -81,7 +81,7 @@ pub fn pruefe(wurzel: &Path, diff: &BTreeSet<String>) -> Vec<String> {
     }
     if !freigabe {
         return vec![format!(
-            "Grenzfreigabe fehlt: {} geaendert ohne neue {FREIGABE} (R30)",
+            "Grenzfreigabe fehlt: {} geändert ohne neue {FREIGABE} (R30)",
             crate::FESTSCHREIBUNG
         )];
     }
@@ -115,7 +115,7 @@ pub fn pruefe(wurzel: &Path, diff: &BTreeSet<String>) -> Vec<String> {
     if feld("diff") != d {
         fehler.push(format!(
             "Grenzfreigabe passt nicht zum Diff: freigegeben {}, im Baum {d}. \
-             Nach der Freigabe wurde etwas geaendert",
+             Nach der Freigabe wurde etwas geändert",
             feld("diff")
         ));
     }

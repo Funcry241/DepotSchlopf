@@ -102,13 +102,13 @@ pub fn vergleiche(deklaration: &Deklaration, diff: &BTreeSet<String>) -> Vec<Str
     let mut fehler = Vec::new();
     if !diff.contains(crate::DEKLARATION) {
         fehler.push(format!(
-            "{} wurde nicht erneuert: jede Aenderung braucht ihre eigene Deklaration",
+            "{} wurde nicht erneuert: jede Änderung braucht ihre eigene Deklaration",
             crate::DEKLARATION
         ));
     }
     for pfad in diff {
         if pfad != crate::DEKLARATION && !deklaration.pfade.iter().any(|e| deckt(e, pfad)) {
-            fehler.push(format!("undeklarierte Aenderung: {pfad}"));
+            fehler.push(format!("undeklarierte Änderung: {pfad}"));
         }
     }
     for eintrag in &deklaration.pfade {

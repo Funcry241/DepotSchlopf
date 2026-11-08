@@ -1445,7 +1445,7 @@ fn befund_k10_02_utf16_umgeht_die_muster_nicht() -> Result<(), String> {
             ("UTF-16BE mit BOM", &be_bom, "Geheimnismuster"),
             ("UTF-16LE ohne BOM", &le_ohne, "Geheimnismuster"),
             ("UTF-16BE ohne BOM", &be_ohne, "Geheimnismuster"),
-            ("nicht lesbare Kodierung", &kaputt, "nicht pruefbar"),
+            ("nicht lesbare Kodierung", &kaputt, "nicht prüfbar"),
         ],
     )
 }

@@ -69,7 +69,7 @@ fn main() -> ExitCode {
             .and_then(|d| depot_kodex::freigabe::vorlage(&wurzel, &d.pfade));
         return match vorlage {
             Ok(v) => {
-                println!("[Kodex] Vorlage fuer {}:", depot_kodex::freigabe::FREIGABE);
+                println!("[Kodex] Vorlage für {}:", depot_kodex::freigabe::FREIGABE);
                 print!("{v}");
                 ExitCode::SUCCESS
             }
@@ -87,7 +87,7 @@ fn main() -> ExitCode {
         depot_kodex::pruefe(&wurzel, basis)
     } else {
         println!(
-            "[Kodex] HINWEIS: kein Git-Arbeitsbaum. Deklaration und Pfadrollen nicht pruefbar; \
+            "[Kodex] HINWEIS: kein Git-Arbeitsbaum. Deklaration und Pfadrollen nicht prüfbar; \
              massgeblich bleibt das Gate auf GitHub."
         );
         depot_kodex::pruefe_ohne_diff(&wurzel)

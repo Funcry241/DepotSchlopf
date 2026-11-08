@@ -37,6 +37,7 @@ const ZEICHEN: [&str; 30] = [
 struct Leser {
     z: Vec<char>,
     i: usize,
+    texte: Option<Vec<String>>,
 }
 
 impl Leser {
@@ -63,14 +64,28 @@ impl Leser {
         format!("Zeile {}: {was}", self.zeile())
     }
 
+    fn merke_text(&mut self, start: usize) {
+        if let Some(texte) = &mut self.texte {
+            texte.push(
+                self.z
+                    .get(start..self.i)
+                    .unwrap_or_default()
+                    .iter()
+                    .collect(),
+            );
+        }
+    }
+
     /// `"…"` mit Escapes; `self.i` steht auf dem oeffnenden `"`.
     fn text(&mut self) -> Result<(), String> {
         self.weiter(1);
+        let start = self.i;
         loop {
             match self.an(0) {
                 None => return Err(self.fehler("Text nicht abgeschlossen")),
                 Some('\\') => self.weiter(2),
                 Some('"') => {
+                    self.merke_text(start);
                     self.weiter(1);
                     return Ok(());
                 }
@@ -90,10 +105,12 @@ impl Leser {
             return Err(self.fehler("roher Text ohne Anfuehrungszeichen"));
         }
         self.weiter(1);
+        let start = self.i;
         loop {
             match self.an(0) {
                 None => return Err(self.fehler("roher Text nicht abgeschlossen")),
                 Some('"') if (1..=rauten).all(|k| self.an(k) == Some('#')) => {
+                    self.merke_text(start);
                     self.weiter(rauten.saturating_add(1));
                     return Ok(());
                 }
@@ -164,9 +181,19 @@ impl Leser {
 /// # Errors
 /// Nicht abgeschlossene Kommentare, Texte oder Zeichen.
 pub fn zerlege(quelle: &str) -> Result<Vec<Token>, String> {
+    zerlege_mit_text(quelle, false).map(|(token, _)| token)
+}
+
+/// Zeichenketten mit ursprünglichen Escapes, Kommentare und Zeichenliterale ausgeschlossen.
+pub fn zeichenketten(quelle: &str) -> Result<Vec<String>, String> {
+    zerlege_mit_text(quelle, true).map(|(_, texte)| texte)
+}
+
+fn zerlege_mit_text(quelle: &str, sammeln: bool) -> Result<(Vec<Token>, Vec<String>), String> {
     let mut l = Leser {
         z: quelle.chars().collect(),
         i: 0,
+        texte: sammeln.then(Vec::new),
     };
     let mut aus = Vec::new();
     while let Some(c) = l.an(0) {
@@ -247,7 +274,7 @@ pub fn zerlege(quelle: &str) -> Result<Vec<Token>, String> {
             }
         }
     }
-    Ok(aus)
+    Ok((aus, l.texte.unwrap_or_default()))
 }
 
 #[cfg(test)]
