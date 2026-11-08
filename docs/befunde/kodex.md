@@ -134,3 +134,15 @@ Die bisherige Vorbereitung `remove_dir_all` gefolgt von `create_dir_all` konnte 
 `befund_1_r03_lesefehler_beim_scan_macht_den_kodex_rot` führt dieselben Prüfungen auf Datei statt Verzeichnis, Symlink und fehlendes Leserecht weiter aus. Seine Fehlermeldungen unterscheiden jetzt Entfernen des Verzeichnisses, Anlegen der Testdatei und Entfernen dieser Datei und nennen bei Abweichungen Pfad und Dateityp. Keine Testwiederholung bis zum Erfolg, keine Serialisierung des Gates und keine abgeschwächte Schutzprüfung.
 
 Nachweise: `vorhandener_pruefbaum_wird_nicht_geloescht` und `parallele_pruefbaeume_mit_gleicher_kennung_bleiben_getrennt` in `crates/depot_kodex/tests/befunde.rs`; vollständige Gegenproben und das reguläre Projekt-Gate laufen weiterhin parallel.
+
+## Eigene Umgebung für cargo test (08.11.2026)
+
+Das ausführbare Gate richtet direkt vor `cargo test --workspace --no-fail-fast` einen atomisch reservierten temporären Ordner ein und gibt ihn nur diesem Kindprozess als TEMP, TMP und TMPDIR mit. Es ändert keine globale Prozessumgebung. Git liest im Test weder Nutzer- noch Systemkonfiguration und erhält stattdessen eine bekannte Datei mit Testidentität und LF-Zeilenenden. Geerbte Git-Variablen werden entfernt; nur lokale Datei-Transporte sind erlaubt. Unbeabsichtigte Git-Netzaufrufe scheitern vor dem Verbindungsaufbau. Cargo-/Rustup-Orte und der vorhandene Build-Ordner bleiben unverändert.
+
+Schlägt das Einrichten fehl, bleibt das Gate geschlossen. Nach dem Ende wird nur der selbst angelegte Ordner entfernt; ein Aufräumfehler wird gemeldet. Es gibt kein Überspringen oder Wiederholen fehlgeschlagener Tests. Alle bisherigen Nachweise bleiben Bestandteil des Gates.
+
+Die Änderung liegt im neuen `depot_kodex`, nicht nur im Updater. Ein alter installierter Updater, der den neuen Stand in einer Prüfkopie mit diesem Gate startet, erhält deshalb die Isolation bereits vor dem Einspielen. Die getrennte Funktionsänderung isoliert außerdem die Doppelstart-Gegenprobe und entfernt ihren Zugriff auf den echten Dienst-Port.
+
+Nachweise: Git-Testbefehle ignorieren eine vorgegebene falsche Zeilenenden-Konfiguration und störende Git-Variablen; zwei Umgebungen sind getrennt, der erste Ordner wird entfernt und der zweite bleibt erhalten. HTTPS-Transport wird vor jedem Netzaufruf abgewiesen. Vollständige Linux- und Windows-Prüfung vor Merge; Nutzerinstallation bleibt bis dahin unverändert.
+
+Die CI führt zusätzlich einen vollständigen Updateversuch aus dem installierten Quellstand `4da352e` aus: eigenes lokales Repository als GitHub-Ersatz, belegter Dienst-Port 47410, gehaltene Wächtersperre und störende persönliche Git-Konfiguration im XDG-Ordner. Der alte Updater muss das neue Gate durchlaufen, den bestätigten Stand einspielen und die bestehenden Sperren sowie eine unveränderte Daten-Testdatei erhalten. Die Gegenprobe läuft nur mit ausdrücklichem Prüfmaschinen-Parameter auf isolierten Linux-/Windows-Runnern und ist kein Werkzeug für die Benutzerinstallation. Ein gelungener Prüf-Updateversuch ersetzt keine Bestätigung durch den neu gestarteten echten Dienst; die Probe prüft den vorliegenden Abbruch vor dem Einspielen.

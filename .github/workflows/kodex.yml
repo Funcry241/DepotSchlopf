@@ -25,6 +25,8 @@ jobs:
             BASIS="${{ github.event.before }}"
           fi
           cargo run --locked -p depot_lauf -- alles --basis "$BASIS"
+      - name: Alter Updater bei laufendem Dienst
+        run: python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$RUNNER_TEMP/depot-update-alt"
       - name: Assistenten-Export bereitstellen
         if: always()
         uses: actions/upload-artifact@v4
@@ -54,6 +56,9 @@ jobs:
           }
           cargo run --locked -p depot_lauf -- alles --basis $basis
           exit $LASTEXITCODE
+      - name: Alter Windows-Updater bei laufendem Dienst
+        shell: pwsh
+        run: python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$env:RUNNER_TEMP/depot-update-alt"
       - name: Windows-Assistenten-Export bereitstellen
         if: always()
         uses: actions/upload-artifact@v4
