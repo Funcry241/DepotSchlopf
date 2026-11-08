@@ -91,6 +91,7 @@ pub enum Art {
     /// `berater;datum;zyklus;cent`: eine Buchung des KI-Kassenbuchs, geprueft nach den Regeln
     /// aus `depot_ki` (K13-02).
     Ki,
+    KiAbrechnung,
     /// Der Abdruck der KI-Grenzen, unter denen die folgenden Buchungen entstehen.
     KiGrenzen,
     /// `datum;wer;text`: warum etwas geschieht oder nicht geschieht. `wer` ist ein Berater
@@ -129,6 +130,7 @@ impl Art {
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
             Art::Ki => "ki",
+            Art::KiAbrechnung => "ki-abrechnung",
             Art::KiGrenzen => "ki-grenzen",
             Art::Begruendung => "begruendung",
             Art::Abschluss => "abschluss",
@@ -154,6 +156,7 @@ impl Art {
             Art::Auftrag,
             Art::Zustand,
             Art::Ki,
+            Art::KiAbrechnung,
             Art::KiGrenzen,
             Art::Begruendung,
             Art::Abschluss,
@@ -516,6 +519,10 @@ impl Stand {
             }
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
             Art::Ki => self.ki.buche(inhalt)?,
+            Art::KiAbrechnung => {
+                self.ki.rechne_ab(inhalt)?;
+                return Ok(());
+            }
             Art::Begruendung => {
                 let b = lies_begruendung(inhalt).ok_or("Begruendung unlesbar")?;
                 kanonisch(&begruendung_text(b.0, &b.1, &b.2), inhalt)?;
@@ -523,16 +530,7 @@ impl Stand {
                 self.begruendungen.push(b);
             }
             Art::Format => {
-                kanonisch(&FORMAT.to_string(), inhalt)?;
-                if self.format != FORMAT_ALT {
-                    return Err(format!("Umstellung im Format {}", self.format));
-                }
-                if self.seit_abschluss > 0 {
-                    return Err("Umstellung nur ohne angefangenen Tag".into());
-                }
-                // Die Umstellung beginnt keinen Tag: Sie aendert nur, nach welchen Regeln die
-                // folgenden Eintraege gelten.
-                self.format = FORMAT;
+                self.stelle_format_um(inhalt)?;
                 return Ok(());
             }
             Art::Abrechnungstag => self.beginne_abrechnung(inhalt)?,
@@ -545,6 +543,18 @@ impl Stand {
             }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    fn stelle_format_um(&mut self, inhalt: &str) -> Result<(), String> {
+        kanonisch(&FORMAT.to_string(), inhalt)?;
+        if self.format != FORMAT_ALT {
+            return Err(format!("Umstellung im Format {}", self.format));
+        }
+        if self.seit_abschluss > 0 {
+            return Err("Umstellung nur ohne angefangenen Tag".into());
+        }
+        self.format = FORMAT;
         Ok(())
     }
 

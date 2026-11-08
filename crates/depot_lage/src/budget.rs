@@ -4,9 +4,8 @@
 //! Zyklus (`depot_sim::tagnummer`), mit denen der Papiertag reserviert. Was die Anzeige
 //! „bereit“ nennt, wuerde der Kostenschutz also gerade erlauben.
 //!
-//! Das Kassenbuch kennt bisher nur Reservierungen der Hoechstkosten je Aufruf. Bis die
-//! tatsaechlichen Kosten im Journal stehen, ist „gebucht“ immer die Obergrenze dessen, was
-//! verbraucht sein kann.
+//! Bestätigte Minderkosten vermindern die gebuchten Beträge; ungeklärte Reservierungen
+//! bleiben voll gebucht. Das unverbindliche Anbieterprotokoll ist keine Budgetfreigabe.
 
 use depot_journal::anbieter::{Eintrag, Kosten};
 use depot_kern::{BeraterId, Cent, Datum, Preis};
@@ -44,8 +43,10 @@ pub struct KiBudget {
     pub berater: BeraterId,
     pub heute_aufrufe: usize,
     pub heute_aufrufe_max: u32,
-    /// Heute gebucht (Hoechstkosten der reservierten Aufrufe).
+    /// Heute gebucht (abgerechnete Kosten plus ungeklärte Höchstkosten).
     pub heute_gebucht: Cent,
+    pub tagesrahmen: Cent,
+    pub handelstage_rest: u32,
     pub monat_aufrufe: usize,
     pub monat_aufrufe_max: u32,
     pub monat_gebucht: Cent,
@@ -90,7 +91,12 @@ fn rest(grenze: Cent, gebucht: Cent) -> Cent {
 fn status(s: Result<Cent, Sperre>) -> BudgetStatus {
     match s {
         Ok(_) => BudgetStatus::Bereit,
-        Err(Sperre::ZyklusVoll | Sperre::TagVoll) => BudgetStatus::PausiertBisMorgen,
+        Err(
+            Sperre::ZyklusVoll
+            | Sperre::TagVoll
+            | Sperre::TagesrahmenErschoepft
+            | Sperre::ErstmeinungReserviert,
+        ) => BudgetStatus::PausiertBisMorgen,
         Err(Sperre::MonatVoll | Sperre::MonatsbudgetErschoepft) => {
             BudgetStatus::PausiertBisMonatsanfang
         }
@@ -127,6 +133,8 @@ pub fn ki_budget(buchungen: &[Buchung], berater: BeraterId, heute: Datum) -> KiB
         heute_aufrufe: heute_b().count(),
         heute_aufrufe_max: g.aufrufe_je_zyklus().saturating_mul(g.zyklen_je_tag()),
         heute_gebucht: summe(heute_b()),
+        tagesrahmen: depot_ki::tagesrahmen(&g, buchungen, berater, heute).unwrap_or(Cent::NULL),
+        handelstage_rest: depot_ki::handelstage_rest(heute),
         monat_aufrufe: monat().count(),
         monat_aufrufe_max: g.aufrufe_je_monat(),
         monat_gebucht,

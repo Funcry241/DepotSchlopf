@@ -27,7 +27,7 @@ use depot_regelwerk::{GenehmigterAuftrag, Kennungsvergabe};
 use sha2::{Digest, Sha256};
 
 use crate::auftrag::{Meldung, meldung_text};
-use crate::kasse::{AufrufErlaubnis, buchung_text, naechste};
+use crate::kasse::{AufrufErlaubnis, naechste};
 use crate::kursbeleg::{KursBeleg, kursbeleg_text};
 use crate::nachrichtbeleg::{NachrichtBeleg, nachrichtbeleg_text};
 use crate::stand::{
@@ -597,7 +597,7 @@ impl Journal {
             Art::Vorbereitung => Err(JournalFehler::Abgelehnt(
                 "Vorbereitung nur ueber ihre geprueften Methoden".into(),
             )),
-            Art::Ki | Art::KiGrenzen => Err(JournalFehler::Abgelehnt(
+            Art::Ki | Art::KiAbrechnung | Art::KiGrenzen => Err(JournalFehler::Abgelehnt(
                 "KI-Eintraege entstehen nur ueber reserviere".into(),
             )),
             Art::Auftrag => Err(JournalFehler::Abgelehnt(
@@ -919,7 +919,13 @@ impl Journal {
         let datum = start.datum().ok_or(Sperre::Rechenfehler)?;
         let zyklus =
             u32::try_from(start.sekunden().div_euclid(86_400)).map_err(|_| Sperre::Rechenfehler)?;
-        let (buchung, deckel) = naechste(self.stand.ki(), berater, datum, zyklus)?;
+        let (buchung, deckel) = crate::kasse::naechste_fuer(
+            self.stand.ki(),
+            berater,
+            datum,
+            zyklus,
+            crate::KiZweck::Vorbereitung,
+        )?;
         let e = crate::vorbereitung::Eintrag::Budget {
             start,
             abdruck: grenzabdruck(),
@@ -927,7 +933,11 @@ impl Journal {
         };
         self.schreibe_eintrag(Art::Vorbereitung, &e.text())
             .map_err(|e| Sperre::Kassenbuch(format!("{e:?}")))?;
-        Ok(AufrufErlaubnis::neu(buchung, deckel))
+        Ok(AufrufErlaubnis::neu(
+            buchung,
+            deckel,
+            self.stand.ki().buchungen().len().saturating_sub(1),
+        ))
     }
 
     pub fn belege_vorbereitungsantwort(
@@ -939,12 +949,53 @@ impl Journal {
         self.schreibe_eintrag(Art::Vorbereitung, &e.text())
     }
 
-    /// Prueft die KI-Grenzen, bucht die Hoechstkosten dauerhaft und gibt erst dann die
-    /// Erlaubnis (R8). Vor der ersten Buchung unter neuen Grenzen steht deren Abdruck.
-    ///
-    /// # Errors
-    /// Jede verletzte Grenze ergibt ihre `Sperre`; jeder Fehler des Journals
-    /// `Sperre::Kassenbuch`. Dann wird nicht gefragt.
+    /// Bestätigt Minderkosten einer passenden Reservierung; bei Schreibfehlern bleiben die Höchstkosten gebucht.
+    pub fn rechne_ki_ab(&mut self, abrechnung: &crate::KiAbrechnung) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::KiAbrechnung, &abrechnung.text())
+    }
+
+    pub fn pruefe_ki(
+        &self,
+        berater: BeraterId,
+        datum: Datum,
+        zyklus: u32,
+        zweck: crate::KiZweck,
+    ) -> Result<(), Sperre> {
+        crate::kasse::naechste_fuer(self.stand.ki(), berater, datum, zyklus, zweck).map(|_| ())
+    }
+
+    pub fn reserviere_fuer(
+        &mut self,
+        berater: BeraterId,
+        datum: Datum,
+        zyklus: u32,
+        zweck: crate::KiZweck,
+    ) -> Result<AufrufErlaubnis, Sperre> {
+        let (buchung, deckel) =
+            crate::kasse::naechste_fuer(self.stand.ki(), berater, datum, zyklus, zweck)?;
+        self.schreibe_ki(buchung, deckel, zweck)
+    }
+
+    fn schreibe_ki(
+        &mut self,
+        buchung: depot_ki::Buchung,
+        deckel: depot_ki::KiDeckel,
+        zweck: crate::KiZweck,
+    ) -> Result<AufrufErlaubnis, Sperre> {
+        let sperre = |e: JournalFehler| Sperre::Kassenbuch(format!("Journal: {e:?}"));
+        if !self.stand.ki().abdruck_aktuell() {
+            self.schreibe_eintrag(Art::KiGrenzen, &grenzabdruck())
+                .map_err(sperre)?;
+        }
+        self.schreibe_eintrag(Art::Ki, &crate::kasse::buchung_fuer(&buchung, zweck))
+            .map_err(sperre)?;
+        Ok(AufrufErlaubnis::neu(
+            buchung,
+            deckel,
+            self.stand.ki().buchungen().len().saturating_sub(1),
+        ))
+    }
+
     pub fn reserviere(
         &mut self,
         berater: BeraterId,
@@ -952,14 +1003,7 @@ impl Journal {
         zyklus: u32,
     ) -> Result<AufrufErlaubnis, Sperre> {
         let (buchung, deckel) = naechste(self.stand.ki(), berater, datum, zyklus)?;
-        let sperre = |e: JournalFehler| Sperre::Kassenbuch(format!("Journal: {e:?}"));
-        if !self.stand.ki().abdruck_aktuell() {
-            self.schreibe_eintrag(Art::KiGrenzen, &grenzabdruck())
-                .map_err(sperre)?;
-        }
-        self.schreibe_eintrag(Art::Ki, &buchung_text(&buchung))
-            .map_err(sperre)?;
-        Ok(AufrufErlaubnis::neu(buchung, deckel))
+        self.schreibe_ki(buchung, deckel, crate::KiZweck::Erstmeinung)
     }
 }
 

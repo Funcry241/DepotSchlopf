@@ -212,8 +212,8 @@ fn budget(l: &Lagebild, s: &mut String) {
     s.push_str(
         "<section><h2>KI-Budget</h2><div class=\"breit\"><table><tr><th>KI</th>\
          <th>Status</th><th class=\"z\">Verbraucht im Monat</th>\
-         <th class=\"z\">Reserviert im Monat</th><th class=\"z\">Verfügbar im Monat</th>\
-         <th class=\"z\">Heute</th><th class=\"z\">Jahr</th><th class=\"z\">je Aufruf</th>\
+         <th class=\"z\">Gebucht im Monat</th><th class=\"z\">Verfügbar im Monat</th>\
+         <th class=\"z\">Heute / Tagesrahmen frei</th><th class=\"z\">Jahr</th><th class=\"z\">je Aufruf</th>\
          </tr>",
     );
     for b in &l.budget {
@@ -232,8 +232,8 @@ fn budget(l: &Lagebild, s: &mut String) {
             "<tr><td>{}</td><td class=\"{klasse}\">{}</td>\
              <td class=\"z\">{}<br><span class=\"leise\">{} Aufrufe abgerechnet{unbekannt}</span></td>\
              <td class=\"z\">{} von {}<br><span class=\"leise\">{}/{} Aufrufe</span></td>\
-             <td class=\"z\"><b>{}</b></td>\
-             <td class=\"z\">{} · {}/{} Aufrufe</td>\
+             <td class=\"z\"><b>{}</b><br><span class=\"leise\">{} Handelstage übrig</span></td>\
+             <td class=\"z\">{} · {}/{} Aufrufe<br>noch {}</td>\
              <td class=\"z\">{} von {}</td><td class=\"z\">{}</td></tr>",
             berater_text(b.berater),
             maskiere(&b.status.text()),
@@ -244,9 +244,11 @@ fn budget(l: &Lagebild, s: &mut String) {
             b.monat_aufrufe,
             b.monat_aufrufe_max,
             euro(b.monat_rest),
+            b.handelstage_rest,
             euro(b.heute_gebucht),
             b.heute_aufrufe,
             b.heute_aufrufe_max,
+            euro(b.tagesrahmen),
             euro(b.jahr_gebucht),
             euro(b.jahr_grenze),
             geld(b.je_aufruf),
@@ -254,10 +256,10 @@ fn budget(l: &Lagebild, s: &mut String) {
     }
     s.push_str(
         "</table></div><p class=\"leise\"><b>Verbraucht</b> ist, was die Anbieter je Aufruf \
-         gemeldet haben (daten/anbieter.txt). <b>Reserviert</b> sind die Höchstkosten jedes \
-         Aufrufs im KI-Kassenbuch des Journals; damit rechnet der Kostenschutz, auch wenn \
-         weniger verbraucht wurde. <b>Verfügbar</b> ist die Monatsgrenze minus Reserviertes: \
-         So viel darf in diesem Monat noch reserviert werden.</p></section>",
+         gemeldet haben (daten/anbieter.txt). <b>Gebucht</b> sind bestätigte tatsächliche Kosten \
+         plus ungeklärte Höchstkosten im Journal. Fehlende Abrechnungen bleiben voll gebucht. \
+         <b>Verfügbar</b> ist der Monatsrest. Der Tagesrahmen verteilt ihn auf die verbleibenden \
+         Handelstage; Zusatzfragen lassen die Reserve für die nächste Erstmeinung frei.</p></section>",
     );
 }
 

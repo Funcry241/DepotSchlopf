@@ -49,3 +49,7 @@ Je KI höchstens 20 € im Monat (Wolfgang); schlimmstenfalls bucht Dachs 46 × 
 - ganzer Papiertag mit beiden KIs: Vorschlag, Zustimmung, Kauf, jede Antwort mit Kosten im Journal
 
 Dazu `voller_monat_fragt_niemanden` in `crates/depot_sim/tests/papiertag.rs`: nach 23 Papiertagen mit je 2 Aufrufen je KI fragt der 24. Tag niemanden. Angepasst an die neuen Werte: die Budgettests im Journal, Regelwerk-Tests mit 4 Werten, 40 % und 100 % Umschlag, die exakte Anteilsprüfung bei 42 %, das Beispielszenario (Alpha jetzt 50 %, gekürzt auf 40 %).
+
+## 08.11.2026: bestätigte Kosten und begrenzte Abstimmung
+
+[KI-Abrechnung und Abstimmung](ki-dialog.md) beschreibt den aktuellen Ablauf einschließlich Tagesrahmen, 30/690 Aufrufen bei unveränderten Eurogrenzen, kurzem Ausgabedeckel, Journalbelegen und den neuen Gegenproben. Frühere Aussagen über ausschließlich gebuchte Höchstkosten sind durch die bestätigte Minderkostenabrechnung ergänzt.

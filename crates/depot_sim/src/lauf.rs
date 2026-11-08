@@ -458,23 +458,56 @@ pub(crate) fn ein_tag(
         .ok_or_else(|| rechnung("Depotwert"))?;
     let b = beteiligte;
     let topf_a = frage_topf(jr, z, TopfId::A, b.dachs)?;
-    // Im Papiertag muessen beide Antworten feststehen, bevor jemand den Vorschlag des
-    // anderen sieht. Das Beispiel-Szenario behaelt seine bisherige Aufrufreihenfolge.
-    let topf_b = if z.uhr.is_some() {
-        Some(frage_topf(jr, z, TopfId::B, b.maus)?)
-    } else {
-        None
-    };
-    topf_zyklus(jr, z, topf_a, b.maus, &mut *b.konto)?;
-    let topf_b = match topf_b {
-        Some(topf) => topf,
-        None => frage_topf(jr, z, TopfId::B, b.maus)?,
-    };
-    topf_zyklus(jr, z, topf_b, b.dachs, &mut *b.konto)?;
+    let topf_b = frage_topf(jr, z, TopfId::B, b.maus)?;
+    let erste = [topf_a.clone(), topf_b.clone()];
+    let topf_a = zweite_meinung(jr, z, topf_a, b.maus)?;
+    let topf_b = zweite_meinung(jr, z, topf_b, b.dachs)?;
+    let [topf_a, topf_b] =
+        crate::abstimmung::berate(jr, z, erste, [topf_a, topf_b], b.dachs, b.maus)?;
+    beide_topfzyklen(jr, z, [topf_a, topf_b], &mut *b.konto)?;
     let hoch = hoch.max(heute);
     jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
     Ok(hoch)
+}
+
+/// Auch ein langer Dialog darf die bestehende Datenfrische nicht verlängern.
+pub(crate) fn beratungszeit(z: &Zyklus<'_>) -> bool {
+    let Some(uhr) = z.uhr else {
+        return true;
+    };
+    let Some(jetzt) = uhr() else {
+        return false;
+    };
+    jetzt.am_tag(z.tag.datum)
+        && jetzt >= z.tag.kurse.stand()
+        && z.universum.isins().iter().all(|isin| {
+            z.tag
+                .kurse
+                .abruf(isin)
+                .and_then(|abruf| jetzt.sekunden_seit(abruf))
+                .is_some_and(|alter| alter <= z.grenzen.kurs_hoechstalter_s())
+        })
+}
+
+fn beide_topfzyklen(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    antworten: [TopfAntwort; 2],
+    konto: &mut dyn Broker,
+) -> Result<(), LaufFehler> {
+    if !beratungszeit(z) {
+        return begruende(
+            j,
+            z.tag,
+            DATEN,
+            "Beratung beendet: Datenfrische abgelaufen oder Uhr unklar. Keine neuen Aufträge.",
+        );
+    }
+    for antwort in antworten {
+        topf_zyklus(j, z, antwort, konto)?;
+    }
+    Ok(())
 }
 
 fn stoppe_kaeufe(j: &mut Journal, tag: &Tag, konto: &mut dyn Broker) -> Result<(), LaufFehler> {
@@ -635,7 +668,12 @@ fn erlaubnis(
     berater: BeraterId,
     folge: &str,
 ) -> Result<Option<depot_journal::AufrufErlaubnis>, LaufFehler> {
-    match j.reserviere(berater, tag.datum, zyklus) {
+    let zweck = if folge == "kein Vorschlag" {
+        depot_journal::KiZweck::Erstmeinung
+    } else {
+        depot_journal::KiZweck::Zweitmeinung
+    };
+    match j.reserviere_fuer(berater, tag.datum, zyklus, zweck) {
         Ok(e) => Ok(Some(e)),
         Err(Sperre::Kassenbuch(e)) => Err(halt(format!("Kassenbuch: {e}"))),
         Err(sperre) => {
@@ -662,11 +700,12 @@ fn frage(
     id: TopfId,
     frager: &mut dyn Berater,
     lage: &Lage<'_>,
-) -> Result<Option<Vorschlag>, LaufFehler> {
+) -> Result<(Option<Vorschlag>, bool), LaufFehler> {
     let (tag, zyklus) = (z.tag, z.nr);
     let wer = id.berater();
     let t = topf_name(id);
     let mut vorschlag: Option<Vorschlag> = None;
+    let mut verwertbar = false;
     // Ein Berater ohne Anbindung wird nicht gefragt und kostet nichts: Fuer ihn wird keine
     // Erlaubnis reserviert. Ohne Vorschlag oder ohne Zweitmeinung gibt es keinen Auftrag.
     if !frager.angebunden() {
@@ -681,6 +720,10 @@ fn frage(
         )?;
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag")? {
         let mut antwort = frager.vorschlagen(e, lage);
+        if let Some(a) = frager.abrechnung() {
+            j.rechne_ki_ab(&a).map_err(journal)?;
+        }
+        verwertbar = antwort.verwertbar;
         let wie = if antwort.verwertbar {
             if z.uhr.is_some()
                 && let Some(prognose) = antwort.prognose.take()
@@ -708,7 +751,7 @@ fn frage(
         }
         vorschlag = antwort.vorschlag;
     }
-    Ok(vorschlag)
+    Ok((vorschlag, verwertbar))
 }
 
 fn belege_prognose(
@@ -745,9 +788,11 @@ fn belege_prognose(
     Ok(())
 }
 
-struct TopfAntwort {
-    topf: Topf,
-    vorschlag: Option<Vorschlag>,
+#[derive(Clone)]
+pub(crate) struct TopfAntwort {
+    pub(crate) topf: Topf,
+    pub(crate) vorschlag: Option<Vorschlag>,
+    pub(crate) erste_verwertbar: bool,
 }
 
 fn frage_topf(
@@ -775,31 +820,35 @@ fn frage_topf(
         .offene_auftraege()
         .find(|l| l.versand.is_some() && l.beleg.topf == id)
         .map(|l| l.beleg.nr);
-    let vorschlag = if let Some(nr) = wartet {
+    let (vorschlag, erste_verwertbar) = if let Some(nr) = wartet {
         begruende(
             j,
             tag,
             AUFTRAGSSTELLE,
             &format!("{t}: wartet auf offenen Auftrag {nr}"),
         )?;
-        None
+        (None, false)
     } else {
         frage(j, z, id, frager, &lage)?
     };
-    Ok(TopfAntwort { topf, vorschlag })
+    Ok(TopfAntwort {
+        topf,
+        vorschlag,
+        erste_verwertbar,
+    })
 }
 
 /// Der zweite Berater prueft den Vorschlag, dann entscheidet das Regelwerk.
-fn topf_zyklus(
+fn zweite_meinung(
     j: &mut Journal,
     z: &Zyklus<'_>,
     antwort: TopfAntwort,
     pruefer: &mut dyn Berater,
-    konto: &mut dyn Broker,
-) -> Result<(), LaufFehler> {
+) -> Result<TopfAntwort, LaufFehler> {
     let TopfAntwort {
         topf,
         mut vorschlag,
+        erste_verwertbar,
     } = antwort;
     let (tag, zyklus) = (z.tag, z.nr);
     let id = topf.id();
@@ -834,6 +883,9 @@ fn topf_zyklus(
         )?
     {
         let urteil = pruefer.pruefen(e, &lage, &v);
+        if let Some(a) = pruefer.abrechnung() {
+            j.rechne_ki_ab(&a).map_err(journal)?;
+        }
         let wort = match (urteil.verwertbar, urteil.zustimmung) {
             (true, true) => ZUSTIMMUNG,
             (true, false) => VETO,
@@ -849,6 +901,25 @@ fn topf_zyklus(
             vorschlag = Some(v);
         }
     }
+    Ok(TopfAntwort {
+        topf,
+        vorschlag,
+        erste_verwertbar,
+    })
+}
+
+fn topf_zyklus(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    antwort: TopfAntwort,
+    konto: &mut dyn Broker,
+) -> Result<(), LaufFehler> {
+    let TopfAntwort {
+        topf, vorschlag, ..
+    } = antwort;
+    let tag = z.tag;
+    let id = topf.id();
+    let t = topf_name(id);
     let mut vergabe = j.kennungsvergabe();
     let ent = entscheide(
         &Eingabe {
@@ -1034,6 +1105,45 @@ fn protokolliere_ausfuehrungen(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn laengerer_dialog_verlaengert_die_kursfrist_nicht() -> Result<(), LaufFehler> {
+        let (szenario, _, _) = crate::Szenario::beispiel().ok_or_else(|| halt("Szenario"))?;
+        let tag = szenario.tage.first().ok_or_else(|| halt("Tag"))?;
+        let stand = tag.kurse.stand();
+        let jetzt = std::cell::Cell::new(Some(stand));
+        let uhr = || jetzt.get();
+        let grenzen = Grenzen::standard();
+        let zyklus = Zyklus {
+            grenzen: &grenzen,
+            universum: &szenario.universum,
+            tag,
+            vortag: &szenario.vorlauf,
+            nr: 1,
+            abdruck: "Probe",
+            uhr: Some(&uhr),
+            vollstaendige_kurse: true,
+        };
+        assert!(beratungszeit(&zyklus));
+        jetzt.set(Zeitpunkt::aus_sekunden(
+            stand
+                .sekunden()
+                .saturating_add(grenzen.kurs_hoechstalter_s()),
+        ));
+        assert!(beratungszeit(&zyklus));
+        jetzt.set(Zeitpunkt::aus_sekunden(
+            stand
+                .sekunden()
+                .saturating_add(grenzen.kurs_hoechstalter_s())
+                .saturating_add(1),
+        ));
+        assert!(!beratungszeit(&zyklus));
+        jetzt.set(Zeitpunkt::aus_sekunden(stand.sekunden().saturating_sub(1)));
+        assert!(!beratungszeit(&zyklus));
+        jetzt.set(None);
+        assert!(!beratungszeit(&zyklus));
+        Ok(())
+    }
 
     #[test]
     fn abgelehnte_prognose_laesst_den_tagesabschluss_zu() -> Result<(), LaufFehler> {

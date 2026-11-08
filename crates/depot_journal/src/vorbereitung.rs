@@ -243,7 +243,7 @@ pub(crate) fn anwenden(
             }
             let mut neu = ki.clone();
             neu.abdruck(&abdruck)?;
-            neu.buche(&buchung_text(&buchung))?;
+            neu.buche_fuer(&buchung_text(&buchung), crate::KiZweck::Vorbereitung)?;
             *ki = neu;
             p.reserviert.push(buchung.berater);
         }

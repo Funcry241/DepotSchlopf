@@ -509,7 +509,7 @@ fn konto_mit_bewegung_ohne_depot_haelt() -> Result<(), String> {
 /// Monat beider KIs voll gebucht (46 Aufrufe). Am 24. Tag fragt der Papiertag niemanden, bucht
 /// nichts und schreibt den Grund ins Journal. Der Tag schliesst trotzdem ab.
 #[test]
-fn voller_monat_fragt_niemanden() -> Result<(), String> {
+fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let mut dachs = Drehbuch::default();
@@ -560,10 +560,10 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
             "Tag {t}: {aus:?}"
         );
     }
-    assert_eq!(dachs.aufrufe, 46, "Dachs: 23 Tage zu je 2 Aufrufen");
-    assert_eq!(maus.aufrufe, 46, "Maus: 23 Tage zu je 2 Aufrufen");
+    assert_eq!(dachs.aufrufe, 48, "Dachs: 24 Tage zu je zwei Aufrufen");
+    assert_eq!(maus.aufrufe, 48, "Maus: 24 Tage zu je zwei Aufrufen");
     let j = ort.oeffnen()?;
-    assert_eq!(j.stand().ki().buchungen().len(), 92, "jede Frage gebucht");
+    assert_eq!(j.stand().ki().buchungen().len(), 96, "jede Frage gebucht");
     let t25 = tag(25)?;
     let schutz: Vec<&str> = j
         .stand()
@@ -572,8 +572,7 @@ fn voller_monat_fragt_niemanden() -> Result<(), String> {
         .filter(|(d, wer, _)| *d == t25 && wer == "Kostenschutz")
         .map(|(_, _, t)| t.as_str())
         .collect();
-    assert_eq!(schutz.len(), 2, "{schutz:?}");
-    assert!(schutz.iter().all(|t| t.contains("MonatVoll")), "{schutz:?}");
+    assert!(schutz.is_empty(), "{schutz:?}");
     Ok(())
 }
 
@@ -1471,5 +1470,196 @@ fn order_ohne_kurs_verfaellt_und_gibt_den_topf_wieder_frei() -> Result<(), Strin
             .offene_auftraege()
             .any(|l| l.beleg.isin == sap)
     );
+    Ok(())
+}
+
+// Reale Aufrufreihenfolge mit erfundenen Beratern und bestätigter Tokenabrechnung.
+struct Diskutant {
+    wer: BeraterId,
+    plan: Drehbuch,
+    runden: std::collections::VecDeque<Option<i64>>,
+    gesehen: Vec<depot_sim::abstimmung::AbstimmungsStand>,
+    kosten: Option<depot_journal::KiAbrechnung>,
+    veto: bool,
+}
+impl depot_sim::Berater for Diskutant {
+    fn vorschlagen(
+        &mut self,
+        e: depot_journal::AufrufErlaubnis,
+        lage: &depot_sim::Lage<'_>,
+    ) -> Antwort {
+        assert!(self.gesehen.is_empty(), "Erstmeinung vor jeder Abstimmung");
+        self.kosten = e.abrechnung(100, 100);
+        depot_sim::Berater::vorschlagen(&mut self.plan, e, lage)
+    }
+    fn pruefen(
+        &mut self,
+        e: depot_journal::AufrufErlaubnis,
+        lage: &depot_sim::Lage<'_>,
+        v: &Vorschlag,
+    ) -> Urteil {
+        self.kosten = e.abrechnung(100, 100);
+        depot_sim::Berater::pruefen(&mut self.plan, e, lage, v)
+    }
+    fn kann_abstimmen(&self) -> bool {
+        true
+    }
+    fn abrechnung(&mut self) -> Option<depot_journal::KiAbrechnung> {
+        self.kosten.take()
+    }
+    fn abstimmen(
+        &mut self,
+        e: depot_journal::AufrufErlaubnis,
+        _: &depot_sim::Lage<'_>,
+        stand: &depot_sim::abstimmung::AbstimmungsStand,
+    ) -> depot_sim::abstimmung::AbstimmungsAntwort {
+        self.gesehen.push(stand.clone());
+        let Some(Some(bp)) = self.runden.pop_front() else {
+            return depot_sim::abstimmung::AbstimmungsAntwort::unverwertbar();
+        };
+        self.kosten = e.abrechnung(100, 100);
+        let Some(mut v) = stand.eigener_vorschlag.clone() else {
+            return depot_sim::abstimmung::AbstimmungsAntwort::unverwertbar();
+        };
+        assert_eq!(v.berater, self.wer);
+        for gewicht in v.zielgewichte_bp.values_mut() {
+            *gewicht = bp;
+        }
+        depot_sim::abstimmung::AbstimmungsAntwort {
+            eigene: Antwort {
+                prognose: None,
+                verwertbar: true,
+                einschaetzung: format!(
+                    "Runde {} begründet Änderung oder Beibehaltung",
+                    stand.runde
+                ),
+                vorschlag: Some(v),
+            },
+            zustimmung_fremd: !self.veto,
+        }
+    }
+}
+fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Diskutant, String> {
+    let mut plan = Drehbuch::default();
+    let sap = sap()?;
+    plan.antworten.insert(
+        tag(5)?,
+        Antwort {
+            prognose: None,
+            verwertbar: true,
+            einschaetzung: format!("Unabhängige Erstmeinung {wer:?}"),
+            vorschlag: Some(Vorschlag {
+                berater: wer,
+                zielgewichte_bp: [(sap.clone(), 2000)].into_iter().collect(),
+                begruendung: [(sap, "Belegte Lage".into())].into_iter().collect(),
+            }),
+        },
+    );
+    plan.urteile.insert(
+        tag(5)?,
+        Urteil {
+            verwertbar: true,
+            zustimmung: true,
+            begruendung: format!("Unabhängige Zweitmeinung {wer:?}"),
+        },
+    );
+    Ok(Diskutant {
+        wer,
+        plan,
+        runden: runden.into(),
+        gesehen: Vec::new(),
+        kosten: None,
+        veto,
+    })
+}
+fn dialoglauf(a: &mut Diskutant, b: &mut Diskutant) -> Result<(Ort, Journal), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    belege(
+        &mut j,
+        5,
+        &[(&sap()?, "229", "230"), (&allianz()?, "350", "351")],
+    )?;
+    let mut k = konto(&ort, &j)?;
+    papiertag(&mut j, tag(5)?, &universum()?, &start()?, a, b, &mut k)
+        .map_err(|e| format!("{e:?}"))?;
+    Ok((ort, j))
+}
+#[test]
+fn aenderung_braucht_eine_weitere_gesehene_zustimmung() -> Result<(), String> {
+    let mut a = diskutant(BeraterId::Dachs, vec![Some(1000), Some(1000)], false)?;
+    let mut b = diskutant(BeraterId::Maus, vec![Some(1000), Some(1000)], false)?;
+    let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+    assert_eq!(a.gesehen.len(), 2);
+    assert_eq!(b.gesehen.len(), 2);
+    assert!(j.stand().auftraege().iter().all(|l| l.beleg.stueck == 2));
+    assert_eq!(j.stand().auftraege().len(), 2);
+    let erster = a.gesehen.first().ok_or("Erste Runde")?;
+    assert!(
+        erster
+            .fremde_beitraege
+            .contains("Unabhängige Erstmeinung Maus")
+    );
+    assert!(
+        erster
+            .fremde_beitraege
+            .contains("Unabhängige Zweitmeinung Maus")
+    );
+    let zweiter = a.gesehen.get(1).ok_or("Zweite Runde")?;
+    assert!(zweiter.fremde_beitraege.contains("Letzte Abstimmung"));
+    assert_eq!(j.stand().ki().buchungen().len(), 8);
+    Ok(())
+}
+#[test]
+fn unklare_runde_stoppt_ohne_ungepruefte_aenderung() -> Result<(), String> {
+    let mut a = diskutant(BeraterId::Dachs, vec![Some(1000), None, Some(1000)], false)?;
+    let mut b = diskutant(BeraterId::Maus, vec![Some(1000), Some(1000)], false)?;
+    let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+    assert_eq!(a.gesehen.len(), 2);
+    assert_eq!(b.gesehen.len(), 1);
+    assert_eq!(j.stand().auftraege().len(), 2);
+    assert!(j.stand().auftraege().iter().all(|l| l.beleg.stueck == 4));
+    Ok(())
+}
+#[test]
+fn abstimmung_kann_die_zweitmeinung_auch_widerrufen() -> Result<(), String> {
+    let mut a = diskutant(BeraterId::Dachs, vec![Some(2000)], true)?;
+    let mut b = diskutant(BeraterId::Maus, vec![Some(2000)], true)?;
+    let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+    assert!(j.stand().auftraege().is_empty());
+    assert_eq!(a.gesehen.len(), 1);
+    Ok(())
+}
+#[test]
+fn endlose_meinungsaenderungen_enden_an_der_tagesgrenze() -> Result<(), String> {
+    let folge: Vec<_> = (0..100).map(|n| Some(1000_i64.saturating_add(n))).collect();
+    let mut a = diskutant(BeraterId::Dachs, folge.clone(), false)?;
+    let mut b = diskutant(BeraterId::Maus, folge, false)?;
+    let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+    assert_eq!(a.gesehen.len(), 28);
+    assert_eq!(b.gesehen.len(), 28);
+    for wer in [BeraterId::Dachs, BeraterId::Maus] {
+        assert_eq!(
+            j.stand()
+                .ki()
+                .buchungen()
+                .iter()
+                .filter(|b| b.berater == wer)
+                .count(),
+            30
+        );
+    }
+    assert!(j.stand().auftraege().iter().all(|l| l.beleg.stueck == 4));
+    Ok(())
+}
+
+#[test]
+fn unbrauchbare_erstmeinung_loest_keine_abstimmung_aus() -> Result<(), String> {
+    let mut a = diskutant(BeraterId::Dachs, vec![Some(1000)], false)?;
+    let mut b = diskutant(BeraterId::Maus, vec![Some(1000)], false)?;
+    let erste = a.plan.antworten.get_mut(&tag(5)?).ok_or("Erstmeinung")?;
+    erste.verwertbar = false;
+    let (_ort, _j) = dialoglauf(&mut a, &mut b)?;
+    assert!(a.gesehen.is_empty() && b.gesehen.is_empty());
     Ok(())
 }

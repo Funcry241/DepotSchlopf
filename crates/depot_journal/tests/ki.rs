@@ -65,14 +65,19 @@ fn buchungen_in(p: &Path) -> Result<usize, String> {
 
 /// Fuellt den Monat von Dachs (23 Zyklen zu je zwei Aufrufen) und schliesst das Journal.
 fn monat_voll(p: &Path) -> Result<(), String> {
+    schreib_eintraege(
+        p,
+        &[
+            (Art::KiGrenzen, "0".repeat(64)),
+            (Art::Ki, "Dachs;2026-11-01;1;1000".into()),
+            (Art::Ki, "Dachs;2026-11-01;1;1000".into()),
+            (Art::RssAbruf, "tagesschau;1793520000".into()),
+        ],
+        "Monatsbudget",
+    )?;
     let mut k = journal(p)?;
-    for t in 1..=23_u8 {
-        for _ in 0..2 {
-            vorbedingung(k.reserviere(DACHS, tag(t)?, u32::from(t)), "Reservierung")?;
-        }
-    }
     match k.reserviere(DACHS, tag(24)?, 24) {
-        Err(depot_ki::Sperre::MonatVoll) => Ok(()),
+        Err(depot_ki::Sperre::MonatsbudgetErschoepft) => Ok(()),
         anders => Err(format!("Vorbedingung Monat voll: {anders:?}")),
     }
 }
@@ -262,12 +267,8 @@ fn befund_1_k05_kaputte_historie_fuehrt_zu_halt() -> Result<(), String> {
             vec![buchung(2, 1, 999_999)?],
         ),
         (
-            "mehr Aufrufe im Zyklus als erlaubt",
-            vec![
-                buchung(2, 1, hoechst)?,
-                buchung(2, 1, hoechst)?,
-                buchung(2, 1, hoechst)?,
-            ],
+            "Tagesrahmen überschritten",
+            vec![buchung(2, 1, hoechst)?; 31],
         ),
     ];
     let mut angenommen = Vec::new();

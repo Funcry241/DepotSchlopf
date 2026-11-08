@@ -7,7 +7,7 @@
 //! dauerhaft geschrieben hat.
 //!
 //! Jeder Fehler sperrt (fail-closed). Eine Endlosschleife, die jede Sekunde fragt,
-//! bekommt pro Zyklus hoechstens zwei Erlaubnisse und danach nur noch Sperren.
+//! bekommt pro Zyklus höchstens 30 Erlaubnisse und danach nur noch Sperren.
 
 // Die harten Lints stehen auf `forbid`: Der Compiler lehnt jede lokale Ausnahme ab, auch eine
 // hinter `cfg_attr` (R26, Befund 1·G01). Die Liste haelt der Kodex fest.
@@ -24,5 +24,7 @@
 )]
 
 pub mod budget;
+mod tagesrahmen;
+pub use tagesrahmen::{handelstage_rest, tagesrahmen};
 
 pub use budget::{Buchung, Datum, KiDeckel, KiGrenzen, Preise, Sperre, grenzabdruck, pruefe};

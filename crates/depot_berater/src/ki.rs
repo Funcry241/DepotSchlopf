@@ -60,6 +60,7 @@ pub struct KiBerater<N: Netz> {
     /// Wartet vor einem neuen Versand; in Tests ohne echtes Warten.
     schlafe: fn(Duration),
     vorbereitung: Option<Zeitpunkt>,
+    abrechnung: Option<depot_journal::KiAbrechnung>,
 }
 
 impl<N: Netz> fmt::Debug for KiBerater<N> {
@@ -102,6 +103,7 @@ impl<N: Netz> KiBerater<N> {
             limit_im_lauf: false,
             schlafe: std::thread::sleep,
             vorbereitung: None,
+            abrechnung: None,
         }
     }
 
@@ -364,6 +366,7 @@ impl<N: Netz> KiBerater<N> {
     }
 
     fn fragen(&mut self, erlaubnis: &AufrufErlaubnis, system: &str, frage: &str) -> Ergebnis {
+        self.abrechnung = None;
         let ohne = |t: String| Ergebnis {
             text: Err(t),
             kosten: "keine Kosten".into(),
@@ -451,6 +454,9 @@ impl<N: Netz> KiBerater<N> {
                 kosten,
             };
         }
+        if gelesen.text.is_ok() {
+            self.abrechnung = erlaubnis.abrechnung(v.token_ein, v.token_aus);
+        }
         Ergebnis {
             text: gelesen.text.map_err(|e| self.bereinigt(&e)),
             kosten,
@@ -533,6 +539,41 @@ impl<N: Netz> KiBerater<N> {
 }
 
 impl<N: Netz> Berater for KiBerater<N> {
+    fn kann_abstimmen(&self) -> bool {
+        true
+    }
+    fn abstimmen(
+        &mut self,
+        erlaubnis: AufrufErlaubnis,
+        lage: &Lage<'_>,
+        stand: &depot_sim::abstimmung::AbstimmungsStand,
+    ) -> depot_sim::abstimmung::AbstimmungsAntwort {
+        let system = frage::system(self.wer, &self.grenzen);
+        let f = frage::abstimmungs_frage(lage, &self.universum, stand);
+        let e = self.fragen(&erlaubnis, &system, &f);
+        match e
+            .text
+            .and_then(|t| frage::lies_abstimmung(&t, self.wer, &self.universum))
+            .and_then(|mut a| {
+                a.eigene = self.ohne_geheimnis_antwort(a.eigene)?;
+                Ok(a)
+            }) {
+            Ok(mut a) => {
+                a.eigene.prognose = None;
+                a.eigene.einschaetzung = format!("{} [{}]", a.eigene.einschaetzung, e.kosten);
+                a
+            }
+            Err(g) => {
+                self.abrechnung = None;
+                let mut a = depot_sim::abstimmung::AbstimmungsAntwort::unverwertbar();
+                a.eigene.einschaetzung = sauber(&self.bereinigt(&g));
+                a
+            }
+        }
+    }
+    fn abrechnung(&mut self) -> Option<depot_journal::KiAbrechnung> {
+        self.abrechnung.take()
+    }
     fn angebunden(&self) -> bool {
         self.schluessel.is_some() && !self.gesperrt() && self.pause().is_none()
     }
@@ -578,16 +619,19 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a.einschaetzung = format!("{} [{}]", a.einschaetzung, e.kosten);
                 a
             }
-            Err(grund) => Antwort {
-                prognose: None,
-                verwertbar: false,
-                einschaetzung: format!(
-                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
-                    sauber(&self.bereinigt(&grund)),
-                    e.kosten
-                ),
-                vorschlag: None,
-            },
+            Err(grund) => {
+                self.abrechnung = None;
+                Antwort {
+                    prognose: None,
+                    verwertbar: false,
+                    einschaetzung: format!(
+                        "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
+                        sauber(&self.bereinigt(&grund)),
+                        e.kosten
+                    ),
+                    vorschlag: None,
+                }
+            }
         }
     }
 
@@ -610,15 +654,18 @@ impl<N: Netz> Berater for KiBerater<N> {
                 u
             }
             // Ohne verwertbare Antwort keine Zustimmung (R31).
-            Err(grund) => Urteil {
-                verwertbar: false,
-                zustimmung: false,
-                begruendung: format!(
-                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
-                    sauber(&self.bereinigt(&grund)),
-                    e.kosten
-                ),
-            },
+            Err(grund) => {
+                self.abrechnung = None;
+                Urteil {
+                    verwertbar: false,
+                    zustimmung: false,
+                    begruendung: format!(
+                        "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
+                        sauber(&self.bereinigt(&grund)),
+                        e.kosten
+                    ),
+                }
+            }
         }
     }
 }
