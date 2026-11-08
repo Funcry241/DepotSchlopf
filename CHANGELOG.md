@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Eine gemeinsame Betriebsleiste zeigt auf Live und Einrichtung den laufenden Auftrag, Wartehinweise, Warteschlange und Abschluss. Gefundene Updates erscheinen dort mit „Update ansehen“. Wichtige Aktionen haben gefüllte Knöpfe; laufende Bereiche und gesperrte Knöpfe sind deutlicher erkennbar. Die Aktualisierung lässt Einrichtungsformulare unangetastet.
+
 - Auch die Kodex-Ausgaben verwenden Umlaute. Ein Quelltexttest meldet typische erneute ASCII-Umschreibungen und hält Maschinenkennungen sowie die ausdrücklichen historischen Ausnahmen frei.
 
 - Sichtbare Meldungen verwenden echte Umlaute und ß. URLs, Formularfelder, Dateinamen und Speicherformate bleiben ASCII; historische Sperrtexte und eingefrorene Beispieldaten bleiben bytegleich lesbar.

@@ -25,10 +25,22 @@ nav a[aria-current=page]{font-weight:700;background:var(--flaeche);border-bottom
 nav a:focus-visible{outline:2px solid currentColor;outline-offset:2px}\
 .version{margin-inline-start:auto;white-space:nowrap}\
 form.knopf{display:inline;margin:0}\
-a.aktion{display:inline-block;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;color:inherit}\
-button{font:inherit;padding:4px 10px;border:1px solid var(--linie);border-radius:6px;\
+a.aktion{display:inline-block;text-decoration:none;padding:10px 16px;border:1px solid var(--linie);border-radius:6px;color:inherit}\
+button{font:inherit;font-weight:600;min-height:44px;padding:10px 16px;border:2px solid var(--linie);border-radius:6px;\
 background:var(--flaeche);color:var(--text);cursor:pointer}\
-button:disabled{opacity:.65;cursor:default}\
+button:disabled{color:var(--leise);border-style:dashed;cursor:default}\
+button:not(:disabled):hover,a.aktion:hover{outline:2px solid currentColor;outline-offset:2px}\
+button:focus-visible,a.aktion:focus-visible{outline:3px solid var(--text);outline-offset:3px}\
+button.primaer,a.primaer{background:#005c97;color:#fff;border:2px solid #005c97;font-weight:700}\
+button.laeuft{border:2px solid var(--offen);color:var(--offen)}\
+#betriebsleiste{position:sticky;top:0;z-index:1;background:var(--grund);padding:4px 0}\
+.betrieb{border:2px solid var(--linie);border-radius:8px;padding:10px 14px;margin:0}\
+.betrieb.aktiv{border-color:var(--offen)}.betrieb p{margin:4px 0}\
+.betrieb progress{width:90px;max-width:30%;vertical-align:middle;margin-right:8px}\
+.update-angebot{border:2px solid var(--gut);padding:10px 14px;border-radius:8px;margin-top:6px}\
+.update-angebot p{margin:0 0 6px}.aktiver-bereich{border:2px solid var(--offen)}\
+section[id]{scroll-margin-top:180px}\
+@media(max-width:600px){#betriebsleiste{position:static}}\
 input[type=password],input[type=time]{font:inherit;padding:3px 6px;border:1px solid var(--linie);\
 border-radius:6px;background:var(--grund);color:var(--text);max-width:100%}\
 pre{white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,Consolas,monospace;\
@@ -39,13 +51,13 @@ label{display:block;margin:6px 0}\
 .selten{border:2px solid var(--halt);background:#fff1f0}\
 @media(prefers-color-scheme:dark){.selten{background:#2b1d1d}}\
 .selten>h2{color:var(--halt)}\
-.schlüssel-tabelle input{width:100%}.schlüssel-tabelle td{overflow-wrap:anywhere}\
-@media(max-width:600px){.schlüssel-tabelle,.schlüssel-tabelle tbody,\
-.schlüssel-tabelle tr,.schlüssel-tabelle td{display:block;width:100%}\
-.schlüssel-tabelle tr:first-child{display:none}.schlüssel-tabelle td{border:0}\
-.schlüssel-tabelle tr{border-bottom:1px solid var(--linie);padding:8px 0}\
-.schlüssel-tabelle td[data-titel]::before{content:attr(data-titel) \": \";font-weight:600}\
-.schlüssel-tabelle button{margin-top:6px}}";
+.schluessel-tabelle input{width:100%}.schluessel-tabelle td{overflow-wrap:anywhere}\
+@media(max-width:600px){.schluessel-tabelle,.schluessel-tabelle tbody,\
+.schluessel-tabelle tr,.schluessel-tabelle td{display:block;width:100%}\
+.schluessel-tabelle tr:first-child{display:none}.schluessel-tabelle td{border:0}\
+.schluessel-tabelle tr{border-bottom:1px solid var(--linie);padding:8px 0}\
+.schluessel-tabelle td[data-titel]::before{content:attr(data-titel) \": \";font-weight:600}\
+.schluessel-tabelle button{margin-top:6px}}";
 
 /// Ein Bedienelement zu einem Auftrag und seinem aktuellen Stand.
 fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
@@ -57,7 +69,12 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
     });
     if let Some(status) = status {
         return format!(
-            "<button type=\"button\" disabled>{} · {status}</button>",
+            "<button type=\"button\" class=\"{}\" disabled>{} · {status}</button>",
+            if status.starts_with("läuft") {
+                "laeuft"
+            } else {
+                "wartet"
+            },
             maskiere(text)
         );
     }
@@ -99,7 +116,7 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
         "<form class=\"knopf\" method=\"post\" action=\"/ausfuehren\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"art\" value=\"{}\">\
-         {ziel}<button type=\"submit\">{}</button></form>",
+         {ziel}<button class=\"primaer\" type=\"submit\">{}</button></form>",
         maskiere(token),
         art.kurz(),
         maskiere(text)
@@ -109,7 +126,7 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
 fn bestaetigungslink(art: Art, text: &str, sha: Option<&str>) -> String {
     let stand = sha.map_or_else(String::new, |s| format!("&amp;sha={}", maskiere(s)));
     format!(
-        "<a class=\"aktion\" href=\"/bestaetigen?art={}{stand}\">{}</a>",
+        "<a class=\"aktion primaer\" href=\"/bestaetigen?art={}{stand}\">{}</a>",
         art.kurz(),
         maskiere(text)
     )
@@ -149,7 +166,7 @@ pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> S
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"art\" value=\"{}\">{stand}\
          <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> {haken}</label>\
-         <button type=\"submit\">{knopf}</button> <a href=\"{ziel}\">Abbrechen</a></form></section>",
+         <button class=\"primaer\" type=\"submit\">{knopf}</button> <a href=\"{ziel}\">Abbrechen</a></form></section>",
         maskiere(token),
         art.kurz()
     )
@@ -390,6 +407,7 @@ pub fn rahmen(
     meldung: Option<(&str, &str)>,
     inhalt: &str,
     commit: Option<&str>,
+    betrieb: &str,
 ) -> String {
     let mut s = String::with_capacity(inhalt.len().saturating_add(4096));
     let nav = |pfad: &str, text: &str| {
@@ -442,7 +460,7 @@ pub fn rahmen(
         .unwrap_or_default();
     let _ = writeln!(
         s,
-        "<div id=\"teil\"{teil}>{inhalt}</div></main>\
+        "<div id=\"betriebsleiste\" data-teil=\"/teil/kopf\" role=\"status\" aria-live=\"polite\">{betrieb}</div><div id=\"teil\"{teil}>{inhalt}</div></main>\
          <script src=\"/app.js\"></script></body></html>"
     );
     s
@@ -555,7 +573,7 @@ pub fn fehler(status: u16, text: &str) -> Vec<u8> {
     crate::http::antwort(
         status,
         "text/html; charset=utf-8",
-        rahmen("", None, None, &inhalt, None).as_bytes(),
+        rahmen("", None, None, &inhalt, None, "").as_bytes(),
     )
 }
 
@@ -623,7 +641,8 @@ fn ergebnis(a: &Auftrag, z: &Zustand) -> (&'static str, &'static str) {
 
 /// Was der Dienst tut: laufender Auftrag, Warteschlange, naechster Lauf, Verlauf.
 pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
-    let mut s = String::from("<section><h2>Tätigkeit</h2>");
+    let klasse = z.laufend.as_ref().map_or("", |_| "aktiver-bereich");
+    let mut s = format!("<section id=\"taetigkeit\" class=\"{klasse}\"><h2>Tätigkeit</h2>");
     if let Some(a) = &z.laufend {
         let _ = write!(
             s,
@@ -824,6 +843,65 @@ fn gesamtstatus_teil(token: &str, z: &Zustand) -> String {
     s
 }
 
+/// Gemeinsame, unabhängig von Formularen aufgefrischte Betriebsleiste.
+pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
+    let mut s = marke(start);
+    if let Some(a) = &z.laufend {
+        let _ = write!(
+            s,
+            "<div class=\"betrieb aktiv\"><strong><progress aria-label=\"Auftrag läuft\"></progress>Jetzt: {}</strong> \
+             <a href=\"/#taetigkeit\">Fortschritt ansehen</a><p>Seit {} · {}</p>",
+            maskiere(a.art.name()),
+            maskiere(&zeit_text(a.start)),
+            anlass_text(a.anlass)
+        );
+        if let Some(h) = &a.hinweis {
+            let _ = write!(s, "<p>{}</p>", maskiere(h));
+        } else {
+            s.push_str("<p>DepotSchlopf arbeitet. Du musst den Auftrag nicht erneut starten.</p>");
+        }
+    } else if z.neustart {
+        s.push_str("<div class=\"betrieb aktiv\"><strong>Update: Neustart wird vorbereitet.</strong><p>Die Oberfläche verbindet sich von selbst neu.</p>");
+    } else {
+        s.push_str("<div class=\"betrieb\"><strong>Im Moment läuft kein Auftrag.</strong>");
+        let _ = write!(
+            s,
+            "<p>Nächster geplanter Lauf: {}</p>",
+            maskiere(&naechster_text(z, heute))
+        );
+        if let Some(a) = z.verlauf.front() {
+            let (_, ergebnis) = ergebnis(a, z);
+            let _ = write!(
+                s,
+                "<p>Zuletzt: {} · {} · <a href=\"/#taetigkeit\">Ergebnis ansehen</a></p>",
+                maskiere(a.art.name()),
+                ergebnis
+            );
+        }
+    }
+    if !z.warteschlange.is_empty() {
+        let _ = write!(
+            s,
+            "<p>Danach warten {} Aufträge.</p>",
+            z.warteschlange.len()
+        );
+    }
+    s.push_str("</div>");
+    if z.auftrag_stand(Art::Update).is_none()
+        && let Some((sha, _)) = z.update_angebot()
+    {
+        let _ = write!(
+            s,
+            "<div class=\"update-angebot\"><p><strong>Update verfügbar</strong> · Version {}</p>\
+            <a class=\"aktion primaer\" href=\"/einrichtung#update\">Update ansehen</a> \
+            <span>Einspielen erst nach deiner Bestätigung.</span></div>",
+            maskiere(crate::rueckfall::kurz(sha))
+        );
+    }
+    s.push_str(&update_hinweis(z));
+    s
+}
+
 /// Der Inhalt der Live-Seite (auch `/teil/live`).
 pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> String {
     let mut s = marke(start);
@@ -845,20 +923,8 @@ pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> Stri
 }
 
 /// Kurzer Stand fuer die Einrichtung (auch `/teil/status`).
-pub fn status(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> String {
-    let jetzt = match &z.laufend {
-        Some(a) => format!("Läuft: {} ({}).", a.art.name(), anlass_text(a.anlass)),
-        None => "Gerade läuft nichts.".into(),
-    };
-    format!(
-        "{}{}<section>{}<div class=\"kopf\">{}</div>\
-         <div class=\"leise\">Nächster geplanter Lauf: {}</div></section>",
-        marke(start),
-        gesamtstatus_teil(token, z),
-        update_hinweis(z),
-        maskiere(&jetzt),
-        maskiere(&naechster_text(z, heute))
-    )
+pub fn status(token: &str, start: &str, z: &Zustand, _heute: Option<Datum>) -> String {
+    format!("{}{}", marke(start), gesamtstatus_teil(token, z))
 }
 
 fn regel(w: Wer) -> &'static str {

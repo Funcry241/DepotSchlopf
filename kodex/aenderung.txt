@@ -1,7 +1,7 @@
 klasse: Funktion
-zweck: Papiertag während der Update-Probe schreibfrei anhalten und Aufrufe sowie Höchstkosten der verbleibenden Erstmeinungen vor Zusatzfragen schützen.
+zweck: Laufende Aufträge und gefundene Updates auf beiden Seiten sichtbar machen und wichtige Aktionen hervorheben.
 pfade:
-crates/depot_sim/
-crates/depot_journal/
-docs/befunde/update.md
-docs/befunde/ki-dialog.md
+crates/depot_dienst/
+README.md
+CHANGELOG.md
+docs/befunde/bedienbarkeit.md

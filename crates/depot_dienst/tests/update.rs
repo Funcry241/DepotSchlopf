@@ -162,6 +162,67 @@ fn bestaetige_update(d: &Dienst) -> Result<String, String> {
 }
 
 #[test]
+fn betriebsleiste_zeigt_auftrag_wartehinweis_und_abschluss_auf_beiden_seiten() -> Result<(), String>
+{
+    let d = dienst(ordner()?);
+    let t = mittag()?;
+    d.einreihen(Art::Nachrichten, Anlass::Hand)?;
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(t), "Auftrag gestartet")?;
+    some(d.sperre().laufend.as_mut(), "laufender Auftrag")?.hinweis =
+        Some("Verbindung weg. Nächster Versuch <17:45>.".into());
+    for pfad in ["/", "/einrichtung", "/teil/kopf"] {
+        let html = get(&d, pfad)?;
+        assert!(
+            html.contains("Jetzt: Schlagzeilen abrufen"),
+            "{pfad}: {html}"
+        );
+        assert!(html.contains("aria-label=\"Auftrag läuft\""));
+        assert!(html.contains("Verbindung weg. Nächster Versuch &lt;17:45&gt;."));
+        assert!(!html.contains("<17:45>"));
+        assert!(html.contains("Danach warten 1 Aufträge."));
+        assert!(html.contains("href=\"/#taetigkeit\""));
+        if pfad != "/teil/kopf" {
+            assert!(html.contains("id=\"betriebsleiste\" data-teil=\"/teil/kopf\""));
+        }
+    }
+    assert!(get(&d, "/teil/live")?.contains("id=\"taetigkeit\" class=\"aktiver-bereich\""));
+    d.verfolge(nr, kind, || mittag().ok());
+    let html = get(&d, "/teil/kopf")?;
+    assert!(!html.contains("<progress"));
+    assert!(html.contains("Zuletzt: Schlagzeilen abrufen · erfolgreich"));
+    assert!(html.contains("Im Moment läuft kein Auftrag."));
+    Ok(())
+}
+
+#[test]
+fn gefundenes_update_ist_global_sichtbar_und_braucht_weiter_bestaetigung() -> Result<(), String> {
+    let d = dienst(ordner()?);
+    assert!(!get(&d, "/teil/kopf")?.contains("Update verfügbar"));
+    suche_update(&d, mittag()?)?;
+    for pfad in ["/", "/einrichtung", "/teil/kopf"] {
+        let html = get(&d, pfad)?;
+        assert!(html.contains("<strong>Update verfügbar</strong>"), "{pfad}");
+        assert!(
+            html.contains("class=\"aktion primaer\" href=\"/einrichtung#update\">Update ansehen")
+        );
+        assert!(html.contains("Einspielen erst nach deiner Bestätigung."));
+    }
+    assert!(d.sperre().warteschlange.is_empty());
+    let ziel = format!("/bestaetigen?art=update&sha={UPDATE_SHA}");
+    let html = get(&d, &ziel)?;
+    assert!(html.contains("name=\"geprueft\" value=\"ja\" required"));
+    assert!(html.contains(&format!("name=\"sha\" value=\"{UPDATE_SHA}\"")));
+    assert!(html.contains("class=\"primaer\" type=\"submit\">Update einspielen"));
+    assert!(
+        post_auftrag(&d, &format!("update&sha={UPDATE_SHA}"))?.contains("m=update_bestaetigen")
+    );
+    assert!(bestaetige_update(&d)?.contains("m=update#update"));
+    assert!(!get(&d, "/teil/kopf")?.contains("Update verfügbar"));
+    Ok(())
+}
+
+#[test]
 fn update_laeuft_allein_und_sperrt_auftraege_bis_zum_neustart() -> Result<(), String> {
     let wurzel = ordner()?;
     let t = mittag()?;
@@ -834,10 +895,10 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const reply=t=>Promise.resolve({ok:true,text:()=>Promise.resolve(t)});
 const health=(start='alt',bereit=true)=>`<span data-start="${start}"></span><span data-bereit="${bereit?'ja':'nein'}"></span>`;
-function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt'}={}) {
+function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt',urls=['/teil/status','/teil/update','/teil/journal']}={}) {
   let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={};
   const banner={hidden:true,textContent:''};
-  const elements=Array.from({length:parts},(_,i)=>({innerHTML:'alt',getAttribute:()=>['/teil/status','/teil/update','/teil/journal'][i],querySelectorAll:()=>[]}));
+  const elements=Array.from({length:parts},(_,i)=>({innerHTML:'alt',getAttribute:()=>urls[i],querySelectorAll:()=>[]}));
   const document={addEventListener(){},getElementById:()=>banner,querySelector:()=>known?{getAttribute:()=>known}:null,querySelectorAll:s=>s==='[data-teil]'?elements:[]};
   vm.runInNewContext(script,{document,navigator:{},URL,AbortController,Set,
     window:{addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
@@ -893,6 +954,16 @@ test('Teilaktualisierung läuft weiter und alle Abrufe umgehen den Cache',async(
   const detail={id:'log',open:true};b.elements[0].querySelectorAll=()=>[detail];
   await b.advance(2000);assert.equal(b.elements[1].innerHTML,'aktuell');
   assert.ok(b.requests.every(r=>r.options.cache==='no-store'&&r.options.credentials==='same-origin'&&r.options.signal));
+});
+
+test('Betriebsleiste wechselt von Lauf zu Update-Hinweis ohne Seitenneuladung',async()=>{
+  let inhalt=health()+'Jetzt: Kurse abrufen';
+  const b=browser({parts:1,urls:['/teil/kopf'],response:u=>reply(u==='/teil/kopf'?inhalt:health())});
+  await b.advance(2000);assert.match(b.elements[0].innerHTML,/Jetzt: Kurse abrufen/);
+  inhalt=health()+'Update verfügbar';
+  await b.advance(2000);assert.match(b.elements[0].innerHTML,/Update verfügbar/);
+  assert.deepEqual(b.navigations,[]);
+  assert.ok(b.requests.some(r=>r.url==='/teil/kopf'));
 });
 
 test('Rückfall auf älteren Dienst ohne Bereitschaftsmarker wird erkannt',async()=>{
