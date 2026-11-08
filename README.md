@@ -136,3 +136,9 @@ Ein weiterer Doppelklick während Bau, Update oder Rückfall übernimmt den lauf
 Dachs und Maus können nach unabhängig festgehaltenen Erstmeinungen und den Zweitmeinungen ihre Vorschläge abstimmen. Jede Runde sieht denselben vorher fixierten Stand; eine Änderung braucht eine nachfolgende ausdrückliche Zustimmung zu genau diesem Vorschlag. Bei unklarer Antwort endet die Abstimmung, bei Einigkeit ebenfalls. Der letzte gültige und geprüfte Stand geht an das Regelwerk. Jede Runde, Änderung und Begründung steht getrennt im Journal. Näheres: [KI-Abrechnung und Abstimmung](docs/befunde/ki-dialog.md).
 
 Die Oberfläche und neue Protokollmeldungen verwenden echte Umlaute. Alte Journaltexte und technische Kennungen bleiben unverändert; du musst keine Daten konvertieren.
+
+### Was gerade läuft und ob ein Update bereitliegt
+
+Oben auf **Live** und **Einrichtung** zeigt die Betriebsleiste den laufenden Auftrag und seine Wartehinweise. „Fortschritt ansehen“ führt zum Protokoll. Der Balken zeigt Tätigkeit, keinen geschätzten Prozentwert. Nach dem Abschluss steht dort das Ergebnis; ein wartender Auftrag erscheint beim nächsten Start.
+
+Nach **Nach Update suchen** bleibt ein gefundenes Update auf beiden Seiten als **Update verfügbar** sichtbar. **Update ansehen** führt zu den Änderungen in der Einrichtung. Einspielen braucht weiterhin deine Bestätigung für genau die gefundene Version. Es gibt keine automatische Installation. Die Leiste wird getrennt von deinen Eingabefeldern aktualisiert.

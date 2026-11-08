@@ -192,6 +192,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 meldung,
                 &inhalt,
                 d.version.as_deref(),
+                &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
             );
             antwort(200, HTML, s.as_bytes())
         }
@@ -206,13 +207,18 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             HTML,
             seiten::journal_teil(&d.token, &d.sperre()).as_bytes(),
         ),
+        "/teil/kopf" => antwort(
+            200,
+            HTML,
+            seiten::betriebsleiste(&d.start, &d.sperre(), tag).as_bytes(),
+        ),
         "/teil/update" => antwort(
             200,
             HTML,
             seiten::update_aktionen(&d.token, &d.start, &d.sperre()).as_bytes(),
         ),
-        "/bestaetigen" => auftrag_bestaetigen(d, a),
-        "/protokoll" | "/protokoll.txt" => protokoll_lesen(d, a),
+        "/bestaetigen" => auftrag_bestaetigen(d, a, tag),
+        "/protokoll" | "/protokoll.txt" => protokoll_lesen(d, a, tag),
         "/einrichtung" => {
             // Erst ausserhalb der Sperre nachsehen, was gespeichert ist.
             let datei = werkbank::lies_falls_da(&d.wurzel.join("daten").join("zeitplan.txt"));
@@ -258,8 +264,14 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             };
             let inhalt = seiten::einrichtung(&d.token, &d.start, &zustand, tag, &gespeichert);
             drop(zustand);
-            let seite =
-                seiten::rahmen("/einrichtung", None, meldung, &inhalt, d.version.as_deref());
+            let seite = seiten::rahmen(
+                "/einrichtung",
+                None,
+                meldung,
+                &inhalt,
+                d.version.as_deref(),
+                &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+            );
             antwort(200, HTML, seite.as_bytes())
         }
         "/app.js" => antwort(
@@ -284,7 +296,7 @@ fn verbindungsstatus(d: &Dienst, tag: Option<depot_kern::Datum>) -> Vec<u8> {
     antwort(200, HTML, text.as_bytes())
 }
 
-fn protokoll_lesen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
+fn protokoll_lesen(d: &Dienst, a: &Anfrage, tag: Option<depot_kern::Datum>) -> Vec<u8> {
     let formular = formular(a.abfrage.as_bytes()).unwrap_or_default();
     let Some(kennung) = feld(&formular, "lauf").filter(|k| protokoll::gueltige_kennung(k)) else {
         return seiten::fehler(400, "Wähle ein Protokoll unter Live aus.");
@@ -300,7 +312,14 @@ fn protokoll_lesen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
                 seiten::marke(&d.start),
                 seiten::protokoll_seite(kennung, &text)
             );
-            let html = seiten::rahmen("/", None, None, &inhalt, d.version.as_deref());
+            let html = seiten::rahmen(
+                "/",
+                None,
+                None,
+                &inhalt,
+                d.version.as_deref(),
+                &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+            );
             antwort(200, HTML, html.as_bytes())
         }
         Err(_) => seiten::fehler(
@@ -409,7 +428,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     }
 }
 
-fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
+fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, tag: Option<depot_kern::Datum>) -> Vec<u8> {
     let f = formular(a.abfrage.as_bytes()).unwrap_or_default();
     let (art, sha, ziel) = match feld(&f, "art").and_then(Art::aus_kurz) {
         Some(art @ (Art::Papier | Art::Vorbereiten)) => (art, None, "/"),
@@ -430,7 +449,14 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage) -> Vec<u8> {
         seiten::marke(&d.start),
         seiten::auftrag_bestaetigen(&d.token, art, sha.as_deref())
     );
-    let seite = seiten::rahmen(ziel, None, None, &inhalt, d.version.as_deref());
+    let seite = seiten::rahmen(
+        ziel,
+        None,
+        None,
+        &inhalt,
+        d.version.as_deref(),
+        &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+    );
     antwort(200, HTML, seite.as_bytes())
 }
 
