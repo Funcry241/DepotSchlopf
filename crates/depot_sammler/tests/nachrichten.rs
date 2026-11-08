@@ -88,6 +88,13 @@ fn kostenlos_ohne_schluessel_mit_quelle_link_zeit_und_rohhash() -> Result<(), St
     .map_err(|e| format!("{e:?}"))?;
     assert_eq!(b.neu, 2);
     assert_eq!(n.adressen.len(), 2);
+    assert_eq!(
+        j.stand().seit_abschluss(),
+        0,
+        "RSS-Abrufe beginnen keinen Papiertag"
+    );
+    assert!(j.stand().rss_abruf("tagesschau").is_some());
+    assert!(j.stand().rss_abruf("bbc-world").is_some());
     assert!(
         n.adressen
             .iter()

@@ -55,6 +55,7 @@ pub mod konto;
 pub mod kursbeleg;
 pub mod kurssperre;
 pub mod nachrichtbeleg;
+pub mod rss_abruf;
 pub mod stand;
 pub mod terminbeleg;
 pub mod vorbereitung;

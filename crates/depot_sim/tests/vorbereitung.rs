@@ -296,3 +296,37 @@ fn kurze_journalsperre_beim_start_wird_ohne_neue_reservierung_abgewartet() -> Re
     assert_eq!(ort.journal()?.stand().ki().buchungen().len(), 2);
     Ok(())
 }
+
+#[test]
+fn rss_abrufe_aus_altem_und_neuem_sammler_blockieren_die_vorbereitung_nicht() -> Result<(), String>
+{
+    for alt in [true, false] {
+        let ort = Ort::neu()?;
+        let t = zeit(8)?;
+        let tag = t.datum().ok_or("Datum")?;
+        {
+            let mut j = ort.journal()?;
+            if alt {
+                j.beobachte(tag, &format!("rss-abruf: tagesschau;{}", t.sekunden()))
+                    .map_err(|e| format!("{e:?}"))?;
+            } else {
+                j.belege_rss_abruf("tagesschau", t)
+                    .map_err(|e| format!("{e:?}"))?;
+            }
+            nachricht(&mut j, t, t, "Erfundenes politisches Ereignis am Sonntag")?;
+        }
+        let mut j = ort.journal()?;
+        let (mut dachs, mut maus, fragen) = modelle()?;
+        vorbereiten(&mut j, t, &universum()?, &mut dachs, &mut maus, || Some(t))?;
+        assert_eq!(fragen.borrow().len(), 2);
+        assert!(
+            j.stand()
+                .vorbereitungen()
+                .last()
+                .is_some_and(depot_journal::Vorbereitung::abgeschlossen)
+        );
+        assert_eq!(j.stand().seit_abschluss(), 0);
+        assert!(j.stand().toepfe().is_empty() && j.stand().auftraege().is_empty());
+    }
+    Ok(())
+}

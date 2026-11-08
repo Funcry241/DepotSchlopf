@@ -76,6 +76,8 @@ pub enum Art {
     /// `quelle;abruf;roh;zeit;text`: eine Nachricht von aussen (`nachrichtbeleg`, R40). Nur im
     /// Format 2; die Abrufe fallen nie zurueck.
     Nachricht,
+    /// `quelle;utc-sekunden`: Verwaltungsbeleg für RSS-Abrufpausen, kein Handel.
+    RssAbruf,
     /// Fixierte, unabhaengige Prognose eines Beraters im Papiertag.
     Weltprognose,
     /// Wissensstand, Budget und Antworten einer Vorbereitung ohne Handel.
@@ -121,6 +123,7 @@ impl Art {
             Art::Kurs => "kurs",
             Art::Termin => "termin",
             Art::Nachricht => "nachricht",
+            Art::RssAbruf => "rss-abruf",
             Art::Weltprognose => "weltprognose",
             Art::Vorbereitung => "vorbereitung",
             Art::Auftrag => "auftrag",
@@ -145,6 +148,7 @@ impl Art {
             Art::Kurs,
             Art::Termin,
             Art::Nachricht,
+            Art::RssAbruf,
             Art::Weltprognose,
             Art::Vorbereitung,
             Art::Auftrag,
@@ -202,6 +206,7 @@ pub struct Stand {
     toepfe: BTreeMap<TopfId, Topf>,
     auftraege: Vec<AuftragsLage>,
     beobachtungen: Vec<(Datum, String)>,
+    rss_abrufe: BTreeMap<String, Zeitpunkt>,
     kurse: Vec<KursBeleg>,
     termine: Vec<TerminBeleg>,
     nachrichten: Vec<NachrichtBeleg>,
@@ -238,6 +243,18 @@ impl Stand {
     /// Das Format, nach dem die Eintraege gelten: `FORMAT_ALT` oder `FORMAT`.
     pub fn format(&self) -> u8 {
         self.format
+    }
+
+    /// Letzter Abruf dieser Quelle, einschließlich exakt erkannter alter RSS-Vermerke.
+    pub fn rss_abruf(&self, quelle: &str) -> Option<Zeitpunkt> {
+        self.rss_abrufe.get(quelle).copied()
+    }
+
+    fn merke_rss_abruf(&mut self, a: crate::rss_abruf::RssAbruf) {
+        self.rss_abrufe
+            .entry(a.quelle)
+            .and_modify(|t| *t = (*t).max(a.zeit))
+            .or_insert(a.zeit);
     }
 
     /// Der zuletzt belegte Stand je Topf des Papierdepots.
@@ -428,9 +445,9 @@ impl Stand {
     pub(crate) fn anwenden(&mut self, art: Art, inhalt: &str) -> Result<(), String> {
         match art {
             Art::Beobachtung => {
-                let b = lies_beobachtung(inhalt).ok_or("Beobachtung unlesbar")?;
-                kanonisch(&beobachtung_text(b.0, &b.1), inhalt)?;
-                self.beobachtungen.push(b);
+                if self.belege_beobachtung(inhalt)? {
+                    return Ok(());
+                }
             }
             Art::Topf => {
                 let t = lies_topf(inhalt).ok_or("Topf unlesbar")?;
@@ -450,6 +467,12 @@ impl Stand {
             }
             Art::Nachricht => {
                 self.belege_nachricht(inhalt)?;
+                return Ok(());
+            }
+            Art::RssAbruf => {
+                let a =
+                    crate::rss_abruf::RssAbruf::lies(inhalt).ok_or("RSS-Abrufvermerk unlesbar")?;
+                self.merke_rss_abruf(a);
                 return Ok(());
             }
             Art::Vorbereitung => {
@@ -523,6 +546,19 @@ impl Stand {
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
         Ok(())
+    }
+
+    fn belege_beobachtung(&mut self, inhalt: &str) -> Result<bool, String> {
+        let b = lies_beobachtung(inhalt).ok_or("Beobachtung unlesbar")?;
+        kanonisch(&beobachtung_text(b.0, &b.1), inhalt)?;
+        let rss = crate::rss_abruf::RssAbruf::aus_alt(b.0, &b.1);
+        self.beobachtungen.push(b);
+        if let Some(a) = rss {
+            self.merke_rss_abruf(a);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn belege_weltprognose(&mut self, inhalt: &str) -> Result<(), String> {

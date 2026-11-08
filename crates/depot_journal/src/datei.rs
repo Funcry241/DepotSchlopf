@@ -632,6 +632,7 @@ impl Journal {
             | Art::Kurs
             | Art::Termin
             | Art::Nachricht
+            | Art::RssAbruf
             | Art::Begruendung
             | Art::Abschluss => self.schreibe_eintrag(art, inhalt),
         }
@@ -882,6 +883,13 @@ impl Journal {
     /// Schreibt den naechsten Zustand eines Auftrags.
     pub(crate) fn schreibe_meldung(&mut self, nr: u64, m: &Meldung) -> Result<(), JournalFehler> {
         self.schreibe_eintrag(Art::Zustand, &meldung_text(nr, m))
+    }
+
+    /// Verwaltungsbeleg für das Quellenkontingent; keine Beobachtung eines Papiertags.
+    pub fn belege_rss_abruf(&mut self, quelle: &str, zeit: Zeitpunkt) -> Result<(), JournalFehler> {
+        let a = crate::rss_abruf::RssAbruf::neu(quelle, zeit)
+            .ok_or_else(|| JournalFehler::Abgelehnt("RSS-Quelle unbekannt".into()))?;
+        self.schreibe_eintrag(Art::RssAbruf, &a.text())
     }
 
     pub fn starte_vorbereitung(
