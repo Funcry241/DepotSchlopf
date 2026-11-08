@@ -120,6 +120,20 @@ fn laeuft_schon() -> bool {
     }
 }
 
+/// Ein weiterer Aufruf beobachtet nur den bestehenden Start und übernimmt ihn nicht.
+fn einzelner_waechter(ohne_browser: bool) -> Result<Option<std::fs::File>, String> {
+    let sperre = depot_dienst::waechter::prozess_sperre()?;
+    if sperre.is_none() {
+        println!(
+            "[Waechter] DepotSchlopf läuft oder startet bereits. Die vorhandene Oberfläche verbindet sich automatisch wieder."
+        );
+        if !ohne_browser && laeuft_schon() {
+            oeffne_browser();
+        }
+    }
+    Ok(sperre)
+}
+
 fn main() -> ExitCode {
     let mut ohne_browser = false;
     for a in std::env::args().skip(1) {
@@ -135,6 +149,16 @@ fn main() -> ExitCode {
             "[Waechter] FEHLER: Projektordner nicht gefunden. DepotSchlopf.cmd dort starten."
         );
         return ExitCode::FAILURE;
+    };
+    // Diese Sperre bleibt auch während Bau, Neustart und Rückfall bestehen. Der Port
+    // allein reicht dann nicht: Der Dienst hat ihn in dieser Zeit noch nicht geöffnet.
+    let _prozess_sperre = match einzelner_waechter(ohne_browser) {
+        Ok(Some(sperre)) => sperre,
+        Ok(None) => return ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("[Waechter] FEHLER: {e}");
+            return ExitCode::FAILURE;
+        }
     };
     // Ein zweiter Start baut nichts (die laufende Datei ist unter Windows gesperrt) und setzt
     // nichts zurueck; er oeffnet nur die Seite.
