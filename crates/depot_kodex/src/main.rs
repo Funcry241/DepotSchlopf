@@ -13,14 +13,32 @@
     clippy::cast_sign_loss
 )]
 
+mod testumgebung;
+
 use std::process::{Command, ExitCode};
 
 fn cargo(args: &[&str]) -> bool {
     println!("[Kodex] cargo {}", args.join(" "));
-    Command::new("cargo")
-        .args(args)
-        .status()
-        .is_ok_and(|s| s.success())
+    let mut befehl = Command::new("cargo");
+    befehl.args(args);
+    let _testumgebung = if args.first() == Some(&"test") {
+        match testumgebung::Testumgebung::neu() {
+            Ok(umgebung) => {
+                umgebung.anwenden(&mut befehl);
+                println!(
+                    "[Kodex] Tests laufen mit eigenen temporären Dateien und eigener Git-Konfiguration."
+                );
+                Some(umgebung)
+            }
+            Err(e) => {
+                eprintln!("[Kodex] {e}");
+                return false;
+            }
+        }
+    } else {
+        None
+    };
+    befehl.status().is_ok_and(|s| s.success())
 }
 
 fn basis_aus(args: &[String]) -> &str {

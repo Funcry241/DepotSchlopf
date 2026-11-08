@@ -1,6 +1,8 @@
-klasse: Funktion
-zweck: Update-Gegenproben von der laufenden Wächtersperre und Git-Testtransporte von absoluten Windows-Pfaden trennen.
+klasse: KodexAenderung
+zweck: Den vollständigen Testlauf von installierten Dienstsperren und persönlicher Git-Konfiguration isolieren, auch beim Aufruf durch alte Updater.
 pfade:
-crates/depot_dienst/tests/update.rs
-crates/depot_lauf/src/update.rs
-docs/befunde/update.md
+crates/depot_kodex/src/main.rs
+crates/depot_kodex/src/testumgebung.rs
+docs/befunde/kodex.md
+.github/workflows/kodex.yml
+.github/scripts/pruefe_update_alt.py
