@@ -1,8 +1,5 @@
-klasse: KodexAenderung
-zweck: Den vollständigen Testlauf von installierten Dienstsperren und persönlicher Git-Konfiguration isolieren, auch beim Aufruf durch alte Updater.
+klasse: Funktion
+zweck: Den weiterhin scheiternden Klon aus der lokalen Update-Testfixture entfernen, ohne Prüfungen auszulassen, und Git-Fehler nachvollziehbar protokollieren.
 pfade:
-crates/depot_kodex/src/main.rs
-crates/depot_kodex/src/testumgebung.rs
-docs/befunde/kodex.md
-.github/workflows/kodex.yml
-.github/scripts/pruefe_update_alt.py
+crates/depot_lauf/src/update.rs
+docs/befunde/update.md

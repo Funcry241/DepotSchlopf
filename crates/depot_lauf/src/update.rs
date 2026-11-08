@@ -387,8 +387,7 @@ mod tests {
 
     fn g(dir: &Path, args: &[&str]) -> Result<String, String> {
         let aus = Command::new("git")
-            .arg("-C")
-            .arg(dir)
+            .current_dir(dir)
             .args([
                 "-c",
                 "user.name=Test",
@@ -408,20 +407,31 @@ mod tests {
                 if cfg!(windows) { "NUL" } else { "/dev/null" },
             )
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TRACE", "1")
+            .env("GIT_TRACE_SETUP", "1")
             .args(args)
             .output()
             .map_err(|e| format!("git: {e}"))?;
         if !aus.status.success() {
-            return Err(format!(
-                "git {}: {}",
+            // Einzeln ausgeben: auch das begrenzte Diagnoseprotokoll behält den Kontext.
+            eprintln!("[Test-Git] Ordner: {}", dir.display());
+            eprintln!(
+                "[Test-Git] Befehl: git {} · Exit {:?}",
                 args.join(" "),
-                String::from_utf8_lossy(&aus.stderr)
+                aus.status.code()
+            );
+            for zeile in String::from_utf8_lossy(&aus.stderr).lines() {
+                eprintln!("[Test-Git] {zeile}");
+            }
+            return Err(format!(
+                "Lokaler Git-Testbefehl fehlgeschlagen: git {}. Einzelheiten stehen im Test-Git-Protokoll.",
+                args.join(" ")
             ));
         }
         Ok(String::from_utf8_lossy(&aus.stdout).trim().to_string())
     }
 
-    /// Ein Ursprung (`origin`), ein Projektordner und ein zweiter Klon, der auf `main` schiebt.
+    /// Ein Ursprung (`origin`) und zwei getrennte Arbeitsstände, einer davon liefert neue Versionen.
     struct Aufbau {
         projekt: PathBuf,
         andere: PathBuf,
@@ -455,17 +465,22 @@ mod tests {
         g(&andere, &["commit", "-q", "-m", "eins"])?;
         g(&andere, &["remote", "add", "origin", "../ursprung.git"])?;
         g(&andere, &["push", "-q", "origin", "main"])?;
+        // Der Produktiv-Updater klont nicht. Der Test braucht nur einen zweiten Stand
+        // mit demselben lokalen Ursprung: init + fetch vermeidet den unnötigen Klonpfad.
+        g(&dir, &["init", "-q", "-b", "main", "projekt"])?;
+        g(&projekt, &["remote", "add", "origin", "../ursprung.git"])?;
         g(
-            &dir,
+            &projekt,
             &[
-                "clone",
+                "fetch",
                 "-q",
-                "--local",
-                "--no-hardlinks",
-                "--",
-                "ursprung.git",
-                "projekt",
+                "origin",
+                "+refs/heads/main:refs/remotes/origin/main",
             ],
+        )?;
+        g(
+            &projekt,
+            &["checkout", "-q", "-B", "main", "--track", "origin/main"],
         )?;
         fs::create_dir_all(projekt.join("daten")).map_err(|e| e.to_string())?;
         Ok(Aufbau { projekt, andere })
@@ -549,9 +564,26 @@ mod tests {
             g(&a.andere, &["remote", "get-url", "origin"])?,
             "../ursprung.git"
         );
+        assert_eq!(g(&a.projekt, &["symbolic-ref", "--short", "HEAD"])?, "main");
+        assert_eq!(
+            g(&a.projekt, &["rev-parse", "--abbrev-ref", "@{upstream}"])?,
+            "origin/main"
+        );
+        let alt = g(&a.andere, &["rev-parse", "HEAD"])?;
+        assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, alt);
+        assert!(g(&a.projekt, &["status", "--porcelain"])?.is_empty());
+        assert_eq!(
+            fs::read(a.projekt.join("a.txt")).map_err(|e| e.to_string())?,
+            b"eins\n"
+        );
         let neu = neuer_stand(&a, "lokaler Nachweis\n")?;
         let kandidat = hole(&a.projekt)?.ok_or("Lokaler Kandidat fehlt")?;
         assert_eq!(kandidat.neu, neu);
+        assert_eq!(
+            g(&a.projekt, &["rev-parse", "HEAD"])?,
+            alt,
+            "Prüfen spielt nichts ein"
+        );
         Ok(())
     }
 
