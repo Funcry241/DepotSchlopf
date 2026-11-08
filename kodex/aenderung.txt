@@ -5,10 +5,7 @@ crates/depot_berater/
 crates/depot_dienst/
 crates/depot_journal/
 crates/depot_kern/
-crates/depot_ki/
-crates/depot_lage/
 crates/depot_lauf/
-crates/depot_regelwerk/
 crates/depot_sammler/
 crates/depot_sim/
 README.md
