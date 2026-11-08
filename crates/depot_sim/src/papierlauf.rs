@@ -99,6 +99,13 @@ pub fn papier(
     dachs: &mut dyn Berater,
     maus: &mut dyn Berater,
 ) -> Result<Vec<String>, String> {
+    if wurzel
+        .join("daten/update_offen.txt")
+        .try_exists()
+        .map_err(|e| e.to_string())?
+    {
+        return Err("Das Update ist noch nicht bestätigt. Kein Papiertag während der Probezeit; danach erneut starten.".into());
+    }
     let mut zeilen = Vec::new();
     // Nach einem Sicherheitsabbruch des Sammlers beginnt kein Papiertag, auch nicht von Hand:
     // Seine Teilkurse werden nie verwendet (Maus, Restbefund zu #34).

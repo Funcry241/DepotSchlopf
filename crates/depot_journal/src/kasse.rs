@@ -284,39 +284,7 @@ pub(crate) fn naechste_fuer(
         zyklus,
     )?;
     if zweck != KiZweck::Erstmeinung {
-        let g = KiGrenzen::standard();
-        let gebucht = stand
-            .buchungen
-            .iter()
-            .filter(|b| {
-                b.berater == berater
-                    && b.datum.jahr() == datum.jahr()
-                    && b.datum.monat() == datum.monat()
-            })
-            .try_fold(Cent::NULL, |s, b| s.checked_add(b.reserviert))
-            .ok_or(depot_ki::Sperre::Rechenfehler)?;
-        let morgen = KiDeckel::standard(berater)
-            .hoechstkosten()
-            .ok_or(depot_ki::Sperre::Rechenfehler)?;
-        let frei = g
-            .kosten_je_monat()
-            .checked_sub(gebucht)
-            .and_then(|r| r.checked_sub(reserviert))
-            .ok_or(depot_ki::Sperre::Rechenfehler)?;
-        let jahr = stand
-            .buchungen
-            .iter()
-            .filter(|b| b.berater == berater && b.datum.jahr() == datum.jahr())
-            .try_fold(Cent::NULL, |s, b| s.checked_add(b.reserviert))
-            .ok_or(depot_ki::Sperre::Rechenfehler)?;
-        let jahr_frei = g
-            .kosten_je_jahr()
-            .checked_sub(jahr)
-            .and_then(|r| r.checked_sub(reserviert))
-            .ok_or(depot_ki::Sperre::Rechenfehler)?;
-        if frei < morgen || jahr_frei < morgen {
-            return Err(depot_ki::Sperre::ErstmeinungReserviert);
-        }
+        pruefe_zusatzreserve(stand, berater, datum, reserviert)?;
     }
     Ok((
         Buchung {
@@ -327,4 +295,66 @@ pub(crate) fn naechste_fuer(
         },
         deckel,
     ))
+}
+
+/// Zusatzfragen lassen Aufrufe und Höchstkosten aller übrigen Erstmeinungen frei.
+fn pruefe_zusatzreserve(
+    stand: &KiStand,
+    berater: BeraterId,
+    datum: Datum,
+    reserviert: Cent,
+) -> Result<(), depot_ki::Sperre> {
+    let g = KiGrenzen::standard();
+    let gebucht = stand
+        .buchungen
+        .iter()
+        .filter(|b| {
+            b.berater == berater
+                && b.datum.jahr() == datum.jahr()
+                && b.datum.monat() == datum.monat()
+        })
+        .try_fold(Cent::NULL, |s, b| s.checked_add(b.reserviert))
+        .ok_or(depot_ki::Sperre::Rechenfehler)?;
+    let tage = depot_ki::handelstage_rest(datum)
+        .saturating_sub(u32::from(depot_kern::liste::handelstag(datum)));
+    let monat_aufrufe = stand
+        .buchungen
+        .iter()
+        .filter(|b| {
+            b.berater == berater
+                && b.datum.jahr() == datum.jahr()
+                && b.datum.monat() == datum.monat()
+        })
+        .count();
+    let nachher = monat_aufrufe
+        .checked_add(1)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or(depot_ki::Sperre::Rechenfehler)?;
+    if nachher > g.aufrufe_je_monat().saturating_sub(tage) {
+        return Err(depot_ki::Sperre::ErstmeinungReserviert);
+    }
+    let morgen = KiDeckel::standard(berater)
+        .hoechstkosten()
+        .and_then(|c| c.mal_stueck(u64::from(tage.max(1))))
+        .ok_or(depot_ki::Sperre::Rechenfehler)?;
+    let frei = g
+        .kosten_je_monat()
+        .checked_sub(gebucht)
+        .and_then(|r| r.checked_sub(reserviert))
+        .ok_or(depot_ki::Sperre::Rechenfehler)?;
+    let jahr = stand
+        .buchungen
+        .iter()
+        .filter(|b| b.berater == berater && b.datum.jahr() == datum.jahr())
+        .try_fold(Cent::NULL, |s, b| s.checked_add(b.reserviert))
+        .ok_or(depot_ki::Sperre::Rechenfehler)?;
+    let jahr_frei = g
+        .kosten_je_jahr()
+        .checked_sub(jahr)
+        .and_then(|r| r.checked_sub(reserviert))
+        .ok_or(depot_ki::Sperre::Rechenfehler)?;
+    if frei < morgen || jahr_frei < morgen {
+        return Err(depot_ki::Sperre::ErstmeinungReserviert);
+    }
+    Ok(())
 }

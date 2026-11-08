@@ -1663,3 +1663,30 @@ fn unbrauchbare_erstmeinung_loest_keine_abstimmung_aus() -> Result<(), String> {
     assert!(a.gesehen.is_empty() && b.gesehen.is_empty());
     Ok(())
 }
+
+#[test]
+fn direkter_papiertag_wartet_schreibfrei_auf_updatebestaetigung() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let daten = ort.dir.join("daten");
+    fs::create_dir_all(&daten).map_err(|e| e.to_string())?;
+    let pfad = daten.join("journal.txt");
+    Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+    let vorher = fs::read(&pfad).map_err(|e| e.to_string())?;
+    let vermerk = fs::read(pfad.with_extension("vermerk")).map_err(|e| e.to_string())?;
+    let markierung = daten.join("update_offen.txt");
+    fs::write(&markierung, "Probe").map_err(|e| e.to_string())?;
+    let aus =
+        depot_sim::papierlauf::papier(&ort.dir, tag(5)?, &universum()?, &mut Stumm, &mut Stumm);
+    assert!(aus.is_err_and(|e| e.contains("Update ist noch nicht bestätigt")));
+    assert_eq!(fs::read(&pfad).map_err(|e| e.to_string())?, vorher);
+    assert_eq!(
+        fs::read(pfad.with_extension("vermerk")).map_err(|e| e.to_string())?,
+        vermerk
+    );
+    assert!(!daten.join("papierkonto.txt").exists());
+    fs::remove_file(markierung).map_err(|e| e.to_string())?;
+    let aus =
+        depot_sim::papierlauf::papier(&ort.dir, tag(5)?, &universum()?, &mut Stumm, &mut Stumm);
+    assert!(!aus.is_err_and(|e| e.contains("Update ist noch nicht bestätigt")));
+    Ok(())
+}
