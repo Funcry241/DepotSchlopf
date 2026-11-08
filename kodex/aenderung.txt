@@ -1,6 +1,7 @@
-klasse: KodexAenderung
-zweck: Kodex-Ausgaben mit Umlauten schreiben und typische ASCII-Rückfälle in sichtbaren Zeichenketten prüfen, ohne Maschinenformate oder historische Belege umzuschreiben.
+klasse: Funktion
+zweck: Papiertag während der Update-Probe schreibfrei anhalten und Aufrufe sowie Höchstkosten der verbleibenden Erstmeinungen vor Zusatzfragen schützen.
 pfade:
-crates/depot_kodex/
-CHANGELOG.md
-docs/befunde/sprache.md
+crates/depot_sim/
+crates/depot_journal/
+docs/befunde/update.md
+docs/befunde/ki-dialog.md

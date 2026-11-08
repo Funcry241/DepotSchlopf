@@ -202,3 +202,64 @@ fn jahresrest_wird_fuer_die_naechste_erstmeinung_geschuetzt() -> Result<(), Stri
     );
     Ok(())
 }
+
+#[test]
+fn vorbereitungen_verbrauchen_nicht_die_kosten_der_restlichen_erstmeinungen() -> Result<(), String>
+{
+    let pfad = ort()?;
+    let datum = tag(8)?;
+    let tage = depot_ki::handelstage_rest(datum);
+    let reserve = i64::from(tage).saturating_mul(24);
+    let alt = format!("Dachs;2026-11-01;1;{}", 2000_i64.saturating_sub(reserve));
+    schreibe(&pfad, &[(Art::KiGrenzen, &"0".repeat(64)), (Art::Ki, &alt)])?;
+    let mut buch = offen(&pfad)?;
+    assert_eq!(
+        buch.pruefe_ki(BeraterId::Dachs, datum, 2, KiZweck::Vorbereitung),
+        Err(Sperre::ErstmeinungReserviert)
+    );
+    for n in 9..=30_u8 {
+        let datum = tag(n)?;
+        if depot_kern::liste::handelstag(datum) {
+            buch.reserviere(BeraterId::Dachs, datum, u32::from(n))
+                .map_err(|e| format!("{datum}: {e:?}"))?;
+        }
+    }
+    assert_eq!(
+        buch.stand()
+            .ki()
+            .buchungen()
+            .iter()
+            .map(|b| b.reserviert.0)
+            .sum::<i64>(),
+        2000
+    );
+    Ok(())
+}
+#[test]
+fn billige_zusatzfragen_verbrauchen_nicht_die_aufrufe_der_restlichen_erstmeinungen()
+-> Result<(), String> {
+    let pfad = ort()?;
+    let datum = tag(8)?;
+    let tage = depot_ki::handelstage_rest(datum);
+    let hash = "0".repeat(64);
+    let b = "Dachs;2026-11-01;1;0";
+    let mut eintraege = vec![(Art::KiGrenzen, hash.as_str())];
+    for _ in 0..690_u32.saturating_sub(tage) {
+        eintraege.push((Art::Ki, b));
+    }
+    schreibe(&pfad, &eintraege)?;
+    let mut buch = offen(&pfad)?;
+    assert_eq!(
+        buch.pruefe_ki(BeraterId::Dachs, datum, 2, KiZweck::Vorbereitung),
+        Err(Sperre::ErstmeinungReserviert)
+    );
+    for n in 9..=30_u8 {
+        let datum = tag(n)?;
+        if depot_kern::liste::handelstag(datum) {
+            buch.reserviere(BeraterId::Dachs, datum, u32::from(n))
+                .map_err(|e| format!("{datum}: {e:?}"))?;
+        }
+    }
+    assert_eq!(buch.stand().ki().buchungen().len(), 690);
+    Ok(())
+}
