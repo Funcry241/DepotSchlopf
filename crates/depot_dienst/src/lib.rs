@@ -182,17 +182,17 @@ const HTML: &str = "text/html; charset=utf-8";
 
 fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let tag = heute(jetzt);
-    let meldung = seiten::meldung(&a.abfrage);
     match a.pfad.as_str() {
         "/" => {
             let inhalt = seiten::live(&d.token, &d.start, &d.sperre(), tag);
             let s = seiten::rahmen(
                 "/",
                 Some("/teil/live"),
-                meldung,
+                seiten::meldung(&a.abfrage),
                 &inhalt,
                 d.version.as_deref(),
                 &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+                seiten::meldungs_aktion(&a.abfrage),
             );
             antwort(200, HTML, s.as_bytes())
         }
@@ -267,10 +267,11 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             let seite = seiten::rahmen(
                 "/einrichtung",
                 None,
-                meldung,
+                seiten::meldung(&a.abfrage),
                 &inhalt,
                 d.version.as_deref(),
                 &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+                seiten::meldungs_aktion(&a.abfrage),
             );
             antwort(200, HTML, seite.as_bytes())
         }
@@ -319,6 +320,7 @@ fn protokoll_lesen(d: &Dienst, a: &Anfrage, tag: Option<depot_kern::Datum>) -> V
                 &inhalt,
                 d.version.as_deref(),
                 &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+                seiten::meldungs_aktion(&a.abfrage),
             );
             antwort(200, HTML, html.as_bytes())
         }
@@ -456,6 +458,7 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, tag: Option<depot_kern::Datum>) 
         &inhalt,
         d.version.as_deref(),
         &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+        seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, seite.as_bytes())
 }
@@ -502,7 +505,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
 
 fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
     let (meldung, entwurf, ergebnis) = match feld(f, "aktion") {
-        Some("speichern") => {
+        Some(aktion @ ("speichern" | "speichern_an")) => {
             let entwurf = seiten::Entwurf::aus_formular(f).als_abfrage();
             let Some(plan) = zeitplan_aus_formular(f) else {
                 return http::umleitung(&format!(
@@ -515,9 +518,16 @@ fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
                 ));
             }
             (
-                "zeitplan",
+                if aktion == "speichern_an" {
+                    "zeitplan_gespeichert_an"
+                } else {
+                    "zeitplan"
+                },
                 entwurf,
-                d.aendere_zeitplan(|alt| Zeitplan { an: alt.an, ..plan }),
+                d.aendere_zeitplan(|alt| Zeitplan {
+                    an: aktion == "speichern_an" || alt.an,
+                    ..plan
+                }),
             )
         }
         Some(aktion @ ("an" | "aus")) => {

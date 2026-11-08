@@ -1286,7 +1286,10 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
     // Die Seite erklärt, warum der Einschaltknopf gesperrt ist.
     let seite = get(&d, &ort(&r), t);
     assert!(seite.contains("Zeitplan nicht eingeschaltet"), "{seite}");
-    assert!(seite.contains("disabled>Zeitplan einschalten"), "{seite}");
+    assert!(
+        seite.contains("disabled>Speichern und Zeitplan einschalten"),
+        "{seite}"
+    );
     assert!(seite.contains("Einschalten geht erst"), "{seite}");
     // Ohne Entwurf zeigt die Seite den aktiven Plan.
     let seite = get(&d, "/einrichtung", t);
@@ -1317,6 +1320,73 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
     assert!(!plan.an);
     assert_eq!(plan.termine, (8, 15));
     assert_eq!(plan.kurse, (18, 5));
+    Ok(())
+}
+
+#[test]
+fn speichern_und_einschalten_uebernimmt_genau_die_ausgefuellten_werte() -> Result<(), String> {
+    let w = ordner()?;
+    let d = Arc::new(Dienst::neu(
+        w.clone(),
+        TOKEN.into(),
+        echo_starter(true),
+        lagebild_mit_schluesseln(true),
+    ));
+    let t = donnerstag(12, 0)?;
+    assert!(d.schritt(t).is_none());
+    let sende = |werte: &str| {
+        text(&behandle(
+            &d,
+            &Attrappe::default(),
+            &formular_post(
+                "/zeitplan",
+                &format!("t={TOKEN}&aktion=speichern_an&{werte}"),
+            ),
+            t,
+        ))
+    };
+    let r = sende("termine=08%3A15&kurse=18%3A05&nachrichten_an=ja");
+    assert!(r.contains("m=zeitplan_gespeichert_an"), "{r}");
+    let plan = d.sperre().zeitplan;
+    assert!(plan.an && plan.nachrichten_an);
+    assert_eq!(plan.termine, (8, 15));
+    assert_eq!(plan.kurse, (18, 5));
+    assert_eq!(
+        Zeitplan::lies(
+            &fs::read_to_string(w.join("daten/zeitplan.txt")).map_err(|e| e.to_string())?
+        ),
+        Ok(plan)
+    );
+    let seite = get(&d, &ort(&r), t);
+    assert!(seite.contains("Einstellungen gespeichert und Zeitplan eingeschaltet"));
+    // Ungültig heißt weder speichern noch einschalten; die bisherigen Werte gelten weiter.
+    let r = sende("termine=ungueltig&kurse=19%3A05");
+    assert!(r.contains("m=zeitplan_ungueltig"));
+    assert_eq!(d.sperre().zeitplan, plan);
+    let html = get(&d, &ort(&r), t);
+    assert!(html.contains("value=\"19:05\""));
+    assert!(html.contains("data-entwurf=\"ja\""));
+    assert!(html.contains("href=\"#zeitplan\">Zeitplan und Eingaben ansehen"));
+    Ok(())
+}
+
+#[test]
+fn kombiniertes_einschalten_bleibt_bei_fehlender_einrichtung_ohne_wirkung() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let jetzt = donnerstag(12, 0)?;
+    assert!(d.schritt(jetzt).is_none());
+    let formular = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&aktion=speichern_an&termine=08%3A15&kurse=18%3A05"),
+    );
+    let antwort = text(&behandle(&d, &Attrappe::default(), &formular, jetzt));
+    assert!(antwort.contains("m=zeitplan_einrichtung"));
+    assert!(!d.sperre().zeitplan.an);
+    assert!(!wurzel.join("daten/zeitplan.txt").exists());
+    let html = get(&d, &ort(&antwort), jetzt);
+    assert!(html.contains("value=\"18:05\""));
+    assert!(html.contains("disabled>Speichern und Zeitplan einschalten"));
     Ok(())
 }
 

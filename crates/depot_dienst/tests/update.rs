@@ -895,20 +895,66 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const reply=t=>Promise.resolve({ok:true,text:()=>Promise.resolve(t)});
 const health=(start='alt',bereit=true)=>`<span data-start="${start}"></span><span data-bereit="${bereit?'ja':'nein'}"></span>`;
-function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt',urls=['/teil/status','/teil/update','/teil/journal']}={}) {
-  let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={};
-  const banner={hidden:true,textContent:''};
+function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt',urls=['/teil/status','/teil/update','/teil/journal'],forms=[],confirm=()=>false}={}) {
+  let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={},docEvents={};
+  const banner={hidden:true,textContent:''}, reconnect={hidden:true};
   const elements=Array.from({length:parts},(_,i)=>({innerHTML:'alt',getAttribute:()=>urls[i],querySelectorAll:()=>[]}));
-  const document={addEventListener(){},getElementById:()=>banner,querySelector:()=>known?{getAttribute:()=>known}:null,querySelectorAll:s=>s==='[data-teil]'?elements:[]};
+  const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:banner,querySelector:()=>known?{getAttribute:()=>known}:null,querySelectorAll:s=>s==='[data-teil]'?elements:s==='form[data-aenderungen]'?forms:[]};
   vm.runInNewContext(script,{document,navigator:{},URL,AbortController,Set,
-    window:{addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
+    window:{confirm,addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
     setTimeout:(f,delay)=>{const id=++nr;timers.set(id,{f,at:now+delay});return id},clearTimeout:id=>timers.delete(id),
     fetch:(url,options)=>{requests.push({url,options});return response(url,options)}
   });
-  return {banner,elements,requests,navigations,events,get timers(){return timers},
+  return {banner,reconnect,elements,requests,navigations,events,docEvents,get timers(){return timers},
     async advance(ms){const end=now+ms;for(let i=0;i<200;i++){const due=[...timers.entries()].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;timers.delete(due[0]);now=due[1].at;due[1].f();await new Promise(r=>setImmediate(r));}now=end;}
   };
 }
+function formular(input={type:'time',value:'17:45',defaultValue:'17:45'}) {
+  const status={textContent:''},classes=new Set(),button={dataset:{},textContent:'Speichern',disabled:false};
+  return {dataset:{},input,status,button,classes,
+    querySelectorAll:()=>[input],querySelector:s=>s==='[data-speicherstand]'?status:button,
+    classList:{toggle:(c,an)=>an?classes.add(c):classes.delete(c)}};
+}
+function ereignis(target,submitter){return {target,submitter,preventDefault(){this.verhindert=true;}};}
+test('Ändern und Zurücksetzen zeigen genau den Speicherbedarf; Verlassen warnt',()=>{
+  const f=formular(),b=browser({forms:[f]});
+  assert.ok(!f.classes.has('ungespeichert'));
+  f.input.value='18:05';b.docEvents.input({target:{closest:()=>f}});
+  assert.match(f.status.textContent,/Noch nicht gespeichert/);
+  assert.ok(f.classes.has('ungespeichert'));
+  const weg=ereignis();b.events.beforeunload(weg);assert.equal(weg.verhindert,true);
+  f.input.value='17:45';b.docEvents.change({target:{closest:()=>f}});
+  assert.ok(!f.classes.has('ungespeichert'));
+  const bleibt=ereignis();b.events.beforeunload(bleibt);assert.ok(!bleibt.verhindert);
+});
+test('Gespeicherter Fehlerentwurf und ungültige Felder bleiben als unerledigt sichtbar',()=>{
+  const f=formular();f.dataset.entwurf='ja';const b=browser({forms:[f]});
+  assert.match(f.status.textContent,/Noch nicht gespeichert/);
+  b.docEvents.invalid({target:{closest:()=>f}});
+  assert.match(f.status.textContent,/markierte Feld/);
+});
+test('Eigenes Speichern nutzt den angeklickten Knopf; fremde Eingaben brauchen Entscheidung',async()=>{
+  const f=formular(),g=formular();g.input.value='19:00';
+  let zustimmen=false;const b=browser({forms:[f,g],confirm:()=>zustimmen});
+  const abbruch=ereignis(f,f.button);b.docEvents.submit(abbruch);
+  assert.equal(abbruch.verhindert,true);assert.ok(!f.button.dataset.gesendet);
+  zustimmen=true;
+  const anderer={dataset:{},textContent:'Speichern und einschalten',disabled:false};
+  const ok=ereignis(f,anderer);b.docEvents.submit(ok);await b.advance(0);
+  assert.ok(!ok.verhindert);assert.equal(anderer.disabled,true);assert.equal(f.button.disabled,false);
+  const verlassen=ereignis();b.events.beforeunload(verlassen);assert.ok(!verlassen.verhindert);
+});
+test('Neustart verwirft ungespeicherte Zugangsdaten nicht automatisch',async()=>{
+  const f=formular({type:'password',value:'nur-im-formular',defaultValue:''});
+  const b=browser({forms:[f],response:()=>reply(health('neu'))});await b.advance(0);
+  assert.deepEqual(b.navigations,[]);assert.equal(b.reconnect.hidden,false);
+  assert.match(b.banner.textContent,/ungespeicherten Eingaben/);
+  const speichern=ereignis(f,f.button);b.docEvents.submit(speichern);
+  assert.equal(speichern.verhindert,true);
+  assert.equal(f.input.value,'nur-im-formular');
+  const weg=ereignis();b.events.beforeunload(weg);assert.equal(weg.verhindert,true);
+  f.input.value='';await b.advance(2000);assert.deepEqual(b.navigations,['/einrichtung#update']);
+});
 test('auch Protokoll und Bestätigung ohne Live-Bereich prüfen die Verbindung',async()=>{
   for(const href of ['http://127.0.0.1:47410/protokoll?lauf=123-4#ende','http://127.0.0.1:47410/bestaetigen?art=update&sha=abc']){
     const b=browser({href,response:()=>reply(health('neu'))});await b.advance(0);

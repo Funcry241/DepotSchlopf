@@ -1,5 +1,5 @@
 klasse: Funktion
-zweck: Laufende Aufträge und gefundene Updates auf beiden Seiten sichtbar machen und wichtige Aktionen hervorheben.
+zweck: Einrichtungsänderungen sichtbar speichern, Zeitplan mit aktuellen Eingaben einschalten und Fehler mit passenden nächsten Schritten begleiten.
 pfade:
 crates/depot_dienst/
 README.md

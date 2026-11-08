@@ -142,3 +142,9 @@ Die Oberfläche und neue Protokollmeldungen verwenden echte Umlaute. Alte Journa
 Oben auf **Live** und **Einrichtung** zeigt die Betriebsleiste den laufenden Auftrag und seine Wartehinweise. „Fortschritt ansehen“ führt zum Protokoll. Der Balken zeigt Tätigkeit, keinen geschätzten Prozentwert. Nach dem Abschluss steht dort das Ergebnis; ein wartender Auftrag erscheint beim nächsten Start.
 
 Nach **Nach Update suchen** bleibt ein gefundenes Update auf beiden Seiten als **Update verfügbar** sichtbar. **Update ansehen** führt zu den Änderungen in der Einrichtung. Einspielen braucht weiterhin deine Bestätigung für genau die gefundene Version. Es gibt keine automatische Installation. Die Leiste wird getrennt von deinen Eingabefeldern aktualisiert.
+
+### Änderungen speichern und in Ruhe einrichten
+
+Zeitplanänderungen gelten nach dem Speichern. Ist der Zeitplan aus, übernimmt **Speichern und Zeitplan einschalten** die ausgefüllten Werte und aktiviert die automatischen Läufe gemeinsam. **Nur speichern · Zeitplan bleibt aus** richtet alles für später ein. Fehlt eine Voraussetzung, steht der Grund beim Zeitplan; dann lassen sich die Einstellungen zunächst nur speichern.
+
+Beim Bearbeiten zeigt das Formular **Noch nicht gespeichert** und hebt die Speicheraktion hervor. Beim Verlassen warnt der Browser; beim Absenden eines anderen Formulars fragt die Seite nach, bevor sie offene Änderungen verwirft. Nach einem Dienstneustart bleibt eine bearbeitete Einrichtung zunächst stehen. Prüfe dann deine Eingaben und nutze **Einrichtung neu laden**; der Browser fragt vor dem Verwerfen nach. Diese Eingaben werden nicht über den Neustart der Seite hinweg gespeichert. Zugangsdaten landen weder in Browser-Speichern noch in Rückmelde-URLs.
