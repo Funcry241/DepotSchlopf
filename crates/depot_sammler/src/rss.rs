@@ -107,16 +107,16 @@ struct Leser {
 impl Leser {
     fn element(&mut self, e: &quick_xml::events::BytesStart<'_>) -> Result<(), String> {
         for a in e.attributes() {
-            let a = a.map_err(|_| "Ungueltige RSS-Attribute")?;
+            let a = a.map_err(|_| "Ungültige RSS-Attribute")?;
             let wert = a
                 .normalized_value(quick_xml::XmlVersion::Implicit1_0)
-                .map_err(|_| "Ungueltiger Attributwert")?;
+                .map_err(|_| "Ungültiger Attributwert")?;
             self.dekodiert.push_str(&wert);
         }
         let name = e.name().as_ref().to_string();
         if name == "rss"
             && e.try_get_attribute("version")
-                .map_err(|_| "RSS-Version ungueltig")?
+                .map_err(|_| "RSS-Version ungültig")?
                 .is_none_or(|a| a.value.as_ref() != "2.0")
         {
             return Err("RSS 2.0 erwartet".into());
@@ -176,7 +176,7 @@ impl Leser {
             .chars()
             .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
         {
-            return Err("Ungueltiges XML-Zeichen".into());
+            return Err("Ungültiges XML-Zeichen".into());
         }
         self.dekodiert.push_str(text);
         if let Some(name) = self.feld().map(str::to_string) {
@@ -216,7 +216,7 @@ pub fn lies(
             .chars()
             .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
     {
-        return Err("RSS zu gross oder mit ungueltigen Steuerzeichen".into());
+        return Err("RSS zu groß oder mit ungültigen Steuerzeichen".into());
     }
     let mut reader = Reader::from_str(text);
     reader.config_mut().check_comments = true;
@@ -248,7 +248,7 @@ pub fn lies(
                 l.dekodiert.push_str(d.as_ref());
                 if d.encoding()
                     .transpose()
-                    .map_err(|_| "Ungueltige XML-Kodierung")?
+                    .map_err(|_| "Ungültige XML-Kodierung")?
                     .is_some_and(|e| !e.eq_ignore_ascii_case("UTF-8"))
                 {
                     return Err("RSS muss UTF-8 sein".into());

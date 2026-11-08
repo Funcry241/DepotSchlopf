@@ -58,8 +58,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("depot_kurssperre_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(kurssperre(&dir), None);
-        sperre_kurse(&dir, "Schluessel\\nin der Antwort")?;
-        assert!(kurssperre(&dir).is_some_and(|g| g.contains("Schluessel")));
+        sperre_kurse(&dir, "Schlüssel\\nin der Antwort")?;
+        assert!(kurssperre(&dir).is_some_and(|g| g.contains("Schlüssel")));
         std::fs::remove_file(dir.join(KURSSPERRE)).map_err(|e| e.to_string())?;
         assert_eq!(kurssperre(&dir), None);
         let _ = std::fs::remove_dir_all(&dir);

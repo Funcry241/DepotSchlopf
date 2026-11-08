@@ -149,7 +149,7 @@ impl Zeitplan {
             match zeile {
                 "nachrichten_an=ja" if !nachrichten_an => nachrichten_an = true,
                 "vorbereitung_an=ja" if !vorbereitung_an => vorbereitung_an = true,
-                _ => return Err("Zeitplan: Einstellung ungueltig oder doppelt".into()),
+                _ => return Err("Zeitplan: Einstellung ungültig oder doppelt".into()),
             }
         }
         if vorbereitung_an && !nachrichten_an {

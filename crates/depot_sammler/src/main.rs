@@ -99,7 +99,7 @@ fn gesperrt(wurzel: &Path) -> bool {
     };
     eprintln!(
         "[Sammler] HALT: daten/{} liegt ({grund}). Kein Abruf und kein Papiertag, bis ein Mensch \
-         den Schluessel geprueft und die Sperre in der Einrichtung aufgehoben hat.",
+         den Schlüssel geprüft und die Sperre in der Einrichtung aufgehoben hat.",
         kurssperre::KURSSPERRE
     );
     true
@@ -108,8 +108,8 @@ fn gesperrt(wurzel: &Path) -> bool {
 /// Nach einem Sicherheitsabbruch: Kurssperre anlegen, damit auch ein Papiertag von Hand die
 /// Teilkurse dieses Abrufs nie verwendet.
 fn sperre(wurzel: &Path, diagnose: Option<&str>, zugang: &Zugang) {
-    let grund = "Sicherheitsabbruch: Die Kursquelle gab den Schluessel zurueck. Teilkurse dieses \
-                 Abrufs nicht verwenden; Schluessel pruefen und bei Bedarf erneuern";
+    let grund = "Sicherheitsabbruch: Die Kursquelle gab den Schlüssel zurück. Teilkurse dieses \
+                 Abrufs nicht verwenden; Schlüssel prüfen und bei Bedarf erneuern";
     let grund = diagnose.map_or_else(|| grund.to_string(), |d| format!("{grund}. {d}"));
     let grund = zugang.bereinige(&grund);
     match kurssperre::sperre_kurse(&wurzel.join("daten"), &grund) {
@@ -177,7 +177,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         }
     };
     if werte.is_empty() {
-        println!("[Sammler] Keine Werte dieser Boerse in der Liste, nichts abzurufen.");
+        println!("[Sammler] Keine Werte dieser Börse in der Liste, nichts abzurufen.");
         return ExitCode::SUCCESS;
     }
     let schluessel = zugang(&werte);
@@ -244,7 +244,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         ExitCode::SUCCESS
     } else {
         eprintln!(
-            "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Pruefung nicht bestanden)."
+            "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Prüfung nicht bestanden)."
         );
         ExitCode::FAILURE
     }
@@ -280,7 +280,7 @@ fn zeige_pruefung(bericht: &depot_sammler::Bericht) {
         None => println!("[Sammler] Keine Schlusskurse belegt."),
         Some(t) if bericht.pruefung.is_empty() => {
             println!(
-                "[Sammler] Pruefung fuer den Handelstag {}: in Ordnung.",
+                "[Sammler] Prüfung für den Handelstag {}: in Ordnung.",
                 datum(t)
             );
             for f in &bericht.ausgelassen {
@@ -289,7 +289,7 @@ fn zeige_pruefung(bericht: &depot_sammler::Bericht) {
         }
         Some(t) => {
             println!(
-                "[Sammler] Pruefung fuer den Handelstag {} (Hoechstalter 20 Minuten: Schlusskurse sind nur kurz nach 17:35 Uhr frisch):",
+                "[Sammler] Prüfung für den Handelstag {} (Hoechstalter 20 Minuten: Schlusskurse sind nur kurz nach 17:35 Uhr frisch):",
                 datum(t)
             );
             for f in &bericht.pruefung {
@@ -403,7 +403,7 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         return ExitCode::FAILURE;
     }
     println!(
-        "[Sammler] Termine: {} neu, {} geaendert, {} unveraendert. Belegt im Journal {}.",
+        "[Sammler] Termine: {} neu, {} geändert, {} unveraendert. Belegt im Journal {}.",
         bericht.neu,
         bericht.geaendert,
         bericht.unveraendert,

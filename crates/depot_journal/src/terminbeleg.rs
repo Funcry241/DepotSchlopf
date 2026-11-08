@@ -59,10 +59,10 @@ impl TerminBeleg {
         termin: Termin,
     ) -> Result<TerminBeleg, String> {
         if !quelle_gueltig(quelle) {
-            return Err(format!("Quelle `{quelle}` ungueltig"));
+            return Err(format!("Quelle `{quelle}` ungültig"));
         }
         if !abdruck_gueltig(&roh) {
-            return Err("Abdruck der Antwort ungueltig".into());
+            return Err("Abdruck der Antwort ungültig".into());
         }
         Ok(TerminBeleg {
             quelle: quelle.to_string(),
@@ -130,7 +130,7 @@ pub(crate) fn lies_terminbeleg(inhalt: &str) -> Result<TerminBeleg, String> {
     };
     let herkunft = Herkunft::aus_name(herkunft).ok_or("Termin: Herkunft unbekannt")?;
     let abruf = Zeitpunkt::lies(abruf).ok_or("Termin: Abruf unlesbar")?;
-    let verl = Verlaesslichkeit::aus_name(verl).ok_or("Termin: Verlaesslichkeit unbekannt")?;
+    let verl = Verlaesslichkeit::aus_name(verl).ok_or("Termin: Verlässlichkeit unbekannt")?;
     let zeit = Zeitbezug::lies(zeit).ok_or("Termin: Zeit unlesbar")?;
     let betroffen = betroffen
         .split(',')

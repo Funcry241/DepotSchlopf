@@ -41,7 +41,7 @@ pub fn begleite(kind: &mut Child, offen: &Path, frist: Duration, takt: Duration)
                         return Ausgang::Ende(s.code());
                     }
                     return Ausgang::Rueckfall(format!(
-                        "Neuer Stand endete vor der Bestaetigung (Code {:?})",
+                        "Neuer Stand endete vor der Bestätigung (Code {:?})",
                         s.code()
                     ));
                 }
@@ -60,7 +60,7 @@ pub fn begleite(kind: &mut Child, offen: &Path, frist: Duration, takt: Duration)
                     return Ausgang::Ende(None);
                 }
                 return Ausgang::Rueckfall(format!(
-                    "Neuer Stand hat sich nicht binnen {} s bestaetigt; Dienst beendet",
+                    "Neuer Stand hat sich nicht binnen {} s bestätigt; Dienst beendet",
                     frist.as_secs()
                 ));
             }

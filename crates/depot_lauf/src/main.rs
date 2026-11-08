@@ -28,16 +28,16 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-const HILFE: &str = "Aufruf:\n  run.cmd                  alles: Gate pruefen und Assistenten-Export schreiben\n  \
-run.cmd kodex            dasselbe\n  run.cmd festschreibung   Festschreibung neu schreiben (nur fuer FestschreibungAenderung)\n  \
-run.cmd kurse            Schlusskurse und Nachrichten holen, im Journal belegen und pruefen (nur lesend)\n  \
+const HILFE: &str = "Aufruf:\n  run.cmd                  alles: Gate prüfen und Assistenten-Export schreiben\n  \
+run.cmd kodex            dasselbe\n  run.cmd festschreibung   Festschreibung neu schreiben (nur für FestschreibungAenderung)\n  \
+run.cmd kurse            Schlusskurse und Nachrichten holen, im Journal belegen und prüfen (nur lesend)\n  \
 run.cmd kurse einrichten Journal daten/journal.txt einmal anlegen\n  \
 run.cmd nachrichten      nur die Nachrichten holen und im Journal belegen (nur lesend)\n  \
 run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)\n  \
 run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)\n  \
 run.cmd lage             Lagebild nach daten/lage.html: Bereitschaft, KI-Budget, Depot, Gespraech\n  \
-run.cmd update pruefen   neue Staende auf main nennen (git fetch, aendert nichts)\n  \
-run.cmd update           neuen Stand im Pruefordner mit dem Gate pruefen, nur dann vorwaerts einspielen\n  \
+run.cmd update prüfen   neue Staende auf main nennen (git fetch, ändert nichts)\n  \
+run.cmd update           neuen Stand im Prüfordner mit dem Gate prüfen, nur dann vorwaerts einspielen\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
 
 /// Offene Reste frueherer Laeufe: Eine liegengebliebene Sperrdatei bedeutet einen Absturz
@@ -49,8 +49,8 @@ fn wiederherstellung(wurzel: &Path) -> Vec<String> {
             let name = e.file_name().to_string_lossy().into_owned();
             if name.ends_with(".sperre") {
                 warnungen.push(format!(
-                    "daten/{name} liegt noch: frueherer Lauf abgebrochen. KI-Aufrufe bleiben gesperrt, \
-                     bis ein Mensch geprueft und die Datei geloescht hat."
+                    "daten/{name} liegt noch: früherer Lauf abgebrochen. KI-Aufrufe bleiben gesperrt, \
+                     bis ein Mensch geprüft und die Datei gelöscht hat."
                 ));
             }
         }

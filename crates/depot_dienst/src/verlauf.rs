@@ -209,7 +209,7 @@ pub fn laden(wurzel: &Path) -> Result<Geladen, String> {
         neu.push('\n');
     }
     if let Err(e) = schreibe_ganz(&p, &neu) {
-        eprintln!("[Dienst] Verlauf nicht gekuerzt: {e}");
+        eprintln!("[Dienst] Verlauf nicht gekürzt: {e}");
     }
     Ok(g)
 }

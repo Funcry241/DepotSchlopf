@@ -53,7 +53,7 @@ impl PapierHalt {
                     format!("{ganz},{rest:02}")
                 };
                 format!(
-                    "Notbremse: {prozent} % Gesamtverlust erreicht. Neue Kaeufe gesperrt; Freigabe des Eigentuemers noetig"
+                    "Notbremse: {prozent} % Gesamtverlust erreicht. Neue Käufe gesperrt; Freigabe des Eigentümers nötig"
                 )
             }
         }
@@ -492,7 +492,7 @@ impl Stand {
                 let nr = b.nr;
                 if nr <= self.letzte_kennung {
                     return Err(format!(
-                        "Auftragskennung {nr} nicht groesser als die letzte ({})",
+                        "Auftragskennung {nr} nicht größer als die letzte ({})",
                         self.letzte_kennung
                     ));
                 }
@@ -524,7 +524,7 @@ impl Stand {
                 return Ok(());
             }
             Art::Begruendung => {
-                let b = lies_begruendung(inhalt).ok_or("Begruendung unlesbar")?;
+                let b = lies_begruendung(inhalt).ok_or("Begründung unlesbar")?;
                 kanonisch(&begruendung_text(b.0, &b.1, &b.2), inhalt)?;
                 self.lies_alten_papier_halt(b.0, &b.1, &b.2);
                 self.begruendungen.push(b);
@@ -669,7 +669,7 @@ impl Stand {
                 (None, _) | (Some(PapierHalt::Notbremse), PapierHalt::Gesamtverlust)
             )
         {
-            return Err("Papier-Halt unzulaessig".into());
+            return Err("Papier-Halt unzulässig".into());
         }
         self.papier_halt = Some(grund);
         self.begruendungen
@@ -685,7 +685,7 @@ impl Stand {
             .datum;
         let bargeld = self
             .papier_freigabe_bargeld()
-            .ok_or("Papierfreigabe unzulaessig")?;
+            .ok_or("Papierfreigabe unzulässig")?;
         if !Grenzen::standard().papier_freigabe_neue_messung() {
             return Err("Neue Papier-Verlustmessung ist nicht freigegeben".into());
         }
@@ -722,7 +722,7 @@ impl Stand {
             || self.papier_gesamtverlust_erreicht(a.hoechststand, None) != Some(false)
             || self.papier_bargeld() != Some(a.hoechststand)
         {
-            return Err("Notbremsenfreigabe unzulaessig".into());
+            return Err("Notbremsenfreigabe unzulässig".into());
         }
         self.schliesse_ab(inhalt)?;
         self.papier_halt = None;
@@ -732,7 +732,7 @@ impl Stand {
             a.datum,
             "Waechter".into(),
             format!(
-                "Notbremse automatisch aufgehoben: Konto abgeglichen und Kurse geprueft. Neuer Referenzwert {} Cent; normaler Betrieb ab dem naechsten Papiertag.",
+                "Notbremse automatisch aufgehoben: Konto abgeglichen und Kurse geprüft. Neuer Referenzwert {} Cent; normaler Betrieb ab dem nächsten Papiertag.",
                 a.hoechststand.0
             ),
         ));
@@ -750,7 +750,7 @@ impl Stand {
             || self.abschluss.as_ref().is_some_and(|a| a.datum >= tag)
             || self.wissensstichtage.contains_key(&tag)
         {
-            return Err("Wissensstichtag unzulaessig".into());
+            return Err("Wissensstichtag unzulässig".into());
         }
         self.wissensstichtage.insert(tag, zeit);
         Ok(())
@@ -766,7 +766,7 @@ impl Stand {
                 tag <= alt || self.abschluss.as_ref().is_none_or(|a| a.datum != alt)
             })
         {
-            return Err("Abrechnungstag unzulaessig".into());
+            return Err("Abrechnungstag unzulässig".into());
         }
         self.prueft_wiederanlauf = self.notbremse_aktiv()
             && self.gehalten().is_empty()
@@ -879,7 +879,7 @@ impl Stand {
                 .get(&nr)
                 .map_or(Cent::NULL, |(_, n)| *n)
                 .checked_add(netto)
-                .ok_or("Verkaufserloes: Ueberlauf")?;
+                .ok_or("Verkaufserloes: Überlauf")?;
             self.abrechnungen.insert(nr, (valuta, gesamt));
         }
         self.toepfe.insert(topf.id(), topf);
@@ -902,7 +902,7 @@ impl Stand {
             };
         };
         if self.abschluss.as_ref().is_some_and(|a| a.datum == tag) {
-            return Err("Ausfuehrung ohne offenen Abrechnungstag".into());
+            return Err("Ausführung ohne offenen Abrechnungstag".into());
         }
         if let Some(zeit) = aus.kurszeit {
             let rundung = match beleg.richtung {
@@ -927,7 +927,7 @@ impl Stand {
             .kurs
             .mal_stueck(aus.stueck)
             .and_then(|v| v.checked_sub(aus.gebuehr))
-            .ok_or("Verkaufserloes: Ueberlauf")?;
+            .ok_or("Verkaufserloes: Überlauf")?;
         let valuta = papier_valuta(tag).ok_or("Valuta ausserhalb des Kalenders")?;
         Ok((netto > Cent::NULL).then_some((valuta, netto)))
     }
@@ -960,11 +960,11 @@ impl Stand {
                         .limit
                         .mal_stueck(offen)
                         .and_then(|v| kauf.checked_add(v))
-                        .ok_or("Deckung: Ueberlauf")?;
+                        .ok_or("Deckung: Überlauf")?;
                 }
                 Richtung::Verkauf => {
                     let summe = verkauf.entry(&l.beleg.isin).or_insert(0);
-                    *summe = summe.checked_add(offen).ok_or("Deckung: Ueberlauf")?;
+                    *summe = summe.checked_add(offen).ok_or("Deckung: Überlauf")?;
                 }
             }
         }
@@ -972,17 +972,17 @@ impl Stand {
             .gesperrt(topf.id())
             .and_then(|s| s.checked_add(neuer_erloes))
             .and_then(|s| topf.bargeld().checked_sub(s))
-            .ok_or("Deckung: Ueberlauf")?;
+            .ok_or("Deckung: Überlauf")?;
         if kauf > frei {
             return Err(format!(
-                "Deckung: offene Kaeufe {} Cent ueber dem Bargeld {} Cent",
+                "Deckung: offene Käufe {} Cent über dem Bargeld {} Cent",
                 kauf.0, frei.0
             ));
         }
         for (isin, stueck) in verkauf {
             if stueck > topf.stueck(isin) {
                 return Err(format!(
-                    "Deckung: {stueck} Stueck {isin} im Verkauf, {} im Bestand",
+                    "Deckung: {stueck} Stück {isin} im Verkauf, {} im Bestand",
                     topf.stueck(isin)
                 ));
             }
@@ -998,10 +998,7 @@ fn ueber_nacht(l: &AuftragsLage) -> bool {
 }
 
 fn buche(topf: &Topf, b: &AuftragsBeleg, a: &crate::auftrag::Ausfuehrung) -> Result<Topf, String> {
-    let volumen = a
-        .kurs
-        .mal_stueck(a.stueck)
-        .ok_or("Ausfuehrung: Ueberlauf")?;
+    let volumen = a.kurs.mal_stueck(a.stueck).ok_or("Ausführung: Überlauf")?;
     let gehalten = topf.stueck(&b.isin);
     let (bargeld, stueck) = match b.richtung {
         Richtung::Kauf => (
@@ -1018,7 +1015,7 @@ fn buche(topf: &Topf, b: &AuftragsBeleg, a: &crate::auftrag::Ausfuehrung) -> Res
         ),
     };
     let (Some(bargeld), Some(stueck)) = (bargeld, stueck) else {
-        return Err(format!("Auftrag {}: Ausfuehrung nicht buchbar", b.nr));
+        return Err(format!("Auftrag {}: Ausführung nicht buchbar", b.nr));
     };
     let mut neu = Topf::neu(topf.id(), bargeld)
         .map_err(|_| format!("Auftrag {}: Bargeld wuerde negativ", b.nr))?;

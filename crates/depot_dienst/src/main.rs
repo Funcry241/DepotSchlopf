@@ -41,7 +41,7 @@ fn bediene(d: &Dienst, u: &dyn Umwelt, mut strom: TcpStream) {
             Some(t) => behandle(d, u, &anfrage, t),
             None => depot_dienst::seiten::fehler(500, "Uhr liefert keinen Zeitpunkt"),
         },
-        Err(http::LeseFehler::ZuGross) => depot_dienst::seiten::fehler(413, "Anfrage zu gross"),
+        Err(http::LeseFehler::ZuGross) => depot_dienst::seiten::fehler(413, "Anfrage zu groß"),
         Err(http::LeseFehler::Kaputt) => depot_dienst::seiten::fehler(400, "Anfrage unlesbar"),
         Err(http::LeseFehler::Abgebrochen) => return,
     };
@@ -250,7 +250,7 @@ fn main() -> ExitCode {
     let lauscher = match TcpListener::bind((::std::net::Ipv4Addr::LOCALHOST, http::PORT)) {
         Ok(l) => l,
         Err(e) if e.kind() == ErrorKind::AddrInUse => {
-            println!("[Dienst] Laeuft schon.");
+            println!("[Dienst] Läuft schon.");
             if !ohne_browser {
                 oeffne_browser();
             }
@@ -279,7 +279,7 @@ fn main() -> ExitCode {
         let d = Arc::clone(&dienst);
         thread::spawn(move || arbeiter(&d));
     }
-    println!("[Dienst] Bereit. Fenster offen lassen; Schliessen beendet den Dienst.");
+    println!("[Dienst] Bereit. Fenster offen lassen; Schließen beendet den Dienst.");
     if !ohne_browser {
         oeffne_browser();
     }

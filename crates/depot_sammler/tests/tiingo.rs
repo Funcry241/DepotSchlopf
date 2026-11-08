@@ -181,7 +181,7 @@ fn lauf(
 #[test]
 fn schluessel_von_tiingo() -> Result<(), String> {
     let s = vorbedingung(Schluessel::fuer(Anbieter::Tiingo, TI), "Schluessel")?;
-    assert_eq!(format!("{s:?}"), "Schluessel(***)");
+    assert_eq!(format!("{s:?}"), "Schlüssel(***)");
     assert_eq!(s.bereinige(&format!("token={TI} x")), "token=*** x");
     assert_eq!(
         s.bereinige(&format!("token={} x", TI.to_ascii_uppercase())),

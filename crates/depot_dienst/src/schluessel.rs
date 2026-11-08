@@ -97,7 +97,7 @@ impl Wer {
                     .bytes()
                     .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
                 {
-                    return Err("nur Grossbuchstaben und Ziffern erlaubt");
+                    return Err("nur Großbuchstaben und Ziffern erlaubt");
                 }
             }
             Wer::KursquelleUs => {
@@ -177,7 +177,7 @@ pub fn ablegen(wer: Wer, text: &str) -> Result<(), String> {
 pub fn ablegen(wer: Wer, text: &str) -> Result<(), String> {
     wer.pruefe(text)?;
     let _ = BENUTZER;
-    Err("Schluessel liegen nur in der Windows-Anmeldeinformationsverwaltung.".into())
+    Err("Schlüssel liegen nur in der Windows-Anmeldeinformationsverwaltung.".into())
 }
 
 /// Lädt ausschließlich zum Entfernen von Geheimnissen aus Diagnoseausgaben.

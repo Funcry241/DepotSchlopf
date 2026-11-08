@@ -61,7 +61,7 @@ fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
     let protokoll = wurzel.join("daten").join(depot_journal::anbieter::DATEI);
     if sperre.exists() {
         eprintln!(
-            "[Papier] {} liegt: KIs gesperrt, niemand wird gefragt. Grund in der Datei; nach der Pruefung loeschen.",
+            "[Papier] {} liegt: KIs gesperrt, niemand wird gefragt. Grund in der Datei; nach der Prüfung löschen.",
             sperre.display()
         );
     }
@@ -98,7 +98,7 @@ fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
     let ergebnis = papier(wurzel, heute, &universum, &mut dachs, &mut maus);
     if dachs.gesperrt() || maus.gesperrt() {
         eprintln!(
-            "[Papier] KIs gesperrt am Kostenschutz: {}. Pruefen, dann loeschen.",
+            "[Papier] KIs gesperrt am Kostenschutz: {}. Prüfen, dann löschen.",
             sperre.display()
         );
     }

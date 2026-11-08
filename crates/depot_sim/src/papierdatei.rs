@@ -65,24 +65,24 @@ impl Papierdatei {
             (true, false) => {
                 let k = lies(pfad)?;
                 let frisch =
-                    Papierkonto::eroeffne(start).ok_or("Papierkonto: Startwerte ungueltig")?;
+                    Papierkonto::eroeffne(start).ok_or("Papierkonto: Startwerte ungültig")?;
                 if k != frisch {
                     return Err(format!(
-                        "{} liegt mit Bewegungen vor, aber das Journal fuehrt kein Papierdepot. \
-                         Halt bis zur Pruefung",
+                        "{} liegt mit Bewegungen vor, aber das Journal führt kein Papierdepot. \
+                         Halt bis zur Prüfung",
                         pfad.display()
                     ));
                 }
                 k
             }
             (false, false) => {
-                let k = Papierkonto::eroeffne(start).ok_or("Papierkonto: Startwerte ungueltig")?;
+                let k = Papierkonto::eroeffne(start).ok_or("Papierkonto: Startwerte ungültig")?;
                 schreibe(pfad, &k.als_text())?;
                 k
             }
             (false, true) => {
                 return Err(format!(
-                    "{} fehlt, aber das Journal fuehrt ein Papierdepot. Halt bis zur Pruefung",
+                    "{} fehlt, aber das Journal führt ein Papierdepot. Halt bis zur Prüfung",
                     pfad.display()
                 ));
             }

@@ -34,7 +34,7 @@ impl Zip {
     /// # Errors
     /// Datei oder Archiv zu gross (ueber 4 GB) oder zu viele Eintraege.
     pub fn datei(&mut self, name: &str, daten: &[u8]) -> Result<(), String> {
-        let zu_gross = || format!("{name}: zu gross fuer ZIP ohne ZIP64");
+        let zu_gross = || format!("{name}: zu groß für ZIP ohne ZIP64");
         let groesse = u32::try_from(daten.len()).map_err(|_| zu_gross())?;
         let name_len = u16::try_from(name.len()).map_err(|_| zu_gross())?;
         let versatz = u32::try_from(self.puffer.len()).map_err(|_| zu_gross())?;
@@ -82,8 +82,8 @@ impl Zip {
     /// # Errors
     /// Archiv zu gross.
     pub fn fertig(mut self) -> Result<Vec<u8>, String> {
-        let versatz = u32::try_from(self.puffer.len()).map_err(|_| "Archiv zu gross")?;
-        let laenge = u32::try_from(self.verzeichnis.len()).map_err(|_| "Archiv zu gross")?;
+        let versatz = u32::try_from(self.puffer.len()).map_err(|_| "Archiv zu groß")?;
+        let laenge = u32::try_from(self.verzeichnis.len()).map_err(|_| "Archiv zu groß")?;
         self.puffer.append(&mut self.verzeichnis);
         let p = &mut self.puffer;
         u32_le(p, 0x0605_4b50);

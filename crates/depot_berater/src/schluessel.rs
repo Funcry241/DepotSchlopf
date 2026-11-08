@@ -22,7 +22,7 @@ pub struct Schluessel(String);
 
 impl fmt::Debug for Schluessel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Schluessel(***)")
+        f.write_str("Schlüssel(***)")
     }
 }
 
@@ -34,13 +34,13 @@ impl Schluessel {
     pub fn neu(text: &str) -> Result<Schluessel, String> {
         let t = text.trim();
         if !(20..=256).contains(&t.len()) {
-            return Err("Schluessel: 20 bis 256 Zeichen erwartet".into());
+            return Err("Schlüssel: 20 bis 256 Zeichen erwartet".into());
         }
         if !t
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
         {
-            return Err("Schluessel: nur Buchstaben, Ziffern, - und _ erlaubt".into());
+            return Err("Schlüssel: nur Buchstaben, Ziffern, - und _ erlaubt".into());
         }
         Ok(Schluessel(t.to_string()))
     }
@@ -68,7 +68,7 @@ impl Schluessel {
         let adresse = anbieter.adresse();
         let hinweis = || {
             format!(
-                "Schluessel fehlt. Einmal anlegen mit: cmdkey /generic:{adresse} /user:depotschlopf /pass"
+                "Schlüssel fehlt. Einmal anlegen mit: cmdkey /generic:{adresse} /user:depotschlopf /pass"
             )
         };
         let store = Store::new().map_err(|e| format!("Anmeldeverwaltung: {e}"))?;
@@ -93,7 +93,7 @@ impl Schluessel {
     #[cfg(not(windows))]
     pub fn aus_anmeldeverwaltung(anbieter: Anbieter) -> Result<Schluessel, String> {
         Err(format!(
-            "Der Schluessel {} liegt nur in der Windows-Anmeldeinformationsverwaltung.",
+            "Der Schlüssel {} liegt nur in der Windows-Anmeldeinformationsverwaltung.",
             anbieter.adresse()
         ))
     }

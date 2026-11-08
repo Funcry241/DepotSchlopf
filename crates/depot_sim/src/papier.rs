@@ -288,7 +288,7 @@ impl Papierkonto {
         };
         let versand = if let Some(zeit) = versand {
             let Some(frist) = papierorder_schluss(&o.isin, zeit) else {
-                return Sendeantwort::Abgelehnt("keine Frist der Boerse".into());
+                return Sendeantwort::Abgelehnt("keine Frist der Börse".into());
             };
             Some((zeit, frist))
         } else {

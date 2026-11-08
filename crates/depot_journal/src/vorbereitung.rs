@@ -212,7 +212,7 @@ pub(crate) fn anwenden(
                 || ereignisse.iter().any(|e| !text_ok(e, 8_000))
                 || ereignisse.iter().map(String::len).sum::<usize>() > 64_000
             {
-                return Err("Vorbereitungsstart unzulaessig".into());
+                return Err("Vorbereitungsstart unzulässig".into());
             }
             alle.push(Vorbereitung {
                 zeit,
@@ -239,7 +239,7 @@ pub(crate) fn anwenden(
                 || p.reserviert.contains(&buchung.berater)
                 || p.antworten.iter().any(|a| a.berater == buchung.berater)
             {
-                return Err("Vorbereitungsreservierung unzulaessig".into());
+                return Err("Vorbereitungsreservierung unzulässig".into());
             }
             let mut neu = ki.clone();
             neu.abdruck(&abdruck)?;
@@ -262,7 +262,7 @@ pub(crate) fn anwenden(
                     .as_ref()
                     .is_some_and(|w| !w.gueltig() || w.ereignis_nr > p.ereignisse.len())
             {
-                return Err("Vorbereitungsantwort unzulaessig".into());
+                return Err("Vorbereitungsantwort unzulässig".into());
             }
             p.antworten.push(a);
         }

@@ -216,7 +216,7 @@ pub fn festhalten_in(wurzel: &Path, ablage: &Path) -> Result<Option<Abbild>, Str
     }
     let baum = git_text(wurzel, &["write-tree"])?;
     let kopf = git_text(wurzel, &["rev-parse", "--verify", "-q", "HEAD"]).ok();
-    let mut commit_args = vec!["commit-tree", baum.as_str(), "-m", "gepruefter Stand"];
+    let mut commit_args = vec!["commit-tree", baum.as_str(), "-m", "geprüfter Stand"];
     if let Some(k) = &kopf {
         commit_args.extend(["-p", k.as_str()]);
     }
@@ -353,7 +353,7 @@ pub fn vergleiche(wurzel: &Path, abbild: &Abbild) -> Vec<String> {
         let erwartet = depot_kodex::git::blob(wurzel, blob);
         match (ist, erwartet) {
             (Ok(i), Ok(e)) if i == e => {}
-            (Ok(_), Ok(_)) => probleme.push(format!("{p}: waehrend des Gates geaendert")),
+            (Ok(_), Ok(_)) => probleme.push(format!("{p}: waehrend des Gates geändert")),
             (Err(e), _) => probleme.push(format!("{p}: nicht lesbar: {e}")),
             (_, Err(e)) => probleme.push(format!("{p} (Index): nicht lesbar: {e}")),
         }
@@ -377,7 +377,7 @@ fn hinweise(wurzel: &Path) -> Vec<String> {
             .filter(|p| !p.is_empty())
             .map(|p| {
                 format!(
-                    "Hinweis: {} ist nicht vorgemerkt, weder geprueft noch exportiert",
+                    "Hinweis: {} ist nicht vorgemerkt, weder geprüft noch exportiert",
                     String::from_utf8_lossy(p)
                 )
             })
@@ -407,16 +407,16 @@ pub fn gepruefter_lauf(
         Ok(None) => (pruefung(wurzel, &mut konsole), None),
         Err(e) => {
             probleme.push(format!(
-                "Stand nicht festhaltbar, Gate nicht ausgefuehrt: {e}"
+                "Stand nicht festhaltbar, Gate nicht ausgeführt: {e}"
             ));
             (1, None)
         }
     };
     for p in &probleme {
-        let z = format!("[DepotSchlopf] Quellstand ungeprueft: {p}\n");
+        let z = format!("[DepotSchlopf] Quellstand ungeprüft: {p}\n");
         eprint!("{z}");
         konsole.push_str(&z);
-        warnungen.push(format!("Quellstand ungeprueft: {p}"));
+        warnungen.push(format!("Quellstand ungeprüft: {p}"));
     }
     Lauf {
         befehl,

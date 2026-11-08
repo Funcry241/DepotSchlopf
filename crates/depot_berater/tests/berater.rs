@@ -420,7 +420,7 @@ fn kosten_ueber_der_reservierung_sperren_alle_kis() -> Result<(), String> {
     let antwort = mit_lage(|l| dachs.vorschlagen(e, l))?;
     assert!(antwort.vorschlag.is_none(), "{antwort:?}");
     assert!(
-        antwort.einschaetzung.contains("42 Cent ueber 24"),
+        antwort.einschaetzung.contains("42 Cent über 24"),
         "{antwort:?}"
     );
     assert!(ort.sperre().exists(), "Sperrdatei geschrieben");
@@ -552,7 +552,7 @@ fn ohne_schluessel_oder_mit_sperrdatei_nicht_angebunden() -> Result<(), String> 
 #[test]
 fn schluessel_ohne_textform() -> Result<(), String> {
     let s = vorbedingung(Schluessel::neu(SCHLUESSEL), "Schluessel")?;
-    assert_eq!(format!("{s:?}"), "Schluessel(***)");
+    assert_eq!(format!("{s:?}"), "Schlüssel(***)");
     assert_eq!(s.bereinige(&format!("a {SCHLUESSEL} b")), "a *** b");
     assert!(Schluessel::neu("kurz").is_err());
     assert!(Schluessel::neu("mit leerzeichen 0123456789abcdef").is_err());
@@ -756,10 +756,7 @@ fn zurueckgegebener_schluessel_gelangt_nie_ins_ergebnis() -> Result<(), String> 
         let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
         assert!(a.vorschlag.is_none(), "{a:?}");
         assert!(!format!("{a:?}").contains(SCHLUESSEL), "{a:?}");
-        assert!(
-            a.einschaetzung.contains("Schluessel des Anbieters"),
-            "{a:?}"
-        );
+        assert!(a.einschaetzung.contains("Schlüssel des Anbieters"), "{a:?}");
     }
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();
@@ -838,7 +835,7 @@ fn verworfene_antwort_wird_trotzdem_auf_kosten_geprueft() -> Result<(), String> 
     let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
     assert!(a.vorschlag.is_none(), "{a:?}");
     assert!(!format!("{a:?}").contains(SCHLUESSEL), "{a:?}");
-    assert!(a.einschaetzung.contains("42 Cent ueber 24"), "{a:?}");
+    assert!(a.einschaetzung.contains("42 Cent über 24"), "{a:?}");
     assert!(ort.sperre().exists(), "Sperrdatei geschrieben");
     // Verbrauch unlesbar: sperren.
     let mut ort = Ort::neu()?;
@@ -957,7 +954,7 @@ fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
     assert!(
         texte
             .get(2)
-            .is_some_and(|t| t.contains("lehnt den Schluessel ab"))
+            .is_some_and(|t| t.contains("lehnt den Schlüssel ab"))
     );
     Ok(())
 }
@@ -1253,10 +1250,7 @@ fn schluessel_hinter_escapes_gelangt_nie_ins_ergebnis() -> Result<(), String> {
                 .any(|t| t.contains(SCHLUESSEL)),
             "{a:?}"
         );
-        assert!(
-            a.einschaetzung.contains("Schluessel des Anbieters"),
-            "{a:?}"
-        );
+        assert!(a.einschaetzung.contains("Schlüssel des Anbieters"), "{a:?}");
         assert!(a.einschaetzung.contains("Kosten 1 von 24"), "{a:?}");
     }
     Ok(())

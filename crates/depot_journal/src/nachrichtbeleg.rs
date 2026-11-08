@@ -50,10 +50,10 @@ impl NachrichtBeleg {
         text: &str,
     ) -> Result<NachrichtBeleg, String> {
         if !quelle_gueltig(quelle) {
-            return Err(format!("Quelle `{quelle}` ungueltig"));
+            return Err(format!("Quelle `{quelle}` ungültig"));
         }
         if !abdruck_gueltig(&roh) {
-            return Err("Abdruck der Antwort ungueltig".into());
+            return Err("Abdruck der Antwort ungültig".into());
         }
         if text.is_empty() || text.trim() != text {
             return Err("Nachricht leer oder mit Leerraum am Rand".into());
@@ -62,7 +62,7 @@ impl NachrichtBeleg {
             return Err("Steuerzeichen in der Nachricht".into());
         }
         if text.chars().nth(MAX_NACHRICHT).is_some() {
-            return Err(format!("Nachricht laenger als {MAX_NACHRICHT} Zeichen"));
+            return Err(format!("Nachricht länger als {MAX_NACHRICHT} Zeichen"));
         }
         if zeit > abruf {
             return Err(format!("Nachricht von {zeit} nach dem Abruf {abruf}"));
@@ -111,7 +111,7 @@ pub(crate) fn nachrichtbeleg_text(b: &NachrichtBeleg) -> String {
 pub(crate) fn lies_nachrichtbeleg(inhalt: &str) -> Result<NachrichtBeleg, String> {
     let teile: Vec<&str> = inhalt.splitn(5, ';').collect();
     let [quelle, abruf, roh, zeit, text] = teile.as_slice() else {
-        return Err("Nachricht: fuenf Felder erwartet".into());
+        return Err("Nachricht: fünf Felder erwartet".into());
     };
     let abruf = Zeitpunkt::lies(abruf).ok_or("Nachricht: Abruf unlesbar")?;
     let zeit = Zeitpunkt::lies(zeit).ok_or("Nachricht: Zeit unlesbar")?;

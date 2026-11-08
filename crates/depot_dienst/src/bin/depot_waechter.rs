@@ -52,13 +52,13 @@ fn baue(wurzel: &Path) -> Option<PathBuf> {
         Ok(a) if a.status.success() => {
             let p = programm_aus_bau(&String::from_utf8_lossy(&a.stdout));
             if p.is_none() {
-                eprintln!("[Waechter] FEHLER: Cargo nennt keine Programmdatei des Dienstes.");
+                eprintln!("[Wächter] FEHLER: Cargo nennt keine Programmdatei des Dienstes.");
             }
             p
         }
         Ok(_) => None,
         Err(e) => {
-            eprintln!("[Waechter] FEHLER: cargo nicht startbar: {e}");
+            eprintln!("[Wächter] FEHLER: cargo nicht startbar: {e}");
             None
         }
     }
@@ -91,7 +91,7 @@ fn starte(wurzel: &Path, programm: &Path, ohne_browser: bool, quelle: &Quelle) -
             Ausgang::Rueckfall(format!("Neuer Stand nicht startbar: {e}"))
         }
         Err(e) => {
-            eprintln!("[Waechter] FEHLER: Dienst nicht startbar: {e}");
+            eprintln!("[Wächter] FEHLER: Dienst nicht startbar: {e}");
             Ausgang::Ende(None)
         }
     }
@@ -101,12 +101,12 @@ fn starte(wurzel: &Path, programm: &Path, ohne_browser: bool, quelle: &Quelle) -
 fn zuruecksetzen(wurzel: &Path, warum: &str) -> bool {
     match rueckfall::zuruecksetzen_mit_grund(wurzel, warum) {
         Ok(Some(m)) => {
-            eprintln!("[Waechter] {warum}. {m}");
+            eprintln!("[Wächter] {warum}. {m}");
             true
         }
         Ok(None) => false,
         Err(e) => {
-            eprintln!("[Waechter] {warum}. Rueckfall nicht moeglich: {e}");
+            eprintln!("[Wächter] {warum}. Rückfall nicht möglich: {e}");
             false
         }
     }
@@ -125,7 +125,7 @@ fn einzelner_waechter(ohne_browser: bool) -> Result<Option<std::fs::File>, Strin
     let sperre = depot_dienst::waechter::prozess_sperre()?;
     if sperre.is_none() {
         println!(
-            "[Waechter] DepotSchlopf läuft oder startet bereits. Die vorhandene Oberfläche verbindet sich automatisch wieder."
+            "[Wächter] DepotSchlopf läuft oder startet bereits. Die vorhandene Oberfläche verbindet sich automatisch wieder."
         );
         if !ohne_browser && laeuft_schon() {
             oeffne_browser();
@@ -140,14 +140,12 @@ fn main() -> ExitCode {
         if a == "--ohne-browser" {
             ohne_browser = true;
         } else {
-            eprintln!("[Waechter] FEHLER: unbekannte Angabe {a:?}. Erlaubt: --ohne-browser");
+            eprintln!("[Wächter] FEHLER: unbekannte Angabe {a:?}. Erlaubt: --ohne-browser");
             return ExitCode::FAILURE;
         }
     }
     let Some(wurzel) = finde_wurzel() else {
-        eprintln!(
-            "[Waechter] FEHLER: Projektordner nicht gefunden. DepotSchlopf.cmd dort starten."
-        );
+        eprintln!("[Wächter] FEHLER: Projektordner nicht gefunden. DepotSchlopf.cmd dort starten.");
         return ExitCode::FAILURE;
     };
     // Diese Sperre bleibt auch während Bau, Neustart und Rückfall bestehen. Der Port
@@ -156,14 +154,14 @@ fn main() -> ExitCode {
         Ok(Some(sperre)) => sperre,
         Ok(None) => return ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("[Waechter] FEHLER: {e}");
+            eprintln!("[Wächter] FEHLER: {e}");
             return ExitCode::FAILURE;
         }
     };
     // Ein zweiter Start baut nichts (die laufende Datei ist unter Windows gesperrt) und setzt
     // nichts zurueck; er oeffnet nur die Seite.
     if laeuft_schon() {
-        println!("[Waechter] Dienst laeuft schon.");
+        println!("[Wächter] Dienst läuft schon.");
         if !ohne_browser {
             oeffne_browser();
         }
@@ -175,7 +173,7 @@ fn main() -> ExitCode {
         match programmstand::startklar(&wurzel) {
             Ok(stand) => {
                 println!(
-                    "[Waechter] Starte den gesicherten Programmstand {} ohne Cargo.",
+                    "[Wächter] Starte den gesicherten Programmstand {} ohne Cargo.",
                     stand.kurz()
                 );
                 match starte(
@@ -188,21 +186,21 @@ fn main() -> ExitCode {
                     Ausgang::Ende(Some(c))
                         if c == i32::from(NEUSTART) && rueckfall::offen_pfad(&wurzel).exists() =>
                     {
-                        println!("[Waechter] Update eingespielt, Dienst startet neu.");
+                        println!("[Wächter] Update eingespielt, Dienst startet neu.");
                         ohne_browser = true;
                         continue;
                     }
                     Ausgang::Ende(code) => {
-                        eprintln!("[Waechter] Dienst endete mit Fehler ({code:?}).");
+                        eprintln!("[Wächter] Dienst endete mit Fehler ({code:?}).");
                         return ExitCode::FAILURE;
                     }
                     Ausgang::Rueckfall(warum) => {
-                        eprintln!("[Waechter] {warum}");
+                        eprintln!("[Wächter] {warum}");
                         return ExitCode::FAILURE;
                     }
                 }
             }
-            Err(grund) => println!("[Waechter] Kein Start ohne Cargo: {grund}. Baue mit Cargo."),
+            Err(grund) => println!("[Wächter] Kein Start ohne Cargo: {grund}. Baue mit Cargo."),
         }
         // Der Baum vor dem Bau: Nur wenn er danach noch derselbe ist, wird gesichert.
         let baum = programmstand::sauberer_baum(&wurzel).ok();
@@ -212,7 +210,7 @@ fn main() -> ExitCode {
                 .flatten()
         });
         let Some(programm) = gebaut else {
-            eprintln!("[Waechter] FEHLER: Dienst laesst sich nicht bauen.");
+            eprintln!("[Wächter] FEHLER: Dienst lässt sich nicht bauen.");
             return ExitCode::FAILURE;
         };
         match starte(&wurzel, &programm, ohne_browser, &Quelle::Gebaut(baum)) {
@@ -226,16 +224,16 @@ fn main() -> ExitCode {
             Ausgang::Ende(Some(c))
                 if c == i32::from(NEUSTART) && rueckfall::offen_pfad(&wurzel).exists() =>
             {
-                println!("[Waechter] Update eingespielt, Dienst startet neu.");
+                println!("[Wächter] Update eingespielt, Dienst startet neu.");
             }
             Ausgang::Ende(code) => {
-                eprintln!("[Waechter] Dienst endete mit Fehler ({code:?}).");
+                eprintln!("[Wächter] Dienst endete mit Fehler ({code:?}).");
                 return ExitCode::FAILURE;
             }
         }
         neustarts = neustarts.saturating_add(1);
         if neustarts > NEUSTARTS_MAX {
-            eprintln!("[Waechter] FEHLER: zu viele Neustarts, gebe auf.");
+            eprintln!("[Wächter] FEHLER: zu viele Neustarts, gebe auf.");
             return ExitCode::FAILURE;
         }
         ohne_browser = true;

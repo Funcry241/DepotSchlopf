@@ -55,11 +55,12 @@ pub(crate) fn sicherheitsabbruch(zugang: &Zugang, quelle: &str, roh: &[u8]) -> O
         .collect::<Vec<_>>()
         .join(", ");
     Some(zugang.bereinige(&format!(
-        "Die Antwort enthaelt den Schluessel: nicht abgelegt, nicht belegt, Lauf beendet. \
+        "Die Antwort enthält den Schlüssel: nicht abgelegt, nicht belegt, Lauf beendet. \
          Quelle der Antwort: {}. Erkannter gespeicherter Zugang: {wer}. Antwortart: {}. \
-         Treffer auf einen vollstaendigen hinterlegten Schluessel, eventuell nach JSON-Dekodierung; \
-         keine Aussage ueber Ursache oder Zugriff durch Dritte.",
-        name(quelle), antwortart(roh)
+         Treffer auf einen vollständigen hinterlegten Schlüssel, eventuell nach JSON-Dekodierung; \
+         keine Aussage über Ursache oder Zugriff durch Dritte.",
+        name(quelle),
+        antwortart(roh)
     )))
 }
 

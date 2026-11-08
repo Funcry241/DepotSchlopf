@@ -347,7 +347,7 @@ fn rueckfall_setzt_auf_den_alten_stand_zurueck_und_lehnt_den_neuen_ab() -> Resul
     assert_eq!(rueckfall::zuruecksetzen(&w)?, None, "nichts offen");
     offen_schreiben(&w, &vorher, &neu)?;
     let m = some(rueckfall::zuruecksetzen(&w)?, "Meldung")?;
-    assert!(m.contains("zurueckgesetzt"), "{m}");
+    assert!(m.contains("zurückgesetzt"), "{m}");
     assert_eq!(g(&w, &["rev-parse", "HEAD"])?, vorher);
     assert_eq!(g(&w, &["symbolic-ref", "--short", "HEAD"])?, "main");
     let inhalt = fs::read_to_string(w.join("a.txt")).map_err(|e| e.to_string())?;

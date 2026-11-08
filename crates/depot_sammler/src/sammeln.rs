@@ -360,7 +360,7 @@ fn abrufbar<'a>(
     }
     let schluessel = zugang.von(anbieter).ok_or_else(|| {
         format!(
-            "Kein Schluessel fuer {} ({}): nicht abgerufen",
+            "Kein Schlüssel für {} ({}): nicht abgerufen",
             anbieter.dienst(),
             anbieter.adresse()
         )
@@ -628,7 +628,7 @@ fn abschliessen(
         for (_, e) in &mut bericht.werte {
             if matches!(e, Ergebnis::Belegt { .. }) {
                 *e = Ergebnis::Fehler(
-                    "Nicht belegt: Sicherheitsabbruch des Laufs, kein Kurs dieses Abrufs zaehlt"
+                    "Nicht belegt: Sicherheitsabbruch des Laufs, kein Kurs dieses Abrufs zählt"
                         .into(),
                 );
             }

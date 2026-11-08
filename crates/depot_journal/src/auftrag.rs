@@ -174,7 +174,7 @@ impl AuftragsLage {
             }
             (z, m) => {
                 return Err(format!(
-                    "Auftrag {nr}: `{}` nach {z:?} unzulaessig",
+                    "Auftrag {nr}: `{}` nach {z:?} unzulässig",
                     m.name()
                 ));
             }
@@ -191,15 +191,15 @@ impl AuftragsLage {
             ));
         }
         if a.stueck == 0 || a.kurs.0 <= 0 || a.gebuehr.0 < 0 {
-            return Err(format!("Auftrag {nr}: Ausfuehrung unplausibel"));
+            return Err(format!("Auftrag {nr}: Ausführung unplausibel"));
         }
         let gesamt = self
             .gefuellt()
             .checked_add(a.stueck)
-            .ok_or("Ausfuehrung: Ueberlauf")?;
+            .ok_or("Ausführung: Überlauf")?;
         if gesamt > b.stueck {
             return Err(format!(
-                "Auftrag {nr}: {gesamt} Stueck ausgefuehrt, {} beauftragt",
+                "Auftrag {nr}: {gesamt} Stück ausgeführt, {} beauftragt",
                 b.stueck
             ));
         }

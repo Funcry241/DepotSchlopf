@@ -228,7 +228,7 @@ fn beobachtungsliste_gueltig() -> Result<(), String> {
 #[test]
 fn schluessel_ohne_textform() -> Result<(), String> {
     let s = schluessel()?;
-    assert_eq!(format!("{s:?}"), "Schluessel(***)");
+    assert_eq!(format!("{s:?}"), "Schlüssel(***)");
     assert_eq!(
         s.bereinige(&format!("x apikey={SCHLUESSEL} y")),
         "x apikey=*** y"

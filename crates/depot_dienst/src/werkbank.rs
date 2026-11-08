@@ -1034,7 +1034,7 @@ fn einreihen(
     if z.laufend.as_ref().is_some_and(|a| a.art == art)
         || z.warteschlange.iter().any(|a| a.art == art)
     {
-        return Err("laeuft schon oder wartet schon");
+        return Err("läuft schon oder wartet schon");
     }
     if z.warteschlange.len() >= WARTEN_MAX {
         return Err("zu viele wartende Auftraege");

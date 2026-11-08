@@ -142,7 +142,7 @@ fn bestaetige_einmal(wurzel: &Path) -> Result<Option<Offen>, DatenprobeFehler> {
     };
     if kopf(wurzel)? != o.neu {
         return Err(format!(
-            "Projektordner steht nicht auf dem eingespielten Stand {}; Update nicht bestaetigt.",
+            "Projektordner steht nicht auf dem eingespielten Stand {}; Update nicht bestätigt.",
             kurz(&o.neu)
         )
         .into());
@@ -204,7 +204,7 @@ pub fn zuruecksetzen_mit_grund(wurzel: &Path, grund: &str) -> Result<Option<Stri
             })
             .map_err(|e| format!("{}: {e}", p.display()))?;
         format!(
-            "Update auf {} zurueckgesetzt, wieder auf {}. Der Stand wird nicht noch einmal \
+            "Update auf {} zurückgesetzt, wieder auf {}. Der Stand wird nicht noch einmal \
              eingespielt.",
             kurz(&o.neu),
             kurz(&o.vorher)
@@ -212,7 +212,7 @@ pub fn zuruecksetzen_mit_grund(wurzel: &Path, grund: &str) -> Result<Option<Stri
     } else {
         return Err(format!(
             "Projektordner steht auf {}, weder vor ({}) noch nach dem Update ({}). Nichts \
-             angefasst; bitte von Hand pruefen.",
+             angefasst; bitte von Hand prüfen.",
             kurz(&ist),
             kurz(&o.vorher),
             kurz(&o.neu)

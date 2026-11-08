@@ -103,7 +103,7 @@ pub fn tageskurse_am(
     let ende = stand
         .wissensstichtag(tag)
         .or_else(|| Zeitpunkt::frankfurt(tag, 23, 59, 59))
-        .ok_or_else(|| halt(format!("Kein Tagesende fuer den {}", datum_text(tag))))?;
+        .ok_or_else(|| halt(format!("Kein Tagesende für den {}", datum_text(tag))))?;
     let k = tageskurse_bis(stand, universum, Some(ende))?;
     if k.handelstag != tag {
         return Err(halt(format!(
@@ -151,7 +151,7 @@ fn tageskurse_bis(
             .values()
             .map(|b| b.abruf())
             .max()
-            .ok_or_else(|| halt("Kein Kurs fuer den Vergleich belegt"))?;
+            .ok_or_else(|| halt("Kein Kurs für den Vergleich belegt"))?;
         let eintraege: Vec<(Isin, Kurs, Zeitpunkt)> = m
             .iter()
             .map(|(i, b)| ((*i).clone(), b.kurs().clone(), b.abruf()))
@@ -388,7 +388,7 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
     if stand.seit_abschluss() > 0 {
         return Err(halt(format!(
             "{} Eintraege nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
-             abgeschlossen. Halt bis zur Pruefung; niemand wird neu gefragt",
+             abgeschlossen. Halt bis zur Prüfung; niemand wird neu gefragt",
             stand.seit_abschluss()
         )));
     }
@@ -413,7 +413,7 @@ pub fn papiertag_wiederabspielen(
 ) -> Result<Tag, LaufFehler> {
     let wissen_bis = stand
         .wissensstichtag(tag)
-        .ok_or_else(|| halt(format!("Kein belegter Wissensstichtag fuer {tag}")))?;
+        .ok_or_else(|| halt(format!("Kein belegter Wissensstichtag für {tag}")))?;
     let kurse = pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, tag)?;
     Ok(Tag {
         datum: tag,
@@ -448,11 +448,11 @@ fn belegte_lage(
     uhr: Option<&dyn Fn() -> Option<Zeitpunkt>>,
 ) -> Result<(Tageskurse, Zeitpunkt), LaufFehler> {
     let jetzt = match uhr {
-        Some(uhr) => uhr().ok_or_else(|| halt("Keine verlaessliche Zeit fuer den Wissensstand"))?,
+        Some(uhr) => uhr().ok_or_else(|| halt("Keine verlässliche Zeit für den Wissensstand"))?,
         // Ein neuer Papiertag ohne reale Uhr dient Szenarien. Seine simulierte Uhr steht
         // beim letzten an diesem Tag bezeugten Abruf.
         None => {
-            letzter_abruf_am(stand, heute).ok_or_else(|| halt("Keine Abrufe fuer den Papiertag"))?
+            letzter_abruf_am(stand, heute).ok_or_else(|| halt("Keine Abrufe für den Papiertag"))?
         }
     };
     let wissen_bis = stand.wissensstichtag(heute).unwrap_or(jetzt);
@@ -497,7 +497,7 @@ pub(crate) fn papiertag_mit_uhr(
         let abweichungen = j.gleiche_ab(&*beteiligte.konto).map_err(journal)?;
         if !abweichungen.is_empty() {
             return Err(halt(format!(
-                "Kontowaechter: {abweichungen:?}. Halt bis zur Pruefung; niemand wird gefragt, \
+                "Kontowaechter: {abweichungen:?}. Halt bis zur Prüfung; niemand wird gefragt, \
                  nichts gesendet"
             )));
         }
@@ -517,7 +517,7 @@ pub(crate) fn papiertag_mit_uhr(
     } else {
         j.stand()
             .papier_waechterreferenz()
-            .ok_or_else(|| halt("Toepfe ohne Abschluss im Journal"))?
+            .ok_or_else(|| halt("Töpfe ohne Abschluss im Journal"))?
     };
     let grenzen = Grenzen::standard();
     let tag = Tag {
@@ -529,7 +529,7 @@ pub(crate) fn papiertag_mit_uhr(
         tag.datum,
         PAPIERTAG,
         &format!(
-            "Papiergeld; Ausfuehrung erst zu einem geprueften Schlusskurs nach Versand. Weltmodell: Wissensstand {wissen_bis}."
+            "Papiergeld; Ausführung erst zu einem geprüften Schlusskurs nach Versand. Weltmodell: Wissensstand {wissen_bis}."
         ),
     )
     .map_err(journal)?;
