@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Die Einrichtung zeigt ungespeicherte Änderungen direkt am Formular und warnt vor ihrem Verlust. „Speichern und Zeitplan einschalten“ übernimmt die ausgefüllten Werte gemeinsam, unter denselben Einrichtungsprüfungen. Rückmeldungen bieten den passenden nächsten Schritt an; ein Dienstneustart verwirft offene Eingaben nicht mehr automatisch.
+
 - Eine gemeinsame Betriebsleiste zeigt auf Live und Einrichtung den laufenden Auftrag, Wartehinweise, Warteschlange und Abschluss. Gefundene Updates erscheinen dort mit „Update ansehen“. Wichtige Aktionen haben gefüllte Knöpfe; laufende Bereiche und gesperrte Knöpfe sind deutlicher erkennbar. Die Aktualisierung lässt Einrichtungsformulare unangetastet.
 
 - Auch die Kodex-Ausgaben verwenden Umlaute. Ein Quelltexttest meldet typische erneute ASCII-Umschreibungen und hält Maschinenkennungen sowie die ausdrücklichen historischen Ausnahmen frei.

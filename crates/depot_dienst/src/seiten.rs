@@ -32,6 +32,7 @@ button:disabled{color:var(--leise);border-style:dashed;cursor:default}\
 button:not(:disabled):hover,a.aktion:hover{outline:2px solid currentColor;outline-offset:2px}\
 button:focus-visible,a.aktion:focus-visible{outline:3px solid var(--text);outline-offset:3px}\
 button.primaer,a.primaer{background:#005c97;color:#fff;border:2px solid #005c97;font-weight:700}\
+button.primaer:disabled{background:var(--flaeche);color:var(--leise);border-color:var(--linie)}\
 button.laeuft{border:2px solid var(--offen);color:var(--offen)}\
 #betriebsleiste{position:sticky;top:0;z-index:1;background:var(--grund);padding:4px 0}\
 .betrieb{border:2px solid var(--linie);border-radius:8px;padding:10px 14px;margin:0}\
@@ -46,7 +47,12 @@ border-radius:6px;background:var(--grund);color:var(--text);max-width:100%}\
 pre{white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,Consolas,monospace;\
 margin:6px 0}\
 .banner{position:sticky;top:0;z-index:3;background:var(--halt);color:#fff;padding:8px 16px;font-weight:600}\
-.meldung{position:sticky;top:8px;z-index:2;background:var(--flaeche);border-left:4px solid currentColor;padding-left:10px}\
+.meldung{background:var(--flaeche);border-left:4px solid currentColor;padding-left:10px}\
+.meldungs-aktion{margin-top:-4px}.speicher-aktionen{position:sticky;bottom:0;background:var(--flaeche);border:2px solid var(--linie);border-radius:8px;padding:12px;margin-top:12px;z-index:1}\
+.speicher-aktionen p{margin:4px 0}.ungespeichert .speicher-aktionen{border-color:var(--offen)}\
+[data-aenderungen].ungespeichert [data-speicherstand]{font-weight:700;color:var(--offen)}\
+#neuverbinden{padding:12px}\
+@media(max-width:600px),(max-height:700px){.speicher-aktionen{position:static}}\
 label{display:block;margin:6px 0}\
 .selten{border:2px solid var(--halt);background:#fff1f0}\
 @media(prefers-color-scheme:dark){.selten{background:#2b1d1d}}\
@@ -253,6 +259,10 @@ fn einstellungs_meldung(code: &str) -> Option<(&'static str, &'static str)> {
             "gut",
             "Einstellungen gespeichert. Ob der Zeitplan an oder aus ist, bleibt unverändert.",
         ),
+        "zeitplan_gespeichert_an" => (
+            "gut",
+            "Einstellungen gespeichert und Zeitplan eingeschaltet. DepotSchlopf führt die geplanten Läufe jetzt selbstständig aus, solange der Dienst läuft.",
+        ),
         "zeitplan_an" => (
             "gut",
             "Zeitplan eingeschaltet. Die gespeicherten Einstellungen gelten.",
@@ -315,8 +325,8 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "auftrag_belegt" => (
             "offen",
             "Nicht eingereiht: Dieser Auftrag läuft oder wartet schon, ist gerade erst fertig \
-             geworden (doppelt geklickt oder Seite neu gesendet?), oder es warten zu viele. \
-             Nichts wurde doppelt gestartet; unter Tätigkeit steht, was läuft.",
+             geworden, oder es warten bereits zu viele. \
+             Deine Anfrage ist angekommen. Nichts wurde doppelt gestartet; unter Tätigkeit steht, was läuft.",
         ),
         "schluessel" => (
             "gut",
@@ -329,7 +339,7 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         ),
         "schluessel_ungueltig" => (
             "halt",
-            "Schlüssel nicht gespeichert: Länge oder Zeichen passen nicht (Regel steht in der Zeile).",
+            "Schlüssel nicht gespeichert: Länge oder Zeichen passen nicht. Dein bisheriger Eintrag bleibt unverändert. Bitte gib den Schlüssel nach der Regel in seiner Zeile erneut ein; er wird zu deinem Schutz nicht auf der Fehlerseite ausgegeben.",
         ),
         "schluessel_fehler" => (
             "halt",
@@ -399,6 +409,51 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
     })
 }
 
+/// Feste Abhilfe direkt neben der Rückmeldung; niemals Eingabewerte als Ziel verwenden.
+pub fn meldungs_aktion(abfrage: &str) -> (&'static str, &'static str) {
+    let code = abfrage
+        .split('&')
+        .find_map(|p| p.strip_prefix("m="))
+        .unwrap_or_default();
+    match code {
+        "zeitplan"
+        | "zeitplan_an"
+        | "zeitplan_gespeichert_an"
+        | "zeitplan_aus"
+        | "zeitplan_ungueltig"
+        | "zeitplan_fehler"
+        | "vorbereitung_quellen" => ("/einrichtung#zeitplan", "Zeitplan und Eingaben ansehen"),
+        "zeitplan_lage" | "zeitplan_neu_laden" | "zeitplan_einrichtung" => {
+            ("/einrichtung#zeitplan", "Einrichtung prüfen")
+        }
+        "schluessel" | "schluessel_protokoll" | "schluessel_ungueltig" | "schluessel_fehler" => {
+            ("/einrichtung#schluessel", "Zu den Zugangsdaten")
+        }
+        "update_suche" | "update_bestaetigen" | "vorbereitung_update" => {
+            ("/einrichtung#update", "Zum Update")
+        }
+        "papier_bestaetigen" => (
+            "/bestaetigen?art=papier",
+            "Papiertag ansehen und bestätigen",
+        ),
+        "vorbereitung_bestaetigen" => (
+            "/bestaetigen?art=vorbereiten",
+            "Vorbereitung ansehen und bestätigen",
+        ),
+        "auftrag" | "auftrag_belegt" | "update" | "update_belegt" => {
+            ("/#taetigkeit", "Auftrag und Ergebnis ansehen")
+        }
+        c if c.starts_with("kostenschutz_") => ("/einrichtung#kostenschutz", "Kostenschutz prüfen"),
+        c if c.starts_with("kurssperre_") => ("/einrichtung#kurssperre", "Kurssperre prüfen"),
+        c if c.starts_with("papierfreigabe_") => {
+            ("/einrichtung#papierfreigabe", "Papierfreigabe prüfen")
+        }
+        c if c.starts_with("autostart_") => ("/einrichtung#autostart", "Autostart prüfen"),
+        c if c.starts_with("dialogtest_") => ("/einrichtung#papierdialog-test", "Zum Dialogtest"),
+        _ => ("", ""),
+    }
+}
+
 /// Der Seitenrahmen. `teil` ist der Pfad, mit dem `/app.js` den ganzen Inhalt regelmaessig neu
 /// laedt; ohne `teil` erneuert es nur einen Bereich mit `data-teil` im Inhalt (falls vorhanden).
 pub fn rahmen(
@@ -408,6 +463,7 @@ pub fn rahmen(
     inhalt: &str,
     commit: Option<&str>,
     betrieb: &str,
+    hilfe: (&str, &str),
 ) -> String {
     let mut s = String::with_capacity(inhalt.len().saturating_add(4096));
     let nav = |pfad: &str, text: &str| {
@@ -440,7 +496,8 @@ pub fn rahmen(
          <title>DepotSchlopf</title><style>{STIL}{STIL_DIENST}</style></head><body>\
          <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt, etwa \
          beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu. Wenn du das schwarze \
-         Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div><main>\
+         Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div>\
+         <p id=\"neuverbinden\" hidden><a class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
          <nav aria-label=\"Hauptnavigation\"><h1>DepotSchlopf</h1>{}{}\
          <span class=\"leise\">Nur Papiergeld.</span>{version}</nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit der Zeitplan läuft. \
@@ -454,6 +511,19 @@ pub fn rahmen(
             "<section role=\"status\" class=\"meldung {klasse}\">{}</section>",
             maskiere(text)
         );
+        if !hilfe.0.is_empty() {
+            let ziel = if hier == "/einrichtung" {
+                hilfe.0.strip_prefix("/einrichtung").unwrap_or(hilfe.0)
+            } else {
+                hilfe.0
+            };
+            let _ = write!(
+                s,
+                "<p class=\"meldungs-aktion\"><a class=\"aktion primaer\" href=\"{}\">{}</a></p>",
+                maskiere(ziel),
+                maskiere(hilfe.1)
+            );
+        }
     }
     let teil = teil
         .map(|t| format!(" data-teil=\"{}\"", maskiere(t)))
@@ -573,7 +643,7 @@ pub fn fehler(status: u16, text: &str) -> Vec<u8> {
     crate::http::antwort(
         status,
         "text/html; charset=utf-8",
-        rahmen("", None, None, &inhalt, None, "").as_bytes(),
+        rahmen("", None, None, &inhalt, None, "", ("", "")).as_bytes(),
     )
 }
 
@@ -1034,11 +1104,11 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
             s,
             "<tr><td>{}<br><span class=\"leise\">{}</span></td>\
              <td data-titel=\"Stand\"><span class=\"{klasse}\">{text}</span></td><td data-titel=\"Neu hinterlegen\">\
-             <form method=\"post\" action=\"/schluessel\">\
+             <form method=\"post\" action=\"/schluessel\" data-aenderungen>\
              <input type=\"hidden\" name=\"t\" value=\"{}\">\
              <input type=\"hidden\" name=\"wer\" value=\"{}\">\
              <input aria-label=\"Schlüssel für {}\" type=\"password\" name=\"wert\" autocomplete=\"off\" required> \
-             <button type=\"submit\">Speichern</button>\
+             <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Noch keinen neuen Schlüssel eingegeben.</p><button class=\"primaer\" type=\"submit\">Schlüssel speichern</button></div>\
              <div class=\"leise\">{}</div></form></td></tr>",
             maskiere(w.name()),
             maskiere(w.adresse()),
@@ -1191,28 +1261,10 @@ fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
     s.push_str("</table></div></section>");
 }
 
-fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String) {
-    let p: &Zeitplan = &zustand.zeitplan;
-    let fehler = zustand
-        .erledigt_fehler
-        .as_ref()
-        .or(zustand.zeitplan_fehler.as_ref());
-    let gespeichert = match (e.zeitplan_gespeichert, fehler) {
-        (_, Some(f)) => format!("<p class=\"halt\">{}</p>", maskiere(f)),
-        (Some(true), None) => "<p>Einstellungen gespeichert.</p>".into(),
-        (Some(false), None) => "<p class=\"offen\">Datei weicht vom laufenden Stand ab.</p>".into(),
-        (None, None) => "<p>Es gelten die voreingestellten Uhrzeiten.</p>".into(),
-    };
-    let haken = |b: bool| if b { " checked" } else { "" };
-    let ent = &e.entwurf;
-    let entwurf_hinweis = if ent.leer() {
-        ""
-    } else {
-        "<p class=\"offen\">Das Formular zeigt deine letzten, nicht gespeicherten Eingaben.</p>"
-    };
+fn zeitplan_voraussetzungen(zustand: &Zustand) -> (String, &'static str) {
     let mut voraussetzung = String::new();
     let mut gesperrt = "";
-    if !p.an {
+    if !zustand.zeitplan.an {
         match zustand.einschalten_erlaubt() {
             Ok(()) => {}
             Err(ZeitplanAbgelehnt::Einrichtung(fehlt)) => {
@@ -1239,29 +1291,68 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
              <button type=\"submit\">Stand neu laden</button></form>",
         );
     }
-    let (stand, aktion, knopf) = if p.an {
-        ("An", "aus", "Zeitplan ausschalten")
-    } else {
-        ("Aus", "an", "Zeitplan einschalten")
+    (voraussetzung, gesperrt)
+}
+
+fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String) {
+    let p: &Zeitplan = &zustand.zeitplan;
+    let fehler = zustand
+        .erledigt_fehler
+        .as_ref()
+        .or(zustand.zeitplan_fehler.as_ref());
+    let gespeichert = match (e.zeitplan_gespeichert, fehler) {
+        (_, Some(f)) => format!("<p class=\"halt\">{}</p>", maskiere(f)),
+        (Some(true), None) => "<p>Einstellungen gespeichert.</p>".into(),
+        (Some(false), None) => "<p class=\"offen\">Datei weicht vom laufenden Stand ab.</p>".into(),
+        (None, None) => "<p>Es gelten die voreingestellten Uhrzeiten.</p>".into(),
     };
+    let haken = |b: bool| if b { " checked" } else { "" };
+    let ent = &e.entwurf;
+    let entwurf_hinweis = if ent.leer() {
+        ""
+    } else {
+        "<p class=\"offen\">Das Formular zeigt deine letzten, nicht gespeicherten Eingaben.</p>"
+    };
+    let (voraussetzung, gesperrt) = zeitplan_voraussetzungen(zustand);
+    let stand = if p.an { "an" } else { "aus" };
     let token = maskiere(token);
+    let schalter = if p.an {
+        format!(
+            "<form method=\"post\" action=\"/zeitplan\"><input type=\"hidden\" name=\"t\" value=\"{token}\"><input type=\"hidden\" name=\"aktion\" value=\"aus\"><button type=\"submit\">Zeitplan ausschalten</button></form>"
+        )
+    } else {
+        "<p>Automatische Läufe sind aus. Prüfe die Einstellungen und wähle unten <b>Speichern und Zeitplan einschalten</b>.</p>".into()
+    };
+    let einschalten = if p.an {
+        String::new()
+    } else {
+        format!(
+            "<button class=\"primaer\" type=\"submit\" name=\"aktion\" value=\"speichern_an\"{gesperrt}>Speichern und Zeitplan einschalten</button>"
+        )
+    };
+    let entwurf = if ent.leer() { "nein" } else { "ja" };
+    let speicher_text = if p.an {
+        "Änderungen speichern"
+    } else {
+        "Nur speichern · Zeitplan bleibt aus"
+    };
+    let speicher_klasse = if p.an || !gesperrt.is_empty() {
+        "primaer"
+    } else {
+        ""
+    };
     let _ = write!(
         s,
         "<section id=\"zeitplan\"><h2>Zeitplan</h2>\
          <p><b>{stand}</b> · Empfohlen, wenn DepotSchlopf nach einem erfolgreichen manuellen \
          Test selbstständig laufen soll.</p>{gespeichert}{voraussetzung}\
-         <form method=\"post\" action=\"/zeitplan\">\
-         <input type=\"hidden\" name=\"t\" value=\"{token}\">\
-         <input type=\"hidden\" name=\"aktion\" value=\"{aktion}\">\
-         <button type=\"submit\"{gesperrt}>{knopf}</button></form>\
+         {schalter}\
          <h3>Uhrzeiten und automatische Läufe</h3>\
-         <p>Änderungen unten gelten erst nach dem Speichern. Der Schalter oben nutzt die zuletzt \
-         gespeicherten Einstellungen. Kurs- und Terminläufe sind montags bis freitags, nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten. Das löst keine zusätzlichen KI-Aufrufe aus. \
+         <p>Änderungen gelten erst nach dem Speichern. Beim Einschalten unten werden deine Eingaben gemeinsam gespeichert. Kurs- und Terminläufe sind montags bis freitags, nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten. Das löst keine zusätzlichen KI-Aufrufe aus. \
          Für Xetra ist 17:45 Uhr voreingestellt, kurz nach Börsenschluss.</p>\
          {entwurf_hinweis}\
-         <form method=\"post\" action=\"/zeitplan\">\
+         <form id=\"zeitplan-formular\" method=\"post\" action=\"/zeitplan\" data-aenderungen data-entwurf=\"{entwurf}\">\
          <input type=\"hidden\" name=\"t\" value=\"{token}\">\
-         <input type=\"hidden\" name=\"aktion\" value=\"speichern\">\
          <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
          <label>Kurse Xetra abrufen um <input type=\"time\" name=\"kurse\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
          <p class=\"leise\">Jede andere Börse der Liste wird zehn Minuten nach ihrem eigenen \
@@ -1275,7 +1366,9 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <label><input type=\"checkbox\" name=\"vorbereitung_an\" value=\"ja\"{}> \
          An börsenfreien Tagen den nächsten Handelstag vorbereiten (empfohlen; braucht Schlagzeilen und eingeschalteten Zeitplan; höchstens ein Aufruf je KI und Tag zwischen 08 und 23 Uhr). \
          Erst nach bestätigtem Update verfügbar. Die Aufrufe zählen zum Monatsbudget; der Tagesrahmen und die Reserve der nächsten Erstmeinung haben Vorrang. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
-         <button type=\"submit\">Einstellungen speichern</button></form></section>",
+         <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Änderungen werden erst durch Speichern wirksam.</p>\
+         {einschalten} <button class=\"{speicher_klasse}\" type=\"submit\" name=\"aktion\" value=\"speichern\">{speicher_text}</button>\
+         <p>Nur speichern lässt den Zeitplan {stand}. Du kannst die Einrichtung jederzeit später fortsetzen.</p></div></form></section>",
         uhrzeit_text(ent.termine.unwrap_or(p.termine)),
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),
         haken(ent.papier_danach.unwrap_or(p.papier_danach)),
@@ -1525,7 +1618,9 @@ pub fn einrichtung(
     heute: Option<Datum>,
     e: &Einrichtung,
 ) -> String {
-    let mut s = String::with_capacity(16_384);
+    let mut s = String::from(
+        "<section><h2>Einrichtung – Schritt für Schritt</h2><p>Hier legst du fest, wie DepotSchlopf für dich arbeitet. Du kannst die Einrichtung jederzeit später fortsetzen. Änderungen gelten nach dem Speichern; an jedem Formular steht, was als Nächstes geschieht.</p><p><a href=\"#zeitplan\">Automatische Läufe einrichten</a> · <a href=\"#schluessel\">Zugangsdaten einrichten</a></p></section>",
+    );
     let _ = write!(
         s,
         "<div id=\"stand\" data-teil=\"/teil/status\">{}</div>",
@@ -1588,6 +1683,37 @@ pub fn einrichtung(
 /// tragen dann das Token des neuen Starts.
 pub const APP_JS: &str = r#""use strict";
 (function () {
+  // Änderungen bleiben im Formular; insbesondere kein Schlüssel in Browser-Speichern.
+  var verlaesst = false;
+  var andererStart = false;
+  function formulare() { return Array.from(document.querySelectorAll("form[data-aenderungen]")); }
+  function geaendert(f) {
+    return f.dataset.entwurf === "ja" || Array.from(f.querySelectorAll("input:not([type=hidden])")).some(function (i) {
+      return i.type === "checkbox" ? i.checked !== i.defaultChecked : i.value !== i.defaultValue;
+    });
+  }
+  function offen(ausser) { return formulare().some(function (f) { return f !== ausser && geaendert(f); }); }
+  function zeige(f) {
+    var neu = geaendert(f);
+    f.classList.toggle("ungespeichert", neu);
+    var status = f.querySelector("[data-speicherstand]");
+    if (status) { status.textContent = neu ? "Noch nicht gespeichert. Bitte unten speichern, damit deine Änderungen gelten." : "Keine ungespeicherten Änderungen in diesem Formular."; }
+  }
+  ["input", "change"].forEach(function (ereignis) {
+    document.addEventListener(ereignis, function (e) {
+      var f = e.target.closest("form[data-aenderungen]");
+      if (f) { zeige(f); }
+    });
+  });
+  document.addEventListener("invalid", function (e) {
+    var f = e.target.closest("form[data-aenderungen]");
+    var status = f && f.querySelector("[data-speicherstand]");
+    if (status) { status.textContent = "Noch nicht gespeichert. Bitte prüfe das markierte Feld. Deine übrigen Eingaben bleiben stehen."; }
+  }, true);
+  window.addEventListener("beforeunload", function (e) {
+    if (!verlaesst && offen()) { e.preventDefault(); e.returnValue = ""; }
+  });
+  formulare().forEach(zeige);
   // Delegiert, da Live auch laufende Protokolle regelmäßig ersetzt.
   document.addEventListener("click", async function (e) {
     var b = e.target.closest("[data-protokoll-kopieren]");
@@ -1614,10 +1740,15 @@ pub const APP_JS: &str = r#""use strict";
   // Doppelklicks: Ein abgesendetes Formular sperrt seinen Knopf. Der Dienst lehnt doppelte
   // Auftraege ohnehin ab; so sieht man sofort, dass der Klick angekommen ist.
   document.addEventListener("submit", function (e) {
-    var b = e.target.querySelector("button[type=submit]");
+    if (andererStart) { e.preventDefault(); return; }
+    if (offen(e.target) && !window.confirm("In einem anderen Formular stehen noch ungespeicherte Änderungen. Sie werden bei dieser Aktion verworfen. Trotzdem fortfahren?")) {
+      e.preventDefault(); return;
+    }
+    var b = e.submitter || e.target.querySelector("button[type=submit]");
     if (b) {
       if (b.disabled) { e.preventDefault(); return; }
       if (b.dataset.gesendet) { e.preventDefault(); return; }
+      verlaesst = true;
       b.dataset.gesendet = b.textContent;
       setTimeout(function () { b.disabled = true; b.textContent = "wird gesendet …"; }, 0);
     }
@@ -1667,7 +1798,12 @@ pub const APP_JS: &str = r#""use strict";
         banner.textContent = "DepotSchlopf startet und prüft die neue Version. Diese Seite wartet auf die Bestätigung.";
         banner.hidden = false;
       } else if (start && neu !== start) {
-        if (!neuladen) {
+        if (offen()) {
+          andererStart = true;
+          banner.textContent = "DepotSchlopf wurde neu gestartet. Deine ungespeicherten Eingaben stehen noch hier. Prüfe sie vor dem Neuladen. Zum Speichern braucht diese Seite die neue Verbindung.";
+          banner.hidden = false;
+          document.getElementById("neuverbinden").hidden = false;
+        } else if (!neuladen) {
           neuladen = true;
           // Wesentliche Parameter (z.B. Protokollkennung) und die Position bleiben erhalten.
           var ziel = new URL(window.location.href);
@@ -1725,6 +1861,8 @@ pub const APP_JS: &str = r#""use strict";
     anfragen.forEach(function (a) { a.abort(); });
   });
   window.addEventListener("pageshow", function (e) {
+    verlaesst = false;
+    formulare().forEach(zeige);
     document.querySelectorAll("button[data-gesendet]").forEach(function (b) {
       b.textContent = b.dataset.gesendet;
       delete b.dataset.gesendet;
