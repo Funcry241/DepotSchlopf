@@ -96,7 +96,7 @@ fn hebe_auf(p: &Path, q: &Path, gesehen: &str, jetzt: Zeitpunkt) -> Result<Aufhe
         .and_then(|mut f| {
             writeln!(
                 f,
-                "aufgehoben {} ({}) nach Pruefung ueber die Einrichtung:",
+                "aufgehoben {} ({}) nach Prüfung über die Einrichtung:",
                 jetzt.sekunden(),
                 depot_lage::zeit_text(jetzt)
             )?;

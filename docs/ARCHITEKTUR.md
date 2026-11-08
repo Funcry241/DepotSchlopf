@@ -224,7 +224,7 @@ Spontane Ereignisse und Unternehmensentscheidungen stehen vorher nicht im Regist
 | --- | --- | --- |
 | lage | Einschätzung der Lage in wenigen Sätzen | ja |
 | zielgewichte | je Wert: ISIN, Gewicht in Basispunkten, Aktion (kaufen, halten, verkaufen) | ja |
-| begruendung | je geändertem Wert: warum, in wenigen Sätzen | bei jeder Änderung |
+| begründung | je geändertem Wert: warum, in wenigen Sätzen | bei jeder Änderung |
 | risiken | je geändertem Wert: was dagegen spricht | bei jeder Änderung |
 | belege | je geändertem Wert: Kennungen aus dem Lagebild (Kennzahl, Schlagzeile, Termin oder Beobachtung) | bei jeder Änderung |
 | termine | je betroffenem Wert: Kennungen der Termine im Horizont und wie sie berücksichtigt sind (halten, verkleinern, abwarten, bewusst eingehen) | wenn Termine im Horizont liegen |

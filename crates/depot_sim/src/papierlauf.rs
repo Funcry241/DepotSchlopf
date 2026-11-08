@@ -104,7 +104,7 @@ pub fn papier(
     // Seine Teilkurse werden nie verwendet (Maus, Restbefund zu #34).
     if let Some(grund) = depot_journal::kurssperre::kurssperre(&wurzel.join("daten")) {
         return Err(format!(
-            "daten/{} liegt ({grund}). Kein Papiertag, bis ein Mensch geprueft und die Sperre \
+            "daten/{} liegt ({grund}). Kein Papiertag, bis ein Mensch geprüft und die Sperre \
              in der Einrichtung aufgehoben hat",
             depot_journal::kurssperre::KURSSPERRE
         ));
@@ -142,7 +142,7 @@ pub fn papier(
     );
     if let Some(f) = konto.fehler() {
         return Err(format!(
-            "Papierkonto nicht geschrieben: {f}. Papierkonto und Journal weichen ab; der naechste Lauf haelt an"
+            "Papierkonto nicht geschrieben: {f}. Papierkonto und Journal weichen ab; der nächste Lauf hält an"
         ));
     }
     let ausgang = ausgang.map_err(|e| format!("{e:?}"))?;

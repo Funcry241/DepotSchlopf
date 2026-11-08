@@ -119,7 +119,7 @@ pub fn sammle_nachrichten(
     for zeile in QUELLEN.lines() {
         let (quelle, adresse) = zeile
             .split_once('|')
-            .ok_or_else(|| SammelFehler::Ablage("RSS-Quellenliste ungueltig".into()))?;
+            .ok_or_else(|| SammelFehler::Ablage("RSS-Quellenliste ungültig".into()))?;
         let start = uhr().ok_or(SammelFehler::Uhr)?;
         if let Some(grund) = versuch(journal, quelle, start)? {
             b.quellen.push(format!("{quelle}: {grund}"));
@@ -158,7 +158,7 @@ pub fn sammle_nachrichten(
             b.sicherheitsabbruch = true;
             break;
         }
-        b.quellen.push(format!("{quelle}: {} aktuelle Schlagzeilen; {ausgelassen} ungueltige, kuenftige oder zu alte Eintraege ausgelassen.", nachrichten.len()));
+        b.quellen.push(format!("{quelle}: {} aktuelle Schlagzeilen; {ausgelassen} ungültige, künftige oder zu alte Eintraege ausgelassen.", nachrichten.len()));
         gelesen.push(Gelesen {
             quelle: quelle.into(),
             abruf,
@@ -167,7 +167,7 @@ pub fn sammle_nachrichten(
         });
     }
     if b.sicherheitsabbruch {
-        b.fehler = Some("Sicherheitsabbruch: Eine RSS-Antwort enthaelt hinterlegte Zugangsdaten. Keine Antwort und keine Nachricht dieses Laufs gespeichert.".into());
+        b.fehler = Some("Sicherheitsabbruch: Eine RSS-Antwort enthält hinterlegte Zugangsdaten. Keine Antwort und keine Nachricht dieses Laufs gespeichert.".into());
         return Ok(b);
     }
     b.quellen.extend(fehler.iter().cloned());

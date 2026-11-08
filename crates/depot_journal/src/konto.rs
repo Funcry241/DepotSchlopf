@@ -157,10 +157,10 @@ pub(crate) fn pruefe_deckung(
     let a = auftrag.auftrag();
     if a.richtung == Richtung::Kauf {
         let frei = verfuegbar(grenzen, stand, topf).ok_or("Deckung nicht berechenbar")?;
-        let bedarf = kaufbedarf(grenzen, a.limit, a.stueck).ok_or("Deckung: Ueberlauf")?;
+        let bedarf = kaufbedarf(grenzen, a.limit, a.stueck).ok_or("Deckung: Überlauf")?;
         if bedarf > frei {
             return Err(format!(
-                "keine Deckung: Kauf braucht {} Cent mit Gebuehr, frei sind {} Cent",
+                "keine Deckung: Kauf braucht {} Cent mit Gebühr, frei sind {} Cent",
                 bedarf.0, frei.0
             ));
         }
@@ -289,7 +289,7 @@ impl Journal {
                 != Some(*frist)
         {
             return Err(JournalFehler::Abgelehnt(
-                "Versand: ungueltige Boersenfrist".into(),
+                "Versand: ungültige Börsenfrist".into(),
             ));
         }
         self.schreibe_meldung(nr, meldung)
@@ -337,7 +337,7 @@ impl Journal {
         {
             return Ok(Some(Abweichung::Unbuchbar {
                 nr,
-                grund: "Versandzeit oder Boersenfrist weicht vom Journal ab".into(),
+                grund: "Versandzeit oder Börsenfrist weicht vom Journal ab".into(),
             }));
         }
         let mut folge = Vec::new();
@@ -356,7 +356,7 @@ impl Journal {
             .strip_prefix(lage.ausfuehrungen.as_slice())
             .ok_or_else(|| Abweichung::Unbuchbar {
                 nr,
-                grund: "Ausfuehrungen weichen vom Journal ab".into(),
+                grund: "Ausführungen weichen vom Journal ab".into(),
             });
         let neue = match neue {
             Ok(n) => n,

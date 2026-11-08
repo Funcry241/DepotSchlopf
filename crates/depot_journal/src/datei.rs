@@ -83,7 +83,7 @@ fn zeile(vorher: &str, eintrag: &str) -> (String, String) {
 }
 
 fn als_u64(n: usize) -> Result<u64, String> {
-    u64::try_from(n).map_err(|_| "Laenge zu gross".to_string())
+    u64::try_from(n).map_err(|_| "Länge zu groß".to_string())
 }
 
 /// Prueft vollstaendige Zeilen ab der Kette `vorher`. Liefert die Eintraege und die letzte
@@ -106,14 +106,14 @@ fn pruefe_zeilen(bytes: &[u8], vorher: &str) -> Result<(Vec<String>, String), St
             return Err(format!("Zeile {nr} unlesbar"));
         };
         if laenge != eintrag.len().to_string() {
-            return Err(format!("Zeile {nr}: Laenge stimmt nicht"));
+            return Err(format!("Zeile {nr}: Länge stimmt nicht"));
         }
         if eintrag.chars().any(char::is_control) {
             return Err(format!("Zeile {nr}: Steuerzeichen"));
         }
         let neu = kette(&k, eintrag);
         if summe != neu {
-            return Err(format!("Zeile {nr}: Pruefsumme stimmt nicht"));
+            return Err(format!("Zeile {nr}: Prüfsumme stimmt nicht"));
         }
         k = neu;
         eintraege.push(eintrag.to_string());
@@ -314,7 +314,7 @@ fn sichere(ziel: &Path, rest: &[u8]) -> Result<(), JournalFehler> {
     match da {
         Ok(da) if da == rest => Ok(()),
         Ok(_) => Err(halt(format!(
-            "{}: Quarantaene weicht vom Rest ab; nichts gekuerzt",
+            "{}: Quarantaene weicht vom Rest ab; nichts gekürzt",
             ziel.display()
         ))),
         Err(e) => Err(halt(format!("{}: Quarantaene: {e}", ziel.display()))),
@@ -475,7 +475,7 @@ impl Journal {
             .read(true)
             .write(true)
             .open(pfad)
-            .map_err(|e| halt(format!("oeffnen: {e}")))?;
+            .map_err(|e| halt(format!("öffnen: {e}")))?;
         match datei.try_lock() {
             Ok(()) => {}
             Err(TryLockError::WouldBlock) => return Err(JournalFehler::Belegt),
@@ -487,17 +487,17 @@ impl Journal {
             .read_to_end(&mut inhalt)
             .map_err(|e| halt(format!("lesen: {e}")))?;
 
-        let grenze = usize::try_from(v.laenge).map_err(|_| halt("Vermerk: Laenge"))?;
+        let grenze = usize::try_from(v.laenge).map_err(|_| halt("Vermerk: Länge"))?;
         let (bestaetigt, rest) = inhalt.split_at_checked(grenze).ok_or_else(|| {
             halt(format!(
-                "kuerzer als der bestaetigte Stand: {} von {grenze} Byte",
+                "kürzer als der bestätigte Stand: {} von {grenze} Byte",
                 inhalt.len()
             ))
         })?;
         let (mut zeilen, k) = pruefe_zeilen(bestaetigt, &kettenanfang())
-            .map_err(|e| halt(format!("bestaetigter Stand beschaedigt: {e}")))?;
+            .map_err(|e| halt(format!("bestätigter Stand beschaedigt: {e}")))?;
         if k != v.kette {
-            return Err(halt("weicht vom bestaetigten Stand ab"));
+            return Err(halt("weicht vom bestätigten Stand ab"));
         }
         let rest_laenge = als_u64(rest.len()).map_err(halt)?;
 
@@ -538,7 +538,7 @@ impl Journal {
             sichere(&quarantaene_pfad(pfad, v.laenge, rest), rest)?;
             datei
                 .set_len(v.laenge)
-                .map_err(|e| halt(format!("kuerzen: {e}")))?;
+                .map_err(|e| halt(format!("kürzen: {e}")))?;
         }
         // Der Vermerk beschreibt nur, was dauerhaft auf der Platte steht (K13-01): Ein nach
         // einem Fehler nur im Cache lesbarer Eintrag oder eine Kuerzung wird erst
@@ -595,37 +595,37 @@ impl Journal {
     pub fn anhaengen(&mut self, art: Art, inhalt: &str) -> Result<(), JournalFehler> {
         match art {
             Art::Vorbereitung => Err(JournalFehler::Abgelehnt(
-                "Vorbereitung nur ueber ihre geprueften Methoden".into(),
+                "Vorbereitung nur über ihre geprüften Methoden".into(),
             )),
             Art::Ki | Art::KiAbrechnung | Art::KiGrenzen => Err(JournalFehler::Abgelehnt(
-                "KI-Eintraege entstehen nur ueber reserviere".into(),
+                "KI-Eintraege entstehen nur über reserviere".into(),
             )),
             Art::Auftrag => Err(JournalFehler::Abgelehnt(
-                "Auftraege entstehen nur ueber reserviere_auftrag".into(),
+                "Auftraege entstehen nur über reserviere_auftrag".into(),
             )),
             Art::Zustand => Err(JournalFehler::Abgelehnt(
-                "Auftragszustaende entstehen nur ueber melde und gleiche_ab".into(),
+                "Auftragszustaende entstehen nur über melde und gleiche_ab".into(),
             )),
             Art::Weltprognose => Err(JournalFehler::Abgelehnt(
-                "Weltprognose nur ueber belege_weltprognose".into(),
+                "Weltprognose nur über belege_weltprognose".into(),
             )),
             Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
-                "Abrechnungstag nur ueber beginne_abrechnung".into(),
+                "Abrechnungstag nur über beginne_abrechnung".into(),
             )),
             Art::PapierFreigabe => Err(JournalFehler::Abgelehnt(
-                "Papierfreigabe nur ueber gebe_papier_frei".into(),
+                "Papierfreigabe nur über gebe_papier_frei".into(),
             )),
             Art::PapierHalt => Err(JournalFehler::Abgelehnt(
-                "Papier-Halt nur ueber belege_papier_halt".into(),
+                "Papier-Halt nur über belege_papier_halt".into(),
             )),
             Art::NotbremseFreigabe => Err(JournalFehler::Abgelehnt(
-                "Notbremsenfreigabe nur ueber schliesse_wiederanlauf_ab".into(),
+                "Notbremsenfreigabe nur über schließe_wiederanlauf_ab".into(),
             )),
             Art::Wissensstichtag => Err(JournalFehler::Abgelehnt(
-                "Wissensstichtag nur ueber belege_wissensstichtag".into(),
+                "Wissensstichtag nur über belege_wissensstichtag".into(),
             )),
             Art::Format => Err(JournalFehler::Abgelehnt(
-                "Die Umstellung entsteht nur ueber stelle_um".into(),
+                "Die Umstellung entsteht nur über stelle_um".into(),
             )),
             Art::Beobachtung
             | Art::Topf
@@ -675,7 +675,7 @@ impl Journal {
             .and_then(|_| self.datei.write_all(z.as_bytes()))
             .and_then(|()| sync(&self.datei, "Journal"))
             .map_err(|e| format!("schreiben: {e}"))?;
-        let laenge = self.laenge.checked_add(n).ok_or("Laenge zu gross")?;
+        let laenge = self.laenge.checked_add(n).ok_or("Länge zu groß")?;
         let fertig = Vermerk {
             laenge,
             kette: k.to_string(),
@@ -736,7 +736,7 @@ impl Journal {
     ) -> Result<(), JournalFehler> {
         if self.kette != gesehen {
             return Err(JournalFehler::Abgelehnt(
-                "Papierfreigabe: Journalstand hat sich geaendert".into(),
+                "Papierfreigabe: Journalstand hat sich geändert".into(),
             ));
         }
         let bargeld = self.stand.papier_freigabe_bargeld().ok_or_else(|| {

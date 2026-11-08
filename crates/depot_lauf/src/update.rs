@@ -76,7 +76,7 @@ fn vorbedingungen(wurzel: &Path) -> Result<(), String> {
     let geaendert = git(wurzel, &["status", "--porcelain", "--untracked-files=no"])?;
     if !geaendert.is_empty() {
         return Err(format!(
-            "Verfolgte Dateien sind lokal geaendert; das Update ueberschreibt nichts:\n{geaendert}"
+            "Verfolgte Dateien sind lokal geändert; das Update überschreibt nichts:\n{geaendert}"
         ));
     }
     if let Ok(eintraege) = fs::read_dir(wurzel.join("daten")) {
@@ -92,8 +92,8 @@ fn vorbedingungen(wurzel: &Path) -> Result<(), String> {
     let offen = offen_pfad(wurzel);
     if offen.exists() {
         return Err(format!(
-            "{} liegt: Das letzte Update ist noch nicht bestaetigt. Erst den Dienst \
-             (DepotSchlopf.cmd) neu starten; er bestaetigt es oder setzt es zurueck.",
+            "{} liegt: Das letzte Update ist noch nicht bestätigt. Erst den Dienst \
+             (DepotSchlopf.cmd) neu starten; er bestätigt es oder setzt es zurück.",
             offen.display()
         ));
     }
@@ -122,12 +122,12 @@ fn hole(wurzel: &Path) -> Result<Option<Kandidat>, String> {
     if git(wurzel, &["merge-base", "--is-ancestor", &alt, &neu]).is_err() {
         return Err(format!(
             "Der lokale Stand {alt} ist nicht Teil von origin/{ZWEIG}. Das Update spielt nur \
-             vorwaerts ein und ueberschreibt nichts."
+             vorwaerts ein und überschreibt nichts."
         ));
     }
     if abgelehnt(wurzel, &neu)? {
         return Err(format!(
-            "Stand {neu} wurde schon einmal zurueckgesetzt (daten/update_abgelehnt.txt). Erst \
+            "Stand {neu} wurde schon einmal zurückgesetzt (daten/update_abgelehnt.txt). Erst \
              ein neuerer Stand auf {ZWEIG} wird wieder angeboten."
         ));
     }
@@ -217,7 +217,7 @@ fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<abbild::Abbild, String> {
     let basis = format!("{}^1", k.neu);
     let args: Vec<String> = vec!["--voll".into(), "--basis".into(), basis];
     println!(
-        "[Update] Gate im Pruefordner: cargo run -p depot_kodex -- {}",
+        "[Update] Gate im Prüfordner: cargo run -p depot_kodex -- {}",
         args.join(" ")
     );
     let status = abbild::gate_befehl(&abbild.kopie, &ablage.join("bau-update"), &args)
@@ -230,7 +230,7 @@ fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<abbild::Abbild, String> {
     if !probleme.is_empty() {
         return Err(format!(
             "Die Kopie hat sich waehrend des Gates veraendert; der neue Stand gilt als \
-             ungeprueft:\n{}",
+             ungeprüft:\n{}",
             probleme.join("\n")
         ));
     }
@@ -299,7 +299,7 @@ fn einspielen(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
     vorbedingungen(wurzel)?;
     let jetzt = git(wurzel, &["rev-parse", "--verify", "HEAD^{commit}"])?;
     if jetzt != k.alt {
-        return Err("Der Projektordner hat sich waehrend der Pruefung bewegt. Kein Update.".into());
+        return Err("Der Projektordner hat sich waehrend der Prüfung bewegt. Kein Update.".into());
     }
     offen_schreiben(wurzel, &offen_text(&k.alt, &k.neu))?;
     if let Err(e) = git(wurzel, &["merge", "--ff-only", "--quiet", &k.neu]) {
@@ -309,7 +309,7 @@ fn einspielen(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
             Ok(()) => format!("Vorruecken gescheitert, alter Stand bleibt: {e}"),
             Err(w) => format!(
                 "Vorruecken gescheitert, alter Stand bleibt: {e}. daten/update_offen.txt bitte \
-                 loeschen: {w}"
+                 löschen: {w}"
             ),
         });
     }
@@ -323,7 +323,7 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
         [o] if o == "pruefen" => (true, None),
         [sha] if ist_commit(sha) => (false, Some(sha)),
         _ => {
-            eprintln!("[Update] FEHLER: erlaubt sind nur `update` und `update pruefen`.");
+            eprintln!("[Update] FEHLER: erlaubt sind nur `update` und `update prüfen`.");
             return ExitCode::from(2);
         }
     };
@@ -345,7 +345,7 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
     }
     zeige(&k);
     if nur_pruefen {
-        println!("[Update] Nur geprueft; eingespielt wird mit `run.cmd update`.");
+        println!("[Update] Nur geprüft; eingespielt wird mit `run.cmd update`.");
         println!("[Update] Kandidat: {}", k.neu);
         return ExitCode::SUCCESS;
     }
@@ -363,8 +363,8 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
     match ergebnis {
         Ok(()) => {
             println!(
-                "[Update] Eingespielt: {} -> {}. Der Dienst startet neu und bestaetigt es; \
-                 kommt er nicht hoch, setzt DepotSchlopf.cmd den alten Stand zurueck.",
+                "[Update] Eingespielt: {} -> {}. Der Dienst startet neu und bestätigt es; \
+                 kommt er nicht hoch, setzt DepotSchlopf.cmd den alten Stand zurück.",
                 kurz(&k.alt),
                 kurz(&k.neu)
             );

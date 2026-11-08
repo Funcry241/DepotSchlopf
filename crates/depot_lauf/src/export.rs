@@ -99,7 +99,7 @@ fn quellstand(wurzel: &Path, abbild: Option<&Abbild>) -> Result<Vec<(String, Vec
     if !hat_git(wurzel)? {
         return Ok(Vec::new());
     }
-    let abbild = abbild.ok_or("Git-Index nicht lesbar: kein Abbild vor der Pruefung")?;
+    let abbild = abbild.ok_or("Git-Index nicht lesbar: kein Abbild vor der Prüfung")?;
     abbild
         .dateien
         .iter()
@@ -257,8 +257,8 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     );
     let snapshot_txt = format!(
         "Quellstand DepotSchlopf v{version}\nCommit: {commit}\nZweig: {zweig}\nLokal veraendert: {veraendert}\n\
-         Dateien: {}\nSHA-256: {}\nInhalt aus dem Git-Index vor der Pruefung, nie aus dem Arbeitsbaum; \
-         auf Geheimnisse geprueft. Byte-gleich mit dem geprueften Stand: {}. Ohne Git kein Quellstand. Zum Weiterarbeiten entpacken.\n",
+         Dateien: {}\nSHA-256: {}\nInhalt aus dem Git-Index vor der Prüfung, nie aus dem Arbeitsbaum; \
+         auf Geheimnisse geprüft. Byte-gleich mit dem geprüften Stand: {}. Ohne Git kein Quellstand. Zum Weiterarbeiten entpacken.\n",
         dateien.len(),
         sha_hex(&quelle),
         if geprueft { "ja" } else { "nein" }
@@ -314,13 +314,13 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     let _ = writeln!(j, "  \"festschreibung\": {{{fs_json}}}\n}}");
 
     let mut h = format!(
-        "DEPOTSCHLOPF – ASSISTENTEN-UEBERGABE\n\
+        "DEPOTSCHLOPF – ASSISTENTEN-ÜBERGABE\n\
          ====================================\n\n\
          Essenz lenkt. KI schlaegt vor. Regelwerk entscheidet. Auftragsstelle schreibt.\n\
-         Journal belegt. Abgleich prueft. Kodex wacht.\n\n\
-         Diese ZIP-Datei entsteht nach jedem Lauf von run.cmd. Sie ist fuer eine neue\n\
+         Journal belegt. Abgleich prüft. Kodex wacht.\n\n\
+         Diese ZIP-Datei entsteht nach jedem Lauf von run.cmd. Sie ist für eine neue\n\
          KI-Sitzung gedacht: hochladen, dann diese Datei lesen. Sie ist kein Quellstand\n\
-         zum Einspielen; den Quellstand enthaelt {quelle_name}.\n\n\
+         zum Einspielen; den Quellstand enthält {quelle_name}.\n\n\
          STAND\n-----\nZeit (UTC): {zeit}\nVersion: {version}\nCommit: {commit} ({zweig})\n\
          Lokal veraendert: {veraendert}\nBefehl: {}\nGate: {gate}\n\
          Tests: {bestanden} bestanden, {fehlgeschlagen} fehlgeschlagen\n",
@@ -334,8 +334,8 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     }
     h.push_str(
         "\nKALTSTART-REIHENFOLGE (aus dem Quellstand)\n------------------------------------------\n\
-         1. docs/kaltstart.md\n2. docs/essenz.md (beratend)\n3. kodex/festschreibung.txt (nie ohne Freigabe aendern)\n\
-         4. kodex/aenderung.txt (fuer jede Aenderung neu schreiben)\n5. README.md, CHANGELOG.md\n\n\
+         1. docs/kaltstart.md\n2. docs/essenz.md (beratend)\n3. kodex/festschreibung.txt (nie ohne Freigabe ändern)\n\
+         4. kodex/aenderung.txt (für jede Änderung neu schreiben)\n5. README.md, CHANGELOG.md\n\n\
          ESSENZ-REGELN\n-------------\n",
     );
     for (nr, titel, _) in &regeln {
@@ -346,7 +346,7 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
         let _ = writeln!(h, "{k}: {v}");
     }
     h.push_str(
-        "\nHINWEIS\n-------\nMassgeblich ist immer der aktuelle Quellstand und das Gate, nie diese Uebergabe\n\
+        "\nHINWEIS\n-------\nMassgeblich ist immer der aktuelle Quellstand und das Gate, nie diese Übergabe\n\
          (Essenz D00). Die Konsole steht in depotschlopf.console.txt.\n",
     );
 
@@ -585,22 +585,22 @@ mod tests {
                 "Geheimnismuster",
             ),
             (
-                "Schluessel in verfolgter Datei",
+                "Schlüssel in verfolgter Datei",
                 format!("key {}\n", beispiel_schluessel()).into_bytes(),
                 String::new(),
                 "Geheimnismuster",
             ),
             (
-                "Schluessel in der Konsole",
+                "Schlüssel in der Konsole",
                 b"harmlos\n".to_vec(),
                 format!("Ausgabe {}\n", beispiel_schluessel()),
                 "Geheimnismuster",
             ),
             (
-                "nicht pruefbarer Inhalt",
+                "nicht prüfbarer Inhalt",
                 vec![b'#', b' ', 0xC3, 0x28, 0xFF, b'\n'],
                 String::new(),
-                "nicht pruefbar",
+                "nicht prüfbar",
             ),
         ];
         let mut offen = Vec::new();
@@ -612,7 +612,7 @@ mod tests {
             match schreibe_in(&r, &konsole) {
                 Ok(p) => offen.push(format!("{fall}: Export geschrieben: {}", p.display())),
                 Err(e) => {
-                    if !e.contains(stichwort) {
+                    if !e.replace("pruefbar", "prüfbar").contains(stichwort) {
                         offen.push(format!("{fall}: falscher Grund: {e}"));
                     }
                     if e.contains(&beispiel_iban()) || e.contains(&beispiel_schluessel()) {
@@ -886,12 +886,12 @@ mod tests {
             }
             if !enthaelt(&bytes, &index) || enthaelt(&bytes, b"NUR_ARBEITSBAUM") {
                 offen.push(format!(
-                    "{fall}: Export enthaelt nicht genau den Stand des Gates"
+                    "{fall}: Export enthält nicht genau den Stand des Gates"
                 ));
             }
             if !l.erfolgreich() || !enthaelt(&bytes, b"\"quellstand_geprueft\": true") {
                 offen.push(format!(
-                    "{fall}: gleicher Stand gilt nicht als geprueft: {:?}",
+                    "{fall}: gleicher Stand gilt nicht als geprüft: {:?}",
                     l.warnungen
                 ));
             }
@@ -976,7 +976,7 @@ mod tests {
                 0
             },
         );
-        let ort = ort.ok_or("Gate nicht ausgefuehrt")?;
+        let ort = ort.ok_or("Gate nicht ausgeführt")?;
         aufraeumen(&r);
         let mut offen = Vec::new();
         if ort.starts_with(&r) {
@@ -984,7 +984,7 @@ mod tests {
         }
         let fremd = crate::abbild::fremde_cargo_konfiguration(&ort, None);
         if !fremd.is_empty() {
-            offen.push(format!("fremde Konfiguration ueber der Kopie: {fremd:?}"));
+            offen.push(format!("fremde Konfiguration über der Kopie: {fremd:?}"));
         }
         if !l.erfolgreich() {
             offen.push(format!("Lauf gescheitert: {:?}", l.warnungen));

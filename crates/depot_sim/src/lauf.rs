@@ -256,7 +256,7 @@ pub fn lauf(
         let abweichungen = j.gleiche_ab(&*konto).map_err(journal)?;
         if !abweichungen.is_empty() {
             return Err(halt(format!(
-                "Kontowaechter beim Wiederanlauf: {abweichungen:?}. Halt bis zur Pruefung; \
+                "Kontowaechter beim Wiederanlauf: {abweichungen:?}. Halt bis zur Prüfung; \
                  niemand wird gefragt, nichts gesendet"
             )));
         }
@@ -265,7 +265,7 @@ pub fn lauf(
     if st.seit_abschluss() > 0 {
         return Err(halt(format!(
             "{} Eintraege nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
-             abgeschlossen. Halt bis zur Pruefung; niemand wird neu gefragt",
+             abgeschlossen. Halt bis zur Prüfung; niemand wird neu gefragt",
             st.seit_abschluss()
         )));
     }
@@ -315,7 +315,7 @@ pub fn lauf(
 pub(crate) fn pruefe_stoerung(konto: &dyn Broker) -> Result<(), LaufFehler> {
     match konto.stoerung() {
         Some(s) => Err(halt(format!(
-            "Konto gestoert: {s}. Halt; nichts wird mehr bestaetigt"
+            "Konto gestört: {s}. Halt; nichts wird mehr bestätigt"
         ))),
         None => Ok(()),
     }
@@ -340,7 +340,7 @@ pub(crate) fn kontowaechter(
         j,
         tag,
         KONTOWAECHTER,
-        "Abweichung zum Konto: Halt bis zur Pruefung; kein Verkauf, kein Ausgleich",
+        "Abweichung zum Konto: Halt bis zur Prüfung; kein Verkauf, kein Ausgleich",
     )?;
     Err(halt(format!("Kontowaechter: {abweichungen:?}")))
 }
@@ -432,7 +432,7 @@ pub(crate) fn ein_tag(
                     .ok_or_else(|| halt("Notbremse: Kurs fehlt; Halt ohne Verkauf"))?;
                 fuehre_aus(jr, z, topf.id(), &auftraege, &mut *beteiligte.konto)?;
             }
-            return Err(halt(format!("Waechter: {befund:?}")));
+            return Err(halt(format!("Wächter: {befund:?}")));
         }
         WaechterBefund::Tagesverlust { .. } | WaechterBefund::Unplausibel => {
             if z.uhr.is_some() {
@@ -444,7 +444,7 @@ pub(crate) fn ein_tag(
                 WAECHTER,
                 &format!("{befund:?}: Halt bis zur Freigabe, der Tag bleibt offen"),
             )?;
-            return Err(halt(format!("Waechter: {befund:?}")));
+            return Err(halt(format!("Wächter: {befund:?}")));
         }
     }
     if z.uhr.is_some() {
@@ -516,7 +516,7 @@ fn stoppe_kaeufe(j: &mut Journal, tag: &Tag, konto: &mut dyn Broker) -> Result<(
         .any(|l| l.beleg.richtung == Richtung::Kauf)
     {
         if !konto.stoppe_kaeufe() {
-            return Err(halt("Offene Kaeufe konnten nicht sicher storniert werden"));
+            return Err(halt("Offene Käufe konnten nicht sicher storniert werden"));
         }
         kontowaechter(j, tag, &*konto)?;
         if j.stand()
@@ -650,9 +650,9 @@ fn markt_offener_orders(
         .uhr
         .and_then(|uhr| uhr())
         .filter(|zeit| *zeit >= kurse.stand())
-        .ok_or_else(|| halt("Keine verlaessliche Marktzeit"))?;
+        .ok_or_else(|| halt("Keine verlässliche Marktzeit"))?;
     let kurse = Kurse::mit_abrufen(stand, eintraege)
-        .map_err(|e| halt(format!("Kurse fuer offene Orders: {e:?}")))?;
+        .map_err(|e| halt(format!("Kurse für offene Orders: {e:?}")))?;
     konto.markt(&kurse);
     kontowaechter(j, z.tag, &*konto)?;
     protokolliere_ausfuehrungen(j, z.tag, &offen, Some(&kurse))
@@ -948,7 +948,7 @@ fn topf_zyklus(
             j,
             tag,
             SIMULATION,
-            &format!("{t}: Kaeufe entfallen: nicht alle Verkaeufe ausgefuehrt"),
+            &format!("{t}: Käufe entfallen: nicht alle Verkäufe ausgeführt"),
         ),
         Err(e) => Err(e),
     }
@@ -1002,13 +1002,13 @@ fn fuehre_aus(
             .map(|uhr| {
                 uhr()
                     .filter(|zeit| *zeit >= tag.kurse.stand())
-                    .ok_or_else(|| halt("Keine verlaessliche Versandzeit"))
+                    .ok_or_else(|| halt("Keine verlässliche Versandzeit"))
             })
             .transpose()?;
         let meldung = match versand {
             Some(zeit) => {
                 let frist = papierorder_schluss(&a.auftrag().isin, zeit)
-                    .ok_or_else(|| halt("Keine Boersenfrist fuer den Auftrag"))?;
+                    .ok_or_else(|| halt("Keine Börsenfrist für den Auftrag"))?;
                 Meldung::GesendetAm(zeit, frist)
             }
             None => Meldung::Gesendet,
@@ -1069,7 +1069,7 @@ fn protokolliere_ausfuehrungen(
                 tag,
                 SIMULATION,
                 &format!(
-                    "{t}: Auftrag {nr} ausgefuehrt: {:?} {} Stueck {} zu {} Cent, Gebuehr {} Cent",
+                    "{t}: Auftrag {nr} ausgeführt: {:?} {} Stück {} zu {} Cent, Gebühr {} Cent",
                     l.beleg.richtung, a.stueck, l.beleg.isin, a.kurs.0, a.gebuehr.0
                 ),
             )?;
@@ -1078,13 +1078,13 @@ fn protokolliere_ausfuehrungen(
             let grund = match (papierkurse, l.frist) {
                 (Some(kurse), Some(schluss)) => {
                     if schluss.datum() != kurse.stand().datum() {
-                        "Boersentag der Order bereits vorbei"
+                        "Börsentag der Order bereits vorbei"
                     } else if kurse
                         .eintrag(&l.beleg.isin)
                         .map(depot_kern::Kurs::zeitpunkt)
                         != Some(schluss)
                     {
-                        "kein gepruefter Kurs am Boersenschluss"
+                        "kein geprüfter Kurs am Börsenschluss"
                     } else {
                         "Kurs ausserhalb des Limits"
                     }
@@ -1095,7 +1095,7 @@ fn protokolliere_ausfuehrungen(
                 j,
                 tag,
                 SIMULATION,
-                &format!("{t}: Auftrag {nr} verfaellt: {grund}"),
+                &format!("{t}: Auftrag {nr} verfällt: {grund}"),
             )?;
         }
     }

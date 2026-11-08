@@ -160,7 +160,7 @@ impl Leser<'_> {
         loop {
             self.leer();
             if self.sieh() != Some(b'"') {
-                return Err(format!("Schluessel erwartet bei {}", self.pos));
+                return Err(format!("Schlüssel erwartet bei {}", self.pos));
             }
             let k = self.zeichenkette()?;
             self.leer();
@@ -226,7 +226,7 @@ impl Leser<'_> {
                 })
         };
         if !gueltig {
-            return Err(format!("Zahl {text:?} ungueltig"));
+            return Err(format!("Zahl {text:?} ungültig"));
         }
         Ok(Json::Zahl(text.to_string()))
     }
@@ -235,7 +235,7 @@ impl Leser<'_> {
         let mut wert = 0_u32;
         for _ in 0..4 {
             let c = self.nimm().ok_or("Escape offen")?;
-            let d = char::from(c).to_digit(16).ok_or("Escape ungueltig")?;
+            let d = char::from(c).to_digit(16).ok_or("Escape ungültig")?;
             wert = wert
                 .checked_mul(16)
                 .and_then(|w| w.checked_add(d))
@@ -268,7 +268,7 @@ impl Leser<'_> {
                                 self.erwarte(b"\\u")?;
                                 let tief = self.vier_hex()?;
                                 if !(0xDC00..0xE000).contains(&tief) {
-                                    return Err("Ersatzpaar ungueltig".into());
+                                    return Err("Ersatzpaar ungültig".into());
                                 }
                                 hoch.checked_sub(0xD800)
                                     .and_then(|h| h.checked_mul(0x400))
@@ -278,9 +278,9 @@ impl Leser<'_> {
                             } else {
                                 hoch
                             };
-                            char::from_u32(code).ok_or("Zeichen ungueltig")?
+                            char::from_u32(code).ok_or("Zeichen ungültig")?
                         }
-                        _ => return Err("Escape ungueltig".into()),
+                        _ => return Err("Escape ungültig".into()),
                     };
                     let mut puffer = [0_u8; 4];
                     roh.extend_from_slice(zeichen.encode_utf8(&mut puffer).as_bytes());

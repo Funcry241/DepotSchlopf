@@ -72,7 +72,7 @@ impl Anbieter {
                 Anbieter::AlphaVantage => (
                     8..=64,
                     |b| b.is_ascii_uppercase() || b.is_ascii_digit(),
-                    "Grossbuchstaben und Ziffern",
+                    "Großbuchstaben und Ziffern",
                 ),
                 Anbieter::Tiingo => (
                     20..=64,
@@ -82,14 +82,14 @@ impl Anbieter {
             };
         if !laenge.contains(&t.len()) {
             return Err(format!(
-                "Schluessel {}: {} bis {} Zeichen erwartet",
+                "Schlüssel {}: {} bis {} Zeichen erwartet",
                 self.dienst(),
                 laenge.start(),
                 laenge.end()
             ));
         }
         if !t.bytes().all(zeichen) {
-            return Err(format!("Schluessel {}: nur {art} erlaubt", self.dienst()));
+            return Err(format!("Schlüssel {}: nur {art} erlaubt", self.dienst()));
         }
         Ok(())
     }
@@ -102,7 +102,7 @@ pub struct Schluessel(String);
 
 impl fmt::Debug for Schluessel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Schluessel(***)")
+        f.write_str("Schlüssel(***)")
     }
 }
 
@@ -168,7 +168,7 @@ impl Schluessel {
         let adresse = anbieter.adresse();
         let hinweis = || {
             format!(
-                "Schluessel fehlt. In der Einrichtung hinterlegen oder einmal anlegen mit: cmdkey /generic:{adresse} /user:depotschlopf /pass"
+                "Schlüssel fehlt. In der Einrichtung hinterlegen oder einmal anlegen mit: cmdkey /generic:{adresse} /user:depotschlopf /pass"
             )
         };
         let store = Store::new().map_err(|e| format!("Anmeldeverwaltung: {e}"))?;
@@ -192,7 +192,7 @@ impl Schluessel {
     /// Immer.
     #[cfg(not(windows))]
     pub fn aus_anmeldeverwaltung(_anbieter: Anbieter) -> Result<Schluessel, String> {
-        Err("Der Schluessel liegt nur in der Windows-Anmeldeinformationsverwaltung.".into())
+        Err("Der Schlüssel liegt nur in der Windows-Anmeldeinformationsverwaltung.".into())
     }
 }
 

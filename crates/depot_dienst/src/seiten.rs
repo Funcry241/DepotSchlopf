@@ -39,13 +39,13 @@ label{display:block;margin:6px 0}\
 .selten{border:2px solid var(--halt);background:#fff1f0}\
 @media(prefers-color-scheme:dark){.selten{background:#2b1d1d}}\
 .selten>h2{color:var(--halt)}\
-.schluessel-tabelle input{width:100%}.schluessel-tabelle td{overflow-wrap:anywhere}\
-@media(max-width:600px){.schluessel-tabelle,.schluessel-tabelle tbody,\
-.schluessel-tabelle tr,.schluessel-tabelle td{display:block;width:100%}\
-.schluessel-tabelle tr:first-child{display:none}.schluessel-tabelle td{border:0}\
-.schluessel-tabelle tr{border-bottom:1px solid var(--linie);padding:8px 0}\
-.schluessel-tabelle td[data-titel]::before{content:attr(data-titel) \": \";font-weight:600}\
-.schluessel-tabelle button{margin-top:6px}}";
+.schlüssel-tabelle input{width:100%}.schlüssel-tabelle td{overflow-wrap:anywhere}\
+@media(max-width:600px){.schlüssel-tabelle,.schlüssel-tabelle tbody,\
+.schlüssel-tabelle tr,.schlüssel-tabelle td{display:block;width:100%}\
+.schlüssel-tabelle tr:first-child{display:none}.schlüssel-tabelle td{border:0}\
+.schlüssel-tabelle tr{border-bottom:1px solid var(--linie);padding:8px 0}\
+.schlüssel-tabelle td[data-titel]::before{content:attr(data-titel) \": \";font-weight:600}\
+.schlüssel-tabelle button{margin-top:6px}}";
 
 /// Ein Bedienelement zu einem Auftrag und seinem aktuellen Stand.
 fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {

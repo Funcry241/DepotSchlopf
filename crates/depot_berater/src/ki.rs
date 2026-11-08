@@ -216,7 +216,7 @@ impl<N: Netz> KiBerater<N> {
         };
         let (eintraege, _) = anbieter::lies_alle(&text);
         anbieter::pausiert(&eintraege, self.protokoll_wer(), jetzt)
-            .then(|| "Anbieterlimit, Wartezeit laeuft noch".to_string())
+            .then(|| "Anbieterlimit, Wartezeit läuft noch".to_string())
     }
 
     fn protokoll_wer(&self) -> anbieter::Wer {
@@ -259,7 +259,7 @@ impl<N: Netz> KiBerater<N> {
     fn sperre(&mut self, grund: &str) -> String {
         self.gesperrt = true;
         let text = format!(
-            "{:?} am Kostenschutz gesperrt: {grund}\nPruefen, dann diese Datei loeschen.\n",
+            "{:?} am Kostenschutz gesperrt: {grund}\nPrüfen, dann diese Datei löschen.\n",
             self.wer
         );
         match fs::write(&self.sperre, text) {
@@ -372,7 +372,7 @@ impl<N: Netz> KiBerater<N> {
             kosten: "keine Kosten".into(),
         };
         let Some(schluessel) = self.schluessel.clone() else {
-            return ohne("kein Schluessel".into());
+            return ohne("kein Schlüssel".into());
         };
         if self.gesperrt() {
             return ohne("KI gesperrt".into());
@@ -390,7 +390,7 @@ impl<N: Netz> KiBerater<N> {
         // gesicherte Obergrenze.
         let inhalt = self.anbieter.anfrage(&deckel, system, frage);
         if !erlaubnis.eingabe_passt(&inhalt) {
-            return ohne("Anfrage ueber dem Deckel, nicht gesendet".into());
+            return ohne("Anfrage über dem Deckel, nicht gesendet".into());
         }
         let mut bearer = String::new();
         let kopf = self.anbieter.kopf(schluessel.als_str(), &mut bearer);
@@ -473,17 +473,15 @@ fn ueberschreitung(
 ) -> Option<String> {
     match ist {
         None => Some("Kosten nicht berechenbar".to_string()),
-        Some(c) if c > reserviert => {
-            Some(format!("{} Cent ueber {} reserviert", c.0, reserviert.0))
-        }
+        Some(c) if c > reserviert => Some(format!("{} Cent über {} reserviert", c.0, reserviert.0)),
         Some(_) if v.suchen > 0 => Some(format!("{} Suchen, keine erlaubt", v.suchen)),
         Some(_) if v.token_ein > u64::from(deckel.max_token_ein()) => Some(format!(
-            "{} Eingabe-Token ueber {} erlaubt",
+            "{} Eingabe-Token über {} erlaubt",
             v.token_ein,
             deckel.max_token_ein()
         )),
         Some(_) if v.token_aus > u64::from(deckel.max_token_aus()) => Some(format!(
-            "{} Ausgabe-Token ueber {} erlaubt",
+            "{} Ausgabe-Token über {} erlaubt",
             v.token_aus,
             deckel.max_token_aus()
         )),
@@ -494,16 +492,16 @@ fn ueberschreitung(
 /// Die Ablehnung in Worten fuer Journal und Protokoll.
 fn ablehnung_text(e: Ausgang) -> &'static str {
     match e {
-        Ausgang::Limit => "Anbieterlimit erreicht, naechster Versuch beim naechsten Papiertag",
+        Ausgang::Limit => "Anbieterlimit erreicht, nächster Versuch beim nächsten Papiertag",
         Ausgang::Guthaben => "Guthaben beim Anbieter fehlt",
-        Ausgang::Abgelehnt => "Anbieter lehnt den Schluessel ab",
-        Ausgang::Ueberlastet => "Anbieter ueberlastet oder gestoert",
+        Ausgang::Abgelehnt => "Anbieter lehnt den Schlüssel ab",
+        Ausgang::Ueberlastet => "Anbieter überlastet oder gestört",
         _ => "Anbieter lehnt ab",
     }
 }
 
 /// Meldung, wenn eine Antwort den Schluessel enthaelt. Sie nennt ihn nicht.
-const GEHEIMNIS: &str = "Antwort enthielt den Schluessel des Anbieters; verworfen";
+const GEHEIMNIS: &str = "Antwort enthielt den Schlüssel des Anbieters; verworfen";
 
 fn kostenzeile(ist: Option<i64>, reserviert: i64, v: Verbrauch) -> String {
     let ist = ist.map_or_else(|| "?".into(), |c| c.to_string());

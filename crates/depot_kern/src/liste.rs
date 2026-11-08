@@ -64,13 +64,8 @@ const WERTE: [Eintrag<'static>; 15] = [
         "MBG.DEX",
         "Mercedes-Benz Group",
     ),
-    (
-        "DE0008430026",
-        Boerse::Xetra,
-        "MUV2.DEX",
-        "Muenchener Rueck",
-    ),
-    ("DE0005810055", Boerse::Xetra, "DB1.DEX", "Deutsche Boerse"),
+    ("DE0008430026", Boerse::Xetra, "MUV2.DEX", "Münchener Rück"),
+    ("DE0005810055", Boerse::Xetra, "DB1.DEX", "Deutsche Börse"),
     ("DE0006231004", Boerse::Xetra, "IFX.DEX", "Infineon"),
     ("DE0005190003", Boerse::Xetra, "BMW.DEX", "BMW"),
     ("US46625H1005", Boerse::Nyse, "JPM", "JPMorgan Chase"),
@@ -119,7 +114,7 @@ pub fn pruefe_liste(eintraege: &[Eintrag<'_>]) -> Result<Vec<Wert>, String> {
     for (isin, boerse, kuerzel, name) in eintraege {
         let isin = Isin::neu(isin).map_err(|e| format!("Liste: ISIN {isin}: {e:?}"))?;
         if !kuerzel_gueltig(*boerse, kuerzel) {
-            return Err(format!("Liste: Kuerzel {kuerzel:?} ungueltig"));
+            return Err(format!("Liste: Kürzel {kuerzel:?} ungültig"));
         }
         if werte
             .iter()
@@ -141,7 +136,7 @@ pub fn pruefe_liste(eintraege: &[Eintrag<'_>]) -> Result<Vec<Wert>, String> {
         let n = werte.iter().filter(|w| quelle(w.boerse) == q).count();
         if n > hoechstens_werte(q) {
             return Err(format!(
-                "Liste: {n} Werte fuer {q}, hoechstens {} je Lauf",
+                "Liste: {n} Werte für {q}, hoechstens {} je Lauf",
                 hoechstens_werte(q)
             ));
         }

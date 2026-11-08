@@ -67,10 +67,10 @@ impl KursBeleg {
         kurs: Kurs,
     ) -> Result<KursBeleg, String> {
         if !quelle_gueltig(quelle) {
-            return Err(format!("Quelle `{quelle}` ungueltig"));
+            return Err(format!("Quelle `{quelle}` ungültig"));
         }
         if !abdruck_gueltig(&roh) {
-            return Err("Abdruck der Antwort ungueltig".into());
+            return Err("Abdruck der Antwort ungültig".into());
         }
         if kurs.zeitpunkt() > abruf {
             return Err(format!("Kurs von {isin} nach seinem Abruf"));

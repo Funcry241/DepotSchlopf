@@ -29,7 +29,7 @@ pub fn ordner() -> Option<PathBuf> {
 pub fn inhalt(wurzel: &Path) -> Result<String, String> {
     let w = sicherer_pfad(wurzel)?;
     Ok(format!(
-        "@echo off\r\nrem Autostart von DepotSchlopf. Entfernen ueber die Einrichtung.\r\n\
+        "@echo off\r\nrem Autostart von DepotSchlopf. Entfernen über die Einrichtung.\r\n\
          start \"DepotSchlopf\" /min \"{w}\\{DATEI}\" --ohne-browser\r\n"
     ))
 }
@@ -40,12 +40,12 @@ pub fn inhalt(wurzel: &Path) -> Result<String, String> {
 /// # Errors
 /// Kein gueltiger Text, leer, oder mit Sonderzeichen.
 pub fn sicherer_pfad(p: &Path) -> Result<&str, String> {
-    let w = p.to_str().ok_or("Pfad ist kein gueltiger Text")?;
+    let w = p.to_str().ok_or("Pfad ist kein gültiger Text")?;
     if w.is_empty()
         || w.chars()
             .any(|c| c.is_control() || matches!(c, '"' | '%' | '!' | '^' | '&' | '|' | '<' | '>'))
     {
-        return Err("Pfad enthaelt Sonderzeichen (\" % ! ^ & | < >)".into());
+        return Err("Pfad enthält Sonderzeichen (\" % ! ^ & | < >)".into());
     }
     Ok(w)
 }

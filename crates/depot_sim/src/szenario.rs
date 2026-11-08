@@ -154,7 +154,7 @@ impl Berater for Drehbuch {
             .unwrap_or_else(|| Antwort {
                 prognose: None,
                 verwertbar: true,
-                einschaetzung: "nichts Neues, keine Aenderung".into(),
+                einschaetzung: "nichts Neues, keine Änderung".into(),
                 vorschlag: None,
             })
     }
@@ -300,7 +300,7 @@ fn dachs(w: &Werte) -> Option<Drehbuch> {
                     Some(vorschlag(
                         BeraterId::Dachs,
                         &[
-                            (alpha, 5_000, "bestaetigte Reaktion auf die Zahlen"),
+                            (alpha, 5_000, "bestätigte Reaktion auf die Zahlen"),
                             (beta, 2_000, "unveraendert"),
                             (gamma, 1_500, "unveraendert"),
                         ],

@@ -1462,7 +1462,7 @@ fn order_ohne_kurs_verfaellt_und_gibt_den_topf_wieder_frei() -> Result<(), Strin
     assert_eq!(order.zustand, depot_journal::AuftragsZustand::Verfallen);
     assert!(order.ausfuehrungen.is_empty());
     assert!(journal.stand().begruendungen().iter().any(|(_, _, text)| {
-        text.contains(&format!("Auftrag {nr} verfaellt: kein gepruefter Kurs"))
+        text.contains(&format!("Auftrag {nr} verfällt: kein geprüfter Kurs"))
     }));
     assert!(
         journal

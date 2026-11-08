@@ -49,10 +49,10 @@ pub fn system(wer: BeraterId, grenzen: &Grenzen) -> String {
 um Papiergeld: echte Kurse, aber kein echtes Geld. Du beobachtest, was in der Welt gerade \
 passiert und was angekuendigt ist (Zahlen, Termine, Treffen, Nachrichten). \
 Handelbar sind nur die genannten Werte. Keine Hebel, keine \
-Leerverkaeufe, keine Derivate. Ausgefuehrt wird fruehestens am ersten Boersenschluss nach Versand. Das Regelwerk setzt \
+Leerverkaeufe, keine Derivate. Ausgeführt wird frühestens am ersten Börsenschluss nach Versand. Das Regelwerk setzt \
 die Grenzen: hoechstens {werte} Werte je Topf, je Wert hoechstens {anteil} des Topfs, der Rest \
 ist Bargeld; Auftraege unter {min} EUR entfallen. Du hast keine Websuche; entscheide aus den \
-genannten Kursen, Terminen und Nachrichten und aus deinem Wissen. Begruende knapp und sachlich, auf Deutsch. \
+genannten Kursen, Terminen und Nachrichten und aus deinem Wissen. Begründe knapp und sachlich, auf Deutsch. \
 Antworte am Ende ausschliesslich mit dem verlangten JSON-Objekt, ohne weiteren Text.",
         wer = name(wer),
         werte = grenzen.max_werte(),
@@ -87,7 +87,7 @@ fn lage_text(lage: &Lage<'_>, universum: &Universum) -> String {
                 .and_then(Preis::aus_cent);
             let _ = writeln!(
                 t,
-                "- {} ({isin}): {stueck} Stueck, Wert {} EUR",
+                "- {} ({isin}): {stueck} Stück, Wert {} EUR",
                 namen.get(isin).copied().unwrap_or("?"),
                 euro(wert)
             );
@@ -190,16 +190,16 @@ pub fn vorbereitung_frage(
 /// Die Frage nach Zielgewichten fuer den eigenen Topf.
 pub fn vorschlag_frage(lage: &Lage<'_>, universum: &Universum) -> String {
     format!(
-        "{}\nAufgabe: Schlage Zielgewichte fuer deinen Topf vor. Antworte mit:\n\
+        "{}\nAufgabe: Schlage Zielgewichte für deinen Topf vor. Antworte mit:\n\
 {{\"einschaetzung\": \"Lage in zwei bis drei Saetzen\", \"ziele\": [{{\"isin\": \"...\", \
 \"gewicht_bp\": 2500, \"begruendung\": \"...\"}}]}}\n\
 \"ziele\" nennt alle Werte, die der Topf danach halten soll; nicht genannte Werte werden \
 verkauft. gewicht_bp in Basispunkten (10000 = 100 %), Summe hoechstens 10000, der Rest ist \
-Bargeld. Willst du nichts aendern, setze \"ziele\": null.\n\
+Bargeld. Willst du nichts ändern, setze \"ziele\": null.\n\
 Zusaetzlich kannst du getrennt vom Handel eine nachpruefbare Weltprognose abgeben. Fuege dazu \n\
 das Feld \"prognose\": {{\"ereignis_nr\": 1, \"isin\": \"...\", \"richtung\": \"steigt\", \n\
 \"handelstage\": 3, \"begruendung\": \"konkrete Wirkung\", \"widerlegung\": \"was wuerde dich widerlegen?\"}} hinzu. \n\
-Waehle genau ein nummeriertes Ereignis und einen Wert mit Kurs. Richtung ist steigt oder faellt, \n\
+Wähle genau ein nummeriertes Ereignis und einen Wert mit Kurs. Richtung ist steigt oder faellt, \n\
 Horizont 1 bis 20 Handelstage, Texte je ein kurzer Satz. Wenn keine These tragfaehig ist, setze \"prognose\": null.",
         lage_text(lage, universum)
     )
@@ -216,9 +216,9 @@ pub fn urteil_frage(lage: &Lage<'_>, universum: &Universum, v: &Vorschlag) -> St
         let _ = writeln!(ziele, "- {isin}: {}, {grund}", prozent(*bp));
     }
     format!(
-        "{}\nDer andere Berater ({}) schlaegt fuer diesen Topf vor:\n{ziele}\n\
-Aufgabe: Pruefe den Vorschlag als Zweitmeinung. Stimme nur zu, wenn er aus der beobachteten \
-Lage begruendet ist. Antworte mit:\n\
+        "{}\nDer andere Berater ({}) schlaegt für diesen Topf vor:\n{ziele}\n\
+Aufgabe: Prüfe den Vorschlag als Zweitmeinung. Stimme nur zu, wenn er aus der beobachteten \
+Lage begründet ist. Antworte mit:\n\
 {{\"zustimmung\": true oder false, \"begruendung\": \"...\"}}",
         lage_text(lage, universum),
         name(v.berater)

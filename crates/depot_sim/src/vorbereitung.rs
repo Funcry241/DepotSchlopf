@@ -99,7 +99,7 @@ pub fn vorbereiten<'a>(
     {
         return Ok("Vorbereitung heute bereits begonnen; keine erneuten KI-Aufrufe, auch nach einem Abbruch.".into());
     }
-    let fuer = naechster_handelstag(tag).ok_or("Kein naechster Handelstag")?;
+    let fuer = naechster_handelstag(tag).ok_or("Kein nächster Handelstag")?;
     // Vor beiden Antworten und allen Reservierungen fixieren. Kein Ergebnis des anderen
     // Beraters wird der zweiten KI uebergeben.
     let ereignisse = sichtbare_ereignisse(&weltbelege_am(j.stand(), fuer, zeit));
