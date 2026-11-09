@@ -934,6 +934,17 @@ fn gesamtstatus_ergaenzt_den_zeitplan() -> Result<(), String> {
     assert!(!s.contains("Vollständig bereit"), "{s}");
     let d = mit(true)?;
     assert!(d.schritt(t).is_none());
+    if let Some(lage) = d.sperre().lage.as_mut() {
+        lage.bild.betrieb = depot_lage::Betrieb::OhneKi(vec!["Maus: kein Schlüssel.".into()]);
+    }
+    let s = live(&d);
+    assert!(
+        s.contains(">KI eingeschränkt<") && s.contains("Automatik: Zeitplan aus"),
+        "{s}"
+    );
+    assert!(s.contains("Maus: kein Schlüssel."), "{s}");
+    let d = mit(true)?;
+    assert!(d.schritt(t).is_none());
     // Ab Werk ist der Zeitplan aus: Nichts laeuft von selbst.
     assert!(!d.sperre().zeitplan.an);
     assert!(live(&d).contains(">Pausiert<"), "{}", live(&d));
@@ -1719,7 +1730,7 @@ fn hinweis_des_laufs_steht_gross_in_der_live_ansicht() -> Result<(), String> {
         leeres_lagebild(),
     ));
     let t = donnerstag(17, 45)?;
-    d.einreihen(Art::Kurse, Anlass::Zeitplan)
+    d.einreihen(Art::Kurse, Anlass::Hand)
         .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
     let (nr, kind) = some(d.schritt(t), "Start")?;
     d.verfolge(nr, kind, || donnerstag(17, 55).ok());
@@ -2163,6 +2174,68 @@ fn wartender_papiertag_startet_bei_ausgeschaltetem_zeitplan_nicht() -> Result<()
     Ok(())
 }
 
+#[test]
+fn ausschalten_entfernt_wartenden_abruf_und_wiedereinschalten_holt_ihn_einmal_nach()
+-> Result<(), String> {
+    let wurzel = eingeschaltet(ordner()?)?;
+    let d = Arc::new(Dienst::neu(
+        wurzel.clone(),
+        TOKEN.into(),
+        echo_starter(true),
+        lagebild_mit_schluesseln(true),
+    ));
+    d.sperre().boersen = vec![Boerse::Xetra];
+    let t = donnerstag(17, 46)?;
+    let tag = some(t.datum(), "Handelstag")?;
+    let (nr, kind) = some(d.schritt(t), "Terminabruf")?;
+    assert!(d.schritt(t).is_none());
+    assert_eq!(
+        wartend(&d),
+        vec![(Art::KurseVon(Boerse::Xetra), Anlass::Zeitplan)]
+    );
+    assert_eq!(d.sperre().erledigt.kurse, None);
+    d.einreihen(Art::Nachrichten, Anlass::Hand)?;
+
+    let aus = formular_post("/zeitplan", &format!("t={TOKEN}&aktion=aus"));
+    assert!(text(&behandle(&d, &Attrappe::default(), &aus, t)).contains("m=zeitplan_aus"));
+    assert_eq!(wartend(&d), vec![(Art::Nachrichten, Anlass::Hand)]);
+    assert_eq!(
+        d.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Termine)
+    );
+    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    let (nr, kind) = some(d.schritt(t), "manuelle Schlagzeilen")?;
+    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    assert!(d.schritt(t).is_none());
+    assert_eq!(d.sperre().erledigt.kurse, None);
+
+    let an = formular_post("/zeitplan", &format!("t={TOKEN}&aktion=an"));
+    assert!(text(&behandle(&d, &Attrappe::default(), &an, t)).contains("m=zeitplan_an"));
+    let (nr, kind) = some(d.schritt(t), "nachgeholter Kursabruf")?;
+    assert_eq!(d.sperre().erledigt.kurse, Some(tag));
+    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    let live = get(&d, "/", t);
+    assert!(
+        live.contains("Als Nächstes: Papiertag (Zeitplan)"),
+        "{live}"
+    );
+    assert!(
+        live.contains("Danach laut Zeitplan: Termine abrufen am Fr"),
+        "{live}"
+    );
+    drop(d);
+
+    let neu = nur_xetra(wurzel);
+    let (nr, kind) = some(neu.schritt(t), "Papiertag nach Neustart")?;
+    assert_eq!(
+        neu.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Papier)
+    );
+    neu.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    assert!(neu.schritt(t).is_none());
+    Ok(())
+}
+
 /// Der Kindprozess liefert dieselbe lange Ausgabe unter Windows und Linux.
 #[test]
 fn diagnose_kindprozess() {
@@ -2395,6 +2468,9 @@ fn vorbereitungsautomatik_folgt_erfolgreichen_nachrichten_und_bleibt_nach_neusta
         fs::write(wurzel.join("daten/zeitplan.txt"), z.zeitplan.als_text())
             .map_err(|e| e.to_string())?;
     }
+    let einrichtung = get(&d, "/einrichtung", t);
+    assert!(einrichtung.contains("Diese Vorbereitung nutzt KI-Budget."));
+    assert!(!einrichtung.contains("keine zusätzlichen KI-Aufrufe"));
     for erwartet in [Art::Nachrichten, Art::Vorbereiten] {
         let (nr, kind) = d.schritt(t).ok_or("Auftrag fehlt")?;
         assert_eq!(d.sperre().laufend.as_ref().map(|a| a.art), Some(erwartet));

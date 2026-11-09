@@ -252,6 +252,10 @@ impl Zustand {
             .find(|a| matches!(a.art, Art::Update | Art::UpdatePruefen))
     }
 
+    pub(crate) fn update_wartet_auf_ruhe(&self) -> bool {
+        self.laufend.is_some() || !self.warteschlange.is_empty()
+    }
+
     /// Der letzte erfolgreiche Suchlauf kann einen konkreten Commit anbieten.
     pub(crate) fn update_angebot(&self) -> Option<(&str, &[String])> {
         let a = self.letzter_update_lauf()?;
@@ -698,6 +702,9 @@ impl Dienst {
         }
         schreibe_ganz(&zeitplan_pfad(&self.wurzel), &plan.als_text())
             .map_err(ZeitplanAbgelehnt::Datei)?;
+        if !plan.an {
+            z.warteschlange.retain(|a| a.anlass != Anlass::Zeitplan);
+        }
         z.zeitplan = plan;
         z.zeitplan_fehler = None;
         Ok(())
@@ -709,7 +716,7 @@ impl Dienst {
     pub fn schritt(&self, jetzt: Zeitpunkt) -> Option<(u64, Child)> {
         let mut z = self.sperre();
         (!self.update_offen()).then_some(())?;
-        self.zeitplan_pruefen(&mut z, jetzt);
+        Self::zeitplan_pruefen(&mut z, jetzt);
         if z.laufend.is_none()
             && let Some(wartend) = z.warteschlange.pop_front()
         {
@@ -754,11 +761,9 @@ impl Dienst {
             }
             z.verlauf_fehler = None;
             self.protokoll_beginnen(&mut z, &auftrag);
-            // Den Papiertag des Zeitplans erst beim Start als gestartet vermerken: Endet der
-            // Dienst, waehrend er nur wartet, holt der naechste Start ihn nach.
-            if art == Art::Papier
-                && anlass == Anlass::Zeitplan
-                && let Err(e) = self.papier_vermerken(&mut z, jetzt)
+            if anlass == Anlass::Zeitplan
+                && matches!(art, Art::Termine | Art::KurseVon(_) | Art::Papier)
+                && let Err(e) = self.zeitplan_start_vermerken(&mut z, art, jetzt)
             {
                 auftrag.protokoll.push(format!("Nicht gestartet: {e}"));
                 auftrag.ende = Some(jetzt);
@@ -819,7 +824,7 @@ impl Dienst {
             .spawn()
     }
 
-    fn zeitplan_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
+    fn zeitplan_pruefen(z: &mut Zustand, jetzt: Zeitpunkt) {
         if z.neustart || z.erledigt_fehler.is_some() {
             return;
         }
@@ -848,29 +853,7 @@ impl Dienst {
             }
             return;
         };
-        // Der Papiertag wird erst bei seinem Start vermerkt (`schritt`); wartet er schon, bleibt
-        // es bei dem einen.
-        if art == Art::Papier {
-            let _ = einreihen(z, art, Anlass::Zeitplan, None);
-            return;
-        }
-        // Bei voller Warteschlange bleibt der Abruf faellig. Vor der Ausfuehrung wird
-        // er dauerhaft vermerkt, damit ein Neustart ihn nicht doppelt startet.
-        if einreihen(z, art, Anlass::Zeitplan, None).is_err() {
-            return;
-        }
-        let mut neu = z.erledigt;
-        neu.setze(art, tag);
-        match schreibe_ganz(&erledigt_pfad(&self.wurzel), &neu.als_text()) {
-            Ok(()) => {
-                z.erledigt = neu;
-            }
-            Err(e) => {
-                let _ = z.warteschlange.pop_back();
-                z.zeitplan.an = false;
-                z.zeitplan_fehler = Some(format!("Zeitplan angehalten: {e}"));
-            }
-        }
+        let _ = einreihen(z, art, Anlass::Zeitplan, None);
     }
 
     /// Liest Ausgabe und Ende eines gestarteten Auftrags ins Protokoll. Blockiert bis zum Ende.
@@ -928,15 +911,20 @@ impl Dienst {
         }
         // Folgt jetzt der Papiertag, steht er gleich in der Warteschlange.
         if let Some(jetzt) = ende {
-            self.zeitplan_pruefen(&mut z, jetzt);
+            Self::zeitplan_pruefen(&mut z, jetzt);
         }
     }
 
-    /// Vermerkt den Papiertag des Zeitplans als heute gestartet, bevor er startet.
-    fn papier_vermerken(&self, z: &mut Zustand, jetzt: Zeitpunkt) -> Result<(), String> {
+    /// Vermerkt den Beginn dauerhaft vor dem Prozessstart. Wartende Aufträge bleiben fällig.
+    fn zeitplan_start_vermerken(
+        &self,
+        z: &mut Zustand,
+        art: Art,
+        jetzt: Zeitpunkt,
+    ) -> Result<(), String> {
         let (tag, ..) = ortszeit(jetzt).ok_or("Uhr liefert keinen Tag")?;
         let mut neu = z.erledigt;
-        neu.papier = Some(tag);
+        neu.setze(art, tag);
         match schreibe_ganz(&erledigt_pfad(&self.wurzel), &neu.als_text()) {
             Ok(()) => {
                 z.erledigt = neu;
@@ -1028,7 +1016,7 @@ fn einreihen(
     {
         return Err("Update läuft, wartet oder startet den Dienst neu");
     }
-    if art == Art::Update && (z.laufend.is_some() || !z.warteschlange.is_empty()) {
+    if art == Art::Update && z.update_wartet_auf_ruhe() {
         return Err("Update nur, wenn nichts läuft oder wartet");
     }
     if z.laufend.as_ref().is_some_and(|a| a.art == art)
@@ -1175,16 +1163,17 @@ fn vorbereitung_faellig(z: &Zustand, jetzt: Zeitpunkt) -> bool {
 }
 
 fn zeitplan_auftrag_erlaubt(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> bool {
+    if !z.zeitplan.an || z.erledigt_fehler.is_some() || z.zeitplan_fehler.is_some() {
+        return false;
+    }
     match art {
-        Art::Papier => {
-            z.erledigt_fehler.is_none()
-                && ortszeit(jetzt).is_some_and(|(tag, h, m, _, _)| {
-                    faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen)
-                        == Some(Art::Papier)
-                })
+        Art::Termine | Art::KurseVon(_) | Art::Papier => {
+            ortszeit(jetzt).is_some_and(|(tag, h, m, _, _)| {
+                faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen) == Some(art)
+            })
         }
         Art::Nachrichten => rss_zeitplan_an(z, jetzt),
         Art::Vorbereiten => vorbereitung_faellig(z, jetzt),
-        _ => true,
+        _ => false,
     }
 }

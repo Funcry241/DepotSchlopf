@@ -223,6 +223,30 @@ fn gefundenes_update_ist_global_sichtbar_und_braucht_weiter_bestaetigung() -> Re
 }
 
 #[test]
+fn einrichtung_zeigt_update_und_sperrt_den_knopf_bis_alle_auftraege_fertig_sind()
+-> Result<(), String> {
+    let d = dienst(ordner()?);
+    let t = mittag()?;
+    suche_update(&d, t)?;
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    let pruefe_knopf = || -> Result<(), String> {
+        let html = get(&d, "/teil/update")?;
+        assert!(html.contains("Eine neue Version ist verfügbar."));
+        assert!(html.contains("disabled>Update einspielen</button>"));
+        assert!(html.contains("Möglich, sobald kein anderer Auftrag mehr läuft oder wartet."));
+        Ok(())
+    };
+    pruefe_knopf()?;
+    assert!(bestaetige_update(&d)?.contains("m=update_belegt"));
+    let (nr, kind) = some(d.schritt(t), "Terminabruf")?;
+    pruefe_knopf()?;
+    d.verfolge(nr, kind, || mittag().ok());
+    let html = get(&d, "/teil/update")?;
+    assert!(html.contains(&format!("sha={UPDATE_SHA}\">Update einspielen</a>")));
+    Ok(())
+}
+
+#[test]
 fn update_laeuft_allein_und_sperrt_auftraege_bis_zum_neustart() -> Result<(), String> {
     let wurzel = ordner()?;
     let t = mittag()?;

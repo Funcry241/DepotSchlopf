@@ -1,4 +1,8 @@
 klasse: Funktion
-zweck: Bei einem Börsenabruf mit alten Schlusskursen den erwarteten Handelstag und das jüngste belegte Kursdatum anzeigen.
+zweck: Zeitplan, Auftragswarteschlange, KI-Status und Update-Schaltfläche in der Oberfläche mit dem Dienst abgleichen.
 pfade:
-crates/depot_sammler/src/main.rs
+README.md
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/tests/dienst.rs
+crates/depot_dienst/tests/update.rs

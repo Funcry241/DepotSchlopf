@@ -269,7 +269,7 @@ fn einstellungs_meldung(code: &str) -> Option<(&'static str, &'static str)> {
         ),
         "zeitplan_aus" => (
             "gut",
-            "Zeitplan ausgeschaltet. Bereits gestartete Läufe laufen zu Ende.",
+            "Zeitplan ausgeschaltet. Wartende automatische Aufträge wurden entfernt. Laufende Aufträge laufen zu Ende.",
         ),
         "zeitplan_neu_laden" => (
             "offen",
@@ -574,6 +574,11 @@ fn weiter_text(z: &Zustand, heute: Option<Datum>) -> String {
     }
     let naechster = naechster.trim_end_matches('.');
     if z.zeitplan.an && heute.is_some() {
+        let naechster = z
+            .warteschlange
+            .iter()
+            .find(|a| a.anlass == Anlass::Zeitplan)
+            .map_or(naechster, |a| a.art.name());
         format!("Nach Zeitplan geht es von selbst weiter: {naechster}.")
     } else {
         format!(
@@ -599,7 +604,13 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     let Some(heute) = heute else {
         return "Uhrzeit unklar (Zeitumstellung); der Zeitplan wartet.".into();
     };
-    let boersenlauf = match naechster_fuer(&z.zeitplan, &z.erledigt, heute, &z.boersen) {
+    let mut erledigt = z.erledigt;
+    for auftrag in &z.warteschlange {
+        if auftrag.anlass == Anlass::Zeitplan {
+            erledigt.setze(auftrag.art, heute);
+        }
+    }
+    let boersenlauf = match naechster_fuer(&z.zeitplan, &erledigt, heute, &z.boersen) {
         Some((art, d, u)) => {
             let mut t = format!(
                 "{} am {} {} um {}",
@@ -619,17 +630,34 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
         None => "Kein Lauf in den nächsten Tagen geplant.".into(),
     };
     if z.zeitplan.nachrichten_an {
-        let vorbereitung = if z.zeitplan.vorbereitung.aktiv() && !crate::zeitplan::handelstag(heute)
-        {
-            " Danach einmal die Vorbereitung des nächsten Handelstags."
-        } else {
-            ""
-        };
         format!(
-            "Schlagzeilen täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten.{vorbereitung} Nächster Börsenlauf: {boersenlauf}"
+            "{boersenlauf} · Schlagzeilen täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten."
         )
     } else {
         boersenlauf
+    }
+}
+
+fn naechster_abschnitt(z: &Zustand, heute: Option<Datum>) -> String {
+    let planung = maskiere(&naechster_text(z, heute));
+    let titel = if z.warteschlange.is_empty() {
+        "Nächster geplanter Lauf: "
+    } else {
+        "Danach laut Zeitplan: "
+    };
+    let titel = if z.zeitplan.an && z.erledigt_fehler.is_none() && z.zeitplan_fehler.is_none() {
+        titel
+    } else {
+        ""
+    };
+    if let Some(a) = z.warteschlange.front() {
+        format!(
+            "<p>Als Nächstes: {} ({})</p><p>{titel}{planung}</p>",
+            maskiere(a.art.name()),
+            anlass_text(a.anlass)
+        )
+    } else {
+        format!("<p>{titel}{planung}</p>")
     }
 }
 
@@ -774,11 +802,7 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
             .collect();
         let _ = write!(s, "<p>Wartet: {}</p>", maskiere(&liste.join(", ")));
     }
-    let _ = write!(
-        s,
-        "<p>Nächster geplanter Lauf: {}</p>",
-        maskiere(&naechster_text(z, heute))
-    );
+    s.push_str(&naechster_abschnitt(z, heute));
     letzter_fehler_hinweis(&mut s, z);
     if !z.verlauf.is_empty() {
         s.push_str(
@@ -876,10 +900,18 @@ fn gesamtstatus_teil(token: &str, z: &Zustand) -> String {
     });
     let (klasse, titel) = match (&journal, b.gruende()) {
         (Some((grund, _)), [einziger]) if grund == einziger => ("offen", "Journal in Arbeit"),
+        _ if matches!(b, depot_lage::Betrieb::OhneKi(_)) => (b.klasse(), "KI eingeschränkt"),
         _ => (b.klasse(), b.titel()),
     };
+    let automatik = if z.erledigt_fehler.is_some() || z.zeitplan_fehler.is_some() {
+        "Zeitplan angehalten"
+    } else if z.zeitplan.an {
+        "Zeitplan an"
+    } else {
+        "Zeitplan aus"
+    };
     let mut s = format!(
-        "<section id=\"betrieb\"><div class=\"kopf {klasse}\">{}</div>",
+        "<section id=\"betrieb\"><div class=\"kopf {klasse}\">{}</div><p>Automatik: {automatik}</p>",
         maskiere(titel)
     );
     let mut gruende = String::new();
@@ -934,11 +966,7 @@ pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String 
         s.push_str("<div class=\"betrieb aktiv\"><strong>Update: Neustart wird vorbereitet.</strong><p>Die Oberfläche verbindet sich von selbst neu.</p>");
     } else {
         s.push_str("<div class=\"betrieb\"><strong>Im Moment läuft kein Auftrag.</strong>");
-        let _ = write!(
-            s,
-            "<p>Nächster geplanter Lauf: {}</p>",
-            maskiere(&naechster_text(z, heute))
-        );
+        s.push_str(&naechster_abschnitt(z, heute));
         if let Some(a) = z.verlauf.front() {
             let (_, ergebnis) = ergebnis(a, z);
             let _ = write!(
@@ -1348,7 +1376,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          Test selbstständig laufen soll.</p>{gespeichert}{voraussetzung}\
          {schalter}\
          <h3>Uhrzeiten und automatische Läufe</h3>\
-         <p>Änderungen gelten erst nach dem Speichern. Beim Einschalten unten werden deine Eingaben gemeinsam gespeichert. Kurs- und Terminläufe sind montags bis freitags, nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten. Das löst keine zusätzlichen KI-Aufrufe aus. \
+         <p>Änderungen gelten erst nach dem Speichern. Beim Einschalten unten werden deine Eingaben gemeinsam gespeichert. Kurs- und Terminläufe sind montags bis freitags, nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten. An börsenfreien Tagen kann ein erfolgreicher Abruf die unten aktivierte Vorbereitung auslösen. Diese Vorbereitung nutzt KI-Budget. \
          Für Xetra ist 17:45 Uhr voreingestellt, kurz nach Börsenschluss.</p>\
          {entwurf_hinweis}\
          <form id=\"zeitplan-formular\" method=\"post\" action=\"/zeitplan\" data-aenderungen data-entwurf=\"{entwurf}\">\
@@ -1361,8 +1389,8 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          Nach dem letzten Kursabruf des Tages den Papiertag starten (wenn ein Abruf des Tages \
          erfolgreich war; gilt nur bei eingeschaltetem Zeitplan)</label>\
          <label><input type=\"checkbox\" name=\"nachrichten_an\" value=\"ja\"{}> \
-         Zusätzlich tagsüber Schlagzeilen abrufen (empfohlen für das Weltmodell, kostenlos, \
-         keine zusätzlichen KI-Aufrufe; gilt nur bei eingeschaltetem Zeitplan)</label>\
+         Zusätzlich tagsüber Schlagzeilen abrufen (empfohlen für das Weltmodell, kostenlos; \
+         gilt nur bei eingeschaltetem Zeitplan)</label>\
          <label><input type=\"checkbox\" name=\"vorbereitung_an\" value=\"ja\"{}> \
          An börsenfreien Tagen den nächsten Handelstag vorbereiten (empfohlen; braucht Schlagzeilen und eingeschalteten Zeitplan; höchstens ein Aufruf je KI und Tag zwischen 08 und 23 Uhr). \
          Erst nach bestätigtem Update verfügbar. Die Aufrufe zählen zum Monatsbudget; der Tagesrahmen und die Reserve der nächsten Erstmeinung haben Vorrang. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
@@ -1448,11 +1476,19 @@ pub(crate) fn update_aktionen(token: &str, start: &str, z: &Zustand) -> String {
         for titel in protokoll.iter().filter_map(|z| z.strip_prefix("  ")) {
             let _ = write!(s, "<li>{}</li>", maskiere(titel));
         }
-        let _ = write!(
-            s,
-            "</ul><p>{}</p>",
-            bestaetigungslink(Art::Update, "Update einspielen", Some(sha))
-        );
+        s.push_str("</ul>");
+        if z.update_wartet_auf_ruhe() {
+            s.push_str(
+                "<p><button type=\"button\" disabled>Update einspielen</button> \
+                 Möglich, sobald kein anderer Auftrag mehr läuft oder wartet.</p>",
+            );
+        } else {
+            let _ = write!(
+                s,
+                "<p>{}</p>",
+                bestaetigungslink(Art::Update, "Update einspielen", Some(sha))
+            );
+        }
     } else if let Some(a) = z
         .letzter_update_lauf()
         .filter(|a| a.art == Art::UpdatePruefen)
