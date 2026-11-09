@@ -414,21 +414,34 @@ pub fn naechster_fuer(
     }
     let mut d = tag;
     for _ in 0..8 {
-        if boersen.iter().any(|b| b.handelstag(d)) {
-            let mut kandidaten: Vec<((u8, u8), Art, bool)> =
-                vec![(plan.termine, Art::Termine, erledigt.termine == Some(d))];
-            kandidaten.extend(
-                abrufe_fuer(plan, d, boersen)
-                    .into_iter()
-                    .map(|(b, u)| (u, Art::KurseVon(b), erledigt.kurse_von(b) == Some(d))),
-            );
-            kandidaten.sort_by_key(|(u, _, _)| *u);
-            // Heute zaehlt auch eine verpasste Uhrzeit: Sie startet beim naechsten Blick.
-            if let Some((u, art, _)) = kandidaten.into_iter().find(|(_, _, schon)| !schon) {
-                return Some((art, d, u));
-            }
+        // Heute zaehlt auch eine verpasste Uhrzeit: Sie startet beim naechsten Blick.
+        if let Some((u, art, _)) = geplante_abrufe(*plan, erledigt, d, boersen)
+            .into_iter()
+            .find(|(_, _, schon)| !schon)
+        {
+            return Some((art, d, u));
         }
         d = tag_danach(d)?;
     }
     None
+}
+
+/// Uhrzeiten und Vormerkungen der Börsenläufe, in der Reihenfolge ihrer Sollzeit.
+pub(crate) fn geplante_abrufe(
+    plan: Zeitplan,
+    erledigt: &Erledigt,
+    tag: Datum,
+    boersen: &[Boerse],
+) -> Vec<((u8, u8), Art, bool)> {
+    if !boersen.iter().any(|b| b.handelstag(tag)) {
+        return Vec::new();
+    }
+    let mut kandidaten = vec![(plan.termine, Art::Termine, erledigt.termine == Some(tag))];
+    kandidaten.extend(
+        abrufe_fuer(&plan, tag, boersen)
+            .into_iter()
+            .map(|(b, u)| (u, Art::KurseVon(b), erledigt.kurse_von(b) == Some(tag))),
+    );
+    kandidaten.sort_by_key(|(u, _, _)| *u);
+    kandidaten
 }
