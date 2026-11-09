@@ -13,7 +13,7 @@ use crate::http::feld;
 use crate::kostenschutz;
 use crate::schluessel::Wer;
 use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand};
-use crate::zeitplan::{Zeitplan, lies_uhrzeit, naechster_fuer, uhrzeit_text};
+use crate::zeitplan::{Zeitplan, geplante_abrufe, lies_uhrzeit, naechster_fuer, uhrzeit_text};
 
 const STIL_DIENST: &str = "\
 nav{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;--nav-akzent:#005c97}\
@@ -31,15 +31,17 @@ background:var(--flaeche);color:var(--text);cursor:pointer}\
 button:disabled{color:var(--leise);border-style:dashed;cursor:default}\
 button:not(:disabled):hover,a.aktion:hover{outline:2px solid currentColor;outline-offset:2px}\
 button:focus-visible,a.aktion:focus-visible{outline:3px solid var(--text);outline-offset:3px}\
-button.primaer,a.primaer{background:#005c97;color:#fff;border:2px solid #005c97;font-weight:700}\
+button.primaer,a.primaer,form.ungespeichert:valid button[data-speichern-hervorheben]:not(:disabled){background:#005c97;color:#fff;border:2px solid #005c97;font-weight:700}\
 button.primaer:disabled{background:var(--flaeche);color:var(--leise);border-color:var(--linie)}\
 button.laeuft{border:2px solid var(--offen);color:var(--offen)}\
 #betriebsleiste{position:sticky;top:0;z-index:1;background:var(--grund);padding:4px 0}\
 .betrieb{border:2px solid var(--linie);border-radius:8px;padding:10px 14px;margin:0}\
 .betrieb.aktiv{border-color:var(--offen)}.betrieb p{margin:4px 0}\
 .betrieb progress{width:90px;max-width:30%;vertical-align:middle;margin-right:8px}\
-.update-angebot{border:2px solid var(--gut);padding:10px 14px;border-radius:8px;margin-top:6px}\
+.update-angebot{border:2px solid var(--linie);padding:10px 14px;border-radius:8px;margin-top:6px}\
 .update-angebot p{margin:0 0 6px}.aktiver-bereich{border:2px solid var(--offen)}\
+.zeitstrahl{list-style:none;margin:0;padding-inline-start:14px;border-inline-start:2px solid var(--linie)}\
+.zeitstrahl li{padding:6px 0}.zeitstrahl li span{margin-inline-start:8px}\
 section[id]{scroll-margin-top:180px}\
 @media(max-width:600px){#betriebsleiste{position:static}}\
 input[type=password],input[type=time]{font:inherit;padding:3px 6px;border:1px solid var(--linie);\
@@ -54,9 +56,6 @@ margin:6px 0}\
 #neuverbinden{padding:12px}\
 @media(max-width:600px),(max-height:700px){.speicher-aktionen{position:static}}\
 label{display:block;margin:6px 0}\
-.selten{border:2px solid var(--halt);background:#fff1f0}\
-@media(prefers-color-scheme:dark){.selten{background:#2b1d1d}}\
-.selten>h2{color:var(--halt)}\
 .zugang-tabelle input{width:100%}.zugang-tabelle td{overflow-wrap:anywhere}\
 @media(max-width:600px){.zugang-tabelle,.zugang-tabelle tbody,\
 .zugang-tabelle tr,.zugang-tabelle td{display:block;width:100%}\
@@ -66,7 +65,7 @@ label{display:block;margin:6px 0}\
 .zugang-tabelle button{margin-top:6px}}";
 
 /// Ein Bedienelement zu einem Auftrag und seinem aktuellen Stand.
-fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
+fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str, primaer: bool) -> String {
     let status = z.auftrag_stand(art).or_else(|| match art {
         Art::Kurse => z
             .auftrag_stand(Art::KurseVon(depot_kern::Boerse::Xetra))
@@ -111,8 +110,9 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
         }
     }
     if matches!(art, Art::Papier | Art::Vorbereiten) {
-        return bestaetigungslink(art, text, None);
+        return bestaetigungslink(art, text, None, primaer);
     }
+    let klasse = if primaer { "primaer" } else { "" };
     let ziel = if art == Art::Einrichten {
         "<input type=\"hidden\" name=\"ziel\" value=\"einrichtung\">"
     } else {
@@ -122,17 +122,18 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str) -> String {
         "<form class=\"knopf\" method=\"post\" action=\"/ausfuehren\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"art\" value=\"{}\">\
-         {ziel}<button class=\"primaer\" type=\"submit\">{}</button></form>",
+         {ziel}<button class=\"{klasse}\" type=\"submit\">{}</button></form>",
         maskiere(token),
         art.kurz(),
         maskiere(text)
     )
 }
 
-fn bestaetigungslink(art: Art, text: &str, sha: Option<&str>) -> String {
+fn bestaetigungslink(art: Art, text: &str, sha: Option<&str>, primaer: bool) -> String {
+    let klasse = if primaer { "aktion primaer" } else { "aktion" };
     let stand = sha.map_or_else(String::new, |s| format!("&amp;sha={}", maskiere(s)));
     format!(
-        "<a class=\"aktion primaer\" href=\"/bestaetigen?art={}{stand}\">{}</a>",
+        "<a class=\"{klasse}\" href=\"/bestaetigen?art={}{stand}\">{}</a>",
         art.kurz(),
         maskiere(text)
     )
@@ -179,20 +180,43 @@ pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> S
 }
 
 /// Das Bedienelement zu einer Abhilfe des Lagebilds.
-fn abhilfe_knopf(token: &str, z: &Zustand, a: Abhilfe) -> Option<String> {
+fn abhilfe_knopf(token: &str, z: &Zustand, a: Abhilfe, primaer: bool) -> Option<String> {
     match a {
-        Abhilfe::JournalEinrichten => Some(auftrag_knopf(token, z, Art::Einrichten, "Einrichten")),
-        Abhilfe::KurseAbrufen => Some(auftrag_knopf(token, z, Art::Kurse, "Kurse abrufen")),
+        Abhilfe::JournalEinrichten => Some(auftrag_knopf(
+            token,
+            z,
+            Art::Einrichten,
+            "Einrichten",
+            primaer,
+        )),
+        Abhilfe::KurseAbrufen => Some(auftrag_knopf(
+            token,
+            z,
+            Art::Kurse,
+            "Kurse abrufen",
+            primaer,
+        )),
         Abhilfe::Vorbereiten => Some(auftrag_knopf(
             token,
             z,
             Art::Vorbereiten,
             "Vorbereitung starten",
+            primaer,
         )),
-        Abhilfe::TermineAbrufen => Some(auftrag_knopf(token, z, Art::Termine, "Termine abrufen")),
-        Abhilfe::PapiertagStarten => {
-            Some(auftrag_knopf(token, z, Art::Papier, "Papiertag starten"))
-        }
+        Abhilfe::TermineAbrufen => Some(auftrag_knopf(
+            token,
+            z,
+            Art::Termine,
+            "Termine abrufen",
+            primaer,
+        )),
+        Abhilfe::PapiertagStarten => Some(auftrag_knopf(
+            token,
+            z,
+            Art::Papier,
+            "Papiertag starten",
+            primaer,
+        )),
         Abhilfe::SchluesselKursquelle
         | Abhilfe::SchluesselKursquelleUs
         | Abhilfe::SchluesselBerater(_) => {
@@ -623,7 +647,7 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
                 && z.zeitplan.papier_danach
                 && crate::zeitplan::letzter_abruf_fuer(&z.zeitplan, d, b, &z.boersen)
             {
-                t.push_str(", danach der Papiertag");
+                t.push_str(", danach Papiertag bei mindestens einem erfolgreichen Kursabruf");
             }
             t
         }
@@ -635,6 +659,118 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
         )
     } else {
         boersenlauf
+    }
+}
+
+fn zeitstrahl(z: &Zustand, heute: Option<Datum>) -> String {
+    let mut s = String::from("<section id=\"zeitstrahl\"><h2>Zeitstrahl</h2>");
+    if let Some(f) = &z.verlauf_fehler {
+        let _ = write!(
+            s,
+            "<p class=\"halt\">Zeitplan angehalten: {}</p>",
+            maskiere(f)
+        );
+    } else if !z.zeitplan.an || z.zeitplan_fehler.is_some() || z.erledigt_fehler.is_some() {
+        let _ = write!(s, "<p>{}</p>", maskiere(&naechster_text(z, heute)));
+    } else if let Some(heute) = heute {
+        s.push_str("<p class=\"leise\">Geplante Startzeiten in Frankfurter Ortszeit.</p>");
+        zeitstrahl_tag(&mut s, z, heute, true);
+        if let Some((_, tag, _)) = naechster_fuer(&z.zeitplan, &z.erledigt, heute, &z.boersen)
+            && tag != heute
+        {
+            zeitstrahl_tag(&mut s, z, tag, false);
+        }
+        if z.zeitplan.nachrichten_an {
+            s.push_str("<p><b>Schlagzeilen</b> · täglich von 08:00 bis vor 23:00 Uhr, frühestens alle 90 Minuten, wenn der Dienst frei ist.</p>");
+            if z.zeitplan.vorbereitung.aktiv() {
+                s.push_str("<p><b>Vorbereitung</b> · an börsenfreien Tagen nach einem erfolgreichen Schlagzeilenabruf.</p>");
+            }
+        }
+    } else {
+        s.push_str("<p>Die aktuelle Frankfurter Ortszeit ist nicht verfügbar.</p>");
+    }
+    s.push_str("</section>");
+    s
+}
+
+fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool) {
+    let abrufe = geplante_abrufe(z.zeitplan, &z.erledigt, tag, &z.boersen);
+    let titel = if heute {
+        "Heute"
+    } else {
+        "Nächster Börsentag"
+    };
+    let _ = write!(
+        s,
+        "<h3>{titel} · {} {}</h3>",
+        wochentag_text(tag),
+        datum_text(tag)
+    );
+    if abrufe.is_empty() {
+        s.push_str("<p>Für diesen Tag ist kein Börsenlauf vorgesehen.</p>");
+        return;
+    }
+    s.push_str("<ol class=\"zeitstrahl\">");
+    for (uhr, art, vorgemerkt) in &abrufe {
+        let ersatz = if *vorgemerkt {
+            "vorgemerkt, Ergebnis unbekannt"
+        } else {
+            "geplant"
+        };
+        let (klasse, stand) = zeitstrahl_stand(z, tag, heute, *art).unwrap_or(("leise", ersatz));
+        let _ = write!(
+            s,
+            "<li><b>{} Uhr</b> · {} <span class=\"{klasse}\">{stand}</span></li>",
+            uhrzeit_text(*uhr),
+            maskiere(art.name())
+        );
+    }
+    if z.zeitplan.papier_danach {
+        let ersatz = if z.erledigt.papier == Some(tag) {
+            ("leise", "gestartet, Ergebnis unbekannt")
+        } else if abrufe.iter().all(|(_, _, vorgemerkt)| *vorgemerkt)
+            && abrufe
+                .iter()
+                .all(|(_, art, _)| z.auftrag_stand(*art).is_none())
+            && z.erledigt.kurse_ok != Some(tag)
+        {
+            ("halt", "entfällt: kein erfolgreicher Kursabruf")
+        } else {
+            (
+                "leise",
+                "nach dem letzten Kursabruf, wenn mindestens einer erfolgreich war",
+            )
+        };
+        let (klasse, stand) = zeitstrahl_stand(z, tag, heute, Art::Papier).unwrap_or(ersatz);
+        let _ = write!(
+            s,
+            "<li><b>Papiertag</b> <span class=\"{klasse}\">{stand}</span></li>"
+        );
+    }
+    s.push_str("</ol>");
+}
+
+fn zeitstrahl_stand(
+    z: &Zustand,
+    tag: Datum,
+    heute: bool,
+    art: Art,
+) -> Option<(&'static str, &'static str)> {
+    let passt = |a: &Auftrag| {
+        a.art == art
+            && a.anlass == Anlass::Zeitplan
+            && ortszeit(a.start).is_some_and(|(d, ..)| d == tag)
+    };
+    if z.laufend.iter().any(passt) {
+        Some(("offen", "läuft"))
+    } else if heute
+        && z.warteschlange
+            .iter()
+            .any(|a| a.art == art && a.anlass == Anlass::Zeitplan)
+    {
+        Some(("offen", "wartet"))
+    } else {
+        z.verlauf.iter().find(|a| passt(a)).map(|a| ergebnis(a, z))
     }
 }
 
@@ -885,9 +1021,13 @@ fn update_hinweis(z: &Zustand) -> String {
     }
 }
 
-fn gesamtstatus_teil(token: &str, z: &Zustand) -> String {
+fn gesamtstatus_teil(token: &str, z: &Zustand, einrichtung: bool) -> String {
     let Some(b) = z.gesamtstatus() else {
-        return String::new();
+        return if einrichtung {
+            "<p>Die Einrichtung wird geprüft.</p>".into()
+        } else {
+            String::new()
+        };
     };
     let journal = z.lage.as_ref().and_then(|l| {
         let p = l
@@ -925,13 +1065,25 @@ fn gesamtstatus_teil(token: &str, z: &Zustand) -> String {
     if !gruende.is_empty() {
         let _ = write!(s, "<ul>{gruende}</ul>");
     }
-    if let Some(l) = &z.lage {
+    if einrichtung && !z.zeitplan.an {
+        if let Some((ziel, text)) = einrichtungsziel(z) {
+            if ziel == "#journal" {
+                s.push_str(&auftrag_knopf(token, z, Art::Einrichten, text, true));
+            } else {
+                let _ = write!(s, "<a class=\"aktion primaer\" href=\"{ziel}\">{text}</a>");
+            }
+        } else if z.einschalten_erlaubt().is_ok() {
+            s.push_str(
+                "<a class=\"aktion primaer\" href=\"#zeitplan\">Zum Einschalten des Zeitplans</a>",
+            );
+        }
+    } else if let Some(l) = &z.lage {
         if let Some(k) = l
             .bild
             .punkte
             .iter()
             .filter(|p| p.ampel != depot_lage::Ampel::Gut)
-            .find_map(|p| p.abhilfe.and_then(|a| abhilfe_knopf(token, z, a)))
+            .find_map(|p| p.abhilfe.and_then(|a| abhilfe_knopf(token, z, a, true)))
         {
             s.push_str(&k);
         }
@@ -1003,8 +1155,9 @@ pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String 
 /// Der Inhalt der Live-Seite (auch `/teil/live`).
 pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> String {
     let mut s = marke(start);
+    s.push_str(&zeitstrahl(z, heute));
     s.push_str(&taetigkeit(z, heute));
-    s.push_str(&gesamtstatus_teil(token, z));
+    s.push_str(&gesamtstatus_teil(token, z, false));
     s.push_str(&update_hinweis(z));
     if z.laufend.is_some() && z.lage.is_some() {
         s.push_str("<p class=\"leise\">Das Lagebild zeigt den Stand vor dem laufenden Auftrag und wird danach aktualisiert.</p>");
@@ -1012,7 +1165,7 @@ pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> Stri
     match &z.lage {
         Some(l) => s.push_str(&depot_lage::html::inhalt_mit(
             &l.bild,
-            &|a| abhilfe_knopf(token, z, a),
+            &|a| abhilfe_knopf(token, z, a, false),
             false,
         )),
         None => s.push_str("<section><p class=\"leise\">Lagebild wird berechnet …</p></section>"),
@@ -1022,7 +1175,7 @@ pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> Stri
 
 /// Kurzer Stand fuer die Einrichtung (auch `/teil/status`).
 pub fn status(token: &str, start: &str, z: &Zustand, _heute: Option<Datum>) -> String {
-    format!("{}{}", marke(start), gesamtstatus_teil(token, z))
+    format!("{}{}", marke(start), gesamtstatus_teil(token, z, true))
 }
 
 fn regel(w: Wer) -> &'static str {
@@ -1136,7 +1289,7 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
              <input type=\"hidden\" name=\"t\" value=\"{}\">\
              <input type=\"hidden\" name=\"wer\" value=\"{}\">\
              <input aria-label=\"Schlüssel für {}\" type=\"password\" name=\"wert\" autocomplete=\"off\" required> \
-             <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Noch keinen neuen Schlüssel eingegeben.</p><button class=\"primaer\" type=\"submit\">Schlüssel speichern</button></div>\
+             <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Noch keinen neuen Schlüssel eingegeben.</p><button data-speichern-hervorheben type=\"submit\">Schlüssel speichern</button></div>\
              <div class=\"leise\">{}</div></form></td></tr>",
             maskiere(w.name()),
             maskiere(w.adresse()),
@@ -1243,7 +1396,13 @@ fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
          Ich habe den Schlüssel der Kursquelle geprüft und bei Bedarf erneuert.</label>\
          <button type=\"submit\">Kurssperre aufheben</button></form></section>",
         maskiere(inhalt),
-        auftrag_knopf(token, z, Art::Kursdiagnose, "Kurssperre sicher untersuchen"),
+        auftrag_knopf(
+            token,
+            z,
+            Art::Kursdiagnose,
+            "Kurssperre sicher untersuchen",
+            true
+        ),
         maskiere(token),
         kostenschutz::abdruck(inhalt)
     );
@@ -1283,7 +1442,7 @@ fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
             s,
             "<tr><td>{}</td><td>{zuletzt}</td><td>{}</td></tr>",
             maskiere(name),
-            auftrag_knopf(token, z, art, "Jetzt prüfen")
+            auftrag_knopf(token, z, art, "Jetzt prüfen", false)
         );
     }
     s.push_str("</table></div></section>");
@@ -1302,7 +1461,10 @@ fn zeitplan_voraussetzungen(zustand: &Zustand) -> (String, &'static str) {
                 for punkt in fehlt {
                     let _ = write!(voraussetzung, "<li>{}</li>", maskiere(&punkt));
                 }
-                voraussetzung.push_str("</ul><p><a href=\"#schluessel\">Schlüssel prüfen</a></p>");
+                voraussetzung.push_str("</ul>");
+                if let Some((ziel, text)) = einrichtungsziel(zustand) {
+                    let _ = write!(voraussetzung, "<p><a href=\"{ziel}\">{text}</a></p>");
+                }
             }
             Err(_) => {
                 gesperrt = " disabled";
@@ -1320,6 +1482,21 @@ fn zeitplan_voraussetzungen(zustand: &Zustand) -> (String, &'static str) {
         );
     }
     (voraussetzung, gesperrt)
+}
+
+fn einrichtungsziel(z: &Zustand) -> Option<(&'static str, &'static str)> {
+    let l = z.lage.as_ref()?;
+    l.bild.punkte.iter().find_map(|p| match p.abhilfe {
+        Some(Abhilfe::JournalEinrichten) => Some(("#journal", "Journal einrichten")),
+        Some(Abhilfe::KostenschutzPruefen) => Some(("#kostenschutz", "Kostenschutz prüfen")),
+        Some(Abhilfe::KurssperrePruefen) => Some(("#kurssperre", "Kurssperre prüfen")),
+        Some(
+            Abhilfe::SchluesselKursquelle
+            | Abhilfe::SchluesselKursquelleUs
+            | Abhilfe::SchluesselBerater(_),
+        ) => Some(("#schluessel", "Zugangsdaten prüfen")),
+        _ => None,
+    })
 }
 
 fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String) {
@@ -1364,8 +1541,8 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
     } else {
         "Nur speichern · Zeitplan bleibt aus"
     };
-    let speicher_klasse = if p.an || !gesperrt.is_empty() {
-        "primaer"
+    let speichern_hervorheben = if p.an || !gesperrt.is_empty() {
+        " data-speichern-hervorheben"
     } else {
         ""
     };
@@ -1395,7 +1572,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          An börsenfreien Tagen den nächsten Handelstag vorbereiten (empfohlen; braucht Schlagzeilen und eingeschalteten Zeitplan; höchstens ein Aufruf je KI und Tag zwischen 08 und 23 Uhr). \
          Erst nach bestätigtem Update verfügbar. Die Aufrufe zählen zum Monatsbudget; der Tagesrahmen und die Reserve der nächsten Erstmeinung haben Vorrang. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
          <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Änderungen werden erst durch Speichern wirksam.</p>\
-         {einschalten} <button class=\"{speicher_klasse}\" type=\"submit\" name=\"aktion\" value=\"speichern\">{speicher_text}</button>\
+         {einschalten} <button type=\"submit\" name=\"aktion\" value=\"speichern\"{speichern_hervorheben}>{speicher_text}</button>\
          <p>Nur speichern lässt den Zeitplan {stand}. Du kannst die Einrichtung jederzeit später fortsetzen.</p></div></form></section>",
         uhrzeit_text(ent.termine.unwrap_or(p.termine)),
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),
@@ -1462,7 +1639,13 @@ pub(crate) fn update_aktionen(token: &str, start: &str, z: &Zustand) -> String {
     let _ = write!(
         s,
         "<p>{}</p>",
-        auftrag_knopf(token, z, Art::UpdatePruefen, "Nach Update suchen")
+        auftrag_knopf(
+            token,
+            z,
+            Art::UpdatePruefen,
+            "Nach Update suchen",
+            z.update_angebot().is_none()
+        )
     );
     if let Some(status) = z.auftrag_stand(Art::Update) {
         let _ = write!(
@@ -1486,7 +1669,7 @@ pub(crate) fn update_aktionen(token: &str, start: &str, z: &Zustand) -> String {
             let _ = write!(
                 s,
                 "<p>{}</p>",
-                bestaetigungslink(Art::Update, "Update einspielen", Some(sha))
+                bestaetigungslink(Art::Update, "Update einspielen", Some(sha), true)
             );
         }
     } else if let Some(a) = z
@@ -1597,7 +1780,7 @@ pub(crate) fn journal_teil(token: &str, z: &Zustand) -> String {
                 let _ = write!(s, "<p>{}</p>", maskiere(&p.text));
             }
             if p.abhilfe == Some(Abhilfe::JournalEinrichten) {
-                let knopf = auftrag_knopf(token, z, Art::Einrichten, "Journal einrichten");
+                let knopf = auftrag_knopf(token, z, Art::Einrichten, "Journal einrichten", false);
                 s.push_str(&knopf);
             }
         }
@@ -1638,8 +1821,9 @@ fn erste_schritte(z: &Zustand, e: &Einrichtung) -> String {
         "<section id=\"erste-schritte\"><h2>Erste Schritte</h2><ol>\
         <li><a href=\"#journal\">Journal einrichten</a>: Der Stand wird dort automatisch aktualisiert.</li>\
         <li><a href=\"#schluessel\">Zugangsdaten</a>: {schluessel}.</li>\
-        <li><a href=\"#quellen\">Datenquellen prüfen</a>: Kurse und Termine einmal von Hand abrufen. \
-        Danach auf <a href=\"/\">Live</a> Ergebnis und KI-Budget ansehen und einen Papiertag testen.</li>\
+        <li><a href=\"#quellen\">Datenquellen prüfen</a>: Termine kannst du jederzeit abrufen. \
+        Aktuelle Schlusskurse gibt es erst nach dem jeweiligen Börsenschluss. \
+        Ein hinterlegter Schlüssel und ein erfolgreicher Kursabruf werden getrennt angezeigt.</li>\
         <li><a href=\"#zeitplan\">Zeitplan</a>: {plan}.</li>\
         <li><a href=\"#autostart\">Autostart</a>: {autostart}.</li></ol>\
         <p><a href=\"#update\">Zum Update</a> · <a href=\"#werkzeuge\">Zu den Werkzeugen</a></p></section>"
@@ -1662,6 +1846,9 @@ pub fn einrichtung(
         "<div id=\"stand\" data-teil=\"/teil/status\">{}</div>",
         status(token, start, z, heute)
     );
+    if !z.zeitplan.an {
+        s.push_str(&erste_schritte(z, e));
+    }
     if !matches!(&e.ki_halt, Ok(None)) {
         kostenschutz_teil(token, e, &mut s);
     }
@@ -1671,7 +1858,9 @@ pub fn einrichtung(
     zeitplan_teil(token, z, e, &mut s);
     update_teil(token, start, z, e, &mut s);
     s.push_str("<section id=\"selten\" class=\"selten\" aria-labelledby=\"selten-titel\"><h2 id=\"selten-titel\">Seltene Einstellungen</h2><p>Für die erste Einrichtung oder wenn sich etwas ändert: Zugangsdaten, Datenspeicherung, Windows-Start und technische Prüfungen.</p>");
-    s.push_str(&erste_schritte(z, e));
+    if z.zeitplan.an {
+        s.push_str(&erste_schritte(z, e));
+    }
     let _ = write!(
         s,
         "<div data-teil=\"/teil/journal\">{}</div>",
