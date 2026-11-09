@@ -211,6 +211,8 @@ pub struct Zustand {
 /// Warum ein Zeitplan nicht gespeichert wurde.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ZeitplanAbgelehnt {
+    /// Der Schalter steht anders als beim Öffnen des Formulars.
+    SchalterGeaendert,
     /// Eine neue Version ist noch nicht bestätigt.
     UpdateOffen,
     /// Einschalten erst, wenn die Einrichtung vollstaendig ist: was fehlt.
@@ -244,6 +246,22 @@ impl Zustand {
         } else {
             None
         }
+    }
+
+    pub(crate) fn vorbereitung_pruefen(&self, jetzt: Zeitpunkt) -> Result<(), &'static str> {
+        let tag = depot_lage::vorbereitungstag(jetzt).ok_or("vorbereitung_uhrzeit")?;
+        if crate::zeitplan::handelstag(tag) {
+            return Err("vorbereitung_handelstag");
+        }
+        if self
+            .lage
+            .as_ref()
+            .and_then(|l| l.bild.vorbereitung.as_ref())
+            .is_some_and(|p| depot_lage::vorbereitungstag(p.zeit) == Some(tag))
+        {
+            return Err("vorbereitung_begonnen");
+        }
+        Ok(())
     }
 
     pub(crate) fn letzter_update_lauf(&self) -> Option<&Auftrag> {
@@ -303,6 +321,11 @@ impl Zustand {
     /// # Errors
     /// Warum nicht.
     pub fn einschalten_erlaubt(&self) -> Result<(), ZeitplanAbgelehnt> {
+        if let Some(fehler) = &self.erledigt_fehler {
+            return Err(ZeitplanAbgelehnt::Einrichtung(vec![format!(
+                "Zeitplan angehalten: {fehler}. Datei prüfen, dann Dienst neu starten."
+            )]));
+        }
         let Some(l) = self.lage.as_ref().filter(|_| !self.lage_veraltet) else {
             return Err(ZeitplanAbgelehnt::LageFehlt);
         };
@@ -653,9 +676,12 @@ impl Dienst {
     /// Wie `einreihen`, oder gerade erst erledigt.
     pub fn von_hand(&self, art: Art, jetzt: Zeitpunkt) -> Result<(), &'static str> {
         if art == Art::Vorbereiten && self.update_offen() {
-            return Err("update_offen");
+            return Err("vorbereitung_update");
         }
         let mut z = self.sperre();
+        if art == Art::Vorbereiten {
+            z.vorbereitung_pruefen(jetzt)?;
+        }
         let gerade = z.verlauf.iter().any(|a| {
             a.art == art
                 && a.frueher == Frueher::Nein
@@ -685,15 +711,15 @@ impl Dienst {
     /// Einschalten nicht erlaubt, oder die Datei laesst sich nicht schreiben; dann gilt der alte
     /// weiter.
     pub fn setze_zeitplan(&self, plan: Zeitplan) -> Result<(), ZeitplanAbgelehnt> {
-        self.aendere_zeitplan(|_| plan)
+        self.aendere_zeitplan(|_| Ok(plan))
     }
 
     pub(crate) fn aendere_zeitplan(
         &self,
-        aenderung: impl FnOnce(Zeitplan) -> Zeitplan,
+        aenderung: impl FnOnce(Zeitplan) -> Result<Zeitplan, ZeitplanAbgelehnt>,
     ) -> Result<(), ZeitplanAbgelehnt> {
         let mut z = self.sperre();
-        let plan = aenderung(z.zeitplan);
+        let plan = aenderung(z.zeitplan)?;
         if plan.vorbereitung.aktiv() && !z.zeitplan.vorbereitung.aktiv() && self.update_offen() {
             return Err(ZeitplanAbgelehnt::UpdateOffen);
         }

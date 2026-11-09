@@ -617,6 +617,8 @@ fn auftrag_laeuft_mit_protokoll_und_eindeutiger_kennung() -> Result<(), String> 
     );
     // Waehrend ein Auftrag laeuft, wird kein Lagebild gerechnet.
     assert!(d.sperre().lage.is_none());
+    let detail = format!("<details id=\"protokoll-{}-{nr}\"", t.sekunden());
+    assert!(get(&d, "/teil/live", t).contains(&format!("{detail} open>")));
     d.verfolge(nr, kind, || donnerstag(12, 1).ok());
     let z = d.sperre();
     assert!(z.laufend.is_none());
@@ -624,7 +626,8 @@ fn auftrag_laeuft_mit_protokoll_und_eindeutiger_kennung() -> Result<(), String> 
     assert_eq!(a.erfolg, Some(true));
     assert_eq!(a.protokoll, vec!["lauf termine".to_string()]);
     assert_eq!(a.kennung, format!("{}-{nr}", t.sekunden()));
-    let seite = seiten::live(TOKEN, "s", &z, t.datum());
+    let seite = seiten::live(TOKEN, "s", &z, t);
+    assert!(seite.contains(&format!("{detail}>")));
     assert!(seite.contains("data-protokoll-kopieren>Auszug kopieren"));
     assert!(seite.contains("<pre>lauf termine\n</pre>"));
     drop(z);
@@ -744,7 +747,13 @@ fn k29_01_lesefehler_halten_den_zeitplan_an() -> Result<(), String> {
     assert!(d2.sperre().erledigt_fehler.is_some());
     assert!(d2.schritt(donnerstag(17, 59)?).is_none());
     let an = formular_post("/zeitplan", &format!("t={TOKEN}&aktion=an"));
-    assert!(text(&behandle(&d2, &umw, &an, donnerstag(18, 0)?)).contains("m=zeitplan_an#"));
+    assert!(
+        text(&behandle(&d2, &umw, &an, donnerstag(18, 0)?)).contains("m=zeitplan_einrichtung#")
+    );
+    let seite = get(&d2, "/einrichtung", donnerstag(18, 0)?);
+    assert!(seite.contains("<b>angehalten</b>"));
+    assert!(seite.contains("disabled>Speichern und Zeitplan einschalten"));
+    assert!(!d2.sperre().zeitplan.an);
     assert!(d2.schritt(donnerstag(18, 0)?).is_none());
     assert!(
         wartend(&d2).is_empty(),
@@ -882,6 +891,27 @@ fn neuer_schluessel_ist_wieder_nur_hinterlegt() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn erste_schritte_zeigen_bereits_angenommene_zugangsdaten() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(12, 0)?;
+    let datei = wurzel.join("daten").join(depot_lage::anbieter::DATEI);
+    for wer in depot_dienst::schluessel::ALLE {
+        let eintrag = depot_lage::anbieter::Eintrag::neu(
+            t,
+            wer.protokoll(),
+            depot_lage::anbieter::Ergebnis::Ok,
+            Some(200),
+        );
+        depot_lage::anbieter::anhaengen(&datei, &eintrag)?;
+    }
+    let seite = get(&d, "/einrichtung", t);
+    assert!(seite.contains("alle Schlüssel wurden vom jeweiligen Anbieter angenommen"));
+    assert!(seite.contains("geprüft (angenommen"));
+    Ok(())
+}
+
 /// Ein Lagebild mit allen Schluesseln, aber ohne Journal (also Eingriff noetig). Mit
 /// `als_bereit` setzt es den Gesamtstatus danach auf bereit, damit der Test den Zeitplan-Teil
 /// fuer sich pruefen kann.
@@ -920,7 +950,7 @@ fn gesamtstatus_ergaenzt_den_zeitplan() -> Result<(), String> {
     };
     let t = donnerstag(12, 0)?;
     let heute = t.datum();
-    let live = |d: &Dienst| seiten::live(TOKEN, "s", &d.sperre(), heute);
+    let live = |d: &Dienst| seiten::live(TOKEN, "s", &d.sperre(), t);
     // Maus zu #31: Alle Schluessel da, aber kein Journal: nie „vollständig bereit“, auch mit
     // eingeschaltetem Zeitplan.
     let d = mit(false)?;
@@ -1163,12 +1193,13 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
     assert!(html.contains("täglich von 08:00 bis vor 23:00 Uhr"));
     {
         let mut z = d.sperre();
-        z.erledigt.termine = Some(tag);
         z.erledigt.kurse = Some(tag);
         z.erledigt.kurse_nyse = Some(tag);
     }
-    let html = get(&d, "/teil/live", t);
+    let html = get(&d, "/teil/live", donnerstag(22, 20)?);
     assert!(html.contains("entfällt: kein erfolgreicher Kursabruf"));
+    d.sperre().erledigt.termine = Some(tag);
+    let html = get(&d, "/teil/live", donnerstag(22, 20)?);
     assert!(html.contains("Nächster Börsentag · Fr 06.11.2026"));
     Ok(())
 }
@@ -1369,6 +1400,44 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
 }
 
 #[test]
+fn zeitplanformular_bewahrt_entwurf_bei_schalterwechsel_im_anderen_tab() -> Result<(), String> {
+    let d = Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        echo_starter(true),
+        lagebild_mit_schluesseln(true),
+    );
+    let t = donnerstag(12, 0)?;
+    assert!(d.schritt(t).is_none());
+    assert!(get(&d, "/einrichtung", t).contains("name=\"planstand\" value=\"aus\""));
+    let umw = Attrappe::default();
+    let an = formular_post("/zeitplan", &format!("t={TOKEN}&aktion=an"));
+    assert!(text(&behandle(&d, &umw, &an, t)).contains("m=zeitplan_an"));
+    let vorher = d.sperre().zeitplan;
+    let speichern = |stand| {
+        let post = formular_post(
+            "/zeitplan",
+            &format!("t={TOKEN}&aktion=speichern&planstand={stand}&termine=08%3A15&kurse=18%3A05"),
+        );
+        text(&behandle(&d, &umw, &post, t))
+    };
+    let antwort = speichern("aus");
+    assert!(antwort.contains("m=zeitplan_schalter_geaendert"));
+    assert_eq!(d.sperre().zeitplan, vorher);
+    let seite = get(&d, &ort(&antwort), t);
+    assert!(seite.contains("name=\"planstand\" value=\"an\""));
+    assert!(seite.contains("Der Zeitplan bleibt eingeschaltet."));
+    assert!(!seite.contains("Nur speichern"));
+    assert!(seite.contains("value=\"18:05\""));
+    assert!(seite.contains("Deine Eingaben stehen als Entwurf"));
+    assert!(speichern("an").contains("m=zeitplan#"));
+    let nachher = d.sperre().zeitplan;
+    assert!(nachher.an);
+    assert_eq!(nachher.kurse, (18, 5));
+    Ok(())
+}
+
+#[test]
 fn speichern_und_einschalten_uebernimmt_genau_die_ausgefuellten_werte() -> Result<(), String> {
     let w = ordner()?;
     let d = Arc::new(Dienst::neu(
@@ -1432,6 +1501,31 @@ fn kombiniertes_einschalten_bleibt_bei_fehlender_einrichtung_ohne_wirkung() -> R
     let html = get(&d, &ort(&antwort), jetzt);
     assert!(html.contains("value=\"18:05\""));
     assert!(html.contains("disabled>Speichern und Zeitplan einschalten"));
+    assert!(html.contains("Du kannst die Einstellungen schon speichern."));
+    assert!(!html.contains("wähle unten <b>Speichern und Zeitplan einschalten</b>"));
+    Ok(())
+}
+
+#[test]
+fn quellenbereich_zeigt_den_tatsaechlichen_abruf_und_sein_ergebnis() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(12, 0)?;
+    assert!(get(&d, "/einrichtung", t).contains("data-teil=\"/teil/quellen\""));
+    assert!(get(&d, "/teil/journal", t).contains("data-start="));
+    let quellen = || get(&d, "/teil/quellen", t);
+    assert!(quellen().contains("data-start="));
+    assert!(quellen().contains("Kein Abruf im Verlauf"));
+    for beschriftung in ["Kurse prüfen", "EZB-Termine prüfen", "Schlagzeilen prüfen"] {
+        assert!(quellen().contains(&format!(">{beschriftung}</button>")));
+    }
+    let xetra = Art::KurseVon(Boerse::Xetra);
+    d.einreihen(xetra, Anlass::Hand)?;
+    assert!(quellen().contains("Kurse Xetra abrufen · wartet"));
+    let (nr, kind) = some(d.schritt(t), "Kursabruf")?;
+    assert!(quellen().contains("Kurse Xetra abrufen · läuft"));
+    d.verfolge(nr, kind, || donnerstag(12, 0).ok());
+    assert!(quellen().contains("Xetra · <span class=\"gut\">erfolgreich</span>"));
+    assert!(!quellen().contains("Kurse Xetra abrufen · läuft"));
     Ok(())
 }
 
@@ -1618,7 +1712,7 @@ fn verlauf_uebersteht_neustart_und_zeigt_unterbrochenes() -> Result<(), String> 
             (Art::Termine, Frueher::Beendet, Some(true)),
         ]
     );
-    let seite = seiten::live(TOKEN, "s", &z, t.datum());
+    let seite = seiten::live(TOKEN, "s", &z, t);
     drop(z);
     assert!(
         seite.contains("unterbrochen") && seite.contains("vor dem Neustart"),
@@ -1714,7 +1808,7 @@ fn ohne_schreibbaren_verlauf_startet_nichts() -> Result<(), String> {
     let a = some(z.verlauf.front(), "Verlauf")?;
     assert_eq!(a.erfolg, Some(false));
     assert!(a.protokoll.iter().any(|p| p.starts_with("Nicht gestartet")));
-    let seite = seiten::live(TOKEN, "s", &z, t.datum());
+    let seite = seiten::live(TOKEN, "s", &z, t);
     drop(z);
     assert!(seite.contains("Verlauf nicht schreibbar"), "{seite}");
     // Wieder schreibbar: Der naechste Auftrag startet.
@@ -1777,7 +1871,7 @@ fn hinweis_des_laufs_steht_gross_in_der_live_ansicht() -> Result<(), String> {
         Some("Papiertag heute ausgefallen. Die Verbindung kam bis 17:54 Uhr nicht wieder.")
     );
     assert_eq!(a.protokoll.len(), 4, "Hinweise bleiben im Protokoll");
-    let seite = seiten::live(TOKEN, "s", &z, t.datum());
+    let seite = seiten::live(TOKEN, "s", &z, t);
     assert!(
         seite.contains(
             "<p class=\"kopf halt\" id=\"hinweis\">Kurse abrufen: Papiertag heute ausgefallen."
@@ -1786,7 +1880,8 @@ fn hinweis_des_laufs_steht_gross_in_der_live_ansicht() -> Result<(), String> {
     );
     // Am naechsten Tag steht der alte Hinweis nicht mehr oben, nur im Verlauf.
     let morgen = some(t.datum().and_then(|d| d.plus_tage(1)), "morgen")?;
-    let seite = seiten::live(TOKEN, "s", &z, Some(morgen));
+    let morgen = some(Zeitpunkt::frankfurt(morgen, 12, 0, 0), "Zeit morgen")?;
+    let seite = seiten::live(TOKEN, "s", &z, morgen);
     assert!(!seite.contains("id=\"hinweis\""), "{seite}");
     assert!(seite.contains("Papiertag heute ausgefallen"), "{seite}");
     Ok(())
@@ -1850,18 +1945,14 @@ fn nach_einem_ausfall_sagt_der_zeitplan_wie_es_weitergeht() -> Result<(), String
         ));
         if angehalten {
             assert!(d.schritt(t).is_none());
-            d.setze_zeitplan(Zeitplan {
-                an: true,
-                ..Zeitplan::default()
-            })
-            .map_err(|e| format!("Vorbedingung Zeitplan: {e:?}"))?;
-            assert!(d.sperre().zeitplan.an);
+            // Simuliert einen bereits aktiven Zeitplan mit beschädigtem Laufstand.
+            d.sperre().zeitplan.an = true;
         }
         d.einreihen(Art::Kurse, Anlass::Hand)
             .map_err(|e| format!("Vorbedingung einreihen: {e}"))?;
         let (nr, kind) = some(d.schritt(t), "Start")?;
         d.verfolge(nr, kind, || donnerstag(17, 55).ok());
-        let seite = seiten::live(TOKEN, "s", &d.sperre(), t.datum());
+        let seite = seiten::live(TOKEN, "s", &d.sperre(), t);
         let (_, rest) = some(seite.split_once("id=\"hinweis\">"), "Hinweis")?;
         let (hinweis, _) = some(rest.split_once("</p>"), "Ende")?;
         if angehalten {
@@ -2097,7 +2188,7 @@ fn zeitplan_holt_kursabruf_und_papiertag_nach_update_probe_nach() -> Result<(), 
 
 /// Die Live-Ansicht nach einem Neustart: der Satz mit `id="neustart"`.
 fn neustart_satz(d: &Dienst, t: Zeitpunkt) -> Option<String> {
-    let seite = seiten::live(TOKEN, "s", &d.sperre(), t.datum());
+    let seite = seiten::live(TOKEN, "s", &d.sperre(), t);
     let (_, rest) = seite.split_once("id=\"neustart\">")?;
     rest.split_once("</p>").map(|(s, _)| s.to_string())
 }
@@ -2163,10 +2254,7 @@ fn neustart_waehrend_des_papiertags_startet_ihn_nicht_neu() -> Result<(), String
     let satz = some(neustart_satz(&d, spaeter), "Satz")?;
     assert!(satz.contains("Der Papiertag lief schon"), "{satz}");
     assert!(satz.contains("heutige Schutz bleibt"), "{satz}");
-    assert!(
-        seiten::live(TOKEN, "s", &d.sperre(), spaeter.datum())
-            .contains("kopf halt\" id=\"neustart\"")
-    );
+    assert!(seiten::live(TOKEN, "s", &d.sperre(), spaeter).contains("kopf halt\" id=\"neustart\""));
     Ok(())
 }
 
@@ -2576,6 +2664,36 @@ fn vorbereiten_braucht_bestaetigung_und_automatik_braucht_schlagzeilen() -> Resu
 }
 
 #[test]
+fn vorbereitung_zeigt_frankfurter_zeitfenster_und_prueft_alte_bestaetigungen() -> Result<(), String>
+{
+    let d = dienst(ordner()?, true);
+    let samstag = some(Datum::neu(2026, 11, 7), "Samstag")?;
+    let offen = some(Zeitpunkt::frankfurt(samstag, 22, 59, 0), "Zeit vor Schluss")?;
+    let geschlossen = some(Zeitpunkt::frankfurt(samstag, 23, 0, 0), "Zeit nach Schluss")?;
+    let ziel = "/bestaetigen?art=vorbereiten";
+    let post = formular_post(
+        "/ausfuehren",
+        &format!("t={TOKEN}&art=vorbereiten&geprueft=ja"),
+    );
+    assert!(d.schritt(offen).is_none());
+    assert!(get(&d, "/teil/live", offen).contains(ziel));
+    assert!(get(&d, ziel, offen).contains("echtes KI-Budget"));
+    let seite = get(&d, "/teil/live", geschlossen);
+    assert!(seite.contains("bis vor 23:00 Uhr Frankfurter Zeit"));
+    assert!(!seite.contains(ziel));
+    for (zeit, grund) in [
+        (geschlossen, "vorbereitung_uhrzeit"),
+        (donnerstag(12, 0)?, "vorbereitung_handelstag"),
+    ] {
+        assert!(get(&d, ziel, zeit).contains(grund));
+        let antwort = text(&behandle(&d, &Attrappe::default(), &post, zeit));
+        assert!(antwort.contains(grund));
+        assert!(wartend(&d).is_empty());
+    }
+    Ok(())
+}
+
+#[test]
 fn vorbereitung_vor_start_ausschalten_und_alte_zeitplaene_bleiben_aus() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let t = Datum::neu(2026, 11, 7)
@@ -2694,6 +2812,10 @@ fn vorbereitung_erst_nach_updatebestaetigung_einschalten_und_starten() -> Result
     assert!(!d.sperre().zeitplan.vorbereitung.aktiv());
     fs::remove_file(offen).map_err(|e| e.to_string())?;
     d.setze_zeitplan(plan).map_err(|e| format!("{e:?}"))?;
-    assert!(d.von_hand(Art::Vorbereiten, t).is_ok());
+    let samstag = some(
+        Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0)),
+        "Samstag",
+    )?;
+    assert!(d.von_hand(Art::Vorbereiten, samstag).is_ok());
     Ok(())
 }

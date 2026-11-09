@@ -4,7 +4,7 @@
 
 use std::fmt::Write as _;
 
-use depot_kern::Datum;
+use depot_kern::{Datum, Zeitpunkt};
 use depot_lage::html::{STIL, maskiere};
 use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, ortszeit, zeit_text};
 
@@ -66,13 +66,17 @@ label{display:block;margin:6px 0}\
 
 /// Ein Bedienelement zu einem Auftrag und seinem aktuellen Stand.
 fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str, primaer: bool) -> String {
-    let status = z.auftrag_stand(art).or_else(|| match art {
-        Art::Kurse => z
-            .auftrag_stand(Art::KurseVon(depot_kern::Boerse::Xetra))
-            .or_else(|| z.auftrag_stand(Art::KurseVon(depot_kern::Boerse::Nyse))),
-        _ => None,
-    });
-    if let Some(status) = status {
+    let passt = |a: Art| a == art || (art == Art::Kurse && matches!(a, Art::KurseVon(_)));
+    let lauf = z
+        .laufend
+        .iter()
+        .map(|a| a.art)
+        .chain(z.warteschlange.iter().map(|a| a.art))
+        .find(|a| passt(*a));
+    if let Some(lauf) = lauf
+        && let Some(status) = z.auftrag_stand(lauf)
+    {
+        let beschriftung = if lauf == art { text } else { lauf.name() };
         return format!(
             "<button type=\"button\" class=\"{}\" disabled>{} · {status}</button>",
             if status.starts_with("läuft") {
@@ -80,7 +84,7 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str, primaer: bool) 
             } else {
                 "wartet"
             },
-            maskiere(text)
+            maskiere(beschriftung)
         );
     }
     if z.neustart || z.auftrag_stand(Art::Update).is_some() {
@@ -88,26 +92,6 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str, primaer: bool) 
             "<button type=\"button\" disabled>{} · wartet auf Update</button>",
             maskiere(text)
         );
-    }
-    if art == Art::Vorbereiten
-        && let Some(l) = &z.lage
-    {
-        if l.bild
-            .jetzt
-            .datum()
-            .is_some_and(depot_kern::liste::handelstag)
-        {
-            return "<button type=\"button\" disabled>Vorbereitung heute im Papiertag</button>"
-                .into();
-        }
-        if l.bild
-            .vorbereitung
-            .as_ref()
-            .is_some_and(|p| p.zeit.datum() == l.bild.jetzt.datum())
-        {
-            return "<button type=\"button\" disabled>Vorbereitung heute bereits begonnen</button>"
-                .into();
-        }
     }
     if matches!(art, Art::Papier | Art::Vorbereiten) {
         return bestaetigungslink(art, text, None, primaer);
@@ -299,6 +283,10 @@ fn einstellungs_meldung(code: &str) -> Option<(&'static str, &'static str)> {
             "offen",
             "Zeitplan unverändert. Bitte lade die Einrichtung neu und wähle die gewünschte Aktion.",
         ),
+        "zeitplan_schalter_geaendert" => (
+            "offen",
+            "Der Zeitplan wurde inzwischen ein- oder ausgeschaltet. Deine Eingaben stehen als Entwurf im Formular. Prüfe den aktuellen Stand und wähle erneut, wie du speichern möchtest.",
+        ),
         "zeitplan_ungueltig" => (
             "halt",
             "Zeitplan nicht gespeichert: Uhrzeit im Format hh:mm. Die übrigen Eingaben stehen \
@@ -341,6 +329,9 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         .split('&')
         .find_map(|p| p.strip_prefix("m="))
         .unwrap_or_default();
+    if let Some(grund) = vorbereitung_meldung(code) {
+        return Some(("offen", grund));
+    }
     if let Some(m) = sperr_meldung(code).or_else(|| einstellungs_meldung(code)) {
         return Some(m);
     }
@@ -397,18 +388,6 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "halt",
             "Die Freigabe konnte nicht bestätigt werden. Lade die Einrichtung neu und prüfe Journal und Papierkonto.",
         ),
-        "vorbereitung_bestaetigen" => (
-            "offen",
-            "Bitte bestätige zuerst die Vorbereitung und ihre KI-Kosten.",
-        ),
-        "vorbereitung_update" => (
-            "offen",
-            "Das Update wird noch geprüft. Die Vorbereitung ist erst nach bestätigtem Update verfügbar.",
-        ),
-        "vorbereitung_quellen" => (
-            "offen",
-            "Bitte für die automatische Vorbereitung auch die Schlagzeilen einschalten. Deine Eingaben sind noch nicht gespeichert.",
-        ),
         "papier_bestaetigen" => (
             "offen",
             "Papiertag unverändert. Öffne den Bestätigungsschritt und setze den Haken.",
@@ -429,6 +408,32 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "offen",
             "Update nicht eingereiht: Es geht nur, wenn kein anderer Auftrag läuft oder wartet.",
         ),
+        "updatesuche_belegt" => (
+            "offen",
+            "Updatesuche nicht eingereiht. Sie läuft oder wartet schon, ist gerade erst fertig geworden, die Warteschlange ist voll oder ein Update wird eingespielt. Den Stand siehst du unter Update.",
+        ),
+        _ => return None,
+    })
+}
+
+fn vorbereitung_meldung(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "vorbereitung_bestaetigen" => "Bitte bestätige zuerst die Vorbereitung und ihre KI-Kosten.",
+        "vorbereitung_update" => {
+            "Das Update wird noch geprüft. Die Vorbereitung ist erst nach bestätigtem Update verfügbar."
+        }
+        "vorbereitung_quellen" => {
+            "Bitte für die automatische Vorbereitung auch die Schlagzeilen einschalten. Deine Eingaben sind noch nicht gespeichert."
+        }
+        "vorbereitung_uhrzeit" => {
+            "Vorbereitung ist von 08:00 bis vor 23:00 Uhr Frankfurter Zeit möglich."
+        }
+        "vorbereitung_handelstag" => {
+            "Heute ist Handelstag. Die Vorbereitung fließt in den Papiertag ein."
+        }
+        "vorbereitung_begonnen" => {
+            "Vorbereitung heute bereits begonnen. DepotSchlopf fragt die KI heute dafür nicht erneut."
+        }
         _ => return None,
     })
 }
@@ -445,6 +450,7 @@ pub fn meldungs_aktion(abfrage: &str) -> (&'static str, &'static str) {
         | "zeitplan_gespeichert_an"
         | "zeitplan_aus"
         | "zeitplan_ungueltig"
+        | "zeitplan_schalter_geaendert"
         | "zeitplan_fehler"
         | "vorbereitung_quellen" => ("/einrichtung#zeitplan", "Zeitplan und Eingaben ansehen"),
         "zeitplan_lage" | "zeitplan_neu_laden" | "zeitplan_einrichtung" => {
@@ -453,7 +459,7 @@ pub fn meldungs_aktion(abfrage: &str) -> (&'static str, &'static str) {
         "schluessel" | "schluessel_protokoll" | "schluessel_ungueltig" | "schluessel_fehler" => {
             ("/einrichtung#schluessel", "Zu den Zugangsdaten")
         }
-        "update_suche" | "update_bestaetigen" | "vorbereitung_update" => {
+        "update_suche" | "updatesuche_belegt" | "update_bestaetigen" | "vorbereitung_update" => {
             ("/einrichtung#update", "Zum Update")
         }
         "papier_bestaetigen" => (
@@ -521,7 +527,7 @@ pub fn rahmen(
          <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt, etwa \
          beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu. Wenn du das schwarze \
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div>\
-         <p id=\"neuverbinden\" hidden><a class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
+         <p id=\"neuverbinden\" hidden><a id=\"neuverbinden-link\" class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
          <nav aria-label=\"Hauptnavigation\"><h1>DepotSchlopf</h1>{}{}\
          <span class=\"leise\">Nur Papiergeld.</span>{version}</nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit der Zeitplan läuft. \
@@ -728,11 +734,11 @@ fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool) {
     if z.zeitplan.papier_danach {
         let ersatz = if z.erledigt.papier == Some(tag) {
             ("leise", "gestartet, Ergebnis unbekannt")
-        } else if abrufe.iter().all(|(_, _, vorgemerkt)| *vorgemerkt)
+        } else if z.erledigt.kurse_ok != Some(tag)
             && abrufe
                 .iter()
-                .all(|(_, art, _)| z.auftrag_stand(*art).is_none())
-            && z.erledigt.kurse_ok != Some(tag)
+                .filter(|(_, art, _)| matches!(art, Art::KurseVon(_)))
+                .all(|(_, art, vorgemerkt)| *vorgemerkt && z.auftrag_stand(*art).is_none())
         {
             ("halt", "entfällt: kein erfolgreicher Kursabruf")
         } else {
@@ -823,7 +829,7 @@ pub(crate) fn protokoll_seite(kennung: &str, text: &str) -> String {
     )
 }
 
-fn protokoll(id: &str, a: &Auftrag, offen: bool) -> String {
+fn protokoll(a: &Auftrag, offen: bool) -> String {
     let mut text = String::new();
     for z in &a.protokoll {
         text.push_str(&maskiere(z));
@@ -837,7 +843,7 @@ fn protokoll(id: &str, a: &Auftrag, offen: bool) -> String {
          <span class=\"leise\" role=\"status\"></span>"
     };
     format!(
-        "<details id=\"{id}-{}\"{}><summary>Protokoll ({} Zeilen)</summary>\
+        "<details id=\"protokoll-{}\"{}><summary>Protokoll ({} Zeilen)</summary>\
          {kopieren}<p><a href=\"/protokoll?lauf={0}\">Vollständiges Protokoll öffnen und kopieren</a> · \
          <a href=\"/protokoll.txt?lauf={0}\" download=\"DepotSchlopf-{0}.log\">Herunterladen</a></p>\
          <p class=\"leise\">Auszug mit den letzten 500 Zeilen. Es bleiben höchstens 20 Protokolle, \
@@ -885,7 +891,7 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
             anlass_text(a.anlass),
             maskiere(&zeit_text(a.start)),
             maskiere(&a.kennung),
-            protokoll("l", a, true)
+            protokoll(a, true)
         );
         if a.protokoll.is_empty() {
             s.push_str("<p>Der Lauf wird vorbereitet. Beim ersten Start kann das ein paar Minuten dauern.</p>");
@@ -960,7 +966,7 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
                     .as_ref()
                     .map(|h| format!("<br>{}", maskiere(h)))
                     .unwrap_or_default(),
-                protokoll("v", a, false)
+                protokoll(a, false)
             );
         }
         s.push_str("</table></div>");
@@ -1153,7 +1159,8 @@ pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String 
 }
 
 /// Der Inhalt der Live-Seite (auch `/teil/live`).
-pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> String {
+pub fn live(token: &str, start: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
+    let heute = ortszeit(jetzt).map(|(d, ..)| d);
     let mut s = marke(start);
     s.push_str(&zeitstrahl(z, heute));
     s.push_str(&taetigkeit(z, heute));
@@ -1165,7 +1172,17 @@ pub fn live(token: &str, start: &str, z: &Zustand, heute: Option<Datum>) -> Stri
     match &z.lage {
         Some(l) => s.push_str(&depot_lage::html::inhalt_mit(
             &l.bild,
-            &|a| abhilfe_knopf(token, z, a, false),
+            &|a| {
+                if a == Abhilfe::Vorbereiten
+                    && let Some(grund) = z
+                        .vorbereitung_pruefen(jetzt)
+                        .err()
+                        .and_then(vorbereitung_meldung)
+                {
+                    return Some(format!("<p class=\"leise\">{}</p>", maskiere(grund)));
+                }
+                abhilfe_knopf(token, z, a, false)
+            },
             false,
         )),
         None => s.push_str("<section><p class=\"leise\">Lagebild wird berechnet …</p></section>"),
@@ -1408,32 +1425,46 @@ fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
     );
 }
 
-fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
+pub(crate) fn quellen_teil(token: &str, start: &str, z: &Zustand) -> String {
+    let mut s = marke(start);
     s.push_str(
         "<section id=\"quellen\"><h2>Datenquellen und Verbindungstest</h2><p class=\"leise\">\
-         Der Test ist der Abruf selbst (nur lesend); sein Protokoll steht auf Live unter \
-         Tätigkeit.</p><div class=\"breit\"><table><tr><th>Quelle</th><th>Zuletzt</th><th></th></tr>",
+         Jeder Verbindungstest startet einen echten Abruf. DepotSchlopf speichert die Ergebnisse im Journal. \
+         Das Protokoll steht auf Live unter Tätigkeit. An börsenfreien Tagen kann ein erfolgreicher \
+         Schlagzeilenabruf die eingeschaltete automatische Vorbereitung auslösen. Diese nutzt KI-Budget.</p>\
+         <div class=\"breit\"><table><tr><th>Quelle</th><th>Letzter Abruf</th><th></th></tr>",
     );
-    for (art, name) in [
+    for (art, name, aktion) in [
         (
             Art::Kurse,
             "Schlusskurse aller Börsen der Liste (Xetra: Alpha Vantage, NYSE: Tiingo mit \
              EZB-Referenzkursen; je mit Schlüssel)",
+            "Kurse prüfen",
         ),
-        (Art::Termine, "Termine der EZB (ohne Schlüssel)"),
+        (
+            Art::Termine,
+            "Termine der EZB (ohne Schlüssel)",
+            "EZB-Termine prüfen",
+        ),
         (
             Art::Nachrichten,
             "Schlagzeilen: tagesschau und BBC World (kostenlos, ohne Schlüssel; mindestens 90 Minuten Abrufpause)",
+            "Schlagzeilen prüfen",
         ),
     ] {
         // Ein Kursabruf je Boerse zaehlt fuer die Kursquellen mit.
         let gleich = |a: Art| a == art || (art == Art::Kurse && matches!(a, Art::KurseVon(_)));
         let zuletzt = z.verlauf.iter().find(|a| gleich(a.art)).map_or_else(
-            || "<span class=\"leise\">seit Dienststart nicht</span>".into(),
+            || "<span class=\"leise\">Kein Abruf im Verlauf</span>".into(),
             |a| {
                 let (klasse, text) = ergebnis(a, z);
+                let umfang = match a.art {
+                    Art::KurseVon(boerse) => format!("{} · ", maskiere(boerse.name())),
+                    Art::Kurse => "Alle Börsen · ".into(),
+                    _ => String::new(),
+                };
                 format!(
-                    "<span class=\"{klasse}\">{text}</span> {}",
+                    "{umfang}<span class=\"{klasse}\">{text}</span> {}",
                     maskiere(&zeit_text(a.start))
                 )
             },
@@ -1442,10 +1473,11 @@ fn quellen_teil(token: &str, z: &Zustand, s: &mut String) {
             s,
             "<tr><td>{}</td><td>{zuletzt}</td><td>{}</td></tr>",
             maskiere(name),
-            auftrag_knopf(token, z, art, "Jetzt prüfen", false)
+            auftrag_knopf(token, z, art, aktion, false)
         );
     }
     s.push_str("</table></div></section>");
+    s
 }
 
 fn zeitplan_voraussetzungen(zustand: &Zustand) -> (String, &'static str) {
@@ -1520,13 +1552,20 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
     };
     let (voraussetzung, gesperrt) = zeitplan_voraussetzungen(zustand);
     let stand = if p.an { "an" } else { "aus" };
+    let betrieb = if fehler.is_some() {
+        "angehalten"
+    } else {
+        stand
+    };
     let token = maskiere(token);
     let schalter = if p.an {
         format!(
             "<form method=\"post\" action=\"/zeitplan\"><input type=\"hidden\" name=\"t\" value=\"{token}\"><input type=\"hidden\" name=\"aktion\" value=\"aus\"><button type=\"submit\">Zeitplan ausschalten</button></form>"
         )
-    } else {
+    } else if gesperrt.is_empty() {
         "<p>Automatische Läufe sind aus. Prüfe die Einstellungen und wähle unten <b>Speichern und Zeitplan einschalten</b>.</p>".into()
+    } else {
+        "<p>Automatische Läufe sind aus. Du kannst die Einstellungen schon speichern. Zum Einschalten erledige zuerst die Punkte oben.</p>".into()
     };
     let einschalten = if p.an {
         String::new()
@@ -1536,10 +1575,13 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
         )
     };
     let entwurf = if ent.leer() { "nein" } else { "ja" };
-    let speicher_text = if p.an {
-        "Änderungen speichern"
+    let (speicher_text, speicher_hinweis) = if p.an {
+        ("Änderungen speichern", "Der Zeitplan bleibt eingeschaltet.")
     } else {
-        "Nur speichern · Zeitplan bleibt aus"
+        (
+            "Nur speichern · Zeitplan bleibt aus",
+            "Mit „Nur speichern“ bleiben automatische Läufe ausgeschaltet.",
+        )
     };
     let speichern_hervorheben = if p.an || !gesperrt.is_empty() {
         " data-speichern-hervorheben"
@@ -1549,15 +1591,16 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
     let _ = write!(
         s,
         "<section id=\"zeitplan\"><h2>Zeitplan</h2>\
-         <p><b>{stand}</b> · Empfohlen, wenn DepotSchlopf nach einem erfolgreichen manuellen \
+         <p><b>{betrieb}</b> · Empfohlen, wenn DepotSchlopf nach einem erfolgreichen manuellen \
          Test selbstständig laufen soll.</p>{gespeichert}{voraussetzung}\
          {schalter}\
          <h3>Uhrzeiten und automatische Läufe</h3>\
-         <p>Änderungen gelten erst nach dem Speichern. Beim Einschalten unten werden deine Eingaben gemeinsam gespeichert. Kurs- und Terminläufe sind montags bis freitags, nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten. An börsenfreien Tagen kann ein erfolgreicher Abruf die unten aktivierte Vorbereitung auslösen. Diese Vorbereitung nutzt KI-Budget. \
+         <p>Änderungen gelten ab dem Speichern. Kurs- und Terminläufe richten sich nach den Handelstagen der Börsenliste und nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten. An börsenfreien Tagen kann ein erfolgreicher Abruf die unten aktivierte Vorbereitung auslösen. Diese Vorbereitung nutzt KI-Budget. \
          Für Xetra ist 17:45 Uhr voreingestellt, kurz nach Börsenschluss.</p>\
          {entwurf_hinweis}\
          <form id=\"zeitplan-formular\" method=\"post\" action=\"/zeitplan\" data-aenderungen data-entwurf=\"{entwurf}\">\
          <input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <input type=\"hidden\" name=\"planstand\" value=\"{stand}\">\
          <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
          <label>Kurse Xetra abrufen um <input type=\"time\" name=\"kurse\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
          <p class=\"leise\">Jede andere Börse der Liste wird zehn Minuten nach ihrem eigenen \
@@ -1573,7 +1616,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          Erst nach bestätigtem Update verfügbar. Die Aufrufe zählen zum Monatsbudget; der Tagesrahmen und die Reserve der nächsten Erstmeinung haben Vorrang. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
          <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Änderungen werden erst durch Speichern wirksam.</p>\
          {einschalten} <button type=\"submit\" name=\"aktion\" value=\"speichern\"{speichern_hervorheben}>{speicher_text}</button>\
-         <p>Nur speichern lässt den Zeitplan {stand}. Du kannst die Einrichtung jederzeit später fortsetzen.</p></div></form></section>",
+         <p>{speicher_hinweis} Du kannst die Einrichtung jederzeit später fortsetzen.</p></div></form></section>",
         uhrzeit_text(ent.termine.unwrap_or(p.termine)),
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),
         haken(ent.papier_danach.unwrap_or(p.papier_danach)),
@@ -1761,8 +1804,9 @@ fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
 }
 
 /// Das Journal bleibt in seinem eigenen Abschnitt automatisch aktuell.
-pub(crate) fn journal_teil(token: &str, z: &Zustand) -> String {
-    let mut s = String::from(
+pub(crate) fn journal_teil(token: &str, start: &str, z: &Zustand) -> String {
+    let mut s = marke(start);
+    s.push_str(
         "<section id=\"journal\"><h2>1. Journal</h2><p>Hier hält DepotSchlopf seine Läufe und Papierdaten dauerhaft fest.</p>",
     );
     match z
@@ -1797,17 +1841,25 @@ fn erste_schritte(z: &Zustand, e: &Einrichtung) -> String {
             .any(|(_, st)| *st == SchluesselStand::Unbekannt)
     {
         "unbekannt"
+    } else if e
+        .schluessel
+        .iter()
+        .all(|(_, st)| matches!(st, SchluesselStand::Geprueft(_)))
+    {
+        "alle Schlüssel wurden vom jeweiligen Anbieter angenommen"
     } else if e.schluessel.iter().all(|(_, st)| {
         matches!(
             st,
             SchluesselStand::Geprueft(_) | SchluesselStand::Hinterlegt
         )
     }) {
-        "hinterlegt; die Verbindung wird beim echten Lauf geprüft"
+        "alle Schlüssel sind hinterlegt. Der jeweilige Prüfstand steht bei den Zugangsdaten"
     } else {
         "bitte ergänzen oder prüfen"
     };
-    let plan = if z.zeitplan.an {
+    let plan = if z.zeitplan_fehler.is_some() || z.erledigt_fehler.is_some() {
+        "angehalten; den Grund findest du im Zeitplan"
+    } else if z.zeitplan.an {
         "eingeschaltet"
     } else {
         "aus; erst nach dem manuellen Test empfohlen"
@@ -1854,7 +1906,11 @@ pub fn einrichtung(
     }
     kurssperre_teil(token, z, e, &mut s);
     papierfreigabe_teil(token, e, &mut s);
-    quellen_teil(token, z, &mut s);
+    let _ = write!(
+        s,
+        "<div data-teil=\"/teil/quellen\">{}</div>",
+        quellen_teil(token, start, z)
+    );
     zeitplan_teil(token, z, e, &mut s);
     update_teil(token, start, z, e, &mut s);
     s.push_str("<section id=\"selten\" class=\"selten\" aria-labelledby=\"selten-titel\"><h2 id=\"selten-titel\">Seltene Einstellungen</h2><p>Für die erste Einrichtung oder wenn sich etwas ändert: Zugangsdaten, Datenspeicherung, Windows-Start und technische Prüfungen.</p>");
@@ -1864,7 +1920,7 @@ pub fn einrichtung(
     let _ = write!(
         s,
         "<div data-teil=\"/teil/journal\">{}</div>",
-        journal_teil(token, z)
+        journal_teil(token, start, z)
     );
     schluessel_teil(token, e, &mut s);
     autostart_teil(token, e, &mut s);
@@ -2009,6 +2065,12 @@ pub const APP_JS: &str = r#""use strict";
     var m = /data-start="([^"]*)"/.exec(t);
     return m ? m[1] : null;
   }
+  function wiederverbindungsziel() {
+    // Die Position und fachliche Parameter bleiben erhalten, die alte Rückmeldung entfällt.
+    var ziel = new URL(window.location.href);
+    ziel.searchParams.delete("m");
+    return ziel.pathname + ziel.search + ziel.hash;
+  }
   async function verbindung() {
     var g = generation;
     var fehler = false;
@@ -2027,13 +2089,11 @@ pub const APP_JS: &str = r#""use strict";
           andererStart = true;
           banner.textContent = "DepotSchlopf wurde neu gestartet. Deine ungespeicherten Eingaben stehen noch hier. Prüfe sie vor dem Neuladen. Zum Speichern braucht diese Seite die neue Verbindung.";
           banner.hidden = false;
+          document.getElementById("neuverbinden-link").href = wiederverbindungsziel();
           document.getElementById("neuverbinden").hidden = false;
         } else if (!neuladen) {
           neuladen = true;
-          // Wesentliche Parameter (z.B. Protokollkennung) und die Position bleiben erhalten.
-          var ziel = new URL(window.location.href);
-          ziel.searchParams.delete("m");
-          window.location.replace(ziel.pathname + ziel.search + ziel.hash);
+          window.location.replace(wiederverbindungsziel());
         }
       } else {
         start = neu;
