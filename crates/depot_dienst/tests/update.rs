@@ -209,6 +209,12 @@ fn gefundenes_update_ist_global_sichtbar_und_braucht_weiter_bestaetigung() -> Re
         assert!(html.contains("Einspielen erst nach deiner Bestätigung."));
     }
     assert!(d.sperre().warteschlange.is_empty());
+    d.einreihen(Art::Nachrichten, Anlass::Hand)?;
+    let blockiert = get(&d, "/teil/update")?;
+    assert!(blockiert.contains("disabled>Update einspielen · wartet auf"));
+    assert!(!blockiert.contains("art=update&amp;sha="));
+    let (nr, kind) = some(d.schritt(mittag()?), "Schlagzeilen gestartet")?;
+    d.verfolge(nr, kind, || mittag().ok());
     let ziel = format!("/bestaetigen?art=update&sha={UPDATE_SHA}");
     let html = get(&d, &ziel)?;
     assert!(html.contains("name=\"geprueft\" value=\"ja\" required"));

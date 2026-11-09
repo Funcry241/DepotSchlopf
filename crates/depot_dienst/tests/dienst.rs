@@ -1129,6 +1129,40 @@ fn get(d: &Dienst, ziel: &str, t: Zeitpunkt) -> String {
 }
 
 #[test]
+fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), String> {
+    let d = dienst(ordner()?, false);
+    let t = donnerstag(17, 39)?;
+    let tag = some(t.datum(), "Tag des Zeitplans")?;
+    let html = get(&d, "/teil/live", t);
+    assert!(html.contains("<h2>Zeitstrahl</h2><p>Zeitplan aus"));
+    {
+        let mut z = d.sperre();
+        z.boersen = vec![Boerse::Xetra, Boerse::Nyse];
+        z.zeitplan.an = true;
+        z.zeitplan.kurse = (17, 51);
+        z.zeitplan.papier_danach = true;
+        z.zeitplan.nachrichten_an = true;
+    }
+    let html = get(&d, "/teil/live", t);
+    let termine = some(html.find("<b>17:40 Uhr</b> · Termine"), "Terminabruf")?;
+    let xetra = some(html.find("<b>17:51 Uhr</b> · Kurse Xetra"), "Xetra-Abruf")?;
+    let nyse = some(html.find("<b>22:10 Uhr</b> · Kurse NYSE"), "NYSE-Abruf")?;
+    assert!(termine < xetra && xetra < nyse);
+    assert!(html.contains("nach dem letzten Kursabruf, wenn mindestens einer erfolgreich war"));
+    assert!(html.contains("täglich von 08:00 bis vor 23:00 Uhr"));
+    {
+        let mut z = d.sperre();
+        z.erledigt.termine = Some(tag);
+        z.erledigt.kurse = Some(tag);
+        z.erledigt.kurse_nyse = Some(tag);
+    }
+    let html = get(&d, "/teil/live", t);
+    assert!(html.contains("entfällt: kein erfolgreicher Kursabruf"));
+    assert!(html.contains("Nächster Börsentag · Fr 06.11.2026"));
+    Ok(())
+}
+
+#[test]
 fn navigation_markiert_aktuelle_seite_und_zeigt_laufenden_stand() -> Result<(), String> {
     let mut d = Dienst::neu(
         ordner()?,
@@ -1431,6 +1465,8 @@ fn einrichten_bleibt_auf_der_config_seite_und_zeigt_den_arbeitsstand() -> Result
             .ok_or_else(|| format!("Abschnitt fehlt: {anker}"))
     };
     assert!(pos("id=\"journal\"")? < pos("id=\"schluessel\"")?);
+    assert!(pos("id=\"erste-schritte\"")? < pos("id=\"quellen\"")?);
+    assert!(html.contains("href=\"#journal\">Journal einrichten"));
     assert!(pos("id=\"quellen\"")? < pos("id=\"zeitplan\"")?);
     assert!(pos("id=\"zeitplan\"")? < pos("id=\"update\"")?);
     assert!(pos("id=\"update\"")? < pos("id=\"selten\"")?);
