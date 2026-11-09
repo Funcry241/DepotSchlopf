@@ -196,6 +196,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         werte.len(),
         PAUSE.as_secs()
     );
+    let abrufbeginn = jetzt();
     let bericht = match echt_sammeln(
         &mut journal,
         &schluessel,
@@ -242,12 +243,42 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
     if verwendbar {
         println!("[Sammler] Kurse verwendbar.");
         ExitCode::SUCCESS
+    } else if let Some(meldung) = alte_schlusskurse(boerse, abrufbeginn, &bericht) {
+        eprintln!("[Sammler] FEHLER: {meldung}");
+        ExitCode::FAILURE
     } else {
         eprintln!(
             "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Prüfung nicht bestanden)."
         );
         ExitCode::FAILURE
     }
+}
+
+/// Benennt einen alten Kursstand beim gezielten Abruf nach Börsenschluss.
+fn alte_schlusskurse(
+    boerse: Option<Boerse>,
+    abrufbeginn: Option<Zeitpunkt>,
+    bericht: &depot_sammler::Bericht,
+) -> Option<String> {
+    let boerse = boerse?;
+    let abrufbeginn = abrufbeginn?;
+    let (tag, ..) = abrufbeginn.in_frankfurt()?;
+    let letzter = bericht.handelstag?;
+    if !boerse.handelstag(tag)
+        || abrufbeginn < boerse.schluss(tag)?
+        || letzter >= tag
+        || bericht.abbruch.is_some()
+        || bericht.verbindung.is_some()
+    {
+        return None;
+    }
+    Some(format!(
+        "{}: Schlusskurse für {}: 0 von {} belegt. Jüngster belegter Kurs vom {}.",
+        boerse.name(),
+        datum(tag),
+        bericht.werte.len(),
+        datum(letzter)
+    ))
 }
 
 /// Je Wert eine Zeile mit Schlusskursen oder dem Grund, warum sie fehlen.
@@ -289,7 +320,7 @@ fn zeige_pruefung(bericht: &depot_sammler::Bericht) {
         }
         Some(t) => {
             println!(
-                "[Sammler] Prüfung für den Handelstag {} (Hoechstalter 20 Minuten: Schlusskurse sind nur kurz nach 17:35 Uhr frisch):",
+                "[Sammler] Kursprüfung für den jüngsten belegten Handelstag {}:",
                 datum(t)
             );
             for f in &bericht.pruefung {
@@ -469,5 +500,48 @@ fn main() -> ExitCode {
             );
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boersenabruf_meldet_erwarteten_und_belegten_handelstag() -> Result<(), String> {
+        let freitag = Datum::neu(2026, 11, 6).ok_or("Freitag fehlt")?;
+        let montag = Datum::neu(2026, 11, 9).ok_or("Montag fehlt")?;
+        let wert = beobachtungsliste()
+            .map_err(|e| format!("{e:?}"))?
+            .into_iter()
+            .find(|w| w.boerse == Boerse::Xetra)
+            .ok_or("Xetra-Wert fehlt")?;
+        let bericht = depot_sammler::Bericht {
+            werte: vec![(
+                wert,
+                Ergebnis::Belegt {
+                    heute: Some((freitag, Preis::aus_fein(100_000_000))),
+                    vortag: None,
+                    rohdatei: PathBuf::new(),
+                },
+            )],
+            handelstag: Some(freitag),
+            abbruch: None,
+            sicherheitsabbruch: false,
+            pruefung: vec![depot_regelwerk::DatenFehler::AbrufNichtAmHandelstag],
+            ausgelassen: Vec::new(),
+            verbindung: None,
+        };
+        let boerse = Some(Boerse::Xetra);
+        let nach_schluss = Zeitpunkt::frankfurt(montag, 17, 51, 0);
+        let vor_schluss = Zeitpunkt::frankfurt(montag, 17, 30, 0);
+        assert_eq!(
+            alte_schlusskurse(boerse, nach_schluss, &bericht).as_deref(),
+            Some(
+                "Xetra: Schlusskurse für 09.11.2026: 0 von 1 belegt. Jüngster belegter Kurs vom 06.11.2026."
+            )
+        );
+        assert_eq!(alte_schlusskurse(boerse, vor_schluss, &bericht), None);
+        Ok(())
     }
 }
