@@ -1,5 +1,4 @@
 klasse: Funktion
-zweck: Update-Testversionen mit Git-Bundles ohne lokalen Shell-Transport liefern; alle Update- und Schutzprüfungen erhalten.
+zweck: Bei einem Börsenabruf mit alten Schlusskursen den erwarteten Handelstag und das jüngste belegte Kursdatum anzeigen.
 pfade:
-crates/depot_lauf/src/update.rs
-docs/befunde/update.md
+crates/depot_sammler/src/main.rs
