@@ -211,7 +211,7 @@ fn gefundenes_update_ist_global_sichtbar_und_braucht_weiter_bestaetigung() -> Re
     assert!(d.sperre().warteschlange.is_empty());
     d.einreihen(Art::Nachrichten, Anlass::Hand)?;
     let blockiert = get(&d, "/teil/update")?;
-    assert!(blockiert.contains("disabled>Update einspielen · wartet auf"));
+    assert!(blockiert.contains("disabled>Update einspielen</button>"));
     assert!(!blockiert.contains("art=update&amp;sha="));
     let (nr, kind) = some(d.schritt(mittag()?), "Schlagzeilen gestartet")?;
     d.verfolge(nr, kind, || mittag().ok());
@@ -225,6 +225,30 @@ fn gefundenes_update_ist_global_sichtbar_und_braucht_weiter_bestaetigung() -> Re
     );
     assert!(bestaetige_update(&d)?.contains("m=update#update"));
     assert!(!get(&d, "/teil/kopf")?.contains("Update verfügbar"));
+    Ok(())
+}
+
+#[test]
+fn einrichtung_zeigt_update_und_sperrt_den_knopf_bis_alle_auftraege_fertig_sind()
+-> Result<(), String> {
+    let d = dienst(ordner()?);
+    let t = mittag()?;
+    suche_update(&d, t)?;
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    let pruefe_knopf = || -> Result<(), String> {
+        let html = get(&d, "/teil/update")?;
+        assert!(html.contains("Eine neue Version ist verfügbar."));
+        assert!(html.contains("disabled>Update einspielen</button>"));
+        assert!(html.contains("Möglich, sobald kein anderer Auftrag mehr läuft oder wartet."));
+        Ok(())
+    };
+    pruefe_knopf()?;
+    assert!(bestaetige_update(&d)?.contains("m=update_belegt"));
+    let (nr, kind) = some(d.schritt(t), "Terminabruf")?;
+    pruefe_knopf()?;
+    d.verfolge(nr, kind, || mittag().ok());
+    let html = get(&d, "/teil/update")?;
+    assert!(html.contains(&format!("sha={UPDATE_SHA}\">Update einspielen</a>")));
     Ok(())
 }
 
