@@ -36,6 +36,7 @@ pub use depot::{AuftragZeile, DepotLage, Position, TopfLage};
 pub use depot_sim::papierlauf::{
     PapierFreigabeAngebot, PapierFreigabeFehler, papier_freigabe_angebot, papier_freigeben,
 };
+pub use depot_sim::vorbereitung::tag_jetzt as vorbereitungstag;
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
 pub use zugang::{
     DatenprobeFehler, PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien,

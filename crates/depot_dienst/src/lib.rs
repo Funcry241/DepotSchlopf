@@ -180,32 +180,39 @@ fn heute(jetzt: Zeitpunkt) -> Option<depot_kern::Datum> {
 
 const HTML: &str = "text/html; charset=utf-8";
 
+fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
+    let inhalt = seiten::live(&d.token, &d.start, &d.sperre(), jetzt);
+    let s = seiten::rahmen(
+        "/",
+        Some("/teil/live"),
+        seiten::meldung(&a.abfrage),
+        &inhalt,
+        d.version.as_deref(),
+        &seiten::betriebsleiste(&d.start, &d.sperre(), heute(jetzt)),
+        seiten::meldungs_aktion(&a.abfrage),
+    );
+    antwort(200, HTML, s.as_bytes())
+}
+
 fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let tag = heute(jetzt);
     match a.pfad.as_str() {
-        "/" => {
-            let inhalt = seiten::live(&d.token, &d.start, &d.sperre(), tag);
-            let s = seiten::rahmen(
-                "/",
-                Some("/teil/live"),
-                seiten::meldung(&a.abfrage),
-                &inhalt,
-                d.version.as_deref(),
-                &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
-                seiten::meldungs_aktion(&a.abfrage),
-            );
-            antwort(200, HTML, s.as_bytes())
-        }
+        "/" => live_seite(d, a, jetzt),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
         "/teil/live" => antwort(
             200,
             HTML,
-            seiten::live(&d.token, &d.start, &d.sperre(), tag).as_bytes(),
+            seiten::live(&d.token, &d.start, &d.sperre(), jetzt).as_bytes(),
         ),
         "/teil/journal" => antwort(
             200,
             HTML,
-            seiten::journal_teil(&d.token, &d.sperre()).as_bytes(),
+            seiten::journal_teil(&d.token, &d.start, &d.sperre()).as_bytes(),
+        ),
+        "/teil/quellen" => antwort(
+            200,
+            HTML,
+            seiten::quellen_teil(&d.token, &d.start, &d.sperre()).as_bytes(),
         ),
         "/teil/kopf" => antwort(
             200,
@@ -217,7 +224,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             HTML,
             seiten::update_aktionen(&d.token, &d.start, &d.sperre()).as_bytes(),
         ),
-        "/bestaetigen" => auftrag_bestaetigen(d, a, tag),
+        "/bestaetigen" => auftrag_bestaetigen(d, a, jetzt),
         "/protokoll" | "/protokoll.txt" => protokoll_lesen(d, a, tag),
         "/einrichtung" => {
             // Erst ausserhalb der Sperre nachsehen, was gespeichert ist.
@@ -430,10 +437,19 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     }
 }
 
-fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, tag: Option<depot_kern::Datum>) -> Vec<u8> {
+fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let f = formular(a.abfrage.as_bytes()).unwrap_or_default();
     let (art, sha, ziel) = match feld(&f, "art").and_then(Art::aus_kurz) {
-        Some(art @ (Art::Papier | Art::Vorbereiten)) => (art, None, "/"),
+        Some(Art::Papier) => (Art::Papier, None, "/"),
+        Some(Art::Vorbereiten) => {
+            if d.update_offen() {
+                return http::umleitung("/?m=vorbereitung_update#vorbereitung");
+            }
+            if let Err(m) = d.sperre().vorbereitung_pruefen(jetzt) {
+                return http::umleitung(&format!("/?m={m}#vorbereitung"));
+            }
+            (Art::Vorbereiten, None, "/")
+        }
         Some(Art::Update) => {
             let z = d.sperre();
             let Some((sha, _)) = z
@@ -442,6 +458,9 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, tag: Option<depot_kern::Datum>) 
             else {
                 return http::umleitung("/einrichtung?m=update_suche#update");
             };
+            if z.update_wartet_auf_ruhe() {
+                return http::umleitung("/einrichtung?m=update_belegt#update");
+            }
             (Art::Update, Some(sha.to_string()), "/einrichtung")
         }
         _ => return seiten::fehler(404, "Diese Aktion gibt es nicht."),
@@ -457,7 +476,7 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, tag: Option<depot_kern::Datum>) 
         None,
         &inhalt,
         d.version.as_deref(),
-        &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+        &seiten::betriebsleiste(&d.start, &d.sperre(), heute(jetzt)),
         seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, seite.as_bytes())
@@ -471,6 +490,14 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
     let ort = match art {
         Art::Vorbereiten if d.update_offen() => "/?m=vorbereitung_update",
         Art::Vorbereiten if !bestaetigt => "/?m=vorbereitung_bestaetigen",
+        Art::Vorbereiten => {
+            let m = match d.von_hand(art, jetzt) {
+                Ok(()) => "auftrag",
+                Err(m) if m.starts_with("vorbereitung_") => m,
+                Err(_) => "auftrag_belegt",
+            };
+            return http::umleitung(&format!("/?m={m}#vorbereitung"));
+        }
         Art::Papier if !bestaetigt => "/?m=papier_bestaetigen",
         Art::Update if !bestaetigt => "/einrichtung?m=update_bestaetigen#update",
         Art::Update => {
@@ -482,7 +509,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
             if d.von_hand(art, jetzt).is_ok() {
                 "/einrichtung?m=update#update"
             } else {
-                "/einrichtung?m=update_belegt#update"
+                "/einrichtung?m=updatesuche_belegt#update"
             }
         }
         Art::Einrichten if feld(f, "ziel") == Some("einrichtung") => {
@@ -524,9 +551,15 @@ fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
                     "zeitplan"
                 },
                 entwurf,
-                d.aendere_zeitplan(|alt| Zeitplan {
-                    an: aktion == "speichern_an" || alt.an,
-                    ..plan
+                d.aendere_zeitplan(|alt| {
+                    let stand = if alt.an { "an" } else { "aus" };
+                    if feld(f, "planstand").is_some_and(|gesehen| gesehen != stand) {
+                        return Err(werkbank::ZeitplanAbgelehnt::SchalterGeaendert);
+                    }
+                    Ok(Zeitplan {
+                        an: aktion == "speichern_an" || alt.an,
+                        ..plan
+                    })
                 }),
             )
         }
@@ -535,13 +568,14 @@ fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
             (
                 if an { "zeitplan_an" } else { "zeitplan_aus" },
                 String::new(),
-                d.aendere_zeitplan(|alt| Zeitplan { an, ..alt }),
+                d.aendere_zeitplan(|alt| Ok(Zeitplan { an, ..alt })),
             )
         }
         _ => return http::umleitung("/einrichtung?m=zeitplan_neu_laden#zeitplan"),
     };
     let fehler = match ergebnis {
         Ok(()) => return http::umleitung(&format!("/einrichtung?m={meldung}#zeitplan")),
+        Err(werkbank::ZeitplanAbgelehnt::SchalterGeaendert) => "zeitplan_schalter_geaendert",
         Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => "zeitplan_einrichtung",
         Err(werkbank::ZeitplanAbgelehnt::UpdateOffen) => "vorbereitung_update",
         Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => "zeitplan_lage",

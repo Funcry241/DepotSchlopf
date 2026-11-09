@@ -243,12 +243,26 @@ fn einrichtung_zeigt_update_und_sperrt_den_knopf_bis_alle_auftraege_fertig_sind(
         Ok(())
     };
     pruefe_knopf()?;
+    let ziel = format!("/bestaetigen?art=update&sha={UPDATE_SHA}");
+    assert!(get(&d, &ziel)?.contains("m=update_belegt"));
     assert!(bestaetige_update(&d)?.contains("m=update_belegt"));
     let (nr, kind) = some(d.schritt(t), "Terminabruf")?;
     pruefe_knopf()?;
     d.verfolge(nr, kind, || mittag().ok());
     let html = get(&d, "/teil/update")?;
     assert!(html.contains(&format!("sha={UPDATE_SHA}\">Update einspielen</a>")));
+    assert!(get(&d, &ziel)?.contains("Ich spiele diese Version ein."));
+    Ok(())
+}
+
+#[test]
+fn doppelte_updatesuche_meldet_den_richtigen_auftrag() -> Result<(), String> {
+    let d = dienst(ordner()?);
+    assert!(post_auftrag(&d, Art::UpdatePruefen.kurz())?.contains("m=update#update"));
+    assert!(post_auftrag(&d, Art::UpdatePruefen.kurz())?.contains("m=updatesuche_belegt#update"));
+    let html = get(&d, "/einrichtung?m=updatesuche_belegt")?;
+    assert!(html.contains("Updatesuche nicht eingereiht."));
+    assert!(html.contains("href=\"#update\">Zum Update"));
     Ok(())
 }
 
@@ -927,15 +941,15 @@ const reply=t=>Promise.resolve({ok:true,text:()=>Promise.resolve(t)});
 const health=(start='alt',bereit=true)=>`<span data-start="${start}"></span><span data-bereit="${bereit?'ja':'nein'}"></span>`;
 function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt',urls=['/teil/status','/teil/update','/teil/journal'],forms=[],confirm=()=>false}={}) {
   let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={},docEvents={};
-  const banner={hidden:true,textContent:''}, reconnect={hidden:true};
+  const banner={hidden:true,textContent:''}, reconnect={hidden:true}, reconnectLink={href:'/einrichtung'};
   const elements=Array.from({length:parts},(_,i)=>({innerHTML:'alt',getAttribute:()=>urls[i],querySelectorAll:()=>[]}));
-  const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:banner,querySelector:()=>known?{getAttribute:()=>known}:null,querySelectorAll:s=>s==='[data-teil]'?elements:s==='form[data-aenderungen]'?forms:[]};
+  const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:id==='neuverbinden-link'?reconnectLink:banner,querySelector:()=>known?{getAttribute:()=>known}:null,querySelectorAll:s=>s==='[data-teil]'?elements:s==='form[data-aenderungen]'?forms:[]};
   vm.runInNewContext(script,{document,navigator:{},URL,AbortController,Set,
     window:{confirm,addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
     setTimeout:(f,delay)=>{const id=++nr;timers.set(id,{f,at:now+delay});return id},clearTimeout:id=>timers.delete(id),
     fetch:(url,options)=>{requests.push({url,options});return response(url,options)}
   });
-  return {banner,reconnect,elements,requests,navigations,events,docEvents,get timers(){return timers},
+  return {banner,reconnect,reconnectLink,elements,requests,navigations,events,docEvents,get timers(){return timers},
     async advance(ms){const end=now+ms;for(let i=0;i<200;i++){const due=[...timers.entries()].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;timers.delete(due[0]);now=due[1].at;due[1].f();await new Promise(r=>setImmediate(r));}now=end;}
   };
 }
@@ -978,6 +992,7 @@ test('Neustart verwirft ungespeicherte Zugangsdaten nicht automatisch',async()=>
   const f=formular({type:'password',value:'nur-im-formular',defaultValue:''});
   const b=browser({forms:[f],response:()=>reply(health('neu'))});await b.advance(0);
   assert.deepEqual(b.navigations,[]);assert.equal(b.reconnect.hidden,false);
+  assert.equal(b.reconnectLink.href,'/einrichtung#update');
   assert.match(b.banner.textContent,/ungespeicherten Eingaben/);
   const speichern=ereignis(f,f.button);b.docEvents.submit(speichern);
   assert.equal(speichern.verhindert,true);
