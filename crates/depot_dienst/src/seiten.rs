@@ -56,6 +56,7 @@ margin:6px 0}\
 #neuverbinden{padding:12px}\
 @media(max-width:600px),(max-height:700px){.speicher-aktionen{position:static}}\
 label{display:block;margin:6px 0}\
+.selten{border:2px solid var(--halt)}\
 .zugang-tabelle input{width:100%}.zugang-tabelle td{overflow-wrap:anywhere}\
 @media(max-width:600px){.zugang-tabelle,.zugang-tabelle tbody,\
 .zugang-tabelle tr,.zugang-tabelle td{display:block;width:100%}\
