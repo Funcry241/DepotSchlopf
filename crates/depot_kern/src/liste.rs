@@ -33,8 +33,9 @@ pub fn quelle(boerse: Boerse) -> &'static str {
 /// Abrufe am Tag, die Alpha Vantage in der kostenlosen Stufe erlaubt.
 pub const ABRUFE_ALPHA_VANTAGE: usize = 25;
 
-/// Abrufe am Tag bei Alpha Vantage, die nicht fuer Kurse sind: die Nachrichten, die der
-/// Xetra-Lauf mit demselben Schluessel einmal holt (`depot_sammler::nachrichten`).
+/// Abrufe am Tag bei Alpha Vantage, die nicht fuer Kurse sind: der Ergebniskalender, den
+/// `run.cmd termine` hoechstens einmal am Tag mit demselben Schluessel holt
+/// (`depot_sammler::ergebnisse`, #120). Die Nachrichten kommen seit #81 per RSS.
 pub const WEITERE_ABRUFE_ALPHA_VANTAGE: usize = 1;
 
 /// Wie viele Werte eine Quelle je Lauf hoechstens bekommt: ein Abruf je Wert, und ein Lauf muss
@@ -144,6 +145,26 @@ pub fn pruefe_liste(eintraege: &[Eintrag<'_>]) -> Result<Vec<Wert>, String> {
     Ok(werte)
 }
 
+/// Die Werte des Vergleichsdepots (#118): genau die Liste vom 10.11.2026. Sie bleibt fest, auch
+/// wenn die Beobachtungsliste waechst; sonst aenderte sich die Vergangenheit des Vergleichs.
+pub const VERGLEICH_ISIN: [&str; 15] = [
+    "DE0007164600",
+    "DE0007236101",
+    "DE0008404005",
+    "DE0005557508",
+    "DE000BASF111",
+    "DE0007100000",
+    "DE0008430026",
+    "DE0005810055",
+    "DE0006231004",
+    "DE0005190003",
+    "US46625H1005",
+    "US1912161007",
+    "US4781601046",
+    "US30231G1022",
+    "US92826C8394",
+];
+
 /// Die festgelegte Beobachtungsliste.
 ///
 /// # Errors
@@ -237,6 +258,17 @@ mod papierorder_tests {
             papierorder_schluss(&coca_cola, versand),
             Boerse::Nyse.schluss(freitag)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn vergleichswerte_sind_gueltig_und_in_der_liste() -> Result<(), String> {
+        for isin in VERGLEICH_ISIN {
+            Isin::neu(isin).map_err(|e| format!("{isin}: {e:?}"))?;
+            if !WERTE.iter().any(|(id, ..)| *id == isin) {
+                return Err(format!("{isin} fehlt in der Beobachtungsliste"));
+            }
+        }
         Ok(())
     }
 }

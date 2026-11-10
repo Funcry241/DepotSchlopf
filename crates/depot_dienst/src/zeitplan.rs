@@ -37,6 +37,22 @@ impl VorbereitungsPlan {
     }
 }
 
+/// Windows-Hinweis bei „Eingriff nötig“ (#122). Ab Werk an, weil er nur anzeigt.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HinweisPlan {
+    #[default]
+    An,
+    Aus,
+}
+impl HinweisPlan {
+    pub fn aktiv(self) -> bool {
+        self == Self::An
+    }
+    pub fn aus_bool(an: bool) -> Self {
+        if an { Self::An } else { Self::Aus }
+    }
+}
+
 /// Der Zeitplan, wie er in `daten/zeitplan.txt` steht.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Zeitplan {
@@ -51,6 +67,8 @@ pub struct Zeitplan {
     pub nachrichten_an: bool,
     /// Einmal je boersenfreiem Tag, innerhalb des bestehenden KI-Budgets.
     pub vorbereitung: VorbereitungsPlan,
+    /// Eine Datei ohne das Feld bedeutet an.
+    pub hinweis: HinweisPlan,
 }
 
 impl Default for Zeitplan {
@@ -65,6 +83,7 @@ impl Default for Zeitplan {
             papier_danach: true,
             nachrichten_an: false,
             vorbereitung: VorbereitungsPlan::Aus,
+            hinweis: HinweisPlan::An,
         }
     }
 }
@@ -119,6 +138,9 @@ impl Zeitplan {
         if self.vorbereitung.aktiv() {
             text.push_str("vorbereitung_an=ja\n");
         }
+        if !self.hinweis.aktiv() {
+            text.push_str("hinweis_aus=ja\n");
+        }
         text
     }
 
@@ -145,10 +167,12 @@ impl Zeitplan {
         let papier_danach = lies_ja_nein(&wert("papier_danach")?).ok_or("Zeitplan: papier")?;
         let mut nachrichten_an = false;
         let mut vorbereitung_an = false;
+        let mut hinweis_aus = false;
         for zeile in z {
             match zeile {
                 "nachrichten_an=ja" if !nachrichten_an => nachrichten_an = true,
                 "vorbereitung_an=ja" if !vorbereitung_an => vorbereitung_an = true,
+                "hinweis_aus=ja" if !hinweis_aus => hinweis_aus = true,
                 _ => return Err("Zeitplan: Einstellung ungültig oder doppelt".into()),
             }
         }
@@ -162,6 +186,7 @@ impl Zeitplan {
             papier_danach,
             nachrichten_an,
             vorbereitung: VorbereitungsPlan::aus_bool(vorbereitung_an),
+            hinweis: HinweisPlan::aus_bool(!hinweis_aus),
         };
         if plan.als_text() != text {
             return Err("Zeitplan: nicht in eigener Form".into());

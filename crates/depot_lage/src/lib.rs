@@ -28,6 +28,7 @@ mod budget;
 mod depot;
 pub mod html;
 pub mod tage;
+pub mod vergleich;
 mod zugang;
 
 pub use betrieb::{AnbieterHinweis, Betrieb, SchluesselStand};

@@ -118,3 +118,27 @@ Jede Gegenprobe ändert den Code an einer Stelle (Z1–Z6 nach K22-01, W1–W5 n
 | G8 rohe Seite nicht abgelegt | `erster_lauf_belegt_jeden_termin`, `zweiter_lauf_schreibt_nichts_doppelt`, `unlesbare_seite_wird_nicht_belegt` |
 
 Keine neuen Grenzen, keine neuen Abhängigkeiten.
+
+## Quartalszahlen der US-Werte (#120)
+
+Quelle ist der Ergebniskalender von Alpha Vantage (`function=EARNINGS_CALENDAR&horizon=3month`, gleicher Schlüssel wie bei den Kursen). Am 10.11.2026 mit dem Demo-Schlüssel geprüft: eine CSV mit 1.650 Zeilen und genau der Kopfzeile `symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay`. Namen mit Komma stehen in Anführungszeichen (`SGU,"STAR GROUP, L.P.",…`). Deshalb liest `depot_sammler::ergebnisse` das Symbol von links und die fünf festen Felder von rechts.
+
+- Termine gibt es nur für Werte der Liste an der US-Börse (Kürzel wie bei Tiingo). **Lücke:** Die Xetra-Werte stehen nicht im Kalender. Am Prüftag stand aus der Liste nur JPM darin. KO, JNJ, XOM und V erscheinen erst, wenn ihr Termin feststeht.
+- Kennung `ergebnis-<kürzel>-<Quartalsende>`. Verschiebt sich der Tag, wird der Termin unter derselben Kennung fortgeschrieben. Ein künftiger Termin, der im Kalender fehlt, wird nur gemeldet.
+- Verlässlichkeit `angekuendigt` (Drittquelle). Zeit: nur der Tag. Der Titel nennt „vor Börsenbeginn“ oder „nach Börsenschluss“, wenn die Quelle es sagt.
+- Höchstens ein Abruf je Kalendertag (Rohablage des Tages vorhanden). Ohne Schlüssel gibt es keinen Abruf. Ein Hinweis der Quelle (JSON) belegt nichts und sperrt nichts. Eine Antwort mit Schlüssel wird weder abgelegt noch gelesen, und die Kurssperre greift wie bei den Kursen. Eine Zeile außerhalb der Form verwirft die ganze Antwort.
+- Kontingent: Der eine Abruf nutzt den Platz `WEITERE_ABRUFE_ALPHA_VANTAGE`, den früher die Nachrichten belegten.
+
+| Test (`crates/depot_sammler/…`) | Prüft |
+|---|---|
+| `ergebnisse::tests::nur_werte_der_liste_und_felder` | JPM und KO aus der Vorlage, Kennung, Titel, Tag, ISIN, Verlässlichkeit |
+| `ergebnisse::tests::name_mit_komma_ist_kein_fehler` | `"STAR GROUP, L.P."` ist kein Fehler, eine kurze Zeile schon |
+| `ergebnisse::tests::falscher_kopf_belegt_nichts`, `hinweis_statt_kalender`, `unbekannte_tageszeit_verwirft_alles` | strenge Form |
+| `tests/ergebnisse.rs::nur_werte_der_liste_werden_belegt` | 2 Termine im Journal, Rohdatei `20261110T220000Z.csv` |
+| `tests/ergebnisse.rs::verschoben_wird_fortgeschrieben_und_einmal_am_tag` | zweiter Lauf am selben Tag ohne Abruf, am nächsten Tag JPM fortgeschrieben, KO als fehlend gemeldet |
+| `tests/ergebnisse.rs::ohne_schluessel_kein_abruf` | kein Abruf |
+| `tests/ergebnisse.rs::hinweis_der_quelle_belegt_nichts_ohne_sperre` | kein Beleg, kein Sicherheitsabbruch |
+| `tests/ergebnisse.rs::schluessel_in_der_antwort_ist_sicherheitsabbruch` | keine Ablage, Meldung ohne Schlüssel |
+| `tests/ergebnisse.rs::falsche_zeile_verwirft_alles` | 0 Termine |
+
+Keine Grenze, keine neue Abhängigkeit, kein neuer Host, keine neue Journalart.

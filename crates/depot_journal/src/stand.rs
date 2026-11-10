@@ -236,6 +236,9 @@ pub struct Stand {
     abrechnungstag: Option<Datum>,
     wissensstichtage: BTreeMap<Datum, Zeitpunkt>,
     abrechnungen: Abrechnungen,
+    /// Je abgeschlossenem Tag die Toepfe zum Abschluss, aufsteigend (#118). Entsteht nur beim
+    /// Lesen; das Journal schreibt dafuer nichts.
+    tagesschluesse: Vec<(Datum, BTreeMap<TopfId, Topf>)>,
 }
 
 pub(crate) fn papier_freigabe_text(tag: Datum, bargeld: Cent) -> String {
@@ -398,6 +401,12 @@ impl Stand {
     /// Begruendungen: Datum, wer, Text.
     pub fn begruendungen(&self) -> &[(Datum, String, String)] {
         &self.begruendungen
+    }
+
+    /// Je abgeschlossenem Tag der Stand der Toepfe zum Abschluss, aufsteigend nach Datum. Ein
+    /// angefangener Tag ohne Abschluss erscheint nicht.
+    pub fn tagesschluesse(&self) -> &[(Datum, BTreeMap<TopfId, Topf>)] {
+        &self.tagesschluesse
     }
 
     /// Der letzte Tagesabschluss.
@@ -694,6 +703,7 @@ impl Stand {
             .papier_verlustreferenz
             .map(|hoch| hoch.max(a.hoechststand));
         self.papier_neustart = None;
+        self.tagesschluesse.push((a.datum, self.toepfe.clone()));
         self.abschluss = Some(a);
         self.seit_abschluss = 0;
         Ok(())

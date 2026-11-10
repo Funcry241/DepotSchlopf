@@ -1,8 +1,9 @@
 klasse: Funktion
-zweck: Seite „Mathematik in DepotSchlopf“ anlegen und in README, Kaltstart-Reihenfolge und Übergabetext des Assistenten-Exports aufnehmen. Invarianten für Auftragsautomat, Beleg-Rundlauf, KI-Budget, Abstimmung und Wiederanlauf an allen Folgen prüfen (#111, #112). Weltprognosen nach ihrem Horizont auflösen und mit Wilson-Intervall gegen „steigt immer“ auswerten (#114).
+zweck: Mathematik dokumentieren, Invarianten prüfen und belegte Weltprognosen auswerten
 pfade:
 CHANGELOG.md
-README.md
+crates/depot_berater/src/frage.rs
+crates/depot_berater/src/ki.rs
 crates/depot_journal/src/aufloesung.rs
 crates/depot_journal/src/datei.rs
 crates/depot_journal/src/lib.rs
@@ -13,7 +14,9 @@ crates/depot_kern/src/liste.rs
 crates/depot_lage/src/html.rs
 crates/depot_lage/src/lib.rs
 crates/depot_lauf/src/export.rs
+crates/depot_sim/src/lauf.rs
 crates/depot_sim/src/papiertag.rs
+crates/depot_sim/src/szenario.rs
 crates/depot_sim/tests/invarianten.rs
 docs/MATHEMATIK.md
 docs/kaltstart.md

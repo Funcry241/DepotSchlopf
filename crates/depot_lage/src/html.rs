@@ -331,8 +331,8 @@ fn depot(l: &Lagebild, s: &mut String) {
         return;
     };
     s.push_str(
-        "<section><h2>Papierdepot</h2><p class=\"leise\">Nur Papiergeld, simuliert: Jeder \
-         Neue Orders warten auf einen geprüften Schlusskurs nach ihrem Versand. Ob eine echte \
+        "<section><h2>Papierdepot</h2><p class=\"leise\">Nur Papiergeld, simuliert: Neue \
+         Orders warten auf einen geprüften Schlusskurs nach ihrem Versand. Ob eine echte \
          Order zu diesem Preis ausgeführt worden wäre, bleibt offen.</p>",
     );
     if d.toepfe.is_empty() {
@@ -375,6 +375,9 @@ fn depot(l: &Lagebild, s: &mut String) {
         }
         s.push_str("</table></div>");
     }
+    if let Some(v) = &d.vergleich {
+        vergleich(v, s);
+    }
     if !d.auftraege.is_empty() {
         s.push_str(
             "<h2 style=\"margin-top:12px\">Aufträge</h2><div class=\"breit\"><table><tr>\
@@ -399,6 +402,66 @@ fn depot(l: &Lagebild, s: &mut String) {
         s.push_str("</table></div>");
     }
     s.push_str("</section>");
+}
+
+/// Basispunkte als Prozent mit Vorzeichen: `+2,46 %`, `−0,01 %`, `±0,00 %`.
+pub fn prozent(bp: i64) -> String {
+    let betrag = bp.unsigned_abs();
+    let zeichen = match bp.signum() {
+        1 => "+",
+        -1 => "−",
+        _ => "±",
+    };
+    format!(
+        "{zeichen}{},{:02} %",
+        betrag.checked_div(100).unwrap_or(0),
+        betrag.checked_rem(100).unwrap_or(0)
+    )
+}
+
+fn vergleich(v: &crate::vergleich::VergleichLage, s: &mut String) {
+    let _ = write!(
+        s,
+        "<h2 style=\"margin-top:12px\">Vergleich seit Start</h2><div class=\"breit\"><table><tr>\
+         <th>Wer</th><th class=\"z\">Wert am {}</th><th class=\"z\">seit Start</th>\
+         <th class=\"z\">KI-Kosten</th><th class=\"z\">nach KI-Kosten</th></tr>",
+        datum_text(v.bewertet)
+    );
+    for z in &v.zeilen {
+        let wert = match (&z.wert, &z.grund) {
+            (Some(w), _) => euro(*w),
+            (None, Some(g)) => format!("nicht bewertbar: {}", maskiere(g)),
+            (None, None) => "nicht bewertbar".into(),
+        };
+        let _ = write!(
+            s,
+            "<tr><td>{}</td><td class=\"z\">{}</td><td class=\"z\">{}</td><td class=\"z\">{}</td>\
+             <td class=\"z\">{}</td></tr>",
+            maskiere(&z.name),
+            wert,
+            z.rendite_bp.map_or_else(|| "–".into(), prozent),
+            z.ki_kosten.map_or_else(|| "–".into(), euro),
+            z.nach_ki_bp.map_or_else(|| "–".into(), prozent)
+        );
+    }
+    s.push_str("</table></div>");
+    let _ = write!(
+        s,
+        "<p class=\"leise\">Ein Topf liegt vorn, wenn er nach KI-Kosten über dem Vergleich liegt. \
+         Start {} mit je {}, {} abgeschlossene Papiertage. Das Vergleichsdepot kauft zu den \
+         Schlusskursen des ersten Papiertags mit derselben Gebühr je Order und hält danach nur.",
+        datum_text(v.start),
+        euro(v.startgeld),
+        v.tage
+    );
+    if !v.ohne.is_empty() {
+        let _ = write!(
+            s,
+            " Ohne {} (kein Kurs am Einstiegstag).",
+            maskiere(&v.ohne.join(", "))
+        );
+    }
+    s.push_str("</p>");
 }
 
 fn prognosen(l: &Lagebild, s: &mut String) {

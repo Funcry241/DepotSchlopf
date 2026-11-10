@@ -719,7 +719,7 @@ fn frage(
             ),
         )?;
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag")? {
-        let mut antwort = frager.vorschlagen(e, lage);
+        let mut antwort = frager.vorschlagen_mit_bilanz(e, lage, &prognosebilanz(j.stand()));
         if let Some(a) = frager.abrechnung() {
             j.rechne_ki_ab(&a).map_err(journal)?;
         }
@@ -793,6 +793,16 @@ pub(crate) struct TopfAntwort {
     pub(crate) topf: Topf,
     pub(crate) vorschlag: Option<Vorschlag>,
     pub(crate) erste_verwertbar: bool,
+}
+
+fn prognosebilanz(stand: &depot_journal::Stand) -> Vec<(BeraterId, depot_journal::Auswertung)> {
+    [BeraterId::Dachs, BeraterId::Maus]
+        .into_iter()
+        .filter_map(|wer| {
+            depot_journal::werte_aus(stand.weltprognosen(), stand.aufloesungen(), Some(wer))
+                .map(|auswertung| (wer, auswertung))
+        })
+        .collect()
 }
 
 fn frage_topf(
@@ -882,7 +892,7 @@ fn zweite_meinung(
             "ohne Zweitmeinung kein Auftrag",
         )?
     {
-        let urteil = pruefer.pruefen(e, &lage, &v);
+        let urteil = pruefer.pruefen_mit_bilanz(e, &lage, &v, &prognosebilanz(j.stand()));
         if let Some(a) = pruefer.abrechnung() {
             j.rechne_ki_ab(&a).map_err(journal)?;
         }

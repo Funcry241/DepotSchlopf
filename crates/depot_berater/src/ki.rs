@@ -587,12 +587,21 @@ impl<N: Netz> Berater for KiBerater<N> {
     }
 
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
+        self.vorschlagen_mit_bilanz(erlaubnis, lage, &[])
+    }
+
+    fn vorschlagen_mit_bilanz(
+        &mut self,
+        erlaubnis: AufrufErlaubnis,
+        lage: &Lage<'_>,
+        bilanz: &[(BeraterId, depot_journal::Auswertung)],
+    ) -> Antwort {
         let system = self.vorbereitung.map_or_else(
             || frage::system(self.wer, &self.grenzen),
             |_| frage::vorbereitung_system(self.wer),
         );
         let f = self.vorbereitung.map_or_else(
-            || frage::vorschlag_frage(lage, &self.universum),
+            || frage::vorschlag_frage(lage, &self.universum, bilanz),
             |zeit| frage::vorbereitung_frage(lage, &self.universum, zeit),
         );
         let e = self.fragen(&erlaubnis, &system, &f);
@@ -639,8 +648,18 @@ impl<N: Netz> Berater for KiBerater<N> {
         lage: &Lage<'_>,
         vorschlag: &Vorschlag,
     ) -> Urteil {
+        self.pruefen_mit_bilanz(erlaubnis, lage, vorschlag, &[])
+    }
+
+    fn pruefen_mit_bilanz(
+        &mut self,
+        erlaubnis: AufrufErlaubnis,
+        lage: &Lage<'_>,
+        vorschlag: &Vorschlag,
+        bilanz: &[(BeraterId, depot_journal::Auswertung)],
+    ) -> Urteil {
         let system = frage::system(self.wer, &self.grenzen);
-        let f = frage::urteil_frage(lage, &self.universum, vorschlag);
+        let f = frage::urteil_frage(lage, &self.universum, vorschlag, bilanz);
         let e = self.fragen(&erlaubnis, &system, &f);
         match e
             .text

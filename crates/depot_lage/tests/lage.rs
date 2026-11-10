@@ -1113,3 +1113,104 @@ fn kurssperre_ist_halt() -> Result<(), String> {
     assert!(p.text.contains("Sicherheitsgründen"), "{p:?}");
     Ok(())
 }
+
+/// Belegt alle Werte der Liste mit Vortag `vorher` und Tag `heute` (Euro als Text).
+fn belege_preise(j: &mut Journal, t: u8, vorher: &str, heute_p: &str) -> Result<(), String> {
+    let heute = tag(t)?;
+    let vortag = tag(t.saturating_sub(1))?;
+    let abruf = some(Zeitpunkt::frankfurt(heute, 17, 40, 0), "Abruf")?;
+    for w in vorbedingung(beobachtungsliste(), "Liste")? {
+        for (d, p) in [(vortag, vorher), (heute, heute_p)] {
+            let zeit = some(Zeitpunkt::frankfurt(d, 17, 35, 0), "Schluss")?;
+            let preis = some(Preis::lies_euro(p), "Preis")?;
+            let kurs = vorbedingung(Kurs::exakt(preis, "EUR", d, zeit, Herkunft::Quelle), "Kurs")?;
+            let beleg = vorbedingung(
+                KursBeleg::neu("alphavantage", abruf, p.as_bytes(), w.isin.clone(), kurs),
+                "Beleg",
+            )?;
+            vorbedingung(j.belege_kurs(&beleg), "Beleg schreiben")?;
+        }
+    }
+    Ok(())
+}
+
+/// #118: Vergleich seit Start. Einstieg am 05.11. zu 101 €: je Wert 333,33 €, abzüglich 1,50 €
+/// Gebühr bleiben 331,83 €, also 3 Stück für 304,50 €; 15 Werte kosten 4.567,50 €, Bargeld
+/// 432,50 €. Am 06.11. zu 102 €: 4.590,00 € + 432,50 € = 5.022,50 €, also +0,45 %. Dachs und Maus
+/// waren stumm: 5.000,00 €, ohne KI-Kosten.
+#[test]
+fn vergleich_seit_start_mit_pruefwerten() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 5)?;
+    drop(jr);
+    stummer_tag(&ort, 5)?;
+    let mut jr = ort.oeffnen()?;
+    belege_preise(&mut jr, 6, "101", "102")?;
+    drop(jr);
+    stummer_tag(&ort, 6)?;
+    let jr = ort.oeffnen()?;
+    assert_eq!(jr.stand().tagesschluesse().len(), 2);
+    let l = lagebild(&umgebung(abends(6)?, Zugang::Offen(jr.stand())));
+    let d = some(l.depot.as_ref(), "Depot")?;
+    let v = some(d.vergleich.as_ref(), "Vergleich")?;
+    assert_eq!((v.start, v.bewertet, v.tage), (tag(5)?, tag(6)?, 2));
+    let zeile = |i: usize| some(v.zeilen.get(i), "Zeile");
+    assert_eq!(zeile(0)?.wert, Some(Cent(500_000)));
+    assert_eq!(zeile(0)?.rendite_bp, Some(0));
+    assert_eq!(zeile(0)?.ki_kosten, Some(Cent::NULL));
+    assert_eq!(zeile(0)?.nach_ki_bp, Some(0));
+    assert_eq!(zeile(2)?.wert, Some(Cent(502_250)));
+    assert_eq!(zeile(2)?.rendite_bp, Some(45));
+    assert_eq!(zeile(3)?.wert, Some(Cent(500_000)));
+    assert!(v.ohne.is_empty());
+    let s = html::seite(&l);
+    assert!(s.contains("Vergleich seit Start"), "{s}");
+    assert!(s.contains("+0,45 %"), "{s}");
+    assert!(s.contains("±0,00 %"), "{s}");
+    assert!(
+        s.contains("Ein Topf liegt vorn, wenn er nach KI-Kosten"),
+        "{s}"
+    );
+    Ok(())
+}
+
+/// #118: Vor dem ersten abgeschlossenen Papiertag gibt es keinen Vergleich.
+#[test]
+fn vergleich_fehlt_vor_dem_ersten_papiertag() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 5)?;
+    let l = lagebild(&umgebung(abends(5)?, Zugang::Offen(jr.stand())));
+    assert!(jr.stand().tagesschluesse().is_empty());
+    assert_eq!(l.depot.as_ref().and_then(|d| d.vergleich.as_ref()), None);
+    assert!(!html::seite(&l).contains("Vergleich seit Start"));
+    Ok(())
+}
+
+/// #118: Fehlt am Bewertungstag der Kurs eines Vergleichswerts, steht dort „nicht bewertbar“.
+#[test]
+fn vergleich_ohne_kurs_ist_nicht_bewertbar() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut jr = ort.oeffnen()?;
+    belege_alle(&mut jr, 5)?;
+    drop(jr);
+    stummer_tag(&ort, 5)?;
+    let mut jr = ort.oeffnen()?;
+    // Am 06.11. fehlt der erste Wert der Liste (SAP).
+    belege_ohne(&mut jr, tag(6)?, tag(5)?, 1)?;
+    drop(jr);
+    stummer_tag(&ort, 6)?;
+    let jr = ort.oeffnen()?;
+    let l = lagebild(&umgebung(abends(6)?, Zugang::Offen(jr.stand())));
+    let v = some(
+        l.depot.as_ref().and_then(|d| d.vergleich.as_ref()),
+        "Vergleich",
+    )?;
+    let z = some(v.zeilen.get(2), "Zeile")?;
+    assert_eq!(z.wert, None, "{z:?}");
+    let grund = some(z.grund.as_ref(), "Grund")?;
+    assert!(grund.contains("SAP"), "{grund}");
+    assert!(html::seite(&l).contains("nicht bewertbar"));
+    Ok(())
+}

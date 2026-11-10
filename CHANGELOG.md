@@ -6,13 +6,20 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
-### Geändert
+### Hinzugefügt
 
-- Weltprognosen werden nach ihrem Horizont aufgelöst: Zieltag im Kalender der Börse des Werts, Schlusskurs genau dieses Tages, sonst „ohne Kurs“. Die Auflösung folgt allein aus dem Journal und steht vor jeder neuen Frage des Papiertags. Live und Lagebild zeigen je Berater die Trefferquote mit 95-%-Intervall und dem Vergleich „steigt immer“, als Hinweis ohne Regel. Neue Eintragsart `prognose-aufloesung`: Ein älteres Programm kann ein Journal danach nicht lesen (#114).
+- Weltprognosen werden nach ihrem Horizont aufgelöst: Zieltag im Kalender der Börse des Werts, Schlusskurs genau dieses Tages, sonst „ohne Kurs“. Die Auflösung folgt allein aus dem Journal und steht vor jeder neuen Frage des Papiertags. Live und Lagebild zeigen je Berater die Trefferquote mit 95-%-Intervall und dem Vergleich „steigt immer“. Die Anfragen des Papiertags zeigen beiden KIs die beiden Einzelbilanzen getrennt von den Ereignissen. Neue Eintragsart `prognose-aufloesung`: Ein älteres Programm kann ein Journal danach nicht lesen (#114).
 
 - Invarianten werden an allen Folgen geprüft statt an Einzelfällen: jede Meldungsfolge eines Auftrags, Rundlauf der Textbelege, vier Monate zufälliger KI-Anfragen gegen alle Budgetgrenzen, jede Abstimmungsrunde gegen ein Modell der Freigaberegel und der Wiederanlauf nach einem Abbruch an jeder Zeile eines echten Papiertags. Ohne neue Abhängigkeit; Zufallsfolgen mit festem Startwert (#111, #112).
 
 - Neue Seite [Mathematik in DepotSchlopf](docs/MATHEMATIK.md): Bestandsaufnahme der Verfahren mit Rolle und Quellstelle, die zentralen Invarianten, Geplantes und offene Grenzen. Sie steht in der Kaltstart-Reihenfolge und im Übergabetext des Assistenten-Exports.
+
+- Windows-Hinweis bei „Eingriff nötig“ (#122): Der Dienst zeigt eine Sprechblase im Infobereich, sobald ein neuer Grund für einen Eingriff entsteht oder der jüngste Papiertag ausgefallen ist, gebündelt und höchstens einmal je Minute. `daten/hinweise.txt` verhindert Wiederholungen nach einem Neustart. Schalter unter Einrichtung → Zeitplan, ab Werk an; alte Zeitpläne bedeuten an.
+
+- Vergleich seit Start (#118): Live zeigt Dachs und Maus vor und nach KI-Kosten neben einem Vergleichsdepot (Startgeld gleich gewichtet in die 15 Werte vom 10.11.2026, dann halten) und reinem Bargeld. Alles kommt aus dem Journal (`Stand::tagesschluesse`); kein neues Format, keine Grenze. Nachweis in `docs/befunde/vergleich.md`.
+- Quartalszahlen als Termine (#120): `run.cmd termine` holt nach den EZB-Terminen höchstens einmal am Tag den Ergebniskalender von Alpha Vantage (gleicher Schlüssel, ein Abruf) und belegt die Quartalstermine der US-Werte der Liste als `angekuendigt`. Die Xetra-Werte kennt der Kalender nicht. Ohne Schlüssel oder bei einem Hinweis der Quelle laufen die übrigen Termine weiter; eine Antwort mit Schlüssel löst die Kurssperre aus. Nachweis in `docs/befunde/termine.md`.
+
+### Geändert
 
 - Die Einrichtung zeigt ungespeicherte Änderungen direkt am Formular und warnt vor ihrem Verlust. „Speichern und Zeitplan einschalten“ übernimmt die ausgefüllten Werte gemeinsam, unter denselben Einrichtungsprüfungen. Rückmeldungen bieten den passenden nächsten Schritt an; ein Dienstneustart verwirft offene Eingaben nicht mehr automatisch.
 
