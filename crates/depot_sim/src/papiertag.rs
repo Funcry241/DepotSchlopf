@@ -32,7 +32,7 @@ use depot_journal::{Journal, KursBeleg, NachrichtBeleg, PapierHalt, Stand};
 use depot_kern::{
     Cent, Datum, Grenzen, Herkunft, Isin, Kurs, Kurse, Rundung, Topf, Universum, Zeitpunkt,
 };
-use depot_regelwerk::waehle_tageswerte;
+use depot_regelwerk::{waehle_morgenwerte, waehle_tageswerte};
 use sha2::{Digest, Sha256};
 
 use crate::lauf::{
@@ -104,6 +104,12 @@ pub fn tageskurse_am(
         .wissensstichtag(tag)
         .or_else(|| Zeitpunkt::frankfurt(tag, 23, 59, 59))
         .ok_or_else(|| halt(format!("Kein Tagesende für den {}", datum_text(tag))))?;
+    if stand
+        .wissensstichtag(tag)
+        .is_some_and(depot_kern::liste::morgenlauf)
+    {
+        return morgenkurse(stand, universum, ende);
+    }
     let k = tageskurse_bis(stand, universum, Some(ende))?;
     if k.handelstag != tag {
         return Err(halt(format!(
@@ -162,6 +168,86 @@ fn tageskurse_bis(
         handelstag,
         heute: kurse(&heute)?,
         vortag: kurse(&vortag)?,
+    })
+}
+
+/// Kursstand zum Morgenlauf, mit einem eigenen Bezugstag je Börse.
+///
+/// # Errors
+/// Starttag, Bezugskurse oder Vergleichskurse fehlen.
+pub fn morgenkurse(
+    stand: &Stand,
+    universum: &Universum,
+    wissen_bis: Zeitpunkt,
+) -> Result<Tageskurse, LaufFehler> {
+    let (start, ..) = wissen_bis
+        .in_frankfurt()
+        .ok_or_else(|| halt("Morgendatum fehlt"))?;
+    let erwartete: BTreeMap<_, _> = universum
+        .instrumente()
+        .iter()
+        .filter_map(|w| {
+            let tag = depot_kern::liste::boerse_von(&w.isin)?.bezugstag(start)?;
+            Some((&w.isin, tag))
+        })
+        .collect();
+    let mut bezug: BTreeMap<&Isin, &KursBeleg> = BTreeMap::new();
+    let mut vergleich: BTreeMap<&Isin, &KursBeleg> = BTreeMap::new();
+    for b in stand
+        .kurse()
+        .iter()
+        .filter(|b| b.abruf() <= wissen_bis && b.kurs().herkunft() == Herkunft::Quelle)
+    {
+        let tag = b.kurs().handelstag();
+        let Some(erwartet) = erwartete.get(b.isin()) else {
+            continue;
+        };
+        if tag <= *erwartet
+            && bezug
+                .get(b.isin())
+                .is_none_or(|alt| alt.kurs().handelstag() <= tag)
+        {
+            bezug.insert(b.isin(), b);
+        }
+    }
+    for b in stand
+        .kurse()
+        .iter()
+        .filter(|b| b.abruf() <= wissen_bis && b.kurs().herkunft() == Herkunft::Quelle)
+    {
+        let tag = b.kurs().handelstag();
+        if bezug
+            .get(b.isin())
+            .is_some_and(|aktuell| tag < aktuell.kurs().handelstag())
+            && vergleich
+                .get(b.isin())
+                .is_none_or(|alt| alt.kurs().handelstag() <= tag)
+        {
+            vergleich.insert(b.isin(), b);
+        }
+    }
+    if bezug.is_empty() {
+        return Err(halt("Keine belegten Schlusskurse für den Morgenlauf"));
+    }
+    let kurse = |belege: BTreeMap<&Isin, &KursBeleg>| {
+        let zuletzt = belege
+            .values()
+            .map(|b| b.abruf())
+            .max()
+            .unwrap_or(wissen_bis);
+        Kurse::mit_abrufen(
+            zuletzt,
+            belege
+                .into_iter()
+                .map(|(isin, b)| (isin.clone(), b.kurs().clone(), b.abruf()))
+                .collect(),
+        )
+        .map_err(|e| halt(format!("Kurse: {e:?}")))
+    };
+    Ok(Tageskurse {
+        handelstag: start,
+        heute: kurse(bezug)?,
+        vortag: kurse(vergleich)?,
     })
 }
 
@@ -414,7 +500,7 @@ pub fn papiertag_wiederabspielen(
     let wissen_bis = stand
         .wissensstichtag(tag)
         .ok_or_else(|| halt(format!("Kein belegter Wissensstichtag für {tag}")))?;
-    let kurse = pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, tag)?;
+    let kurse = kurse_zum_start(stand, universum, tag, wissen_bis)?;
     Ok(Tag {
         datum: tag,
         kurse: kurse.heute,
@@ -459,8 +545,20 @@ fn belegte_lage(
     if wissen_bis > jetzt {
         return Err(halt("Wissensstichtag liegt nach der aktuellen Uhrzeit"));
     }
-    let kurse = pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, heute)?;
+    let kurse = kurse_zum_start(stand, universum, heute, wissen_bis)?;
     Ok((kurse, wissen_bis))
+}
+
+fn kurse_zum_start(
+    stand: &Stand,
+    universum: &Universum,
+    tag: Datum,
+    wissen_bis: Zeitpunkt,
+) -> Result<Tageskurse, LaufFehler> {
+    if depot_kern::liste::morgenlauf(wissen_bis) {
+        return pruefe_kurstag(morgenkurse(stand, universum, wissen_bis)?, tag);
+    }
+    pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, tag)
 }
 
 fn letzter_abruf_am(stand: &Stand, tag: Datum) -> Option<Zeitpunkt> {
@@ -480,6 +578,45 @@ fn letzter_abruf_am(stand: &Stand, tag: Datum) -> Option<Zeitpunkt> {
 }
 
 /// Papiertag mit einer Uhr fuer den Zeitpunkt des Versands.
+fn tagesauswahl(
+    stand: &Stand,
+    grenzen: &Grenzen,
+    universum: &Universum,
+    k: &Tageskurse,
+    wissen_bis: Zeitpunkt,
+) -> Result<depot_regelwerk::Tageswerte, LaufFehler> {
+    let morgens = depot_kern::liste::morgenlauf(wissen_bis);
+    if morgens && !depot_kern::liste::handelstag(k.handelstag) {
+        return Err(halt("Morgenlauf nur an einem Börsentag"));
+    }
+    let wahl = if morgens {
+        waehle_morgenwerte(
+            grenzen,
+            universum,
+            &stand.gehalten(),
+            wissen_bis,
+            &k.heute,
+            &k.vortag,
+        )
+    } else {
+        waehle_tageswerte(
+            grenzen,
+            universum,
+            &stand.gehalten(),
+            k.handelstag,
+            &k.heute,
+            &k.vortag,
+        )
+    };
+    if morgens && !wahl.fehler.is_empty() {
+        return Err(halt(format!(
+            "Morgenlauf ohne gültige Bezugskurse: {:?}; ausgelassen: {:?}",
+            wahl.fehler, wahl.ausgelassen
+        )));
+    }
+    Ok(wahl)
+}
+
 pub(crate) fn papiertag_mit_uhr(
     j: &mut Journal,
     heute: Datum,
@@ -505,6 +642,8 @@ pub(crate) fn papiertag_mit_uhr(
     if let Tageslage::Abgeschlossen(d) = tageslage(j.stand(), k.handelstag)? {
         return Ok(Ausgang::SchonAbgeschlossen(d));
     }
+    let grenzen = Grenzen::standard();
+    let wahl = tagesauswahl(j.stand(), &grenzen, universum, &k, wissen_bis)?;
     let letzter = j.stand().abschluss().cloned();
     j.stelle_um().map_err(journal)?;
     j.belege_wissensstichtag(heute, wissen_bis)
@@ -522,7 +661,6 @@ pub(crate) fn papiertag_mit_uhr(
             .papier_waechterreferenz()
             .ok_or_else(|| halt("Töpfe ohne Abschluss im Journal"))?
     };
-    let grenzen = Grenzen::standard();
     let tag = Tag {
         datum: k.handelstag,
         kurse: k.heute,
@@ -536,14 +674,6 @@ pub(crate) fn papiertag_mit_uhr(
         ),
     )
     .map_err(journal)?;
-    let wahl = waehle_tageswerte(
-        &grenzen,
-        universum,
-        &j.stand().gehalten(),
-        tag.datum,
-        &tag.kurse,
-        &k.vortag,
-    );
     for f in &wahl.ausgelassen {
         j.begruende(tag.datum, AUSWAHL, &format!("heute nicht handelbar: {f:?}"))
             .map_err(journal)?;

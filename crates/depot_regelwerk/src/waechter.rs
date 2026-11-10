@@ -65,11 +65,7 @@ pub fn notbremse_auftraege(
         if *stueck == 0 {
             continue;
         }
-        let alter = kurse.alter_s(isin)?;
-        if alter > grenzen.kurs_hoechstalter_s() {
-            return None;
-        }
-        let kurs = kurse.kurs(isin)?;
+        let kurs = crate::entscheidung::frischer_kurs(grenzen, kurse, isin)?;
         // Mindestpreis, aufgerundet: nie billiger als Kurs und Limit-Abstand vorsehen.
         let limit = kurs.mal_bp(
             BP_GANZ.checked_sub(grenzen.limit_abstand_bp())?,

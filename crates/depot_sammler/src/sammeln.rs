@@ -709,19 +709,21 @@ fn pruefe(
         Kurse::mit_abrufen(stand, heute).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
     let vortag = Kurse::neu(stand, vortag).map_err(|e| SammelFehler::Kurse(format!("{e:?}")))?;
     if let Some(tag) = handelstag {
-        let wahl = waehle_tageswerte(
-            &Grenzen::standard(),
-            &als_universum(werte),
-            &journal
-                .stand()
-                .gehalten()
-                .into_iter()
-                .filter(|i| werte.iter().any(|w| w.isin == *i))
-                .collect(),
-            tag,
-            &heute,
-            &vortag,
-        );
+        let universum = als_universum(werte);
+        let gehalten = journal
+            .stand()
+            .gehalten()
+            .into_iter()
+            .filter(|i| werte.iter().any(|w| w.isin == *i))
+            .collect();
+        let grenzen = Grenzen::standard();
+        let wahl = if depot_kern::liste::morgenlauf(stand) {
+            depot_regelwerk::waehle_morgenwerte(
+                &grenzen, &universum, &gehalten, stand, &heute, &vortag,
+            )
+        } else {
+            waehle_tageswerte(&grenzen, &universum, &gehalten, tag, &heute, &vortag)
+        };
         bericht.pruefung = wahl.fehler;
         bericht.ausgelassen = wahl.ausgelassen;
     }

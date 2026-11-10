@@ -1617,7 +1617,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          {schalter}\
          <h3>Uhrzeiten und automatische Läufe</h3>\
          <p>Änderungen gelten ab dem Speichern. Kurs- und Terminläufe richten sich nach den Handelstagen der Börsenliste und nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten. An börsenfreien Tagen kann ein erfolgreicher Abruf die unten aktivierte Vorbereitung auslösen. Diese Vorbereitung nutzt KI-Budget. \
-         Für Xetra ist 17:45 Uhr voreingestellt, kurz nach Börsenschluss.</p>\
+         Für beide Börsen ist 07:30 Uhr Frankfurter Zeit voreingestellt.</p>\
          {entwurf_hinweis}\
          <form id=\"zeitplan-formular\" method=\"post\" action=\"/zeitplan\" data-aenderungen data-entwurf=\"{entwurf}\">\
          <input type=\"hidden\" name=\"t\" value=\"{token}\">\
@@ -1625,7 +1625,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
          <label>Kurse Xetra abrufen um <input type=\"time\" name=\"kurse\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
          <p class=\"leise\">Jede andere Börse der Liste wird zehn Minuten nach ihrem eigenen \
-         Schluss abgerufen (NYSE meist 22:10 Uhr, mit Sommerzeit und verkürzten Tagen).</p>\
+         Schluss abgerufen, wenn ausdrücklich ein alter Abendplan eingestellt ist. Im Morgenlauf gilt der letzte abgeschlossene Handelstag je Börse.</p>\
          <label><input type=\"checkbox\" name=\"papier_danach\" value=\"ja\"{}> \
          Nach dem letzten Kursabruf des Tages den Papiertag starten (wenn ein Abruf des Tages \
          erfolgreich war; gilt nur bei eingeschaltetem Zeitplan)</label>\

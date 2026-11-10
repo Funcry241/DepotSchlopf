@@ -98,10 +98,19 @@ fn leeres_lagebild() -> Lagerechner {
 }
 
 /// Schaltet den Zeitplan ein, wie es der Mensch in der Einrichtung tut (ab Werk ist er aus).
+fn abendplan() -> Zeitplan {
+    Zeitplan {
+        termine: (17, 40),
+        kurse: (17, 45),
+        ..Zeitplan::default()
+    }
+}
+
 fn eingeschaltet(wurzel: PathBuf) -> Result<PathBuf, String> {
     let p = Zeitplan {
         an: true,
-        ..Zeitplan::default()
+        kurse: (17, 44),
+        ..abendplan()
     };
     fs::write(wurzel.join("daten").join("zeitplan.txt"), p.als_text())
         .map_err(|e| format!("Vorbedingung Zeitplan: {e}"))?;
@@ -479,7 +488,7 @@ fn zeitplan_text_streng() -> Result<(), String> {
 fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
     let p = Zeitplan {
         an: true,
-        ..Zeitplan::default()
+        ..abendplan()
     };
     let do_ = some(Datum::neu(2026, 11, 5), "Donnerstag")?;
     let sa = some(Datum::neu(2026, 11, 7), "Samstag")?;
@@ -545,7 +554,7 @@ fn zeitplan_der_liste_ruft_xetra_und_nyse_ab() -> Result<(), String> {
     );
     let p = Zeitplan {
         an: true,
-        ..Zeitplan::default()
+        ..abendplan()
     };
     let do_ = some(Datum::neu(2026, 11, 5), "Donnerstag")?;
     let xetra = Erledigt {
@@ -576,7 +585,7 @@ fn zeitplan_der_liste_ruft_xetra_und_nyse_ab() -> Result<(), String> {
 fn zeitplan_ruht_an_boersenfeiertagen() -> Result<(), String> {
     let p = Zeitplan {
         an: true,
-        ..Zeitplan::default()
+        ..abendplan()
     };
     let leer = Erledigt::default();
     let heiligabend = some(Datum::neu(2026, 12, 24), "Heiligabend")?;
@@ -1181,6 +1190,7 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
         let mut z = d.sperre();
         z.boersen = vec![Boerse::Xetra, Boerse::Nyse];
         z.zeitplan.an = true;
+        z.zeitplan.termine = (17, 40);
         z.zeitplan.kurse = (17, 51);
         z.zeitplan.papier_danach = true;
         z.zeitplan.nachrichten_an = true;
@@ -1370,7 +1380,7 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
     assert!(seite.contains("Einschalten geht erst"), "{seite}");
     // Ohne Entwurf zeigt die Seite den aktiven Plan.
     let seite = get(&d, "/einrichtung", t);
-    assert!(seite.contains("value=\"17:40\""), "{seite}");
+    assert!(seite.contains("value=\"07:20\""), "{seite}");
     // Uhrzeiten aendern ohne Einschalten geht immer.
     let aus = formular_post(
         "/zeitplan",
@@ -1983,7 +1993,7 @@ fn nach_einem_ausfall_sagt_der_zeitplan_wie_es_weitergeht() -> Result<(), String
 fn kurse_je_boerse_nach_ihrem_schluss() -> Result<(), String> {
     let p = Zeitplan {
         an: true,
-        ..Zeitplan::default()
+        ..abendplan()
     };
     let beide = [Boerse::Xetra, Boerse::Nyse];
     let tag = |m, t| some(Datum::neu(2026, m, t), "Datum");
@@ -3040,5 +3050,36 @@ fn zeitplan_ohne_hinweisfeld_heisst_an() -> Result<(), String> {
     assert!(aus.als_text().ends_with("hinweis_aus=ja\n"));
     assert_eq!(Zeitplan::lies(&aus.als_text())?, aus);
     assert!(Zeitplan::lies(&(aus.als_text() + "hinweis_aus=ja\n")).is_err());
+    Ok(())
+}
+
+#[test]
+fn alter_standardplan_wird_einmal_auf_den_morgen_umgestellt() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let pfad = wurzel.join("daten/zeitplan.txt");
+    let alt = Zeitplan {
+        an: true,
+        kurse: (17, 52),
+        ..abendplan()
+    };
+    fs::write(&pfad, alt.als_text()).map_err(|e| e.to_string())?;
+    let d = dienst(wurzel.clone(), true);
+    let plan = d.sperre().zeitplan;
+    assert!(plan.an);
+    assert_eq!((plan.termine, plan.kurse), ((7, 20), (7, 30)));
+    assert_eq!(
+        fs::read_to_string(&pfad).map_err(|e| e.to_string())?,
+        plan.als_text()
+    );
+    assert_eq!(dienst(wurzel, true).sperre().zeitplan, plan);
+    let tag = some(donnerstag(7, 30)?.datum(), "Tag")?;
+    let beide = [Boerse::Xetra, Boerse::Nyse];
+    assert_eq!(
+        abrufe_fuer(&plan, tag, &beide),
+        vec![(Boerse::Xetra, (7, 30)), (Boerse::Nyse, (7, 30))]
+    );
+    let mut erledigt = Erledigt::default();
+    erledigt.setze(Art::Termine, tag);
+    assert_eq!(faellig_fuer(&plan, &erledigt, tag, (8, 31), &beide), None);
     Ok(())
 }

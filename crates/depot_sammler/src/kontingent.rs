@@ -13,6 +13,7 @@ pub struct KontingentNetz<'a, N> {
     daten: &'a Path,
     uhr: fn() -> Option<Zeitpunkt>,
     abrufe: Option<Abrufe>,
+    abrufbeginn: Option<Zeitpunkt>,
 }
 
 impl<'a, N: Netz> KontingentNetz<'a, N> {
@@ -22,6 +23,7 @@ impl<'a, N: Netz> KontingentNetz<'a, N> {
             daten,
             uhr,
             abrufe: None,
+            abrufbeginn: None,
         }
     }
 
@@ -40,12 +42,17 @@ impl<'a, N: Netz> KontingentNetz<'a, N> {
 }
 
 impl<N: Netz> Netz for KontingentNetz<'_, N> {
+    fn abrufbeginn(&self) -> Option<Zeitpunkt> {
+        self.abrufbeginn
+    }
+
     fn pruefe_alpha(&mut self, benoetigt: usize) -> Result<(), String> {
         let (abrufe, jetzt) = self.alpha()?;
         abrufe.pruefe(jetzt, benoetigt)
     }
 
     fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler> {
+        self.abrufbeginn = (self.uhr)();
         if let Some(query) = adresse.strip_prefix("https://www.alphavantage.co/query?") {
             let kuerzel = query
                 .split('&')

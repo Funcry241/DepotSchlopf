@@ -157,7 +157,14 @@ fn limit_fuer(g: &Grenzen, kurs: Preis, richtung: Richtung) -> Option<Cent> {
 }
 
 /// Kurs eines Werts, wenn er vorliegt und nicht aelter als das Hoechstalter ist.
-fn frischer_kurs(g: &Grenzen, kurse: &Kurse, isin: &Isin) -> Option<Preis> {
+pub(crate) fn frischer_kurs(g: &Grenzen, kurse: &Kurse, isin: &Isin) -> Option<Preis> {
+    if depot_kern::liste::morgenlauf(kurse.stand()) {
+        let kurs = kurse.eintrag(isin)?;
+        let start = kurse.stand().in_frankfurt().map(|(tag, ..)| tag);
+        return crate::daten::morgen_befund(g, kurse.stand(), start, kurse, isin, kurs)
+            .is_none()
+            .then_some(kurs.preis());
+    }
     let alter = kurse.alter_s(isin)?;
     (alter <= g.kurs_hoechstalter_s())
         .then(|| kurse.kurs(isin))

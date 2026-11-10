@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 
-use depot_kern::{Datum, Grenzen, Isin, Kurse, Universum};
+use depot_kern::{Datum, Grenzen, Isin, Kurs, Kurse, Universum, Zeitpunkt, liste::boerse_von};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DatenFehler {
@@ -32,6 +32,13 @@ pub enum DatenFehler {
     AbrufNichtAmHandelstag,
     /// Handelstag oder Zeitpunkt des Kurses ist nicht der Handelstag des Zyklus (K15-02).
     KursNichtAmHandelstag(Isin),
+    /// Der Kurs ist älter oder jünger als der letzte abgeschlossene Börsentag.
+    KursNichtVomBezugstag {
+        isin: Isin,
+        bezugstag: Datum,
+    },
+    /// Für den Wert fehlt der Börsenkalender.
+    BezugstagUnbekannt(Isin),
     /// Der Vergleichskurs stammt nicht von einem frueheren Handelstag (K15-02).
     VergleichskursNichtVorher(Isin),
     /// Der Vergleichsabruf liegt nach dem Abruf des Zyklus: Seine Kurse lagen damals noch
@@ -52,6 +59,8 @@ impl DatenFehler {
             | DatenFehler::KeinVergleichskurs(i)
             | DatenFehler::KursZuAlt(i)
             | DatenFehler::KursNichtAmHandelstag(i)
+            | DatenFehler::KursNichtVomBezugstag { isin: i, .. }
+            | DatenFehler::BezugstagUnbekannt(i)
             | DatenFehler::VergleichskursNichtVorher(i) => Some(i),
             DatenFehler::AbrufNichtAmHandelstag
             | DatenFehler::VergleichsabrufNachAbruf
@@ -86,9 +95,42 @@ pub fn waehle_tageswerte(
     heute: &Kurse,
     vortag: &Kurse,
 ) -> Tageswerte {
+    teile_tageswerte(
+        universum,
+        gehalten,
+        pruefe_kurse(grenzen, universum, handelstag, heute, vortag),
+    )
+}
+
+/// Wie [`waehle_tageswerte`], mit Bezugstag je Börse und frischem Abruf zum Start.
+pub fn waehle_morgenwerte(
+    grenzen: &Grenzen,
+    universum: &Universum,
+    gehalten: &BTreeSet<Isin>,
+    start: Zeitpunkt,
+    bezug: &Kurse,
+    vergleich: &Kurse,
+) -> Tageswerte {
+    let tag = start.in_frankfurt().map(|(tag, ..)| tag);
+    let befunde = pruefe_mit(
+        grenzen,
+        universum,
+        bezug,
+        vergleich,
+        tag.is_some_and(|tag| bezug.stand().in_frankfurt().is_some_and(|(d, ..)| d == tag)),
+        |isin, eintrag| morgen_befund(grenzen, start, tag, bezug, isin, eintrag),
+    );
+    teile_tageswerte(universum, gehalten, befunde)
+}
+
+fn teile_tageswerte(
+    universum: &Universum,
+    gehalten: &BTreeSet<Isin>,
+    befunde: Vec<DatenFehler>,
+) -> Tageswerte {
     let mut fehler = Vec::new();
     let mut ausgelassen = Vec::new();
-    for befund in pruefe_kurse(grenzen, universum, handelstag, heute, vortag) {
+    for befund in befunde {
         match befund.isin() {
             Some(i) if !gehalten.contains(i) => ausgelassen.push(befund),
             _ => fehler.push(befund),
@@ -121,9 +163,62 @@ pub fn pruefe_kurse(
     heute: &Kurse,
     vortag: &Kurse,
 ) -> Vec<DatenFehler> {
+    pruefe_mit(
+        grenzen,
+        universum,
+        heute,
+        vortag,
+        heute.stand().am_tag(handelstag),
+        |isin, eintrag| {
+            if eintrag.handelstag() != handelstag || !eintrag.zeitpunkt().am_tag(handelstag) {
+                return Some(DatenFehler::KursNichtAmHandelstag(isin.clone()));
+            }
+            match heute.alter_s(isin) {
+                Some(alter) if alter <= grenzen.kurs_hoechstalter_s() => None,
+                _ => Some(DatenFehler::KursZuAlt(isin.clone())),
+            }
+        },
+    )
+}
+
+pub(crate) fn morgen_befund(
+    grenzen: &Grenzen,
+    start: Zeitpunkt,
+    tag: Option<Datum>,
+    bezug: &Kurse,
+    isin: &Isin,
+    eintrag: &Kurs,
+) -> Option<DatenFehler> {
+    let Some((boerse, bezugstag)) = boerse_von(isin).and_then(|b| Some((b, b.bezugstag(tag?)?)))
+    else {
+        return Some(DatenFehler::BezugstagUnbekannt(isin.clone()));
+    };
+    if eintrag.handelstag() != bezugstag || boerse.schluss(bezugstag) != Some(eintrag.zeitpunkt()) {
+        return Some(DatenFehler::KursNichtVomBezugstag {
+            isin: isin.clone(),
+            bezugstag,
+        });
+    }
+    let frisch = bezug.abruf(isin).is_some_and(|abruf| {
+        abruf > eintrag.zeitpunkt()
+            && abruf.in_frankfurt().map(|(d, ..)| d) == tag
+            && start
+                .sekunden_seit(abruf)
+                .is_some_and(|alter| alter <= grenzen.kurs_hoechstalter_s())
+    });
+    (!frisch).then(|| DatenFehler::KursZuAlt(isin.clone()))
+}
+
+fn pruefe_mit(
+    grenzen: &Grenzen,
+    universum: &Universum,
+    heute: &Kurse,
+    vortag: &Kurse,
+    abruf_am_starttag: bool,
+    befund: impl Fn(&Isin, &Kurs) -> Option<DatenFehler>,
+) -> Vec<DatenFehler> {
     let mut fehler = Vec::new();
-    // Alter misst gegen den Abruf; der Abruf selbst muss am Handelstag liegen (K15-02).
-    if !heute.stand().am_tag(handelstag) {
+    if !abruf_am_starttag {
         fehler.push(DatenFehler::AbrufNichtAmHandelstag);
     }
     // Nichts zum Vergleich, was es zum Abruf noch nicht gab (K15-03). Jeder Vergleichskurs liegt
@@ -141,22 +236,15 @@ pub fn pruefe_kurse(
             fehler.push(DatenFehler::KursNichtPositiv(isin));
             continue;
         }
-        if eintrag.handelstag() != handelstag || !eintrag.zeitpunkt().am_tag(handelstag) {
-            fehler.push(DatenFehler::KursNichtAmHandelstag(isin));
+        if let Some(f) = befund(&isin, eintrag) {
+            fehler.push(f);
             continue;
-        }
-        match heute.alter_s(&isin) {
-            Some(alter) if alter <= grenzen.kurs_hoechstalter_s() => {}
-            _ => {
-                fehler.push(DatenFehler::KursZuAlt(isin));
-                continue;
-            }
         }
         let Some(alt) = vortag.eintrag(&isin) else {
             fehler.push(DatenFehler::KeinVergleichskurs(isin));
             continue;
         };
-        if alt.handelstag() >= handelstag {
+        if alt.handelstag() >= eintrag.handelstag() {
             fehler.push(DatenFehler::VergleichskursNichtVorher(isin));
             continue;
         }

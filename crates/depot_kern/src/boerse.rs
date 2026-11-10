@@ -35,6 +35,13 @@ pub const NYSE_SCHLUSS: (u8, u8) = (16, 0);
 pub const NYSE_SCHLUSS_KURZ: (u8, u8) = (13, 0);
 
 impl Boerse {
+    /// Letzter Handelstag dieser Börse vor dem Frankfurter Starttag des Morgenlaufs.
+    pub fn bezugstag(self, start: Datum) -> Option<Datum> {
+        (1..=10)
+            .filter_map(|n: i64| start.plus_tage(n.checked_neg()?))
+            .find(|tag| self.handelstag(*tag))
+    }
+
     pub const ALLE: [Boerse; 2] = [Boerse::Xetra, Boerse::Nyse];
 
     pub fn name(self) -> &'static str {

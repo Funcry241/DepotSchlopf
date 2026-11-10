@@ -49,8 +49,8 @@ use depot_journal::anbieter::{Eintrag, Wer};
 use depot_kern::liste::{self, Wert, als_universum, beobachtungsliste};
 use depot_kern::{BeraterId, Datum, Grenzen, Zeitpunkt};
 use depot_ki::KiGrenzen;
-use depot_regelwerk::waehle_tageswerte;
-use depot_sim::{LaufFehler, Tageslage, kurse_von_heute, tageskurse, tageslage};
+use depot_regelwerk::{waehle_morgenwerte, waehle_tageswerte};
+use depot_sim::{LaufFehler, Tageslage, kurse_von_heute, morgenkurse, tageskurse, tageslage};
 use std::fmt::Write as _;
 
 /// Wie das Journal zu erreichen war.
@@ -391,77 +391,40 @@ fn berater_punkt(b: BeraterId, st: SchluesselStand, hinweis: Option<AnbieterHinw
 }
 
 /// Kurse, Termine und Tageslage aus dem Journal, genau wie der Papiertag sie prueft.
-fn tag_punkte(s: &Stand, heute: Datum, werte: &[Wert], punkte: &mut Vec<Punkt>) {
+fn tag_punkte(s: &Stand, heute: Datum, jetzt: Zeitpunkt, werte: &[Wert], punkte: &mut Vec<Punkt>) {
     if geschlossen(s, heute, punkte) {
         return;
     }
     let universum = als_universum(werte);
-    let kurse_heute = match kurse_von_heute(s, &universum, heute) {
+    let morgen = s.wissensstichtag(heute).unwrap_or(jetzt);
+    let morgen = liste::morgenlauf(morgen).then_some(morgen);
+    let kurse = if let Some(start) = morgen {
+        morgenkurse(s, &universum, start)
+    } else {
+        kurse_von_heute(s, &universum, heute)
+    };
+    let kurse_heute = match kurse {
         Ok(k) => {
-            let wahl = waehle_tageswerte(
-                &Grenzen::standard(),
-                &universum,
-                &s.gehalten(),
-                k.handelstag,
-                &k.heute,
-                &k.vortag,
-            );
-            // Faellt der Zyklus aus, zaehlen auch die Gruende der ausgelassenen Kandidaten:
-            // Ohne sie hiesse es nur „kein Wert mit gültigem Kurs“.
-            let befunde: Vec<_> = if wahl.fehler.is_empty() {
-                Vec::new()
+            let wahl = if let Some(start) = morgen {
+                waehle_morgenwerte(
+                    &Grenzen::standard(),
+                    &universum,
+                    &s.gehalten(),
+                    start,
+                    &k.heute,
+                    &k.vortag,
+                )
             } else {
-                wahl.fehler
-                    .iter()
-                    .chain(&wahl.ausgelassen)
-                    .filter(|b| **b != depot_regelwerk::DatenFehler::KeinWertHandelbar)
-                    .cloned()
-                    .collect()
+                waehle_tageswerte(
+                    &Grenzen::standard(),
+                    &universum,
+                    &s.gehalten(),
+                    k.handelstag,
+                    &k.heute,
+                    &k.vortag,
+                )
             };
-            if wahl.fehler.is_empty() {
-                let mut text = format!(
-                    "Vom {} belegt und geprüft, Abruf {}.",
-                    datum_text(k.handelstag),
-                    zeit_text(k.heute.stand())
-                );
-                if !wahl.ausgelassen.is_empty() {
-                    let roh: Vec<String> =
-                        wahl.ausgelassen.iter().map(|b| format!("{b:?}")).collect();
-                    let _ = write!(
-                        text,
-                        " Heute nicht handelbar, der Papiertag läuft ohne sie: {}.",
-                        tage::befunde_text(roh.iter().map(String::as_str)).join("; ")
-                    );
-                }
-                punkte.push(punkt("Schlusskurse", Ampel::Gut, text, None));
-            } else {
-                let roh: Vec<String> = befunde.iter().map(|b| format!("{b:?}")).collect();
-                // Zu alte Kurse heilt kein neuer Abruf am selben Abend: Er laege noch spaeter.
-                let nur_zu_alt = befunde
-                    .iter()
-                    .all(|b| matches!(b, depot_regelwerk::DatenFehler::KursZuAlt(_)));
-                let (rat, abhilfe) = if nur_zu_alt {
-                    (
-                        " Ein neuer Abruf hilft heute nicht, er läge noch später. Morgen \
-                         rechtzeitig nach 17:35 abrufen (Zeitplan an, Rechner wach).",
-                        None,
-                    )
-                } else {
-                    ("", Some(Abhilfe::KurseAbrufen))
-                };
-                punkte.push(punkt(
-                    "Schlusskurse",
-                    Ampel::Offen,
-                    format!(
-                        "Vom {} belegt, Abruf {}. Die Prüfung meldet: {}. Der Papiertag liefe \
-                         ohne Fragen an die Berater und ohne Handel.{rat}",
-                        datum_text(k.handelstag),
-                        zeit_text(k.heute.stand()),
-                        tage::befunde_text(roh.iter().map(String::as_str)).join("; ")
-                    ),
-                    abhilfe,
-                ));
-            }
+            kurs_punkt(&k, &wahl, morgen.is_some(), punkte);
             true
         }
         Err(e) => {
@@ -489,6 +452,89 @@ fn tag_punkte(s: &Stand, heute: Datum, werte: &[Wert], punkte: &mut Vec<Punkt>) 
         Heute::OhneKurse
     };
     termin_und_tag(s, heute, &heute_ist, punkte);
+}
+
+fn kurs_punkt(
+    k: &depot_sim::Tageskurse,
+    wahl: &depot_regelwerk::Tageswerte,
+    morgen: bool,
+    punkte: &mut Vec<Punkt>,
+) {
+    // Faellt der Zyklus aus, zaehlen auch die Gruende der ausgelassenen Kandidaten:
+    // Ohne sie hiesse es nur „kein Wert mit gültigem Kurs“.
+    let befunde: Vec<_> = if wahl.fehler.is_empty() {
+        Vec::new()
+    } else {
+        wahl.fehler
+            .iter()
+            .chain(&wahl.ausgelassen)
+            .filter(|b| **b != depot_regelwerk::DatenFehler::KeinWertHandelbar)
+            .cloned()
+            .collect()
+    };
+    if wahl.fehler.is_empty() {
+        let mut text = if morgen {
+            let tage: std::collections::BTreeSet<_> = wahl
+                .universum
+                .instrumente()
+                .iter()
+                .filter_map(|w| k.heute.eintrag(&w.isin).map(depot_kern::Kurs::handelstag))
+                .collect();
+            let tage: Vec<_> = tage.into_iter().map(datum_text).collect();
+            format!(
+                "Bezugstag: {} · Abruf {}.",
+                tage.join(", "),
+                zeit_text(k.heute.stand())
+            )
+        } else {
+            format!(
+                "Vom {} belegt und geprüft, Abruf {}.",
+                datum_text(k.handelstag),
+                zeit_text(k.heute.stand())
+            )
+        };
+        if !wahl.ausgelassen.is_empty() {
+            let roh: Vec<String> = wahl.ausgelassen.iter().map(|b| format!("{b:?}")).collect();
+            let _ = write!(
+                text,
+                " Heute nicht handelbar, der Papiertag läuft ohne sie: {}.",
+                tage::befunde_text(roh.iter().map(String::as_str)).join("; ")
+            );
+        }
+        punkte.push(punkt("Schlusskurse", Ampel::Gut, text, None));
+    } else {
+        let roh: Vec<String> = befunde.iter().map(|b| format!("{b:?}")).collect();
+        // Zu alte Kurse heilt kein neuer Abruf am selben Abend: Er laege noch spaeter.
+        let nur_zu_alt = befunde
+            .iter()
+            .all(|b| matches!(b, depot_regelwerk::DatenFehler::KursZuAlt(_)));
+        let (rat, abhilfe) = if morgen && nur_zu_alt {
+            (
+                " Ein neuer Abruf im Morgenfenster kann helfen.",
+                Some(Abhilfe::KurseAbrufen),
+            )
+        } else if nur_zu_alt {
+            (
+                " Ein neuer Abruf hilft heute nicht, er läge noch später. Morgen \
+                 rechtzeitig nach 17:35 abrufen (Zeitplan an, Rechner wach).",
+                None,
+            )
+        } else {
+            ("", Some(Abhilfe::KurseAbrufen))
+        };
+        punkte.push(punkt(
+            "Schlusskurse",
+            Ampel::Offen,
+            format!(
+                "Vom {} belegt, Abruf {}. Die Prüfung meldet: {}. Der Papiertag liefe \
+                 ohne Fragen an die Berater und ohne Handel.{rat}",
+                datum_text(k.handelstag),
+                zeit_text(k.heute.stand()),
+                tage::befunde_text(roh.iter().map(String::as_str)).join("; ")
+            ),
+            abhilfe,
+        ));
+    }
 }
 
 /// Handelt heute keine Boerse der Liste, sagen Schlusskurse und Papiertag das, und es wird
@@ -817,7 +863,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
                 fruehere_vorbereitung = fruehere_einschaetzungen(letzte, fruehere);
                 vorbereitung = Some(letzte.clone());
             }
-            tag_punkte(s, heute, werte, &mut punkte);
+            tag_punkte(s, heute, u.jetzt, werte, &mut punkte);
             budget = [BeraterId::Dachs, BeraterId::Maus]
                 .into_iter()
                 .map(|b| mit_verbrauch(ki_budget(s.ki().buchungen(), b, heute), &u.anbieter, heute))

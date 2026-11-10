@@ -1,13 +1,10 @@
 //! Der Zeitplan: wann der Dienst an Handelstagen (Montag bis Freitag) von selbst Termine und
 //! Kurse holt und danach den Papiertag startet. Uhrzeiten in Frankfurter Ortszeit.
 //!
-//! **Kurse je Boerse** (Wolfgang am 05.11.2026, Vorschlag von Maus): Jede Boerse der Liste wird
-//! an ihren Handelstagen kurz nach ihrem eigenen Schluss abgerufen, nur mit ihren Werten
-//! (`run.cmd kurse xetra`, `run.cmd kurse nyse`). Xetra zur eingestellten Uhrzeit `kurse`
-//! (17:45), jede andere Boerse `NACHLAUF_MIN` Minuten nach ihrem Schluss an diesem Tag
-//! (`Boerse::schluss`, mit Sommerzeit und verkuerzten Tagen), in Frankfurter Zeit; die NYSE
-//! also meist um 22:10 Uhr. Der Papiertag beginnt erst nach dem letzten Abruf des Tages, wenn
-//! wenigstens ein Abruf dieses Tages erfolgreich war; welche Kurse er nimmt, prueft er selbst.
+//! **Morgenlauf:** Die Börsen werden ab 07:30 Uhr nacheinander abgerufen, sofern mindestens
+//! eine davon an diesem Tag handelt. Danach folgt bis 08:30 Uhr der Papiertag. Jede Börse
+//! hat ihren eigenen Bezugstag. Explizit abweichende alte Abendzeiten behalten die
+//! Abrufreihenfolge nach Börsenschluss.
 //!
 //! **Einmal je Tag:** Was der Zeitplan an einem Tag gestartet hat, steht in
 //! `daten/dienst_erledigt.txt`, bevor der Auftrag beginnt. Ein Neustart des Dienstes startet es
@@ -72,14 +69,14 @@ pub struct Zeitplan {
 }
 
 impl Default for Zeitplan {
-    /// Termine 17:40, Kurse 17:45 (nach dem Xetra-Schluss um 17:35), dann der Papiertag, aber
+    /// Termine 07:20, Kurse 07:30, dann der Papiertag. Die Automatik ist zunächst
     /// **aus**: Der Betrieb von selbst beginnt erst, wenn der Mensch ihn in der Einrichtung
     /// bewusst einschaltet. Ein erster neugieriger Start loest so keinen KI-Aufruf aus.
     fn default() -> Zeitplan {
         Zeitplan {
             an: false,
-            termine: (17, 40),
-            kurse: (17, 45),
+            termine: (7, 20),
+            kurse: (7, 30),
             papier_danach: true,
             nachrichten_an: false,
             vorbereitung: VorbereitungsPlan::Aus,
@@ -123,6 +120,17 @@ pub fn uhrzeit_text((h, m): (u8, u8)) -> String {
 }
 
 impl Zeitplan {
+    pub(crate) fn migriere_morgen(&mut self) -> bool {
+        if !matches!(self.kurse, (17, 45 | 52)) {
+            return false;
+        }
+        self.kurse = (7, 30);
+        if self.termine >= (7, 30) {
+            self.termine = (7, 20);
+        }
+        true
+    }
+
     pub fn als_text(&self) -> String {
         let basis = format!(
             "{KOPF}\nan={}\ntermine={}\nkurse={}\npapier_danach={}\n",
@@ -336,6 +344,16 @@ fn in_frankfurt(z: depot_kern::Zeitpunkt) -> Option<(Datum, (u8, u8))> {
 /// `NACHLAUF_MIN` Minuten nach ihrem Schluss an diesem Tag. Faellt der Abruf nicht auf denselben
 /// Tag in Frankfurt, entfaellt er (bei den Boersen der Liste kommt das nicht vor).
 pub fn abrufe_fuer(plan: &Zeitplan, tag: Datum, boersen: &[Boerse]) -> Vec<(Boerse, (u8, u8))> {
+    if depot_kern::liste::morgenzeit(plan.kurse) {
+        if !boersen.iter().any(|b| b.handelstag(tag)) {
+            return Vec::new();
+        }
+        return boersen
+            .iter()
+            .filter(|b| b.bezugstag(tag).is_some())
+            .map(|b| (*b, plan.kurse))
+            .collect();
+    }
     let mut a: Vec<(Boerse, (u8, u8))> = boersen
         .iter()
         .filter(|b| b.handelstag(tag))
@@ -384,6 +402,9 @@ pub fn faellig_fuer(
     }
     if zeit >= plan.termine && erledigt.termine != Some(tag) {
         return Some(Art::Termine);
+    }
+    if depot_kern::liste::morgenzeit(plan.kurse) && zeit > depot_kern::liste::MORGEN_BIS {
+        return None;
     }
     let abrufe = abrufe_fuer(plan, tag, boersen);
     if let Some((b, _)) = abrufe

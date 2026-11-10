@@ -425,6 +425,32 @@ fn zeitplan_pfad(wurzel: &Path) -> PathBuf {
     wurzel.join("daten").join("zeitplan.txt")
 }
 
+fn lade_zeitplan(wurzel: &Path) -> (Zeitplan, Option<String>) {
+    match lies_falls_da(&zeitplan_pfad(wurzel)) {
+        Ok(Some(t)) => match Zeitplan::lies(&t) {
+            Ok(mut z) => {
+                let fehler = if z.migriere_morgen() {
+                    match schreibe_ganz(&zeitplan_pfad(wurzel), &z.als_text()) {
+                        Ok(()) => {
+                            eprintln!(
+                                "[Dienst] Zeitplan auf Morgenlauf umgestellt. Kurse ab 07:30 Uhr."
+                            );
+                            None
+                        }
+                        Err(e) => Some(format!("Morgenzeitplan nicht gespeichert: {e}")),
+                    }
+                } else {
+                    None
+                };
+                (z, fehler)
+            }
+            Err(e) => (Zeitplan::default(), Some(e)),
+        },
+        Ok(None) => (Zeitplan::default(), None),
+        Err(e) => (Zeitplan::default(), Some(e)),
+    }
+}
+
 fn erledigt_pfad(wurzel: &Path) -> PathBuf {
     wurzel.join("daten").join("dienst_erledigt.txt")
 }
@@ -511,14 +537,7 @@ impl Dienst {
         // Nur „Datei fehlt“ heisst Erststart mit Voreinstellung. Jeder andere Lesefehler und
         // jede fremde Form halten den Zeitplan an (K29-01): Eine ausgeschaltete Automatik darf
         // nicht wieder angehen, ein erledigter Abruf nicht noch einmal starten.
-        let (zeitplan, zeitplan_fehler) = match lies_falls_da(&zeitplan_pfad(&wurzel)) {
-            Ok(Some(t)) => match Zeitplan::lies(&t) {
-                Ok(z) => (z, None),
-                Err(e) => (Zeitplan::default(), Some(e)),
-            },
-            Ok(None) => (Zeitplan::default(), None),
-            Err(e) => (Zeitplan::default(), Some(e)),
-        };
+        let (zeitplan, zeitplan_fehler) = lade_zeitplan(&wurzel);
         let (erledigt, erledigt_fehler) = match lies_falls_da(&erledigt_pfad(&wurzel)) {
             Ok(Some(t)) => match Erledigt::lies(&t) {
                 Ok(e) => (e, None),

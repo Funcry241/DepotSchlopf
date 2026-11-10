@@ -1,4 +1,4 @@
-# DepotSchlopf – Festschreibung. Aendern nur mit Grenzfreigabe des Eigentuemers in
+# DepotSchlopf – Festschreibung. Ändern nur mit Grenzfreigabe des Eigentümers in
 # kodex/freigabe.txt (R30). Neu erzeugen: run.cmd festschreibung
 abhaengigkeiten.depot_berater: dependencies.depot_journal={"workspace"=true};dependencies.depot_kern={"workspace"=true};dependencies.depot_ki={"workspace"=true};dependencies.depot_sim={"workspace"=true};dependencies.ureq={"workspace"=true};target.cfg(windows).dependencies.keyring-core={"workspace"=true};target.cfg(windows).dependencies.windows-native-keyring-store={"workspace"=true}
 abhaengigkeiten.depot_dienst: dependencies.depot_kern={"workspace"=true};dependencies.depot_lage={"workspace"=true};target.cfg(windows).dependencies.keyring-core={"workspace"=true};target.cfg(windows).dependencies.windows-native-keyring-store={"workspace"=true}
@@ -14,7 +14,7 @@ abhaengigkeiten.depot_sim: dependencies.depot_journal={"workspace"=true};depende
 abhaengigkeiten.workspace: workspace.dependencies.depot_journal={"path"="crates/depot_journal"};workspace.dependencies.depot_kern={"path"="crates/depot_kern"};workspace.dependencies.depot_ki={"path"="crates/depot_ki"};workspace.dependencies.depot_kodex={"path"="crates/depot_kodex"};workspace.dependencies.depot_lage={"path"="crates/depot_lage"};workspace.dependencies.depot_regelwerk={"path"="crates/depot_regelwerk"};workspace.dependencies.depot_sim={"path"="crates/depot_sim"};workspace.dependencies.keyring-core="1.0";workspace.dependencies.quick-xml={"default-features"=false,"version"="0.42"};workspace.dependencies.sha2="0.10";workspace.dependencies.ureq={"default-features"=false,"features"=["rustls"],"version"="3.5"};workspace.dependencies.windows-native-keyring-store={"default-features"=false,"version"="1.1"}
 cargo_lock: b2dd995c9dd1e95b8592fc7e9234e06479e1cc35cf6084ae898463537a89246d
 crates: depot_berater,depot_dienst,depot_journal,depot_kern,depot_ki,depot_kodex,depot_lage,depot_lauf,depot_regelwerk,depot_sammler,depot_sim
-grenzen: fab3f9efa8a71515c2becb77f5f6cbd4fa6f9ae6f02a763c26e161c3ff110bc4
+grenzen: 436bf230b956f15a9eef18ae96c5397e50301a7f7bae7230a637899ad08f6d94
 ki_budget: 37db5b3cd211eefb5b154c5c36c5e63b7c04c0e06d8b51d5f608a0019affa2ea
 lints: 920e5415b5ec05b278ec52b7a41d7779c20a6d6c8f9c3b0820fed4307dbff6cd
 produktarten: Aktie,EtfPhysischUcits

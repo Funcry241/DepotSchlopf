@@ -173,6 +173,19 @@ pub fn beobachtungsliste() -> Result<Vec<Wert>, String> {
     pruefe_liste(&WERTE)
 }
 
+/// Gemeinsames Frankfurter Zeitfenster des Morgenlaufs.
+pub const MORGEN_VON: (u8, u8) = (7, 0);
+pub const MORGEN_BIS: (u8, u8) = (8, 30);
+
+pub fn morgenzeit(zeit: (u8, u8)) -> bool {
+    (MORGEN_VON..=MORGEN_BIS).contains(&zeit)
+}
+
+pub fn morgenlauf(zeit: Zeitpunkt) -> bool {
+    zeit.in_frankfurt()
+        .is_some_and(|(_, h, m, ..)| morgenzeit((h, m)))
+}
+
 /// Der erste Schluss der Boerse des Werts nach dem Versand. Nur dieser Schluss ist fuer
 /// eine zeitbelegte Papierorder erreichbar. Ohne bekannte Boerse gibt es keine Frist.
 pub fn papierorder_schluss(isin: &Isin, versand: Zeitpunkt) -> Option<Zeitpunkt> {
