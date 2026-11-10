@@ -22,6 +22,7 @@ use crate::sammeln::{SammelFehler, lege_ab};
 /// Der Bericht eines Laufs ueber die Termine.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TerminBericht {
+    pub sicherheitsabbruch: bool,
     /// Die abgelegte rohe Seite; keine, wenn der Abruf scheiterte.
     pub rohdatei: Option<PathBuf>,
     /// Termine mit neuer Kennung.
@@ -70,6 +71,7 @@ pub fn sammle_termine_geschuetzt(
         }
     };
     if let Some(text) = crate::diagnose::sicherheitsabbruch(zugang, QUELLE_EZB, &roh) {
+        bericht.sicherheitsabbruch = true;
         bericht.fehler = Some(text);
         return Ok(bericht);
     }

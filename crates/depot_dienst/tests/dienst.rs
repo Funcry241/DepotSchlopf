@@ -3451,3 +3451,58 @@ fn gemini_laeuft_vor_papier_und_speichert_stderr() -> Result<(), String> {
     d.verfolge(nr, kind, || donnerstag(7, 32).ok());
     Ok(())
 }
+
+#[test]
+fn betriebsleiste_zeigt_kurssperre_mit_art_zeit_und_grund() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let d = dienst(wurzel, true);
+    let zeit = donnerstag(12, 0)?;
+    let vorher = get(&d, "/teil/kopf", zeit);
+    assert!(!vorher.contains("Kurssperre seit"));
+    let schutz = depot_lage::kurssperre::sperren(&daten)?;
+    schutz.sicherheit(
+        depot_lage::kurssperre::Quelle::AlphaVantage,
+        Some(zeit),
+        "Prüfgrund",
+    )?;
+    drop(schutz);
+    let html = get(&d, "/teil/kopf", zeit);
+    assert!(html.contains("Kurssperre seit") && html.contains("Prüfgrund · sicherheit"));
+    assert!(html.contains(&depot_lage::zeit_text(zeit)));
+    assert!(html.contains("/einrichtung#kurssperre"));
+    Ok(())
+}
+
+#[test]
+fn automatisch_aufgehobene_kurssperre_erzeugt_einen_hinweis() -> Result<(), String> {
+    use depot_lage::kurssperre;
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let zeit = donnerstag(12, 0)?;
+    fs::write(
+        daten.join(kurssperre::KURSSPERRE),
+        "Sicherheitsabbruch: Die Kursquelle gab den Schlüssel zurück.",
+    )
+    .map_err(|e| e.to_string())?;
+    let schutz = kurssperre::sperren(&daten)?;
+    let sperre = some(kurssperre::lies(&daten)?, "Altsperre")?;
+    schutz.fehlalarm_aufheben(&sperre, zeit)?;
+    drop(schutz);
+    let gruende = Gruende::default();
+    let (d, meldungen) = hinweis_dienst(wurzel.clone(), &gruende, false);
+    assert!(d.schritt(zeit).is_none());
+    assert!(d.schritt(donnerstag(12, 1)?).is_none());
+    assert_eq!(
+        gezeigt(&meldungen)
+            .iter()
+            .filter(|s| s.contains("Kurssperre aufgehoben: Fehlalarm"))
+            .count(),
+        1
+    );
+    drop(d);
+    let (d, meldungen) = hinweis_dienst(wurzel, &gruende, false);
+    assert!(d.schritt(donnerstag(12, 2)?).is_none());
+    assert!(gezeigt(&meldungen).is_empty());
+    Ok(())
+}

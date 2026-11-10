@@ -37,7 +37,9 @@ pub fn kurse_pfad(wurzel: &Path) -> PathBuf {
 }
 
 pub fn kurse_protokoll_pfad(wurzel: &Path) -> PathBuf {
-    wurzel.join("daten").join("kurse_halt_aufgehoben.txt")
+    wurzel
+        .join("daten")
+        .join(depot_lage::kurssperre::AUFGEHOBEN)
 }
 
 /// Ein Abdruck des Inhalts, damit nur die gesehene Fassung aufgehoben wird. Kein Schutz gegen
@@ -72,6 +74,7 @@ pub fn aufheben(wurzel: &Path, gesehen: &str, jetzt: Zeitpunkt) -> Result<Aufheb
 /// # Errors
 /// Wie `aufheben`.
 pub fn kurse_aufheben(wurzel: &Path, gesehen: &str, jetzt: Zeitpunkt) -> Result<Aufheben, String> {
+    let _sperre = depot_lage::kurssperre::sperren(&wurzel.join("daten"))?;
     hebe_auf(
         &kurse_pfad(wurzel),
         &kurse_protokoll_pfad(wurzel),
