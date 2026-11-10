@@ -156,7 +156,12 @@ fn frist_aus_schluss_und_hoechstalter() -> Result<(), String> {
         frist(Boerse::Xetra, &g, utc(11, 4, 10, 0, 0)?),
         Some(utc(11, 3, 16, 54, 30)?)
     );
-    // Montag frueh: der Freitag davor.
+    // Montag im Morgenlauf: 20 Minuten ab dem ersten Versuch, abzüglich 30 s.
+    assert_eq!(
+        frist(Boerse::Xetra, &g, utc(11, 9, 6, 30, 0)?),
+        Some(utc(11, 9, 6, 49, 30)?)
+    );
+    // Ausserhalb des Morgenlaufs gilt weiterhin der letzte Börsenschluss.
     assert_eq!(
         frist(Boerse::Xetra, &g, utc(11, 9, 8, 0, 0)?),
         Some(utc(11, 6, 16, 54, 30)?)

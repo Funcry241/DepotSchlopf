@@ -696,7 +696,7 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Kassenbuch | Anker | bestätigter Stand (Zeilenzahl und Hash) im Journal und im Abendbericht aufs Handy; höchstens ein unbestätigter Eintrag beim Start |
 | Aufträge | Schutzfrist Kurzfrist | 60 Sekunden bis zum bestätigten Stopp; sonst bei erreichbarem Broker Rest stornieren, ungeschützte Menge zwingend verkaufen, Halt; ohne Verbindung Zustand „Schutz ungewiss“: Halt, Nachricht, Neuversuch alle 30 Sekunden |
 | Aufträge | zwingender Ausstieg | Limit um den Limit-Abstand unter dem letzten Kurs, höchstens 3 Nachzieh-Schritte zu je diesem Abstand |
-| Kurse | Höchstalter | 20 Minuten für Entscheidungen, freiwillige Aufträge, Tagesverlust und Notbremse; älter: Halt |
+| Kurse | Höchstalter | 20 Minuten für Entscheidungen, freiwillige Aufträge, Tagesverlust und Notbremse. Im Morgenlauf zählen die 20 Minuten ab dem Abruf am Starttag. Der Kurs muss vom letzten Handelsschluss seiner Börse vor dem Starttag stammen. |
 | Kurse | Spreadgrenze | höchstens 0,5 % der Mitte zwischen Bid und Ask, Bid und Ask nicht älter als das Höchstalter; ohne Bid oder Ask kein freiwilliger Auftrag |
 | Freigaben | Handelszustimmung von Maus | gültig 15 Minuten und nur bis zum nächsten Lagebild |
 | Rundung | Reservierungen und Kosten | auf ganze Cent aufgerundet; verfügbares Geld abgerundet |

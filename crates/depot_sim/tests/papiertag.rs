@@ -1719,3 +1719,131 @@ fn direkter_papiertag_wartet_schreibfrei_auf_updatebestaetigung() -> Result<(), 
     assert!(!aus.is_err_and(|e| e.contains("Update ist noch nicht bestätigt")));
     Ok(())
 }
+
+fn belege_morgen(j: &mut Journal, schluss: u8, abruf: Zeitpunkt) -> Result<(), String> {
+    use depot_kern::Boerse;
+    let aktuell = tag(schluss)?;
+    let vorher = some(Boerse::Xetra.bezugstag(aktuell), "Vergleichstag")?;
+    for isin in [sap()?, allianz()?] {
+        for (datum, preis) in [(vorher, Cent(23_000)), (aktuell, Cent(23_010))] {
+            let kurs = vorbedingung(
+                Kurs::neu(
+                    preis,
+                    "EUR",
+                    datum,
+                    some(Boerse::Xetra.schluss(datum), "Schluss")?,
+                    Herkunft::Quelle,
+                ),
+                "Kurs",
+            )?;
+            let beleg = vorbedingung(
+                KursBeleg::neu("alphavantage", abruf, b"Morgenprobe", isin.clone(), kurs),
+                "Kursbeleg",
+            )?;
+            vorbedingung(j.belege_kurs(&beleg), "Kurs speichern")?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn montagmorgen_nutzt_freitagskurse_und_schliesst_am_montag_ab() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let starttag = tag(9)?;
+    let mut j = ort.oeffnen()?;
+    let abruf = some(Zeitpunkt::frankfurt(starttag, 7, 30, 0), "Morgen")?;
+    belege_morgen(&mut j, 6, abruf)?;
+    drop(j);
+    let ausgang = vorbedingung(stumm_tag(&ort, 9)?, "Montagmorgenlauf")?;
+    assert!(matches!(ausgang, Ausgang::Abgeschlossen { datum, .. } if datum == starttag));
+    let j = ort.oeffnen()?;
+    assert_eq!(j.stand().abschluss().map(|a| a.datum), Some(starttag));
+    let wiederholung = vorbedingung(
+        depot_sim::papiertag_wiederabspielen(j.stand(), &universum()?, starttag),
+        "Wiederabspielen",
+    )?;
+    assert_eq!(
+        wiederholung.kurse.eintrag(&sap()?).map(Kurs::handelstag),
+        Some(tag(6)?)
+    );
+    Ok(())
+}
+
+#[test]
+fn montagmorgen_mit_donnerstagskurs_schliesst_nichts_ab() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let starttag = tag(9)?;
+    let mut j = ort.oeffnen()?;
+    belege_morgen(
+        &mut j,
+        5,
+        some(Zeitpunkt::frankfurt(starttag, 7, 30, 0), "Morgen")?,
+    )?;
+    drop(j);
+    let fehler = stumm_tag(&ort, 9)?
+        .err()
+        .ok_or("Kein Halt bei Donnerstagskurs")?;
+    assert!(format!("{fehler:?}").contains("KursNichtVomBezugstag"));
+    assert!(ort.oeffnen()?.stand().abschluss().is_none());
+    Ok(())
+}
+
+#[test]
+fn montagmorgen_versendet_order_fuer_montag_und_belegt_spaeter_dessen_schluss() -> Result<(), String>
+{
+    use depot_kern::Boerse;
+    let ort = Ort::neu()?;
+    let montag = tag(9)?;
+    let dienstag = tag(10)?;
+    let sap = sap()?;
+    let mut j = ort.oeffnen()?;
+    let mut k = konto(&ort, &j)?;
+    let abruf = some(Zeitpunkt::frankfurt(montag, 7, 30, 0), "Morgen")?;
+    belege_morgen(&mut j, 6, abruf)?;
+    let (mut dachs, mut maus) = kaeufer(montag, &sap);
+    vorbedingung(
+        papiertag(
+            &mut j,
+            montag,
+            &universum()?,
+            &start()?,
+            &mut dachs,
+            &mut maus,
+            &mut k,
+        ),
+        "Montag",
+    )?;
+    let order = j
+        .stand()
+        .offene_auftraege()
+        .next()
+        .ok_or_else(|| format!("Offene Order fehlt: {:?}", j.stand().begruendungen()))?;
+    let nr = order.beleg.nr;
+    assert_eq!(order.versand, Some(abruf));
+    assert_eq!(order.frist, Boerse::Xetra.schluss(montag));
+    assert!(order.ausfuehrungen.is_empty());
+    belege_morgen(
+        &mut j,
+        9,
+        some(Zeitpunkt::frankfurt(dienstag, 7, 30, 0), "Morgen")?,
+    )?;
+    vorbedingung(
+        papiertag(
+            &mut j,
+            dienstag,
+            &universum()?,
+            &start()?,
+            &mut Stumm,
+            &mut Stumm,
+            &mut k,
+        ),
+        "Dienstag",
+    )?;
+    let order = some(j.stand().auftrag(nr), "Erledigte Order")?;
+    assert_eq!(
+        order.ausfuehrungen.first().and_then(|a| a.kurszeit),
+        Boerse::Xetra.schluss(montag)
+    );
+    assert!(vorbedingung(j.gleiche_ab(&k), "Kontoabgleich")?.is_empty());
+    Ok(())
+}

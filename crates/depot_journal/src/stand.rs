@@ -977,21 +977,33 @@ impl Stand {
         if self.abschluss.as_ref().is_some_and(|a| a.datum == tag) {
             return Err("Ausführung ohne offenen Abrechnungstag".into());
         }
+        let mut ausfuehrungstag = tag;
         if let Some(zeit) = aus.kurszeit {
+            let datum = zeit.datum().ok_or("Ausführungstag fehlt")?;
+            let morgen = self
+                .wissensstichtag(tag)
+                .filter(|z| depot_kern::liste::morgenlauf(*z));
+            let vorabend = morgen.is_some_and(|bis| {
+                depot_kern::liste::boerse_von(&beleg.isin).and_then(|b| b.bezugstag(tag))
+                    == Some(datum)
+                    && zeit < bis
+            });
             let rundung = match beleg.richtung {
                 Richtung::Kauf => Rundung::Auf,
                 Richtung::Verkauf => Rundung::Ab,
             };
-            if zeit.datum() != Some(tag)
+            if (datum != tag && !vorabend)
                 || !self.kurse.iter().any(|b| {
                     b.isin() == &beleg.isin
                         && b.kurs().herkunft() == Herkunft::Quelle
                         && b.kurs().zeitpunkt() == zeit
+                        && (!vorabend || morgen.is_some_and(|bis| b.abruf() <= bis))
                         && b.kurs().preis().mal_stueck(1, rundung) == Some(aus.kurs)
                 })
             {
                 return Err("Kein passender Kursbeleg am Abrechnungstag".into());
             }
+            ausfuehrungstag = datum;
         }
         if beleg.richtung != Richtung::Verkauf {
             return Ok(None);
@@ -1001,7 +1013,7 @@ impl Stand {
             .mal_stueck(aus.stueck)
             .and_then(|v| v.checked_sub(aus.gebuehr))
             .ok_or("Verkaufserloes: Überlauf")?;
-        let valuta = papier_valuta(tag).ok_or("Valuta ausserhalb des Kalenders")?;
+        let valuta = papier_valuta(ausfuehrungstag).ok_or("Valuta ausserhalb des Kalenders")?;
         Ok((netto > Cent::NULL).then_some((valuta, netto)))
     }
 

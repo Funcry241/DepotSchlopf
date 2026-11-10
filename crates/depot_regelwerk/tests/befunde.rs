@@ -12,8 +12,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use depot_kern::{
-    BeraterId, Cent, Datum, Grenzen, Herkunft, Instrument, InstrumentArt, Isin, Kurs, KursFehler,
-    Kurse, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
+    BeraterId, Boerse, Cent, Datum, Grenzen, Herkunft, Instrument, InstrumentArt, Isin, Kurs,
+    KursFehler, Kurse, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
 };
 use depot_regelwerk::{
     Anlass, AuftragsKennung, DatenFehler, Eingabe, Entscheidung, GenehmigterAuftrag,
@@ -372,6 +372,33 @@ fn befund_1_r06_veralteter_kurs_erzeugt_keinen_auftrag() {
         !pruefe_kurse(&g, &universum(), handelstag(), &alt, &vortag).is_empty(),
         "veraltete Kurse nicht gemeldet"
     );
+}
+
+#[test]
+fn notbremse_nutzt_am_morgen_nur_frisch_abgerufenen_bezugskurs() -> Result<(), String> {
+    let freitag = Datum::neu(2026, 11, 6).ok_or("Freitag")?;
+    let montag = Datum::neu(2026, 11, 9).ok_or("Montag")?;
+    let dienstag = Datum::neu(2026, 11, 10).ok_or("Dienstag")?;
+    let schluss = Boerse::Xetra.schluss(freitag).ok_or("Xetra-Schluss")?;
+    let kurs = Kurs::neu(Cent(10_000), "EUR", freitag, schluss, Herkunft::Simulation)
+        .map_err(|e| format!("{e:?}"))?;
+    let mut topf = topf_neu(TopfId::A, Cent(800_000));
+    topf.setze_bestand(isin(0), 10);
+    let grenze = Grenzen::standard();
+
+    for (tag, abruf_stunde, abruf_minute, erlaubt) in [
+        (montag, 6, 30, true),
+        (montag, 6, 9, false),
+        (dienstag, 6, 30, false),
+    ] {
+        let start = Zeitpunkt::neu(tag, 6, 30, 0).ok_or("Start")?;
+        let abruf = Zeitpunkt::neu(tag, abruf_stunde, abruf_minute, 0).ok_or("Abruf")?;
+        let kurse = Kurse::mit_abrufen(start, vec![(isin(0), kurs.clone(), abruf)])
+            .map_err(|e| format!("{e:?}"))?;
+        let auftraege = notbremse_auftraege(&grenze, &topf, &kurse, &mut Kennungsvergabe::nach(0));
+        assert_eq!(auftraege.as_ref().map(Vec::len), erlaubt.then_some(1));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------

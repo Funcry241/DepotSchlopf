@@ -173,8 +173,10 @@ impl Papierkonto {
             if stand < schluss {
                 return;
             }
-            eintrag =
-                eintrag.filter(|k| stand.datum() == schluss.datum() && k.zeitpunkt() == schluss);
+            eintrag = eintrag.filter(|k| {
+                (stand.datum() == schluss.datum() || depot_kern::liste::morgenlauf(stand))
+                    && k.zeitpunkt() == schluss
+            });
         }
         let ausfuehrung = eintrag.and_then(|eintrag| {
             let exakt = eintrag.preis();

@@ -328,10 +328,9 @@ fn normaler_lauf_belegt_und_prueft() -> Result<(), String> {
     Ok(())
 }
 
-/// Am naechsten Morgen sind dieselben Schlusskurse nicht mehr frisch: Die Pruefung meldet das,
-/// belegt wird trotzdem, was abgerufen wurde.
+/// Ein frischer Morgenabruf belegt und verwendet die Kurse des letzten Börsentags.
 #[test]
-fn am_naechsten_morgen_zu_alt() -> Result<(), String> {
+fn am_naechsten_morgen_sind_frisch_abgerufene_schlusskurse_verwendbar() -> Result<(), String> {
     let (journal, roh) = ordner()?;
     let werte = zwei_werte()?;
     let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(ROH_SAP)), ("MBG.DEX", Ok(ROH_MBG))]);
@@ -343,14 +342,9 @@ fn am_naechsten_morgen_zu_alt() -> Result<(), String> {
         &werte,
     )?
     .map_err(|e| format!("Lauf: {e:?}"))?;
-    assert!(b.pruefung.contains(&DatenFehler::AbrufNichtAmHandelstag));
-    // Zu alte Kurse sind belegt, aber nicht verwendbar: Der Lauf meldet keinen Erfolg (K19-02).
-    assert!(!b.verwendbar());
-    assert!(
-        b.ausgelassen
-            .iter()
-            .any(|f| matches!(f, DatenFehler::KursZuAlt(_)))
-    );
+    assert_eq!(b.handelstag, Some(tag(11, 4)?));
+    assert!(b.pruefung.is_empty() && b.ausgelassen.is_empty(), "{b:?}");
+    assert!(b.verwendbar());
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     assert_eq!(j.stand().kurse().len(), 4);
     Ok(())

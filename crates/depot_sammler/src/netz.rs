@@ -60,6 +60,11 @@ impl fmt::Display for NetzFehler {
 
 /// Holt die rohe Antwort einer Adresse. In Tests ersetzt eine erfundene Quelle das Netz.
 pub trait Netz {
+    /// Zeit des zuletzt begonnenen Netzversuchs, falls der Transport sie erfasst.
+    fn abrufbeginn(&self) -> Option<Zeitpunkt> {
+        None
+    }
+
     /// Prüft, ob noch genügend Alpha-Vantage-Versuche verfügbar sind.
     ///
     /// # Errors
@@ -130,20 +135,28 @@ impl Netz for Https {
 }
 
 /// Die Frist fuer Wiederholungen eines Abrufs von Kursen dieser Boerse: Ein Versuch muss so
-/// beginnen, dass sein Abruf auch nach der vollen Zeitgrenze noch im Frischefenster liegt,
-/// also spaetestens `Schluss + Hoechstalter - ZEITGRENZE` des letzten Handelstags bis `jetzt`.
+/// beginnen, dass sein Abruf auch nach der vollen Zeitgrenze noch im Frischefenster liegt.
+/// Abends gilt der letzte Börsenschluss als Beginn, morgens der erste Abrufversuch.
 /// `None`, wenn in den letzten zehn Tagen kein Schluss lag oder die Rechnung ueberlaeuft: Dann
 /// wird nicht wiederholt.
 pub fn frist(boerse: Boerse, grenzen: &Grenzen, jetzt: Zeitpunkt) -> Option<Zeitpunkt> {
+    let rest = grenzen
+        .kurs_hoechstalter_s()
+        .checked_sub(i64::try_from(ZEITGRENZE.as_secs()).ok()?)?;
+    if depot_kern::liste::morgenlauf(jetzt) {
+        let (start, ..) = jetzt.in_frankfurt()?;
+        boerse.bezugstag(start)?;
+        return jetzt
+            .sekunden()
+            .checked_add(rest)
+            .and_then(Zeitpunkt::aus_sekunden);
+    }
     let heute = jetzt.datum()?;
     let schluss = (0..10_i64)
         .filter_map(|n| heute.plus_tage(n.checked_neg()?))
         .filter(|d: &Datum| boerse.handelstag(*d))
         .filter_map(|d| boerse.schluss(d))
         .find(|s| *s <= jetzt)?;
-    let rest = grenzen
-        .kurs_hoechstalter_s()
-        .checked_sub(i64::try_from(ZEITGRENZE.as_secs()).ok()?)?;
     Zeitpunkt::aus_sekunden(schluss.sekunden().checked_add(rest)?)
 }
 
@@ -207,8 +220,9 @@ impl fmt::Debug for Takt<'_> {
 }
 
 /// Holt eine Adresse; scheitert der Abruf voruebergehend, nach `WARTEZEITEN` erneut, solange
-/// der naechste Versuch spaetestens zur Frist beginnt. Die Frist rechnet `frist_ab` aus der Uhr
-/// beim ersten Scheitern; `None` heisst: nicht wiederholen. Die Uhr wird nur nach einem
+/// der naechste Versuch spaetestens zur Frist beginnt. Die Frist rechnet `frist_ab` aus dem
+/// ersten Abrufbeginn, ersatzweise aus der Uhr beim ersten Scheitern.
+/// `None` heisst: nicht wiederholen. Die Uhr wird nur nach einem
 /// Scheitern gefragt, und noch einmal unmittelbar vor jedem weiteren Versuch: Liegt er nach der
 /// Frist, unterbleibt er.
 ///
@@ -242,7 +256,7 @@ pub fn hole_mit_wiederholung(
             });
         };
         let jetzt = (takt.uhr)();
-        let frist = *frist.get_or_insert_with(|| jetzt.and_then(frist_ab));
+        let frist = *frist.get_or_insert_with(|| netz.abrufbeginn().or(jetzt).and_then(frist_ab));
         let Some(frist) = frist else {
             return Err(Ausfall::KeineVersucheMehr {
                 versuche: versuch,

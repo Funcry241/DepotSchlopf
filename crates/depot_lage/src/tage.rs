@@ -123,6 +123,8 @@ fn befund_text(roh: &str) -> &'static str {
         "Kurssprung" => "Kurssprung über der Grenze",
         "KeinVergleichskurs" => "kein Vortagskurs zum Vergleich",
         "AbrufNichtAmHandelstag" => "Abruf nicht am Handelstag",
+        "KursNichtVomBezugstag" => "Kurs stammt nicht vom Bezugstag",
+        "BezugstagUnbekannt" => "Börsenkalender für den Bezugstag fehlt",
         "KursNichtAmHandelstag" => "Kurs nicht vom Handelstag",
         "VergleichskursNichtVorher" => "Vergleichskurs nicht von einem früheren Tag",
         "VergleichsabrufNachAbruf" => "Vergleichsabruf nach dem Abruf",

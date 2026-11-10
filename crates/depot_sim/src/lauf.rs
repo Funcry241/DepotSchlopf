@@ -992,7 +992,23 @@ fn fuehre_aus(
     }
     let t = topf_name(id);
     let mut gesendet = Vec::new();
+    let morgens = j
+        .stand()
+        .wissensstichtag(tag.datum)
+        .is_some_and(depot_kern::liste::morgenlauf);
     for a in auftraege {
+        if morgens
+            && !depot_kern::liste::boerse_von(&a.auftrag().isin)
+                .is_some_and(|b| b.handelstag(tag.datum))
+        {
+            begruende(
+                j,
+                tag,
+                AUFTRAGSSTELLE,
+                &format!("{t}: {} heute börsenfrei, kein Versand.", a.auftrag().isin),
+            )?;
+            continue;
+        }
         let nr = a.auftrag().kennung.nr();
         match j.reserviere_auftrag(z.grenzen, id, a) {
             Ok(()) => {}
@@ -1087,7 +1103,9 @@ fn protokolliere_ausfuehrungen(
         if l.zustand == AuftragsZustand::Verfallen {
             let grund = match (papierkurse, l.frist) {
                 (Some(kurse), Some(schluss)) => {
-                    if schluss.datum() != kurse.stand().datum() {
+                    if schluss.datum() != kurse.stand().datum()
+                        && !depot_kern::liste::morgenlauf(kurse.stand())
+                    {
                         "Börsentag der Order bereits vorbei"
                     } else if kurse
                         .eintrag(&l.beleg.isin)
