@@ -257,6 +257,16 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         println!("[Sammler] Lauf vorzeitig beendet: {a}");
     }
     zeige_pruefung(&bericht);
+    if !verwendbar
+        && bericht.abbruch.is_none()
+        && bericht.verbindung.is_none()
+        && let Some(beginn) = abrufbeginn
+        && !depot_kern::liste::morgenlauf(beginn)
+    {
+        for meldung in schlusskursstand(beginn, &bericht) {
+            println!("[Sammler] {meldung}");
+        }
+    }
     if let Some(a) = &bericht.verbindung {
         println!(
             "{}",
@@ -281,42 +291,57 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
     if verwendbar {
         println!("[Sammler] Kurse verwendbar.");
         ExitCode::SUCCESS
-    } else if let Some(meldung) = alte_schlusskurse(boerse, abrufbeginn, &bericht) {
-        eprintln!("[Sammler] FEHLER: {meldung}");
+    } else if bericht.abbruch.is_some() || bericht.verbindung.is_some() {
+        println!("[Sammler] Kurse nicht verwendbar: Der Kursabruf wurde vorzeitig beendet.");
         ExitCode::FAILURE
     } else {
-        eprintln!(
-            "[Sammler] Kurse NICHT verwendbar (Fehler, Abbruch oder Prüfung nicht bestanden)."
+        println!(
+            "[Sammler] FEHLER: Kurse nicht verwendbar. Die Kursprüfung hat den Abruf nicht freigegeben."
         );
         ExitCode::FAILURE
     }
 }
 
-/// Benennt einen alten Kursstand beim gezielten Abruf nach Börsenschluss.
-fn alte_schlusskurse(
-    boerse: Option<Boerse>,
-    abrufbeginn: Option<Zeitpunkt>,
-    bericht: &depot_sammler::Bericht,
-) -> Option<String> {
-    let boerse = boerse?;
-    let abrufbeginn = abrufbeginn?;
-    let (tag, ..) = abrufbeginn.in_frankfurt()?;
-    let letzter = bericht.handelstag?;
-    if !boerse.handelstag(tag)
-        || abrufbeginn < boerse.schluss(tag)?
-        || letzter >= tag
-        || bericht.abbruch.is_some()
-        || bericht.verbindung.is_some()
-    {
-        return None;
-    }
-    Some(format!(
-        "{}: Schlusskurse für {}: 0 von {} belegt. Jüngster belegter Kurs vom {}.",
-        boerse.name(),
-        datum(tag),
-        bericht.werte.len(),
-        datum(letzter)
-    ))
+/// Trennt einen noch offenen Handelstag von fehlenden Kursen nach Börsenschluss.
+fn schlusskursstand(abrufbeginn: Zeitpunkt, bericht: &depot_sammler::Bericht) -> Vec<String> {
+    let Some((tag, ..)) = abrufbeginn.in_frankfurt() else {
+        return Vec::new();
+    };
+    Boerse::ALLE.into_iter().filter_map(|boerse| {
+        let schluss = boerse.schluss(tag)?;
+        if !boerse.handelstag(tag) {
+            return None;
+        }
+        let mut gesamt = 0usize;
+        let mut aktuell = 0usize;
+        let mut letzter = None;
+        for (_, ergebnis) in bericht.werte.iter().filter(|(w, _)| w.boerse == boerse) {
+            gesamt = gesamt.saturating_add(1);
+            if let Ergebnis::Belegt { heute: Some((belegt, _)), .. } = ergebnis {
+                aktuell = aktuell.saturating_add(usize::from(*belegt == tag));
+                letzter = letzter.max(Some(*belegt));
+            }
+        }
+        if gesamt == 0 || aktuell == gesamt {
+            return None;
+        }
+        let name = boerse.name();
+        if abrufbeginn < schluss {
+            let (_, h, m, ..) = schluss.in_frankfurt()?;
+            return Some(format!(
+                "{name}: Bei Abrufbeginn lief der Handel für {} noch (Börsenschluss {h:02}:{m:02} Uhr deutscher Zeit).",
+                datum(tag)
+            ));
+        }
+        let belegt = letzter.map_or_else(
+            || "Kein Schlusskurs belegt.".into(),
+            |d| format!("Jüngster belegter Schlusskurs vom {}.", datum(d)),
+        );
+        Some(format!(
+            "{name}: Schlusskurse für {} nach Börsenschluss: {aktuell} von {gesamt} belegt. {belegt}",
+            datum(tag)
+        ))
+    }).collect()
 }
 
 /// Je Wert eine Zeile mit Schlusskursen oder dem Grund, warum sie fehlen.
@@ -362,7 +387,13 @@ fn zeige_pruefung(bericht: &depot_sammler::Bericht) {
                 datum(t)
             );
             for f in &bericht.pruefung {
-                println!("  {f:?}");
+                if *f == depot_regelwerk::DatenFehler::AbrufNichtAmHandelstag {
+                    println!(
+                        "  Abrufdatum und der für die Prüfung angesetzte Handelstag stimmen nicht überein."
+                    );
+                } else {
+                    println!("  {f:?}");
+                }
             }
         }
     }
@@ -653,16 +684,35 @@ mod tests {
             ausgelassen: Vec::new(),
             verbindung: None,
         };
-        let boerse = Some(Boerse::Xetra);
-        let nach_schluss = Zeitpunkt::frankfurt(montag, 17, 51, 0);
-        let vor_schluss = Zeitpunkt::frankfurt(montag, 17, 30, 0);
+        let nach_schluss = Zeitpunkt::frankfurt(montag, 17, 51, 0).ok_or("Abrufzeit fehlt")?;
         assert_eq!(
-            alte_schlusskurse(boerse, nach_schluss, &bericht).as_deref(),
-            Some(
-                "Xetra: Schlusskurse für 09.11.2026: 0 von 1 belegt. Jüngster belegter Kurs vom 06.11.2026."
-            )
+            schlusskursstand(nach_schluss, &bericht),
+            [
+                "Xetra: Schlusskurse für 09.11.2026 nach Börsenschluss: 0 von 1 belegt. Jüngster belegter Schlusskurs vom 06.11.2026."
+            ]
         );
-        assert_eq!(alte_schlusskurse(boerse, vor_schluss, &bericht), None);
+        let nyse = beobachtungsliste()
+            .map_err(|e| format!("{e:?}"))?
+            .into_iter()
+            .find(|w| w.boerse == Boerse::Nyse)
+            .ok_or("NYSE-Wert fehlt")?;
+        let mut gemischt = bericht;
+        gemischt.werte.push((
+            nyse,
+            Ergebnis::Belegt {
+                heute: Some((freitag, Preis::aus_fein(100_000_000))),
+                vortag: None,
+                rohdatei: PathBuf::new(),
+            },
+        ));
+        let vor_nyse_schluss = Zeitpunkt::frankfurt(montag, 21, 35, 0).ok_or("Abrufzeit fehlt")?;
+        assert_eq!(
+            schlusskursstand(vor_nyse_schluss, &gemischt),
+            [
+                "Xetra: Schlusskurse für 09.11.2026 nach Börsenschluss: 0 von 1 belegt. Jüngster belegter Schlusskurs vom 06.11.2026.",
+                "NYSE: Bei Abrufbeginn lief der Handel für 09.11.2026 noch (Börsenschluss 22:00 Uhr deutscher Zeit).",
+            ]
+        );
         Ok(())
     }
 }

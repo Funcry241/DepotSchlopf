@@ -58,7 +58,7 @@ margin:6px 0}\
 #neuverbinden{padding:12px}\
 @media(max-width:600px),(max-height:700px){.speicher-aktionen{position:static}}\
 label{display:block;margin:6px 0}\
-.selten{border:2px solid var(--halt)}\
+.einstellungsgruppe{border:2px solid var(--halt)}\
 .zugang-tabelle input{width:100%}.zugang-tabelle td{overflow-wrap:anywhere}\
 @media(max-width:600px){.zugang-tabelle,.zugang-tabelle tbody,\
 .zugang-tabelle tr,.zugang-tabelle td{display:block;width:100%}\
@@ -1435,7 +1435,7 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
              <form method=\"post\" action=\"/schluessel\" data-aenderungen>\
              <input type=\"hidden\" name=\"t\" value=\"{}\">\
              <input type=\"hidden\" name=\"wer\" value=\"{}\">\
-             <input aria-label=\"Schlüssel für {}\" type=\"password\" name=\"wert\" autocomplete=\"off\" required> \
+             <input aria-label=\"Schlüssel für {}\" type=\"password\" name=\"wert\" autocomplete=\"new-password\" required> \
              <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Noch keinen neuen Schlüssel eingegeben.</p><button data-speichern-hervorheben type=\"submit\">Schlüssel speichern</button></div>\
              <div class=\"leise\">{}</div></form></td></tr>",
             maskiere(w.name()),
@@ -2078,7 +2078,7 @@ pub fn einrichtung(
     );
     zeitplan_teil(token, z, e, &mut s);
     update_teil(token, start, z, e, &mut s);
-    s.push_str("<section id=\"selten\" class=\"selten\" aria-labelledby=\"selten-titel\"><h2 id=\"selten-titel\">Seltene Einstellungen</h2><p>Für die erste Einrichtung oder wenn sich etwas ändert: Zugangsdaten, Datenspeicherung, Windows-Start und technische Prüfungen.</p>");
+    s.push_str("<section id=\"selten\" class=\"einstellungsgruppe\" aria-labelledby=\"selten-titel\"><h2 id=\"selten-titel\">Seltene Einstellungen</h2><p>Für die erste Einrichtung oder wenn sich etwas ändert: Zugangsdaten, Datenspeicherung, Windows-Start und technische Prüfungen.</p>");
     if z.zeitplan.an {
         s.push_str(&erste_schritte(z, e));
     }
@@ -2132,9 +2132,11 @@ pub const APP_JS: &str = r#""use strict";
   // Änderungen bleiben im Formular; insbesondere kein Schlüssel in Browser-Speichern.
   var verlaesst = false;
   var andererStart = false;
+  var bearbeitet = new WeakSet();
   function formulare() { return Array.from(document.querySelectorAll("form[data-aenderungen]")); }
   function geaendert(f) {
     return f.dataset.entwurf === "ja" || Array.from(f.querySelectorAll("input:not([type=hidden])")).some(function (i) {
+      if (!bearbeitet.has(i) || (i.type === "password" && i.matches(":autofill"))) { return false; }
       return i.type === "checkbox" ? i.checked !== i.defaultChecked : i.value !== i.defaultValue;
     });
   }
@@ -2148,7 +2150,7 @@ pub const APP_JS: &str = r#""use strict";
   ["input", "change"].forEach(function (ereignis) {
     document.addEventListener(ereignis, function (e) {
       var f = e.target.closest("form[data-aenderungen]");
-      if (f) { zeige(f); }
+      if (f) { bearbeitet.add(e.target); zeige(f); }
     });
   });
   document.addEventListener("invalid", function (e) {

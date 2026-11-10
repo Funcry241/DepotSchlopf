@@ -10,11 +10,10 @@
 
 use std::collections::VecDeque;
 use std::fs::{self, OpenOptions};
-use std::io::{BufReader, Write};
+use std::io::{BufReader, PipeReader, Write, pipe};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::thread;
 
 use depot_kern::{Boerse, Datum, Zeitpunkt};
 use depot_lage::anbieter::Wer as Quelle;
@@ -424,6 +423,21 @@ impl std::fmt::Debug for Dienst {
     }
 }
 
+/// Prozess und gemeinsamer Ausgabekanal für sein Laufprotokoll.
+#[derive(Debug)]
+pub struct Laufprozess {
+    kind: Child,
+    ausgabe: PipeReader,
+}
+
+impl Laufprozess {
+    /// Wartet auf einen Prozess, dessen Ausgabe nicht verfolgt werden muss.
+    pub fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        std::io::copy(&mut self.ausgabe, &mut std::io::sink())?;
+        self.kind.wait()
+    }
+}
+
 /// Der Standardstarter: `cargo run --quiet -p depot_lauf -- <argumente>` im Projektordner.
 pub fn cargo_starter() -> Starter {
     Box::new(|art: Art, wurzel: &Path| {
@@ -550,6 +564,34 @@ fn kuerze(mut z: String) -> String {
     z
 }
 
+fn lade_protokoll(wurzel: &Path, a: &mut Auftrag, schutz: &crate::protokoll::Schutz) {
+    if let Ok(text) = crate::protokoll::lesen(wurzel, &a.kennung) {
+        a.protokoll = text
+            .lines()
+            .rev()
+            .take(PROTOKOLL_ZEILEN)
+            .map(|z| kuerze(schutz.bereinige(z)))
+            .collect();
+        a.protokoll.reverse();
+        if crate::protokoll::letzter_fehler(&a.protokoll).is_none()
+            && let Some(fehler) = text
+                .lines()
+                .rev()
+                .skip(PROTOKOLL_ZEILEN)
+                .find(|zeile| crate::protokoll::ist_fehler(zeile))
+        {
+            a.protokoll.remove(0);
+            a.protokoll.insert(0, kuerze(schutz.bereinige(fehler)));
+        }
+        if a.frueher == Frueher::Unterbrochen {
+            if a.protokoll.len() >= PROTOKOLL_ZEILEN {
+                a.protokoll.remove(0);
+            }
+            a.protokoll.push("Der Dienst endete während dieses Laufs. Das gespeicherte Protokoll ist unvollständig.".into());
+        }
+    }
+}
+
 impl Dienst {
     /// Laedt Zeitplan und Erledigt aus `daten/`. Ein unlesbarer Zeitplan schaltet den Zeitplan
     /// aus und wird gemeldet; nichts startet dann von selbst.
@@ -595,21 +637,7 @@ impl Dienst {
             ),
         };
         for a in &mut verlauf {
-            if let Ok(text) = crate::protokoll::lesen(&wurzel, &a.kennung) {
-                a.protokoll = text
-                    .lines()
-                    .rev()
-                    .take(PROTOKOLL_ZEILEN)
-                    .map(|z| kuerze(protokoll_schutz.bereinige(z)))
-                    .collect();
-                a.protokoll.reverse();
-                if a.frueher == Frueher::Unterbrochen {
-                    if a.protokoll.len() >= PROTOKOLL_ZEILEN {
-                        a.protokoll.remove(0);
-                    }
-                    a.protokoll.push("Der Dienst endete während dieses Laufs. Das gespeicherte Protokoll ist unvollständig.".into());
-                }
-            }
+            lade_protokoll(&wurzel, a, &protokoll_schutz);
         }
         let (update_ergebnisse, mut update_meldung) = match crate::aktualisierung::laden(&wurzel) {
             Ok(e) => {
@@ -759,22 +787,32 @@ impl Dienst {
     }
 
     fn protokoll_beenden(&self, z: &mut Zustand, a: &mut Auftrag) {
+        let schon_protokolliert = z.protokoll_fehler.is_some();
         if let Some(fehler) = z.protokoll_fehler.take()
             && !a.protokoll.contains(&fehler)
         {
             if a.protokoll.len() >= PROTOKOLL_ZEILEN {
                 a.protokoll.remove(0);
             }
-            a.protokoll.push(fehler);
+            a.protokoll.insert(0, fehler);
         }
         if let Some(mut log) = z.protokoll_datei.take() {
             let zeit = a.ende.unwrap_or(a.start);
-            if let Some(f) = crate::protokoll::letzter_fehler(&a.protokoll)
+            // Fehler beim Start gelangen direkt in den Auftrag, Prozessausgaben schon beim Lesen in die Datei.
+            if !schon_protokolliert
+                && let Some(f) = crate::protokoll::letzter_fehler(&a.protokoll)
                 && let Err(e) = log.zeile(zeit, &self.protokoll_bereinigen(f))
             {
                 z.verlauf_hinweis = Some(e);
             }
-            if let Err(e) = log.abschliessen(zeit, a.erfolg == Some(true)) {
+            let ende = if a.erfolg == Some(true) {
+                "Lauf erfolgreich beendet."
+            } else if matches!(a.art, Art::Kurse | Art::KurseVon(_)) {
+                "Lauf ohne verwendbare Kurse beendet."
+            } else {
+                "Lauf abgebrochen."
+            };
+            if let Err(e) = log.abschliessen(zeit, ende) {
                 z.verlauf_hinweis = Some(e);
             }
         }
@@ -880,7 +918,7 @@ impl Dienst {
     /// Ein Schritt des Arbeiters: Zeitplan pruefen, dann den naechsten Auftrag starten, sonst das
     /// Lagebild auffrischen. Gibt einen gestarteten Prozess zurueck; `verfolge` liest ihn aus.
     /// Nur der eine Arbeiter ruft `schritt`: So startet kein Auftrag, waehrend das Lagebild liest.
-    pub fn schritt(&self, jetzt: Zeitpunkt) -> Option<(u64, Child)> {
+    pub fn schritt(&self, jetzt: Zeitpunkt) -> Option<(u64, Laufprozess)> {
         let mut z = self.sperre();
         (!self.update_offen()).then_some(())?;
         self.vermerke_ausgelassen(&mut z, jetzt);
@@ -1019,21 +1057,23 @@ impl Dienst {
         update_commit: Option<&str>,
         kennung: &str,
         gemini_vorrang: bool,
-    ) -> std::io::Result<Child> {
+    ) -> std::io::Result<Laufprozess> {
         if art == Art::Update && update_commit.is_none_or(|sha| !crate::rueckfall::ist_commit(sha))
         {
             return Err(std::io::Error::other(
                 "Kein bestätigter Commit. Bitte suche erneut nach einem Update.",
             ));
         }
-        (self.starter)(art, &self.wurzel)
+        let (ausgabe, schreiber) = pipe()?;
+        let kind = (self.starter)(art, &self.wurzel)
             .args(update_commit)
             .args(gemini_vorrang.then_some("papiertag"))
             .env(depot_lage::gespraeche::LAUF_ENV, kennung)
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .stdout(schreiber.try_clone()?)
+            .stderr(schreiber)
+            .spawn()?;
+        Ok(Laufprozess { kind, ausgabe })
     }
 
     fn vermerke_ausgelassen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
@@ -1110,19 +1150,11 @@ impl Dienst {
     }
 
     /// Liest Ausgabe und Ende eines gestarteten Auftrags ins Protokoll. Blockiert bis zum Ende.
-    pub fn verfolge(self: &Arc<Self>, nr: u64, mut kind: Child, uhr: fn() -> Option<Zeitpunkt>) {
-        let fehler_leser = kind.stderr.take().map(|e| {
-            let d = Arc::clone(self);
-            thread::spawn(move || {
-                crate::protokoll::zeilen(BufReader::new(e), |t| d.protokolliere(nr, &t, uhr()));
-            })
+    pub fn verfolge(self: &Arc<Self>, nr: u64, lauf: Laufprozess, uhr: fn() -> Option<Zeitpunkt>) {
+        let Laufprozess { mut kind, ausgabe } = lauf;
+        crate::protokoll::zeilen(BufReader::new(ausgabe), |t| {
+            self.protokolliere(nr, &t, uhr());
         });
-        if let Some(o) = kind.stdout.take() {
-            crate::protokoll::zeilen(BufReader::new(o), |t| self.protokolliere(nr, &t, uhr()));
-        }
-        if let Some(h) = fehler_leser {
-            let _ = h.join();
-        }
         let erfolg = kind.wait().is_ok_and(|s| s.success());
         let mut z = self.sperre();
         let Some(mut a) = z.laufend.take() else {

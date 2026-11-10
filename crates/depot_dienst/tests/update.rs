@@ -954,6 +954,7 @@ function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47
   };
 }
 function formular(input={type:'time',value:'17:45',defaultValue:'17:45'}) {
+  input.matches=s=>s===':autofill' && input.autofill===true;
   const status={textContent:''},classes=new Set(),button={dataset:{},textContent:'Speichern',disabled:false};
   return {dataset:{},input,status,button,classes,
     querySelectorAll:()=>[input],querySelector:s=>s==='[data-speicherstand]'?status:button,
@@ -963,23 +964,32 @@ function ereignis(target,submitter){return {target,submitter,preventDefault(){th
 test('Ändern und Zurücksetzen zeigen genau den Speicherbedarf; Verlassen warnt',()=>{
   const f=formular(),b=browser({forms:[f]});
   assert.ok(!f.classes.has('ungespeichert'));
-  f.input.value='18:05';b.docEvents.input({target:{closest:()=>f}});
+  f.input.value='18:05';b.docEvents.input({target:Object.assign(f.input,{closest:()=>f})});
   assert.match(f.status.textContent,/Noch nicht gespeichert/);
   assert.ok(f.classes.has('ungespeichert'));
   const weg=ereignis();b.events.beforeunload(weg);assert.equal(weg.verhindert,true);
-  f.input.value='17:45';b.docEvents.change({target:{closest:()=>f}});
+  f.input.value='17:45';b.docEvents.change({target:Object.assign(f.input,{closest:()=>f})});
   assert.ok(!f.classes.has('ungespeichert'));
   const bleibt=ereignis();b.events.beforeunload(bleibt);assert.ok(!bleibt.verhindert);
+});
+test('Ein automatisch gefülltes Feld allein blockiert keinen Seitenwechsel',()=>{
+  const f=formular({type:'password',value:'automatisch',defaultValue:'',autofill:true});
+  const b=browser({forms:[f]});
+  b.docEvents.input({target:Object.assign(f.input,{closest:()=>f})});
+  const weg=ereignis();b.events.beforeunload(weg);
+  assert.ok(!weg.verhindert);
+  assert.ok(!f.classes.has('ungespeichert'));
 });
 test('Gespeicherter Fehlerentwurf und ungültige Felder bleiben als unerledigt sichtbar',()=>{
   const f=formular();f.dataset.entwurf='ja';const b=browser({forms:[f]});
   assert.match(f.status.textContent,/Noch nicht gespeichert/);
-  b.docEvents.invalid({target:{closest:()=>f}});
+  b.docEvents.invalid({target:Object.assign(f.input,{closest:()=>f})});
   assert.match(f.status.textContent,/markierte Feld/);
 });
 test('Eigenes Speichern nutzt den angeklickten Knopf; fremde Eingaben brauchen Entscheidung',async()=>{
   const f=formular(),g=formular();g.input.value='19:00';
   let zustimmen=false;const b=browser({forms:[f,g],confirm:()=>zustimmen});
+  b.docEvents.input({target:Object.assign(g.input,{closest:()=>g})});
   const abbruch=ereignis(f,f.button);b.docEvents.submit(abbruch);
   assert.equal(abbruch.verhindert,true);assert.ok(!f.button.dataset.gesendet);
   zustimmen=true;
@@ -990,7 +1000,8 @@ test('Eigenes Speichern nutzt den angeklickten Knopf; fremde Eingaben brauchen E
 });
 test('Neustart verwirft ungespeicherte Zugangsdaten nicht automatisch',async()=>{
   const f=formular({type:'password',value:'nur-im-formular',defaultValue:''});
-  const b=browser({forms:[f],response:()=>reply(health('neu'))});await b.advance(0);
+  const b=browser({forms:[f],response:()=>reply(health('neu'))});
+  b.docEvents.input({target:Object.assign(f.input,{closest:()=>f})});await b.advance(0);
   assert.deepEqual(b.navigations,[]);assert.equal(b.reconnect.hidden,false);
   assert.equal(b.reconnectLink.href,'/einrichtung#update');
   assert.match(b.banner.textContent,/ungespeicherten Eingaben/);
