@@ -18,8 +18,9 @@ use std::thread;
 
 use depot_kern::{Boerse, Datum, Zeitpunkt};
 use depot_lage::anbieter::Wer as Quelle;
-use depot_lage::{Betrieb, Lagebild, SchluesselStand, ortszeit};
+use depot_lage::{Betrieb, Lagebild, SchluesselStand, TagStand, ortszeit};
 
+use crate::hinweis::Gedaechtnis;
 use crate::zeitplan::{Erledigt, Zeitplan, faellig_fuer};
 
 /// Was ein Auftrag tut.
@@ -364,6 +365,9 @@ pub type Starter = Box<dyn Fn(Art, &Path) -> Command + Send + Sync>;
 /// Rechnet das Lagebild; bekommt den Projektordner und die Uhr.
 pub type Lagerechner = Box<dyn Fn(&Path, Zeitpunkt) -> Lagebild + Send + Sync>;
 
+/// Zeigt einen Hinweis (Titel, Text). Im Betrieb `Umwelt::hinweis`, in Tests eine Attrappe.
+pub type Melder = Box<dyn Fn(&str, &str) + Send + Sync>;
+
 /// Der Dienst.
 pub struct Dienst {
     pub wurzel: PathBuf,
@@ -378,6 +382,24 @@ pub struct Dienst {
     protokoll_schutz: Mutex<crate::protokoll::Schutz>,
     starter: Starter,
     lagerechner: Lagerechner,
+    hinweise: Hinweise,
+}
+
+/// Windows-Hinweise des Dienstes (#122).
+struct Hinweise {
+    /// Welche Gründe für „Eingriff nötig“ schon gemeldet sind (`daten/hinweise.txt`).
+    gedaechtnis: Mutex<crate::hinweis::Gedaechtnis>,
+    /// Ohne Melder kommt kein Hinweis (Tests ohne Attrappe); das Gedächtnis wird trotzdem gepflegt.
+    melder: Option<Melder>,
+}
+
+impl Hinweise {
+    fn laden(wurzel: &Path) -> Hinweise {
+        Hinweise {
+            gedaechtnis: Mutex::new(Gedaechtnis::laden(&hinweise_pfad(wurzel))),
+            melder: None,
+        }
+    }
 }
 
 impl std::fmt::Debug for Dienst {
@@ -405,6 +427,34 @@ fn zeitplan_pfad(wurzel: &Path) -> PathBuf {
 
 fn erledigt_pfad(wurzel: &Path) -> PathBuf {
     wurzel.join("daten").join("dienst_erledigt.txt")
+}
+
+fn hinweise_pfad(wurzel: &Path) -> PathBuf {
+    wurzel.join("daten").join("hinweise.txt")
+}
+
+/// Die Gründe, die einen Windows-Hinweis wert sind: jeder Grund für „Eingriff nötig“ im
+/// Gesamtstatus, dazu der jüngste Handelstag, wenn er ausgefallen ist (einmal je Datum).
+fn hinweis_gruende(z: &Zustand) -> Vec<String> {
+    let mut g = match z.gesamtstatus() {
+        Some(Betrieb::EingriffNoetig(g)) => g,
+        _ => Vec::new(),
+    };
+    let juengster = z.lage.as_ref().and_then(|l| {
+        l.bild
+            .tage
+            .iter()
+            .find(|t| !matches!(t.stand, TagStand::Offen | TagStand::Geschlossen(_)))
+    });
+    if let Some(t) = juengster
+        && matches!(t.stand, TagStand::Ausgefallen(_))
+    {
+        g.push(format!(
+            "Papiertag am {} ausgefallen.",
+            depot_lage::datum_text(t.datum)
+        ));
+    }
+    g
 }
 
 /// Schreibt eine Datei ganz: erst Nebendatei, auf den Datentraeger, dann an ihren Platz.
@@ -530,6 +580,7 @@ impl Dienst {
             update_meldung = Some((true, "Für das letzte Update liegt keine bestätigte Aktivierung vor. Details stehen unter Tätigkeit im Protokoll.".into()));
         }
         Dienst {
+            hinweise: Hinweise::laden(&wurzel),
             wurzel,
             token,
             start,
@@ -559,6 +610,35 @@ impl Dienst {
             protokoll_schutz: Mutex::new(protokoll_schutz),
             starter,
             lagerechner,
+        }
+    }
+
+    /// Mit Melder für Windows-Hinweise (`Umwelt::hinweis`).
+    #[must_use]
+    pub fn mit_melder(mut self, melder: Melder) -> Dienst {
+        self.hinweise.melder = Some(melder);
+        self
+    }
+
+    /// Gleicht die Gründe für „Eingriff nötig“ mit dem Gedächtnis ab und zeigt, wenn es so
+    /// weit ist, einen Hinweis. Der Melder läuft außerhalb jeder Sperre.
+    fn hinweise_pruefen(&self, jetzt: Zeitpunkt) {
+        let (gruende, an) = {
+            let z = self.sperre();
+            (hinweis_gruende(&z), z.zeitplan.hinweis.aktiv())
+        };
+        let gruende: Vec<String> = gruende
+            .iter()
+            .map(|g| self.protokoll_bereinigen(g))
+            .collect();
+        let text = self
+            .hinweise
+            .gedaechtnis
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pruefe(&gruende, an, jetzt, &hinweise_pfad(&self.wurzel));
+        if let (Some(text), Some(melder)) = (text, self.hinweise.melder.as_ref()) {
+            melder(crate::hinweis::TITEL, &text);
         }
     }
 
@@ -828,9 +908,12 @@ impl Dienst {
             // Ohne Sperre rechnen: Die Oberflaeche bleibt bedienbar. Ein Auftrag startet nur hier
             // im Arbeiter, also nicht, solange das Lagebild das Journal liest.
             let bild = (self.lagerechner)(&self.wurzel, jetzt);
-            let mut z = self.sperre();
-            z.lage = Some(Lage { stand: jetzt, bild });
-            z.lage_veraltet = false;
+            {
+                let mut z = self.sperre();
+                z.lage = Some(Lage { stand: jetzt, bild });
+                z.lage_veraltet = false;
+            }
+            self.hinweise_pruefen(jetzt);
         }
         None
     }

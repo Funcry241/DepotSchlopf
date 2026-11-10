@@ -1213,6 +1213,7 @@ pub struct Entwurf {
     pub papier_danach: Option<bool>,
     pub nachrichten_an: Option<bool>,
     pub vorbereitung_an: Option<bool>,
+    pub hinweis_an: Option<bool>,
 }
 
 impl Entwurf {
@@ -1235,6 +1236,7 @@ impl Entwurf {
             papier_danach: haken("papier_danach"),
             nachrichten_an: haken("nachrichten_an"),
             vorbereitung_an: haken("vorbereitung_an"),
+            hinweis_an: haken("hinweis_an"),
         }
     }
 
@@ -1243,6 +1245,9 @@ impl Entwurf {
         let mut q = String::from("&entwurf=ja");
         if self.vorbereitung_an == Some(true) {
             q.push_str("&vorbereitung_an=ja");
+        }
+        if self.hinweis_an == Some(true) {
+            q.push_str("&hinweis_an=ja");
         }
         if self.nachrichten_an == Some(true) {
             q.push_str("&nachrichten_an=ja");
@@ -1615,6 +1620,10 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <label><input type=\"checkbox\" name=\"vorbereitung_an\" value=\"ja\"{}> \
          An börsenfreien Tagen den nächsten Handelstag vorbereiten (empfohlen; braucht Schlagzeilen und eingeschalteten Zeitplan; höchstens ein Aufruf je KI und Tag zwischen 08 und 23 Uhr). \
          Erst nach bestätigtem Update verfügbar. Der Quellenstand wird auch bei fehlendem KI-Budget belegt. Für KI-Aufrufe gelten der Tagesrahmen und die Rücklage für Erstmeinungen. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
+         <label><input type=\"checkbox\" name=\"hinweis_an\" value=\"ja\"{}> \
+         Windows-Hinweis bei Eingriff (empfohlen; zeigt im Infobereich eine Sprechblase, sobald \
+         ein neuer Grund für „Eingriff nötig“ entsteht oder ein Papiertag ausgefallen ist; löst \
+         nichts aus und gilt auch bei ausgeschaltetem Zeitplan)</label>\
          <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Änderungen werden erst durch Speichern wirksam.</p>\
          {einschalten} <button type=\"submit\" name=\"aktion\" value=\"speichern\"{speichern_hervorheben}>{speicher_text}</button>\
          <p>{speicher_hinweis} Du kannst die Einrichtung jederzeit später fortsetzen.</p></div></form></section>",
@@ -1622,7 +1631,8 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),
         haken(ent.papier_danach.unwrap_or(p.papier_danach)),
         haken(ent.nachrichten_an.unwrap_or(p.nachrichten_an)),
-        haken(ent.vorbereitung_an.unwrap_or(p.vorbereitung.aktiv()))
+        haken(ent.vorbereitung_an.unwrap_or(p.vorbereitung.aktiv())),
+        haken(ent.hinweis_an.unwrap_or(p.hinweis.aktiv()))
     );
 }
 

@@ -794,6 +794,7 @@ fn zeitplan_ueber_die_seite_speichern_und_aktivieren() -> Result<(), String> {
         papier_danach: false,
         nachrichten_an: false,
         vorbereitung: depot_dienst::zeitplan::VorbereitungsPlan::Aus,
+        hinweis: depot_dienst::zeitplan::HinweisPlan::Aus,
     };
     assert_eq!(d.sperre().zeitplan, erwartet);
     let datei = fs::read_to_string(wurzel.join("daten").join("zeitplan.txt"))
@@ -2808,5 +2809,236 @@ fn vorbereitung_erst_nach_updatebestaetigung_einschalten_und_starten() -> Result
         "Samstag",
     )?;
     assert!(d.von_hand(Art::Vorbereiten, samstag).is_ok());
+    Ok(())
+}
+
+// --- Windows-Hinweis bei Eingriff (#122) ---
+
+type Gruende = Arc<Mutex<Vec<String>>>;
+
+/// Ein Lagebild, dessen Gründe für „Eingriff nötig“ der Test vorgibt; mit `ausgefallen` ist der
+/// jüngste Handelstag (09.11.2026) ausgefallen.
+fn lagebild_mit_gruenden(gruende: &Gruende, ausgefallen: bool) -> Lagerechner {
+    let gruende = Arc::clone(gruende);
+    let leer = leeres_lagebild();
+    Box::new(move |wurzel: &Path, jetzt: Zeitpunkt| {
+        let mut bild = leer(wurzel, jetzt);
+        let g = gruende
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        bild.betrieb = if g.is_empty() {
+            depot_lage::Betrieb::Bereit
+        } else {
+            depot_lage::Betrieb::EingriffNoetig(g)
+        };
+        bild.tage = Vec::new();
+        if ausgefallen && let Some(d) = Datum::neu(2026, 11, 9) {
+            bild.tage.push(depot_lage::TagErgebnis {
+                datum: d,
+                stand: depot_lage::TagStand::Ausgefallen("keine Schlusskurse".into()),
+                ki: Vec::new(),
+            });
+        }
+        bild
+    })
+}
+
+type Gezeigt = Arc<Mutex<Vec<(String, String)>>>;
+
+fn hinweis_dienst(wurzel: PathBuf, gruende: &Gruende, ausgefallen: bool) -> (Arc<Dienst>, Gezeigt) {
+    let gezeigt: Gezeigt = Arc::default();
+    let g = Arc::clone(&gezeigt);
+    let d = Dienst::neu(
+        wurzel,
+        TOKEN.into(),
+        echo_starter(true),
+        lagebild_mit_gruenden(gruende, ausgefallen),
+    )
+    .mit_melder(Box::new(move |titel: &str, text: &str| {
+        g.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((titel.to_string(), text.to_string()));
+    }));
+    (Arc::new(d), gezeigt)
+}
+
+fn setze(gruende: &Gruende, neu: &[&str]) {
+    *gruende.lock().unwrap_or_else(PoisonError::into_inner) =
+        neu.iter().map(|g| (*g).to_string()).collect();
+}
+
+fn gezeigt(g: &Gezeigt) -> Vec<String> {
+    g.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .map(|(_, t)| t.clone())
+        .collect()
+}
+
+/// Lässt den Dienst zu den genannten Sekunden nach 12:00 Uhr (Samstag) das Lagebild rechnen.
+fn schritte(d: &Dienst, sekunden: &[i64]) -> Result<(), String> {
+    let basis = some(
+        Datum::neu(2026, 11, 7).and_then(|t| Zeitpunkt::frankfurt(t, 12, 0, 0)),
+        "Samstag",
+    )?;
+    for s in sekunden {
+        let t = some(
+            basis
+                .sekunden()
+                .checked_add(*s)
+                .and_then(Zeitpunkt::aus_sekunden),
+            "Zeit",
+        )?;
+        assert!(d.schritt(t).is_none());
+    }
+    Ok(())
+}
+
+fn hinweise_datei(wurzel: &Path) -> String {
+    fs::read_to_string(wurzel.join("daten").join("hinweise.txt")).unwrap_or_default()
+}
+
+#[test]
+fn hinweis_meldet_neuen_grund_einmal_und_nach_rueckkehr_wieder() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let gruende = Gruende::default();
+    setze(&gruende, &["Notbremse: Topf A unter 70 %"]);
+    let (d, g) = hinweis_dienst(wurzel.clone(), &gruende, false);
+    schritte(&d, &[0, 10, 20, 30])?;
+    let gesehen = g.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    assert_eq!(gesehen.len(), 1);
+    assert_eq!(
+        gesehen.first().map(|(t, x)| (t.as_str(), x.as_str())),
+        Some((
+            "DepotSchlopf: Eingriff nötig",
+            "Notbremse: Topf A unter 70 % Details auf http://127.0.0.1:47410/"
+        ))
+    );
+    let h = depot_kern::abdruck::sha256_hex("Notbremse: Topf A unter 70 %".as_bytes());
+    assert!(hinweise_datei(&wurzel).starts_with(&format!("{h};2026-11-07T11:00:10Z")));
+    setze(&gruende, &[]);
+    schritte(&d, &[100, 110])?;
+    assert_eq!(hinweise_datei(&wurzel), "");
+    setze(&gruende, &["Notbremse: Topf A unter 70 %"]);
+    schritte(&d, &[200, 210])?;
+    assert_eq!(gezeigt(&g).len(), 2);
+    Ok(())
+}
+
+#[test]
+fn neustart_meldet_nicht_doppelt() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let h = depot_kern::abdruck::sha256_hex(b"A");
+    fs::write(
+        wurzel.join("daten").join("hinweise.txt"),
+        format!("{h};2026-11-07T10:00:00Z\n"),
+    )
+    .map_err(|e| format!("Vorbedingung Datei: {e}"))?;
+    let gruende = Gruende::default();
+    setze(&gruende, &["A"]);
+    let (d, g) = hinweis_dienst(wurzel.clone(), &gruende, false);
+    schritte(&d, &[0, 10, 20, 80])?;
+    assert!(gezeigt(&g).is_empty());
+    assert_eq!(
+        hinweise_datei(&wurzel),
+        format!("{h};2026-11-07T10:00:00Z\n")
+    );
+    Ok(())
+}
+
+#[test]
+fn buendelt_in_60_sekunden() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let gruende = Gruende::default();
+    let (d, g) = hinweis_dienst(wurzel, &gruende, false);
+    setze(&gruende, &["A"]);
+    schritte(&d, &[0])?;
+    setze(&gruende, &["A", "B"]);
+    schritte(&d, &[5])?;
+    setze(&gruende, &["A", "B", "C"]);
+    schritte(&d, &[10, 20])?;
+    assert_eq!(
+        gezeigt(&g),
+        vec!["A (und 2 weitere) Details auf http://127.0.0.1:47410/".to_string()]
+    );
+    // Ein weiterer Grund kurz danach wartet, bis 60 Sekunden seit dem letzten Hinweis um sind.
+    setze(&gruende, &["A", "B", "C", "D"]);
+    schritte(&d, &[30, 40, 50, 60])?;
+    assert_eq!(gezeigt(&g).len(), 1);
+    schritte(&d, &[70])?;
+    assert_eq!(
+        gezeigt(&g).last().map(String::as_str),
+        Some("D Details auf http://127.0.0.1:47410/")
+    );
+    Ok(())
+}
+
+#[test]
+fn ausgefallener_tag_einmal() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let gruende = Gruende::default();
+    let (d, g) = hinweis_dienst(wurzel, &gruende, true);
+    schritte(&d, &[0, 10, 20, 30, 40])?;
+    assert_eq!(
+        gezeigt(&g),
+        vec![
+            "Papiertag am 09.11.2026 ausgefallen. Details auf http://127.0.0.1:47410/".to_string()
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn kaputte_hinweisdatei_gilt_leer() -> Result<(), String> {
+    let wurzel = ordner()?;
+    fs::write(wurzel.join("daten").join("hinweise.txt"), "xyz")
+        .map_err(|e| format!("Vorbedingung Datei: {e}"))?;
+    let gruende = Gruende::default();
+    setze(&gruende, &["A"]);
+    let (d, g) = hinweis_dienst(wurzel.clone(), &gruende, false);
+    schritte(&d, &[0, 10])?;
+    assert_eq!(gezeigt(&g).len(), 1);
+    let h = depot_kern::abdruck::sha256_hex(b"A");
+    assert_eq!(
+        hinweise_datei(&wurzel),
+        format!("{h};2026-11-07T11:00:10Z\n")
+    );
+    Ok(())
+}
+
+#[test]
+fn hinweis_schalter_aus_pflegt_trotzdem() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let plan = Zeitplan {
+        hinweis: depot_dienst::zeitplan::HinweisPlan::Aus,
+        ..Zeitplan::default()
+    };
+    fs::write(wurzel.join("daten").join("zeitplan.txt"), plan.als_text())
+        .map_err(|e| format!("Vorbedingung Zeitplan: {e}"))?;
+    let gruende = Gruende::default();
+    setze(&gruende, &["A"]);
+    let (d, g) = hinweis_dienst(wurzel.clone(), &gruende, false);
+    schritte(&d, &[0, 10, 20])?;
+    assert!(gezeigt(&g).is_empty());
+    let h = depot_kern::abdruck::sha256_hex(b"A");
+    assert!(hinweise_datei(&wurzel).starts_with(&h));
+    Ok(())
+}
+
+#[test]
+fn zeitplan_ohne_hinweisfeld_heisst_an() -> Result<(), String> {
+    let alt = "zeitplan-v1\nan=ja\ntermine=17:40\nkurse=17:45\npapier_danach=ja\n";
+    assert_eq!(
+        Zeitplan::lies(alt)?.hinweis,
+        depot_dienst::zeitplan::HinweisPlan::An
+    );
+    let aus = Zeitplan {
+        hinweis: depot_dienst::zeitplan::HinweisPlan::Aus,
+        ..Zeitplan::default()
+    };
+    assert!(aus.als_text().ends_with("hinweis_aus=ja\n"));
+    assert_eq!(Zeitplan::lies(&aus.als_text())?, aus);
+    assert!(Zeitplan::lies(&(aus.als_text() + "hinweis_aus=ja\n")).is_err());
     Ok(())
 }

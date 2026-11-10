@@ -267,7 +267,12 @@ fn main() -> ExitCode {
     let token = neues_token();
     let umwelt: Arc<dyn Umwelt> = Arc::new(System);
     let (starter, meldung, version) = starter_fuer(&wurzel, &herkunft);
-    let mut dienst = Dienst::neu(wurzel, token, starter, lagerechner(Arc::clone(&umwelt)));
+    let melder = {
+        let u = Arc::clone(&umwelt);
+        Box::new(move |titel: &str, text: &str| u.hinweis(titel, text))
+    };
+    let mut dienst =
+        Dienst::neu(wurzel, token, starter, lagerechner(Arc::clone(&umwelt))).mit_melder(melder);
     dienst.version = version;
     let dienst = Arc::new(dienst);
     dienst.sperre().programm_meldung = Some(meldung);
