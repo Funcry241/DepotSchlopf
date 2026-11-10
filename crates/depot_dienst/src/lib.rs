@@ -251,6 +251,11 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 ki_halt: werkbank::lies_falls_da(&kostenschutz::pfad(&d.wurzel)),
                 kurse_halt: werkbank::lies_falls_da(&kostenschutz::kurse_pfad(&d.wurzel)),
                 papier_freigabe: depot_lage::papier_freigabe_angebot(&d.wurzel),
+                alpha_kontingent: depot_lage::abrufkontingent::stand(
+                    &d.wurzel.join("daten"),
+                    jetzt,
+                )
+                .ok(),
                 zeitplan_gespeichert: None,
                 entwurf: formular(a.abfrage.as_bytes())
                     .map(|f| seiten::Entwurf::aus_formular(&f))

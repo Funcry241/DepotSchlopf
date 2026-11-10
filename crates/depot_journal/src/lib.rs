@@ -47,6 +47,7 @@
     clippy::cast_sign_loss
 )]
 
+pub mod abrufkontingent;
 pub mod anbieter;
 pub mod auftrag;
 pub mod datei;

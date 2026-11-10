@@ -266,6 +266,12 @@ fn main() -> ExitCode {
     };
     let token = neues_token();
     let umwelt: Arc<dyn Umwelt> = Arc::new(System);
+    if let Some((heute, ..)) = jetzt().and_then(depot_kern::Zeitpunkt::in_frankfurt)
+        && let Ok(abrufe) = depot_lage::abrufkontingent::Abrufe::sperren(&wurzel.join("daten"))
+        && let Err(e) = abrufe.raeume_auf(heute)
+    {
+        eprintln!("[Dienst] Altes Alpha-Vantage-Kontingent konnte nicht aufgeräumt werden: {e}");
+    }
     let (starter, meldung, version) = starter_fuer(&wurzel, &herkunft);
     let melder = {
         let u = Arc::clone(&umwelt);

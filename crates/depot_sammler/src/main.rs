@@ -24,10 +24,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use depot_journal::{Journal, anbieter, kurssperre};
 use depot_kern::{Boerse, Datum, Grenzen, Preis, Zeitpunkt, hinweis};
+use depot_sammler::kontingent::KontingentNetz;
+use depot_sammler::termine::sammle_termine_geschuetzt;
 use depot_sammler::{
     Anbieter, Ergebnis, Https, Schluessel, Zugang, beobachtungsliste, einordnen,
     ergebnisse::sammle_ergebnisse, ezb::ADRESSE_EZB, netz, sammle, sammle_nachrichten,
-    sammle_termine, zugang_laden,
+    zugang_laden,
 };
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
@@ -152,9 +154,12 @@ fn echt_sammeln(
         schlafe: &mut schlafe,
         melde: &mut melde,
     };
+    let daten = ablage
+        .parent()
+        .ok_or_else(|| depot_sammler::SammelFehler::Ablage("Datenordner fehlt".into()))?;
     sammle(
         journal,
-        &mut Https::neu(),
+        &mut KontingentNetz::neu(Https::neu(), daten, jetzt),
         zugang,
         &mut takt,
         ablage,
@@ -380,8 +385,10 @@ fn nachrichten_holen(
 }
 
 fn nachrichten(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
-    if gesperrt(wurzel) {
-        return ExitCode::FAILURE;
+    if kurssperre::kurssperre(&wurzel.join("daten")).is_some() {
+        println!(
+            "[Hinweis] Kurssperre liegt; Schlagzeilen werden trotzdem geholt. Kurse und Papiertag bleiben gesperrt."
+        );
     }
     let (schluessel, _) = zugang_laden(&[], Schluessel::aus_anmeldeverwaltung);
     let mut journal = match Journal::oeffnen(journal_pfad) {
@@ -413,13 +420,16 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         }
     };
     println!("[Sammler] Hole die Termine der EZB von {ADRESSE_EZB} ...");
-    let mut netz = Https::neu();
+    let daten = wurzel.join("daten");
+    let mut netz = KontingentNetz::neu(Https::neu(), &daten, jetzt);
     let mut uhr = jetzt;
-    let bericht = match sammle_termine(
+    let (zugang, _) = zugang_laden(&[], Schluessel::aus_anmeldeverwaltung);
+    let bericht = match sammle_termine_geschuetzt(
         &mut journal,
         &mut netz,
         &mut uhr,
-        &wurzel.join("daten").join("roh"),
+        &daten.join("roh"),
+        &zugang,
     ) {
         Ok(b) => b,
         Err(e) => {
@@ -458,9 +468,16 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
 /// ohne Schluessel, schon heute abgerufen oder mit Hinweis der Quelle laeuft der Lauf weiter.
 /// `false` nur nach einem Sicherheitsabbruch (Kurssperre) oder einem Fehler von Journal,
 /// Ablage oder Uhr.
-fn quartalszahlen(wurzel: &Path, journal: &mut Journal, netz: &mut Https) -> bool {
-    if gesperrt(wurzel) {
-        return false;
+fn quartalszahlen(
+    wurzel: &Path,
+    journal: &mut Journal,
+    netz: &mut dyn depot_sammler::Netz,
+) -> bool {
+    if kurssperre::kurssperre(&wurzel.join("daten")).is_some() {
+        println!(
+            "[Hinweis] Kurssperre liegt; der Alpha-Vantage-Kalender wird übersprungen. EZB-Termine laufen unabhängig davon."
+        );
+        return true;
     }
     let werte = match beobachtungsliste() {
         Ok(w) => w,
@@ -528,8 +545,9 @@ fn kursdiagnose(wurzel: &Path) -> ExitCode {
         return ExitCode::FAILURE;
     };
     let (zugang, _) = zugang_laden(&werte, Schluessel::aus_anmeldeverwaltung);
+    let daten = wurzel.join("daten");
     depot_sammler::diagnose::pruefabruf(
-        &mut Https::neu(),
+        &mut KontingentNetz::neu(Https::neu(), &daten, jetzt),
         &zugang,
         &werte,
         &mut std::thread::sleep,

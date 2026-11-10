@@ -737,3 +737,33 @@ fn normalisierung_steht_vor_dem_kurs_im_journal_und_nie_nach_sicherheitsabbruch(
     }
     Ok(())
 }
+
+#[test]
+fn alpha_limit_laesst_tiingo_weiterlaufen() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    let mut netz = Erfunden::neu(&[
+        (
+            "ezb",
+            Ok(ezb(&[("2026-11-04", "1.1224"), ("2026-11-03", "1.25")])),
+        ),
+        (
+            "SAP.DEX",
+            Ok(format!(r#"{{"Information":"rate limit {AV}"}}"#)),
+        ),
+        ("aapl", Ok(ROH_AAPL.to_string())),
+    ]);
+    let b = lauf(
+        &journal,
+        &roh,
+        &mut netz,
+        &zugang()?,
+        vec![utc(11, 4, 21, 4)?, utc(11, 4, 21, 5)?],
+        &werte()?,
+    )?
+    .map_err(|e| format!("{e:?}"))?;
+    assert!(!b.sicherheitsabbruch);
+    assert!(!roh.join(QUELLE).exists());
+    assert!(matches!(b.werte.get(1), Some((_, Ergebnis::Belegt { .. }))));
+    assert_eq!(netz.abgerufen.len(), 3);
+    Ok(())
+}

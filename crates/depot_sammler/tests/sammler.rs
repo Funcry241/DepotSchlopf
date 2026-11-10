@@ -356,13 +356,13 @@ fn am_naechsten_morgen_zu_alt() -> Result<(), String> {
     Ok(())
 }
 
-/// Ein Hinweis der Quelle (etwa das erreichte Tageskontingent) beendet den Lauf: kein weiterer
-/// Abruf, nichts belegt.
+/// Ein Limithinweis beendet weitere Abrufe dieser Quelle, ohne Rohablage oder Kurssperre.
 #[test]
 fn hinweis_beendet_den_lauf() -> Result<(), String> {
     let (journal, roh) = ordner()?;
     let werte = zwei_werte()?;
-    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(NOTIZ)), ("MBG.DEX", Ok(ROH_MBG))]);
+    let limit = NOTIZ.replace("Thank you for using Alpha Vantage!", SCHLUESSEL);
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(&limit)), ("MBG.DEX", Ok(ROH_MBG))]);
     let b = lauf(
         &journal,
         &roh,
@@ -372,11 +372,11 @@ fn hinweis_beendet_den_lauf() -> Result<(), String> {
     )?
     .map_err(|e| format!("Lauf: {e:?}"))?;
     assert_eq!(netz.abgerufen.len(), 1);
+    assert!(!b.sicherheitsabbruch);
     assert!(
-        b.abbruch
-            .as_deref()
-            .is_some_and(|a| a.contains("25 requests"))
+        matches!(b.werte.first(), Some((_, Ergebnis::Fehler(text))) if text.contains("Tageslimit"))
     );
+    assert!(!roh.join(QUELLE).exists());
     assert!(matches!(
         b.werte.get(1),
         Some((_, Ergebnis::NichtAbgerufen))

@@ -158,12 +158,14 @@ fn hinweis_der_quelle_belegt_nichts_ohne_sperre() -> Result<(), String> {
     let (b, _) = lauf(
         &journal,
         &roh,
-        r#"{"Information": "rate limit reached"}"#,
+        &format!(r#"{{"Information": "rate limit reached {SCHLUESSEL}"}}"#),
         utc(10, 22)?,
         &zugang()?,
     )?;
     let b = b.map_err(|e| format!("{e:?}"))?;
     assert!(!b.sicherheitsabbruch);
+    assert!(b.rohdatei.is_none());
+    assert!(!b.fehler.as_deref().unwrap_or_default().contains(SCHLUESSEL));
     assert!(b.fehler.is_some_and(|f| f.contains("Hinweis der Quelle")));
     assert_eq!(b.neu, 0);
     Ok(())

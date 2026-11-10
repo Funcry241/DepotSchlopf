@@ -156,6 +156,12 @@ pub fn einordnen(b: &Bericht, quelle: Anbieter) -> Option<depot_journal::anbiete
         .filter(|(w, _)| Anbieter::fuer(w.boerse) == quelle)
         .map(|(_, e)| e)
         .collect();
+    if eigene
+        .iter()
+        .any(|e| matches!(e, Ergebnis::Fehler(t) if t == crate::diagnose::ALPHA_LIMIT))
+    {
+        return Some(E::Limit);
+    }
     if eigene.iter().any(|e| matches!(e, Ergebnis::Belegt { .. })) {
         return Some(E::Ok);
     }
@@ -384,11 +390,18 @@ enum Schritt {
     },
     /// Nur dieser Wert ergibt nichts.
     Fehler(String),
+    AlphaLimit,
     /// Der Lauf endet; `sicherheit`, wenn die Antwort einen Schluessel enthielt.
-    Abbruch { text: String, sicherheit: bool },
+    Abbruch {
+        text: String,
+        sicherheit: bool,
+    },
     /// Die Verbindung zur Quelle blieb trotz Wiederholung weg; bei ihr wird nichts mehr
     /// abgerufen.
-    Verbindung { text: String, ausfall: Ausfall },
+    Verbindung {
+        text: String,
+        ausfall: Ausfall,
+    },
 }
 
 /// Holt, prueft, legt ab und liest einen Wert.
@@ -417,18 +430,20 @@ fn lies_wert(
             });
         }
     };
+    let anbieter = Anbieter::fuer(wert.boerse);
+    if crate::diagnose::alpha_limit(zugang, anbieter, &roh) {
+        return Ok(Schritt::AlphaLimit);
+    }
     // Gibt die Quelle einen Schluessel zurueck, wird die Antwort weder abgelegt noch gelesen,
     // und der Lauf endet: Keine Datei des Rahmens enthaelt ihn (K19-01).
-    if let Some(text) =
-        crate::diagnose::sicherheitsabbruch(zugang, Anbieter::fuer(wert.boerse).dienst(), &roh)
-    {
+    if let Some(text) = crate::diagnose::sicherheitsabbruch(zugang, anbieter.dienst(), &roh) {
         return Ok(Schritt::Abbruch {
             text,
             sicherheit: true,
         });
     }
     let abruf = (takt.uhr)().ok_or(SammelFehler::Uhr)?;
-    let quelle = Anbieter::fuer(wert.boerse).dienst();
+    let quelle = anbieter.dienst();
     let rohdatei = lege_ab(ablage, quelle, abruf, &format!("_{}.csv", wert.isin), &roh)
         .map_err(SammelFehler::Ablage)?;
     if let Some((nur_wert, text)) = hinweis(&roh) {
@@ -510,19 +525,32 @@ pub fn sammle(
         ausgelassen: Vec::new(),
         verbindung: None,
     };
-    let mut normalisierungen = Vec::new();
-    let mut heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)> = Vec::new();
-    let mut vortag: Vec<(depot_kern::Isin, Kurs)> = Vec::new();
-    let mut letzter_abruf: Option<Zeitpunkt> = None;
-    let mut offen: Vec<KursBeleg> = Vec::new();
+    let mut gelesen = Gelesen::default();
 
     let vorbereitung = vorbereite(&mut bericht, netz, zugang, takt, ablage, werte)?;
     let mut abgerufen = vorbereitung.abgerufen;
     // Quellen, zu denen die Verbindung trotz Wiederholung wegblieb.
     let mut weg: Vec<Anbieter> = Vec::new();
 
+    let alpha_anzahl = werte.iter().filter(|w| w.boerse == Boerse::Xetra).count();
+    let alpha_grund = (alpha_anzahl > 0 && zugang.von(Anbieter::AlphaVantage).is_some())
+        .then(|| netz.pruefe_alpha(alpha_anzahl).err())
+        .flatten();
+    let mut alpha_limit = false;
     for wert in werte {
         if bericht.abbruch.is_some() {
+            bericht.werte.push((wert.clone(), Ergebnis::NichtAbgerufen));
+            continue;
+        }
+        if wert.boerse == Boerse::Xetra
+            && let Some(grund) = &alpha_grund
+        {
+            bericht
+                .werte
+                .push((wert.clone(), Ergebnis::Uebersprungen(grund.clone())));
+            continue;
+        }
+        if alpha_limit && Anbieter::fuer(wert.boerse) == Anbieter::AlphaVantage {
             bericht.werte.push((wert.clone(), Ergebnis::NichtAbgerufen));
             continue;
         }
@@ -553,6 +581,14 @@ pub fn sammle(
                     bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
                     continue;
                 }
+                Schritt::AlphaLimit => {
+                    alpha_limit = true;
+                    bericht.werte.push((
+                        wert.clone(),
+                        Ergebnis::Fehler(crate::diagnose::ALPHA_LIMIT.into()),
+                    ));
+                    continue;
+                }
                 Schritt::Abbruch { text, sicherheit } => {
                     bericht.abbruch = Some(text.clone());
                     bericht.sicherheitsabbruch |= sicherheit;
@@ -568,25 +604,8 @@ pub fn sammle(
                     continue;
                 }
             };
-        normalisierungen.extend(notizen);
-        let quelle = Anbieter::fuer(wert.boerse).dienst();
-        // Belegt wird nach dem Lauf, bevor irgendetwas die Kurse verwendet (R12): je Wert erst
-        // der Vortag, dann heute.
-        for kurs in [v.eintrag(&wert.isin), h.eintrag(&wert.isin)]
-            .into_iter()
-            .flatten()
-        {
-            let beleg = KursBeleg::neu(quelle, abruf, &roh, wert.isin.clone(), kurs.clone())
-                .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
-            offen.push(beleg);
-        }
-        if let Some(k) = h.eintrag(&wert.isin) {
-            heute.push((wert.isin.clone(), k.clone(), abruf));
-        }
-        if let Some(k) = v.eintrag(&wert.isin) {
-            vortag.push((wert.isin.clone(), k.clone()));
-        }
-        letzter_abruf = Some(abruf);
+        gelesen.normalisierungen.extend(notizen);
+        gelesen.belege(wert, abruf, &roh, &h, &v)?;
         bericht.werte.push((
             wert.clone(),
             Ergebnis::Belegt {
@@ -597,23 +616,47 @@ pub fn sammle(
         ));
     }
 
-    let gelesen = Gelesen {
-        normalisierungen,
-        offen,
-        letzter_abruf,
-        heute,
-        vortag,
-    };
     abschliessen(bericht, journal, werte, gelesen)
 }
 
 /// Was ein Lauf gelesen, aber noch nicht belegt hat.
+#[derive(Default)]
 struct Gelesen {
     normalisierungen: Vec<(Datum, String)>,
     offen: Vec<KursBeleg>,
     letzter_abruf: Option<Zeitpunkt>,
     heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)>,
     vortag: Vec<(depot_kern::Isin, Kurs)>,
+}
+
+impl Gelesen {
+    fn belege(
+        &mut self,
+        wert: &Wert,
+        abruf: Zeitpunkt,
+        roh: &[u8],
+        heute: &Kurse,
+        vortag: &Kurse,
+    ) -> Result<(), SammelFehler> {
+        let quelle = Anbieter::fuer(wert.boerse).dienst();
+        // Erst den Vortag, dann den aktuellen Kurs zur Belegung vormerken.
+        for kurs in [vortag.eintrag(&wert.isin), heute.eintrag(&wert.isin)]
+            .into_iter()
+            .flatten()
+        {
+            let beleg = KursBeleg::neu(quelle, abruf, roh, wert.isin.clone(), kurs.clone())
+                .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
+            self.offen.push(beleg);
+        }
+        if let Some(k) = heute.eintrag(&wert.isin) {
+            self.heute.push((wert.isin.clone(), k.clone(), abruf));
+        }
+        if let Some(k) = vortag.eintrag(&wert.isin) {
+            self.vortag.push((wert.isin.clone(), k.clone()));
+        }
+        self.letzter_abruf = Some(abruf);
+        Ok(())
+    }
 }
 
 /// Nach den Abrufen: ohne Sicherheitsabbruch alles in Abrufreihenfolge belegen und pruefen;
