@@ -21,10 +21,12 @@
 
 pub mod anbieter;
 pub mod frage;
+mod gemini_netz;
 pub use depot_kern::json;
 pub mod ki;
 pub mod netz;
 pub mod schluessel;
+pub mod zusatz;
 
 pub use anbieter::{Anbieter, Gelesen, Verbrauch};
 pub use ki::KiBerater;

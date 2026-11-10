@@ -321,6 +321,7 @@ impl Erledigt {
             | Art::Kurse
             | Art::Kursdiagnose
             | Art::Nachrichten
+            | Art::Gemini
             | Art::Vorbereiten
             | Art::UpdatePruefen
             | Art::Update => {}

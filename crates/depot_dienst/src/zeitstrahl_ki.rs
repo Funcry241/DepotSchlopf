@@ -131,6 +131,10 @@ impl Aufrufe {
         aus
     }
 
+    pub(crate) fn hat_eintrag(&self, lauf: &str) -> bool {
+        self.je_lauf.contains_key(lauf)
+    }
+
     pub(crate) fn hand_kennung(
         &self,
         dienstlauf: &str,

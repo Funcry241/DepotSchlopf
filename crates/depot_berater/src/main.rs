@@ -53,6 +53,19 @@ fn schluessel(wer: BeraterId) -> Option<Schluessel> {
     }
 }
 
+fn laufkennung() -> String {
+    std::env::var(depot_journal::gespraeche::LAUF_ENV)
+        .ok()
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit() || b == b'-'))
+        .unwrap_or_else(|| {
+            format!(
+                "hand-{}-{}",
+                jetzt().map_or(0, Zeitpunkt::sekunden),
+                std::process::id()
+            )
+        })
+}
+
 fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
     let werte = beobachtungsliste()?;
     let universum = als_universum(&werte);
@@ -65,15 +78,11 @@ fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
             sperre.display()
         );
     }
-    let lauf = std::env::var(depot_journal::gespraeche::LAUF_ENV)
-        .ok()
-        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit() || b == b'-'))
-        .unwrap_or_else(|| {
-            format!(
-                "hand-{}-{}",
-                jetzt().map_or(0, Zeitpunkt::sekunden),
-                std::process::id()
-            )
+    let lauf = laufkennung();
+    let zuarbeit = jetzt()
+        .and_then(Zeitpunkt::in_frankfurt)
+        .map_or_else(depot_berater::zusatz::Zuarbeit::default, |(tag, ..)| {
+            depot_berater::zusatz::Zuarbeit::lesen(&wurzel.join("daten"), tag, &universum)
         });
     let dachs_schluessel = schluessel(BeraterId::Dachs);
     let maus_schluessel = schluessel(BeraterId::Maus);
@@ -85,7 +94,8 @@ fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
         sperre.clone(),
     )
     .mit_protokoll(protokoll.clone(), jetzt)
-    .mit_gespraechen(lauf.clone(), maus_schluessel.clone());
+    .mit_gespraechen(lauf.clone(), maus_schluessel.clone())
+    .mit_zuarbeit(zuarbeit.clone());
     let mut maus = KiBerater::neu(
         BeraterId::Maus,
         maus_schluessel,
@@ -94,7 +104,8 @@ fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
         sperre.clone(),
     )
     .mit_protokoll(protokoll, jetzt)
-    .mit_gespraechen(lauf, dachs_schluessel);
+    .mit_gespraechen(lauf, dachs_schluessel)
+    .mit_zuarbeit(zuarbeit);
     if vorbereitung {
         let zeit = jetzt().ok_or("Uhr liefert keine Zeit")?;
         dachs = dachs.fuer_vorbereitung(zeit);
@@ -130,6 +141,20 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(args.as_slice(), [befehl] if befehl == "gemini-vorlauf")
+        || matches!(args.as_slice(), [befehl, modus] if befehl == "gemini-vorlauf" && modus == "papiertag")
+    {
+        if let (Some(zeit), Ok(werte)) = (jetzt(), beobachtungsliste()) {
+            depot_berater::zusatz::vorlauf(
+                &wurzel.join("daten"),
+                zeit,
+                &laufkennung(),
+                &als_universum(&werte),
+                args.len() == 2,
+            );
+        }
+        return ExitCode::SUCCESS;
+    }
     if args.as_slice() != ["papier"] && args.as_slice() != ["vorbereiten"] {
         eprintln!("[Papier] Aufruf: run.cmd papier oder run.cmd vorbereiten");
         return ExitCode::from(2);

@@ -21,6 +21,7 @@
 
 pub mod aktualisierung;
 pub mod autostart;
+mod gemini;
 mod gespraeche;
 pub mod hinweis;
 pub mod http;
@@ -287,8 +288,9 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 },
                 ..gespeichert
             };
-            let inhalt = seiten::einrichtung(&d.token, &d.start, &zustand, tag, &gespeichert);
+            let mut inhalt = seiten::einrichtung(&d.token, &d.start, &zustand, tag, &gespeichert);
             drop(zustand);
+            inhalt.push_str(&gemini::einrichtung(d, u, tag));
             let seite = seiten::rahmen(
                 "/einrichtung",
                 None,
@@ -423,6 +425,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     }
     match a.pfad.as_str() {
         "/ausfuehren" => auftrag_einreihen(d, &f, jetzt),
+        "/gemini" => gemini::speichern(d, &f),
         "/schluessel" => {
             let (Some(wer), Some(wert)) =
                 (feld(&f, "wer").and_then(Wer::aus_kurz), feld(&f, "wert"))
@@ -433,11 +436,18 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 );
             };
             if wer.pruefe(wert).is_err() {
-                return http::umleitung("/einrichtung?m=schluessel_ungueltig#schluessel");
+                return http::umleitung(if wer == Wer::Gemini {
+                    "/einrichtung?m=schluessel_ungueltig#zusatz"
+                } else {
+                    "/einrichtung?m=schluessel_ungueltig#schluessel"
+                });
             }
             match u.schluessel_ablegen(wer, wert) {
                 Ok(()) => {
                     d.protokoll_schluessel_merken(wert.trim());
+                    if wer == Wer::Gemini {
+                        return http::umleitung("/einrichtung?m=schluessel#zusatz");
+                    }
                     // Der neue Schluessel ist nur hinterlegt, bis ein Aufruf ihn bestaetigt.
                     let neu = anbieter::Eintrag::neu(
                         jetzt,
@@ -453,6 +463,9 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                     } else {
                         http::umleitung("/einrichtung?m=schluessel_protokoll#schluessel")
                     }
+                }
+                Err(_) if wer == Wer::Gemini => {
+                    http::umleitung("/einrichtung?m=schluessel_fehler#zusatz")
                 }
                 Err(_) => http::umleitung("/einrichtung?m=schluessel_fehler#schluessel"),
             }
