@@ -22,7 +22,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use depot_journal::{Journal, anbieter, kurssperre};
+use depot_journal::{
+    Journal, anbieter,
+    kurssperre::{self, Quelle},
+};
 use depot_kern::{Boerse, Datum, Grenzen, Preis, Zeitpunkt, hinweis};
 use depot_sammler::kontingent::KontingentNetz;
 use depot_sammler::termine::sammle_termine_geschuetzt;
@@ -97,12 +100,11 @@ fn vermerke(wurzel: &Path, bericht: &depot_sammler::Bericht) {
 
 /// Liegt die Kurssperre, wird nichts abgerufen.
 fn gesperrt(wurzel: &Path) -> bool {
-    let Some(grund) = kurssperre::kurssperre(&wurzel.join("daten")) else {
+    if kurssperre::kurssperre(&wurzel.join("daten")).is_none() {
         return false;
-    };
+    }
     eprintln!(
-        "[Sammler] HALT: daten/{} liegt ({grund}). Kein Abruf und kein Papiertag, bis ein Mensch \
-         den Schlüssel geprüft und die Sperre in der Einrichtung aufgehoben hat.",
+        "[Sammler] HALT: daten/{} liegt. Kein regulärer Kursabruf und kein Papiertag. Siehe Einrichtung → Kurssperre.",
         kurssperre::KURSSPERRE
     );
     true
@@ -110,12 +112,14 @@ fn gesperrt(wurzel: &Path) -> bool {
 
 /// Nach einem Sicherheitsabbruch: Kurssperre anlegen, damit auch ein Papiertag von Hand die
 /// Teilkurse dieses Abrufs nie verwendet.
-fn sperre(wurzel: &Path, diagnose: Option<&str>, zugang: &Zugang) {
+fn sperre(wurzel: &Path, quelle: Quelle, diagnose: Option<&str>, zugang: &Zugang) {
     let grund = "Sicherheitsabbruch: Die Kursquelle gab den Schlüssel zurück. Teilkurse dieses \
                  Abrufs nicht verwenden; Schlüssel prüfen und bei Bedarf erneuern";
     let grund = diagnose.map_or_else(|| grund.to_string(), |d| format!("{grund}. {d}"));
     let grund = zugang.bereinige(&grund);
-    match kurssperre::sperre_kurse(&wurzel.join("daten"), &grund) {
+    let ergebnis = kurssperre::sperren(&wurzel.join("daten"))
+        .and_then(|schutz| schutz.sicherheit(quelle, jetzt(), &grund));
+    match ergebnis {
         Ok(()) => eprintln!(
             "[Sammler] Kurssperre daten/{} angelegt.",
             kurssperre::KURSSPERRE
@@ -168,7 +172,35 @@ fn echt_sammeln(
     )
 }
 
+fn pruefe_kurssperre(daten: &Path, netz: &mut dyn depot_sammler::Netz) {
+    use depot_sammler::diagnose::AutomatischePruefung;
+    if kurssperre::kurssperre(daten).is_none() {
+        return;
+    }
+    let (Some(zeit), Ok(werte)) = (jetzt(), beobachtungsliste()) else {
+        return;
+    };
+    let (zugang, _) = zugang_laden(&werte, Schluessel::aus_anmeldeverwaltung);
+    let text = match depot_sammler::diagnose::pruefe_altsperre(daten, zeit, netz, &zugang, &werte) {
+        Ok(AutomatischePruefung::KeinBedarf) => return,
+        Ok(AutomatischePruefung::Aufgehoben) => "Kurssperre aufgehoben: Fehlalarm",
+        Ok(AutomatischePruefung::Sicherheit) => {
+            "Kurssperre bestätigt: Antwort enthielt einen Schlüssel"
+        }
+        Ok(AutomatischePruefung::Morgen) => {
+            "Kurssperre bleibt aktiv; nächste automatische Prüfung frühestens morgen."
+        }
+        Err(_) => "Kurssperre konnte nicht automatisch geprüft oder aufgehoben werden.",
+    };
+    println!("{}", hinweis::zeile(&zugang.bereinige(text)));
+}
+
 fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode {
+    let daten = wurzel.join("daten");
+    pruefe_kurssperre(
+        &daten,
+        &mut KontingentNetz::neu(Https::neu(), &daten, jetzt),
+    );
     if gesperrt(wurzel) {
         return ExitCode::FAILURE;
     }
@@ -216,8 +248,8 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         }
     };
     let verwendbar = bericht.verwendbar();
-    if bericht.sicherheitsabbruch {
-        sperre(wurzel, bericht.abbruch.as_deref(), &schluessel);
+    if let Some(quelle) = bericht.sperrquelle {
+        sperre(wurzel, quelle, bericht.abbruch.as_deref(), &schluessel);
     }
     vermerke(wurzel, &bericht);
     zeige_werte(&bericht.werte);
@@ -358,7 +390,7 @@ fn nachrichten_holen(
     ) {
         Ok(b) => {
             if b.sicherheitsabbruch {
-                sperre(wurzel, None, schluessel);
+                sperre(wurzel, Quelle::Rss, None, schluessel);
                 return NachrichtenAusgang::Sicherheitsabbruch;
             }
             for text in &b.quellen {
@@ -422,6 +454,7 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
     println!("[Sammler] Hole die Termine der EZB von {ADRESSE_EZB} ...");
     let daten = wurzel.join("daten");
     let mut netz = KontingentNetz::neu(Https::neu(), &daten, jetzt);
+    pruefe_kurssperre(&daten, &mut netz);
     let mut uhr = jetzt;
     let (zugang, _) = zugang_laden(&[], Schluessel::aus_anmeldeverwaltung);
     let bericht = match sammle_termine_geschuetzt(
@@ -456,6 +489,9 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         }
         true
     };
+    if bericht.sicherheitsabbruch {
+        sperre(wurzel, Quelle::Ezb, bericht.fehler.as_deref(), &zugang);
+    }
     let kalender_ok = quartalszahlen(wurzel, &mut journal, &mut netz);
     if ezb_ok && kalender_ok {
         ExitCode::SUCCESS
@@ -508,7 +544,7 @@ fn quartalszahlen(
         return true;
     }
     if b.sicherheitsabbruch {
-        sperre(wurzel, None, &zugang);
+        sperre(wurzel, Quelle::AlphaVantage, None, &zugang);
         eprintln!("[Sammler] Quartalszahlen: HALT, die Antwort enthielt einen Schlüssel.");
         return false;
     }
@@ -612,6 +648,7 @@ mod tests {
             handelstag: Some(freitag),
             abbruch: None,
             sicherheitsabbruch: false,
+            sperrquelle: None,
             pruefung: vec![depot_regelwerk::DatenFehler::AbrufNichtAmHandelstag],
             ausgelassen: Vec::new(),
             verbindung: None,

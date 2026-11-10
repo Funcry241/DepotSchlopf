@@ -668,10 +668,26 @@ impl Dienst {
     /// Gleicht die Gründe für „Eingriff nötig“ mit dem Gedächtnis ab und zeigt, wenn es so
     /// weit ist, einen Hinweis. Der Melder läuft außerhalb jeder Sperre.
     fn hinweise_pruefen(&self, jetzt: Zeitpunkt) {
-        let (gruende, an) = {
+        let (mut gruende, an) = {
             let z = self.sperre();
             (hinweis_gruende(&z, jetzt), z.zeitplan.hinweis.aktiv())
         };
+        let daten = self.wurzel.join("daten");
+        match depot_lage::kurssperre::lies(&daten) {
+            Ok(Some(s)) => gruende.push(format!("Kurssperre aktiv ({}).", s.art.text())),
+            Err(_) => gruende.push("Kurssperre aktiv: Datei unlesbar.".into()),
+            Ok(None) => {
+                if let Some(aufgehoben) = depot_lage::kurssperre::letzter_fehlalarm(&daten)
+                    && ortszeit(aufgehoben).map(|(tag, ..)| tag)
+                        == ortszeit(jetzt).map(|(tag, ..)| tag)
+                {
+                    gruende.push(format!(
+                        "Kurssperre aufgehoben: Fehlalarm ({}).",
+                        depot_lage::zeit_text(aufgehoben)
+                    ));
+                }
+            }
+        }
         let gruende: Vec<String> = gruende
             .iter()
             .map(|g| self.protokoll_bereinigen(g))

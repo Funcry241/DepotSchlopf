@@ -1,19 +1,15 @@
-klasse: FestschreibungAenderung
-zweck: Verpasste Morgenläufe bis zum tatsächlichen ersten Handelsschluss nachholen und Ausfälle belegen (R1, #136)
+klasse: Funktion
+zweck: Zuordenbare Alt-Kurssperren kontrolliert prüfen und bestätigte Sicherheitsfälle geschlossen halten (R2, #142)
 pfade:
 CHANGELOG.md
-crates/depot_dienst/src/programmstand.rs
+README.md
+crates/depot_dienst/src/kostenschutz.rs
+crates/depot_dienst/src/lib.rs
 crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/src/verlauf.rs
 crates/depot_dienst/src/werkbank.rs
-crates/depot_dienst/src/zeitplan.rs
 crates/depot_dienst/tests/dienst.rs
-crates/depot_kern/src/grenzen.rs
-crates/depot_kern/src/liste.rs
-crates/depot_regelwerk/src/entscheidung.rs
-crates/depot_regelwerk/tests/befunde.rs
-crates/depot_sammler/tests/wiederholung.rs
-crates/depot_sim/tests/papiertag.rs
-docs/befunde/morgenlauf.md
-kodex/festschreibung.txt
-kodex/freigabe.txt
+crates/depot_journal/src/kurssperre.rs
+crates/depot_sammler/src/diagnose.rs
+crates/depot_sammler/src/main.rs
+crates/depot_sammler/src/sammeln.rs
+crates/depot_sammler/src/termine.rs

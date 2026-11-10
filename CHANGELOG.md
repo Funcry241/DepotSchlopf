@@ -27,6 +27,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Kurssperre (R2, #142): Ein täglicher Prüfabruf kann einen zugeordneten Altfall automatisch aufheben. Bestätigte Schlüsselfunde bleiben bis zur Freigabe in der Einrichtung gesperrt. Die Betriebsleiste zeigt Zeitpunkt, Grund und Art.
+
 - Morgenlauf (R1, #136): Der Dienst holt Termine, Kurse und den Papiertag bis zum ersten tatsächlichen Handelsschluss des Tages nach. Nach der Frist vermerkt er einen ausgebliebenen Papiertag einmalig im Verlauf und zeigt einen Windows-Hinweis.
 
 - Morgenlauf (#135): Der Standardzeitplan startet Termine um 07:20 Uhr und die Kurse um 07:30 Uhr. Der Papiertag verwendet den letzten abgeschlossenen Handelstag je Börse und frische Abrufe vom Starttag. Orders gehören zum Starttag und verwenden weiterhin die bestehende Schlusskurs-Simulation. Die Einrichtung übernimmt alte Standardzeiten einmalig.

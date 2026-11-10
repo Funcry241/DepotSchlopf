@@ -197,6 +197,12 @@ fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
     seiten::live_mit_ki(&d.token, &d.start, &d.sperre(), jetzt, &ki)
 }
 
+fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {
+    let mut s = seiten::betriebsleiste(&d.start, &d.sperre(), tag);
+    seiten::kurssperre_status(&d.wurzel.join("daten"), tag, &mut s);
+    s
+}
+
 fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let inhalt = live_inhalt(d, jetzt);
     let s = seiten::rahmen(
@@ -205,7 +211,7 @@ fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         seiten::meldung(&a.abfrage),
         &inhalt,
         d.version.as_deref(),
-        &seiten::betriebsleiste(&d.start, &d.sperre(), heute(jetzt)),
+        &betriebsleiste(d, heute(jetzt)),
         seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, s.as_bytes())
@@ -228,11 +234,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             HTML,
             seiten::quellen_teil(&d.token, &d.start, &d.sperre()).as_bytes(),
         ),
-        "/teil/kopf" => antwort(
-            200,
-            HTML,
-            seiten::betriebsleiste(&d.start, &d.sperre(), tag).as_bytes(),
-        ),
+        "/teil/kopf" => antwort(200, HTML, betriebsleiste(d, tag).as_bytes()),
         "/teil/update" => antwort(
             200,
             HTML,
@@ -297,7 +299,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 seiten::meldung(&a.abfrage),
                 &inhalt,
                 d.version.as_deref(),
-                &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+                &betriebsleiste(d, tag),
                 seiten::meldungs_aktion(&a.abfrage),
             );
             antwort(200, HTML, seite.as_bytes())
@@ -331,7 +333,7 @@ fn gespraechsseite(d: &Dienst, a: &Anfrage, heute: Option<depot_kern::Datum>) ->
         None,
         &inhalt,
         d.version.as_deref(),
-        &seiten::betriebsleiste(&d.start, &d.sperre(), heute),
+        &betriebsleiste(d, heute),
         ("", ""),
     );
     antwort(200, HTML, seite.as_bytes())
@@ -372,7 +374,7 @@ fn protokoll_lesen(d: &Dienst, a: &Anfrage, tag: Option<depot_kern::Datum>) -> V
                 None,
                 &inhalt,
                 d.version.as_deref(),
-                &seiten::betriebsleiste(&d.start, &d.sperre(), tag),
+                &betriebsleiste(d, tag),
                 seiten::meldungs_aktion(&a.abfrage),
             );
             antwort(200, HTML, html.as_bytes())
@@ -534,7 +536,7 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         None,
         &inhalt,
         d.version.as_deref(),
-        &seiten::betriebsleiste(&d.start, &d.sperre(), heute(jetzt)),
+        &betriebsleiste(d, heute(jetzt)),
         seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, seite.as_bytes())

@@ -85,6 +85,7 @@ pub struct Bericht {
     /// Dann ist nichts aus diesem Lauf verwendbar, auch nicht, was vorher belegt wurde (Maus,
     /// Gegenprobe 1 zu #34).
     pub sicherheitsabbruch: bool,
+    pub sperrquelle: Option<depot_journal::kurssperre::Quelle>,
     /// Der juengste Handelstag unter den belegten Schlusskursen.
     pub handelstag: Option<Datum>,
     /// Befunde, an denen der Papiertag ausfiele (`waehle_tageswerte`): zum Abruf, zu einem
@@ -98,6 +99,15 @@ pub struct Bericht {
 }
 
 impl Bericht {
+    fn beende_abruf(&mut self, wert: &Wert, text: String, sicherheit: bool) {
+        self.abbruch = Some(text.clone());
+        if sicherheit {
+            self.sicherheitsabbruch = true;
+            self.sperrquelle = Some(crate::diagnose::sperrquelle(Anbieter::fuer(wert.boerse)));
+        }
+        self.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+    }
+
     /// Sind die Kurse dieses Laufs verwendbar? Nie nach einem Sicherheitsabbruch. Sonst nur, wenn
     /// Schlusskurse belegt sind und die
     /// Pruefung wie im Papiertag nichts meldet, was den Zyklus ausfallen liesse (K19-02): Pflicht
@@ -292,6 +302,7 @@ fn hole_devisen(
     if let Some(text) = crate::diagnose::sicherheitsabbruch(zugang, "ezb", &roh) {
         bericht.abbruch = Some(text);
         bericht.sicherheitsabbruch = true;
+        bericht.sperrquelle = Some(depot_journal::kurssperre::Quelle::Ezb);
         return Ok(fehlt("Sicherheitsabbruch".into()));
     }
     lege_ab(ablage, ABLAGE_DEVISEN, beginn, ".xml", &roh).map_err(SammelFehler::Ablage)?;
@@ -520,6 +531,7 @@ pub fn sammle(
         werte: Vec::new(),
         abbruch: None,
         sicherheitsabbruch: false,
+        sperrquelle: None,
         handelstag: None,
         pruefung: Vec::new(),
         ausgelassen: Vec::new(),
@@ -590,9 +602,7 @@ pub fn sammle(
                     continue;
                 }
                 Schritt::Abbruch { text, sicherheit } => {
-                    bericht.abbruch = Some(text.clone());
-                    bericht.sicherheitsabbruch |= sicherheit;
-                    bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+                    bericht.beende_abruf(wert, text, sicherheit);
                     continue;
                 }
                 Schritt::Verbindung { text, ausfall } => {

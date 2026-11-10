@@ -1,7 +1,9 @@
 //! Geheimnisfreie Metadaten eines Sicherheitsabbruchs. Kein Antwortausschnitt verlässt
 //! diese Funktion; auch die Namen stammen nur aus der festen Quellenliste.
 use crate::{Anbieter, Netz, Wert, Zugang};
-use depot_kern::json;
+use depot_journal::kurssperre::{self, Art, Quelle};
+use depot_kern::{Zeitpunkt, json};
+use std::path::Path;
 use std::time::Duration;
 
 fn antwortart(roh: &[u8]) -> &'static str {
@@ -151,6 +153,102 @@ pub fn pruefabruf(
     );
 }
 
+/// Ergebnis der einzigen automatischen Prüfung pro Frankfurter Kalendertag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutomatischePruefung {
+    KeinBedarf,
+    Aufgehoben,
+    Sicherheit,
+    Morgen,
+}
+
+pub(crate) fn sperrquelle(a: Anbieter) -> Quelle {
+    match a {
+        Anbieter::AlphaVantage => Quelle::AlphaVantage,
+        Anbieter::Tiingo => Quelle::Tiingo,
+    }
+}
+
+fn pruefadresse(
+    quelle: Quelle,
+    zugang: &Zugang,
+    werte: &[Wert],
+) -> Option<(String, Option<Anbieter>)> {
+    let anbieter = match quelle {
+        Quelle::AlphaVantage => Anbieter::AlphaVantage,
+        Quelle::Tiingo => Anbieter::Tiingo,
+        Quelle::Ezb => return Some((crate::ADRESSE_DEVISEN.into(), None)),
+        Quelle::Rss => return None,
+    };
+    let wert = werte
+        .iter()
+        .find(|w| Anbieter::fuer(w.boerse) == anbieter)?;
+    let key = zugang.von(anbieter)?;
+    Some((crate::sammeln::adresse(wert, key, None), Some(anbieter)))
+}
+
+fn saubere_daten(quelle: Quelle, roh: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(roh) else {
+        return false;
+    };
+    match quelle {
+        Quelle::AlphaVantage => depot_kern::lies_tageskurse(text).is_ok_and(|t| !t.is_empty()),
+        Quelle::Tiingo => {
+            depot_kern::tiingo::lies_tageskurse(text).is_ok_and(|t| !t.kurse.is_empty())
+        }
+        Quelle::Ezb => depot_kern::Devisen::lies_ezb(text).is_ok(),
+        Quelle::Rss => false,
+    }
+}
+
+/// Prüft einen Altfall mit der zugeordneten Quelle. Fehler und unbekannte Antworten
+/// bleiben gesperrt. Rohantwort und Zugang verlassen die Prüfung nie.
+pub fn pruefe_altsperre(
+    daten: &Path,
+    jetzt: Zeitpunkt,
+    netz: &mut dyn Netz,
+    zugang: &Zugang,
+    werte: &[Wert],
+) -> Result<AutomatischePruefung, String> {
+    use AutomatischePruefung::{Aufgehoben, KeinBedarf, Morgen, Sicherheit};
+    if !kurssperre::lies(daten)?.is_some_and(|s| s.art == Art::Unklar && s.quelle.is_some()) {
+        return Ok(KeinBedarf);
+    }
+    let schutz = kurssperre::sperren(daten)?;
+    let Some(sperre) = kurssperre::lies(daten)?.filter(|s| s.art == Art::Unklar) else {
+        return Ok(KeinBedarf);
+    };
+    let Some(quelle) = sperre.quelle else {
+        return Ok(KeinBedarf);
+    };
+    let Some((adresse, anbieter)) = pruefadresse(quelle, zugang, werte) else {
+        return Ok(KeinBedarf);
+    };
+    let (tag, ..) = jetzt.in_frankfurt().ok_or("Prüfuhr unlesbar")?;
+    if !schutz.pruefung_vermerken(tag)?
+        || (anbieter == Some(Anbieter::AlphaVantage) && netz.pruefe_alpha(1).is_err())
+    {
+        return Ok(Morgen);
+    }
+    let Ok(roh) = netz.hole(&adresse) else {
+        return Ok(Morgen);
+    };
+    let limit = anbieter.is_some_and(|a| alpha_limit(zugang, a, &roh));
+    if !limit && zugang.steht_in(&roh) {
+        schutz.sicherheit(
+            quelle,
+            Some(jetzt),
+            "Prüfabruf bestätigte einen Schlüsselfund. Schlüssel prüfen und bei Bedarf erneuern.",
+        )?;
+        return Ok(Sicherheit);
+    }
+    if limit || saubere_daten(quelle, &roh) {
+        schutz.fehlalarm_aufheben(&sperre, jetzt)?;
+        return Ok(Aufgehoben);
+    }
+    Ok(Morgen)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,6 +334,146 @@ mod tests {
             let d = sicherheitsabbruch(&z, "alphavantage", roh).ok_or("Treffer fehlt")?;
             assert!(!d.to_ascii_uppercase().contains("ALPHAVANTAGE"));
             assert!(!d.contains("Unbekannter-Text") && !d.contains("<html>"));
+        }
+        Ok(())
+    }
+    const ALT: &str = "Sicherheitsabbruch: Die Kursquelle gab den Schlüssel zurück. Teilkurse dieses Abrufs nicht verwenden; Schlüssel prüfen und bei Bedarf erneuern";
+    const TESTKEY: &str = "ERFUNDEN0123TEST";
+    const CSV: &str = "timestamp,open,high,low,close,volume\n2026-11-09,230,231,229,230,1000\n";
+
+    struct Netzprobe {
+        roh: Option<Vec<u8>>,
+        aufrufe: usize,
+        alpha_frei: bool,
+    }
+
+    impl Netz for Netzprobe {
+        fn pruefe_alpha(&mut self, _: usize) -> Result<(), String> {
+            if self.alpha_frei {
+                Ok(())
+            } else {
+                Err("Kontingent ausgeschöpft".into())
+            }
+        }
+        fn hole(&mut self, _: &str) -> Result<Vec<u8>, crate::NetzFehler> {
+            self.aufrufe = self.aufrufe.saturating_add(1);
+            self.roh
+                .clone()
+                .ok_or_else(|| crate::NetzFehler::voruebergehend("Netzfehler"))
+        }
+    }
+
+    fn mit_altfall(
+        test: impl FnOnce(&Path, Zeitpunkt, &Zugang, &[Wert]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NR: AtomicU32 = AtomicU32::new(0);
+        let nr = NR.fetch_add(1, Ordering::Relaxed);
+        let daten = std::env::temp_dir().join(format!("depot_r2_{}_{nr}", std::process::id()));
+        std::fs::create_dir_all(&daten).map_err(|e| e.to_string())?;
+        let ergebnis = (|| {
+            std::fs::write(daten.join(kurssperre::KURSSPERRE), ALT).map_err(|e| e.to_string())?;
+            let jetzt = Zeitpunkt::lies("2026-11-10T06:20:00Z").ok_or("Uhr fehlt")?;
+            let zugang = Zugang::alpha_vantage(Schluessel::neu(TESTKEY)?);
+            let werte = crate::beobachtungsliste()?;
+            test(&daten, jetzt, &zugang, &werte)
+        })();
+        std::fs::remove_dir_all(daten).map_err(|e| e.to_string())?;
+        ergebnis
+    }
+
+    #[test]
+    fn alter_limitfehlalarm_oder_saubere_csv_wird_einmal_aufgehoben() -> Result<(), String> {
+        for antwort in [
+            format!(r#"{{"Information":"rate limit apikey={TESTKEY}"}}"#),
+            CSV.into(),
+        ] {
+            mit_altfall(|daten, zeit, zugang, werte| {
+                let mut netz = Netzprobe {
+                    roh: Some(antwort.into_bytes()),
+                    aufrufe: 0,
+                    alpha_frei: true,
+                };
+                assert_eq!(
+                    pruefe_altsperre(daten, zeit, &mut netz, zugang, werte)?,
+                    AutomatischePruefung::Aufgehoben
+                );
+                assert_eq!(
+                    pruefe_altsperre(daten, zeit, &mut netz, zugang, werte)?,
+                    AutomatischePruefung::KeinBedarf
+                );
+                assert_eq!(netz.aufrufe, 1);
+                assert_eq!(kurssperre::kurssperre(daten), None);
+                assert_eq!(kurssperre::letzter_fehlalarm(daten), Some(zeit));
+                let protokoll = std::fs::read_to_string(daten.join(kurssperre::AUFGEHOBEN))
+                    .map_err(|e| e.to_string())?;
+                assert_eq!(protokoll.matches("automatisch: Fehlalarm").count(), 1);
+                assert!(!protokoll.contains(TESTKEY));
+                assert!(!daten.join("roh").exists());
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn schluesselfund_macht_alte_sperre_dauerhaft_und_geheimnisfrei() -> Result<(), String> {
+        mit_altfall(|daten, zeit, zugang, werte| {
+            let mut netz = Netzprobe {
+                roh: Some(format!("{CSV}{TESTKEY}").into_bytes()),
+                aufrufe: 0,
+                alpha_frei: true,
+            };
+            assert_eq!(
+                pruefe_altsperre(daten, zeit, &mut netz, zugang, werte)?,
+                AutomatischePruefung::Sicherheit
+            );
+            let sperre = kurssperre::lies(daten)?.ok_or("Sperre fehlt")?;
+            assert_eq!(
+                (sperre.art, sperre.seit, sperre.quelle),
+                (Art::Sicherheit, Some(zeit), Some(Quelle::AlphaVantage))
+            );
+            netz.roh = Some(CSV.as_bytes().to_vec());
+            assert_eq!(
+                pruefe_altsperre(daten, zeit, &mut netz, zugang, werte)?,
+                AutomatischePruefung::KeinBedarf
+            );
+            assert_eq!(netz.aufrufe, 1);
+            let text = std::fs::read_to_string(daten.join(kurssperre::KURSSPERRE))
+                .map_err(|e| e.to_string())?;
+            assert!(!text.contains(TESTKEY) && !daten.join("roh").exists());
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn kontingentfehler_und_netzfehler_warten_bis_morgen() -> Result<(), String> {
+        for alpha_frei in [false, true] {
+            mit_altfall(|daten, zeit, zugang, werte| {
+                let mut netz = Netzprobe {
+                    roh: None,
+                    aufrufe: 0,
+                    alpha_frei,
+                };
+                assert_eq!(
+                    pruefe_altsperre(daten, zeit, &mut netz, zugang, werte)?,
+                    AutomatischePruefung::Morgen
+                );
+                assert_eq!(netz.aufrufe, usize::from(alpha_frei));
+                netz.alpha_frei = true;
+                netz.roh = Some(CSV.as_bytes().to_vec());
+                assert_eq!(
+                    pruefe_altsperre(daten, zeit, &mut netz, zugang, werte)?,
+                    AutomatischePruefung::Morgen
+                );
+                assert_eq!(netz.aufrufe, usize::from(alpha_frei));
+                let morgen = Zeitpunkt::lies("2026-11-11T06:20:00Z").ok_or("Uhr fehlt")?;
+                assert_eq!(
+                    pruefe_altsperre(daten, morgen, &mut netz, zugang, werte)?,
+                    AutomatischePruefung::Aufgehoben
+                );
+                Ok(())
+            })?;
         }
         Ok(())
     }

@@ -1506,6 +1506,36 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
     );
 }
 
+pub(crate) fn kurssperre_status(daten: &std::path::Path, heute: Option<Datum>, s: &mut String) {
+    use depot_lage::kurssperre;
+    let text = match kurssperre::lies(daten) {
+        Ok(None) => return,
+        Ok(Some(sperre)) => {
+            let zeit = sperre.seit.map_or_else(|| "unbekannt".into(), zeit_text);
+            let naechste = if sperre.art != kurssperre::Art::Unklar {
+                ""
+            } else if sperre.quelle.is_none() {
+                " · Prüfung in der Einrichtung"
+            } else if heute.is_some_and(|tag| kurssperre::pruefdatum(daten) == Some(tag)) {
+                " · Nächste automatische Prüfung frühestens morgen"
+            } else {
+                " · Automatische Prüfung beim nächsten Termin- oder Kurslauf"
+            };
+            format!(
+                "Kurssperre seit {zeit}: {} · {}{naechste}",
+                sperre.grund,
+                sperre.art.text()
+            )
+        }
+        Err(_) => "Kurssperre: Datei unlesbar".into(),
+    };
+    let _ = write!(
+        s,
+        "<div class=\"betrieb halt\">{} · <a href=\"/einrichtung#kurssperre\">Einrichtung</a></div>",
+        maskiere(&text)
+    );
+}
+
 fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
     let inhalt = match &e.kurse_halt {
         // Ohne Kurssperre kein eigener Abschnitt: Sie kommt nur nach einem Sicherheitsabbruch vor.
@@ -1524,8 +1554,8 @@ fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
     let _ = write!(
         s,
         "<section id=\"kurssperre\"><h2>Kurssperre</h2>\
-         <p><span class=\"halt\">gesperrt</span>: Ein Kursabruf endete aus Sicherheitsgründen, \
-         weil eine Antwort einen hinterlegten Schlüssel enthielt. Bis zur Prüfung gibt es keine regulären Abrufe, \
+         <p><span class=\"halt\">gesperrt</span>: Kursabrufe sind aus Sicherheitsgründen angehalten. Unklare Altfälle prüft DepotSchlopf automatisch. \
+         Bis zur Freigabe gibt es keine regulären Kursabrufe, \
          und kein Papiertag beginnt, auch nicht von Hand.</p><pre>{}</pre>\
          <p>Empfohlen: Zuerst <b>Kurssperre sicher untersuchen</b>. Der Prüfabruf zeigt nur \
          Quelle, erkannten Zugang und Antwortart. Keine Antwort und keine Kurse werden gespeichert, \
