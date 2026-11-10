@@ -353,7 +353,7 @@ pub fn vergleiche(wurzel: &Path, abbild: &Abbild) -> Vec<String> {
         let erwartet = depot_kodex::git::blob(wurzel, blob);
         match (ist, erwartet) {
             (Ok(i), Ok(e)) if i == e => {}
-            (Ok(_), Ok(_)) => probleme.push(format!("{p}: waehrend des Gates geändert")),
+            (Ok(_), Ok(_)) => probleme.push(format!("{p}: während des Gates geändert")),
             (Err(e), _) => probleme.push(format!("{p}: nicht lesbar: {e}")),
             (_, Err(e)) => probleme.push(format!("{p} (Index): nicht lesbar: {e}")),
         }

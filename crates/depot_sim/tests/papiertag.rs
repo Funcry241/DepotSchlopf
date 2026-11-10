@@ -1481,6 +1481,7 @@ struct Diskutant {
     gesehen: Vec<depot_sim::abstimmung::AbstimmungsStand>,
     kosten: Option<depot_journal::KiAbrechnung>,
     veto: bool,
+    zieht_zurueck: bool,
 }
 impl depot_sim::Berater for Diskutant {
     fn vorschlagen(
@@ -1533,7 +1534,7 @@ impl depot_sim::Berater for Diskutant {
                     "Runde {} begründet Änderung oder Beibehaltung",
                     stand.runde
                 ),
-                vorschlag: Some(v),
+                vorschlag: (!self.zieht_zurueck).then_some(v),
             },
             zustimmung_fremd: !self.veto,
         }
@@ -1570,6 +1571,7 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
         gesehen: Vec::new(),
         kosten: None,
         veto,
+        zieht_zurueck: false,
     })
 }
 fn dialoglauf(a: &mut Diskutant, b: &mut Diskutant) -> Result<(Ort, Journal), String> {
@@ -1617,8 +1619,35 @@ fn unklare_runde_stoppt_ohne_ungepruefte_aenderung() -> Result<(), String> {
     let (_ort, j) = dialoglauf(&mut a, &mut b)?;
     assert_eq!(a.gesehen.len(), 2);
     assert_eq!(b.gesehen.len(), 1);
-    assert_eq!(j.stand().auftraege().len(), 2);
-    assert!(j.stand().auftraege().iter().all(|l| l.beleg.stueck == 4));
+    assert!(j.stand().auftraege().is_empty());
+    Ok(())
+}
+#[test]
+fn zustimmung_zum_alten_stand_bestaetigt_keine_aenderung() -> Result<(), String> {
+    let mut a = diskutant(BeraterId::Dachs, vec![Some(1000)], false)?;
+    let mut b = diskutant(BeraterId::Maus, vec![Some(2000)], false)?;
+    let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+    let [auftrag] = j.stand().auftraege() else {
+        return Err("Nur der unveränderte Vorschlag darf zu einem Auftrag führen".into());
+    };
+    assert_eq!(auftrag.beleg.topf, TopfId::B);
+    assert_eq!(auftrag.beleg.stueck, 4);
+    Ok(())
+}
+#[test]
+fn aenderung_oder_rueckzug_gilt_auch_ohne_zweite_antwort() -> Result<(), String> {
+    for rueckzug in [false, true] {
+        let mut a = diskutant(BeraterId::Dachs, vec![Some(1000)], false)?;
+        a.zieht_zurueck = rueckzug;
+        let mut b = diskutant(BeraterId::Maus, vec![None], false)?;
+        let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+        let [auftrag] = j.stand().auftraege() else {
+            return Err(
+                "Nur der bisher gültige Vorschlag von Maus darf zu einem Auftrag führen".into(),
+            );
+        };
+        assert_eq!(auftrag.beleg.topf, TopfId::B);
+    }
     Ok(())
 }
 #[test]
@@ -1649,7 +1678,7 @@ fn endlose_meinungsaenderungen_enden_an_der_tagesgrenze() -> Result<(), String> 
             30
         );
     }
-    assert!(j.stand().auftraege().iter().all(|l| l.beleg.stueck == 4));
+    assert!(j.stand().auftraege().is_empty());
     Ok(())
 }
 

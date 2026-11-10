@@ -604,7 +604,7 @@ impl Journal {
                 "Auftraege entstehen nur über reserviere_auftrag".into(),
             )),
             Art::Zustand => Err(JournalFehler::Abgelehnt(
-                "Auftragszustaende entstehen nur über melde und gleiche_ab".into(),
+                "Auftragszustände entstehen nur über melde und gleiche_ab".into(),
             )),
             Art::Weltprognose => Err(JournalFehler::Abgelehnt(
                 "Weltprognose nur über belege_weltprognose".into(),

@@ -256,7 +256,7 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
         version.replace('.', "_")
     );
     let snapshot_txt = format!(
-        "Quellstand DepotSchlopf v{version}\nCommit: {commit}\nZweig: {zweig}\nLokal veraendert: {veraendert}\n\
+        "Quellstand DepotSchlopf v{version}\nCommit: {commit}\nZweig: {zweig}\nLokal verändert: {veraendert}\n\
          Dateien: {}\nSHA-256: {}\nInhalt aus dem Git-Index vor der Prüfung, nie aus dem Arbeitsbaum; \
          auf Geheimnisse geprüft. Byte-gleich mit dem geprüften Stand: {}. Ohne Git kein Quellstand. Zum Weiterarbeiten entpacken.\n",
         dateien.len(),
@@ -322,7 +322,7 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
          KI-Sitzung gedacht: hochladen, dann diese Datei lesen. Sie ist kein Quellstand\n\
          zum Einspielen; den Quellstand enthält {quelle_name}.\n\n\
          STAND\n-----\nZeit (UTC): {zeit}\nVersion: {version}\nCommit: {commit} ({zweig})\n\
-         Lokal veraendert: {veraendert}\nBefehl: {}\nGate: {gate}\n\
+         Lokal verändert: {veraendert}\nBefehl: {}\nGate: {gate}\n\
          Tests: {bestanden} bestanden, {fehlgeschlagen} fehlgeschlagen\n",
         lauf.befehl
     );
@@ -813,7 +813,7 @@ mod tests {
     /// K14-01: Gate und Export pruefen und exportieren denselben festgehaltenen Stand, Byte fuer
     /// Byte, auch wenn Git eine Abweichung des Arbeitsbaums nicht meldet (`assume-unchanged`,
     /// `core.autocrlf`). Was nur im Arbeitsbaum liegt, sieht weder das Gate noch der Export;
-    /// eine Aenderung am Index waehrend des Gates erreicht keinen von beiden.
+    /// eine Aenderung am Index während des Gates erreicht keinen von beiden.
     #[test]
     fn befund_k14_01_gate_und_export_sehen_dieselben_bytes() -> Result<(), String> {
         let index = b"INDEX_STAND\nZEILE_ZWEI\n".to_vec();
@@ -823,7 +823,7 @@ mod tests {
             "autocrlf",
             "nicht vorgemerkt",
             "neu und unverfolgt",
-            "Index waehrend des Gates",
+            "Index während des Gates",
         ] {
             let r = sauberes_repo(&index)?;
             match fall {
@@ -859,7 +859,7 @@ mod tests {
                 |stand, _| {
                     sicht.readme = fs::read(stand.join("README.md")).ok();
                     sicht.neu = stand.join("src/neu.rs").exists();
-                    if fall == "Index waehrend des Gates" {
+                    if fall == "Index während des Gates" {
                         fehler = schreib(&r, "README.md", b"NUR_ARBEITSBAUM\n")
                             .and_then(|()| git_muss(&r, &["add", "README.md"]));
                     }

@@ -165,7 +165,7 @@ pub fn papier(
             hoechststand,
         } => {
             zeilen.push(format!(
-                "Papiertag {datum} abgeschlossen. Hoechststand {} EUR.",
+                "Papiertag {datum} abgeschlossen. Höchststand {} EUR.",
                 euro(*hoechststand)
             ));
             *datum

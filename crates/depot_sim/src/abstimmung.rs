@@ -3,6 +3,7 @@ use crate::lauf::{TopfAntwort, Zyklus, journal};
 use crate::{Antwort, Berater, Lage, LaufFehler};
 use depot_journal::{Journal, KiZweck};
 use depot_kern::{BeraterId, Vorschlag};
+use depot_ki::Sperre;
 
 #[derive(Clone, Debug)]
 pub struct AbstimmungsStand {
@@ -59,21 +60,47 @@ fn beitraege(buch: &Journal, zyklus: &Zyklus<'_>, wer: BeraterId) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+fn budgetgrenze(sperre: &Sperre) -> bool {
+    matches!(
+        sperre,
+        Sperre::ZyklusVoll
+            | Sperre::TagVoll
+            | Sperre::MonatVoll
+            | Sperre::MonatsbudgetErschoepft
+            | Sperre::JahresbudgetErschoepft
+            | Sperre::TagesrahmenErschoepft
+            | Sperre::ErstmeinungReserviert
+    )
+}
+
+fn runde_frei(buch: &Journal, zyklus: &Zyklus<'_>) -> Result<bool, LaufFehler> {
+    for wer in [BeraterId::Dachs, BeraterId::Maus] {
+        match buch.pruefe_ki(wer, zyklus.tag.datum, zyklus.nr, KiZweck::Abstimmung) {
+            Ok(()) => {}
+            Err(s) if budgetgrenze(&s) => return Ok(false),
+            Err(s) => return Err(crate::lauf::halt(format!("Abstimmungsprüfung: {s:?}"))),
+        }
+    }
+    Ok(true)
+}
+
 fn frage(
     buch: &mut Journal,
     zyklus: &Zyklus<'_>,
     zweite: &mut dyn Berater,
     topf: &TopfAntwort,
     dialog: &AbstimmungsStand,
-) -> Result<AbstimmungsAntwort, LaufFehler> {
-    let erlaubnis = buch
-        .reserviere_fuer(
-            topf.topf.id().berater(),
-            zyklus.tag.datum,
-            zyklus.nr,
-            KiZweck::Abstimmung,
-        )
-        .map_err(|s| crate::lauf::halt(format!("Abstimmungsreservierung: {s:?}")))?;
+) -> Result<Option<AbstimmungsAntwort>, LaufFehler> {
+    let erlaubnis = match buch.reserviere_fuer(
+        topf.topf.id().berater(),
+        zyklus.tag.datum,
+        zyklus.nr,
+        KiZweck::Abstimmung,
+    ) {
+        Ok(erlaubnis) => erlaubnis,
+        Err(s) if budgetgrenze(&s) => return Ok(None),
+        Err(s) => return Err(crate::lauf::halt(format!("Abstimmungsreservierung: {s:?}"))),
+    };
     let lage = Lage {
         datum: zyklus.tag.datum,
         topf: &topf.topf,
@@ -102,7 +129,7 @@ fn frage(
         &text,
     )
     .map_err(journal)?;
-    Ok(erste)
+    Ok(Some(erste))
 }
 fn uebernehme(
     gueltig: &mut TopfAntwort,
@@ -110,11 +137,9 @@ fn uebernehme(
     neu: &AbstimmungsAntwort,
     peer: &AbstimmungsAntwort,
 ) {
-    if neu.eigene.vorschlag.is_none() {
-        gueltig.vorschlag = None;
-    } else if neu.eigene.vorschlag.as_ref() == bisher && peer.zustimmung_fremd {
+    if neu.eigene.vorschlag.as_ref() == bisher && peer.zustimmung_fremd {
         gueltig.vorschlag.clone_from(&neu.eigene.vorschlag);
-    } else if gueltig.vorschlag.as_ref() == bisher && !peer.zustimmung_fremd {
+    } else {
         gueltig.vorschlag = None;
     }
 }
@@ -145,11 +170,7 @@ pub(crate) fn berate(
         if !crate::lauf::beratungszeit(zyklus) || !dachs.angebunden() || !maus.angebunden() {
             break;
         }
-        let frei = [BeraterId::Dachs, BeraterId::Maus].into_iter().all(|wer| {
-            buch.pruefe_ki(wer, zyklus.tag.datum, zyklus.nr, KiZweck::Abstimmung)
-                .is_ok()
-        });
-        if !frei {
+        if !runde_frei(buch, zyklus)? {
             break;
         }
         let sa = AbstimmungsStand {
@@ -167,11 +188,23 @@ pub(crate) fn berate(
             fremde_beitraege: format!("{da}\nLetzte Abstimmung: {letzte_a}"),
         };
         // Beide sehen denselben vor der Runde fixierten Stand; die zweite Anfrage sieht die erste Antwort nicht.
-        let erste = frage(buch, zyklus, dachs, &ea, &sa)?;
-        if !erste.eigene.verwertbar || !crate::lauf::beratungszeit(zyklus) {
+        let Some(erste) = frage(buch, zyklus, dachs, &ea, &sa)? else {
+            break;
+        };
+        if !erste.eigene.verwertbar {
             break;
         }
-        let zweite = frage(buch, zyklus, maus, &eb, &sb)?;
+        // Ein verwertbarer Rückzug oder Wechsel gilt auch bei einer unvollständigen Runde.
+        let [ga, _] = &mut gueltig;
+        if ga.vorschlag != erste.eigene.vorschlag {
+            ga.vorschlag = None;
+        }
+        if !crate::lauf::beratungszeit(zyklus) {
+            break;
+        }
+        let Some(zweite) = frage(buch, zyklus, maus, &eb, &sb)? else {
+            break;
+        };
         if !zweite.eigene.verwertbar {
             break;
         }
