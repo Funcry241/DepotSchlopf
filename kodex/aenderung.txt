@@ -1,18 +1,5 @@
-klasse: Funktion
-zweck: Überholte Vorschläge aus der Abstimmung entfernen, Budgetgrenzen gesondert behandeln und Update-Hilfe und sichtbare Texte korrigieren.
+klasse: KodexAenderung
+zweck: Die Sprachprüfung erkennt die sichtbaren ASCII-Umschreibungen aus Issue 100 auch künftig.
 pfade:
-README.md
-crates/depot_journal/src/datei.rs
-crates/depot_journal/src/stand.rs
-crates/depot_kern/src/liste.rs
-crates/depot_lauf/src/abbild.rs
-crates/depot_lauf/src/export.rs
-crates/depot_lauf/src/main.rs
-crates/depot_lauf/src/update.rs
-crates/depot_sammler/src/main.rs
-crates/depot_sammler/tests/sammler.rs
-crates/depot_sim/src/abstimmung.rs
-crates/depot_sim/src/papierlauf.rs
-crates/depot_sim/tests/papiertag.rs
-docs/befunde/export.md
-docs/befunde/ki-dialog.md
+crates/depot_kodex/src/deklaration.rs
+crates/depot_kodex/tests/sprache.rs
