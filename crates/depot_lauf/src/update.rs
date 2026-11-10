@@ -122,7 +122,7 @@ fn hole(wurzel: &Path) -> Result<Option<Kandidat>, String> {
     if git(wurzel, &["merge-base", "--is-ancestor", &alt, &neu]).is_err() {
         return Err(format!(
             "Der lokale Stand {alt} ist nicht Teil von origin/{ZWEIG}. Das Update spielt nur \
-             vorwaerts ein und überschreibt nichts."
+             vorwärts ein und überschreibt nichts."
         ));
     }
     if abgelehnt(wurzel, &neu)? {
@@ -149,7 +149,7 @@ fn hole(wurzel: &Path) -> Result<Option<Kandidat>, String> {
 
 fn zeige(k: &Kandidat) {
     println!(
-        "[Update] Neu auf {ZWEIG}: {} Stand/Staende, {} -> {}",
+        "[Update] Neu auf {ZWEIG}: Stände: {}, {} -> {}",
         k.staende.len(),
         kurz(&k.alt),
         kurz(&k.neu)
@@ -229,7 +229,7 @@ fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<abbild::Abbild, String> {
     let probleme = abbild::vergleiche(wurzel, &abbild);
     if !probleme.is_empty() {
         return Err(format!(
-            "Die Kopie hat sich waehrend des Gates veraendert; der neue Stand gilt als \
+            "Die Kopie hat sich während des Gates verändert; der neue Stand gilt als \
              ungeprüft:\n{}",
             probleme.join("\n")
         ));
@@ -299,16 +299,16 @@ fn einspielen(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
     vorbedingungen(wurzel)?;
     let jetzt = git(wurzel, &["rev-parse", "--verify", "HEAD^{commit}"])?;
     if jetzt != k.alt {
-        return Err("Der Projektordner hat sich waehrend der Prüfung bewegt. Kein Update.".into());
+        return Err("Der Projektordner hat sich während der Prüfung bewegt. Kein Update.".into());
     }
     offen_schreiben(wurzel, &offen_text(&k.alt, &k.neu))?;
     if let Err(e) = git(wurzel, &["merge", "--ff-only", "--quiet", &k.neu]) {
         // Nichts eingespielt: Die Markierung darf keinen Rueckfall ausloesen.
         let weg = fs::remove_file(offen_pfad(wurzel));
         return Err(match weg {
-            Ok(()) => format!("Vorruecken gescheitert, alter Stand bleibt: {e}"),
+            Ok(()) => format!("Vorrücken gescheitert, alter Stand bleibt: {e}"),
             Err(w) => format!(
-                "Vorruecken gescheitert, alter Stand bleibt: {e}. daten/update_offen.txt bitte \
+                "Vorrücken gescheitert, alter Stand bleibt: {e}. daten/update_offen.txt bitte \
                  löschen: {w}"
             ),
         });
@@ -320,7 +320,7 @@ fn einspielen(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
 pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
     let (nur_pruefen, erwartet) = match optionen {
         [] => (false, None),
-        [o] if o == "pruefen" => (true, None),
+        [o] if matches!(o.as_str(), "pruefen" | "prüfen") => (true, None),
         [sha] if ist_commit(sha) => (false, Some(sha)),
         _ => {
             eprintln!("[Update] FEHLER: erlaubt sind nur `update` und `update prüfen`.");
@@ -606,8 +606,11 @@ mod tests {
             (k.alt.as_str(), k.neu.as_str(), k.staende.len()),
             (alt.as_str(), neu.as_str(), 1)
         );
-        // Pruefen allein aendert nichts.
-        assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, alt);
+        for option in ["pruefen", "prüfen"] {
+            assert_eq!(lauf(&a.projekt, &[option.into()]), ExitCode::SUCCESS);
+            assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, alt);
+            assert!(!offen_pfad(&a.projekt).exists());
+        }
         einspielen(&a.projekt, &k)?;
         assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, neu);
         assert_eq!(

@@ -480,7 +480,7 @@ impl Stand {
             }
             Art::Vorbereitung => {
                 if self.seit_abschluss > 0 {
-                    return Err("Vorbereitung waehrend eines offenen Papiertags".into());
+                    return Err("Vorbereitung während eines offenen Papiertags".into());
                 }
                 crate::vorbereitung::anwenden(&mut self.vorbereitungen, &mut self.ki, inhalt)?;
                 return Ok(());
@@ -816,7 +816,7 @@ impl Stand {
             .is_some_and(|alt| alt.termin() == t.termin())
         {
             return Err(format!(
-                "Termin {} unveraendert noch einmal belegt",
+                "Termin {} unverändert noch einmal belegt",
                 t.termin().kennung()
             ));
         }

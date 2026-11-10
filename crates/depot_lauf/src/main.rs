@@ -35,9 +35,9 @@ run.cmd kurse einrichten Journal daten/journal.txt einmal anlegen\n  \
 run.cmd nachrichten      nur die Nachrichten holen und im Journal belegen (nur lesend)\n  \
 run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)\n  \
 run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)\n  \
-run.cmd lage             Lagebild nach daten/lage.html: Bereitschaft, KI-Budget, Depot, Gespraech\n  \
-run.cmd update prüfen   neue Staende auf main nennen (git fetch, ändert nichts)\n  \
-run.cmd update           neuen Stand im Prüfordner mit dem Gate prüfen, nur dann vorwaerts einspielen\n  \
+run.cmd lage             Lagebild nach daten/lage.html: Bereitschaft, KI-Budget, Depot, Gespräch\n  \
+run.cmd update prüfen   neue Stände auf main nennen (git fetch, ändert nichts)\n  \
+run.cmd update           neuen Stand im Prüfordner mit dem Gate prüfen, nur dann vorwärts einspielen\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
 
 /// Offene Reste frueherer Laeufe: Eine liegengebliebene Sperrdatei bedeutet einen Absturz

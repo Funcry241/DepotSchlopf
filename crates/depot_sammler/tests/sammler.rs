@@ -194,7 +194,7 @@ fn beobachtungsliste_gueltig() -> Result<(), String> {
         .map(|(i, k)| (i.as_str(), Boerse::Xetra, k.as_str(), "x"))
         .collect();
     let fehler = pruefe_liste(&zu_viele).err().unwrap_or_default();
-    assert!(fehler.contains("hoechstens 24"), "{fehler}");
+    assert!(fehler.contains("höchstens 24"), "{fehler}");
     assert!(pruefe_liste(zu_viele.get(..24).unwrap_or_default()).is_ok());
     assert!(pruefe_liste(&[("DE0007164601", Boerse::Xetra, "SAP.DEX", "x")]).is_err());
     assert!(pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP.DE", "x")]).is_err());

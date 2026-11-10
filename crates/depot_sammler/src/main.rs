@@ -434,7 +434,7 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         return ExitCode::FAILURE;
     }
     println!(
-        "[Sammler] Termine: {} neu, {} geändert, {} unveraendert. Belegt im Journal {}.",
+        "[Sammler] Termine: {} neu, {} geändert, {} unverändert. Belegt im Journal {}.",
         bericht.neu,
         bericht.geaendert,
         bericht.unveraendert,

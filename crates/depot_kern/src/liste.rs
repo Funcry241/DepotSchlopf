@@ -136,7 +136,7 @@ pub fn pruefe_liste(eintraege: &[Eintrag<'_>]) -> Result<Vec<Wert>, String> {
         let n = werte.iter().filter(|w| quelle(w.boerse) == q).count();
         if n > hoechstens_werte(q) {
             return Err(format!(
-                "Liste: {n} Werte für {q}, hoechstens {} je Lauf",
+                "Liste: {n} Werte für {q}, höchstens {} je Lauf",
                 hoechstens_werte(q)
             ));
         }
