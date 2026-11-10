@@ -340,6 +340,17 @@ pub fn weltlage_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> V
 /// Handelstags (UTC): hoechstens `MAX_NACHRICHTEN_LAGE`, die neueste zuerst. Wird es dem
 /// Berater zu viel, faellt so die aelteste weg.
 fn nachrichten(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
+    nachrichtenbelege_am(stand, handelstag, wissen_bis)
+        .into_iter()
+        .filter_map(nachricht_text)
+        .collect()
+}
+
+pub fn nachrichtenbelege_am(
+    stand: &Stand,
+    handelstag: Datum,
+    wissen_bis: Zeitpunkt,
+) -> Vec<&NachrichtBeleg> {
     let Some(beginn) = tagesbeginn(handelstag) else {
         return Vec::new();
     };
@@ -361,18 +372,20 @@ fn nachrichten(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<S
         .collect();
     aus.sort_by(|a, b| b.zeit().cmp(&a.zeit()).then_with(|| a.text().cmp(b.text())));
     aus.truncate(MAX_NACHRICHTEN_LAGE);
-    aus.into_iter()
-        .filter_map(|n| {
-            let (h, m, _) = n.zeit().uhrzeit()?;
-            let d = n.zeit().datum()?;
-            Some(format!(
-                "Nachricht {} {h:02}:{m:02} UTC ({}): {}",
-                datum_text(d),
-                n.quelle(),
-                n.text()
-            ))
-        })
-        .collect()
+    aus
+}
+
+pub fn nachricht_text(n: &NachrichtBeleg) -> Option<String> {
+    nachricht_anzeige(n.zeit(), n.quelle(), n.text())
+}
+
+pub fn nachricht_anzeige(zeit: Zeitpunkt, quelle: &str, text: &str) -> Option<String> {
+    let (h, m, _) = zeit.uhrzeit()?;
+    let d = zeit.datum()?;
+    Some(format!(
+        "Nachricht {} {h:02}:{m:02} UTC ({quelle}): {text}",
+        datum_text(d)
+    ))
 }
 
 fn feld(h: &mut Sha256, text: &str) {

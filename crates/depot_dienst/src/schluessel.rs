@@ -21,6 +21,7 @@ pub enum Wer {
     /// Kursquelle der NYSE (Tiingo).
     KursquelleUs,
     Berater(BeraterId),
+    Gemini,
 }
 
 pub const ALLE: [Wer; 4] = [
@@ -36,6 +37,7 @@ impl Wer {
     /// Dienstname im Speicher.
     pub fn dienst(self) -> &'static str {
         match self {
+            Wer::Gemini => depot_kern::gemini::DIENST,
             Wer::Kursquelle => "alphavantage",
             Wer::KursquelleUs => "tiingo",
             Wer::Berater(BeraterId::Dachs) => "anthropic",
@@ -46,6 +48,7 @@ impl Wer {
     /// Adresse in der Anmeldeinformationsverwaltung.
     pub fn adresse(self) -> &'static str {
         match self {
+            Wer::Gemini => depot_kern::gemini::ADRESSE,
             Wer::Kursquelle => "DepotSchlopf/alphavantage",
             Wer::KursquelleUs => "DepotSchlopf/tiingo",
             Wer::Berater(BeraterId::Dachs) => "DepotSchlopf/anthropic",
@@ -55,6 +58,7 @@ impl Wer {
 
     pub fn name(self) -> &'static str {
         match self {
+            Wer::Gemini => "Gemini",
             Wer::Kursquelle => "Kursquelle (Alpha Vantage)",
             Wer::KursquelleUs => "Kursquelle NYSE (Tiingo)",
             Wer::Berater(BeraterId::Dachs) => "Dachs (Claude, Anthropic)",
@@ -65,6 +69,7 @@ impl Wer {
     /// Name im Anbieterprotokoll.
     pub fn protokoll(self) -> depot_lage::anbieter::Wer {
         match self {
+            Wer::Gemini => depot_lage::anbieter::Wer::Gemini,
             Wer::Kursquelle => depot_lage::anbieter::Wer::Kursquelle,
             Wer::KursquelleUs => depot_lage::anbieter::Wer::Tiingo,
             Wer::Berater(BeraterId::Dachs) => depot_lage::anbieter::Wer::Dachs,
@@ -78,7 +83,9 @@ impl Wer {
     }
 
     pub fn aus_kurz(k: &str) -> Option<Wer> {
-        ALLE.into_iter().find(|w| w.kurz() == k)
+        ALLE.into_iter()
+            .chain([Wer::Gemini])
+            .find(|w| w.kurz() == k)
     }
 
     /// Prueft einen eingegebenen Schluessel. Leerraum am Rand wird entfernt. Die Meldung nennt
@@ -111,7 +118,7 @@ impl Wer {
                     return Err("nur Kleinbuchstaben und Ziffern erlaubt");
                 }
             }
-            Wer::Berater(_) => {
+            Wer::Berater(_) | Wer::Gemini => {
                 if !(20..=256).contains(&t.len()) {
                     return Err("20 bis 256 Zeichen erwartet");
                 }

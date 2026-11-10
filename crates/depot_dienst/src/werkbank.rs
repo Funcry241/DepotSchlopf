@@ -36,6 +36,8 @@ pub enum Art {
     KurseVon(Boerse),
     Termine,
     Nachrichten,
+    /// Interner Auftrag für die optionale Nachrichtensortierung.
+    Gemini,
     Vorbereiten,
     Papier,
     /// Neue Staende auf `main` nennen (`run.cmd update pruefen`).
@@ -68,6 +70,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => "Kurse NYSE abrufen",
             Art::Termine => "Termine abrufen",
             Art::Nachrichten => "Schlagzeilen abrufen",
+            Art::Gemini => "Gemini-Zuarbeit",
             Art::Vorbereiten => "Nächsten Handelstag vorbereiten",
             Art::Papier => "Papiertag",
             Art::UpdatePruefen => "Nach Update suchen",
@@ -85,6 +88,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => "kurse_nyse",
             Art::Termine => "termine",
             Art::Nachrichten => "nachrichten",
+            Art::Gemini => "gemini-vorlauf",
             Art::Vorbereiten => "vorbereiten",
             Art::Papier => "papier",
             Art::UpdatePruefen => "update_pruefen",
@@ -106,6 +110,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => &["kurse", "nyse"],
             Art::Termine => &["termine"],
             Art::Nachrichten => &["nachrichten"],
+            Art::Gemini => &["gemini-vorlauf"],
             Art::Vorbereiten => &["vorbereiten"],
             Art::Papier => &["papier"],
             Art::UpdatePruefen => &["update", "pruefen"],
@@ -173,6 +178,8 @@ pub struct WartenderAuftrag {
     pub art: Art,
     pub anlass: Anlass,
     update_commit: Option<String>,
+    gemini_vorrang: bool,
+    gemini_vorgeschaltet: bool,
 }
 
 /// Der veraenderliche Zustand.
@@ -230,6 +237,7 @@ fn quelle_name(w: Quelle) -> &'static str {
         Quelle::Tiingo => "Kursquelle Tiingo",
         Quelle::Dachs => "Dachs (Claude)",
         Quelle::Maus => "Maus (GPT)",
+        Quelle::Gemini => "Gemini",
     }
 }
 
@@ -851,7 +859,9 @@ impl Dienst {
                 art,
                 anlass,
                 update_commit,
-            } = wartend;
+                gemini_vorrang,
+                ..
+            } = self.gemini_vorschalten(&mut z, wartend, jetzt);
             if anlass == Anlass::Zeitplan && !zeitplan_auftrag_erlaubt(&z, art, jetzt) {
                 return None;
             }
@@ -900,7 +910,12 @@ impl Dienst {
                 ablegen(&mut z, auftrag);
                 return None;
             }
-            match self.starte_auftrag(art, update_commit.as_deref(), &auftrag.kennung) {
+            match self.starte_auftrag(
+                art,
+                update_commit.as_deref(),
+                &auftrag.kennung,
+                gemini_vorrang,
+            ) {
                 Ok(kind) => {
                     z.laufend = Some(auftrag);
                     return Some((nr, kind));
@@ -939,11 +954,38 @@ impl Dienst {
         None
     }
 
+    fn gemini_vorschalten(
+        &self,
+        z: &mut Zustand,
+        mut wartend: WartenderAuftrag,
+        jetzt: Zeitpunkt,
+    ) -> WartenderAuftrag {
+        if !matches!(wartend.art, Art::Papier | Art::Vorbereiten)
+            || wartend.gemini_vorgeschaltet
+            || (wartend.anlass == Anlass::Zeitplan
+                && !zeitplan_auftrag_erlaubt(z, wartend.art, jetzt))
+            || !depot_lage::gespraeche::gemini_aktiv(&self.wurzel.join("daten"))
+        {
+            return wartend;
+        }
+        wartend.gemini_vorgeschaltet = true;
+        let anlass = wartend.anlass;
+        z.warteschlange.push_front(wartend);
+        WartenderAuftrag {
+            art: Art::Gemini,
+            anlass,
+            update_commit: None,
+            gemini_vorrang: true,
+            gemini_vorgeschaltet: false,
+        }
+    }
+
     fn starte_auftrag(
         &self,
         art: Art,
         update_commit: Option<&str>,
         kennung: &str,
+        gemini_vorrang: bool,
     ) -> std::io::Result<Child> {
         if art == Art::Update && update_commit.is_none_or(|sha| !crate::rueckfall::ist_commit(sha))
         {
@@ -953,6 +995,7 @@ impl Dienst {
         }
         (self.starter)(art, &self.wurzel)
             .args(update_commit)
+            .args(gemini_vorrang.then_some("papiertag"))
             .env(depot_lage::gespraeche::LAUF_ENV, kennung)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -1015,6 +1058,7 @@ impl Dienst {
         a.ende = uhr();
         a.erfolg = Some(erfolg);
         let ende = a.ende;
+        let nachrichten_lauf = (erfolg && a.art == Art::Nachrichten).then_some(a.anlass);
         if erfolg {
             self.kurse_ok_vermerken(&mut z, &a);
         }
@@ -1049,6 +1093,16 @@ impl Dienst {
         // Folgt jetzt der Papiertag, steht er gleich in der Warteschlange.
         if let Some(jetzt) = ende {
             Self::zeitplan_pruefen(&mut z, jetzt);
+        }
+        if let Some(anlass) = nachrichten_lauf
+            && !self.update_offen()
+            && !z
+                .warteschlange
+                .iter()
+                .any(|a| matches!(a.art, Art::Papier | Art::Vorbereiten))
+            && depot_lage::gespraeche::gemini_aktiv(&self.wurzel.join("daten"))
+        {
+            let _ = einreihen(&mut z, Art::Gemini, anlass, None);
         }
     }
 
@@ -1168,6 +1222,8 @@ fn einreihen(
         art,
         anlass,
         update_commit,
+        gemini_vorrang: false,
+        gemini_vorgeschaltet: false,
     });
     Ok(())
 }
@@ -1312,6 +1368,7 @@ fn zeitplan_auftrag_erlaubt(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> bool {
             })
         }
         Art::Nachrichten => rss_zeitplan_an(z, jetzt),
+        Art::Gemini => true,
         Art::Vorbereiten => vorbereitung_faellig(z, jetzt),
         _ => false,
     }

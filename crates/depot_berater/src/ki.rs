@@ -58,6 +58,7 @@ pub struct KiBerater<N: Netz> {
     /// Anbieterprotokoll und Uhr; ohne beides wird nichts vermerkt.
     protokoll: Option<Protokoll>,
     gespraechslauf: Option<String>,
+    zuarbeit: crate::zusatz::Zuarbeit,
     weiterer_schluessel: Option<Schluessel>,
     /// Der Anbieter hat in diesem Lauf ein Limit gemeldet; bis zum Ende des Laufs pausiert,
     /// auch wenn das Protokoll nicht geschrieben werden konnte.
@@ -106,6 +107,7 @@ impl<N: Netz> KiBerater<N> {
             gesperrt: false,
             protokoll: None,
             gespraechslauf: None,
+            zuarbeit: crate::zusatz::Zuarbeit::default(),
             weiterer_schluessel: None,
             limit_im_lauf: false,
             schlafe: std::thread::sleep,
@@ -177,6 +179,31 @@ impl<N: Netz> KiBerater<N> {
         self.gespraechslauf = Some(lauf);
         self.weiterer_schluessel = weiterer_schluessel;
         self
+    }
+
+    #[must_use]
+    pub fn mit_zuarbeit(mut self, zuarbeit: crate::zusatz::Zuarbeit) -> Self {
+        self.zuarbeit = zuarbeit;
+        self
+    }
+
+    fn ergaenze_frage(
+        &self,
+        frage: String,
+        lage: &Lage<'_>,
+        system: &str,
+        erlaubnis: &AufrufErlaubnis,
+    ) -> String {
+        let Some(hinweise) = self.zuarbeit.hinweise(lage.ereignisse, &frage) else {
+            return frage;
+        };
+        let ergaenzt = format!("{frage}{hinweise}");
+        let inhalt = self.anbieter.anfrage(erlaubnis.deckel(), system, &ergaenzt);
+        if erlaubnis.eingabe_passt(&inhalt) {
+            ergaenzt
+        } else {
+            frage
+        }
     }
 
     fn gespraech(&self, zweck: KiZweck, zeit: Option<Zeitpunkt>) -> Option<Gespraech> {
@@ -703,6 +730,7 @@ impl<N: Netz> Berater for KiBerater<N> {
     ) -> depot_sim::abstimmung::AbstimmungsAntwort {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::abstimmungs_frage(lage, &self.universum, stand);
+        let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
         let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Abstimmung);
         match e
             .text
@@ -766,6 +794,7 @@ impl<N: Netz> Berater for KiBerater<N> {
             || frage::vorschlag_frage(lage, &self.universum, bilanz),
             |zeit| frage::vorbereitung_frage(lage, &self.universum, zeit),
         );
+        let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
         let e = self.fragen(
             &erlaubnis,
             &system,
@@ -831,6 +860,7 @@ impl<N: Netz> Berater for KiBerater<N> {
     ) -> Urteil {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::urteil_frage(lage, &self.universum, vorschlag, bilanz);
+        let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
         let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Zweitmeinung);
         match e
             .text

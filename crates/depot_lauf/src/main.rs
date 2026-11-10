@@ -127,7 +127,7 @@ fn main() -> ExitCode {
         return sammler(&wurzel, &args);
     }
     // Der Papiertag laeuft fuer sich: kein Netz, nur Papiergeld.
-    if befehl == "papier" || befehl == "vorbereiten" {
+    if matches!(befehl.as_str(), "papier" | "vorbereiten" | "gemini-vorlauf") {
         return programm(&wurzel, "depot_berater", &args);
     }
     // Das Lagebild liest nur und schreibt nur daten/lage.html: kein Netz, keine Schluessel.

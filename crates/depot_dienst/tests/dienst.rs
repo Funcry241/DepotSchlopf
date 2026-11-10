@@ -3249,3 +3249,87 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
     assert!(!gespraech.contains("Frage aus anderem Lauf"));
     Ok(())
 }
+
+#[test]
+fn gemini_bleibt_ohne_bestaetigtes_gratisprojekt_aus() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(17, 50)?;
+    let html = get(&d, "/einrichtung", t);
+    assert!(html.contains("Zusatz-KIs (optional)"));
+    assert!(html.contains("Aus · Aufrufe heute 0 von 5"));
+    let ziel = d.wurzel.join("daten");
+    let sende = |text: &str| {
+        let a = formular_post("/gemini", &format!("t={TOKEN}&{text}"));
+        crate::text(&behandle(&d, &Attrappe::default(), &a, t))
+    };
+    assert!(sende("an=ja").starts_with("HTTP/1.1 400"));
+    assert!(!depot_lage::gespraeche::gemini_aktiv(&ziel));
+    assert!(sende("an=ja&gratisprojekt=ja").contains("/einrichtung#zusatz"));
+    assert!(depot_lage::gespraeche::gemini_aktiv(&ziel));
+    assert!(sende("an=nein").contains("/einrichtung#zusatz"));
+    assert!(!depot_lage::gespraeche::gemini_aktiv(&ziel));
+    Ok(())
+}
+
+#[test]
+fn gemini_laeuft_vor_papier_und_speichert_stderr() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    fs::write(
+        depot_lage::gespraeche::gemini_pfad(&daten),
+        "gratisprojekt=ja\n",
+    )
+    .map_err(|e| e.to_string())?;
+    let starter: Starter = Box::new(|art, _| {
+        let mut c = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "echo Probe-Standardfehler 1>&2"]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", "echo Probe-Standardfehler >&2"]);
+            c
+        };
+        if art != Art::Gemini {
+            c = echo_starter(true)(art, Path::new("."));
+        }
+        c
+    });
+    let d = Arc::new(Dienst::neu(
+        wurzel.clone(),
+        TOKEN.into(),
+        starter,
+        leeres_lagebild(),
+    ));
+    let zeit = donnerstag(7, 30)?;
+    d.einreihen(Art::Papier, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(zeit), "Gemini gestartet")?;
+    assert_eq!(
+        d.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Gemini)
+    );
+    assert_eq!(
+        d.sperre().warteschlange.front().map(|a| a.art),
+        Some(Art::Papier)
+    );
+    assert!(d.schritt(zeit).is_none());
+    d.verfolge(nr, kind, || donnerstag(7, 31).ok());
+    assert!(d.sperre().verlauf.front().is_some_and(|a| {
+        a.art == Art::Gemini
+            && a.protokoll
+                .iter()
+                .any(|z| z.contains("Probe-Standardfehler"))
+    }));
+    let neu = dienst(wurzel, true);
+    assert_eq!(
+        neu.sperre().verlauf.front().map(|a| a.art),
+        Some(Art::Gemini)
+    );
+    let (nr, kind) = some(d.schritt(donnerstag(7, 31)?), "Papier gestartet")?;
+    assert_eq!(
+        d.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Papier)
+    );
+    d.verfolge(nr, kind, || donnerstag(7, 32).ok());
+    Ok(())
+}

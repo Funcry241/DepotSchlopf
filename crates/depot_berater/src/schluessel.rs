@@ -54,18 +54,21 @@ impl Schluessel {
         depot_kern::geheimnis::mit_schluessel(text, &self.0)
     }
 
+    pub fn aus_anmeldeverwaltung(anbieter: Anbieter) -> Result<Self, String> {
+        Self::fuer_dienst(anbieter.dienst(), anbieter.adresse())
+    }
+
     /// Liest den Schluessel eines Anbieters aus der Windows-Anmeldeinformationsverwaltung.
     ///
     /// # Errors
     /// Kein Eintrag, nicht lesbar oder ungueltig.
     #[cfg(windows)]
-    pub fn aus_anmeldeverwaltung(anbieter: Anbieter) -> Result<Schluessel, String> {
+    pub(crate) fn fuer_dienst(dienst: &str, adresse: &str) -> Result<Schluessel, String> {
         use std::collections::HashMap;
 
         use keyring_core::api::CredentialStoreApi;
         use windows_native_keyring_store::Store;
 
-        let adresse = anbieter.adresse();
         let hinweis = || {
             format!(
                 "Schlüssel fehlt. Einmal anlegen mit: cmdkey /generic:{adresse} /user:depotschlopf /pass"
@@ -74,7 +77,7 @@ impl Schluessel {
         let store = Store::new().map_err(|e| format!("Anmeldeverwaltung: {e}"))?;
         let ziel = HashMap::from([("target", adresse)]);
         let eintrag = store
-            .build(anbieter.dienst(), "depotschlopf", Some(&ziel))
+            .build(dienst, "depotschlopf", Some(&ziel))
             .map_err(|e| format!("Anmeldeverwaltung: {e}"))?;
         match eintrag.get_password() {
             Ok(text) => Schluessel::neu(&text),
@@ -91,10 +94,9 @@ impl Schluessel {
     /// # Errors
     /// Immer.
     #[cfg(not(windows))]
-    pub fn aus_anmeldeverwaltung(anbieter: Anbieter) -> Result<Schluessel, String> {
+    pub(crate) fn fuer_dienst(_dienst: &str, adresse: &str) -> Result<Schluessel, String> {
         Err(format!(
-            "Der Schlüssel {} liegt nur in der Windows-Anmeldeinformationsverwaltung.",
-            anbieter.adresse()
+            "Der Schlüssel {adresse} liegt nur in der Windows-Anmeldeinformationsverwaltung."
         ))
     }
 }

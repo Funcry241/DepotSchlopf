@@ -26,6 +26,7 @@ pub mod depot;
 pub mod devisen;
 pub mod geheimnis;
 pub mod geld;
+pub mod gemini;
 pub mod grenzen;
 pub mod hinweis;
 pub mod instrument;
