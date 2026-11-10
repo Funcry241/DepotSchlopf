@@ -43,7 +43,7 @@ Diese Sätze müssen für **jeden** Ablauf gelten, nicht nur für die ausgedacht
 
 1. **Geld:** Bargeld und Bestände sind nie negativ. Bewertung ≤ exakter Wert ≤ Deckung. Kauflimit ≤ exakter Kurs ≤ Verkaufslimit.
 2. **Budget:** Für jede Folge von Reservierungen und Abrechnungen gilt je KI: Gebuchtes + Reserviertes ≤ Grenze für Tag, Monat und Jahr. Die Summe der Tagesrahmen eines Monats ist ≤ $M$.
-3. **Abstimmung:** Ein Vorschlag, den sein Autor geändert oder zurückgezogen hat, wird nie ausgeführt. Ein Abbruch, eine Budgetsperre oder ein Fehler führt zu keinem Auftrag.
+3. **Abstimmung:** Ein Vorschlag, den sein Autor geändert oder zurückgezogen hat, wird nie ausgeführt. Ein Abbruch, eine Budgetsperre oder ein Fehler kann keine neue Zustimmung begründen. Ein bereits erklärter Widerruf bleibt wirksam.
 4. **Auftrag:** Kein Übergang aus einem Endzustand. Höchstens ein Versand je Auftrag. Summe der Ausführungen ≤ beauftragte Menge. Jede Ausführung hält das Limit.
 5. **Journal:** Laden nach Schreiben ergibt denselben Zustand. Ein Abbruch nach einem beliebigen Eintrag führt nach dem Neustart zu einem gültigen Zustand. Ein doppelt eingespielter Beleg ändert nichts. Jeder Beleg lässt sich verlustfrei lesen und wieder schreiben ($\text{lies}(\text{text}(b)) = b$).
 

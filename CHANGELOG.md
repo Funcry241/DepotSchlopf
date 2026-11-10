@@ -127,6 +127,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Behoben
 
+- Widerruf in der KI-Abstimmung (#108): Eine widerrufene Zustimmung zu einem Handelsvorschlag bleibt auch bei abgebrochener Runde widerrufen.
+
 - Kodex: Ein unveränderter Stand (frischer Klon von main) wird nicht mehr wegen fehlender Deklaration abgelehnt.
 
 ### Hinzugefügt

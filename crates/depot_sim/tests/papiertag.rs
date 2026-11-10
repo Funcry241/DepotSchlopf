@@ -1651,6 +1651,19 @@ fn aenderung_oder_rueckzug_gilt_auch_ohne_zweite_antwort() -> Result<(), String>
     Ok(())
 }
 #[test]
+fn widerruf_gilt_auch_ohne_verwertbare_zweite_antwort() -> Result<(), String> {
+    let mut a = diskutant(BeraterId::Dachs, vec![Some(2000)], true)?;
+    let mut b = diskutant(BeraterId::Maus, vec![None], false)?;
+    let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+    assert_eq!(a.gesehen.len(), 1);
+    assert_eq!(b.gesehen.len(), 1);
+    let [auftrag] = j.stand().auftraege() else {
+        return Err("Nur der nicht widerrufene Vorschlag darf zu einem Auftrag führen".into());
+    };
+    assert_eq!(auftrag.beleg.topf, TopfId::A);
+    Ok(())
+}
+#[test]
 fn abstimmung_kann_die_zweitmeinung_auch_widerrufen() -> Result<(), String> {
     let mut a = diskutant(BeraterId::Dachs, vec![Some(2000)], true)?;
     let mut b = diskutant(BeraterId::Maus, vec![Some(2000)], true)?;

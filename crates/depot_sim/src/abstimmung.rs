@@ -194,10 +194,13 @@ pub(crate) fn berate(
         if !erste.eigene.verwertbar {
             break;
         }
-        // Ein verwertbarer Rückzug oder Wechsel gilt auch bei einer unvollständigen Runde.
-        let [ga, _] = &mut gueltig;
+        // Rückzug, Wechsel und Widerruf gelten auch bei einer unvollständigen Runde.
+        let [ga, gb] = &mut gueltig;
         if ga.vorschlag != erste.eigene.vorschlag {
             ga.vorschlag = None;
+        }
+        if !erste.zustimmung_fremd && gb.vorschlag == vb {
+            gb.vorschlag = None;
         }
         if !crate::lauf::beratungszeit(zyklus) {
             break;
