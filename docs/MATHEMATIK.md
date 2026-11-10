@@ -32,11 +32,14 @@ Fehlende Information wird nie zu null oder zu einer Erlaubnis. „Kein Kurs“, 
 | 10 | KI-Budget: Vorab-Reservierung zum Höchstbetrag, Abrechnung nach echten Kosten | Schützt. Ungeklärte Reservierungen bleiben voll gebucht. | [depot_ki](../crates/depot_ki/src/lib.rs), [kasse.rs](../crates/depot_journal/src/kasse.rs) |
 | 11 | Tagesrahmen: $r(d) = \max\bigl(0,\ \min(\lfloor \max(0, M - V_d) / n_d \rfloor,\ D) - H_d\bigr)$ mit Monatsbudget $M$, Kosten vor dem Tag $V_d$, Resthandelstagen $n_d$, Deckel $D$, heutigen Kosten $H_d$ | Schützt. Die Monatsgrenze hält; die Gleichverteilung an börsenfreien Tagen ist offen (A3 in #100). | [tagesrahmen.rs](../crates/depot_ki/src/tagesrahmen.rs) |
 | 12 | Abstimmung Dachs/Maus: ausgeführt wird nur ein Vorschlag $v$ mit Autor hält $v$ in der letzten Runde $\land$ Partner stimmt genau $v$ zu | Schützt (Vier-Augen-Prinzip, R31). | [abstimmung.rs](../crates/depot_sim/src/abstimmung.rs) |
-| 13 | Weltprognose: Richtung, Horizont 1–20 Handelstage, Ausgangskurs fixiert vor dem Ergebnis | Misst. Noch ohne Auswertung. | [weltprognose.rs](../crates/depot_journal/src/weltprognose.rs) |
+| 13 | Weltprognose: Richtung, Horizont 1–20 Handelstage, Ausgangskurs fixiert vor dem Ergebnis | Misst. | [weltprognose.rs](../crates/depot_journal/src/weltprognose.rs) |
+| 14 | Auflösung der Prognosen: Zieltag als $h$-ter Handelstag im Kalender der Börse des Werts, Schlusskurs genau dieses Tages, Gleichstand = verfehlt | Misst. Die Auflösung folgt allein aus dem Stand; jede andere ist Halt. | [aufloesung.rs](../crates/depot_journal/src/aufloesung.rs) |
+| 15 | Wilson-Intervall 95 % ganzzahlig: $\frac{k + z^2/2 \pm z\sqrt{k(n-k)/n + z^2/4}}{n + z^2}$ mit $z^2 = 3{,}8416$, Wurzel aufgerundet, Untergrenze ab-, Obergrenze aufgerundet; Vergleich mit „steigt immer“ auf denselben Fällen | Misst. „Besser als naiv“ erst, wenn die Untergrenze über der naiven Quote liegt; daraus folgt die Mindestfallzahl. Hinweis, nie Regel. | [aufloesung.rs](../crates/depot_journal/src/aufloesung.rs) |
+| 16 | Eigenschaftstests: vollständige Aufzählung kleiner Modelle und Zufallsfolgen mit festem Startwert (xorshift64) | Prüft die Invarianten unten an allen Folgen statt an Einzelfällen. Ohne Abhängigkeit. | [journal](../crates/depot_journal/tests/invarianten.rs), [Abstimmung und Wiederanlauf](../crates/depot_sim/tests/invarianten.rs) |
 
 ## Zentrale Invarianten
 
-Diese Sätze müssen für **jeden** Ablauf gelten, nicht nur für die ausgedachten Testfälle.
+Diese Sätze müssen für **jeden** Ablauf gelten, nicht nur für die ausgedachten Testfälle. Sie werden mit Verfahren 16 geprüft (#111, #112); jede Prüfung ist mit einer Gegenprobe belegt, die bei verletztem Satz rot wird.
 
 1. **Geld:** Bargeld und Bestände sind nie negativ. Bewertung ≤ exakter Wert ≤ Deckung. Kauflimit ≤ exakter Kurs ≤ Verkaufslimit.
 2. **Budget:** Für jede Folge von Reservierungen und Abrechnungen gilt je KI: Gebuchtes + Reserviertes ≤ Grenze für Tag, Monat und Jahr. Die Summe der Tagesrahmen eines Monats ist ≤ $M$.
@@ -48,13 +51,11 @@ Diese Sätze müssen für **jeden** Ablauf gelten, nicht nur für die ausgedacht
 
 | Vorhaben | Mathematik | Rolle |
 |---|---|---|
-| Invarianten oben als Eigenschaftstests | Property-based Testing mit `proptest`: zufällige Abläufe, automatisch verkleinerte Gegenbeispiele | Prüft |
 | Rundung als Intervall | Jeder Betrag als $[u, o]$; Grenzen prüfen immer die ungünstige Seite | Prüft |
 | Ausfall der Zusatz-KIs | Sicherungsschalter (zu / offen / halboffen) mit verdoppelter Wartezeit; Satz: Ergebnis mit ausgefallener Zusatz-KI = Ergebnis ohne sie | Schützt |
 | Wirkungskarte (R41) | Gerichteter Graph Größe → Wert mit Vorzeichen; Relevanz = Erreichbarkeit, Ordnung = Pfadlänge; Kreisfreiheit geprüft | Entscheidet über Relevanz |
-| Auswertung der Prognosen | Trefferquote mit Wilson-Intervall gegen die Grundrate („steigt immer“); Brier-Wert, sobald die Prognose eine Zuversicht nennt | Misst |
+| Brier-Wert der Prognosen | Sobald eine Prognose eine Zuversicht nennt | Misst |
 | Reaktion auf Ereignisse (R40) | Rendite des Werts minus Rendite des Vergleichsindex im Beobachtungsfenster | Misst |
-| Mindestfallzahl | Aus dem Wilson-Intervall statt fest gewählt: ein Zusammenhang gilt erst, wenn das Intervall die Grundrate nicht mehr enthält | Misst |
 | Entdoppeln von Schlagzeilen | Wort-Schindeln und Jaccard-Ähnlichkeit, deterministisch | Misst |
 
 ## Bewusst nicht

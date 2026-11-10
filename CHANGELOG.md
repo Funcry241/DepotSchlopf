@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Weltprognosen werden nach ihrem Horizont aufgelöst: Zieltag im Kalender der Börse des Werts, Schlusskurs genau dieses Tages, sonst „ohne Kurs“. Die Auflösung folgt allein aus dem Journal und steht vor jeder neuen Frage des Papiertags. Live und Lagebild zeigen je Berater die Trefferquote mit 95-%-Intervall und dem Vergleich „steigt immer“, als Hinweis ohne Regel. Neue Eintragsart `prognose-aufloesung`: Ein älteres Programm kann ein Journal danach nicht lesen (#114).
+
 - Invarianten werden an allen Folgen geprüft statt an Einzelfällen: jede Meldungsfolge eines Auftrags, Rundlauf der Textbelege, vier Monate zufälliger KI-Anfragen gegen alle Budgetgrenzen, jede Abstimmungsrunde gegen ein Modell der Freigaberegel und der Wiederanlauf nach einem Abbruch an jeder Zeile eines echten Papiertags. Ohne neue Abhängigkeit; Zufallsfolgen mit festem Startwert (#111, #112).
 
 - Neue Seite [Mathematik in DepotSchlopf](docs/MATHEMATIK.md): Bestandsaufnahme der Verfahren mit Rolle und Quellstelle, die zentralen Invarianten, Geplantes und offene Grenzen. Sie steht in der Kaltstart-Reihenfolge und im Übergabetext des Assistenten-Exports.

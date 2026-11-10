@@ -509,6 +509,9 @@ pub(crate) fn papiertag_mit_uhr(
     j.stelle_um().map_err(journal)?;
     j.belege_wissensstichtag(heute, wissen_bis)
         .map_err(journal)?;
+    // Fällige Prognosen werden vor jeder neuen Frage aufgelöst (#114), damit ihr Ergebnis
+    // im Lagebild dieses Tages steht.
+    j.loese_prognosen_auf().map_err(journal)?;
     let hoch = if neu {
         for t in start {
             j.setze_topf(t).map_err(journal)?;
