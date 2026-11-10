@@ -24,6 +24,7 @@
 )]
 
 pub mod diagnose;
+pub mod ergebnisse;
 pub mod ezb;
 pub use depot_kern::liste;
 pub mod nachrichten;

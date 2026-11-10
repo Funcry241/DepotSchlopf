@@ -6,6 +6,10 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Quartalszahlen als Termine (#120): `run.cmd termine` holt nach den EZB-Terminen höchstens einmal am Tag den Ergebniskalender von Alpha Vantage (gleicher Schlüssel, ein Abruf) und belegt die Quartalstermine der US-Werte der Liste als `angekuendigt`. Die Xetra-Werte kennt der Kalender nicht. Ohne Schlüssel oder bei einem Hinweis der Quelle laufen die übrigen Termine weiter; eine Antwort mit Schlüssel löst die Kurssperre aus. Nachweis in `docs/befunde/termine.md`.
+
 ### Geändert
 
 - Die Einrichtung zeigt ungespeicherte Änderungen direkt am Formular und warnt vor ihrem Verlust. „Speichern und Zeitplan einschalten“ übernimmt die ausgefüllten Werte gemeinsam, unter denselben Einrichtungsprüfungen. Rückmeldungen bieten den passenden nächsten Schritt an; ein Dienstneustart verwirft offene Eingaben nicht mehr automatisch.

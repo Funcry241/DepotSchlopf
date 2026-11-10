@@ -33,8 +33,9 @@ pub fn quelle(boerse: Boerse) -> &'static str {
 /// Abrufe am Tag, die Alpha Vantage in der kostenlosen Stufe erlaubt.
 pub const ABRUFE_ALPHA_VANTAGE: usize = 25;
 
-/// Abrufe am Tag bei Alpha Vantage, die nicht fuer Kurse sind: die Nachrichten, die der
-/// Xetra-Lauf mit demselben Schluessel einmal holt (`depot_sammler::nachrichten`).
+/// Abrufe am Tag bei Alpha Vantage, die nicht fuer Kurse sind: der Ergebniskalender, den
+/// `run.cmd termine` hoechstens einmal am Tag mit demselben Schluessel holt
+/// (`depot_sammler::ergebnisse`, #120). Die Nachrichten kommen seit #81 per RSS.
 pub const WEITERE_ABRUFE_ALPHA_VANTAGE: usize = 1;
 
 /// Wie viele Werte eine Quelle je Lauf hoechstens bekommt: ein Abruf je Wert, und ein Lauf muss
