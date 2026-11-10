@@ -113,7 +113,7 @@ pub fn vergleiche(deklaration: &Deklaration, diff: &BTreeSet<String>) -> Vec<Str
     }
     for eintrag in &deklaration.pfade {
         if !diff.iter().any(|p| deckt(eintrag, p)) {
-            fehler.push(format!("deklariert, aber unveraendert: {eintrag}"));
+            fehler.push(format!("deklariert, aber unverändert: {eintrag}"));
         }
     }
     fehler

@@ -18,6 +18,14 @@ const STAMM: &[&str] = &[
     "gepruef",
     "ungepruef",
     "verfueg",
+    "auftragszustaend",
+    "gespraech",
+    "hoechststand",
+    "staend",
+    "unveraendert",
+    "vorwaert",
+    "vorrueck",
+    "waehrend",
 ];
 const HISTORISCH: &[(&str, &str)] = &[
     (
@@ -123,6 +131,15 @@ fn sichtbare_quelltexte_verwenden_umlaute() -> Result<(), String> {
 fn sprachregel_erkennt_meldungen_aber_keine_bezeichner_oder_kommentare() -> Result<(), String> {
     assert!(fund("Pruefung fuer den Handelstag").is_some());
     assert!(fund("Schluessel hinterlegt").is_some());
+    for text in [
+        "Waehrend des Updates",
+        "Neue Staende gefunden",
+        "Vorruecken gescheitert",
+        "Neuer Hoechststand",
+        "Gespraech beendet",
+    ] {
+        assert!(fund(text).is_some(), "{text}");
+    }
     assert!(fund("Pause\\nNaechster Versuch").is_some());
     assert!(fund("Prüfung für den Handelstag").is_none());
     for text in [
