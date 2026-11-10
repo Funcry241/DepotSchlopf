@@ -65,6 +65,10 @@ impl AufrufErlaubnis {
         })
     }
 
+    pub fn buchungsnummer(&self) -> usize {
+        self.nr
+    }
+
     pub fn buchung(&self) -> &Buchung {
         &self.buchung
     }

@@ -23,7 +23,7 @@
 
 pub mod betrieb;
 /// Das Anbieterprotokoll, fuer die Oberflaeche.
-pub use depot_journal::{abrufkontingent, anbieter, kurssperre};
+pub use depot_journal::{abrufkontingent, anbieter, gespraeche, kurssperre};
 mod budget;
 mod depot;
 pub mod html;

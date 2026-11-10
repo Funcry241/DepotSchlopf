@@ -25,8 +25,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use depot_journal::AufrufErlaubnis;
 use depot_journal::anbieter::{self, Eintrag, Ergebnis as Ausgang, Kosten};
+use depot_journal::{
+    AufrufErlaubnis, KiZweck,
+    gespraeche::{self, Gespraech},
+};
 use depot_kern::{BeraterId, Cent, Grenzen, Universum, Vorschlag, Zeitpunkt};
 use depot_sim::{Antwort, Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Urteil};
 
@@ -54,6 +57,8 @@ pub struct KiBerater<N: Netz> {
     gesperrt: bool,
     /// Anbieterprotokoll und Uhr; ohne beides wird nichts vermerkt.
     protokoll: Option<Protokoll>,
+    gespraechslauf: Option<String>,
+    weiterer_schluessel: Option<Schluessel>,
     /// Der Anbieter hat in diesem Lauf ein Limit gemeldet; bis zum Ende des Laufs pausiert,
     /// auch wenn das Protokoll nicht geschrieben werden konnte.
     limit_im_lauf: bool,
@@ -100,6 +105,8 @@ impl<N: Netz> KiBerater<N> {
             sperre,
             gesperrt: false,
             protokoll: None,
+            gespraechslauf: None,
+            weiterer_schluessel: None,
             limit_im_lauf: false,
             schlafe: std::thread::sleep,
             vorbereitung: None,
@@ -159,6 +166,74 @@ impl<N: Netz> KiBerater<N> {
     pub fn mit_protokoll(mut self, pfad: PathBuf, uhr: fn() -> Option<Zeitpunkt>) -> Self {
         self.protokoll = Some((pfad, uhr));
         self
+    }
+
+    #[must_use]
+    pub fn mit_gespraechen(
+        mut self,
+        lauf: String,
+        weiterer_schluessel: Option<Schluessel>,
+    ) -> Self {
+        self.gespraechslauf = Some(lauf);
+        self.weiterer_schluessel = weiterer_schluessel;
+        self
+    }
+
+    fn gespraech(&self, zweck: KiZweck, zeit: Option<Zeitpunkt>) -> Option<Gespraech> {
+        Some(Gespraech {
+            zeit: zeit?,
+            lauf: self.gespraechslauf.clone()?,
+            wer: self.protokoll_wer().kurz().into(),
+            rolle: "haupt".into(),
+            modell: self.anbieter.modell().into(),
+            zweck: zweck.text().into(),
+            ergebnis: "uebersprungen".into(),
+            http: None,
+            token_ein: None,
+            token_aus: None,
+            buchung: None,
+            kosten_cent: None,
+            system: None,
+            frage: None,
+            antwort: None,
+            fehler: None,
+        })
+    }
+
+    fn gespraechszeit(&self) -> Option<Zeitpunkt> {
+        self.protokoll.as_ref().and_then(|(_, uhr)| uhr())
+    }
+
+    fn geheim_im_gespraech(&self, text: &str) -> bool {
+        self.enthaelt_schluessel(text)
+            || self.bereinigt(text) != text
+            || self
+                .weiterer_schluessel
+                .as_ref()
+                .is_some_and(|s| s.bereinige(text) != text)
+    }
+
+    fn notiere_gespraech(&self, mut e: Gespraech, geheim: bool) {
+        let Some(daten) = self.protokoll.as_ref().and_then(|(p, _)| p.parent()) else {
+            return;
+        };
+        if geheim
+            || [&e.system, &e.frage, &e.antwort, &e.fehler]
+                .into_iter()
+                .flatten()
+                .any(|text| self.geheim_im_gespraech(text))
+        {
+            e.system = None;
+            e.frage = None;
+            e.antwort = None;
+            e.fehler = Some("Gespräch wegen Zugangsdaten verworfen.".into());
+        }
+        if self.geheim_im_gespraech(&e.modell) {
+            e.modell = self.anbieter.modell().into();
+        }
+        if let Err(f) = gespraeche::anhaengen(daten, &e) {
+            self.hinweis(&format!("Gespräch nicht gespeichert: {f}"));
+        }
     }
 
     /// Haengt einen Eintrag an das Protokoll. Ein Schreibfehler aendert nichts am Aufruf; das
@@ -304,7 +379,7 @@ impl<N: Netz> KiBerater<N> {
         kopf: &[(&str, &str)],
         inhalt: &str,
         reserviert: Cent,
-    ) -> Result<crate::netz::Rueckmeldung, String> {
+    ) -> Result<crate::netz::Rueckmeldung, (Option<Ausgang>, String)> {
         let von = WARTEZEITEN.len().saturating_add(1);
         let mut warten = WARTEZEITEN.iter();
         let mut versuch = 1_usize;
@@ -316,7 +391,7 @@ impl<N: Netz> KiBerater<N> {
                         || j.datum() != start.datum()
                         || depot_sim::vorbereitung::tag_jetzt(j).is_none()
                 }) {
-                    return Err("nicht gesendet: Zeitfenster der Vorbereitung abgelaufen oder Rechneruhr zurückgestellt".into());
+                    return Err((None, "nicht gesendet: Zeitfenster der Vorbereitung abgelaufen oder Rechneruhr zurückgestellt".into()));
                 }
             }
             match self
@@ -333,7 +408,7 @@ impl<N: Netz> KiBerater<N> {
                         self.hinweis(&format!(
  "Anfrage hat den Anbieter auch nach {versuch} Versuchen nicht erreicht (keine Verbindung). Sie hat nichts gekostet. Dieser Papiertag läuft ohne diese KI weiter."
  ));
-                        return Err(format!("nicht gesendet: {e}"));
+                        return Err((Some(Ausgang::Netz), format!("nicht gesendet: {e}")));
                     };
                     versuch = versuch.saturating_add(1);
                     self.hinweis(&format!(
@@ -343,11 +418,14 @@ impl<N: Netz> KiBerater<N> {
                     (self.schlafe)(*pause);
                     if self.gesperrt() {
                         self.hinweis("Kein weiterer Versuch: Der Kostenschutz ist gesperrt.");
-                        return Err("nicht gesendet: KI gesperrt".into());
+                        return Err((Some(Ausgang::Netz), "nicht gesendet: KI gesperrt".into()));
                     }
                     if let Some(p) = self.pause() {
                         self.hinweis("Kein weiterer Versuch: Der Anbieter pausiert.");
-                        return Err(format!("nicht gesendet: pausiert: {p}"));
+                        return Err((
+                            Some(Ausgang::Netz),
+                            format!("nicht gesendet: pausiert: {p}"),
+                        ));
                     }
                 }
                 Err(NetzFehler::Unklar(e)) => {
@@ -359,13 +437,78 @@ impl<N: Netz> KiBerater<N> {
                     let m = self.sperre(&format!(
  "Verbindung nach dem Absenden abgebrochen; die Anfrage kann angekommen sein und gekostet haben, Kosten unbekannt: {e}"
                 ));
-                    return Err(m);
+                    return Err((Some(Ausgang::Unklar), m));
                 }
             }
         }
     }
 
-    fn fragen(&mut self, erlaubnis: &AufrufErlaubnis, system: &str, frage: &str) -> Ergebnis {
+    fn fragen(
+        &mut self,
+        erlaubnis: &AufrufErlaubnis,
+        system: &str,
+        frage: &str,
+        zweck: KiZweck,
+    ) -> Ergebnis {
+        let mut e = self.gespraech(zweck, self.gespraechszeit());
+        if let Some(eintrag) = &mut e {
+            eintrag.buchung = Some(erlaubnis.buchungsnummer());
+        }
+        let mut geheim = false;
+        let aus = self.fragen_intern(erlaubnis, system, frage, &mut e, &mut geheim);
+        if let Some(mut e) = e {
+            e.system = Some(system.into());
+            e.frage = Some(frage.into());
+            e.fehler = aus.text.as_ref().err().cloned();
+            self.notiere_gespraech(e, geheim);
+        }
+        aus
+    }
+
+    fn erfasse_http(&self, e: &mut Gespraech, antwort: &crate::netz::Rueckmeldung) -> bool {
+        let roh = String::from_utf8_lossy(&antwort.inhalt);
+        e.http = Some(antwort.status);
+        if antwort.status == 200 {
+            e.ergebnis = Ausgang::Unklar.kurz().into();
+            if let Some(modell) = crate::json::lies(&roh)
+                .ok()
+                .and_then(|j| j.feld("model")?.text().map(str::to_owned))
+                .filter(|m| !m.is_empty() && m.len() <= 128)
+            {
+                e.modell = modell;
+            }
+        } else {
+            let kurz: String = roh.chars().take(300).collect();
+            e.ergebnis = anbieter::einordnen(antwort.status, &kurz).kurz().into();
+            e.kosten_cent = Some(0);
+        }
+        self.geheim_im_gespraech(&roh)
+    }
+
+    fn erfasse_verbrauch(
+        eintrag: Option<&mut Gespraech>,
+        art: Ausgang,
+        v: Verbrauch,
+        ist: Option<Cent>,
+        text: &Result<String, String>,
+    ) {
+        if let Some(e) = eintrag {
+            e.ergebnis = art.kurz().into();
+            e.token_ein = Some(v.token_ein);
+            e.token_aus = Some(v.token_aus);
+            e.kosten_cent = ist.and_then(|c| u64::try_from(c.0).ok());
+            e.antwort = text.as_ref().ok().cloned();
+        }
+    }
+
+    fn fragen_intern(
+        &mut self,
+        erlaubnis: &AufrufErlaubnis,
+        system: &str,
+        frage: &str,
+        e: &mut Option<Gespraech>,
+        geheim: &mut bool,
+    ) -> Ergebnis {
         self.abrechnung = None;
         let ohne = |t: String| Ergebnis {
             text: Err(t),
@@ -396,8 +539,19 @@ impl<N: Netz> KiBerater<N> {
         let kopf = self.anbieter.kopf(schluessel.als_str(), &mut bearer);
         let antwort = match self.sende(&kopf, &inhalt, reserviert) {
             Ok(a) => a,
-            Err(m) => return ohne(m),
+            Err((status, meldung)) => {
+                if let Some((e, status)) = e.as_mut().zip(status) {
+                    e.ergebnis = status.kurz().into();
+                    if status == Ausgang::Netz {
+                        e.kosten_cent = Some(0);
+                    }
+                }
+                return ohne(meldung);
+            }
         };
+        if let Some(e) = e {
+            *geheim = self.erfasse_http(e, &antwort);
+        }
         if antwort.status != 200 {
             return ohne(self.ablehnung(&antwort, reserviert));
         }
@@ -434,6 +588,7 @@ impl<N: Netz> KiBerater<N> {
         } else {
             Ausgang::Ok
         };
+        Self::erfasse_verbrauch(e.as_mut(), art, v, ist, &gelesen.text);
         self.vermerke(
             art,
             Some(antwort.status),
@@ -548,7 +703,7 @@ impl<N: Netz> Berater for KiBerater<N> {
     ) -> depot_sim::abstimmung::AbstimmungsAntwort {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::abstimmungs_frage(lage, &self.universum, stand);
-        let e = self.fragen(&erlaubnis, &system, &f);
+        let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Abstimmung);
         match e
             .text
             .and_then(|t| frage::lies_abstimmung(&t, self.wer, &self.universum))
@@ -586,6 +741,13 @@ impl<N: Netz> Berater for KiBerater<N> {
         self.pause().map(|p| format!("Anbieterpause: {p}"))
     }
 
+    fn anfrage_uebersprungen(&self, zweck: KiZweck, grund: &str) {
+        if let Some(mut e) = self.gespraech(zweck, self.gespraechszeit()) {
+            e.fehler = Some(grund.into());
+            self.notiere_gespraech(e, false);
+        }
+    }
+
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
         self.vorschlagen_mit_bilanz(erlaubnis, lage, &[])
     }
@@ -604,7 +766,16 @@ impl<N: Netz> Berater for KiBerater<N> {
             || frage::vorschlag_frage(lage, &self.universum, bilanz),
             |zeit| frage::vorbereitung_frage(lage, &self.universum, zeit),
         );
-        let e = self.fragen(&erlaubnis, &system, &f);
+        let e = self.fragen(
+            &erlaubnis,
+            &system,
+            &f,
+            if self.vorbereitung.is_some() {
+                KiZweck::Vorbereitung
+            } else {
+                KiZweck::Erstmeinung
+            },
+        );
         match e
             .text
             .and_then(|t| frage::lies_vorschlag(&t, self.wer, &self.universum))
@@ -660,7 +831,7 @@ impl<N: Netz> Berater for KiBerater<N> {
     ) -> Urteil {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::urteil_frage(lage, &self.universum, vorschlag, bilanz);
-        let e = self.fragen(&erlaubnis, &system, &f);
+        let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Zweitmeinung);
         match e
             .text
             .and_then(|t| frage::lies_urteil(&t))

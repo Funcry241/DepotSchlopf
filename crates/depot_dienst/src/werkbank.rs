@@ -898,7 +898,7 @@ impl Dienst {
                 ablegen(&mut z, auftrag);
                 return None;
             }
-            match self.starte_auftrag(art, update_commit.as_deref()) {
+            match self.starte_auftrag(art, update_commit.as_deref(), &auftrag.kennung) {
                 Ok(kind) => {
                     z.laufend = Some(auftrag);
                     return Some((nr, kind));
@@ -937,7 +937,12 @@ impl Dienst {
         None
     }
 
-    fn starte_auftrag(&self, art: Art, update_commit: Option<&str>) -> std::io::Result<Child> {
+    fn starte_auftrag(
+        &self,
+        art: Art,
+        update_commit: Option<&str>,
+        kennung: &str,
+    ) -> std::io::Result<Child> {
         if art == Art::Update && update_commit.is_none_or(|sha| !crate::rueckfall::ist_commit(sha))
         {
             return Err(std::io::Error::other(
@@ -946,6 +951,7 @@ impl Dienst {
         }
         (self.starter)(art, &self.wurzel)
             .args(update_commit)
+            .env(depot_lage::gespraeche::LAUF_ENV, kennung)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

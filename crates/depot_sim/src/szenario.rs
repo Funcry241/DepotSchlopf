@@ -93,6 +93,7 @@ pub trait Berater {
     fn warum_nicht(&self) -> Option<String> {
         None
     }
+    fn anfrage_uebersprungen(&self, _zweck: depot_journal::KiZweck, _grund: &str) {}
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort;
     fn pruefen(
         &mut self,
