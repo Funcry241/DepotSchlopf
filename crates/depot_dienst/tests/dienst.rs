@@ -3083,3 +3083,61 @@ fn alter_standardplan_wird_einmal_auf_den_morgen_umgestellt() -> Result<(), Stri
     assert_eq!(faellig_fuer(&plan, &erledigt, tag, (8, 31), &beide), None);
     Ok(())
 }
+
+#[test]
+fn gespraeche_zeigt_alle_ki_rollen_filtert_und_maskiert() -> Result<(), String> {
+    use depot_lage::gespraeche::{Gespraech, anhaengen};
+    use std::io::Write as _;
+
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let d = dienst(wurzel, true);
+    let zeit = donnerstag(17, 50)?;
+    let tag = some(zeit.in_frankfurt().map(|(d, ..)| d), "Frankfurter Tag")?;
+    let eintrag = Gespraech {
+        zeit,
+        lauf: "123-1".into(),
+        wer: "dachs".into(),
+        rolle: "haupt".into(),
+        modell: "Hauptmodell".into(),
+        zweck: "erstmeinung".into(),
+        ergebnis: "ok".into(),
+        http: Some(200),
+        token_ein: Some(123),
+        token_aus: Some(45),
+        buchung: None,
+        kosten_cent: Some(3),
+        system: None,
+        frage: Some("Frage von Dachs".into()),
+        antwort: Some("<script>Antwort von Dachs</script>".into()),
+        fehler: None,
+    };
+    anhaengen(&daten, &eintrag).map_err(|e| e.to_string())?;
+    anhaengen(
+        &daten,
+        &Gespraech {
+            wer: "gemini".into(),
+            rolle: "zusatz".into(),
+            modell: "Zusatzmodell".into(),
+            frage: Some("Frage von Gemini".into()),
+            ..eintrag
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(daten.join("gespraeche").join(format!("{tag}.jsonl")))
+        .and_then(|mut f| f.write_all(b"{kaputt}\n"))
+        .map_err(|e| e.to_string())?;
+
+    let alles = get(&d, "/gespraeche", zeit);
+    assert!(alles.contains("KI-Gespräche") && alles.contains("Zusatz-KI"));
+    assert!(alles.contains("Dachs (Hauptmodell)") && alles.contains("Gemini (Zusatzmodell)"));
+    assert!(alles.contains("&lt;script&gt;Antwort von Dachs&lt;/script&gt;"));
+    assert!(alles.contains("Nicht lesbare Zeilen: 1"));
+    assert!(!alles.contains("<script>Antwort von Dachs</script>"));
+    let gefiltert = get(&d, &format!("/gespraeche?tag={tag}&wer=gemini"), zeit);
+    assert!(gefiltert.contains("Frage von Gemini"));
+    assert!(!gefiltert.contains("Frage von Dachs"));
+    Ok(())
+}
