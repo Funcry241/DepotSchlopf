@@ -8,6 +8,7 @@
 //! Ausgeführt wird ein Vorschlag nur, wenn sein Autor ihn zuletzt verwertbar vertreten hat und
 //! der Partner genau diesem Stand in einer vollständigen Runde, in der er ihn sah, zugestimmt
 //! hat (oder ihn vor der Abstimmung in der Zweitmeinung geprüft hat und sich nichts änderte).
+//! Ein Widerruf der Zustimmung wirkt auch dann, wenn die Runde abbricht.
 //!
 //! Erfundene Daten (D12). Keine Abhängigkeit, kein `f64`.
 
@@ -196,6 +197,9 @@ fn modell(runden: &[(Zug, Zug)]) -> ([Stand; 2], Vec<Stand>, Vec<Stand>) {
         // Eine verwertbare neue Antwort nimmt der alten Freigabe sofort die Gültigkeit.
         if na != frei[0] {
             frei[0] = None;
+        }
+        if !za && frei[1] == vb {
+            frei[1] = None;
         }
         sieht_b.push(va);
         let Some(nb) = antwort(sb, vb) else { break };
