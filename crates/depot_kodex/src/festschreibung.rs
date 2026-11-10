@@ -111,6 +111,14 @@ pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("RSS-Quellenliste nicht lesbar: {e}")),
     }
+    // Das optionale Netzziel wird ab seiner Einführung an die Grenzfreigabe gebunden.
+    match fs::read(wurzel.join("crates/depot_berater/src/gemini_netz.rs")) {
+        Ok(bytes) => {
+            f.insert("gemini_netz".into(), sha_bytes(&normalisiert(&bytes)));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("Gemini-Netzziel nicht lesbar: {e}")),
+    }
     let wurzel_toml = manifest::lies(&wurzel.join("Cargo.toml"))?;
     f.insert("lints".into(), lints(&wurzel_toml));
     f.insert(
