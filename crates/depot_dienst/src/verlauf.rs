@@ -103,7 +103,11 @@ fn lies_zeile(z: &str) -> Option<Zeile> {
     }
     let mut zeile = Zeile {
         kennung: kennung.to_string(),
-        art: Art::aus_kurz(art).or_else(|| (art == Art::Gemini.kurz()).then_some(Art::Gemini))?,
+        art: Art::aus_kurz(art).or_else(|| {
+            [Art::Gemini, Art::PapierAusgelassen]
+                .into_iter()
+                .find(|a| a.kurz() == art)
+        })?,
         anlass: anlass_aus(anlass)?,
         start: zeit(start)?,
         ende: None,

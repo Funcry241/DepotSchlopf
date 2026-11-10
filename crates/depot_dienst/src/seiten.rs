@@ -855,6 +855,13 @@ fn zeitstrahl_stand(
     heute: bool,
     art: Art,
 ) -> Option<(&'static str, &'static str)> {
+    if art == Art::Papier
+        && z.verlauf.iter().any(|a| {
+            a.art == Art::PapierAusgelassen && ortszeit(a.start).is_some_and(|(d, ..)| d == tag)
+        })
+    {
+        return Some(("halt", "ausgelassen: vor Börsenschluss nicht gestartet"));
+    }
     let passt = |a: &Auftrag| {
         a.art == art
             && a.anlass == Anlass::Zeitplan

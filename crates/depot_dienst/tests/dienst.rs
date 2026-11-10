@@ -3083,7 +3083,125 @@ fn alter_standardplan_wird_einmal_auf_den_morgen_umgestellt() -> Result<(), Stri
     );
     let mut erledigt = Erledigt::default();
     erledigt.setze(Art::Termine, tag);
-    assert_eq!(faellig_fuer(&plan, &erledigt, tag, (8, 31), &beide), None);
+    assert_eq!(
+        faellig_fuer(&plan, &erledigt, tag, (10, 15), &beide),
+        Some(Art::KurseVon(Boerse::Xetra))
+    );
+    assert_eq!(faellig_fuer(&plan, &erledigt, tag, (17, 35), &beide), None);
+    Ok(())
+}
+
+#[test]
+fn spaeter_neustart_holt_nach_oder_vermerkt_den_ausfall_einmal() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    fs::write(
+        daten.join("zeitplan.txt"),
+        Zeitplan {
+            an: true,
+            ..Zeitplan::default()
+        }
+        .als_text(),
+    )
+    .map_err(|e| e.to_string())?;
+    let d = dienst(wurzel.clone(), true);
+    let zeit = donnerstag(10, 15)?;
+    for art in [
+        Art::Termine,
+        Art::KurseVon(Boerse::Xetra),
+        Art::KurseVon(Boerse::Nyse),
+        Art::Papier,
+    ] {
+        let (nr, kind) = some(d.schritt(zeit), "Auftrag nachholen")?;
+        assert_eq!(d.sperre().laufend.as_ref().map(|a| a.art), Some(art));
+        d.verfolge(nr, kind, || donnerstag(10, 16).ok());
+    }
+    drop(d);
+    assert!(dienst(wurzel, true).schritt(donnerstag(10, 20)?).is_none());
+
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    fs::write(
+        daten.join("zeitplan.txt"),
+        Zeitplan {
+            an: true,
+            ..Zeitplan::default()
+        }
+        .als_text(),
+    )
+    .map_err(|e| e.to_string())?;
+    let d = dienst(wurzel.clone(), true);
+    let (nr, kind) = some(d.schritt(donnerstag(17, 50)?), "Termine bleiben möglich")?;
+    assert_eq!(
+        d.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Termine)
+    );
+    d.verfolge(nr, kind, || donnerstag(17, 51).ok());
+    drop(d);
+    let d = dienst(wurzel, true);
+    assert!(d.schritt(donnerstag(18, 30)?).is_none());
+    let verlauf =
+        fs::read_to_string(daten.join("dienst_verlauf.txt")).map_err(|e| e.to_string())?;
+    assert_eq!(verlauf.matches(";papier_ausgelassen;").count(), 1);
+    let morgen = some(
+        Datum::neu(2026, 11, 6).and_then(|d| Zeitpunkt::frankfurt(d, 7, 30, 0)),
+        "Freitag",
+    )?;
+    let (nr, kind) = some(d.schritt(morgen), "Termine am Folgetag")?;
+    assert_eq!(
+        d.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Termine)
+    );
+    d.verfolge(nr, kind, || None);
+    Ok(())
+}
+
+#[test]
+fn ausgelassener_papiertag_meldet_sich_genau_einmal() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let tag = some(donnerstag(17, 50)?.datum(), "Tag")?;
+    let daten = wurzel.join("daten");
+    fs::write(
+        daten.join("zeitplan.txt"),
+        Zeitplan {
+            an: true,
+            ..Zeitplan::default()
+        }
+        .als_text(),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut erledigt = Erledigt::default();
+    erledigt.setze(Art::Termine, tag);
+    fs::write(daten.join("dienst_erledigt.txt"), erledigt.als_text()).map_err(|e| e.to_string())?;
+    let gruende = Gruende::default();
+    let (d, meldungen) = hinweis_dienst(wurzel.clone(), &gruende, false);
+    assert!(d.schritt(donnerstag(17, 50)?).is_none());
+    assert!(d.schritt(donnerstag(17, 51)?).is_none());
+    let erste = gezeigt(&meldungen);
+    assert_eq!(erste.len(), 1);
+    assert!(erste.iter().any(|text| text.contains("ausgelassen")));
+    drop(d);
+    let (d, meldungen) = hinweis_dienst(wurzel, &gruende, false);
+    assert!(d.schritt(donnerstag(18, 30)?).is_none());
+    assert!(gezeigt(&meldungen).is_empty());
+    Ok(())
+}
+
+#[test]
+fn geschlossene_xetra_bestimmt_den_nyse_schluss_nicht() -> Result<(), String> {
+    let tag = some(Datum::neu(2026, 12, 24), "Heiligabend")?;
+    let boersen = [Boerse::Xetra, Boerse::Nyse];
+    assert!(!Boerse::Xetra.handelstag(tag) && Boerse::Nyse.handelstag(tag));
+    assert_eq!(
+        depot_kern::liste::erster_schluss(tag, &boersen),
+        Boerse::Nyse.schluss(tag)
+    );
+    let zeit = some(Zeitpunkt::frankfurt(tag, 18, 0, 0), "Frankfurt")?;
+    assert!(depot_kern::liste::morgenlauf(zeit));
+    assert!(!depot_kern::liste::morgenlauf(some(
+        Boerse::Nyse.schluss(tag),
+        "NYSE-Schluss"
+    )?));
     Ok(())
 }
 

@@ -2,7 +2,7 @@
 //! Kurse holt und danach den Papiertag startet. Uhrzeiten in Frankfurter Ortszeit.
 //!
 //! **Morgenlauf:** Die Börsen werden ab 07:30 Uhr nacheinander abgerufen, sofern mindestens
-//! eine davon an diesem Tag handelt. Danach folgt bis 08:30 Uhr der Papiertag. Jede Börse
+//! eine davon an diesem Tag handelt. Danach folgt bis zum ersten Handelsschluss der Papiertag. Jede Börse
 //! hat ihren eigenen Bezugstag. Explizit abweichende alte Abendzeiten behalten die
 //! Abrufreihenfolge nach Börsenschluss.
 //!
@@ -11,7 +11,7 @@
 //! an diesem Tag nicht noch einmal. Der Papiertag selbst laeuft ohnehin nur einmal je
 //! Handelstag (Journal).
 
-use depot_kern::{Boerse, Datum};
+use depot_kern::{Boerse, Datum, Zeitpunkt};
 
 use crate::werkbank::Art;
 
@@ -323,6 +323,7 @@ impl Erledigt {
             | Art::Nachrichten
             | Art::Gemini
             | Art::Vorbereiten
+            | Art::PapierAusgelassen
             | Art::UpdatePruefen
             | Art::Update => {}
         }
@@ -340,12 +341,30 @@ fn in_frankfurt(z: depot_kern::Zeitpunkt) -> Option<(Datum, (u8, u8))> {
     depot_lage::ortszeit(z).map(|(d, h, m, _, _)| (d, (h, m)))
 }
 
+// Zeitpläne aus dem Morgenfenster von #140 behalten ihre Bedeutung; die Laufzeitgrenze
+// ergibt sich unabhängig davon aus den Börsenschlüssen.
+fn morgenplan(plan: &Zeitplan) -> bool {
+    ((7, 0)..=(8, 30)).contains(&plan.kurse)
+}
+
+pub(crate) fn morgen_abgelaufen(
+    plan: &Zeitplan,
+    tag: Datum,
+    zeit: (u8, u8),
+    boersen: &[Boerse],
+) -> bool {
+    morgenplan(plan)
+        && Zeitpunkt::frankfurt(tag, zeit.0, zeit.1, 0)
+            .zip(depot_kern::liste::erster_schluss(tag, boersen))
+            .is_some_and(|(jetzt, schluss)| jetzt >= schluss)
+}
+
 /// Die Kursabrufe eines Tages: je Boerse aus `boersen`, die an diesem Tag handelt, ihre Uhrzeit
 /// in Frankfurt, frueheste zuerst. Xetra zur Uhrzeit `kurse` des Plans, jede andere
 /// `NACHLAUF_MIN` Minuten nach ihrem Schluss an diesem Tag. Faellt der Abruf nicht auf denselben
 /// Tag in Frankfurt, entfaellt er (bei den Boersen der Liste kommt das nicht vor).
 pub fn abrufe_fuer(plan: &Zeitplan, tag: Datum, boersen: &[Boerse]) -> Vec<(Boerse, (u8, u8))> {
-    if depot_kern::liste::morgenzeit(plan.kurse) {
+    if morgenplan(plan) {
         if !boersen.iter().any(|b| b.handelstag(tag)) {
             return Vec::new();
         }
@@ -404,7 +423,7 @@ pub fn faellig_fuer(
     if zeit >= plan.termine && erledigt.termine != Some(tag) {
         return Some(Art::Termine);
     }
-    if depot_kern::liste::morgenzeit(plan.kurse) && zeit > depot_kern::liste::MORGEN_BIS {
+    if morgen_abgelaufen(plan, tag, zeit, boersen) {
         return None;
     }
     let abrufe = abrufe_fuer(plan, tag, boersen);

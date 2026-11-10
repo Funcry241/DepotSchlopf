@@ -129,7 +129,9 @@ impl Grenzen {
 
     /// SHA-256 ueber eine feste Textform aller Werte. Jede Aenderung ergibt einen anderen Abdruck.
     pub fn fingerabdruck(&self) -> String {
-        let text = format!("depotschlopf-grenzen-v2|morgen-alter-seit-abruf|{self:?}");
+        let text = format!(
+            "depotschlopf-grenzen-v3|morgen-alter-seit-abruf-bis-erster-handelsschluss|{self:?}"
+        );
         let hash = Sha256::digest(text.as_bytes());
         hash.iter().fold(String::with_capacity(64), |mut s, b| {
             let _ = write!(s, "{b:02x}");

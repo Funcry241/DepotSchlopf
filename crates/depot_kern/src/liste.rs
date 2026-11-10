@@ -13,7 +13,7 @@
 use crate::boerse::Boerse;
 use crate::grenzen::Universum;
 use crate::instrument::{Instrument, InstrumentArt, Isin};
-use crate::zeit::Zeitpunkt;
+use crate::zeit::{Datum, Zeitpunkt};
 
 /// Name der Quelle fuer Xetra-Werte im Journal (`kurs;quelle;…`).
 pub const QUELLE: &str = "alphavantage";
@@ -173,17 +173,20 @@ pub fn beobachtungsliste() -> Result<Vec<Wert>, String> {
     pruefe_liste(&WERTE)
 }
 
-/// Gemeinsames Frankfurter Zeitfenster des Morgenlaufs.
-pub const MORGEN_VON: (u8, u8) = (7, 0);
-pub const MORGEN_BIS: (u8, u8) = (8, 30);
-
-pub fn morgenzeit(zeit: (u8, u8)) -> bool {
-    (MORGEN_VON..=MORGEN_BIS).contains(&zeit)
+/// Erster tatsächlicher Handelsschluss der heute geöffneten Börsen.
+pub fn erster_schluss(tag: Datum, boersen: &[Boerse]) -> Option<Zeitpunkt> {
+    boersen
+        .iter()
+        .filter(|b| b.handelstag(tag))
+        .filter_map(|b| b.schluss(tag))
+        .min()
 }
 
+/// Die Bezugskurse vom Vortag gelten bis zum ersten Handelsschluss am Starttag.
 pub fn morgenlauf(zeit: Zeitpunkt) -> bool {
     zeit.in_frankfurt()
-        .is_some_and(|(_, h, m, ..)| morgenzeit((h, m)))
+        .and_then(|(tag, ..)| erster_schluss(tag, &boersen()))
+        .is_some_and(|schluss| zeit < schluss)
 }
 
 /// Der erste Schluss der Boerse des Werts nach dem Versand. Nur dieser Schluss ist fuer

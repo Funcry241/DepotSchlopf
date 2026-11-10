@@ -1,31 +1,19 @@
 klasse: FestschreibungAenderung
-zweck: Optionale Gemini-Zuarbeit vor Papiertag und Vorbereitung mit reserviertem Kontingent und nachvollziehbaren Aufträgen vorbereiten (#129)
+zweck: Verpasste Morgenläufe bis zum tatsächlichen ersten Handelsschluss nachholen und Ausfälle belegen (R1, #136)
 pfade:
 CHANGELOG.md
-crates/depot_berater/src/frage.rs
-crates/depot_berater/src/gemini_netz.rs
-crates/depot_berater/src/ki.rs
-crates/depot_berater/src/lib.rs
-crates/depot_berater/src/main.rs
-crates/depot_berater/src/netz.rs
-crates/depot_berater/src/schluessel.rs
-crates/depot_berater/src/zusatz.rs
-crates/depot_dienst/src/gemini.rs
-crates/depot_dienst/src/lib.rs
-crates/depot_dienst/src/main.rs
 crates/depot_dienst/src/programmstand.rs
-crates/depot_dienst/src/schluessel.rs
 crates/depot_dienst/src/seiten.rs
 crates/depot_dienst/src/verlauf.rs
 crates/depot_dienst/src/werkbank.rs
 crates/depot_dienst/src/zeitplan.rs
-crates/depot_dienst/src/zeitstrahl_ki.rs
 crates/depot_dienst/tests/dienst.rs
-crates/depot_journal/src/anbieter.rs
-crates/depot_journal/src/gespraeche.rs
-crates/depot_kern/src/gemini.rs
-crates/depot_kern/src/lib.rs
-crates/depot_lauf/src/main.rs
-crates/depot_sim/src/papiertag.rs
+crates/depot_kern/src/grenzen.rs
+crates/depot_kern/src/liste.rs
+crates/depot_regelwerk/src/entscheidung.rs
+crates/depot_regelwerk/tests/befunde.rs
+crates/depot_sammler/tests/wiederholung.rs
+crates/depot_sim/tests/papiertag.rs
+docs/befunde/morgenlauf.md
 kodex/festschreibung.txt
 kodex/freigabe.txt

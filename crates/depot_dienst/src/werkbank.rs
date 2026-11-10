@@ -40,6 +40,8 @@ pub enum Art {
     Gemini,
     Vorbereiten,
     Papier,
+    /// Dauerhafter Verlaufseintrag ohne gestarteten Prozess.
+    PapierAusgelassen,
     /// Neue Staende auf `main` nennen (`run.cmd update pruefen`).
     UpdatePruefen,
     /// Neuen Stand pruefen und vorwaerts einspielen (`run.cmd update`).
@@ -73,6 +75,7 @@ impl Art {
             Art::Gemini => "Gemini-Zuarbeit",
             Art::Vorbereiten => "Nächsten Handelstag vorbereiten",
             Art::Papier => "Papiertag",
+            Art::PapierAusgelassen => "Papiertag ausgelassen: vor Börsenschluss nicht gestartet",
             Art::UpdatePruefen => "Nach Update suchen",
             Art::Update => "Update einspielen",
         }
@@ -91,6 +94,7 @@ impl Art {
             Art::Gemini => "gemini-vorlauf",
             Art::Vorbereiten => "vorbereiten",
             Art::Papier => "papier",
+            Art::PapierAusgelassen => "papier_ausgelassen",
             Art::UpdatePruefen => "update_pruefen",
             Art::Update => "update",
         }
@@ -113,6 +117,7 @@ impl Art {
             Art::Gemini => &["gemini-vorlauf"],
             Art::Vorbereiten => &["vorbereiten"],
             Art::Papier => &["papier"],
+            Art::PapierAusgelassen => &["papier_ausgelassen"],
             Art::UpdatePruefen => &["update", "pruefen"],
             Art::Update => &["update"],
         }
@@ -470,11 +475,22 @@ fn hinweise_pfad(wurzel: &Path) -> PathBuf {
 
 /// Die Gründe, die einen Windows-Hinweis wert sind: jeder Grund für „Eingriff nötig“ im
 /// Gesamtstatus, dazu der jüngste Handelstag, wenn er ausgefallen ist (einmal je Datum).
-fn hinweis_gruende(z: &Zustand) -> Vec<String> {
+fn hinweis_gruende(z: &Zustand, jetzt: Zeitpunkt) -> Vec<String> {
     let mut g = match z.gesamtstatus() {
         Some(Betrieb::EingriffNoetig(g)) => g,
         _ => Vec::new(),
     };
+    if let Some(tag) = ortszeit(jetzt).map(|(tag, ..)| tag)
+        && z.verlauf.iter().any(|a| {
+            a.art == Art::PapierAusgelassen && ortszeit(a.start).is_some_and(|(d, ..)| d == tag)
+        })
+    {
+        g.push(format!(
+            "Papiertag am {} ausgelassen: vor Börsenschluss nicht gestartet.",
+            depot_lage::datum_text(tag)
+        ));
+        return g;
+    }
     let juengster = z.lage.as_ref().and_then(|l| {
         l.bild
             .tage
@@ -654,7 +670,7 @@ impl Dienst {
     fn hinweise_pruefen(&self, jetzt: Zeitpunkt) {
         let (gruende, an) = {
             let z = self.sperre();
-            (hinweis_gruende(&z), z.zeitplan.hinweis.aktiv())
+            (hinweis_gruende(&z, jetzt), z.zeitplan.hinweis.aktiv())
         };
         let gruende: Vec<String> = gruende
             .iter()
@@ -851,6 +867,7 @@ impl Dienst {
     pub fn schritt(&self, jetzt: Zeitpunkt) -> Option<(u64, Child)> {
         let mut z = self.sperre();
         (!self.update_offen()).then_some(())?;
+        self.vermerke_ausgelassen(&mut z, jetzt);
         Self::zeitplan_pruefen(&mut z, jetzt);
         if z.laufend.is_none()
             && let Some(wartend) = z.warteschlange.pop_front()
@@ -1001,6 +1018,46 @@ impl Dienst {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
+    }
+
+    fn vermerke_ausgelassen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
+        let Some((tag, h, m, ..)) = ortszeit(jetzt) else {
+            return;
+        };
+        if !z.zeitplan.an
+            || !z.zeitplan.papier_danach
+            || z.erledigt_fehler.is_some()
+            || z.erledigt.papier == Some(tag)
+            || !crate::zeitplan::morgen_abgelaufen(&z.zeitplan, tag, (h, m), &z.boersen)
+            || z.laufend.iter().chain(z.verlauf.iter()).any(|a| {
+                matches!(a.art, Art::Papier | Art::PapierAusgelassen)
+                    && ortszeit(a.start).is_some_and(|(d, ..)| d == tag)
+            })
+        {
+            return;
+        }
+        let nr = z.naechste_nr;
+        let a = Auftrag {
+            nr,
+            kennung: format!("{}-{nr}", jetzt.sekunden()),
+            art: Art::PapierAusgelassen,
+            anlass: Anlass::Zeitplan,
+            start: jetzt,
+            ende: Some(jetzt),
+            erfolg: Some(false),
+            protokoll: Vec::new(),
+            hinweis: None,
+            frueher: Frueher::Nein,
+        };
+        if let Err(e) = crate::verlauf::vermerke(&self.wurzel, &crate::verlauf::ende_zeile(&a)) {
+            z.verlauf_fehler = Some(format!("Ausgelassenen Papiertag nicht vermerkt: {e}"));
+            return;
+        }
+        z.naechste_nr = nr.saturating_add(1);
+        ablegen(z, a);
+        z.lage_veraltet = true;
+        // Der Verlauf schützt auch dann vor Wiederholungen, wenn diese zweite Datei ausfällt.
+        let _ = self.zeitplan_start_vermerken(z, Art::Papier, jetzt);
     }
 
     fn zeitplan_pruefen(z: &mut Zustand, jetzt: Zeitpunkt) {
@@ -1197,6 +1254,9 @@ fn einreihen(
     anlass: Anlass,
     update_commit: Option<String>,
 ) -> Result<(), &'static str> {
+    if art == Art::PapierAusgelassen {
+        return Err("Verlaufseintrag ist kein Auftrag");
+    }
     if art == Art::Update && update_commit.is_none() {
         return Err("Kein bestätigter Commit. Bitte suche erneut nach einem Update.");
     }
