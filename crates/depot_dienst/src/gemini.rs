@@ -49,18 +49,23 @@ pub(crate) fn einrichtung(d: &Dienst, u: &dyn Umwelt, tag: Option<Datum>) -> Str
     let auswahl = if an { " checked" } else { "" };
     let token = maskiere(&d.token);
     format!(
-        "<section id=\"zusatz\"><h2>Zusatz-KIs (optional)</h2>\
-         <p>Haupt-KIs: Dachs ({}) · Maus ({})</p>\
-         <p>Optionale Zuarbeiter helfen Dachs und Maus. Der Papiertag läuft auch ohne sie.</p>\
-         <h3>Gemini ({MODELL})</h3><p>Sortiert belegte Nachrichten mit höchster Denkstufe vor.</p>\
-         <p>{} · Aufrufe heute {aufrufe} von {TAGESGRENZE} · Gratis-Projekt ohne Abrechnung</p>\
-         <form method=\"post\" action=\"/gemini\"><input type=\"hidden\" name=\"t\" value=\"{token}\">\
-         <label><input type=\"checkbox\" name=\"gratisprojekt\" value=\"ja\"{auswahl}> Ich verwende ein Google-Gratis-Projekt ohne Abrechnung.</label>\
-         <button name=\"an\" value=\"ja\">Gemini einschalten</button> <button name=\"an\" value=\"nein\">Gemini ausschalten</button></form>\
-         <form method=\"post\" action=\"/schluessel\"><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+        "<section id=\"zusatz\" class=\"einstellungsgruppe\" aria-labelledby=\"zusatz-titel\">\
+         <h2 id=\"zusatz-titel\">Zusatz-KIs (optional)</h2>\
+         <p>Optionale Zuarbeiter helfen Dachs ({}) und Maus ({}). Der Papiertag läuft auch ohne sie.</p>\
+         <section aria-labelledby=\"gemini-titel\"><h3 id=\"gemini-titel\">Gemini ({MODELL})</h3>\
+         <p>Sortiert belegte Nachrichten mit höchster Denkstufe vor.</p>\
+         <p><strong>{}</strong> · Aufrufe heute {aufrufe} von {TAGESGRENZE} · Gratis-Projekt ohne Abrechnung</p>\
+         <form method=\"post\" action=\"/schluessel\" data-aenderungen>\
+         <input type=\"hidden\" name=\"t\" value=\"{token}\">\
          <input type=\"hidden\" name=\"wer\" value=\"{DIENST}\">\
-         <label>Gemini-Schlüssel <input type=\"password\" name=\"wert\" autocomplete=\"off\" required></label>\
-         <button>Schlüssel speichern</button></form></section>",
+         <label>Gemini-Schlüssel <input type=\"password\" name=\"wert\" autocomplete=\"new-password\" required></label>\
+         <button type=\"submit\">Schlüssel speichern</button>\
+         <p data-speicherstand role=\"status\">Noch keinen neuen Schlüssel eingegeben.</p></form>\
+         <form method=\"post\" action=\"/gemini\" data-aenderungen><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <label><input type=\"checkbox\" name=\"gratisprojekt\" value=\"ja\"{auswahl}> Ich verwende ein Google-Gratis-Projekt ohne Abrechnung.</label>\
+         <button type=\"submit\" name=\"an\" value=\"ja\">Gemini einschalten</button> \
+         <button type=\"submit\" name=\"an\" value=\"nein\">Gemini ausschalten</button>\
+         <p data-speicherstand role=\"status\"></p></form></section></section>",
         depot_kern::modelle::MODELL_DACHS,
         depot_kern::modelle::MODELL_MAUS,
         maskiere(stand),

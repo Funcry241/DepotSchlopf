@@ -2382,7 +2382,8 @@ fn ausschalten_entfernt_wartenden_abruf_und_wiedereinschalten_holt_ihn_einmal_na
 #[test]
 fn diagnose_kindprozess() {
     if std::env::var_os("DEPOT_DIAGNOSE_KIND").is_some() {
-        println!("FEHLER: Beispiel vor langem Folgeprotokoll");
+        println!("Ausgabe vor der Fehlermeldung");
+        eprintln!("FEHLER: Beispiel vor langem Folgeprotokoll");
         for n in 0..600 {
             println!("Diagnosezeile {n}");
         }
@@ -2430,6 +2431,11 @@ fn lange_diagnose_bleibt_nach_neustart_kopierbar() -> Result<(), String> {
     ] {
         assert!(gespeichert.contains(teil), "fehlt: {teil}");
     }
+    assert_eq!(gespeichert.matches("FEHLER: Beispiel").count(), 1);
+    assert!(
+        gespeichert.find("Ausgabe vor der Fehlermeldung") < gespeichert.find("FEHLER: Beispiel")
+    );
+    assert!(gespeichert.find("FEHLER: Beispiel") < gespeichert.find("Diagnosezeile 0"));
     drop(d);
     let neu = dienst(wurzel.clone(), true);
     assert!(
@@ -3374,7 +3380,7 @@ fn gemini_bleibt_ohne_bestaetigtes_gratisprojekt_aus() -> Result<(), String> {
     let t = donnerstag(17, 50)?;
     let html = get(&d, "/einrichtung", t);
     assert!(html.contains("Zusatz-KIs (optional)"));
-    assert!(html.contains("Aus · Aufrufe heute 0 von 5"));
+    assert!(html.contains("<strong>Aus</strong> · Aufrufe heute 0 von 5"));
     let ziel = d.wurzel.join("daten");
     let sende = |text: &str| {
         let a = formular_post("/gemini", &format!("t={TOKEN}&{text}"));

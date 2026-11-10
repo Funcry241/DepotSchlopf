@@ -247,12 +247,7 @@ impl Datei {
         Ok(())
     }
 
-    pub(crate) fn abschliessen(mut self, zeit: Zeitpunkt, erfolgreich: bool) -> Result<(), String> {
-        let ende = if erfolgreich {
-            "Lauf erfolgreich beendet."
-        } else {
-            "Lauf abgebrochen."
-        };
+    pub(crate) fn abschliessen(mut self, zeit: Zeitpunkt, ende: &str) -> Result<(), String> {
         self.ausgabe
             .write_all(format!("[{zeit}] {ende}\n").as_bytes())
             .map_err(|_| "Protokollabschluss nicht schreibbar.")?;
@@ -267,21 +262,23 @@ pub fn letzter_fehler(zeilen: &[String]) -> Option<&str> {
     zeilen
         .iter()
         .rev()
-        .find(|z| {
-            let klein = z.to_ascii_lowercase();
-            !klein.ends_with(" ... ok")
-                && [
-                    "fehler",
-                    "error",
-                    "failed",
-                    "panicked",
-                    "fehlgeschlagen",
-                    "nicht gestartet",
-                ]
-                .iter()
-                .any(|s| klein.contains(s))
-        })
+        .find(|z| ist_fehler(z))
         .map(String::as_str)
+}
+
+pub(crate) fn ist_fehler(zeile: &str) -> bool {
+    let klein = zeile.to_ascii_lowercase();
+    !klein.ends_with(" ... ok")
+        && [
+            "fehler",
+            "error",
+            "failed",
+            "panicked",
+            "fehlgeschlagen",
+            "nicht gestartet",
+        ]
+        .iter()
+        .any(|s| klein.contains(s))
 }
 
 /// Liest auch fehlerhafte oder überlange Ausgaben mit begrenztem Speicher.
@@ -391,7 +388,7 @@ mod tests {
                 datei.zeile(zeit, "geheimer, zu großer Rest")?;
                 datei.zeile(zeit, "auch nicht gespeichert")?;
             }
-            datei.abschliessen(zeit, false)?;
+            datei.abschliessen(zeit, "Lauf abgebrochen.")?;
         }
         let anzahl = fs::read_dir(ordner(&wurzel))
             .map_err(|e| e.to_string())?
@@ -454,7 +451,8 @@ mod tests {
             .ok_or("Testzeit fehlt")?;
         for n in 0..AUFBEWAHREN.saturating_add(2) {
             let kennung = format!("{}-{n}", 100_usize.saturating_sub(n));
-            Datei::neu(&wurzel, &kennung, None, zeit, "Test")?.abschliessen(zeit, true)?;
+            Datei::neu(&wurzel, &kennung, None, zeit, "Test")?
+                .abschliessen(zeit, "Lauf erfolgreich beendet.")?;
         }
         assert!(lesen(&wurzel, "100-0").is_err());
         assert!(lesen(&wurzel, "80-20").is_ok());

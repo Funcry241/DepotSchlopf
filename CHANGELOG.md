@@ -27,6 +27,9 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Die Zusatz-KIs sind wie die seltenen Einstellungen gegliedert. Der Browser warnt beim Verlassen bei bearbeiteten Formularfeldern oder einem offenen Entwurf.
+- Das Laufprotokoll speichert die Ausgaben in ihrer Reihenfolge. Bei einem Kursabruf ohne verwendbare Daten zeigt es je Börse, ob der Handel bei Abrufbeginn noch lief oder welche Schlusskurse nach Börsenschluss belegt sind.
+
 - Kurssperre (R2, #142): Ein täglicher Prüfabruf kann einen zugeordneten Altfall automatisch aufheben. Bestätigte Schlüsselfunde bleiben bis zur Freigabe in der Einrichtung gesperrt. Die Betriebsleiste zeigt Zeitpunkt, Grund und Art.
 
 - Morgenlauf (R1, #136): Der Dienst holt Termine, Kurse und den Papiertag bis zum ersten tatsächlichen Handelsschluss des Tages nach. Nach der Frist vermerkt er einen ausgebliebenen Papiertag einmalig im Verlauf und zeigt einen Windows-Hinweis.
