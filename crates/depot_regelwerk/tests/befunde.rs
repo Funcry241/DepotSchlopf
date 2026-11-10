@@ -380,7 +380,7 @@ fn notbremse_nutzt_am_morgen_nur_frisch_abgerufenen_bezugskurs() -> Result<(), S
     let montag = Datum::neu(2026, 11, 9).ok_or("Montag")?;
     let dienstag = Datum::neu(2026, 11, 10).ok_or("Dienstag")?;
     let schluss = Boerse::Xetra.schluss(freitag).ok_or("Xetra-Schluss")?;
-    let kurs = Kurs::neu(Cent(10_000), "EUR", freitag, schluss, Herkunft::Simulation)
+    let kurs = Kurs::neu(Cent(10_000), "EUR", freitag, schluss, Herkunft::Quelle)
         .map_err(|e| format!("{e:?}"))?;
     let mut topf = topf_neu(TopfId::A, Cent(800_000));
     topf.setze_bestand(isin(0), 10);

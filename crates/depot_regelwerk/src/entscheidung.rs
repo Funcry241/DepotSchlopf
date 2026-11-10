@@ -11,8 +11,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use depot_kern::{
-    BP_GANZ, BeraterId, Cent, Grenzen, Isin, Kurse, Preis, Rundung, Topf, TopfId, Universum,
-    Vorschlag,
+    BP_GANZ, BeraterId, Cent, Grenzen, Herkunft, Isin, Kurse, Preis, Rundung, Topf, TopfId,
+    Universum, Vorschlag,
 };
 
 use crate::auftrag::{Anlass, Auftrag, GenehmigterAuftrag, Kennungsvergabe, RegelBeleg, Richtung};
@@ -158,8 +158,9 @@ fn limit_fuer(g: &Grenzen, kurs: Preis, richtung: Richtung) -> Option<Cent> {
 
 /// Kurs eines Werts, wenn er vorliegt und nicht aelter als das Hoechstalter ist.
 pub(crate) fn frischer_kurs(g: &Grenzen, kurse: &Kurse, isin: &Isin) -> Option<Preis> {
-    if depot_kern::liste::morgenlauf(kurse.stand()) {
-        let kurs = kurse.eintrag(isin)?;
+    let kurs = kurse.eintrag(isin)?;
+    // Synthetische Kurse in isolierten Simulationen haben keinen Börsenschluss.
+    if kurs.herkunft() == Herkunft::Quelle && depot_kern::liste::morgenlauf(kurse.stand()) {
         let start = kurse.stand().in_frankfurt().map(|(tag, ..)| tag);
         return crate::daten::morgen_befund(g, kurse.stand(), start, kurse, isin, kurs)
             .is_none()

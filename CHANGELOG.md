@@ -27,6 +27,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Morgenlauf (R1, #136): Der Dienst holt Termine, Kurse und den Papiertag bis zum ersten tatsächlichen Handelsschluss des Tages nach. Nach der Frist vermerkt er einen ausgebliebenen Papiertag einmalig im Verlauf und zeigt einen Windows-Hinweis.
+
 - Morgenlauf (#135): Der Standardzeitplan startet Termine um 07:20 Uhr und die Kurse um 07:30 Uhr. Der Papiertag verwendet den letzten abgeschlossenen Handelstag je Börse und frische Abrufe vom Starttag. Orders gehören zum Starttag und verwenden weiterhin die bestehende Schlusskurs-Simulation. Die Einrichtung übernimmt alte Standardzeiten einmalig.
 
 - Abrufschutz (#132–#134, #138): Eindeutige Alpha-Vantage-Limithinweise mit eigenem Schlüssel werden ohne Rohablage als Limit gemeldet. Eine Kurssperre lässt RSS und EZB-Termine weiterlaufen. Kursabrufe, Quartalskalender und Diagnose teilen sich ein dauerhaftes Kontingent von 20 Versuchen je Frankfurter Kalendertag (Anzeige zusätzlich für die letzten 24 Stunden). Der Quartalskalender lässt Platz für den nächsten vollständigen Xetra-Lauf.

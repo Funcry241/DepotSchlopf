@@ -151,20 +151,20 @@ fn frist_aus_schluss_und_hoechstalter() -> Result<(), String> {
         frist(Boerse::Xetra, &g, utc(11, 4, 16, 45, 0)?),
         Some(utc(11, 4, 16, 54, 30)?)
     );
-    // Vor dem Schluss gilt der Vortag: Morgens wird ein alter Kurs nicht stundenlang versucht.
+    // Ein verspäteter Abruf vor dem ersten Schluss erhält das gleiche Frischefenster.
     assert_eq!(
         frist(Boerse::Xetra, &g, utc(11, 4, 10, 0, 0)?),
-        Some(utc(11, 3, 16, 54, 30)?)
+        Some(utc(11, 4, 10, 19, 30)?)
     );
     // Montag im Morgenlauf: 20 Minuten ab dem ersten Versuch, abzüglich 30 s.
     assert_eq!(
         frist(Boerse::Xetra, &g, utc(11, 9, 6, 30, 0)?),
         Some(utc(11, 9, 6, 49, 30)?)
     );
-    // Ausserhalb des Morgenlaufs gilt weiterhin der letzte Börsenschluss.
+    // Auch nach 08:30 Frankfurter Zeit bleibt der Morgenmodus bis zum Schluss aktiv.
     assert_eq!(
         frist(Boerse::Xetra, &g, utc(11, 9, 8, 0, 0)?),
-        Some(utc(11, 6, 16, 54, 30)?)
+        Some(utc(11, 9, 8, 19, 30)?)
     );
     // NYSE 16:00 EST = 21:00 UTC (Winterzeit seit 01.11.2026).
     assert_eq!(

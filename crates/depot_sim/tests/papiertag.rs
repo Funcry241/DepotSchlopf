@@ -1783,6 +1783,29 @@ fn montagmorgen_nutzt_freitagskurse_und_schliesst_am_montag_ab() -> Result<(), S
 }
 
 #[test]
+fn verspaeteter_papiertag_nutzt_um_mittag_bezugskurse() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let starttag = tag(9)?;
+    let mut j = ort.oeffnen()?;
+    let abruf = some(Zeitpunkt::frankfurt(starttag, 12, 0, 0), "Mittag")?;
+    belege_morgen(&mut j, 6, abruf)?;
+    drop(j);
+    let ausgang = vorbedingung(stumm_tag(&ort, 9)?, "Montagmorgenlauf")?;
+    assert!(matches!(ausgang, Ausgang::Abgeschlossen { datum, .. } if datum == starttag));
+    let j = ort.oeffnen()?;
+    assert_eq!(j.stand().abschluss().map(|a| a.datum), Some(starttag));
+    let wiederholung = vorbedingung(
+        depot_sim::papiertag_wiederabspielen(j.stand(), &universum()?, starttag),
+        "Wiederabspielen",
+    )?;
+    assert_eq!(
+        wiederholung.kurse.eintrag(&sap()?).map(Kurs::handelstag),
+        Some(tag(6)?)
+    );
+    Ok(())
+}
+
+#[test]
 fn montagmorgen_mit_donnerstagskurs_schliesst_nichts_ab() -> Result<(), String> {
     let ort = Ort::neu()?;
     let starttag = tag(9)?;
