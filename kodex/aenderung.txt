@@ -1,15 +1,11 @@
 klasse: Funktion
-zweck: Vergleich seit Start im Lagebild: Dachs und Maus vor und nach KI-Kosten gegen ein gleich gewichtetes Vergleichsdepot und Bargeld (#118).
+zweck: Quartalszahlen der US-Werte aus dem Ergebniskalender von Alpha Vantage als Termine belegen (#120).
 pfade:
 CHANGELOG.md
 README.md
-crates/depot_journal/src/stand.rs
 crates/depot_kern/src/liste.rs
-crates/depot_lage/src/depot.rs
-crates/depot_lage/src/html.rs
-crates/depot_lage/src/lib.rs
-crates/depot_lage/src/vergleich.rs
-crates/depot_lage/tests/lage.rs
-docs/befunde/papiertag.md
-docs/befunde/tagesergebnis.md
-docs/befunde/vergleich.md
+crates/depot_sammler/src/ergebnisse.rs
+crates/depot_sammler/src/lib.rs
+crates/depot_sammler/src/main.rs
+crates/depot_sammler/tests/ergebnisse.rs
+docs/befunde/termine.md

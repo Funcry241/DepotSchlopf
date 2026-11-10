@@ -87,6 +87,8 @@ Danach holt `run.cmd kurse` die Schlusskurse der Beobachtungsliste (ein Abruf je
 
 `run.cmd termine` holt die Sitzungstermine des EZB-Rats von der Seite der EZB, legt die Seite roh unter `daten/roh/ezb/` ab und belegt jeden Termin mit Quelle und Abrufzeit in `daten/journal.txt`. Ein Schlüssel ist nicht nötig, nur das Journal (`run.cmd kurse einrichten`). Ein unveränderter Termin wird nicht noch einmal geschrieben, ein geänderter fortgeschrieben.
 
+**Quartalszahlen:** Ist der Schlüssel von Alpha Vantage hinterlegt, holt `run.cmd termine` danach höchstens einmal am Tag den Ergebniskalender (ein Abruf aus dem Tageskontingent), legt ihn roh unter `daten/roh/alphavantage-ergebnisse/` ab und belegt die Quartalstermine der US-Werte der Liste als „angekündigt“, etwa „JPMorgan Chase: Quartalszahlen (Quartal bis 31.12.2026)“. Für die Xetra-Werte nennt der Kalender keine Termine. Fehlt der Schlüssel oder meldet die Quelle einen Hinweis, bleiben die übrigen Termine gültig.
+
 ### Papierhandel mit Dachs und Maus
 
 `run.cmd papier` führt nach `run.cmd kurse` einen Papiertag mit den heute belegten Schlusskursen: Dachs und Maus schlagen vor und prüfen sich gegenseitig, dann Kontowächter, Regelwerk und Papierkonto `daten/papierkonto.txt`, nur Papiergeld, einmal je Handelstag. Ohne Kurse von heute hält er an. Pflicht sind nur die Kurse der gehaltenen Werte: Ein Kandidat ohne gültigen Kurs ist an dem Tag nicht handelbar und steht so im Lagebild. Jeder Wert gehört zu einer Börse, deren Schluss und Feiertage gelten (Xetra, NYSE). An einem Tag, an dem keine Börse der Liste handelt, läuft nichts, und nichts ist verpasst. Die Schlüssel legt Wolfgang einmal in der Windows-Anmeldeinformationsverwaltung an:

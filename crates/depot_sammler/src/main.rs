@@ -25,8 +25,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use depot_journal::{Journal, anbieter, kurssperre};
 use depot_kern::{Boerse, Datum, Grenzen, Preis, Zeitpunkt, hinweis};
 use depot_sammler::{
-    Anbieter, Ergebnis, Https, Schluessel, Zugang, beobachtungsliste, einordnen, ezb::ADRESSE_EZB,
-    netz, sammle, sammle_nachrichten, sammle_termine, zugang_laden,
+    Anbieter, Ergebnis, Https, Schluessel, Zugang, beobachtungsliste, einordnen,
+    ergebnisse::sammle_ergebnisse, ezb::ADRESSE_EZB, netz, sammle, sammle_nachrichten,
+    sammle_termine, zugang_laden,
 };
 
 /// Abstand zwischen zwei Abrufen: hoechstens vier Abrufe je Minute.
@@ -429,21 +430,86 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
     if let Some(d) = &bericht.rohdatei {
         println!("[Sammler] Rohe Seite: {}", d.display());
     }
-    if let Some(f) = &bericht.fehler {
+    let ezb_ok = if let Some(f) = &bericht.fehler {
         eprintln!("[Sammler] FEHLER, nichts belegt: {f}");
-        return ExitCode::FAILURE;
+        false
+    } else {
+        println!(
+            "[Sammler] Termine: {} neu, {} geändert, {} unverändert. Belegt im Journal {}.",
+            bericht.neu,
+            bericht.geaendert,
+            bericht.unveraendert,
+            journal_pfad.display()
+        );
+        for k in &bericht.fehlen {
+            println!("  {k}: steht im Journal, aber nicht mehr auf der Seite (nur gemeldet)");
+        }
+        true
+    };
+    let kalender_ok = quartalszahlen(wurzel, &mut journal, &mut netz);
+    if ezb_ok && kalender_ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// Die Quartalszahlen der US-Werte aus dem Ergebniskalender von Alpha Vantage (#120). Optional:
+/// ohne Schluessel, schon heute abgerufen oder mit Hinweis der Quelle laeuft der Lauf weiter.
+/// `false` nur nach einem Sicherheitsabbruch (Kurssperre) oder einem Fehler von Journal,
+/// Ablage oder Uhr.
+fn quartalszahlen(wurzel: &Path, journal: &mut Journal, netz: &mut Https) -> bool {
+    if gesperrt(wurzel) {
+        return false;
+    }
+    let werte = match beobachtungsliste() {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("[Sammler] Quartalszahlen: Liste: {e}");
+            return false;
+        }
+    };
+    let zugang = zugang(&werte);
+    let mut uhr = jetzt;
+    println!("[Sammler] Hole die Quartalstermine der US-Werte von Alpha Vantage ...");
+    let b = match sammle_ergebnisse(
+        journal,
+        netz,
+        &mut uhr,
+        &wurzel.join("daten").join("roh"),
+        &zugang,
+        &werte,
+    ) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("[Sammler] Quartalszahlen: FEHLER, Lauf angehalten: {e:?}");
+            return false;
+        }
+    };
+    if let Some(grund) = &b.uebersprungen {
+        println!("[Sammler] Quartalszahlen: kein Abruf ({grund}).");
+        return true;
+    }
+    if b.sicherheitsabbruch {
+        sperre(wurzel, None, &zugang);
+        eprintln!("[Sammler] Quartalszahlen: HALT, die Antwort enthielt einen Schlüssel.");
+        return false;
+    }
+    if let Some(d) = &b.rohdatei {
+        println!("[Sammler] Rohe Antwort: {}", d.display());
+    }
+    if let Some(f) = &b.fehler {
+        println!("[Sammler] Quartalszahlen: nichts belegt ({f}). Die übrigen Termine gelten.");
+        return true;
     }
     println!(
-        "[Sammler] Termine: {} neu, {} geändert, {} unverändert. Belegt im Journal {}.",
-        bericht.neu,
-        bericht.geaendert,
-        bericht.unveraendert,
-        journal_pfad.display()
+        "[Sammler] Quartalszahlen: {} neu, {} geändert, {} unverändert.",
+        b.neu, b.geaendert, b.unveraendert
     );
-    for k in &bericht.fehlen {
-        println!("  {k}: steht im Journal, aber nicht mehr auf der Seite (nur gemeldet)");
+    for k in &b.fehlen {
+        println!("  {k}: steht im Journal, aber nicht mehr im Kalender (nur gemeldet)");
     }
-    ExitCode::SUCCESS
+    true
 }
 
 /// Die einzige Ausnahme vom Abrufhalt: ausdrücklich gestartete, rein lesende Diagnose.
