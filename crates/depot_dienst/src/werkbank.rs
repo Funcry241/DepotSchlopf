@@ -378,6 +378,7 @@ pub struct Dienst {
     /// Commit des laufenden Programms, einmal beim Dienststart ermittelt.
     pub version: Option<String>,
     pub zustand: Mutex<Zustand>,
+    pub(crate) gespraechscache: crate::zeitstrahl_ki::Cache,
     pub(crate) papierdialog: Mutex<()>,
     protokoll_schutz: Mutex<crate::protokoll::Schutz>,
     starter: Starter,
@@ -625,6 +626,7 @@ impl Dienst {
                 protokoll_datei: None,
                 protokoll_fehler: None,
             }),
+            gespraechscache: crate::zeitstrahl_ki::Cache::default(),
             papierdialog: Mutex::new(()),
             protokoll_schutz: Mutex::new(protokoll_schutz),
             starter,

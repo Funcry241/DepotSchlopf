@@ -14,10 +14,7 @@ use depot_ki::KiDeckel;
 
 use crate::json::{self, Json, zitiere};
 
-/// Modell von Dachs. Preise im Deckel (`depot_ki`): 2 $ / 10 $ je Mio. Token.
-pub const MODELL_DACHS: &str = "claude-sonnet-5-5";
-/// Modell von Maus (Wolfgang, 05.11.2026). Preise im Deckel (`depot_ki`): 1 $ / 5 $ je Mio. Token.
-pub const MODELL_MAUS: &str = "gpt-6.1-terra";
+pub use depot_kern::modelle::{MODELL_DACHS, MODELL_MAUS};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Anbieter {

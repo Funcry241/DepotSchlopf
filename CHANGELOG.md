@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Hinzugefügt
 
+- Der Zeitstrahl (#106, #117) nennt die vorgesehenen Modelle für Papiertag und Vorbereitung. Bei gelaufenen Schritten zeigt er die protokollierten Modelle und verlinkt zum jeweiligen KI-Gespräch.
+
 - „KI-Gespräche“ (#105, #115) zeigt lokal protokollierte Anfragen, Antworten, Modelle und Verbrauch. Die Ansicht filtert nach Tag und KI und unterstützt Haupt- und Zusatz-KIs. DepotSchlopf zeichnet zunächst Dachs und Maus auf.
 
 - Weltprognosen werden nach ihrem Horizont aufgelöst: Zieltag im Kalender der Börse des Werts, Schlusskurs genau dieses Tages, sonst „ohne Kurs“. Die Auflösung folgt allein aus dem Journal und steht vor jeder neuen Frage des Papiertags. Live und Lagebild zeigen je Berater die Trefferquote mit 95-%-Intervall und dem Vergleich „steigt immer“. Die Anfragen des Papiertags zeigen beiden KIs die beiden Einzelbilanzen getrennt von den Ereignissen. Neue Eintragsart `prognose-aufloesung`: Ein älteres Programm kann ein Journal danach nicht lesen (#114).

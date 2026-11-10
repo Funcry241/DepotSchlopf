@@ -1200,6 +1200,9 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
     let xetra = some(html.find("<b>17:51 Uhr</b> · Kurse Xetra"), "Xetra-Abruf")?;
     let nyse = some(html.find("<b>22:10 Uhr</b> · Kurse NYSE"), "NYSE-Abruf")?;
     assert!(termine < xetra && xetra < nyse);
+    assert!(html.contains("Kurse Xetra abrufen · ohne KI"));
+    assert!(html.contains(&format!("Dachs ({})", depot_kern::modelle::MODELL_DACHS)));
+    assert!(html.contains(&format!("Maus ({})", depot_kern::modelle::MODELL_MAUS)));
     assert!(html.contains("nach dem letzten Kursabruf, wenn mindestens einer erfolgreich war"));
     assert!(html.contains("täglich von 08:00 bis vor 23:00 Uhr"));
     {
@@ -2355,7 +2358,7 @@ fn ausschalten_entfernt_wartenden_abruf_und_wiedereinschalten_holt_ihn_einmal_na
         "{live}"
     );
     assert!(
-        live.contains("<li><b>Papiertag</b> <span class=\"offen\">wartet</span></li>"),
+        live.contains("<li><b>Papiertag</b> <span class=\"offen\">wartet</span>"),
         "{live}"
     );
     assert!(
@@ -3139,5 +3142,110 @@ fn gespraeche_zeigt_alle_ki_rollen_filtert_und_maskiert() -> Result<(), String> 
     let gefiltert = get(&d, &format!("/gespraeche?tag={tag}&wer=gemini"), zeit);
     assert!(gefiltert.contains("Frage von Gemini"));
     assert!(!gefiltert.contains("Frage von Dachs"));
+    Ok(())
+}
+
+#[test]
+fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), String> {
+    use depot_dienst::werkbank::{Auftrag, Frueher};
+    use depot_lage::gespraeche::{Gespraech, anhaengen};
+
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let d = dienst(wurzel, true);
+    let zeit = donnerstag(17, 50)?;
+    let tag = some(zeit.in_frankfurt().map(|(d, ..)| d), "Frankfurter Tag")?;
+    let kennung = format!("{}-1", zeit.sekunden());
+    {
+        let mut z = d.sperre();
+        z.zeitplan.an = true;
+        z.zeitplan.papier_danach = true;
+        z.boersen = vec![Boerse::Xetra];
+        z.verlauf.push_front(Auftrag {
+            nr: 1,
+            kennung: kennung.clone(),
+            art: Art::Papier,
+            anlass: Anlass::Zeitplan,
+            start: zeit,
+            ende: Some(zeit),
+            erfolg: Some(true),
+            protokoll: Vec::new(),
+            hinweis: None,
+            frueher: Frueher::Nein,
+        });
+    }
+    let html = get(&d, "/teil/live", zeit);
+    assert!(html.contains("Modell nicht protokolliert"));
+    assert!(!html.contains("Dachs ("));
+
+    for (lauf, wer, rolle, modell, ergebnis, frage) in [
+        (
+            kennung.as_str(),
+            "dachs",
+            "haupt",
+            "Dachs-alt<script>",
+            "ok",
+            "Frage für diesen Lauf",
+        ),
+        (
+            kennung.as_str(),
+            "maus",
+            "haupt",
+            "Maus-alt",
+            "limit",
+            "Frage trotz Limit",
+        ),
+        (
+            kennung.as_str(),
+            "gemini",
+            "zusatz",
+            "Gemini-alt",
+            "ok",
+            "Zusatzfrage",
+        ),
+        (
+            "anderer-lauf",
+            "dachs",
+            "haupt",
+            "falsches Modell",
+            "ok",
+            "Frage aus anderem Lauf",
+        ),
+    ] {
+        let e = Gespraech {
+            zeit,
+            lauf: lauf.into(),
+            wer: wer.into(),
+            rolle: rolle.into(),
+            modell: modell.into(),
+            zweck: "erstmeinung".into(),
+            ergebnis: ergebnis.into(),
+            http: Some(200),
+            token_ein: None,
+            token_aus: None,
+            buchung: None,
+            kosten_cent: None,
+            system: None,
+            frage: Some(frage.into()),
+            antwort: None,
+            fehler: None,
+        };
+        anhaengen(&daten, &e).map_err(|e| e.to_string())?;
+    }
+    let html = get(&d, "/teil/live", zeit);
+    assert!(html.contains("Dachs (Dachs-alt&lt;script&gt;)"));
+    assert!(html.contains("Maus (Maus-alt)</a> · Anbieterlimit"));
+    assert!(html.contains("Gemini (Gemini-alt)</a> · Antwort erhalten · optional"));
+    assert!(!html.contains("falsches Modell") && !html.contains("Modell nicht protokolliert"));
+    assert!(html.contains(&format!(
+        "/gespraeche?tag={tag}&amp;wer=dachs&amp;lauf={kennung}"
+    )));
+    let gespraech = get(
+        &d,
+        &format!("/gespraeche?tag={tag}&wer=dachs&lauf={kennung}"),
+        zeit,
+    );
+    assert!(gespraech.contains("Frage für diesen Lauf"));
+    assert!(!gespraech.contains("Frage aus anderem Lauf"));
     Ok(())
 }
