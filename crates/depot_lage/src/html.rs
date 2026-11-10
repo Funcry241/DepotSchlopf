@@ -124,6 +124,35 @@ fn punkte(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
     s.push_str("</table></div></section>");
 }
 
+fn vorbereitungsthese(
+    a: &depot_journal::VorbereitungsAntwort,
+    beleg: Option<&str>,
+    s: &mut String,
+) {
+    if let Some(w) = &a.prognose {
+        let richtung = match w.richtung {
+            depot_journal::Prognoserichtung::Steigt => "steigt",
+            depot_journal::Prognoserichtung::Faellt => "fällt",
+        };
+        let _ = write!(
+            s,
+            "<p><b>Beobachtung:</b> {} {richtung}, Horizont {} Handelstage.<br>\
+             Wirkung: {}<br>Gegenargument / Widerlegung: {}</p>",
+            maskiere(w.isin.als_str()),
+            w.handelstage,
+            maskiere(&w.begruendung),
+            maskiere(&w.widerlegung)
+        );
+        if let Some(e) = beleg {
+            let _ = write!(
+                s,
+                "<details><summary>Ursprünglicher Beleg</summary><p>{}</p></details>",
+                maskiere(e)
+            );
+        }
+    }
+}
+
 fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
     s.push_str("<section id=\"vorbereitung\"><h2>Vorbereitung auf den nächsten Handelstag</h2>");
     if let Some(p) = &l.vorbereitung {
@@ -134,6 +163,12 @@ fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
             zeit_text(p.zeit),
             p.ereignisse.len()
         );
+        if l.jetzt
+            .datum()
+            .is_some_and(|d| Some(d) != p.zeit.datum() && !depot_kern::liste::handelstag(d))
+        {
+            s.push_str("<p class=\"offen\">Heute ist noch kein neuer Wissensstand belegt. Angezeigt wird der letzte belegte Stand.</p>");
+        }
         if l.jetzt.datum().is_some_and(|d| d > p.fuer) {
             s.push_str("<p class=\"leise\">Das Ziel-Datum ist vergangen. Bei neuen Entscheidungen werden die Thesen erneut geprüft.</p>");
         }
@@ -153,32 +188,12 @@ fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
                     zeit_text(a.zeit),
                     maskiere(&a.text)
                 );
-                if let Some(w) = &a.prognose {
-                    let richtung = match w.richtung {
-                        depot_journal::Prognoserichtung::Steigt => "steigt",
-                        depot_journal::Prognoserichtung::Faellt => "fällt",
-                    };
-                    let _ = write!(
-                        s,
-                        "<p><b>Beobachtung:</b> {} {richtung}, Horizont {} Handelstage.<br>\
-                        Wirkung: {}<br>Gegenargument / Widerlegung: {}</p>",
-                        maskiere(w.isin.als_str()),
-                        w.handelstage,
-                        maskiere(&w.begruendung),
-                        maskiere(&w.widerlegung)
-                    );
-                    if let Some(e) = w
-                        .ereignis_nr
-                        .checked_sub(1)
-                        .and_then(|n| p.ereignisse.get(n))
-                    {
-                        let _ = write!(
-                            s,
-                            "<details><summary>Ursprünglicher Beleg</summary><p>{}</p></details>",
-                            maskiere(e)
-                        );
-                    }
-                }
+                let beleg = a
+                    .prognose
+                    .as_ref()
+                    .and_then(|w| w.ereignis_nr.checked_sub(1))
+                    .and_then(|n| p.ereignisse.get(n));
+                vorbereitungsthese(a, beleg.map(String::as_str), s);
             } else {
                 let text = if p.reserviert.contains(&b) {
                     "Keine Antwort belegt. Falls der Lauf unterbrochen wurde, bleibt die Reservierung gebucht; heute wird nicht erneut gefragt."
@@ -187,8 +202,23 @@ fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
                 };
                 let _ = write!(s, "<p class=\"offen\">{text}</p>");
             }
+            if let Some(frueher) = l
+                .fruehere_vorbereitung
+                .iter()
+                .find(|p| p.antwort.berater == b)
+            {
+                let _ = write!(
+                    s,
+                    "<details><summary>Letzte belegte Einschätzung vom {} · damals für {}</summary><p>{}</p>",
+                    zeit_text(frueher.antwort.zeit),
+                    datum_text(frueher.fuer),
+                    maskiere(&frueher.antwort.text)
+                );
+                vorbereitungsthese(&frueher.antwort, frueher.beleg.as_deref(), s);
+                s.push_str("</details>");
+            }
         }
-        s.push_str("<details><summary>Gemeinsamer Wissensstand beider KIs</summary><ol>");
+        s.push_str("<details><summary>Belegte Quellen der Vorbereitung</summary><ol>");
         for e in &p.ereignisse {
             let _ = write!(s, "<li>{}</li>", maskiere(e));
         }
@@ -197,7 +227,7 @@ fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
         s.push_str("<p>Noch keine Vorbereitung belegt. An börsenfreien Tagen können Dachs und Maus \
             die nächsten Handelstage vorbereiten. <a href=\"/einrichtung#zeitplan\">Automatik einrichten</a>.</p>");
     }
-    s.push_str("<p class=\"leise\">Zwei getrennte Erstmeinungen, keine Orders. KI-Aufrufe zählen zum vorhandenen Budget. \
+    s.push_str("<p class=\"leise\">Belegte Quellen bleiben auch ohne KI-Einschätzung sichtbar. Je KI ist höchstens ein kurzer Aufruf möglich. \
         An Handelstagen fließen die Hypothesen in die reguläre Beratung ein.</p>");
     if let Some(k) = knopf(Abhilfe::Vorbereiten) {
         s.push_str(&k);
@@ -259,7 +289,8 @@ fn budget(l: &Lagebild, s: &mut String) {
          gemeldet haben (daten/anbieter.txt). <b>Gebucht</b> sind bestätigte tatsächliche Kosten \
          plus ungeklärte Höchstkosten im Journal. Fehlende Abrechnungen bleiben voll gebucht. \
          <b>Verfügbar</b> ist der Monatsrest. Der Tagesrahmen verteilt ihn auf die verbleibenden \
-         Handelstage; Zusatzfragen lassen die Reserve für die nächste Erstmeinung frei.</p></section>",
+         Handelstage. An börsenfreien Tagen zählt heute für die Vorbereitung mit. Nach dem letzten Handelstag \
+         gilt höchstens der Betrag für einen Kurzaufruf je KI. Zusatzfragen lassen die Rücklage für Erstmeinungen frei.</p></section>",
     );
 }
 

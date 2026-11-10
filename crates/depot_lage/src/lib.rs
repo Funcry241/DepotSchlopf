@@ -200,6 +200,7 @@ pub struct Lagebild {
     /// Die letzten Handelstage seit dem ersten Papiertag, neueste zuerst.
     pub tage: Vec<TagErgebnis>,
     pub vorbereitung: Option<depot_journal::Vorbereitung>,
+    pub(crate) fruehere_vorbereitung: Vec<FruehereVorbereitung>,
 }
 
 /// So viele Beitraege zeigt das Lagebild hoechstens.
@@ -722,6 +723,48 @@ fn sperr_punkte(u: &Umgebung<'_>, punkte: &mut Vec<Punkt>) {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FruehereVorbereitung {
+    fuer: Datum,
+    antwort: depot_journal::VorbereitungsAntwort,
+    beleg: Option<String>,
+}
+
+fn fruehere_einschaetzungen(
+    letzte: &depot_journal::Vorbereitung,
+    fruehere: &[depot_journal::Vorbereitung],
+) -> Vec<FruehereVorbereitung> {
+    let mut aus = Vec::new();
+    for wer in [BeraterId::Dachs, BeraterId::Maus] {
+        if letzte
+            .antworten
+            .iter()
+            .any(|a| a.berater == wer && a.verwertbar)
+        {
+            continue;
+        }
+        if let Some((p, a)) = fruehere.iter().rev().find_map(|p| {
+            p.antworten
+                .iter()
+                .find(|a| a.berater == wer && a.verwertbar)
+                .map(|a| (p, a))
+        }) {
+            let beleg = a
+                .prognose
+                .as_ref()
+                .and_then(|w| w.ereignis_nr.checked_sub(1))
+                .and_then(|n| p.ereignisse.get(n))
+                .cloned();
+            aus.push(FruehereVorbereitung {
+                fuer: p.fuer,
+                antwort: a.clone(),
+                beleg,
+            });
+        }
+    }
+    aus
+}
+
 /// Rechnet das Lagebild.
 pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut punkte = vec![journal_punkt(u.journal)];
@@ -734,9 +777,13 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut gespraech = Vec::new();
     let mut tage = Vec::new();
     let mut vorbereitung = None;
+    let mut fruehere_vorbereitung = Vec::new();
     match (u.journal, heute, &werte) {
         (Zugang::Offen(s), Some(heute), Ok(werte)) => {
-            vorbereitung = s.vorbereitungen().last().cloned();
+            if let Some((letzte, fruehere)) = s.vorbereitungen().split_last() {
+                fruehere_vorbereitung = fruehere_einschaetzungen(letzte, fruehere);
+                vorbereitung = Some(letzte.clone());
+            }
             tag_punkte(s, heute, werte, &mut punkte);
             budget = [BeraterId::Dachs, BeraterId::Maus]
                 .into_iter()
@@ -805,6 +852,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         schluessel,
         tage,
         vorbereitung,
+        fruehere_vorbereitung,
     }
 }
 

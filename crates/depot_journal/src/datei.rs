@@ -926,6 +926,17 @@ impl Journal {
             zyklus,
             crate::KiZweck::Vorbereitung,
         )?;
+        // Die engere Grenze gilt für neue Aufrufe. Frühere Buchungen werden
+        // weiterhin nach den beim Schreiben geltenden Grenzen wiederabgespielt.
+        let rahmen = depot_ki::vorbereitungsrahmen(
+            &depot_ki::KiGrenzen::standard(),
+            self.stand.ki().buchungen(),
+            berater,
+            datum,
+        )?;
+        if buchung.reserviert > rahmen {
+            return Err(Sperre::TagesrahmenErschoepft);
+        }
         let e = crate::vorbereitung::Eintrag::Budget {
             start,
             abdruck: grenzabdruck(),
