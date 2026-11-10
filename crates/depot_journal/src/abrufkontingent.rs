@@ -36,6 +36,29 @@ fn kuerzel_gueltig(kuerzel: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
 }
 
+fn lies_tag(daten: &Path, tag: Datum, jetzt: Zeitpunkt) -> Result<Vec<Zeitpunkt>, String> {
+    lies(daten, tag)?
+        .lines()
+        .map(|zeile| {
+            let (sek, kuerzel) = zeile
+                .split_once(';')
+                .ok_or("Ungültiger Kontingentvermerk")?;
+            let zeit = sek
+                .parse()
+                .ok()
+                .and_then(Zeitpunkt::aus_sekunden)
+                .ok_or("Ungültiger Zeitpunkt im Kontingent")?;
+            if zeit > jetzt
+                || zeit.in_frankfurt().map(|(d, ..)| d) != Some(tag)
+                || !kuerzel_gueltig(kuerzel)
+            {
+                return Err("Ungültiger Kontingentvermerk".into());
+            }
+            Ok(zeit)
+        })
+        .collect()
+}
+
 /// Versuche des heutigen Frankfurter Tages und im rollenden 24-Stunden-Fenster.
 ///
 /// # Errors
@@ -52,21 +75,7 @@ pub fn stand(daten: &Path, jetzt: Zeitpunkt) -> Result<(usize, usize), String> {
     let mut heute_n = 0_usize;
     let mut gesamt = 0_usize;
     loop {
-        for zeile in lies(daten, tag)?.lines() {
-            let (sek, kuerzel) = zeile
-                .split_once(';')
-                .ok_or("Ungültiger Kontingentvermerk")?;
-            let zeit = sek
-                .parse()
-                .ok()
-                .and_then(Zeitpunkt::aus_sekunden)
-                .ok_or("Ungültiger Zeitpunkt im Kontingent")?;
-            if zeit > jetzt
-                || zeit.in_frankfurt().map(|(d, ..)| d) != Some(tag)
-                || !kuerzel_gueltig(kuerzel)
-            {
-                return Err("Ungültiger Kontingentvermerk".into());
-            }
+        for zeit in lies_tag(daten, tag, jetzt)? {
             if tag == heute {
                 heute_n = heute_n.saturating_add(1);
             }
@@ -115,7 +124,8 @@ impl Abrufe {
     /// # Errors
     /// Das Kontingent ist unlesbar oder reicht nicht für die benötigten Versuche.
     pub fn pruefe(&self, jetzt: Zeitpunkt, benoetigt: usize) -> Result<(), String> {
-        let (_, verbraucht) = stand(&self.daten, jetzt)?;
+        let (tag, ..) = jetzt.in_frankfurt().ok_or("Ungültige Kontingentuhr")?;
+        let verbraucht = lies_tag(&self.daten, tag, jetzt)?.len();
         let frei = AV_TAG.saturating_sub(verbraucht);
         if frei < benoetigt {
             return Err(format!(
@@ -177,7 +187,33 @@ mod tests {
     }
 
     #[test]
-    fn zwei_laeufe_erschoepfen_das_rollende_kontingent() -> Result<(), String> {
+    fn kalender_und_kurse_bleiben_an_drei_tagen_abrufbar() -> Result<(), String> {
+        let daten =
+            std::env::temp_dir().join(format!("depot-kontingent-zeitplan-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&daten);
+        fs::create_dir(&daten).map_err(|e| e.to_string())?;
+        let abrufe = Abrufe::sperren(&daten)?;
+        for t in [9, 10, 11] {
+            let am = |minute| {
+                Datum::neu(2026, 11, t)
+                    .and_then(|tag| Zeitpunkt::frankfurt(tag, 17, minute, 0))
+                    .ok_or("Testuhr fehlt")
+            };
+            abrufe.pruefe(am(40)?, 11)?;
+            abrufe.vermerke(am(40)?, "kalender")?;
+            abrufe.pruefe(am(45)?, 10)?;
+            for _ in 0..11 {
+                abrufe.vermerke(am(45)?, "SAP.DEX")?;
+            }
+            assert_eq!(stand(&daten, am(46)?)?.0, 12);
+        }
+        drop(abrufe);
+        fs::remove_dir_all(daten).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn zwei_laeufe_erschoepfen_das_kontingent_des_kalendertags() -> Result<(), String> {
         let daten = std::env::temp_dir().join(format!("depot-kontingent-{}", std::process::id()));
         let _ = fs::remove_dir_all(&daten);
         fs::create_dir(&daten).map_err(|e| e.to_string())?;
@@ -190,10 +226,10 @@ mod tests {
             }
         }
         assert!(abrufe.pruefe(zeit(9, 22)?, 10).is_err());
-        assert!(abrufe.vermerke(zeit(10, 8)?, "kalender").is_err());
+        abrufe.pruefe(zeit(10, 8)?, AV_TAG)?;
         assert_eq!(stand(&daten, zeit(10, 8)?)?, (0, 20));
         assert_eq!(stand(&daten, zeit(10, 16)?)?, (0, 10));
-        assert!(abrufe.pruefe(zeit(10, 16)?, 11).is_err());
+        abrufe.pruefe(zeit(10, 16)?, 11)?;
         abrufe.pruefe(zeit(10, 16)?, 10)?;
         abrufe.vermerke(zeit(10, 16)?, "kalender")?;
         assert_eq!(stand(&daten, zeit(10, 16)?)?, (1, 11));
