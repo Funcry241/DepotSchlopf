@@ -1,8 +1,10 @@
 klasse: Funktion
-zweck: Seite „Mathematik in DepotSchlopf“ anlegen und in README, Kaltstart-Reihenfolge und Übergabetext des Assistenten-Exports aufnehmen.
+zweck: Seite „Mathematik in DepotSchlopf“ anlegen und in README, Kaltstart-Reihenfolge und Übergabetext des Assistenten-Exports aufnehmen. Invarianten für Auftragsautomat, Beleg-Rundlauf, KI-Budget, Abstimmung und Wiederanlauf an allen Folgen prüfen (#111, #112).
 pfade:
 CHANGELOG.md
 README.md
+crates/depot_journal/tests/invarianten.rs
 crates/depot_lauf/src/export.rs
+crates/depot_sim/tests/invarianten.rs
 docs/MATHEMATIK.md
 docs/kaltstart.md

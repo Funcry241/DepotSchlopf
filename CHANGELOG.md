@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Invarianten werden an allen Folgen geprüft statt an Einzelfällen: jede Meldungsfolge eines Auftrags, Rundlauf der Textbelege, vier Monate zufälliger KI-Anfragen gegen alle Budgetgrenzen, jede Abstimmungsrunde gegen ein Modell der Freigaberegel und der Wiederanlauf nach einem Abbruch an jeder Zeile eines echten Papiertags. Ohne neue Abhängigkeit; Zufallsfolgen mit festem Startwert (#111, #112).
+
 - Neue Seite [Mathematik in DepotSchlopf](docs/MATHEMATIK.md): Bestandsaufnahme der Verfahren mit Rolle und Quellstelle, die zentralen Invarianten, Geplantes und offene Grenzen. Sie steht in der Kaltstart-Reihenfolge und im Übergabetext des Assistenten-Exports.
 
 - Die Einrichtung zeigt ungespeicherte Änderungen direkt am Formular und warnt vor ihrem Verlust. „Speichern und Zeitplan einschalten“ übernimmt die ausgefüllten Werte gemeinsam, unter denselben Einrichtungsprüfungen. Rückmeldungen bieten den passenden nächsten Schritt an; ein Dienstneustart verwirft offene Eingaben nicht mehr automatisch.
