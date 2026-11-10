@@ -133,7 +133,12 @@ pub fn ki_budget(buchungen: &[Buchung], berater: BeraterId, heute: Datum) -> KiB
         heute_aufrufe: heute_b().count(),
         heute_aufrufe_max: g.aufrufe_je_zyklus().saturating_mul(g.zyklen_je_tag()),
         heute_gebucht: summe(heute_b()),
-        tagesrahmen: depot_ki::tagesrahmen(&g, buchungen, berater, heute).unwrap_or(Cent::NULL),
+        tagesrahmen: if depot_kern::liste::handelstag(heute) {
+            depot_ki::tagesrahmen(&g, buchungen, berater, heute)
+        } else {
+            depot_ki::vorbereitungsrahmen(&g, buchungen, berater, heute)
+        }
+        .unwrap_or(Cent::NULL),
         handelstage_rest: depot_ki::handelstage_rest(heute),
         monat_aufrufe: monat().count(),
         monat_aufrufe_max: g.aufrufe_je_monat(),

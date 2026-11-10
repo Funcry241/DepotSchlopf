@@ -858,6 +858,10 @@ impl Dienst {
             return;
         };
         let Some(art) = faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen) else {
+            if z.laufend.is_none() && z.warteschlange.is_empty() && vorbereitung_faellig(z, jetzt) {
+                let _ = einreihen(z, Art::Vorbereiten, Anlass::Zeitplan, None);
+                return;
+            }
             // Auch am Wochenende Weltgeschehen lesen, aber nur bei bewusst eingeschaltetem
             // Zeitplan. Keine Kurse, keine KI, kein Papiertag durch diesen Auftrag.
             if z.zeitplan.an
@@ -873,9 +877,6 @@ impl Dienst {
                     .all(|a| jetzt.sekunden_seit(a.start).is_some_and(|s| s >= 5400))
             {
                 let _ = einreihen(z, Art::Nachrichten, Anlass::Zeitplan, None);
-            }
-            if z.laufend.is_none() && z.warteschlange.is_empty() && vorbereitung_faellig(z, jetzt) {
-                let _ = einreihen(z, Art::Vorbereiten, Anlass::Zeitplan, None);
             }
             return;
         };
@@ -1183,8 +1184,10 @@ fn vorbereitung_faellig(z: &Zustand, jetzt: Zeitpunkt) -> bool {
         && z.verlauf.iter().any(|a| {
             a.art == Art::Nachrichten
                 && a.erfolg == Some(true)
-                && ortszeit(a.start).is_some_and(|(t, ..)| t == tag)
-                && jetzt.sekunden_seit(a.start).is_some_and(|s| s < 5_400)
+                && a.ende.is_some_and(|ende| {
+                    ortszeit(ende).is_some_and(|(t, ..)| t == tag)
+                        && jetzt.sekunden_seit(ende).is_some_and(|s| s < 5_400)
+                })
         })
 }
 

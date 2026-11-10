@@ -14,7 +14,9 @@ Klasse Funktion; keine neuen Quellen, Bibliotheken oder höheren Budgets.
   einschalten. Die neue kostenpflichtige Option ist bei alten und neuen Installationen aus.
   Vorbereitung braucht aktivierte Schlagzeilen und einen eingeschalteten Zeitplan.
 - An börsenfreien Tagen folgt nach einem erfolgreichen RSS-Lauf eine Vorbereitung,
-  höchstens einmal je Tag, Beginn zwischen 08 und vor 23 Uhr Frankfurt.
+  höchstens einmal je Tag, Beginn zwischen 08 und vor 23 Uhr Frankfurt. Der Dienst
+  berücksichtigt die Zeit seit Abschluss des Schlagzeilenabrufs und zieht eine fällige
+  Vorbereitung einem weiteren Schlagzeilenabruf vor.
   Wartende Aufträge prüfen die Freigabe erneut; Ausschalten wirkt auch vor dem Start.
 - Ein manueller Start auf Live braucht die ausdrückliche Bestätigung des KI-Budgets.
 - Beide KIs erhalten dieselbe vorher gespeicherte, tatsächlich in die Frage passende
@@ -40,12 +42,16 @@ Eine Aufruferlaubnis entsteht erst nach der synchronisierten Reservierung. Diese
 KI-Grenzen, Höchstkosten, Monats- und Jahreszählungen, Anbieterpausen, Netz-Wiederholungen,
 Geheimnisschutz und Kostensperren gelten. Die Vorbereitung hat keinen eigenen
 Geldtopf und setzt keine Kosten zurück. Sie verbraucht einen Teil des bisherigen
-Aufrufkontingents und kann es vor Monatsende erschöpfen.
+Aufrufkontingents. Die Rücklage für reguläre Erstmeinungen gilt weiter. Der börsenfreie
+Tag zählt bei der Verteilung des Monatsrests als zusätzlicher Tag. Nach dem letzten
+Handelstag begrenzt der vorhandene Kurzaufrufdeckel den Tagesrahmen je KI.
 
 Der dauerhafte Start verhindert eine neue Ausführung am selben Tag, auch nach
 Absturz zwischen Reservierung und Antwort. Die Reservierung bleibt dann gebucht.
-Live zeigt fehlende, verworfene und vorhandene Antworten getrennt. Eine gültige
-Einschätzung ist kein Nachweis einer richtigen oder profitablen Vorhersage.
+Live zeigt den Quellenstand auch bei fehlendem KI-Budget oder einem Anbieterausfall.
+Fehlt eine verwertbare Antwort, zeigt Live je KI die letzte belegte Einschätzung mit Datum
+und ursprünglichem Zieltag. Ohne neu belegten Quellenstand bleibt der letzte Stand sichtbar
+und Live kennzeichnet ihn als früheren Stand.
 
 ## Nachweise
 

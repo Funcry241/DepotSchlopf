@@ -232,6 +232,41 @@ fn vorbereitung_zeigt_beide_ergebnisse_maskiert_und_nur_echte_antworten_gruen() 
     assert_eq!(html.matches("Einschätzung vorhanden").count(), 1);
     assert!(html.contains("Nicht gefragt") && html.contains("Anbieterpause"));
     assert!(html.contains("These &lt;script&gt;") && !html.contains("<script>"));
+
+    let heute = abends(8)?;
+    let html = html::inhalt(
+        &lagebild(&umgebung(heute, Zugang::Offen(j.stand()))),
+        &|_| None,
+    );
+    assert!(html.contains("Heute ist noch kein neuer Wissensstand belegt"));
+
+    j.starte_vorbereitung(
+        heute,
+        tag(9)?,
+        vec!["Neuer Quellenstand vom Sonntag".into()],
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    j.belege_vorbereitungsantwort(
+        heute,
+        depot_journal::VorbereitungsAntwort {
+            zeit: heute,
+            berater: BeraterId::Dachs,
+            gefragt: false,
+            verwertbar: false,
+            text: "Tagesrahmen ausgeschöpft".into(),
+            prognose: None,
+        },
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    let html = html::inhalt(
+        &lagebild(&umgebung(heute, Zugang::Offen(j.stand()))),
+        &|_| None,
+    );
+    assert!(html.contains("Neuer Quellenstand vom Sonntag"));
+    assert!(html.contains("Tagesrahmen ausgeschöpft"));
+    assert!(html.contains("Letzte belegte Einschätzung vom 07.11.2026"));
+    assert!(html.contains("These &lt;script&gt;"));
+    assert!(!html.contains("Heute ist noch kein neuer Wissensstand belegt"));
     Ok(())
 }
 

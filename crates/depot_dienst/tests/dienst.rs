@@ -2599,29 +2599,20 @@ fn vorbereitungsautomatik_folgt_erfolgreichen_nachrichten_und_bleibt_nach_neusta
     let einrichtung = get(&d, "/einrichtung", t);
     assert!(einrichtung.contains("Diese Vorbereitung nutzt KI-Budget."));
     assert!(!einrichtung.contains("keine zusätzlichen KI-Aufrufe"));
-    for erwartet in [Art::Nachrichten, Art::Vorbereiten] {
-        let (nr, kind) = d.schritt(t).ok_or("Auftrag fehlt")?;
+    let spaeter = Zeitpunkt::frankfurt(t.datum().ok_or("Datum")?, 13, 30, 0).ok_or("Zeit")?;
+    for (jetzt, erwartet) in [
+        (t, Art::Nachrichten),
+        (spaeter, Art::Vorbereiten),
+        (spaeter, Art::Nachrichten),
+    ] {
+        let (nr, kind) = d.schritt(jetzt).ok_or("Auftrag fehlt")?;
         assert_eq!(d.sperre().laufend.as_ref().map(|a| a.art), Some(erwartet));
         d.verfolge(nr, kind, || {
-            Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 12, 0, 0))
+            Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 13, 30, 0))
         });
     }
-    assert!(d.schritt(t).is_none());
     drop(d);
     let neu = dienst(wurzel, true);
-    assert!(
-        neu.schritt(t).is_none(),
-        "Neustart startet weder RSS noch Vorbereitung doppelt"
-    );
-    let spaeter = Zeitpunkt::frankfurt(t.datum().ok_or("Datum")?, 13, 30, 0).ok_or("Zeit")?;
-    let (nr, kind) = neu.schritt(spaeter).ok_or("Neuer RSS-Abruf")?;
-    assert_eq!(
-        neu.sperre().laufend.as_ref().map(|a| a.art),
-        Some(Art::Nachrichten)
-    );
-    neu.verfolge(nr, kind, || {
-        Datum::neu(2026, 11, 7).and_then(|d| Zeitpunkt::frankfurt(d, 13, 30, 0))
-    });
     assert!(
         neu.schritt(spaeter).is_none(),
         "Weitere Schlagzeilen lösen keine zweite Vorbereitung aus"
