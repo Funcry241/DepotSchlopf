@@ -14,6 +14,7 @@ use crate::kostenschutz;
 use crate::schluessel::Wer;
 use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand};
 use crate::zeitplan::{Zeitplan, geplante_abrufe, lies_uhrzeit, naechster_fuer, uhrzeit_text};
+use crate::zeitstrahl_ki::{self, Aufrufe};
 
 const STIL_DIENST: &str = "\
 nav{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;--nav-akzent:#005c97}\
@@ -42,6 +43,7 @@ button.laeuft{border:2px solid var(--offen);color:var(--offen)}\
 .update-angebot p{margin:0 0 6px}.aktiver-bereich{border:2px solid var(--offen)}\
 .zeitstrahl{list-style:none;margin:0;padding-inline-start:14px;border-inline-start:2px solid var(--linie)}\
 .zeitstrahl li{padding:6px 0}.zeitstrahl li span{margin-inline-start:8px}\
+#zeitstrahl .optional{border-bottom:1px dashed var(--linie)}\
 section[id]{scroll-margin-top:180px}\
 @media(max-width:600px){#betriebsleiste{position:static}}\
 input[type=password],input[type=time]{font:inherit;padding:3px 6px;border:1px solid var(--linie);\
@@ -670,7 +672,7 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     }
 }
 
-fn zeitstrahl(z: &Zustand, heute: Option<Datum>) -> String {
+fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
     let mut s = String::from("<section id=\"zeitstrahl\"><h2>Zeitstrahl</h2>");
     if let Some(f) = &z.verlauf_fehler {
         let _ = write!(
@@ -682,26 +684,83 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>) -> String {
         let _ = write!(s, "<p>{}</p>", maskiere(&naechster_text(z, heute)));
     } else if let Some(heute) = heute {
         s.push_str("<p class=\"leise\">Geplante Startzeiten in Frankfurter Ortszeit.</p>");
-        zeitstrahl_tag(&mut s, z, heute, true);
+        zeitstrahl_tag(&mut s, z, heute, true, ki);
         if let Some((_, tag, _)) = naechster_fuer(&z.zeitplan, &z.erledigt, heute, &z.boersen)
             && tag != heute
         {
-            zeitstrahl_tag(&mut s, z, tag, false);
+            zeitstrahl_tag(&mut s, z, tag, false, ki);
         }
         if z.zeitplan.nachrichten_an {
-            s.push_str("<p><b>Schlagzeilen</b> · täglich von 08:00 bis vor 23:00 Uhr, frühestens alle 90 Minuten, wenn der Dienst frei ist.</p>");
-            if z.zeitplan.vorbereitung.aktiv() {
-                s.push_str("<p><b>Vorbereitung</b> · an börsenfreien Tagen nach einem erfolgreichen Schlagzeilenabruf.</p>");
+            s.push_str("<p><b>Schlagzeilen</b> · ohne KI · täglich von 08:00 bis vor 23:00 Uhr, frühestens alle 90 Minuten, wenn der Dienst frei ist.</p>");
+            if z.zeitplan.vorbereitung.aktiv()
+                && !crate::zeitplan::handelstag(heute)
+                && !ki_auftraege(z, heute).any(|a| a.art == Art::Vorbereiten)
+            {
+                s.push_str("<p><b>Vorbereitung</b> · nach einem erfolgreichen Schlagzeilenabruf.");
+                zeitstrahl_ki::geplant(&mut s, heute);
+                s.push_str("</p>");
             }
         }
     } else {
         s.push_str("<p>Die aktuelle Frankfurter Ortszeit ist nicht verfügbar.</p>");
     }
+    if let Some(tag) = heute {
+        weitere_ki_auftraege(&mut s, z, tag, ki);
+    }
     s.push_str("</section>");
     s
 }
 
-fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool) {
+fn ki_auftraege(z: &Zustand, tag: Datum) -> impl Iterator<Item = &Auftrag> {
+    let am_tag = move |zeit: Zeitpunkt| zeit.in_frankfurt().is_some_and(|(d, ..)| d == tag);
+    z.laufend
+        .iter()
+        .chain(
+            z.verlauf
+                .iter()
+                .filter(move |a| am_tag(a.start) || a.ende.is_some_and(am_tag)),
+        )
+        .filter(|a| matches!(a.art, Art::Papier | Art::Vorbereiten))
+}
+
+fn hand_kennung<'a>(ki: &'a Aufrufe, a: &Auftrag) -> Option<&'a str> {
+    if a.anlass != Anlass::Hand {
+        return None;
+    }
+    ki.hand_kennung(&a.kennung, a.start, a.ende?)
+}
+
+fn weitere_ki_auftraege(s: &mut String, z: &Zustand, tag: Datum, ki: &Aufrufe) {
+    let geplantes_papier_sichtbar = z.zeitplan.an
+        && z.zeitplan.papier_danach
+        && z.zeitplan_fehler.is_none()
+        && z.erledigt_fehler.is_none()
+        && z.verlauf_fehler.is_none()
+        && !geplante_abrufe(z.zeitplan, &z.erledigt, tag, &z.boersen).is_empty();
+    let schon_gezeigt = geplantes_papier_sichtbar
+        .then(|| zeitstrahl_auftrag(z, tag, Art::Papier))
+        .flatten();
+    for a in ki_auftraege(z, tag) {
+        if schon_gezeigt.is_some_and(|b| b.kennung == a.kennung) {
+            continue;
+        }
+        let (klasse, stand) = ergebnis(a, z);
+        let _ = write!(
+            s,
+            "<p><b>{}</b> · {} <span class=\"{klasse}\">{stand}</span>",
+            a.art.name(),
+            zeit_text(a.start)
+        );
+        ki.gelaufen(s, Some(&a.kennung), hand_kennung(ki, a));
+        s.push_str("</p>");
+    }
+    let zugeordnet = ki_auftraege(z, tag)
+        .filter_map(|a| hand_kennung(ki, a))
+        .collect();
+    ki.konsolenlaeufe(s, tag, &zugeordnet);
+}
+
+fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool, ki: &Aufrufe) {
     let abrufe = geplante_abrufe(z.zeitplan, &z.erledigt, tag, &z.boersen);
     let titel = if heute {
         "Heute"
@@ -728,7 +787,7 @@ fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool) {
         let (klasse, stand) = zeitstrahl_stand(z, tag, heute, *art).unwrap_or(("leise", ersatz));
         let _ = write!(
             s,
-            "<li><b>{} Uhr</b> · {} <span class=\"{klasse}\">{stand}</span></li>",
+            "<li><b>{} Uhr</b> · {} · ohne KI <span class=\"{klasse}\">{stand}</span></li>",
             uhrzeit_text(*uhr),
             maskiere(art.name())
         );
@@ -752,10 +811,29 @@ fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool) {
         let (klasse, stand) = zeitstrahl_stand(z, tag, heute, Art::Papier).unwrap_or(ersatz);
         let _ = write!(
             s,
-            "<li><b>Papiertag</b> <span class=\"{klasse}\">{stand}</span></li>"
+            "<li><b>Papiertag</b> <span class=\"{klasse}\">{stand}</span>"
         );
+        let lauf = zeitstrahl_auftrag(z, tag, Art::Papier);
+        if lauf.is_some() || z.erledigt.papier == Some(tag) {
+            ki.gelaufen(
+                s,
+                lauf.map(|a| a.kennung.as_str()),
+                lauf.and_then(|a| hand_kennung(ki, a)),
+            );
+        } else if klasse != "halt" {
+            zeitstrahl_ki::geplant(s, tag);
+        }
+        s.push_str("</li>");
     }
     s.push_str("</ol>");
+}
+
+fn zeitstrahl_auftrag(z: &Zustand, tag: Datum, art: Art) -> Option<&Auftrag> {
+    z.laufend.iter().chain(z.verlauf.iter()).find(|a| {
+        a.art == art
+            && a.anlass == Anlass::Zeitplan
+            && a.start.in_frankfurt().is_some_and(|(d, ..)| d == tag)
+    })
 }
 
 fn zeitstrahl_stand(
@@ -1162,9 +1240,19 @@ pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String 
 
 /// Der Inhalt der Live-Seite (auch `/teil/live`).
 pub fn live(token: &str, start: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
+    live_mit_ki(token, start, z, jetzt, &Aufrufe::default())
+}
+
+pub(crate) fn live_mit_ki(
+    token: &str,
+    start: &str,
+    z: &Zustand,
+    jetzt: Zeitpunkt,
+    ki: &Aufrufe,
+) -> String {
     let heute = ortszeit(jetzt).map(|(d, ..)| d);
     let mut s = marke(start);
-    s.push_str(&zeitstrahl(z, heute));
+    s.push_str(&zeitstrahl(z, heute, ki));
     s.push_str(&taetigkeit(z, heute));
     s.push_str(&gesamtstatus_teil(token, z, false));
     s.push_str(&update_hinweis(z));

@@ -15,7 +15,7 @@ pub(crate) fn beim_start(wurzel: &Path) {
     }
 }
 
-fn name(wer: &str) -> &str {
+pub(crate) fn name(wer: &str) -> &str {
     match wer {
         "dachs" => "Dachs",
         "maus" => "Maus",
@@ -24,7 +24,7 @@ fn name(wer: &str) -> &str {
     }
 }
 
-fn status(ergebnis: &str) -> &str {
+pub(crate) fn status(ergebnis: &str) -> &str {
     match ergebnis {
         "ok" => "Antwort erhalten",
         "uebersprungen" => "Nicht gefragt",
@@ -112,7 +112,7 @@ fn eintrag(s: &mut String, e: &Gespraech, buchungen: &[(BeraterId, Cent)]) {
     s.push_str("</article>");
 }
 
-fn filter(s: &mut String, datum: Option<Datum>, wer: &str, tage: &[Tag]) {
+fn filter(s: &mut String, datum: Option<Datum>, wer: &str, lauf: &str, tage: &[Tag]) {
     let mut namen = BTreeMap::from([("dachs", "Dachs"), ("maus", "Maus")]);
     for e in tage.iter().flat_map(|t| &t.eintraege) {
         namen.insert(&e.wer, name(&e.wer));
@@ -132,7 +132,16 @@ fn filter(s: &mut String, datum: Option<Datum>, wer: &str, tage: &[Tag]) {
             maskiere(titel)
         );
     }
-    s.push_str("</select></label> <button type=\"submit\">Filtern</button> <a href=\"/gespraeche\">Filter zurücksetzen</a></form>");
+    s.push_str("</select></label>");
+    if !lauf.is_empty() {
+        let _ = write!(
+            s,
+            "<input type=\"hidden\" name=\"lauf\" value=\"{}\"> <span>Lauf {}</span>",
+            maskiere(lauf),
+            maskiere(lauf)
+        );
+    }
+    s.push_str(" <button type=\"submit\">Filtern</button> <a href=\"/gespraeche\">Filter zurücksetzen</a></form>");
 }
 
 struct Tag {
@@ -156,7 +165,7 @@ fn tag_lesen(daten: &Path, datum: Datum) -> Tag {
     }
 }
 
-fn tagesstand(s: &mut String, tag: &Tag, wer: &str, buchungen: &[(BeraterId, Cent)]) {
+fn tagesstand(s: &mut String, tag: &Tag, wer: &str, lauf: &str, buchungen: &[(BeraterId, Cent)]) {
     let _ = write!(s, "<h3>{}</h3>", depot_lage::datum_text(tag.datum));
     if tag.lesefehler {
         s.push_str("<p>Gesprächsdatei nicht lesbar.</p>");
@@ -165,7 +174,7 @@ fn tagesstand(s: &mut String, tag: &Tag, wer: &str, buchungen: &[(BeraterId, Cen
     let sichtbar: Vec<_> = tag
         .eintraege
         .iter()
-        .filter(|e| wer.is_empty() || wer == e.wer)
+        .filter(|e| (wer.is_empty() || wer == e.wer) && (lauf.is_empty() || lauf == e.lauf))
         .collect();
     let mut nach_ki = BTreeMap::<&str, usize>::new();
     let mut anzahl = 0_usize;
@@ -210,7 +219,13 @@ fn tagesstand(s: &mut String, tag: &Tag, wer: &str, buchungen: &[(BeraterId, Cen
     }
 }
 
-pub(crate) fn inhalt(daten: &Path, heute: Option<Datum>, datum: &str, wer: &str) -> String {
+pub(crate) fn inhalt(
+    daten: &Path,
+    heute: Option<Datum>,
+    datum: &str,
+    wer: &str,
+    lauf: &str,
+) -> String {
     let mut s = String::from(
         "<section id=\"gespraeche\"><h2>KI-Gespräche</h2>\
         <p>Lokales Protokoll für Haupt- und Zusatz-KIs. Übersprungene Anfragen stehen separat in der Liste.</p>",
@@ -237,9 +252,9 @@ pub(crate) fn inhalt(daten: &Path, heute: Option<Datum>, datum: &str, wer: &str)
     } else {
         Vec::new()
     };
-    filter(&mut s, einzel, wer, &tage);
+    filter(&mut s, einzel, wer, lauf, &tage);
     for tag in tage {
-        tagesstand(&mut s, &tag, wer, &buchungen);
+        tagesstand(&mut s, &tag, wer, lauf, &buchungen);
     }
     s.push_str("</section>");
     s
@@ -279,11 +294,11 @@ mod tests {
         let mut buchungen = vec![(BeraterId::Maus, Cent(1)); 7];
         buchungen.push((BeraterId::Dachs, Cent(20)));
         let mut html = String::new();
-        tagesstand(&mut html, &tag, "", &buchungen);
+        tagesstand(&mut html, &tag, "", "", &buchungen);
         assert!(html.contains("Kosten 20 ct (gebucht)"));
         assert!(html.contains("bekannte Kosten 20 ct · davon gebucht 20 ct"));
         let mut html = String::new();
-        tagesstand(&mut html, &tag, "", &[]);
+        tagesstand(&mut html, &tag, "", "", &[]);
         assert!(html.contains("Buchung nicht lesbar") && !html.contains("3 ct"));
         Ok(())
     }

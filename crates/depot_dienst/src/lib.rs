@@ -36,6 +36,7 @@ pub mod verlauf;
 pub mod waechter;
 pub mod werkbank;
 pub mod zeitplan;
+mod zeitstrahl_ki;
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -189,8 +190,14 @@ fn heute(jetzt: Zeitpunkt) -> Option<depot_kern::Datum> {
 
 const HTML: &str = "text/html; charset=utf-8";
 
+fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
+    let ki =
+        zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), heute(jetzt));
+    seiten::live_mit_ki(&d.token, &d.start, &d.sperre(), jetzt, &ki)
+}
+
 fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
-    let inhalt = seiten::live(&d.token, &d.start, &d.sperre(), jetzt);
+    let inhalt = live_inhalt(d, jetzt);
     let s = seiten::rahmen(
         "/",
         Some("/teil/live"),
@@ -209,11 +216,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/" => live_seite(d, a, jetzt),
         "/gespraeche" => gespraechsseite(d, a, tag),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
-        "/teil/live" => antwort(
-            200,
-            HTML,
-            seiten::live(&d.token, &d.start, &d.sperre(), jetzt).as_bytes(),
-        ),
+        "/teil/live" => antwort(200, HTML, live_inhalt(d, jetzt).as_bytes()),
         "/teil/journal" => antwort(
             200,
             HTML,
@@ -318,6 +321,7 @@ fn gespraechsseite(d: &Dienst, a: &Anfrage, heute: Option<depot_kern::Datum>) ->
         heute,
         feld(&abfrage, "tag").unwrap_or_default(),
         feld(&abfrage, "wer").unwrap_or_default(),
+        feld(&abfrage, "lauf").unwrap_or_default(),
     );
     let seite = seiten::rahmen(
         "/gespraeche",
