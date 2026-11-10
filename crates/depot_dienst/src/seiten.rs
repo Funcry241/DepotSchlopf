@@ -706,9 +706,22 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
     }
     if let Some(tag) = heute {
         weitere_ki_auftraege(&mut s, z, tag, ki);
+        gemini_zeitstrahl(&mut s, z, tag, ki);
     }
     s.push_str("</section>");
     s
+}
+
+fn gemini_zeitstrahl(s: &mut String, z: &Zustand, tag: Datum, ki: &Aufrufe) {
+    for a in z.verlauf.iter().filter(|a| {
+        a.art == Art::Nachrichten
+            && a.start.in_frankfurt().is_some_and(|(d, ..)| d == tag)
+            && ki.hat_eintrag(&a.kennung)
+    }) {
+        s.push_str("<p><b>Zuarbeit: Nachrichten vorsortieren</b>");
+        ki.gelaufen(s, Some(&a.kennung), None);
+        s.push_str("</p>");
+    }
 }
 
 fn ki_auftraege(z: &Zustand, tag: Datum) -> impl Iterator<Item = &Auftrag> {
@@ -720,7 +733,7 @@ fn ki_auftraege(z: &Zustand, tag: Datum) -> impl Iterator<Item = &Auftrag> {
                 .iter()
                 .filter(move |a| am_tag(a.start) || a.ende.is_some_and(am_tag)),
         )
-        .filter(|a| matches!(a.art, Art::Papier | Art::Vorbereiten))
+        .filter(|a| matches!(a.art, Art::Papier | Art::Vorbereiten | Art::Gemini))
 }
 
 fn hand_kennung<'a>(ki: &'a Aufrufe, a: &Auftrag) -> Option<&'a str> {
@@ -1289,7 +1302,7 @@ fn regel(w: Wer) -> &'static str {
     match w {
         Wer::Kursquelle => "8 bis 64 Großbuchstaben und Ziffern",
         Wer::KursquelleUs => "20 bis 64 Kleinbuchstaben und Ziffern",
-        Wer::Berater(_) => "20 bis 256 Zeichen aus A-Z, a-z, 0-9, _ und -",
+        Wer::Berater(_) | Wer::Gemini => "20 bis 256 Zeichen aus A-Z, a-z, 0-9, _ und -",
     }
 }
 

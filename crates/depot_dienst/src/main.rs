@@ -273,6 +273,11 @@ fn main() -> ExitCode {
     {
         eprintln!("[Dienst] Altes Alpha-Vantage-Kontingent konnte nicht aufgeräumt werden: {e}");
     }
+    if let Some((heute, ..)) = jetzt().and_then(depot_kern::Zeitpunkt::in_frankfurt)
+        && let Err(e) = depot_lage::gespraeche::raeume_gemini_auf(&wurzel.join("daten"), heute)
+    {
+        eprintln!("[Dienst] Altes Gemini-Kontingent konnte nicht aufgeräumt werden: {e}");
+    }
     let (starter, meldung, version) = starter_fuer(&wurzel, &herkunft);
     let melder = {
         let u = Arc::clone(&umwelt);

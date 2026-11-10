@@ -29,6 +29,7 @@ pub enum Wer {
     Tiingo,
     Dachs,
     Maus,
+    Gemini,
 }
 
 impl Wer {
@@ -38,13 +39,20 @@ impl Wer {
             Wer::Tiingo => "tiingo",
             Wer::Dachs => "dachs",
             Wer::Maus => "maus",
+            Wer::Gemini => "gemini",
         }
     }
 
     pub fn aus_kurz(k: &str) -> Option<Wer> {
-        [Wer::Kursquelle, Wer::Tiingo, Wer::Dachs, Wer::Maus]
-            .into_iter()
-            .find(|w| w.kurz() == k)
+        [
+            Wer::Kursquelle,
+            Wer::Tiingo,
+            Wer::Dachs,
+            Wer::Maus,
+            Wer::Gemini,
+        ]
+        .into_iter()
+        .find(|w| w.kurz() == k)
     }
 }
 

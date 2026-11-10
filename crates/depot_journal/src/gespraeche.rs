@@ -285,6 +285,49 @@ pub fn aufraeumen(daten: &Path, heute: Datum) -> io::Result<()> {
     fehler.map_or(Ok(()), Err)
 }
 
+pub fn gemini_pfad(daten: &Path) -> PathBuf {
+    daten.join("gemini.txt")
+}
+
+pub fn gemini_aktiv(daten: &Path) -> bool {
+    fs::read_to_string(gemini_pfad(daten)).is_ok_and(|text| text == "gratisprojekt=ja\n")
+}
+
+pub fn gemini_kontingent(daten: &Path, tag: Datum) -> PathBuf {
+    daten.join(format!("gemini-{tag}.kontingent"))
+}
+
+pub fn raeume_gemini_auf(daten: &Path, heute: Datum) -> io::Result<()> {
+    let Some(grenze) = heute.plus_tage(-7) else {
+        return Ok(());
+    };
+    let ordner = match fs::read_dir(daten) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        eintraege => eintraege?,
+    };
+    for eintrag in ordner {
+        let eintrag = eintrag?;
+        let name = eintrag.file_name();
+        let alt = name
+            .to_str()
+            .and_then(|s| s.strip_prefix("gemini-")?.strip_suffix(".kontingent"))
+            .and_then(Datum::lies)
+            .is_some_and(|tag| tag < grenze);
+        if alt && eintrag.file_type()?.is_file() {
+            fs::remove_file(eintrag.path())?;
+        }
+    }
+    Ok(())
+}
+
+pub fn gemini_aufrufe(daten: &Path, tag: Datum) -> usize {
+    fs::read_to_string(gemini_kontingent(daten, tag)).map_or(0, |t| {
+        t.lines()
+            .filter(|z| z.len() == 64 && z.bytes().all(|b| b.is_ascii_hexdigit()))
+            .count()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +405,25 @@ mod tests {
             drop(sperre);
             anhaengen(&daten, &eintrag)?;
             assert_eq!(lesen(&daten, tag)?, (vec![eintrag.clone(), eintrag], 0));
+            Ok(())
+        })();
+        fs::remove_dir_all(daten)?;
+        ergebnis
+    }
+    #[test]
+    fn gemini_raeumt_nur_alte_kontingente_auf() -> io::Result<()> {
+        let daten = std::env::temp_dir().join(format!("depot_gemini_alt_{}", std::process::id()));
+        fs::create_dir_all(&daten)?;
+        let ergebnis = (|| {
+            let heute = Datum::lies("2026-11-10").ok_or_else(|| io::Error::other("Datum fehlt"))?;
+            let alt = daten.join("gemini-2026-11-01.kontingent");
+            let neu = daten.join("gemini-2026-11-05.kontingent");
+            let schalter = gemini_pfad(&daten);
+            for pfad in [&alt, &neu, &schalter] {
+                fs::write(pfad, "")?;
+            }
+            raeume_gemini_auf(&daten, heute)?;
+            assert!(!alt.exists() && neu.is_file() && schalter.is_file());
             Ok(())
         })();
         fs::remove_dir_all(daten)?;

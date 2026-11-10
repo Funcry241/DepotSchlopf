@@ -1,4 +1,31 @@
-klasse: KodexAenderung
-zweck: Die eigene Datei für das optionale Gemini-Netzziel in der Festschreibung berücksichtigen.
+klasse: FestschreibungAenderung
+zweck: Optionale Gemini-Zuarbeit vor Papiertag und Vorbereitung mit reserviertem Kontingent und nachvollziehbaren Aufträgen vorbereiten (#129)
 pfade:
-crates/depot_kodex/src/festschreibung.rs
+CHANGELOG.md
+crates/depot_berater/src/frage.rs
+crates/depot_berater/src/gemini_netz.rs
+crates/depot_berater/src/ki.rs
+crates/depot_berater/src/lib.rs
+crates/depot_berater/src/main.rs
+crates/depot_berater/src/netz.rs
+crates/depot_berater/src/schluessel.rs
+crates/depot_berater/src/zusatz.rs
+crates/depot_dienst/src/gemini.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/main.rs
+crates/depot_dienst/src/programmstand.rs
+crates/depot_dienst/src/schluessel.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/verlauf.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/src/zeitplan.rs
+crates/depot_dienst/src/zeitstrahl_ki.rs
+crates/depot_dienst/tests/dienst.rs
+crates/depot_journal/src/anbieter.rs
+crates/depot_journal/src/gespraeche.rs
+crates/depot_kern/src/gemini.rs
+crates/depot_kern/src/lib.rs
+crates/depot_lauf/src/main.rs
+crates/depot_sim/src/papiertag.rs
+kodex/festschreibung.txt
+kodex/freigabe.txt

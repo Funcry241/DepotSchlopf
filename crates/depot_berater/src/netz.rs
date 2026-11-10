@@ -46,10 +46,14 @@ pub struct Https(ureq::Agent);
 
 impl Https {
     pub fn neu() -> Https {
+        Self::mit_zeitgrenze(ZEITGRENZE)
+    }
+
+    pub(crate) fn mit_zeitgrenze(zeitgrenze: Duration) -> Https {
         let config = ureq::Agent::config_builder()
             .https_only(true)
             .max_redirects(0)
-            .timeout_global(Some(ZEITGRENZE))
+            .timeout_global(Some(zeitgrenze))
             .http_status_as_error(false)
             .user_agent("DepotSchlopf")
             .build();

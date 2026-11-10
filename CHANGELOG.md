@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Hinzugefügt
 
+- Optionale Gemini-Zuarbeit (#107, #129) ordnet öffentliche Nachrichten als eigener Auftrag nach erfolgreichen Schlagzeilenabrufen und vor dem Papiertag. Papiertag und Vorbereitung übernehmen eine passende, fertige Zuarbeit aus demselben Nachrichtenstand. Gemini ist standardmäßig ausgeschaltet.
+
 - Der Zeitstrahl (#106, #117) nennt die vorgesehenen Modelle für Papiertag und Vorbereitung. Bei gelaufenen Schritten zeigt er die protokollierten Modelle und verlinkt zum jeweiligen KI-Gespräch.
 
 - „KI-Gespräche“ (#105, #115) zeigt lokal protokollierte Anfragen, Antworten, Modelle und Verbrauch. Die Ansicht filtert nach Tag und KI und unterstützt Haupt- und Zusatz-KIs. DepotSchlopf zeichnet zunächst Dachs und Maus auf.
