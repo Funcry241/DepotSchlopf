@@ -21,7 +21,7 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
-- Abrufschutz (#132–#134): Eindeutige Alpha-Vantage-Limithinweise mit eigenem Schlüssel werden ohne Rohablage als Limit gemeldet. Eine Kurssperre lässt RSS und EZB-Termine weiterlaufen. Kursabrufe, Quartalskalender und Diagnose teilen sich ein dauerhaftes Kontingent von 20 Versuchen in 24 Stunden. Der Quartalskalender lässt Platz für den nächsten vollständigen Xetra-Lauf.
+- Abrufschutz (#132–#134, #138): Eindeutige Alpha-Vantage-Limithinweise mit eigenem Schlüssel werden ohne Rohablage als Limit gemeldet. Eine Kurssperre lässt RSS und EZB-Termine weiterlaufen. Kursabrufe, Quartalskalender und Diagnose teilen sich ein dauerhaftes Kontingent von 20 Versuchen je Frankfurter Kalendertag (Anzeige zusätzlich für die letzten 24 Stunden). Der Quartalskalender lässt Platz für den nächsten vollständigen Xetra-Lauf.
 
 - Die Einrichtung zeigt ungespeicherte Änderungen direkt am Formular und warnt vor ihrem Verlust. „Speichern und Zeitplan einschalten“ übernimmt die ausgefüllten Werte gemeinsam, unter denselben Einrichtungsprüfungen. Rückmeldungen bieten den passenden nächsten Schritt an; ein Dienstneustart verwirft offene Eingaben nicht mehr automatisch.
 
