@@ -459,6 +459,9 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
 /// `false` nur nach einem Sicherheitsabbruch (Kurssperre) oder einem Fehler von Journal,
 /// Ablage oder Uhr.
 fn quartalszahlen(wurzel: &Path, journal: &mut Journal, netz: &mut Https) -> bool {
+    if gesperrt(wurzel) {
+        return false;
+    }
     let werte = match beobachtungsliste() {
         Ok(w) => w,
         Err(e) => {

@@ -9,11 +9,13 @@
 //!   verschiebt sich der Tag, wird der Termin unter derselben Kennung fortgeschrieben.
 //! - **Verlaesslichkeit:** angekuendigt, weil es eine Drittquelle ist und nicht das Unternehmen
 //!   selbst.
-//! - **Abruf:** hoechstens einer je Kalendertag (Rohablage dieses Tages vorhanden), nur mit
+//! - **Abruf:** hoechstens ein Versuch je Frankfurter Kalendertag, nur mit
 //!   Schluessel von Alpha Vantage. Die Antwort wird gegen jeden Schluessel geprueft; enthaelt
 //!   sie einen, wird sie weder abgelegt noch gelesen (`Bericht::sicherheitsabbruch`).
 
 use std::collections::BTreeSet;
+use std::fs::{self, OpenOptions};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use depot_journal::{Fortschreibung, Journal, JournalFehler, TerminBeleg};
@@ -54,6 +56,7 @@ pub fn lies_kalender(csv: &str, werte: &[Wert]) -> Result<Vec<Termin>, KalenderF
         return Err(KalenderFehler::Kopf);
     }
     let mut termine = Vec::new();
+    let mut kennungen = BTreeSet::new();
     for (i, zeile) in zeilen.enumerate() {
         let nr = i.saturating_add(2);
         let zeile = zeile.trim_end_matches('\r');
@@ -85,6 +88,9 @@ pub fn lies_kalender(csv: &str, werte: &[Wert]) -> Result<Vec<Termin>, KalenderF
             continue; // der Rest des Marktes
         };
         let kennung = format!("ergebnis-{}-{quartal}", symbol.to_ascii_lowercase());
+        if !kennungen.insert(kennung.clone()) {
+            return Err(KalenderFehler::Zeile(nr));
+        }
         let titel = format!(
             "{}: Quartalszahlen (Quartal bis {}){zusatz}",
             w.name,
@@ -127,16 +133,19 @@ pub struct KalenderBericht {
     pub sicherheitsabbruch: bool,
 }
 
-/// Wurde heute schon abgerufen? Die Rohablage traegt den Abruf im Namen (`lege_ab`).
-fn heute_abgerufen(ablage: &Path, heute: Datum) -> bool {
-    let praefix = format!("{:04}{:02}{:02}T", heute.jahr(), heute.monat(), heute.tag());
-    std::fs::read_dir(ablage.join(QUELLE_ERGEBNISSE)).is_ok_and(|d| {
-        d.filter_map(Result::ok).any(|e| {
-            e.file_name()
-                .to_str()
-                .is_some_and(|n| n.starts_with(&praefix))
-        })
-    })
+/// Vermerkt auch einen Abruf, der vor der Rohablage scheitert.
+fn merke_abruf(ablage: &Path, tag: Datum) -> Result<bool, String> {
+    let ordner = ablage.join(QUELLE_ERGEBNISSE);
+    fs::create_dir_all(&ordner).map_err(|e| format!("{}: {e}", ordner.display()))?;
+    let pfad = ordner.join(format!("abruf-{tag}.vermerkt"));
+    match OpenOptions::new().write(true).create_new(true).open(&pfad) {
+        Ok(f) => f
+            .sync_all()
+            .map(|()| true)
+            .map_err(|e| format!("{}: {e}", pfad.display())),
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(format!("{}: {e}", pfad.display())),
+    }
 }
 
 /// Ein Abruf des Ergebniskalenders.
@@ -157,8 +166,8 @@ pub fn sammle_ergebnisse(
         return Ok(bericht);
     };
     let vorher = uhr().ok_or(SammelFehler::Uhr)?;
-    let heute = vorher.datum().ok_or(SammelFehler::Uhr)?;
-    if heute_abgerufen(ablage, heute) {
+    let (heute, ..) = vorher.in_frankfurt().ok_or(SammelFehler::Uhr)?;
+    if !merke_abruf(ablage, heute).map_err(SammelFehler::Ablage)? {
         bericht.uebersprungen = Some("heute schon abgerufen".into());
         return Ok(bericht);
     }
@@ -194,7 +203,7 @@ pub fn sammle_ergebnisse(
             return Ok(bericht);
         }
     };
-    let tag = abruf.datum().ok_or(SammelFehler::Uhr)?;
+    let (tag, ..) = abruf.in_frankfurt().ok_or(SammelFehler::Uhr)?;
     let im_kalender: BTreeSet<&str> = termine.iter().map(Termin::kennung).collect();
     bericht.fehlen = journal
         .stand()

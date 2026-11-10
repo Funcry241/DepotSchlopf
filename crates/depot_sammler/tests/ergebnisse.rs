@@ -124,7 +124,7 @@ fn verschoben_wird_fortgeschrieben_und_einmal_am_tag() -> Result<(), String> {
         .0
         .map_err(|e| format!("{e:?}"))?;
     // Am selben Tag kein zweiter Abruf.
-    let (b, abrufe) = lauf(&journal, &roh, KALENDER, utc(10, 23)?, &zugang()?)?;
+    let (b, abrufe) = lauf(&journal, &roh, KALENDER, utc(10, 22)?, &zugang()?)?;
     assert_eq!(abrufe, 0);
     assert_eq!(
         b.map_err(|e| format!("{e:?}"))?.uebersprungen.as_deref(),
@@ -177,7 +177,14 @@ fn schluessel_in_der_antwort_ist_sicherheitsabbruch() -> Result<(), String> {
     let b = b.map_err(|e| format!("{e:?}"))?;
     assert!(b.sicherheitsabbruch);
     assert_eq!(b.rohdatei, None);
-    assert!(!roh.join(QUELLE_ERGEBNISSE).exists());
+    let (zweiter, abrufe) = lauf(&journal, &roh, KALENDER, utc(10, 22)?, &zugang()?)?;
+    assert_eq!(abrufe, 0);
+    assert!(
+        zweiter
+            .map_err(|e| format!("{e:?}"))?
+            .uebersprungen
+            .is_some()
+    );
     assert!(b.fehler.is_some_and(|f| !f.contains(SCHLUESSEL)));
     Ok(())
 }
@@ -195,5 +202,46 @@ fn falsche_zeile_verwirft_alles() -> Result<(), String> {
     let b = b.map_err(|e| format!("{e:?}"))?;
     assert_eq!(b.neu, 0);
     assert!(b.fehler.is_some_and(|f| f.contains("Kalender unlesbar")));
+    Ok(())
+}
+
+#[test]
+fn netzfehler_verbraucht_den_tagesversuch_bis_frankfurter_mitternacht() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    let mut j = vorbedingung(Journal::oeffnen(&journal), "Journal öffnen")?;
+    let mut netz = Erfunden {
+        antwort: Err("Netz ausgefallen".into()),
+        abgerufen: Vec::new(),
+    };
+    let um = utc(10, 22)?;
+    let bericht = vorbedingung(
+        sammle_ergebnisse(
+            &mut j,
+            &mut netz,
+            &mut || Some(um),
+            &roh,
+            &zugang()?,
+            &beobachtungsliste()?,
+        ),
+        "Abruf",
+    )?;
+    assert!(bericht.fehler.is_some());
+    assert!(bericht.rohdatei.is_none());
+    drop(j);
+    assert_eq!(lauf(&journal, &roh, KALENDER, um, &zugang()?)?.1, 0);
+    assert_eq!(
+        lauf(&journal, &roh, KALENDER, utc(10, 23)?, &zugang()?)?.1,
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn doppeltes_quartal_verwirft_den_kalender() -> Result<(), String> {
+    let doppelt = format!("{KALENDER}JPM,JPMORGAN,2027-01-15,2026-12-31,,USD,\n");
+    assert_eq!(
+        lies_kalender(&doppelt, &beobachtungsliste()?),
+        Err(KalenderFehler::Zeile(7))
+    );
     Ok(())
 }
