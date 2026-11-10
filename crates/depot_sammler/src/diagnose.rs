@@ -41,6 +41,33 @@ fn name(quelle: &str) -> &'static str {
     }
 }
 
+pub(crate) const ALPHA_LIMIT: &str = "Abruf: Alpha Vantage meldet Tageslimit";
+
+/// Nur der eng begrenzte Hinweis des Anbieters darf dessen eigenen Zugang wiederholen.
+pub(crate) fn alpha_limit(zugang: &Zugang, quelle: Anbieter, roh: &[u8]) -> bool {
+    if quelle != Anbieter::AlphaVantage {
+        return false;
+    }
+    let Some(json::Json::Objekt(felder)) = std::str::from_utf8(roh)
+        .ok()
+        .and_then(|t| json::lies(t).ok())
+    else {
+        return false;
+    };
+    let [(name, json::Json::Text(text))] = felder.as_slice() else {
+        return false;
+    };
+    let meldung = text.to_ascii_lowercase();
+    matches!(name.as_str(), "Information" | "Note")
+        && (meldung.contains("rate limit") || meldung.contains("requests per day"))
+        && zugang
+            .treffer(roh)
+            .iter()
+            .all(|a| *a == Anbieter::AlphaVantage)
+        && zugang.treffer(roh) == zugang.treffer(text.as_bytes())
+        && !zugang.steht_in(name.as_bytes())
+}
+
 pub(crate) fn sicherheitsabbruch(zugang: &Zugang, quelle: &str, roh: &[u8]) -> Option<String> {
     let treffer = zugang.treffer(roh);
     if treffer.is_empty() {
@@ -76,8 +103,12 @@ pub fn pruefabruf(
 ) {
     let mut ausgabe = |text: &str| melde(&zugang.bereinige(text));
     let mut begonnen = false;
+    let mut alpha_beendet = false;
     for wert in werte {
         let a = Anbieter::fuer(wert.boerse);
+        if alpha_beendet && a == Anbieter::AlphaVantage {
+            continue;
+        }
         let Some(key) = zugang.von(a) else {
             ausgabe(&zugang.bereinige(&format!(
                 "Quelle {}: Zugang fehlt oder ist unlesbar; nicht abgerufen.",
@@ -98,6 +129,11 @@ pub fn pruefabruf(
             ));
             continue;
         };
+        if alpha_limit(zugang, a, &roh) {
+            ausgabe(ALPHA_LIMIT);
+            alpha_beendet = true;
+            continue;
+        }
         if let Some(d) = sicherheitsabbruch(zugang, a.dienst(), &roh) {
             ausgabe(&d);
             ausgabe(
@@ -120,6 +156,37 @@ mod tests {
     use super::*;
     use crate::Schluessel;
     use std::fmt::Write as _;
+
+    #[test]
+    fn limit_erfordert_genau_das_hinweisfeld_und_nur_eigenen_zugang() -> Result<(), String> {
+        let alpha = "ERFUNDEN0123TEST";
+        let tiingo = "0123456789abcdef0123456789abcdef01234567";
+        let zugang = Zugang::alpha_vantage(Schluessel::neu(alpha)?).mit(
+            Anbieter::Tiingo,
+            Schluessel::fuer(Anbieter::Tiingo, tiingo)?,
+        );
+        let hinweis = format!(r#"{{"Note":"RATE LIMIT {alpha}"}}"#);
+        assert!(alpha_limit(
+            &zugang,
+            Anbieter::AlphaVantage,
+            hinweis.as_bytes()
+        ));
+        assert!(!alpha_limit(&zugang, Anbieter::Tiingo, hinweis.as_bytes()));
+        for roh in [
+            format!(r#"{{"Note":"rate limit {alpha}","x":"{alpha}"}}"#),
+            format!(r#"{{"Note":"rate limit {tiingo}"}}"#),
+            format!(r#"{{"Note":"premium endpoint {alpha}"}}"#),
+            format!("symbol,close\n{alpha},1"),
+        ] {
+            assert!(!alpha_limit(
+                &zugang,
+                Anbieter::AlphaVantage,
+                roh.as_bytes()
+            ));
+            assert!(sicherheitsabbruch(&zugang, "alphavantage", roh.as_bytes()).is_some());
+        }
+        Ok(())
+    }
 
     #[test]
     fn diagnose_enthaelt_nur_feste_metadaten_auch_bei_fremdem_oder_kodiertem_zugang()

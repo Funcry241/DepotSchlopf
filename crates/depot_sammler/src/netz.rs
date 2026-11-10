@@ -60,6 +60,14 @@ impl fmt::Display for NetzFehler {
 
 /// Holt die rohe Antwort einer Adresse. In Tests ersetzt eine erfundene Quelle das Netz.
 pub trait Netz {
+    /// Prüft, ob noch genügend Alpha-Vantage-Versuche verfügbar sind.
+    ///
+    /// # Errors
+    /// Kontingent erschöpft oder nicht zuverlässig lesbar.
+    fn pruefe_alpha(&mut self, _benoetigt: usize) -> Result<(), String> {
+        Ok(())
+    }
+
     /// # Errors
     /// Jeder Fehler beim Abruf, eingeordnet als voruebergehend oder nicht.
     fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler>;

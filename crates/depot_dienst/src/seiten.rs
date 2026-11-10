@@ -1272,6 +1272,8 @@ impl Entwurf {
 #[derive(Clone, Debug)]
 pub struct Einrichtung {
     /// Stand je Schluessel aus Anmeldeverwaltung und Anbieterprotokoll.
+    /// Versuche heute und in den letzten 24 Stunden.
+    pub alpha_kontingent: Option<(usize, usize)>,
     pub schluessel: Vec<(Wer, SchluesselStand)>,
     /// Inhalt von `daten/ki.halt`, falls die Sperre des Kostenschutzes liegt.
     pub ki_halt: Result<Option<String>, String>,
@@ -1304,10 +1306,23 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
     for (w, st) in &e.schluessel {
         let klasse = st.klasse();
         let text = maskiere(&st.text());
+        let kontingent = if *w == Wer::Kursquelle {
+            e.alpha_kontingent.map_or_else(
+                || "<br>Alpha-Vantage-Kontingent derzeit unlesbar".into(),
+                |(heute, gesamt)| {
+                    format!(
+                        "<br>Heute {heute} von {} Anfragen · letzte 24 Stunden: {gesamt}",
+                        depot_lage::abrufkontingent::AV_TAG
+                    )
+                },
+            )
+        } else {
+            String::new()
+        };
         let _ = write!(
             s,
             "<tr><td>{}<br><span class=\"leise\">{}</span></td>\
-             <td data-titel=\"Stand\"><span class=\"{klasse}\">{text}</span></td><td data-titel=\"Neu hinterlegen\">\
+             <td data-titel=\"Stand\"><span class=\"{klasse}\">{text}</span>{kontingent}</td><td data-titel=\"Neu hinterlegen\">\
              <form method=\"post\" action=\"/schluessel\" data-aenderungen>\
              <input type=\"hidden\" name=\"t\" value=\"{}\">\
              <input type=\"hidden\" name=\"wer\" value=\"{}\">\

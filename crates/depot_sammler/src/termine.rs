@@ -47,6 +47,20 @@ pub fn sammle_termine(
     uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
     ablage: &Path,
 ) -> Result<TerminBericht, SammelFehler> {
+    sammle_termine_geschuetzt(journal, netz, uhr, ablage, &crate::Zugang::leer())
+}
+
+/// Wie [`sammle_termine`], mit Prüfung auf hinterlegte Zugangsdaten vor der Rohablage.
+///
+/// # Errors
+/// Journal, Ablage oder Uhr versagen.
+pub fn sammle_termine_geschuetzt(
+    journal: &mut Journal,
+    netz: &mut dyn Netz,
+    uhr: &mut dyn FnMut() -> Option<Zeitpunkt>,
+    ablage: &Path,
+    zugang: &crate::Zugang,
+) -> Result<TerminBericht, SammelFehler> {
     let mut bericht = TerminBericht::default();
     let roh = match netz.hole(ADRESSE_EZB) {
         Ok(r) => r,
@@ -55,6 +69,10 @@ pub fn sammle_termine(
             return Ok(bericht);
         }
     };
+    if let Some(text) = crate::diagnose::sicherheitsabbruch(zugang, QUELLE_EZB, &roh) {
+        bericht.fehler = Some(text);
+        return Ok(bericht);
+    }
     let abruf = uhr().ok_or(SammelFehler::Uhr)?;
     bericht.rohdatei =
         Some(lege_ab(ablage, QUELLE_EZB, abruf, ".html", &roh).map_err(SammelFehler::Ablage)?);

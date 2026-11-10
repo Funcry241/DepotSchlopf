@@ -167,6 +167,11 @@ pub fn sammle_ergebnisse(
     };
     let vorher = uhr().ok_or(SammelFehler::Uhr)?;
     let (heute, ..) = vorher.in_frankfurt().ok_or(SammelFehler::Uhr)?;
+    let fuer_kurse = werte.iter().filter(|w| w.boerse == Boerse::Xetra).count();
+    if let Err(grund) = netz.pruefe_alpha(fuer_kurse.saturating_add(1)) {
+        bericht.uebersprungen = Some(grund);
+        return Ok(bericht);
+    }
     if !merke_abruf(ablage, heute).map_err(SammelFehler::Ablage)? {
         bericht.uebersprungen = Some("heute schon abgerufen".into());
         return Ok(bericht);
@@ -178,6 +183,10 @@ pub fn sammle_ergebnisse(
             return Ok(bericht);
         }
     };
+    if crate::diagnose::alpha_limit(zugang, Anbieter::AlphaVantage, &roh) {
+        bericht.fehler = Some("Hinweis der Quelle: Alpha Vantage meldet Tageslimit".into());
+        return Ok(bericht);
+    }
     if zugang.steht_in(&roh) {
         bericht.sicherheitsabbruch = true;
         bericht.fehler = Some("Die Antwort enthielt einen Schlüssel; nichts abgelegt".into());
