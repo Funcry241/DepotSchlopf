@@ -25,7 +25,7 @@ use depot_kern::abdruck::sha256_hex;
 
 /// So viele gemeldete Gründe merkt sich `daten/hinweise.txt` höchstens.
 pub const MAX_BEKANNT: usize = 200;
-/// Höchstlänge des ersten Grunds im Hinweis, in Zeichen.
+/// Höchstlänge des ersten Grunds im Hinweis, in UTF-16-Codeeinheiten.
 pub const MAX_TEXT: usize = 200;
 /// So lange sammeln sich neue Gründe, bevor ein Hinweis kommt.
 pub const SAMMEL_SEKUNDEN: i64 = 10;
@@ -56,7 +56,14 @@ pub fn neue_gruende(
 /// Der Text eines Hinweises: erster Grund, gekürzt, mit Zahl der weiteren.
 pub fn text(neu: &[String]) -> Option<String> {
     let erster = neu.first()?;
-    let mut t: String = erster.chars().take(MAX_TEXT).collect();
+    let mut rest = MAX_TEXT;
+    let mut t: String = erster
+        .chars()
+        .map_while(|c| {
+            rest = rest.checked_sub(c.len_utf16())?;
+            Some(c)
+        })
+        .collect();
     let weitere = neu.len().saturating_sub(1);
     if weitere > 0 {
         let _ = write!(t, " (und {weitere} weitere)");
@@ -72,7 +79,7 @@ pub fn lies(inhalt: &str) -> Option<BTreeMap<String, String>> {
     for z in inhalt.lines() {
         let (h, zeit) = z.split_once(';')?;
         let hex = h.len() == 64 && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-        if !hex || zeit.is_empty() || zeit.contains(';') {
+        if !hex || Zeitpunkt::lies(zeit).is_none() || m.contains_key(h) {
             return None;
         }
         m.insert(h.to_string(), zeit.to_string());
@@ -277,6 +284,8 @@ mod tests {
         let lang = "ä".repeat(300);
         let t = text(&[lang]).unwrap_or_default();
         assert_eq!(t.chars().filter(|c| *c == 'ä').count(), MAX_TEXT);
+        let emoji = text(&["🦦".repeat(200)]).unwrap_or_default();
+        assert_eq!(emoji.chars().filter(|c| *c == '🦦').count(), 100);
     }
 
     #[test]
@@ -288,6 +297,9 @@ mod tests {
             lies(&format!("{h};2026-11-10T12:00:00Z\n")).map(|m| m.len()),
             Some(1)
         );
+        assert_eq!(lies(&format!("{h};kein-zeitpunkt\n")), None);
+        let zeile = format!("{h};2026-11-10T12:00:00Z\n");
+        assert_eq!(lies(&zeile.repeat(2)), None);
         assert_eq!(lies(""), Some(BTreeMap::new()));
     }
 

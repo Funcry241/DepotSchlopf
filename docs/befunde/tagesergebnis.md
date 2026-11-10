@@ -52,7 +52,7 @@ Ob ein später Abruf am selben Abend trotzdem zählen soll, ist eine Grenze und 
 
 ## Simulation
 
-Das Papierdepot beginnt mit: „Nur Papiergeld, simuliert: Jeder Auftrag gilt als zum Schlusskurs des Entscheidungstags ausgeführt. Ob eine echte Order zu diesem Preis ausgeführt worden wäre, bleibt offen; ein Plus hier ist ein Simulationsergebnis.“
+Das Papierdepot beginnt mit: „Nur Papiergeld, simuliert: Neue Orders warten auf einen geprüften Schlusskurs nach ihrem Versand. Ob eine echte Order zu diesem Preis ausgeführt worden wäre, bleibt offen.“ (Bis #47 hieß es: zum Schlusskurs des Entscheidungstags.)
 
 ## Fassung 2 nach Maus' Prüfung
 

@@ -11,7 +11,7 @@ Nachricht bekommt (Notbremse, Kontowächter). Bisher sah er einen Halt nur auf d
   angefangener Tag, Zeitplanfehler) ergibt einen Windows-Hinweis im Infobereich.
 - Ist der jüngste Handelstag im Tagesergebnis ausgefallen, kommt einmal der Grund
   „Papiertag am TT.MM.JJJJ ausgefallen.“ Heute (noch offen) und Börsenfeiertage zählen nicht.
-- Titel `DepotSchlopf: Eingriff nötig`, Text: erster neuer Grund (höchstens 200 Zeichen), bei
+- Titel `DepotSchlopf: Eingriff nötig`, Text: erster neuer Grund (höchstens 200 UTF-16-Codeeinheiten), bei
   mehreren „(und N weitere)“, am Ende „Details auf http://127.0.0.1:47410/“. Ein Klick öffnet
   nichts.
 - Bündeln: Neue Gründe sammeln sich 10 Sekunden (`SAMMEL_SEKUNDEN`), und zwischen zwei
@@ -38,7 +38,7 @@ Nachricht bekommt (Notbremse, Kontowächter). Bisher sah er einen Halt nur auf d
 
 ## Sicherheit
 
-- Die Gründe sind Oberflächentext und geheimnisfrei. Nichts anderes kommt in den Hinweis.
+- Der Dienst verwendet Gründe aus dem Lagebild und maskiert darin Zugangsdaten vor der Anzeige und vor der Bildung der Abdrücke.
 - `hinweis::zeige` startet PowerShell wie der Papierdialog (`CREATE_NO_WINDOW`,
   `-NoProfile -NonInteractive -STA`). Titel und Text gehen **nur** über die Umgebungsvariablen
   `DEPOTSCHLOPF_HINWEIS_TITEL` und `DEPOTSCHLOPF_HINWEIS_TEXT`, nie in den Befehl. Der Dienst

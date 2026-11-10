@@ -50,6 +50,8 @@ pub struct DepotLage {
     pub hoechststand: Option<Cent>,
     /// Neueste zuerst.
     pub auftraege: Vec<AuftragZeile>,
+    /// Vergleich seit Start (#118); `None` vor dem ersten abgeschlossenen Papiertag.
+    pub vergleich: Option<crate::vergleich::VergleichLage>,
 }
 
 /// So viele Auftraege zeigt das Lagebild hoechstens.
@@ -125,5 +127,6 @@ pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
         letzter_abschluss: s.abschluss().map(|a| a.datum),
         hoechststand: s.historischer_hoechststand(),
         auftraege,
+        vergleich: crate::vergleich::vergleich_lage(s, werte),
     }
 }

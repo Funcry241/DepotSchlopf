@@ -627,6 +627,10 @@ impl Dienst {
             let z = self.sperre();
             (hinweis_gruende(&z), z.zeitplan.hinweis.aktiv())
         };
+        let gruende: Vec<String> = gruende
+            .iter()
+            .map(|g| self.protokoll_bereinigen(g))
+            .collect();
         let text = self
             .hinweise
             .gedaechtnis
