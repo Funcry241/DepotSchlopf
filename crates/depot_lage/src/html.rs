@@ -464,6 +464,26 @@ fn vergleich(v: &crate::vergleich::VergleichLage, s: &mut String) {
     s.push_str("</p>");
 }
 
+fn prognosen(l: &Lagebild, s: &mut String) {
+    if l.prognosen.is_empty() {
+        return;
+    }
+    s.push_str(
+        "<section id=\"prognosen\"><h2>Prognosen</h2><p class=\"leise\">Hinweis, keine \
+         Regel: aufgelöste Weltprognosen nach ihrem Horizont, mit 95-%-Intervall und dem \
+         Vergleich „steigt immer“ auf denselben Fällen.</p><table>",
+    );
+    for (wer, text) in &l.prognosen {
+        let _ = write!(
+            s,
+            "<tr><td>{}</td><td>{}</td></tr>",
+            maskiere(wer),
+            maskiere(text)
+        );
+    }
+    s.push_str("</table></section>");
+}
+
 fn gespraech(l: &Lagebild, s: &mut String) {
     s.push_str("<section><h2>Gespräch und Begründungen</h2>");
     if l.gespraech.is_empty() {
@@ -517,6 +537,7 @@ pub fn inhalt_mit(l: &Lagebild, knopf: Knopf<'_>, mit_betrieb: bool) -> String {
     tage(l, &mut s);
     budget(l, &mut s);
     depot(l, &mut s);
+    prognosen(l, &mut s);
     gespraech(l, &mut s);
     grenzen(l, &mut s);
     s

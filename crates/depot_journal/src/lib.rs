@@ -59,11 +59,13 @@ pub mod nachrichtbeleg;
 pub mod rss_abruf;
 pub use kasse::KiZweck;
 pub use ki_abrechnung::KiAbrechnung;
+pub mod aufloesung;
 pub mod stand;
 pub mod terminbeleg;
 pub mod vorbereitung;
 pub mod weltprognose;
 
+pub use aufloesung::{Aufloesung, Auswertung, Ergebnis, werte_aus, wilson_bp};
 pub use auftrag::{AuftragsLage, AuftragsZustand, Ausfuehrung, Meldung};
 pub use datei::{Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
 pub use kasse::{AufrufErlaubnis, KiStand};

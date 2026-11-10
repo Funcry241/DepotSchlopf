@@ -100,6 +100,27 @@ pub trait Berater {
         lage: &Lage<'_>,
         vorschlag: &Vorschlag,
     ) -> Urteil;
+
+    /// Vorschlag mit der getrennten Auswertung bisheriger Prognosen.
+    fn vorschlagen_mit_bilanz(
+        &mut self,
+        erlaubnis: AufrufErlaubnis,
+        lage: &Lage<'_>,
+        _bilanz: &[(BeraterId, depot_journal::Auswertung)],
+    ) -> Antwort {
+        self.vorschlagen(erlaubnis, lage)
+    }
+
+    /// Zweitmeinung mit derselben Auswertung.
+    fn pruefen_mit_bilanz(
+        &mut self,
+        erlaubnis: AufrufErlaubnis,
+        lage: &Lage<'_>,
+        vorschlag: &Vorschlag,
+        _bilanz: &[(BeraterId, depot_journal::Auswertung)],
+    ) -> Urteil {
+        self.pruefen(erlaubnis, lage, vorschlag)
+    }
 }
 
 /// Ein Berater ohne Anbindung: Er wird nie gefragt. Bis Dachs und Maus angebunden sind,

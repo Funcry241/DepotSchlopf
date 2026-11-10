@@ -609,6 +609,9 @@ impl Journal {
             Art::Weltprognose => Err(JournalFehler::Abgelehnt(
                 "Weltprognose nur über belege_weltprognose".into(),
             )),
+            Art::Aufloesung => Err(JournalFehler::Abgelehnt(
+                "Auflösung nur über loese_prognosen_auf".into(),
+            )),
             Art::Abrechnungstag => Err(JournalFehler::Abgelehnt(
                 "Abrechnungstag nur über beginne_abrechnung".into(),
             )),
@@ -792,6 +795,19 @@ impl Journal {
         beleg: &crate::weltprognose::PrognoseBeleg,
     ) -> Result<(), JournalFehler> {
         self.schreibe_eintrag(Art::Weltprognose, &beleg.als_text())
+    }
+
+    /// Löst alle fälligen Prognosen auf (#114) und liefert, wie viele es waren. Jede
+    /// Auflösung folgt allein aus dem Stand; ein Wiederanlauf löst nichts doppelt auf.
+    ///
+    /// # Errors
+    /// Wie `anhaengen`.
+    pub fn loese_prognosen_auf(&mut self) -> Result<usize, JournalFehler> {
+        let faellig = self.stand.faellige_aufloesungen();
+        for a in &faellig {
+            self.schreibe_eintrag(Art::Aufloesung, &a.text())?;
+        }
+        Ok(faellig.len())
     }
 
     /// Belegt einen Kurs mit Quelle, Abrufzeit und Abdruck der rohen Antwort, bevor er

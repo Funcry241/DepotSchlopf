@@ -12,7 +12,8 @@ Diese Datei zuerst lesen, wenn ein neuer Bearbeiter (Mensch oder KI) ohne Vorges
 2. `docs/essenz.md` – Erfahrungsregeln D00 bis D17. Beratend (advisory only), nicht normativ.
 3. `kodex/festschreibung.txt` – was ohne Freigabe des Eigentümers nie geändert wird.
 4. `kodex/aenderung.txt` – die Deklaration der aktuellen Änderung.
-5. Für die konkrete Aufgabe den zuständigen Code und seine Tests lesen.
+5. `docs/MATHEMATIK.md` – Verfahren, Invarianten und ihre Grenzen.
+6. Für die konkrete Aufgabe den zuständigen Code und seine Tests lesen.
 
 ## Arbeitsablauf je Änderung
 

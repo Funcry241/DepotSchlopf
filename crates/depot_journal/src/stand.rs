@@ -80,6 +80,10 @@ pub enum Art {
     RssAbruf,
     /// Fixierte, unabhaengige Prognose eines Beraters im Papiertag.
     Weltprognose,
+    /// `datum;berater;isin;ereignis;zieltag;schluss;ergebnis`: Auflösung einer Prognose nach
+    /// ihrem Horizont (`aufloesung`, #114). Folgt allein aus dem Stand; jede andere wird
+    /// abgelehnt.
+    Aufloesung,
     /// Wissensstand, Budget und Antworten einer Vorbereitung ohne Handel.
     Vorbereitung,
     /// `nr;topf;isin;richtung;stueck;limit;anlass`: ein genehmigter Auftrag, bevor er den
@@ -126,6 +130,7 @@ impl Art {
             Art::Nachricht => "nachricht",
             Art::RssAbruf => "rss-abruf",
             Art::Weltprognose => "weltprognose",
+            Art::Aufloesung => "prognose-aufloesung",
             Art::Vorbereitung => "vorbereitung",
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
@@ -152,6 +157,7 @@ impl Art {
             Art::Nachricht,
             Art::RssAbruf,
             Art::Weltprognose,
+            Art::Aufloesung,
             Art::Vorbereitung,
             Art::Auftrag,
             Art::Zustand,
@@ -214,6 +220,7 @@ pub struct Stand {
     termine: Vec<TerminBeleg>,
     nachrichten: Vec<NachrichtBeleg>,
     weltprognosen: Vec<PrognoseBeleg>,
+    aufloesungen: Vec<crate::Aufloesung>,
     vorbereitungen: Vec<crate::Vorbereitung>,
     letzte_kennung: u64,
     ki: KiStand,
@@ -289,6 +296,49 @@ impl Stand {
     /// Die Auftraege, die noch keinen Endzustand haben.
     pub fn offene_auftraege(&self) -> impl Iterator<Item = &AuftragsLage> {
         self.auftraege.iter().filter(|l| l.zustand.offen())
+    }
+
+    pub fn aufloesungen(&self) -> &[crate::Aufloesung] {
+        &self.aufloesungen
+    }
+
+    /// Die Auflösungen, die jetzt fällig sind: Prognosen ohne Auflösung, deren Zieltag
+    /// abgeschlossen ist. Jede folgt allein aus dem Stand. Es zählt der zuletzt belegte
+    /// Schlusskurs aus einer Quelle genau am Zieltag.
+    pub fn faellige_aufloesungen(&self) -> Vec<crate::Aufloesung> {
+        let Some(abgeschlossen) = self.abschluss.as_ref().map(|a| a.datum) else {
+            return Vec::new();
+        };
+        self.weltprognosen
+            .iter()
+            .filter(|p| !self.aufloesungen.iter().any(|a| a.zu(p)))
+            .filter_map(|p| {
+                let zieltag =
+                    crate::aufloesung::zieltag(&p.prognose.isin, p.datum, p.prognose.handelstage)?;
+                if zieltag > abgeschlossen {
+                    return None;
+                }
+                let schluss = self
+                    .kurse
+                    .iter()
+                    .rev()
+                    .find(|k| {
+                        k.isin() == &p.prognose.isin
+                            && k.kurs().handelstag() == zieltag
+                            && k.kurs().herkunft() == Herkunft::Quelle
+                    })
+                    .map(|k| k.kurs().preis());
+                Some(crate::Aufloesung {
+                    datum: p.datum,
+                    berater: p.berater,
+                    isin: p.prognose.isin.clone(),
+                    ereignis_nr: p.prognose.ereignis_nr,
+                    zieltag,
+                    schluss,
+                    ergebnis: crate::aufloesung::bewerte(p, schluss),
+                })
+            })
+            .collect()
     }
 
     pub fn vorbereitungen(&self) -> &[crate::Vorbereitung] {
@@ -495,6 +545,7 @@ impl Stand {
                 return Ok(());
             }
             Art::Weltprognose => self.belege_weltprognose(inhalt)?,
+            Art::Aufloesung => return self.loese_auf(inhalt),
             Art::Auftrag => {
                 let b = lies_auftrag(inhalt).ok_or("Auftrag unlesbar")?;
                 kanonisch(&auftrag_text(&b), inhalt)?;
@@ -578,6 +629,18 @@ impl Stand {
             self.beobachtungen.push(b);
             Ok(false)
         }
+    }
+
+    /// Eine Auflösung gilt nur, wenn sie genau so aus dem Stand folgt (#114).
+    fn loese_auf(&mut self, inhalt: &str) -> Result<(), String> {
+        let a = crate::Aufloesung::lies(inhalt).ok_or("Auflösung unlesbar")?;
+        if !self.faellige_aufloesungen().contains(&a) {
+            return Err(format!(
+                "Auflösung passt nicht zu Prognose, Zieltag oder Schlusskurs: {inhalt}"
+            ));
+        }
+        self.aufloesungen.push(a);
+        Ok(())
     }
 
     fn belege_weltprognose(&mut self, inhalt: &str) -> Result<(), String> {

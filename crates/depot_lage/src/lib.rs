@@ -202,6 +202,36 @@ pub struct Lagebild {
     pub tage: Vec<TagErgebnis>,
     pub vorbereitung: Option<depot_journal::Vorbereitung>,
     pub(crate) fruehere_vorbereitung: Vec<FruehereVorbereitung>,
+    /// Auswertung der aufgelösten Prognosen je Berater und gesamt (#114). Ein Hinweis, nie
+    /// eine Regel.
+    pub prognosen: Vec<(String, String)>,
+}
+
+/// Je Berater und gesamt: wie viele Prognosen eingetroffen sind, gegen „steigt immer“.
+fn prognose_auswertung(s: &depot_journal::Stand) -> Vec<(String, String)> {
+    let offen = s
+        .weltprognosen()
+        .iter()
+        .filter(|p| !s.aufloesungen().iter().any(|a| a.zu(p)))
+        .count();
+    let mut aus: Vec<(String, String)> = [
+        ("Dachs", Some(BeraterId::Dachs)),
+        ("Maus", Some(BeraterId::Maus)),
+        ("Gesamt", None),
+    ]
+    .into_iter()
+    .filter_map(|(name, b)| {
+        depot_journal::werte_aus(s.weltprognosen(), s.aufloesungen(), b)
+            .map(|a| (name.to_string(), a.hinweis()))
+    })
+    .collect();
+    if offen > 0 {
+        aus.push((
+            "Offen".into(),
+            format!("{offen} Prognosen warten auf ihren Zieltag"),
+        ));
+    }
+    aus
 }
 
 /// So viele Beitraege zeigt das Lagebild hoechstens.
@@ -779,8 +809,10 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut tage = Vec::new();
     let mut vorbereitung = None;
     let mut fruehere_vorbereitung = Vec::new();
+    let mut prognosen = Vec::new();
     match (u.journal, heute, &werte) {
         (Zugang::Offen(s), Some(heute), Ok(werte)) => {
+            prognosen = prognose_auswertung(s);
             if let Some((letzte, fruehere)) = s.vorbereitungen().split_last() {
                 fruehere_vorbereitung = fruehere_einschaetzungen(letzte, fruehere);
                 vorbereitung = Some(letzte.clone());
@@ -854,6 +886,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         tage,
         vorbereitung,
         fruehere_vorbereitung,
+        prognosen,
     }
 }
 

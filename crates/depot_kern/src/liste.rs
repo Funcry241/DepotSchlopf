@@ -189,6 +189,14 @@ pub fn papierorder_schluss(isin: &Isin, versand: Zeitpunkt) -> Option<Zeitpunkt>
     }
 }
 
+/// Die Boerse eines Werts der festgelegten Liste.
+pub fn boerse_von(isin: &Isin) -> Option<Boerse> {
+    WERTE
+        .iter()
+        .find(|(id, ..)| *id == isin.als_str())
+        .map(|(_, boerse, _, _)| *boerse)
+}
+
 /// Die Boersen der festgelegten Liste.
 pub fn boersen() -> Vec<Boerse> {
     let mut b: Vec<Boerse> = WERTE.iter().map(|(_, boerse, _, _)| *boerse).collect();
