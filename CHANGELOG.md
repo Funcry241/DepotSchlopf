@@ -6,6 +6,10 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Vergleich seit Start (#118): Live zeigt Dachs und Maus vor und nach KI-Kosten neben einem Vergleichsdepot (Startgeld gleich gewichtet in die 15 Werte vom 10.11.2026, dann halten) und reinem Bargeld. Alles kommt aus dem Journal (`Stand::tagesschluesse`); kein neues Format, keine Grenze. Nachweis in `docs/befunde/vergleich.md`.
+
 ### Geändert
 
 - Die Einrichtung zeigt ungespeicherte Änderungen direkt am Formular und warnt vor ihrem Verlust. „Speichern und Zeitplan einschalten“ übernimmt die ausgefüllten Werte gemeinsam, unter denselben Einrichtungsprüfungen. Rückmeldungen bieten den passenden nächsten Schritt an; ein Dienstneustart verwirft offene Eingaben nicht mehr automatisch.
