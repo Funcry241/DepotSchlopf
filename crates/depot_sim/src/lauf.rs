@@ -667,6 +667,7 @@ fn erlaubnis(
     topf: TopfId,
     berater: BeraterId,
     folge: &str,
+    ki: &dyn Berater,
 ) -> Result<Option<depot_journal::AufrufErlaubnis>, LaufFehler> {
     let zweck = if folge == "kein Vorschlag" {
         depot_journal::KiZweck::Erstmeinung
@@ -677,6 +678,7 @@ fn erlaubnis(
         Ok(e) => Ok(Some(e)),
         Err(Sperre::Kassenbuch(e)) => Err(halt(format!("Kassenbuch: {e}"))),
         Err(sperre) => {
+            ki.anfrage_uebersprungen(zweck, &format!("Kostenschutz: {sperre:?}"));
             begruende(
                 j,
                 tag,
@@ -709,16 +711,15 @@ fn frage(
     // Ein Berater ohne Anbindung wird nicht gefragt und kostet nichts: Fuer ihn wird keine
     // Erlaubnis reserviert. Ohne Vorschlag oder ohne Zweitmeinung gibt es keinen Auftrag.
     if !frager.angebunden() {
+        let grund = nicht_angebunden(frager);
+        frager.anfrage_uebersprungen(depot_journal::KiZweck::Erstmeinung, &grund);
         begruende(
             j,
             tag,
             name(wer),
-            &format!(
-                "{t}: {}, nicht gefragt; kein Vorschlag",
-                nicht_angebunden(frager)
-            ),
+            &format!("{t}: {grund}, nicht gefragt; kein Vorschlag"),
         )?;
-    } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag")? {
+    } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag", frager)? {
         let mut antwort = frager.vorschlagen_mit_bilanz(e, lage, &prognosebilanz(j.stand()));
         if let Some(a) = frager.abrechnung() {
             j.rechne_ki_ab(&a).map_err(journal)?;
@@ -871,15 +872,14 @@ fn zweite_meinung(
         ereignisse: &tag.ereignisse,
     };
     if vorschlag.is_some() && !pruefer.angebunden() {
+        let grund = nicht_angebunden(pruefer);
+        pruefer.anfrage_uebersprungen(depot_journal::KiZweck::Zweitmeinung, &grund);
         vorschlag = None;
         begruende(
             j,
             tag,
             name(zweiter),
-            &format!(
-                "{t}: {}, nicht gefragt; ohne Zweitmeinung kein Auftrag",
-                nicht_angebunden(pruefer)
-            ),
+            &format!("{t}: {grund}, nicht gefragt; ohne Zweitmeinung kein Auftrag"),
         )?;
     }
     if let Some(v) = vorschlag.take()
@@ -890,6 +890,7 @@ fn zweite_meinung(
             id,
             zweiter,
             "ohne Zweitmeinung kein Auftrag",
+            pruefer,
         )?
     {
         let urteil = pruefer.pruefen_mit_bilanz(e, &lage, &v, &prognosebilanz(j.stand()));

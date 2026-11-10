@@ -21,6 +21,7 @@
 
 pub mod aktualisierung;
 pub mod autostart;
+mod gespraeche;
 pub mod hinweis;
 pub mod http;
 pub mod kostenschutz;
@@ -206,6 +207,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let tag = heute(jetzt);
     match a.pfad.as_str() {
         "/" => live_seite(d, a, jetzt),
+        "/gespraeche" => gespraechsseite(d, a, tag),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
         "/teil/live" => antwort(
             200,
@@ -302,6 +304,31 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         ),
         _ => seiten::fehler(404, "Nicht gefunden"),
     }
+}
+
+/// Räumt alte lokale Gesprächsprotokolle beim Start des Dienstes auf.
+pub fn gespraeche_beim_start(wurzel: &std::path::Path) {
+    gespraeche::beim_start(wurzel);
+}
+
+fn gespraechsseite(d: &Dienst, a: &Anfrage, heute: Option<depot_kern::Datum>) -> Vec<u8> {
+    let abfrage = formular(a.abfrage.as_bytes()).unwrap_or_default();
+    let inhalt = gespraeche::inhalt(
+        &d.wurzel.join("daten"),
+        heute,
+        feld(&abfrage, "tag").unwrap_or_default(),
+        feld(&abfrage, "wer").unwrap_or_default(),
+    );
+    let seite = seiten::rahmen(
+        "/gespraeche",
+        None,
+        None,
+        &inhalt,
+        d.version.as_deref(),
+        &seiten::betriebsleiste(&d.start, &d.sperre(), heute),
+        ("", ""),
+    );
+    antwort(200, HTML, seite.as_bytes())
 }
 
 /// Der bereits vor diesen Korrekturen vorhandene Statuspfad bleibt der Herzschlag.

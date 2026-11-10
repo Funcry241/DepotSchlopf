@@ -264,6 +264,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    depot_dienst::gespraeche_beim_start(&wurzel);
     let token = neues_token();
     let umwelt: Arc<dyn Umwelt> = Arc::new(System);
     if let Some((heute, ..)) = jetzt().and_then(depot_kern::Zeitpunkt::in_frankfurt)

@@ -420,6 +420,7 @@ mod tests {
     fn geheimes_bleibt_draussen() {
         for p in [
             "daten/kassenbuch.txt",
+            "daten/gespraeche/2026-11-10.jsonl",
             ".env",
             "x/y.key",
             "target/a",

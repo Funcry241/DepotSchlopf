@@ -65,22 +65,36 @@ fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
             sperre.display()
         );
     }
+    let lauf = std::env::var(depot_journal::gespraeche::LAUF_ENV)
+        .ok()
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit() || b == b'-'))
+        .unwrap_or_else(|| {
+            format!(
+                "hand-{}-{}",
+                jetzt().map_or(0, Zeitpunkt::sekunden),
+                std::process::id()
+            )
+        });
+    let dachs_schluessel = schluessel(BeraterId::Dachs);
+    let maus_schluessel = schluessel(BeraterId::Maus);
     let mut dachs = KiBerater::neu(
         BeraterId::Dachs,
-        schluessel(BeraterId::Dachs),
+        dachs_schluessel.clone(),
         Https::neu(),
         universum.clone(),
         sperre.clone(),
     )
-    .mit_protokoll(protokoll.clone(), jetzt);
+    .mit_protokoll(protokoll.clone(), jetzt)
+    .mit_gespraechen(lauf.clone(), maus_schluessel.clone());
     let mut maus = KiBerater::neu(
         BeraterId::Maus,
-        schluessel(BeraterId::Maus),
+        maus_schluessel,
         Https::neu(),
         universum.clone(),
         sperre.clone(),
     )
-    .mit_protokoll(protokoll, jetzt);
+    .mit_protokoll(protokoll, jetzt)
+    .mit_gespraechen(lauf, dachs_schluessel);
     if vorbereitung {
         let zeit = jetzt().ok_or("Uhr liefert keine Zeit")?;
         dachs = dachs.fuer_vorbereitung(zeit);

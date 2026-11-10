@@ -176,6 +176,9 @@ pub fn vorbereiten<'a>(
                 b.warum_nicht().unwrap_or_else(|| "nicht angebunden".into())
             ));
         }
+        if !a.gefragt {
+            b.anfrage_uebersprungen(depot_journal::KiZweck::Vorbereitung, &a.text);
+        }
         println!("[Vorbereitung] {:?}: {}", wer, a.text);
         j.belege_vorbereitungsantwort(zeit, a)
             .map_err(|e| format!("{e:?}"))?;
