@@ -1,14 +1,13 @@
 klasse: Funktion
-zweck: Täglichen Quellenstand und frühere Einschätzungen bei ausgefallener KI zeigen und den Vorbereitungsrahmen an börsenfreien Tagen begrenzen.
+zweck: Windows-Hinweis zeigen, sobald ein neuer Grund für „Eingriff nötig“ entsteht oder der jüngste Papiertag ausgefallen ist (#122).
 pfade:
+CHANGELOG.md
+README.md
+crates/depot_dienst/src/hinweis.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/main.rs
 crates/depot_dienst/src/seiten.rs
 crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/src/zeitplan.rs
 crates/depot_dienst/tests/dienst.rs
-crates/depot_journal/src/datei.rs
-crates/depot_ki/src/lib.rs
-crates/depot_ki/src/tagesrahmen.rs
-crates/depot_lage/src/budget.rs
-crates/depot_lage/src/html.rs
-crates/depot_lage/src/lib.rs
-crates/depot_lage/tests/lage.rs
-docs/befunde/vorbereitung.md
+docs/befunde/hinweis.md

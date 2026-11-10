@@ -21,6 +21,7 @@
 
 pub mod aktualisierung;
 pub mod autostart;
+pub mod hinweis;
 pub mod http;
 pub mod kostenschutz;
 mod papierdialog;
@@ -69,6 +70,9 @@ pub trait Umwelt: Send + Sync {
         DialogErgebnis::NichtVerfuegbar
     }
 
+    /// Zeigt einen Windows-Hinweis und wartet nicht darauf. Ab Werk: nichts.
+    fn hinweis(&self, _titel: &str, _text: &str) {}
+
     /// # Errors
     /// Ordner oder Pfad ungeeignet, Schreibfehler.
     fn autostart_setzen(&self, wurzel: &Path, an: bool) -> Result<(), String>;
@@ -104,6 +108,10 @@ impl Umwelt for System {
 
     fn papierdialog_testen(&self) -> DialogErgebnis {
         papierdialog::testen()
+    }
+
+    fn hinweis(&self, titel: &str, text: &str) {
+        hinweis::zeige(titel, text);
     }
 
     fn autostart_setzen(&self, wurzel: &Path, an: bool) -> Result<(), String> {
@@ -351,6 +359,7 @@ fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
         papier_danach: haken("papier_danach")?,
         nachrichten_an: haken("nachrichten_an")?,
         vorbereitung: zeitplan::VorbereitungsPlan::aus_bool(haken("vorbereitung_an")?),
+        hinweis: zeitplan::HinweisPlan::aus_bool(haken("hinweis_an")?),
     })
 }
 

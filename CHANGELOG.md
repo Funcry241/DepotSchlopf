@@ -6,6 +6,10 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Windows-Hinweis bei „Eingriff nötig“ (#122): Der Dienst zeigt eine Sprechblase im Infobereich, sobald ein neuer Grund für einen Eingriff entsteht oder der jüngste Papiertag ausgefallen ist, gebündelt und höchstens einmal je Minute. `daten/hinweise.txt` verhindert Wiederholungen nach einem Neustart. Schalter unter Einrichtung → Zeitplan, ab Werk an; alte Zeitpläne bedeuten an.
+
 ### Geändert
 
 - Die Einrichtung zeigt ungespeicherte Änderungen direkt am Formular und warnt vor ihrem Verlust. „Speichern und Zeitplan einschalten“ übernimmt die ausgefüllten Werte gemeinsam, unter denselben Einrichtungsprüfungen. Rückmeldungen bieten den passenden nächsten Schritt an; ein Dienstneustart verwirft offene Eingaben nicht mehr automatisch.
