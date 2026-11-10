@@ -53,6 +53,7 @@ Geplant: breitere Auswahl, `run.cmd tag`, Backtest, Steuer-Export aus dem Journa
 ## Essenz und Kodex
 
 - [Essenz](docs/essenz.md): Erfahrungsregeln D00–D17. Beratend, vor jeder Änderung lesen.
+- [Mathematik in DepotSchlopf](docs/MATHEMATIK.md): wo Festkomma, gerichtete Rundung, Hashkette, Zustandsautomaten und Invarianten Geld, Budget und Journal absichern, und wo ihre Grenzen liegen.
 - Kodex: entscheidet nach jeder Änderung. Jede Änderung deklariert sich in `kodex/aenderung.txt`. Harte Grenzen, KI-Budget, Produktarten, Abhängigkeiten und Lints stehen in `kodex/festschreibung.txt` und ändern sich nur mit Freigabe des Eigentümers.
 
 ## Schnellstart

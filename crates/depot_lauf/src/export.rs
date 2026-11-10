@@ -335,7 +335,7 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     h.push_str(
         "\nKALTSTART-REIHENFOLGE (aus dem Quellstand)\n------------------------------------------\n\
          1. docs/kaltstart.md\n2. docs/essenz.md (beratend)\n3. kodex/festschreibung.txt (nie ohne Freigabe ändern)\n\
-         4. kodex/aenderung.txt (für jede Änderung neu schreiben)\n5. README.md, CHANGELOG.md\n\n\
+         4. kodex/aenderung.txt (für jede Änderung neu schreiben)\n5. docs/MATHEMATIK.md (Invarianten und Grenzen)\n6. README.md, CHANGELOG.md\n\n\
          ESSENZ-REGELN\n-------------\n",
     );
     for (nr, titel, _) in &regeln {

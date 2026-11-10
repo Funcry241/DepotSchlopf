@@ -8,6 +8,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Neue Seite [Mathematik in DepotSchlopf](docs/MATHEMATIK.md): Bestandsaufnahme der Verfahren mit Rolle und Quellstelle, die zentralen Invarianten, Geplantes und offene Grenzen. Sie steht in der Kaltstart-Reihenfolge und im Übergabetext des Assistenten-Exports.
+
 - Die Einrichtung zeigt ungespeicherte Änderungen direkt am Formular und warnt vor ihrem Verlust. „Speichern und Zeitplan einschalten“ übernimmt die ausgefüllten Werte gemeinsam, unter denselben Einrichtungsprüfungen. Rückmeldungen bieten den passenden nächsten Schritt an; ein Dienstneustart verwirft offene Eingaben nicht mehr automatisch.
 
 - Eine gemeinsame Betriebsleiste zeigt auf Live und Einrichtung den laufenden Auftrag, Wartehinweise, Warteschlange und Abschluss. Gefundene Updates erscheinen dort mit „Update ansehen“. Wichtige Aktionen haben gefüllte Knöpfe; laufende Bereiche und gesperrte Knöpfe sind deutlicher erkennbar. Die Aktualisierung lässt Einrichtungsformulare unangetastet.

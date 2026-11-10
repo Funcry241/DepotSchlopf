@@ -1,14 +1,8 @@
 klasse: Funktion
-zweck: Täglichen Quellenstand und frühere Einschätzungen bei ausgefallener KI zeigen und den Vorbereitungsrahmen an börsenfreien Tagen begrenzen.
+zweck: Seite „Mathematik in DepotSchlopf“ anlegen und in README, Kaltstart-Reihenfolge und Übergabetext des Assistenten-Exports aufnehmen.
 pfade:
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/src/werkbank.rs
-crates/depot_dienst/tests/dienst.rs
-crates/depot_journal/src/datei.rs
-crates/depot_ki/src/lib.rs
-crates/depot_ki/src/tagesrahmen.rs
-crates/depot_lage/src/budget.rs
-crates/depot_lage/src/html.rs
-crates/depot_lage/src/lib.rs
-crates/depot_lage/tests/lage.rs
-docs/befunde/vorbereitung.md
+CHANGELOG.md
+README.md
+crates/depot_lauf/src/export.rs
+docs/MATHEMATIK.md
+docs/kaltstart.md
