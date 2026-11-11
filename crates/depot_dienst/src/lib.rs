@@ -133,7 +133,7 @@ pub fn lagerechner(umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerechner {
         let daten = wurzel.join("daten");
         let sperren = sperrdateien(&daten);
         let (anbieter, anbieter_unlesbar) = anbieterprotokoll(&daten);
-        mit_journal(&daten, |journal| {
+        let mut bild = mit_journal(&daten, |journal| {
             lagebild(&Umgebung {
                 jetzt,
                 journal,
@@ -154,7 +154,9 @@ pub fn lagerechner(umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerechner {
                 anbieter_unlesbar,
                 ki_halt: ki_halt(&daten),
             })
-        })
+        });
+        bild.gemini_budget = Some(gemini::budget(&daten, heute(jetzt)));
+        bild
     })
 }
 
@@ -292,7 +294,13 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             };
             let mut inhalt = seiten::einrichtung(&d.token, &d.start, &zustand, tag, &gespeichert);
             drop(zustand);
-            inhalt.push_str(&gemini::einrichtung(d, u, tag));
+            let gemini_schluessel = u.schluessel(Wer::Gemini);
+            let gemini_stand = if gemini_schluessel == Hinterlegt::Unbekannt {
+                depot_lage::SchluesselStand::Unbekannt
+            } else {
+                schluessel_stand(gemini_schluessel, &protokoll, Wer::Gemini.protokoll())
+            };
+            inhalt.push_str(&gemini::einrichtung(d, gemini_stand, tag));
             let seite = seiten::rahmen(
                 "/einrichtung",
                 None,
@@ -437,40 +445,30 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                     "Schlüssel unbekannt. Wähle den Anbieter erneut in der Einrichtung.",
                 );
             };
+            let abschnitt = if wer == Wer::Gemini {
+                "zusatz"
+            } else {
+                "schluessel"
+            };
             if wer.pruefe(wert).is_err() {
-                return http::umleitung(if wer == Wer::Gemini {
-                    "/einrichtung?m=schluessel_ungueltig#zusatz"
-                } else {
-                    "/einrichtung?m=schluessel_ungueltig#schluessel"
-                });
+                return http::umleitung(&format!(
+                    "/einrichtung?m=schluessel_ungueltig#{abschnitt}"
+                ));
             }
-            match u.schluessel_ablegen(wer, wert) {
-                Ok(()) => {
-                    d.protokoll_schluessel_merken(wert.trim());
-                    if wer == Wer::Gemini {
-                        return http::umleitung("/einrichtung?m=schluessel#zusatz");
-                    }
-                    // Der neue Schluessel ist nur hinterlegt, bis ein Aufruf ihn bestaetigt.
-                    let neu = anbieter::Eintrag::neu(
-                        jetzt,
-                        wer.protokoll(),
-                        anbieter::Ergebnis::Neu,
-                        None,
-                    );
-                    let datei = d.wurzel.join("daten").join(anbieter::DATEI);
-                    let vermerkt = anbieter::anhaengen(&datei, &neu).is_ok();
-                    d.sperre().lage_veraltet = true;
-                    if vermerkt {
-                        http::umleitung("/einrichtung?m=schluessel#schluessel")
-                    } else {
-                        http::umleitung("/einrichtung?m=schluessel_protokoll#schluessel")
-                    }
-                }
-                Err(_) if wer == Wer::Gemini => {
-                    http::umleitung("/einrichtung?m=schluessel_fehler#zusatz")
-                }
-                Err(_) => http::umleitung("/einrichtung?m=schluessel_fehler#schluessel"),
+            if u.schluessel_ablegen(wer, wert).is_err() {
+                return http::umleitung(&format!("/einrichtung?m=schluessel_fehler#{abschnitt}"));
             }
+            d.protokoll_schluessel_merken(wert.trim());
+            // Der neue Schlüssel ist hinterlegt, bis ein Aufruf ihn bestätigt.
+            let neu = anbieter::Eintrag::neu(jetzt, wer.protokoll(), anbieter::Ergebnis::Neu, None);
+            let datei = d.wurzel.join("daten").join(anbieter::DATEI);
+            let meldung = if anbieter::anhaengen(&datei, &neu).is_ok() {
+                "schluessel"
+            } else {
+                "schluessel_protokoll"
+            };
+            d.sperre().lage_veraltet = true;
+            http::umleitung(&format!("/einrichtung?m={meldung}#{abschnitt}"))
         }
         "/zeitplan" => zeitplan_aendern(d, &f),
         "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),

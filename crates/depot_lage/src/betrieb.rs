@@ -30,7 +30,9 @@ impl SchluesselStand {
             SchluesselStand::Hinterlegt => "hinterlegt, noch nicht benutzt".into(),
             SchluesselStand::Geprueft(z) => format!("geprüft (angenommen {})", zeit_text(z)),
             SchluesselStand::Abgelehnt(z) => format!("abgelehnt ({})", zeit_text(z)),
-            SchluesselStand::Unbekannt => "unbekannt (nur unter Windows prüfbar)".into(),
+            SchluesselStand::Unbekannt => {
+                "unbekannt (Anmeldeinformationsverwaltung nicht prüfbar)".into()
+            }
         }
     }
 
