@@ -36,7 +36,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  kodex-windows:
+  kodex-windows-gate:
     runs-on: windows-latest
     steps:
       - name: Zeilenenden beim Checkout festlegen
@@ -56,9 +56,6 @@ jobs:
           }
           cargo run --locked -p depot_lauf -- alles --basis $basis
           exit $LASTEXITCODE
-      - name: Alter Windows-Updater bei laufendem Dienst
-        shell: pwsh
-        run: python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$env:RUNNER_TEMP/depot-update-alt"
       - name: Windows-Assistenten-Export bereitstellen
         if: always()
         uses: actions/upload-artifact@v4
@@ -67,3 +64,31 @@ jobs:
           path: assistant_export_latest.zip
           if-no-files-found: warn
           retention-days: 30
+
+  kodex-windows-update:
+    runs-on: windows-latest
+    steps:
+      - name: Zeilenenden beim Checkout festlegen
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rust-Werkzeugkette aus rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Alter Windows-Updater bei laufendem Dienst
+        shell: pwsh
+        run: python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$env:RUNNER_TEMP/depot-update-alt"
+
+  kodex-windows:
+    # Der bisherige Windows-Check bleibt das gemeinsame Ergebnis beider Prüfungen.
+    needs: [kodex-windows-gate, kodex-windows-update]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Beide Windows-Prüfungen bestätigen
+        env:
+          GATE: ${{ needs.kodex-windows-gate.result }}
+          UPDATE: ${{ needs.kodex-windows-update.result }}
+        run: |
+          printf 'Windows-Gate: %s\nWindows-Update: %s\n' "$GATE" "$UPDATE"
+          test "$GATE" = success && test "$UPDATE" = success
