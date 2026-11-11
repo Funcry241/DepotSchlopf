@@ -49,6 +49,7 @@ fn eingefrorene_vorbereitung_entspricht_auch_bei_langen_texten_der_gesendeten_au
         datum: Datum::neu(2026, 11, 9).ok_or("Datum")?,
         topf: &topf,
         kurse: &kurse,
+        positionskaeufe: &[],
         ereignisse: &aus,
     };
     let frage = depot_berater::frage::vorbereitung_frage(&lage, &universum()?, zeit);
@@ -89,6 +90,7 @@ fn vorbereitungsclient_akzeptiert_these_ohne_kurs_aber_keine_handelsziele() -> R
         datum: montag,
         topf: &topf,
         kurse: &kurse,
+        positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
     let erlaubt = ort
@@ -313,6 +315,7 @@ fn mit_lage<T>(f: impl FnOnce(&Lage<'_>) -> T) -> Result<T, String> {
         datum: tag()?,
         topf: &topf,
         kurse: &kurse,
+        positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
     Ok(f(&lage))
@@ -1192,6 +1195,7 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
         datum: d,
         topf: &topf,
         kurse: &kurse,
+        positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
     let v = Vorschlag {
@@ -1405,6 +1409,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
         datum: tag()?,
         topf: &topf,
         kurse: &kurse,
+        positionskaeufe: &[],
         ereignisse: &[],
     };
     let frage = depot_berater::frage::abstimmungs_frage(&lage, &universum()?, &stand);

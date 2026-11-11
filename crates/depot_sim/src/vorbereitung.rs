@@ -146,6 +146,7 @@ pub fn vorbereiten<'a>(
                             datum: fuer,
                             topf: &topf,
                             kurse: &kurse,
+                            positionskaeufe: &[],
                             ereignisse: &ereignisse,
                         },
                     );
