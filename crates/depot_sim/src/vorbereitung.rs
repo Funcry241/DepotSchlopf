@@ -145,6 +145,7 @@ pub fn vorbereiten<'a>(
                         &Lage {
                             datum: fuer,
                             topf: &topf,
+                            kaufbar: Cent::NULL,
                             kurse: &kurse,
                             positionskaeufe: &[],
                             ereignisse: &ereignisse,

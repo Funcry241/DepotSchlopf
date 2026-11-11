@@ -80,9 +80,10 @@ fn lage_text(lage: &Lage<'_>, universum: &Universum, bilanz: &[(BeraterId, Auswe
     let _ = writeln!(t, "Datum: {}", lage.datum);
     let _ = writeln!(
         t,
-        "Topf {:?}: Bargeld {} EUR",
+        "Topf {:?}: Bargeld {} EUR, davon für Käufe frei {} EUR",
         lage.topf.id(),
-        euro(Preis::aus_cent(lage.topf.bargeld()))
+        euro(Preis::aus_cent(lage.topf.bargeld())),
+        euro(Preis::aus_cent(lage.kaufbar))
     );
     let namen: BTreeMap<&Isin, &str> = universum
         .instrumente()
@@ -467,6 +468,7 @@ mod prognosebilanz_tests {
         let lage = Lage {
             datum,
             topf: &topf,
+            kaufbar: topf.bargeld(),
             kurse: &kurse,
             positionskaeufe: &[],
             ereignisse: &["Termin".into()],

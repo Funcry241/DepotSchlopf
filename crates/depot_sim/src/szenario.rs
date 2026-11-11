@@ -35,6 +35,8 @@ pub struct Szenario {
 pub struct Lage<'a> {
     pub datum: Datum,
     pub topf: &'a Topf,
+    /// Bargeld nach Abzug offener Käufe und noch nicht abgerechneter Erlöse.
+    pub kaufbar: Cent,
     pub kurse: &'a Kurse,
     pub ereignisse: &'a [String],
     pub positionskaeufe: &'a [crate::Positionskauf],
