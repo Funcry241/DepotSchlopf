@@ -1,12 +1,5 @@
 klasse: Funktion
-zweck: Papierkäufe auf das tatsächlich freie Bargeld begrenzen
+zweck: KI-Gespräche als lesbare Antworten und Begründungen anzeigen
 pfade:
-crates/depot_berater/src/frage.rs
-crates/depot_berater/tests/berater.rs
-crates/depot_regelwerk/src/entscheidung.rs
-crates/depot_regelwerk/src/lib.rs
-crates/depot_sim/src/abstimmung.rs
-crates/depot_sim/src/lauf.rs
-crates/depot_sim/src/szenario.rs
-crates/depot_sim/src/vorbereitung.rs
-crates/depot_sim/tests/papiertag.rs
+crates/depot_dienst/src/gespraeche.rs
+crates/depot_dienst/tests/dienst.rs
