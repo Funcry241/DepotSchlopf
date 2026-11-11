@@ -1,8 +1,7 @@
 //! Negativtests zu den Kodex-Befunden aus `docs/BEFUNDE.md` (Stufe 2, Kodex-Schritt).
 //!
-//! Jeder Test reserviert exklusiv eine Kopie des Arbeitsbaums im System-Tempordner, legt dort ein
-//! Git-Repository mit der Basis `basis` an und fuehrt dann genau einen Verstoss aus dem Befund
-//! ein. Der Kodex muss ihn ablehnen, und zwar aus dem richtigen Grund: Die Ablehnung muss ein
+//! Der Testprozess erfasst den Arbeitsbaum einmal als Git-Bundle. Jeder Test klont daraus
+//! ein eigenes Git-Repository mit der Basis `basis` und führt dort seine Verstöße ein. Der Kodex muss ihn ablehnen, und zwar aus dem richtigen Grund: Die Ablehnung muss ein
 //! erwartetes Stichwort nennen. Vor jedem Verstoss prueft eine Kontrolle, dass dieselbe Kopie
 //! mit einer harmlosen, sauber deklarierten Aenderung das Gate besteht. Eine kaputte Kopie macht
 //! einen Test also nie gruen.
@@ -14,6 +13,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use sha2::{Digest, Sha256};
@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 use std::os::unix::fs::PermissionsExt as _;
 
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
+static BASIS: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
 
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -78,28 +79,69 @@ fn reserviere_ordner(basis: &Path, kennung: &str) -> Result<PathBuf, String> {
 
 /// Eine Kopie des Arbeitsbaums mit eigenem Git-Repository; die Basis heisst `basis`.
 struct Baum {
+    ordner: PathBuf,
     pfad: PathBuf,
 }
 
 impl Drop for Baum {
     fn drop(&mut self) {
         // Nur die exklusiv reservierte eigene Kopie entfernen, nie einen fremden Namen.
-        let _ = fs::remove_dir_all(&self.pfad);
+        let _ = fs::remove_dir_all(&self.ordner);
     }
 }
 
 impl Baum {
-    fn neu() -> Result<Baum, String> {
-        let ws = workspace();
+    fn reserviere() -> Result<Self, String> {
         let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
         let pfad = reserviere_ordner(
             &std::env::temp_dir().join("depotschlopf-kodex-befunde"),
             &format!("baum_{}_{n}", std::process::id()),
         )?;
-        let baum = Baum { pfad };
+        Ok(Self {
+            ordner: pfad.clone(),
+            pfad,
+        })
+    }
+
+    fn neu() -> Result<Self, String> {
+        let basis = BASIS
+            .get_or_init(|| Self::basis_bundle(&workspace()))
+            .as_ref()
+            .map_err(Clone::clone)?;
+        Self::aus_bundle(basis)
+    }
+
+    fn aus_bundle(basis: &[u8]) -> Result<Self, String> {
+        let mut baum = Self::reserviere()?;
+        fs::write(baum.pfad.join("basis.bundle"), basis)
+            .map_err(|e| format!("Prüfbasis schreiben: {e}"))?;
+        git(
+            &baum.pfad,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "clone",
+                "-q",
+                "--branch",
+                "basis",
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "core.eol=lf",
+                "--",
+                "basis.bundle",
+                "repo",
+            ],
+        )?;
+        baum.pfad.push("repo");
+        Ok(baum)
+    }
+
+    fn basis_bundle(ws: &Path) -> Result<Vec<u8>, String> {
+        let baum = Self::reserviere()?;
         let pfad = &baum.pfad;
         let liste = git(
-            &ws,
+            ws,
             &[
                 "ls-files",
                 "-z",
@@ -120,14 +162,13 @@ impl Baum {
             }
             fs::copy(&quelle, &ziel).map_err(|e| format!("{rel}: {e}"))?;
         }
-        git(pfad, &["init", "-q"])?;
+        git(pfad, &["init", "-q", "-b", "basis"])?;
         // Die Gegenproben arbeiten wie die Prüfkopie mit unveränderten LF-Dateien.
         git(pfad, &["config", "--local", "core.autocrlf", "false"])?;
         git(pfad, &["config", "--local", "core.eol", "lf"])?;
         git(pfad, &["add", "-A"])?;
         git(pfad, &["commit", "-q", "-m", "basis"])?;
-        git(pfad, &["branch", "basis"])?;
-        Ok(baum)
+        git(pfad, &["bundle", "create", "-", "refs/heads/basis"])
     }
 
     fn datei(&self, rel: &str) -> PathBuf {
@@ -171,8 +212,7 @@ impl Baum {
 
     /// Setzt den Arbeitsbaum auf die Basis zurueck (auch neue Dateien).
     fn zuruecksetzen(&self) -> Result<(), String> {
-        git(&self.pfad, &["reset", "-q"])?;
-        git(&self.pfad, &["checkout", "-q", "--", "."])?;
+        git(&self.pfad, &["reset", "--hard", "-q"])?;
         git(&self.pfad, &["clean", "-q", "-f", "-d"])?;
         Ok(())
     }
@@ -1540,6 +1580,32 @@ fn rss_quellen_aendern_nur_mit_festschreibung() -> Result<(), String> {
 }
 
 #[test]
+fn pruefbasis_enthaelt_arbeitsstand_und_haelt_kopien_getrennt() -> Result<(), String> {
+    let quelle = Baum::reserviere()?;
+    git(&quelle.pfad, &["init", "-q"])?;
+    quelle.schreibe(".gitignore", "ignoriert.txt\n")?;
+    quelle.schreibe("geaendert.txt", "Index\n")?;
+    quelle.schreibe("geloescht.txt", "entfällt\n")?;
+    git(&quelle.pfad, &["add", "-A"])?;
+    quelle.schreibe("geaendert.txt", "Arbeitsbaum\n")?;
+    quelle.schreibe("neu.txt", "Neue Datei\n")?;
+    quelle.schreibe("ignoriert.txt", "lokal\n")?;
+    fs::remove_file(quelle.datei("geloescht.txt")).map_err(|e| e.to_string())?;
+
+    let basis = Baum::basis_bundle(&quelle.pfad)?;
+    let erste = Baum::aus_bundle(&basis)?;
+    let zweite = Baum::aus_bundle(&basis)?;
+    assert_eq!(erste.lies("geaendert.txt")?, "Arbeitsbaum\n");
+    assert_eq!(erste.lies("neu.txt")?, "Neue Datei\n");
+    assert!(!erste.datei("geloescht.txt").exists());
+    assert!(!erste.datei("ignoriert.txt").exists());
+    erste.schreibe("geaendert.txt", "Nur erste Kopie\n")?;
+    assert_eq!(zweite.lies("geaendert.txt")?, "Arbeitsbaum\n");
+    assert_eq!(quelle.lies("geaendert.txt")?, "Arbeitsbaum\n");
+    Ok(())
+}
+
+#[test]
 fn vorhandener_pruefbaum_wird_nicht_geloescht() -> Result<(), String> {
     let n = ZAEHLER.fetch_add(1, Ordering::SeqCst);
     let basis = reserviere_ordner(
@@ -1554,7 +1620,10 @@ fn vorhandener_pruefbaum_wird_nicht_geloescht() -> Result<(), String> {
         fs::read_to_string(alt.join("eigentuemer.txt")).map_err(|e| e.to_string())?,
         "erster Test"
     );
-    drop(Baum { pfad: neu.clone() });
+    drop(Baum {
+        ordner: neu.clone(),
+        pfad: neu.clone(),
+    });
     assert!(!neu.exists(), "Eigene Kopie wird aufgeraeumt");
     assert_eq!(
         fs::read_to_string(alt.join("eigentuemer.txt")).map_err(|e| e.to_string())?,

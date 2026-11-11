@@ -1,4 +1,4 @@
 klasse: KodexAenderung
-zweck: Windows-Gate und Update-Gegenprobe gleichzeitig ausführen
+zweck: Ausgangsstand der isolierten Kodex-Gegenproben einmal je Testlauf vorbereiten
 pfade:
-.github/workflows/kodex.yml
+crates/depot_kodex/tests/befunde.rs
