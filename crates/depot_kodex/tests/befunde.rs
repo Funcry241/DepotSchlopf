@@ -9,6 +9,8 @@
 //! Die Tests nutzen nur `depot_kodex::pruefe`, `pruefe_ohne_diff` und die Festschreibung
 //! (`berechne`, `als_text`). Diese Schnittstelle bleibt beim Umbau gleich.
 
+use std::cell::RefCell;
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -81,6 +83,7 @@ fn reserviere_ordner(basis: &Path, kennung: &str) -> Result<PathBuf, String> {
 struct Baum {
     ordner: PathBuf,
     pfad: PathBuf,
+    vorher: RefCell<BTreeMap<String, Option<Vec<u8>>>>,
 }
 
 impl Drop for Baum {
@@ -100,6 +103,7 @@ impl Baum {
         Ok(Self {
             ordner: pfad.clone(),
             pfad,
+            vorher: RefCell::default(),
         })
     }
 
@@ -180,9 +184,19 @@ impl Baum {
     }
 
     fn schreibe(&self, rel: &str, inhalt: &str) -> Result<(), String> {
+        self.schreibe_bytes(rel, inhalt.as_bytes())
+    }
+
+    /// Die Testdateien liegen in vorhandenen Ordnern. Pro Fall merken wir ihren ersten Stand.
+    fn schreibe_bytes(&self, rel: &str, inhalt: &[u8]) -> Result<(), String> {
         let ziel = self.datei(rel);
-        if let Some(eltern) = ziel.parent() {
-            fs::create_dir_all(eltern).map_err(|e| format!("{rel}: {e}"))?;
+        if let Entry::Vacant(eintrag) = self.vorher.borrow_mut().entry(rel.to_owned()) {
+            let alt = match fs::read(&ziel) {
+                Ok(bytes) => Some(bytes),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(format!("{rel} vor der Änderung lesen: {e}")),
+            };
+            eintrag.insert(alt);
         }
         fs::write(ziel, inhalt).map_err(|e| format!("{rel}: {e}"))
     }
@@ -210,10 +224,22 @@ impl Baum {
         self.schreibe("kodex/aenderung.txt", &t)
     }
 
-    /// Setzt den Arbeitsbaum auf die Basis zurueck (auch neue Dateien).
+    /// Stellt nur die Dateien wieder her, die der Fall über `schreibe` geändert hat.
     fn zuruecksetzen(&self) -> Result<(), String> {
-        git(&self.pfad, &["reset", "--hard", "-q"])?;
-        git(&self.pfad, &["clean", "-q", "-f", "-d"])?;
+        for (rel, alt) in self.vorher.take() {
+            let ziel = self.datei(&rel);
+            let ergebnis = match alt {
+                Some(bytes) => fs::write(ziel, bytes),
+                None => fs::remove_file(ziel).or_else(|e| {
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
+                }),
+            };
+            ergebnis.map_err(|e| format!("{rel} zurücksetzen: {e}"))?;
+        }
         Ok(())
     }
 
@@ -1024,7 +1050,8 @@ fn befund_1_r03_lesefehler_beim_scan_macht_den_kodex_rot() -> Result<(), String>
             fs::symlink_metadata(&tests).map(|m| m.file_type())
         )
     })?;
-    baum.zuruecksetzen()?;
+    // Dieser Fall ersetzt ein ganzes Verzeichnis außerhalb von `schreibe`.
+    git(&baum.pfad, &["reset", "--hard", "-q"])?;
 
     #[cfg(unix)]
     {
@@ -1417,7 +1444,9 @@ fn befund_k10_01_index_inhalt_wird_geprueft() -> Result<(), String> {
         )?;
         git(&b.pfad, &["add", "docs/notiz.md"])?;
         b.schreibe("docs/notiz.md", "# Notiz\nHarmloser Text\n")?;
-        Ok(b.gate())
+        let fehler = b.gate();
+        git(&b.pfad, &["reset", "-q", "--", "docs/notiz.md"])?;
+        Ok(fehler)
     };
     let nur_im_arbeitsbaum = |b: &Baum| -> Result<Vec<String>, String> {
         b.deklariere("DokuOnly", &["docs/notiz.md"])?;
@@ -1427,7 +1456,9 @@ fn befund_k10_01_index_inhalt_wird_geprueft() -> Result<(), String> {
             "docs/notiz.md",
             &format!("# Notiz\n{}\n", beispiel_api_schluessel()),
         )?;
-        Ok(b.gate())
+        let fehler = b.gate();
+        git(&b.pfad, &["reset", "-q", "--", "docs/notiz.md"])?;
+        Ok(fehler)
     };
     alle_faelle(
         &baum,
@@ -1469,7 +1500,7 @@ fn befund_k10_02_utf16_umgeht_die_muster_nicht() -> Result<(), String> {
     let mit_bytes = |bytes: Vec<u8>| {
         move |b: &Baum| -> Result<Vec<String>, String> {
             b.deklariere("DokuOnly", &["docs/notiz.md"])?;
-            fs::write(b.datei("docs/notiz.md"), &bytes).map_err(|e| format!("notiz: {e}"))?;
+            b.schreibe_bytes("docs/notiz.md", &bytes)?;
             Ok(b.gate())
         }
     };
@@ -1602,6 +1633,11 @@ fn pruefbasis_enthaelt_arbeitsstand_und_haelt_kopien_getrennt() -> Result<(), St
     erste.schreibe("geaendert.txt", "Nur erste Kopie\n")?;
     assert_eq!(zweite.lies("geaendert.txt")?, "Arbeitsbaum\n");
     assert_eq!(quelle.lies("geaendert.txt")?, "Arbeitsbaum\n");
+    erste.schreibe_bytes("geaendert.txt", &[0, 255])?;
+    erste.schreibe("nur-im-fall.txt", "Vorübergehend\n")?;
+    erste.zuruecksetzen()?;
+    assert_eq!(erste.lies("geaendert.txt")?, "Arbeitsbaum\n");
+    assert!(!erste.datei("nur-im-fall.txt").exists());
     Ok(())
 }
 
@@ -1623,6 +1659,7 @@ fn vorhandener_pruefbaum_wird_nicht_geloescht() -> Result<(), String> {
     drop(Baum {
         ordner: neu.clone(),
         pfad: neu.clone(),
+        vorher: RefCell::default(),
     });
     assert!(!neu.exists(), "Eigene Kopie wird aufgeraeumt");
     assert_eq!(
