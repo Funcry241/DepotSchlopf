@@ -85,7 +85,7 @@ pub enum Befund {
 }
 
 /// Verkaeufe zuerst. Die Kaeufe darf die Auftragsstelle erst senden, wenn alle Verkaeufe
-/// ausgefuehrt sind; sonst verfallen sie. Ihr Budget rechnet nur mit dem garantierten Erloes.
+/// ausgefuehrt sind; sonst verfallen sie.
 #[derive(Debug, Default)]
 pub struct Entscheidung {
     pub verkaeufe: Vec<GenehmigterAuftrag>,
@@ -221,8 +221,26 @@ fn leistbare_stueck(g: &Grenzen, limit: Cent, gewuenscht: u64, budget: Cent) -> 
 }
 
 pub fn entscheide(e: &Eingabe<'_>, vergabe: &mut Kennungsvergabe) -> Entscheidung {
+    entscheide_intern(e, vergabe, None)
+}
+
+/// Plant Käufe mit dem vom Kontowächter berechneten freien Bargeld. Geplante Verkäufe
+/// erhöhen dieses Budget erst nach der Abrechnung.
+pub fn entscheide_mit_kaufbudget(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    frei: Cent,
+) -> Entscheidung {
+    entscheide_intern(e, vergabe, Some(frei))
+}
+
+fn entscheide_intern(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    kaufbudget: Option<Cent>,
+) -> Entscheidung {
     let mut befunde = Vec::new();
-    let Some((verkaeufe, kaeufe)) = plane(e, &mut befunde) else {
+    let Some((verkaeufe, kaeufe)) = plane(e, kaufbudget, &mut befunde) else {
         return Entscheidung::nur(Befund::Rechenfehler);
     };
     let Some(mut ent) = genehmige(e.grenzen, &verkaeufe, &kaeufe, vergabe) else {
@@ -271,7 +289,11 @@ fn genehmige(
 }
 
 /// Plant alle Auftraege. `None` nur bei einem Rechenfehler.
-fn plane(e: &Eingabe<'_>, befunde: &mut Vec<Befund>) -> Option<(Vec<Kandidat>, Vec<Kandidat>)> {
+fn plane(
+    e: &Eingabe<'_>,
+    kaufbudget: Option<Cent>,
+    befunde: &mut Vec<Befund>,
+) -> Option<(Vec<Kandidat>, Vec<Kandidat>)> {
     let g = e.grenzen;
 
     // Kurse der gehaltenen Werte: fehlt einer oder ist er zu alt, ist der Topf nicht bewertbar.
@@ -333,6 +355,7 @@ fn plane(e: &Eingabe<'_>, befunde: &mut Vec<Befund>) -> Option<(Vec<Kandidat>, V
         if let Some(ziele) = &ziele {
             freiwillig(
                 e,
+                kaufbudget,
                 tw,
                 ziele,
                 &gesperrt,
@@ -582,6 +605,7 @@ fn pruefe_vorschlag(
 )]
 fn freiwillig(
     e: &Eingabe<'_>,
+    kaufbudget: Option<Cent>,
     topfwert: Preis,
     ziele: &BTreeMap<Isin, i64>,
     gesperrt: &BTreeSet<Isin>,
@@ -622,13 +646,22 @@ fn freiwillig(
         .into_iter()
         .partition(|k| k.richtung == Richtung::Verkauf);
     verkaeufe.extend(freie_verkaeufe);
-    kaufe(e, topfwert, verkaeufe, freie_kaeufe, kaeufe, befunde)
+    kaufe(
+        e,
+        kaufbudget,
+        topfwert,
+        verkaeufe,
+        freie_kaeufe,
+        kaeufe,
+        befunde,
+    )
 }
 
-/// Kaeufe mit Deckung (Bargeld plus garantierter Erloes aller Verkaeufe), Kaufgrenze des
-/// Anteils und Kaufgrenze der Positionszahl, alles am Limit mit hoechster Gebuehr.
+/// Kaeufe mit Deckung, Kaufgrenze des Anteils und Kaufgrenze der Positionszahl,
+/// alles am Limit mit hoechster Gebuehr.
 fn kaufe(
     e: &Eingabe<'_>,
+    kaufbudget: Option<Cent>,
     topfwert: Preis,
     verkaeufe: &[Kandidat],
     geplant: Vec<Kandidat>,
@@ -636,13 +669,15 @@ fn kaufe(
     befunde: &mut Vec<Befund>,
 ) -> Option<()> {
     let g = e.grenzen;
-    let mut budget = e.topf.bargeld();
+    let mut budget = kaufbudget.unwrap_or_else(|| e.topf.bargeld());
     let mut verlust = Cent::NULL;
     for k in verkaeufe {
-        let erloes = k.volumen(g)?;
-        budget = budget
-            .checked_add(erloes)?
-            .checked_sub(g.gebuehren().fuer(erloes)?)?;
+        if kaufbudget.is_none() {
+            let erloes = k.volumen(g)?;
+            budget = budget
+                .checked_add(erloes)?
+                .checked_sub(g.gebuehren().fuer(erloes)?)?;
+        }
         verlust = verlust.checked_add(k.verlust(g)?)?;
     }
     for k in &geplant {

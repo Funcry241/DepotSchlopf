@@ -33,7 +33,7 @@ use depot_kern::{
 };
 use depot_ki::Sperre;
 use depot_regelwerk::{
-    DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide,
+    DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide_mit_kaufbudget,
     notbremse_auftraege, pruefe_kurse, waechter,
 };
 
@@ -806,6 +806,15 @@ fn prognosebilanz(stand: &depot_journal::Stand) -> Vec<(BeraterId, depot_journal
         .collect()
 }
 
+pub(crate) fn kaufbudget(j: &Journal, g: &Grenzen, id: TopfId) -> Result<Cent, LaufFehler> {
+    depot_journal::konto::verfuegbar(g, j.stand(), id).ok_or_else(|| {
+        halt(format!(
+            "{}: freies Bargeld nicht berechenbar",
+            topf_name(id)
+        ))
+    })
+}
+
 fn frage_topf(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -824,6 +833,7 @@ fn frage_topf(
     let lage = Lage {
         datum: tag.datum,
         topf: &topf,
+        kaufbar: kaufbudget(j, z.grenzen, id)?,
         kurse: &tag.kurse,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
@@ -871,6 +881,7 @@ fn zweite_meinung(
     let lage = Lage {
         datum: tag.datum,
         topf: &topf,
+        kaufbar: kaufbudget(j, z.grenzen, id)?,
         kurse: &tag.kurse,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
@@ -936,7 +947,7 @@ fn topf_zyklus(
     let id = topf.id();
     let t = topf_name(id);
     let mut vergabe = j.kennungsvergabe();
-    let ent = entscheide(
+    let ent = entscheide_mit_kaufbudget(
         &Eingabe {
             grenzen: z.grenzen,
             universum: z.universum,
@@ -946,6 +957,7 @@ fn topf_zyklus(
             halt: false,
         },
         &mut vergabe,
+        kaufbudget(j, z.grenzen, id)?,
     );
     for b in &ent.befunde {
         begruende(j, tag, REGELWERK, &format!("{t}: {b:?}"))?;
@@ -954,8 +966,8 @@ fn topf_zyklus(
         return fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto);
     }
     let alle = fuehre_aus(j, z, id, &ent.verkaeufe, None, konto);
-    // Das Regelwerk rechnet die Kaeufe mit dem Erloes der Verkaeufe: Sie gehen nur raus, wenn
-    // alle Verkaeufe ausgefuehrt sind und das bereits abgerechnete Geld ausreicht.
+    // Positions- und Anteilsgrenzen können einen ausgeführten Verkauf voraussetzen.
+    // Der geplante Erlös steht für Käufe erst nach der Abrechnung zur Verfügung.
     match alle {
         Ok(()) if verkauft(j, &ent.verkaeufe) => {
             fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto)
@@ -1217,6 +1229,7 @@ mod tests {
         let lage = Lage {
             datum,
             topf: &topf,
+            kaufbar: topf.bargeld(),
             kurse: &kurse,
             positionskaeufe: &[],
             ereignisse: &["Meldung".into()],

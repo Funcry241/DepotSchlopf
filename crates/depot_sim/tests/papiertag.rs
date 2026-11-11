@@ -1090,17 +1090,66 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
             "Verkaufserloes am Tag {t}"
         );
         assert_eq!(a.stueck(&allianz) > 0, t == 11, "Kauf am Tag {t}");
-        assert_eq!(
-            j.stand().begruendungen().iter().any(|(d, wer, text)| {
+        assert!(
+            !j.stand().begruendungen().iter().any(|(d, wer, text)| {
                 *d == datum && wer == "Kontowaechter" && text.contains("keine Deckung")
             }),
-            matches!(t, 6 | 9),
-            "Kaufversuch im Journal am Tag {t}"
+            "Das Regelwerk darf keinen ungedeckten Kauf planen (Tag {t})"
         );
         assert!(
             vorbedingung(j.gleiche_ab(&k), "Abgleich")?.is_empty(),
             "Abgleich am Tag {t}"
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn papiertag_kuerzt_kauf_bei_gebundenem_verkaufserloes() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut topf_a = vorbedingung(Topf::neu(TopfId::A, Cent(45_000)), "Topf A")?;
+    topf_a.setze_bestand(sap.clone(), 20);
+    let topf_b = vorbedingung(Topf::neu(TopfId::B, Cent(500_000)), "Topf B")?;
+    let start = [topf_a, topf_b];
+    let universum = universum()?;
+    let preise = [(&sap, "250", "250"), (&allianz, "200", "200")];
+    for tagnummer in [5, 6] {
+        let datum = tag(tagnummer)?;
+        let mut journal = ort.oeffnen()?;
+        belege(&mut journal, tagnummer, &preise)?;
+        let (mut dachs, mut maus) = kaeufer(datum, &allianz);
+        let vorschlag = dachs
+            .antworten
+            .get_mut(&datum)
+            .and_then(|antwort| antwort.vorschlag.as_mut())
+            .ok_or("Vorschlag fehlt")?;
+        vorschlag.zielgewichte_bp.insert(sap.clone(), 3_500);
+        if tagnummer == 5 {
+            vorschlag.zielgewichte_bp.remove(&allianz);
+        }
+        let mut konto = Papierdatei::oeffnen(&ort.konto, tagnummer != 5, &start)?;
+        let aus = papiertag(
+            &mut journal,
+            datum,
+            &universum,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut konto,
+        );
+        assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+        let kauf = journal
+            .stand()
+            .offene_auftraege()
+            .find(|l| l.beleg.topf == TopfId::A && l.beleg.isin == allianz);
+        assert_eq!(
+            kauf.map(|l| (l.beleg.stueck, l.versand.is_some())),
+            (tagnummer == 6).then_some((2, true)),
+            "{:?}",
+            journal.stand().begruendungen()
+        );
+        assert!(vorbedingung(journal.gleiche_ab(&konto), "Abgleich")?.is_empty());
     }
     Ok(())
 }

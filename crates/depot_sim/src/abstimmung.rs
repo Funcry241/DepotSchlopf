@@ -91,6 +91,7 @@ fn frage(
     topf: &TopfAntwort,
     dialog: &AbstimmungsStand,
 ) -> Result<Option<AbstimmungsAntwort>, LaufFehler> {
+    let kaufbar = crate::lauf::kaufbudget(buch, zyklus.grenzen, topf.topf.id())?;
     let erlaubnis = match buch.reserviere_fuer(
         topf.topf.id().berater(),
         zyklus.tag.datum,
@@ -105,6 +106,7 @@ fn frage(
     let lage = Lage {
         datum: zyklus.tag.datum,
         topf: &topf.topf,
+        kaufbar,
         kurse: &zyklus.tag.kurse,
         positionskaeufe: &positionskaeufe,
         ereignisse: &zyklus.tag.ereignisse,
