@@ -37,7 +37,33 @@ pub(crate) fn budget(daten: &Path, tag: Option<Datum>) -> GeminiBudget {
     }
 }
 
-pub(crate) fn einrichtung(d: &Dienst, stand: SchluesselStand, tag: Option<Datum>) -> String {
+fn schluessel_meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
+    if !abfrage.split('&').any(|teil| teil == "wer=gemini") {
+        return None;
+    }
+    match abfrage
+        .split('&')
+        .find_map(|teil| teil.strip_prefix("m="))?
+    {
+        "schluessel_fehler" => Some((
+            "halt",
+            "Gemini-Schlüssel konnte nicht bestätigt werden. Prüfe den Eintrag DepotSchlopf/gemini in der Windows-Anmeldeinformationsverwaltung.",
+        )),
+        "schluessel" | "schluessel_protokoll" | "schluessel_ungueltig" => seiten::meldung(abfrage),
+        _ => None,
+    }
+}
+
+pub(crate) fn seiten_meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
+    seiten::meldung(abfrage).filter(|_| schluessel_meldung(abfrage).is_none())
+}
+
+pub(crate) fn einrichtung(
+    d: &Dienst,
+    stand: SchluesselStand,
+    tag: Option<Datum>,
+    abfrage: &str,
+) -> String {
     let daten = d.wurzel.join("daten");
     let budget = budget(&daten, tag);
     let letzter_lauf = tag
@@ -48,6 +74,11 @@ pub(crate) fn einrichtung(d: &Dienst, stand: SchluesselStand, tag: Option<Datum>
                 .fehler
                 .as_deref()
                 .unwrap_or_else(|| crate::gespraeche::status(&e.ergebnis));
+            let ergebnis = if ergebnis.starts_with("Schlüssel fehlt") {
+                "Bei diesem Lauf fehlte der Schlüssel."
+            } else {
+                ergebnis
+            };
             format!(
                 "<p class=\"leise\">Letzter Lauf heute ({}) · {}</p>",
                 depot_lage::zeit_text(e.zeit),
@@ -63,6 +94,13 @@ pub(crate) fn einrichtung(d: &Dienst, stand: SchluesselStand, tag: Option<Datum>
     let aufrufe = budget.aufrufe.map_or_else(|| "–".into(), |n| n.to_string());
     let mut schluessel = seiten::SCHLUESSEL_TABELLE.to_owned();
     seiten::schluessel_zeile(&mut schluessel, &d.token, Wer::Gemini, stand, "");
+    let meldung = schluessel_meldung(abfrage).map_or_else(String::new, |(klasse, text)| {
+        format!(
+            "<p class=\"{}\" role=\"status\">{}</p>",
+            maskiere(klasse),
+            maskiere(text)
+        )
+    });
     let token = maskiere(&d.token);
     let einschalten = if budget.an {
         " disabled"
@@ -82,7 +120,7 @@ pub(crate) fn einrichtung(d: &Dienst, stand: SchluesselStand, tag: Option<Datum>
          <section aria-labelledby=\"gemini-titel\"><h3 id=\"gemini-titel\">Gemini ({MODELL})</h3>\
          <p>Sortiert belegte Nachrichten mit höchster Denkstufe vor.</p>\
          <p><strong class=\"{klasse}\">{status}</strong> · Aufrufe heute {aufrufe} von {TAGESGRENZE} · Gratis-Projekt ohne Abrechnung</p>\
-         {letzter_lauf}{schluessel}</table>\
+         {letzter_lauf}{meldung}{schluessel}</table>\
          <form method=\"post\" action=\"/gemini\" data-aenderungen><input type=\"hidden\" name=\"t\" value=\"{token}\">\
          {bestaetigung}<button type=\"submit\" name=\"an\" value=\"ja\"{einschalten}>Gemini einschalten</button> \
          <button type=\"submit\" name=\"an\" value=\"nein\"{ausschalten}>Gemini ausschalten</button>\

@@ -1,5 +1,7 @@
 klasse: Funktion
-zweck: KI-Gespräche als lesbare Antworten und Begründungen anzeigen
+zweck: Gemini-Schlüssel nach dem Speichern zurücklesen und das Ergebnis am Feld anzeigen
 pfade:
-crates/depot_dienst/src/gespraeche.rs
+crates/depot_dienst/src/gemini.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/schluessel.rs
 crates/depot_dienst/tests/dienst.rs

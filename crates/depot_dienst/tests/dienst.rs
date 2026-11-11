@@ -3584,7 +3584,7 @@ fn gemini_bleibt_ohne_bestaetigtes_gratisprojekt_aus() -> Result<(), String> {
         &format!("t={TOKEN}&wer=gemini&wert=ungueltigAlsEchterSchluessel"),
     );
     let antwort = text(&behandle(&d, &Attrappe::default(), &speichere, t));
-    assert!(antwort.contains("/einrichtung?m=schluessel#zusatz"));
+    assert!(antwort.contains("/einrichtung?m=schluessel&wer=gemini#zusatz"));
     assert!(get(&d, "/einrichtung", t).contains("hinterlegt, noch nicht benutzt"));
     let rechnen = depot_dienst::lagerechner(Arc::new(Attrappe::default()));
     let budget = depot_lage::html::seite(&rechnen(&d.wurzel, t));
@@ -3592,6 +3592,35 @@ fn gemini_bleibt_ohne_bestaetigtes_gratisprojekt_aus() -> Result<(), String> {
     assert!(budget.contains("<dt>Aufrufe heute</dt><dd>0 von 5</dd>"));
     assert!(sende("an=nein").contains("/einrichtung#zusatz"));
     assert!(!depot_lage::gespraeche::gemini_aktiv(&ziel));
+    Ok(())
+}
+
+#[test]
+fn gemini_speichern_meldet_fehlenden_ruecklesebeleg_am_feld() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(17, 50)?;
+    let umwelt = Attrappe {
+        gemini_schluessel: Some(Hinterlegt::Nein),
+        ..Attrappe::default()
+    };
+    let probe = "ungueltigAlsEchterSchluessel";
+    let post = formular_post("/schluessel", &format!("t={TOKEN}&wer=gemini&wert={probe}"));
+    let antwort = text(&behandle(&d, &umwelt, &post, t));
+    assert!(antwort.contains("/einrichtung?m=schluessel_fehler&wer=gemini#zusatz"));
+    let html = text(&behandle(
+        &d,
+        &umwelt,
+        &anfrage(
+            "GET",
+            "/einrichtung?m=schluessel_fehler&wer=gemini",
+            &[("Host", HOST)],
+            "",
+        ),
+        t,
+    ));
+    let (_, zusatz) = some(html.split_once("id=\"zusatz\""), "Gemini-Abschnitt")?;
+    assert!(zusatz.contains("Gemini-Schlüssel konnte nicht bestätigt werden."));
+    assert!(!html.contains(probe));
     Ok(())
 }
 
