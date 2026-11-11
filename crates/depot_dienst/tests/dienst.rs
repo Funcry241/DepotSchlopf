@@ -1818,6 +1818,7 @@ fn ohne_schreibbaren_verlauf_startet_nichts() -> Result<(), String> {
     let datei = depot_dienst::verlauf::pfad(&wurzel);
     fs::create_dir_all(&datei).map_err(|e| format!("Vorbedingung: {e}"))?;
     let d = dienst(wurzel, true);
+    d.sperre().zeitplan.an = true;
     let t = donnerstag(12, 0)?;
     d.einreihen(Art::Termine, Anlass::Hand)
         .map_err(|e| format!("Vorbedingung: {e}"))?;
@@ -1830,6 +1831,9 @@ fn ohne_schreibbaren_verlauf_startet_nichts() -> Result<(), String> {
     let seite = seiten::live(TOKEN, "s", &z, t);
     drop(z);
     assert!(seite.contains("Verlauf nicht schreibbar"), "{seite}");
+    assert!(seite.contains("Zeitplan angehalten"));
+    assert!(!seite.contains("Nächster geplanter Lauf"));
+    assert!(get(&d, "/einrichtung", t).contains("<b>angehalten</b>"));
     // Wieder schreibbar: Der naechste Auftrag startet.
     fs::remove_dir(&datei).map_err(|e| format!("Vorbedingung: {e}"))?;
     d.einreihen(Art::Kurse, Anlass::Hand)
@@ -3376,6 +3380,59 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
     );
     assert!(gespraech.contains("Frage für diesen Lauf"));
     assert!(!gespraech.contains("Frage aus anderem Lauf"));
+    Ok(())
+}
+
+#[test]
+fn gemini_ohne_anfrage_hat_eigenen_lauf_und_keine_erfolgsmeldung() -> Result<(), String> {
+    use depot_dienst::werkbank::{Auftrag, Frueher};
+    use depot_lage::gespraeche::{Gespraech, anhaengen};
+
+    let d = dienst(ordner()?, true);
+    let zeit = donnerstag(17, 50)?;
+    let lauf = format!("{}-2", zeit.sekunden());
+    d.sperre().verlauf.push_front(Auftrag {
+        nr: 2,
+        kennung: lauf.clone(),
+        art: Art::Gemini,
+        anlass: Anlass::Zeitplan,
+        start: zeit,
+        ende: Some(zeit),
+        erfolg: Some(true),
+        protokoll: Vec::new(),
+        hinweis: None,
+        frueher: Frueher::Nein,
+    });
+    anhaengen(
+        &d.wurzel.join("daten"),
+        &Gespraech {
+            zeit,
+            lauf: lauf.clone(),
+            wer: "gemini".into(),
+            rolle: "zusatz".into(),
+            modell: "Gemini-Test".into(),
+            zweck: "nachrichten-vorsortieren".into(),
+            ergebnis: "uebersprungen".into(),
+            http: None,
+            token_ein: None,
+            token_aus: None,
+            buchung: None,
+            kosten_cent: None,
+            system: None,
+            frage: None,
+            antwort: None,
+            fehler: Some("Schlüssel fehlt".into()),
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let html = get(&d, "/teil/live", zeit);
+    let (zeitstrahl, taetigkeit) = some(html.split_once("id=\"taetigkeit\""), "Tätigkeit")?;
+    assert!(zeitstrahl.contains(&format!("wer=gemini&amp;lauf={lauf}")));
+    assert!(zeitstrahl.contains("Nicht gefragt · optional"));
+    let (_, gemini_zeile) = some(taetigkeit.split_once(&lauf), "Gemini-Zeile")?;
+    let (gemini_ergebnis, _) = some(gemini_zeile.split_once("</tr>"), "Gemini-Ergebnis")?;
+    assert!(gemini_ergebnis.contains("Nicht gefragt"));
+    assert!(!gemini_ergebnis.contains("erfolgreich"));
     Ok(())
 }
 

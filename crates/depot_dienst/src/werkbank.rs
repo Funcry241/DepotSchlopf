@@ -250,6 +250,23 @@ fn quelle_name(w: Quelle) -> &'static str {
 pub const DOPPELT_SEKUNDEN: i64 = 30;
 
 impl Zustand {
+    pub(crate) fn automatik_fehler(&self) -> Option<&str> {
+        self.verlauf_fehler
+            .as_deref()
+            .or(self.erledigt_fehler.as_deref())
+            .or(self.zeitplan_fehler.as_deref())
+    }
+
+    pub(crate) fn automatik_status(&self) -> &'static str {
+        if self.automatik_fehler().is_some() {
+            "angehalten"
+        } else if self.zeitplan.an {
+            "an"
+        } else {
+            "aus"
+        }
+    }
+
     /// Stand des Auftrags für die Bedienelemente.
     pub fn auftrag_stand(&self, art: Art) -> Option<&'static str> {
         if self.laufend.as_ref().is_some_and(|a| a.art == art) {

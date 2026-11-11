@@ -1,4 +1,6 @@
 klasse: Funktion
-zweck: Berater im Papierhandel auf kurzfristige Chancen und begründete Positionsgrößen ausrichten
+zweck: Automatikzustand und tatsächliches Gemini-Ergebnis einheitlich anzeigen
 pfade:
-crates/depot_berater/src/frage.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/tests/dienst.rs
