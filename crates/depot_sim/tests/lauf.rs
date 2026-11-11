@@ -216,6 +216,62 @@ fn unplausible_kurse_lassen_den_zyklus_ausfallen() -> Result<(), String> {
 }
 
 #[test]
+fn folgeberatung_sieht_nach_neustart_die_kaufthese_der_ausfuehrung() -> Result<(), String> {
+    use depot_sim::{Antwort, Berater, Lage, Positionskauf, Urteil};
+
+    struct Beobachter {
+        drehbuch: Drehbuch,
+        kaeufe: Vec<Positionskauf>,
+    }
+
+    impl Berater for Beobachter {
+        fn vorschlagen(
+            &mut self,
+            erlaubnis: depot_journal::AufrufErlaubnis,
+            lage: &Lage<'_>,
+        ) -> Antwort {
+            self.kaeufe.extend_from_slice(lage.positionskaeufe);
+            self.drehbuch.vorschlagen(erlaubnis, lage)
+        }
+
+        fn pruefen(
+            &mut self,
+            erlaubnis: depot_journal::AufrufErlaubnis,
+            lage: &Lage<'_>,
+            vorschlag: &depot_kern::Vorschlag,
+        ) -> Urteil {
+            self.drehbuch.pruefen(erlaubnis, lage, vorschlag)
+        }
+    }
+
+    let ort = Ort::neu()?;
+    let (s, mut dachs, mut maus) = beispiel()?;
+    let mut erster = s.clone();
+    erster.tage.truncate(1);
+    let mut k = konto(&s)?;
+    {
+        let mut j = ort.oeffnen()?;
+        vorbedingung(
+            lauf(&mut j, &erster, &mut dachs, &mut maus, &mut k),
+            "erster Papiertag",
+        )?;
+    }
+    let mut dachs = Beobachter {
+        drehbuch: dachs,
+        kaeufe: Vec::new(),
+    };
+    let mut j = ort.oeffnen()?;
+    vorbedingung(lauf(&mut j, &s, &mut dachs, &mut maus, &mut k), "Folgetage")?;
+    let beta = isin("XA0000BETA0")?;
+    assert!(dachs.kaeufe.iter().any(|k| {
+        k.isin == beta
+            && k.these.as_deref() == Some("ruhiger Wert, kein Termin betroffen")
+            && k.ausfuehrung.stueck > 0
+    }));
+    Ok(())
+}
+
+#[test]
 fn wiederanlauf_setzt_nach_dem_letzten_abschluss_fort() -> Result<(), String> {
     let ganz = Ort::neu()?;
     drop(ganzer_lauf(&ganz)?);
