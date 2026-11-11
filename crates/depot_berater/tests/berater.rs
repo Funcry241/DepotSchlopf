@@ -515,12 +515,13 @@ fn fehlendes_guthaben_gibt_reservierung_im_journal_frei() -> Result<(), String> 
     let abrechnung = some(maus.abrechnung(), "Abrechnung für abgelehnten Aufruf")?;
     assert_eq!(abrechnung.kosten(), Cent::NULL);
     vorbedingung(ort.journal.rechne_ki_ab(&abrechnung), "Abrechnung buchen")?;
-    let buch = vorbedingung(
-        Journal::oeffnen(&ort.dir.join("journal.txt")),
-        "Journal neu öffnen",
-    )?;
     assert_eq!(
-        buch.stand().ki().buchungen().get(nr).map(|b| b.reserviert),
+        ort.journal
+            .stand()
+            .ki()
+            .buchungen()
+            .get(nr)
+            .map(|b| b.reserviert),
         Some(Cent::NULL)
     );
     Ok(())
