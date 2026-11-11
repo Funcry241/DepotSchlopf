@@ -3607,20 +3607,23 @@ fn gemini_speichern_meldet_fehlenden_ruecklesebeleg_am_feld() -> Result<(), Stri
     let post = formular_post("/schluessel", &format!("t={TOKEN}&wer=gemini&wert={probe}"));
     let antwort = text(&behandle(&d, &umwelt, &post, t));
     assert!(antwort.contains("/einrichtung?m=schluessel_fehler&wer=gemini#zusatz"));
-    let html = text(&behandle(
-        &d,
-        &umwelt,
-        &anfrage(
-            "GET",
-            "/einrichtung?m=schluessel_fehler&wer=gemini",
-            &[("Host", HOST)],
-            "",
-        ),
-        t,
-    ));
-    let (_, zusatz) = some(html.split_once("id=\"zusatz\""), "Gemini-Abschnitt")?;
-    assert!(zusatz.contains("Gemini-Schlüssel konnte nicht bestätigt werden."));
-    assert!(!html.contains(probe));
+    for meldung in ["schluessel_fehler", "schluessel", "schluessel_protokoll"] {
+        let html = text(&behandle(
+            &d,
+            &umwelt,
+            &anfrage(
+                "GET",
+                &format!("/einrichtung?m={meldung}&wer=gemini"),
+                &[("Host", HOST)],
+                "",
+            ),
+            t,
+        ));
+        let (_, zusatz) = some(html.split_once("id=\"zusatz\""), "Gemini-Abschnitt")?;
+        assert!(zusatz.contains("Gemini-Schlüssel konnte nicht bestätigt werden."));
+        assert!(!html.contains("Schlüssel in der Anmeldeinformationsverwaltung gespeichert."));
+        assert!(!html.contains(probe));
+    }
     Ok(())
 }
 

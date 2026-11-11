@@ -10,6 +10,11 @@ use crate::seiten;
 use crate::werkbank::Dienst;
 use std::path::Path;
 
+const SCHLUESSEL_NICHT_BESTAETIGT: (&str, &str) = (
+    "halt",
+    "Gemini-Schlüssel konnte nicht bestätigt werden. Prüfe den Eintrag DepotSchlopf/gemini in der Windows-Anmeldeinformationsverwaltung.",
+);
+
 pub(crate) fn speichern(d: &Dienst, formular: &[(String, String)]) -> Vec<u8> {
     let wert = match (feld(formular, "an"), feld(formular, "gratisprojekt")) {
         (Some("ja"), Some("ja")) => "gratisprojekt=ja\n",
@@ -45,10 +50,7 @@ fn schluessel_meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         .split('&')
         .find_map(|teil| teil.strip_prefix("m="))?
     {
-        "schluessel_fehler" => Some((
-            "halt",
-            "Gemini-Schlüssel konnte nicht bestätigt werden. Prüfe den Eintrag DepotSchlopf/gemini in der Windows-Anmeldeinformationsverwaltung.",
-        )),
+        "schluessel_fehler" => Some(SCHLUESSEL_NICHT_BESTAETIGT),
         "schluessel" | "schluessel_protokoll" | "schluessel_ungueltig" => seiten::meldung(abfrage),
         _ => None,
     }
@@ -95,6 +97,13 @@ pub(crate) fn einrichtung(
     let mut schluessel = seiten::SCHLUESSEL_TABELLE.to_owned();
     seiten::schluessel_zeile(&mut schluessel, &d.token, Wer::Gemini, stand, "");
     let meldung = schluessel_meldung(abfrage).map_or_else(String::new, |(klasse, text)| {
+        let (klasse, text) = if klasse != "halt"
+            && matches!(stand, SchluesselStand::Fehlt | SchluesselStand::Unbekannt)
+        {
+            SCHLUESSEL_NICHT_BESTAETIGT
+        } else {
+            (klasse, text)
+        };
         format!(
             "<p class=\"{}\" role=\"status\">{}</p>",
             maskiere(klasse),
