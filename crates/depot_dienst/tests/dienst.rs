@@ -132,11 +132,16 @@ struct Attrappe {
     abgelegt: Mutex<Vec<(Wer, String)>>,
     autostart: Mutex<Option<bool>>,
     papierfreigabe: bool,
+    gemini_schluessel: Option<Hinterlegt>,
 }
 
 impl Umwelt for Attrappe {
-    fn schluessel(&self, _wer: Wer) -> Hinterlegt {
-        Hinterlegt::Ja
+    fn schluessel(&self, wer: Wer) -> Hinterlegt {
+        if wer == Wer::Gemini {
+            self.gemini_schluessel.unwrap_or(Hinterlegt::Ja)
+        } else {
+            Hinterlegt::Ja
+        }
     }
 
     fn schluessel_ablegen(&self, wer: Wer, text: &str) -> Result<(), String> {
@@ -3380,7 +3385,8 @@ fn gemini_bleibt_ohne_bestaetigtes_gratisprojekt_aus() -> Result<(), String> {
     let t = donnerstag(17, 50)?;
     let html = get(&d, "/einrichtung", t);
     assert!(html.contains("Zusatz-KIs (optional)"));
-    assert!(html.contains("<strong>Aus</strong> · Aufrufe heute 0 von 5"));
+    assert!(html.contains("Ausgeschaltet</strong> · Aufrufe heute 0 von 5"));
+    assert!(html.contains(r#"value="nein" disabled>Gemini ausschalten"#));
     let ziel = d.wurzel.join("daten");
     let sende = |text: &str| {
         let a = formular_post("/gemini", &format!("t={TOKEN}&{text}"));
@@ -3390,6 +3396,30 @@ fn gemini_bleibt_ohne_bestaetigtes_gratisprojekt_aus() -> Result<(), String> {
     assert!(!depot_lage::gespraeche::gemini_aktiv(&ziel));
     assert!(sende("an=ja&gratisprojekt=ja").contains("/einrichtung#zusatz"));
     assert!(depot_lage::gespraeche::gemini_aktiv(&ziel));
+    let umw = Attrappe {
+        gemini_schluessel: Some(Hinterlegt::Unbekannt),
+        ..Attrappe::default()
+    };
+    let html = text(&behandle(
+        &d,
+        &umw,
+        &anfrage("GET", "/einrichtung", &[("Host", HOST)], ""),
+        t,
+    ));
+    assert!(html.contains("Eingeschaltet</strong>"));
+    assert!(html.contains(r#"value="ja" disabled>Gemini einschalten"#));
+    assert!(html.contains("Anmeldeinformationsverwaltung nicht prüfbar"));
+    let speichere = formular_post(
+        "/schluessel",
+        &format!("t={TOKEN}&wer=gemini&wert=ungueltigAlsEchterSchluessel"),
+    );
+    let antwort = text(&behandle(&d, &Attrappe::default(), &speichere, t));
+    assert!(antwort.contains("/einrichtung?m=schluessel#zusatz"));
+    assert!(get(&d, "/einrichtung", t).contains("hinterlegt, noch nicht benutzt"));
+    let rechnen = depot_dienst::lagerechner(Arc::new(Attrappe::default()));
+    let budget = depot_lage::html::seite(&rechnen(&d.wurzel, t));
+    assert!(budget.contains("<h3>Gemini</h3><p class=\"gut\">Eingeschaltet"));
+    assert!(budget.contains("<dt>Aufrufe heute</dt><dd>0 von 5</dd>"));
     assert!(sende("an=nein").contains("/einrichtung#zusatz"));
     assert!(!depot_lage::gespraeche::gemini_aktiv(&ziel));
     Ok(())

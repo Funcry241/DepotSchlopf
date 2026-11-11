@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::time::Duration;
 
+use depot_journal::anbieter::{self, Eintrag, Ergebnis, Wer};
 use depot_journal::gespraeche::{self, Gespraech};
 use depot_journal::{Journal, NachrichtBeleg};
 use depot_kern::abdruck::sha256_hex;
@@ -317,33 +318,42 @@ pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum
         antwort: None,
         fehler: None,
     };
-    let resultat = Schluessel::fuer_dienst(DIENST, ADRESSE)
-        .map_err(|_| "Gemini-Schlüssel fehlt")
-        .and_then(|schluessel| {
-            if !sauber(&frage, &schluessel) {
-                return Err("Nachrichten enthalten Zugangsdaten");
-            }
-            let mut kontingent = reserviere(daten, tag, &kennung(&frage), vorrang)?;
-            e.system = Some(SYSTEM.into());
-            e.frage = Some(frage.clone());
-            senden(
-                &mut Https::mit_zeitgrenze(FRIST),
-                &schluessel,
-                &frage,
-                universum,
-                &mut e,
-            );
-            if matches!(e.ergebnis.as_str(), "guthaben" | "kosten")
-                && writeln!(kontingent, "anbietersperre")
-                    .and_then(|()| kontingent.sync_all())
-                    .is_err()
-            {
-                eprintln!("[Hinweis] Gemini-Anbieterpause konnte nicht gespeichert werden.");
-            }
-            Ok(())
-        });
+    let resultat = Schluessel::fuer_dienst(DIENST, ADRESSE).and_then(|schluessel| {
+        if !sauber(&frage, &schluessel) {
+            return Err("Nachrichten enthalten Zugangsdaten".into());
+        }
+        let mut kontingent = reserviere(daten, tag, &kennung(&frage), vorrang)?;
+        e.system = Some(SYSTEM.into());
+        e.frage = Some(frage.clone());
+        senden(
+            &mut Https::mit_zeitgrenze(FRIST),
+            &schluessel,
+            &frage,
+            universum,
+            &mut e,
+        );
+        if matches!(e.ergebnis.as_str(), "guthaben" | "kosten")
+            && writeln!(kontingent, "anbietersperre")
+                .and_then(|()| kontingent.sync_all())
+                .is_err()
+        {
+            eprintln!("[Hinweis] Gemini-Anbieterpause konnte nicht gespeichert werden.");
+        }
+        Ok(())
+    });
     if let Err(grund) = resultat {
-        e.fehler = Some(grund.into());
+        e.fehler = Some(grund);
+    }
+    if let Some(http) = e.http {
+        let ergebnis = if http == 200 {
+            Ergebnis::Ok
+        } else {
+            Ergebnis::aus_kurz(&e.ergebnis).unwrap_or(Ergebnis::Fehler)
+        };
+        let eintrag = Eintrag::neu(e.zeit, Wer::Gemini, ergebnis, Some(http));
+        if let Err(f) = anbieter::anhaengen(&daten.join(anbieter::DATEI), &eintrag) {
+            eprintln!("[Hinweis] Gemini-Anbieterstatus nicht gespeichert: {f}");
+        }
     }
     if let Err(f) = gespraeche::anhaengen(daten, &e) {
         eprintln!("[Hinweis] Gemini-Gespräch nicht gespeichert: {f}");
