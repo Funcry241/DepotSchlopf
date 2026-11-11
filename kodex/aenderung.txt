@@ -1,6 +1,15 @@
 klasse: Funktion
-zweck: Automatikzustand und tatsächliches Gemini-Ergebnis einheitlich anzeigen
+zweck: NVIDIA über Tiingo beobachten und den Wissensstand des historischen Falls belegen
 pfade:
+README.md
+crates/depot_dienst/src/schluessel.rs
 crates/depot_dienst/src/seiten.rs
 crates/depot_dienst/src/werkbank.rs
 crates/depot_dienst/tests/dienst.rs
+crates/depot_kern/src/boerse.rs
+crates/depot_kern/src/liste.rs
+crates/depot_kern/tests/devisen.rs
+crates/depot_sammler/src/ergebnisse.rs
+crates/depot_sammler/src/main.rs
+crates/depot_sammler/tests/ergebnisse.rs
+docs/befunde/nvidia-rueckblick.md
