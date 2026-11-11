@@ -534,7 +534,7 @@ pub fn rahmen(
          <p id=\"neuverbinden\" hidden><a id=\"neuverbinden-link\" class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
          <nav aria-label=\"Hauptnavigation\"><h1>DepotSchlopf</h1>{}{}{}\
          <span class=\"leise\">Nur Papiergeld.</span>{version}</nav>\
-         <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit der Zeitplan läuft. \
+         <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit DepotSchlopf läuft. \
          Du kannst es minimieren.</p>",
         nav("/", "Live"),
         nav("/gespraeche", "KI-Gespräche"),
@@ -625,13 +625,14 @@ fn weiter_text(z: &Zustand, heute: Option<Datum>) -> String {
 
 /// Der naechste Lauf des Zeitplans als Satz.
 pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
-    if let Some(f) = &z.erledigt_fehler {
-        return format!(
-            "Zeitplan angehalten: {f}. Datei prüfen oder löschen, dann Dienst neu starten."
-        );
-    }
-    if let Some(f) = &z.zeitplan_fehler {
-        return format!("Zeitplan aus: {f}");
+    if let Some(f) = z.automatik_fehler() {
+        let grund = f.strip_prefix("Zeitplan angehalten: ").unwrap_or(f);
+        let abhilfe = if z.verlauf_fehler.is_none() {
+            " Datei prüfen, dann Dienst neu starten."
+        } else {
+            ""
+        };
+        return format!("Zeitplan angehalten: {grund}{abhilfe}");
     }
     if !z.zeitplan.an {
         return "Zeitplan aus. Einschalten unter Einrichtung.".into();
@@ -675,14 +676,9 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
 
 fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
     let mut s = String::from("<section id=\"zeitstrahl\"><h2>Zeitstrahl</h2>");
-    if let Some(f) = &z.verlauf_fehler {
-        let _ = write!(
-            s,
-            "<p class=\"halt\">Zeitplan angehalten: {}</p>",
-            maskiere(f)
-        );
-    } else if !z.zeitplan.an || z.zeitplan_fehler.is_some() || z.erledigt_fehler.is_some() {
-        let _ = write!(s, "<p>{}</p>", maskiere(&naechster_text(z, heute)));
+    if z.automatik_status() != "an" {
+        let klasse = automatik_halt_klasse(z);
+        let _ = write!(s, "<p{klasse}>{}</p>", maskiere(&naechster_text(z, heute)));
     } else if let Some(heute) = heute {
         s.push_str("<p class=\"leise\">Geplante Startzeiten in Frankfurter Ortszeit.</p>");
         zeitstrahl_tag(&mut s, z, heute, true, ki);
@@ -707,22 +703,9 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
     }
     if let Some(tag) = heute {
         weitere_ki_auftraege(&mut s, z, tag, ki);
-        gemini_zeitstrahl(&mut s, z, tag, ki);
     }
     s.push_str("</section>");
     s
-}
-
-fn gemini_zeitstrahl(s: &mut String, z: &Zustand, tag: Datum, ki: &Aufrufe) {
-    for a in z.verlauf.iter().filter(|a| {
-        a.art == Art::Nachrichten
-            && a.start.in_frankfurt().is_some_and(|(d, ..)| d == tag)
-            && ki.hat_eintrag(&a.kennung)
-    }) {
-        s.push_str("<p><b>Zuarbeit: Nachrichten vorsortieren</b>");
-        ki.gelaufen(s, Some(&a.kennung), None);
-        s.push_str("</p>");
-    }
 }
 
 fn ki_auftraege(z: &Zustand, tag: Datum) -> impl Iterator<Item = &Auftrag> {
@@ -745,11 +728,8 @@ fn hand_kennung<'a>(ki: &'a Aufrufe, a: &Auftrag) -> Option<&'a str> {
 }
 
 fn weitere_ki_auftraege(s: &mut String, z: &Zustand, tag: Datum, ki: &Aufrufe) {
-    let geplantes_papier_sichtbar = z.zeitplan.an
+    let geplantes_papier_sichtbar = z.automatik_status() == "an"
         && z.zeitplan.papier_danach
-        && z.zeitplan_fehler.is_none()
-        && z.erledigt_fehler.is_none()
-        && z.verlauf_fehler.is_none()
         && !geplante_abrufe(z.zeitplan, &z.erledigt, tag, &z.boersen).is_empty();
     let schon_gezeigt = geplantes_papier_sichtbar
         .then(|| zeitstrahl_auftrag(z, tag, Art::Papier))
@@ -758,14 +738,14 @@ fn weitere_ki_auftraege(s: &mut String, z: &Zustand, tag: Datum, ki: &Aufrufe) {
         if schon_gezeigt.is_some_and(|b| b.kennung == a.kennung) {
             continue;
         }
-        let (klasse, stand) = ergebnis(a, z);
-        let _ = write!(
-            s,
-            "<p><b>{}</b> · {} <span class=\"{klasse}\">{stand}</span>",
-            a.art.name(),
-            zeit_text(a.start)
-        );
-        ki.gelaufen(s, Some(&a.kennung), hand_kennung(ki, a));
+        let _ = write!(s, "<p><b>{}</b> · {}", a.art.name(), zeit_text(a.start));
+        if a.art != Art::Gemini || !ki.hat_eintrag(&a.kennung) {
+            let (klasse, stand) = ergebnis(a, z);
+            let _ = write!(s, " <span class=\"{klasse}\">{stand}</span>");
+        }
+        if a.art != Art::Gemini || ki.hat_eintrag(&a.kennung) {
+            ki.gelaufen(s, Some(&a.kennung), hand_kennung(ki, a));
+        }
         s.push_str("</p>");
     }
     let zugeordnet = ki_auftraege(z, tag)
@@ -881,26 +861,40 @@ fn zeitstrahl_stand(
     }
 }
 
+fn automatik_halt_klasse(z: &Zustand) -> &'static str {
+    if z.automatik_fehler().is_some() {
+        " class=\"halt\""
+    } else {
+        ""
+    }
+}
+
 fn naechster_abschnitt(z: &Zustand, heute: Option<Datum>) -> String {
     let planung = maskiere(&naechster_text(z, heute));
+    let klasse = automatik_halt_klasse(z);
     let titel = if z.warteschlange.is_empty() {
         "Nächster geplanter Lauf: "
     } else {
         "Danach laut Zeitplan: "
     };
-    let titel = if z.zeitplan.an && z.erledigt_fehler.is_none() && z.zeitplan_fehler.is_none() {
+    let titel = if z.automatik_status() == "an" {
         titel
     } else {
         ""
     };
     if let Some(a) = z.warteschlange.front() {
+        let naechster = if z.verlauf_fehler.is_some() {
+            "Wartet"
+        } else {
+            "Als Nächstes"
+        };
         format!(
-            "<p>Als Nächstes: {} ({})</p><p>{titel}{planung}</p>",
+            "<p>{naechster}: {} ({})</p><p{klasse}>{titel}{planung}</p>",
             maskiere(a.art.name()),
             anlass_text(a.anlass)
         )
     } else {
-        format!("<p>{titel}{planung}</p>")
+        format!("<p{klasse}>{titel}{planung}</p>")
     }
 }
 
@@ -974,14 +968,25 @@ fn ergebnis(a: &Auftrag, z: &Zustand) -> (&'static str, &'static str) {
         return ("halt", "unterbrochen");
     }
     match a.erfolg {
+        Some(true) if a.art == Art::Gemini => ("leise", "Lauf beendet"),
         Some(true) => ("gut", "erfolgreich"),
         Some(false) => ("halt", "abgebrochen"),
         None => ("offen", "läuft"),
     }
 }
 
+fn auftragsergebnis_html(a: &Auftrag, z: &Zustand, ki: &Aufrufe) -> String {
+    if a.art == Art::Gemini && ki.hat_eintrag(&a.kennung) {
+        let mut s = String::new();
+        ki.gelaufen(&mut s, Some(&a.kennung), None);
+        return s;
+    }
+    let (klasse, text) = ergebnis(a, z);
+    format!("<span class=\"{klasse}\">{text}</span>")
+}
+
 /// Was der Dienst tut: laufender Auftrag, Warteschlange, naechster Lauf, Verlauf.
-pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
+fn taetigkeit(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
     let klasse = z.laufend.as_ref().map_or("", |_| "aktiver-bereich");
     let mut s = format!("<section id=\"taetigkeit\" class=\"{klasse}\"><h2>Tätigkeit</h2>");
     if let Some(a) = &z.laufend {
@@ -1053,11 +1058,11 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
              <th>Ende</th><th>Ergebnis</th></tr>",
         );
         for a in &z.verlauf {
-            let (klasse, text) = ergebnis(a, z);
+            let ergebnis = auftragsergebnis_html(a, z, ki);
             let _ = write!(
                 s,
                 "<tr><td>{}<br><span class=\"leise\">{}</span></td><td>{}</td><td>{}</td><td>{}</td>\
-                 <td><span class=\"{klasse}\">{text}</span>{}{}</td></tr>",
+                 <td>{ergebnis}{}{}</td></tr>",
                 maskiere(a.art.name()),
                 maskiere(&a.kennung),
                 maskiere(&anlass_zeile(a)),
@@ -1075,7 +1080,10 @@ pub fn taetigkeit(z: &Zustand, heute: Option<Datum>) -> String {
     if let Some(f) = &z.verlauf_fehler {
         let _ = write!(s, "<p class=\"kopf halt\">{}</p>", maskiere(f));
     }
-    if let Some(h) = &z.verlauf_hinweis {
+    for h in [&z.verlauf_vermerkfehler, &z.verlauf_hinweis]
+        .into_iter()
+        .flatten()
+    {
         let _ = write!(s, "<p class=\"offen\">{}</p>", maskiere(h));
     }
     s.push_str("</section>");
@@ -1150,15 +1158,9 @@ fn gesamtstatus_teil(token: &str, z: &Zustand, einrichtung: bool) -> String {
         _ if matches!(b, depot_lage::Betrieb::OhneKi(_)) => (b.klasse(), "KI eingeschränkt"),
         _ => (b.klasse(), b.titel()),
     };
-    let automatik = if z.erledigt_fehler.is_some() || z.zeitplan_fehler.is_some() {
-        "Zeitplan angehalten"
-    } else if z.zeitplan.an {
-        "Zeitplan an"
-    } else {
-        "Zeitplan aus"
-    };
+    let automatik = z.automatik_status();
     let mut s = format!(
-        "<section id=\"betrieb\"><div class=\"kopf {klasse}\">{}</div><p>Automatik: {automatik}</p>",
+        "<section id=\"betrieb\"><div class=\"kopf {klasse}\">{}</div><p>Automatik: Zeitplan {automatik}</p>",
         maskiere(titel)
     );
     let mut gruende = String::new();
@@ -1274,7 +1276,7 @@ pub(crate) fn live_mit_ki(
     let heute = ortszeit(jetzt).map(|(d, ..)| d);
     let mut s = marke(start);
     s.push_str(&zeitstrahl(z, heute, ki));
-    s.push_str(&taetigkeit(z, heute));
+    s.push_str(&taetigkeit(z, heute, ki));
     s.push_str(&gesamtstatus_teil(token, z, false));
     s.push_str(&update_hinweis(z));
     if z.laufend.is_some() && z.lage.is_some() {
@@ -1706,10 +1708,7 @@ fn einrichtungsziel(z: &Zustand) -> Option<(&'static str, &'static str)> {
 
 fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String) {
     let p: &Zeitplan = &zustand.zeitplan;
-    let fehler = zustand
-        .erledigt_fehler
-        .as_ref()
-        .or(zustand.zeitplan_fehler.as_ref());
+    let fehler = zustand.automatik_fehler();
     let gespeichert = match (e.zeitplan_gespeichert, fehler) {
         (_, Some(f)) => format!("<p class=\"halt\">{}</p>", maskiere(f)),
         (Some(true), None) => "<p>Einstellungen gespeichert.</p>".into(),
@@ -1725,11 +1724,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
     };
     let (voraussetzung, gesperrt) = zeitplan_voraussetzungen(zustand);
     let stand = if p.an { "an" } else { "aus" };
-    let betrieb = if fehler.is_some() {
-        "angehalten"
-    } else {
-        stand
-    };
+    let betrieb = zustand.automatik_status();
     let token = maskiere(token);
     let schalter = if p.an {
         format!(
@@ -1775,7 +1770,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <input type=\"hidden\" name=\"t\" value=\"{token}\">\
          <input type=\"hidden\" name=\"planstand\" value=\"{stand}\">\
          <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
-         <label>Kurse Xetra abrufen um <input type=\"time\" name=\"kurse\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
+         <label>Kursabruf um <input type=\"time\" name=\"kurse\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
          <p class=\"leise\">Jede andere Börse der Liste wird zehn Minuten nach ihrem eigenen \
          Schluss abgerufen, wenn ausdrücklich ein alter Abendplan eingestellt ist. Im Morgenlauf gilt der letzte abgeschlossene Handelstag je Börse.</p>\
          <label><input type=\"checkbox\" name=\"papier_danach\" value=\"ja\"{}> \
@@ -2035,7 +2030,7 @@ fn erste_schritte(z: &Zustand, e: &Einrichtung) -> String {
     } else {
         "bitte ergänzen oder prüfen"
     };
-    let plan = if z.zeitplan_fehler.is_some() || z.erledigt_fehler.is_some() {
+    let plan = if z.automatik_fehler().is_some() {
         "angehalten; den Grund findest du im Zeitplan"
     } else if z.zeitplan.an {
         "eingeschaltet"
