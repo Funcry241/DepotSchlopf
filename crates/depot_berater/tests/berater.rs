@@ -469,6 +469,7 @@ fn fehlende_antwort_sperrt_abgewiesene_nicht() -> Result<(), String> {
         assert!(a.vorschlag.is_none());
         assert!(!a.einschaetzung.contains(SCHLUESSEL), "{a:?}");
         assert!(!ort.sperre().exists(), "{a:?}");
+        assert_eq!(dachs.abrechnung().map(|a| a.kosten()), Some(Cent::NULL));
     }
     // Eine Antwort ohne Verbrauch: Kosten unbekannt, Sperre.
     let mut netz = Attrappe::default();
@@ -492,6 +493,36 @@ fn abgebrochene_antwort_sperrt() -> Result<(), String> {
     let a = mit_lage(|l| maus.vorschlagen(e, l))?;
     assert!(a.vorschlag.is_none());
     assert!(ort.sperre().exists(), "{a:?}");
+    assert!(maus.abrechnung().is_none(), "Kosten können angefallen sein");
+    Ok(())
+}
+
+#[test]
+fn fehlendes_guthaben_gibt_reservierung_im_journal_frei() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(abgelehnt(
+        429,
+        r#"{"error":{"code":"insufficient_quota"}}"#,
+        None,
+    ));
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?;
+    let erlaubnis = ort.erlaubnis(BeraterId::Maus, 1)?;
+    let nr = erlaubnis.buchungsnummer();
+    assert!(erlaubnis.buchung().reserviert > Cent::NULL);
+    let antwort = mit_lage(|lage| maus.vorschlagen(erlaubnis, lage))?;
+    assert!(!antwort.verwertbar);
+    let abrechnung = some(maus.abrechnung(), "Abrechnung für abgelehnten Aufruf")?;
+    assert_eq!(abrechnung.kosten(), Cent::NULL);
+    vorbedingung(ort.journal.rechne_ki_ab(&abrechnung), "Abrechnung buchen")?;
+    let buch = vorbedingung(
+        Journal::oeffnen(&ort.dir.join("journal.txt")),
+        "Journal neu öffnen",
+    )?;
+    assert_eq!(
+        buch.stand().ki().buchungen().get(nr).map(|b| b.reserviert),
+        Some(Cent::NULL)
+    );
     Ok(())
 }
 
