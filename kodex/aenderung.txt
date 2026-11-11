@@ -1,4 +1,7 @@
-klasse: KodexAenderung
-zweck: Kodex-Gegenproben durch gezieltes Wiederherstellen der Testdateien beschleunigen
+klasse: Funktion
+zweck: KI-Abstimmung anhand von Berater und Zielgewichten abschließen
 pfade:
-crates/depot_kodex/tests/befunde.rs
+crates/depot_berater/src/frage.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/tests/invarianten.rs

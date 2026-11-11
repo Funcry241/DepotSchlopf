@@ -148,7 +148,7 @@ const ERST_BP: i64 = 2_000;
 /// Was ein Berater in einer Runde tut.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Schritt {
-    /// Den eigenen, gezeigten Stand unverändert zurückgeben.
+    /// Die gezeigten Zielgewichte mit neu formulierter Begründung bestätigen.
     Behalten,
     /// Auf dieses Gewicht ändern (oder nach einem Rückzug neu vorschlagen).
     Aendern(i64),
@@ -269,7 +269,12 @@ impl depot_sim::Berater for Spieler {
         };
         let eigener = match schritt {
             Schritt::Unverwertbar => return AbstimmungsAntwort::unverwertbar(),
-            Schritt::Behalten => stand.eigener_vorschlag.clone(),
+            Schritt::Behalten => stand.eigener_vorschlag.clone().map(|mut v| {
+                for grund in v.begruendung.values_mut() {
+                    *grund = format!("Belegte Lage in eigenen Worten (Runde {})", stand.runde);
+                }
+                v
+            }),
             Schritt::Aendern(bp) => vorschlag(self.wer, bp).ok(),
             Schritt::Zurueck => None,
         };

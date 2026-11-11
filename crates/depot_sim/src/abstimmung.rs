@@ -117,7 +117,10 @@ fn frage(
         "Abstimmung Runde {}: verwertbar={}; Änderung={}; Ziele={:?}; Zustimmung zum fremden Stand={}; Grund: {}",
         dialog.runde,
         erste.eigene.verwertbar,
-        erste.eigene.vorschlag != dialog.eigener_vorschlag,
+        !gleiche_ziele(
+            erste.eigene.vorschlag.as_ref(),
+            dialog.eigener_vorschlag.as_ref()
+        ),
         erste.eigene.vorschlag.as_ref().map(|v| &v.zielgewichte_bp),
         erste.zustimmung_fremd,
         crate::vorbereitung::text_fuer_frage(&erste.eigene.einschaetzung)
@@ -133,14 +136,25 @@ fn frage(
     .map_err(journal)?;
     Ok(Some(erste))
 }
+
+/// Zustimmung gilt für Berater und Zielgewichte. `None` ist ein Rückzug.
+fn gleiche_ziele(a: Option<&Vorschlag>, b: Option<&Vorschlag>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a.berater == b.berater && a.zielgewichte_bp == b.zielgewichte_bp,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 fn uebernehme(
     gueltig: &mut TopfAntwort,
     bisher: Option<&Vorschlag>,
     neu: &AbstimmungsAntwort,
     peer: &AbstimmungsAntwort,
 ) {
-    if neu.eigene.vorschlag.as_ref() == bisher && peer.zustimmung_fremd {
-        gueltig.vorschlag.clone_from(&neu.eigene.vorschlag);
+    if gleiche_ziele(neu.eigene.vorschlag.as_ref(), bisher) && peer.zustimmung_fremd {
+        // Die Kaufthese stammt aus dem Stand, den der andere Berater gesehen hat.
+        gueltig.vorschlag = bisher.cloned();
     } else {
         gueltig.vorschlag = None;
     }
@@ -198,10 +212,10 @@ pub(crate) fn berate(
         }
         // Rückzug, Wechsel und Widerruf gelten auch bei einer unvollständigen Runde.
         let [ga, gb] = &mut gueltig;
-        if ga.vorschlag != erste.eigene.vorschlag {
+        if !gleiche_ziele(ga.vorschlag.as_ref(), erste.eigene.vorschlag.as_ref()) {
             ga.vorschlag = None;
         }
-        if !erste.zustimmung_fremd && gb.vorschlag == vb {
+        if !erste.zustimmung_fremd && gleiche_ziele(gb.vorschlag.as_ref(), vb.as_ref()) {
             gb.vorschlag = None;
         }
         if !crate::lauf::beratungszeit(zyklus) {
@@ -216,7 +230,8 @@ pub(crate) fn berate(
         let [ga, gb] = &mut gueltig;
         uebernehme(ga, va.as_ref(), &erste, &zweite);
         uebernehme(gb, vb.as_ref(), &zweite, &erste);
-        let gleich = va == erste.eigene.vorschlag && vb == zweite.eigene.vorschlag;
+        let gleich = gleiche_ziele(va.as_ref(), erste.eigene.vorschlag.as_ref())
+            && gleiche_ziele(vb.as_ref(), zweite.eigene.vorschlag.as_ref());
         letzte_a = crate::vorbereitung::text_fuer_frage(&erste.eigene.einschaetzung);
         letzte_b = crate::vorbereitung::text_fuer_frage(&zweite.eigene.einschaetzung);
         va = erste.eigene.vorschlag;
