@@ -171,9 +171,14 @@ pub fn status(_wer: Wer) -> Hinterlegt {
 #[cfg(windows)]
 pub fn ablegen(wer: Wer, text: &str) -> Result<(), String> {
     let s = wer.pruefe(text)?;
-    eintrag(wer)?
+    let eintrag = eintrag(wer)?;
+    eintrag
         .set_password(&s)
-        .map_err(|_| format!("Anmeldeverwaltung: {} nicht gespeichert", wer.adresse()))
+        .map_err(|_| format!("Anmeldeverwaltung: {} nicht gespeichert", wer.adresse()))?;
+    if wer == Wer::Gemini && !eintrag.get_password().is_ok_and(|gelesen| gelesen == s) {
+        return Err("Anmeldeverwaltung: Gemini-Schlüssel konnte nicht zurückgelesen werden".into());
+    }
+    Ok(())
 }
 
 /// Ausserhalb von Windows gibt es keinen Ort fuer Schluessel.

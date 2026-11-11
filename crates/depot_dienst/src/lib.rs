@@ -300,11 +300,11 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             } else {
                 schluessel_stand(gemini_schluessel, &protokoll, Wer::Gemini.protokoll())
             };
-            inhalt.push_str(&gemini::einrichtung(d, gemini_stand, tag));
+            inhalt.push_str(&gemini::einrichtung(d, gemini_stand, tag, &a.abfrage));
             let seite = seiten::rahmen(
                 "/einrichtung",
                 None,
-                seiten::meldung(&a.abfrage),
+                gemini::seiten_meldung(&a.abfrage),
                 &inhalt,
                 d.version.as_deref(),
                 &betriebsleiste(d, tag),
@@ -445,20 +445,21 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                     "Schlüssel unbekannt. Wähle den Anbieter erneut in der Einrichtung.",
                 );
             };
-            let abschnitt = if wer == Wer::Gemini {
-                "zusatz"
+            let ziel = if wer == Wer::Gemini {
+                "&wer=gemini#zusatz"
             } else {
-                "schluessel"
+                "#schluessel"
             };
             if wer.pruefe(wert).is_err() {
-                return http::umleitung(&format!(
-                    "/einrichtung?m=schluessel_ungueltig#{abschnitt}"
-                ));
+                return http::umleitung(&format!("/einrichtung?m=schluessel_ungueltig{ziel}"));
             }
             if u.schluessel_ablegen(wer, wert).is_err() {
-                return http::umleitung(&format!("/einrichtung?m=schluessel_fehler#{abschnitt}"));
+                return http::umleitung(&format!("/einrichtung?m=schluessel_fehler{ziel}"));
             }
             d.protokoll_schluessel_merken(wert.trim());
+            if wer == Wer::Gemini && u.schluessel(wer) != Hinterlegt::Ja {
+                return http::umleitung(&format!("/einrichtung?m=schluessel_fehler{ziel}"));
+            }
             // Der neue Schlüssel ist hinterlegt, bis ein Aufruf ihn bestätigt.
             let neu = anbieter::Eintrag::neu(jetzt, wer.protokoll(), anbieter::Ergebnis::Neu, None);
             let datei = d.wurzel.join("daten").join(anbieter::DATEI);
@@ -468,7 +469,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 "schluessel_protokoll"
             };
             d.sperre().lage_veraltet = true;
-            http::umleitung(&format!("/einrichtung?m={meldung}#{abschnitt}"))
+            http::umleitung(&format!("/einrichtung?m={meldung}{ziel}"))
         }
         "/zeitplan" => zeitplan_aendern(d, &f),
         "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),
