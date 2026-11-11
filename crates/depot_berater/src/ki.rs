@@ -507,7 +507,6 @@ impl<N: Netz> KiBerater<N> {
         } else {
             let kurz: String = roh.chars().take(300).collect();
             e.ergebnis = anbieter::einordnen(antwort.status, &kurz).kurz().into();
-            e.kosten_cent = Some(0);
         }
         self.geheim_im_gespraech(&roh)
     }
@@ -528,6 +527,47 @@ impl<N: Netz> KiBerater<N> {
         }
     }
 
+    fn ohne_kosten(
+        &mut self,
+        erlaubnis: &AufrufErlaubnis,
+        eintrag: &mut Option<Gespraech>,
+        grund: String,
+    ) -> Ergebnis {
+        self.abrechnung = erlaubnis.abrechnung(0, 0);
+        if let Some(e) = eintrag {
+            e.kosten_cent = Some(0);
+        }
+        Ergebnis {
+            text: Err(grund),
+            kosten: "keine Kosten".into(),
+        }
+    }
+
+    /// Bei einer verworfenen Antwort bleibt die Abrechnung sicher kostenloser Aufrufe gültig.
+    fn behalte_nur_nullabrechnung(&mut self) {
+        self.abrechnung = self.abrechnung.take().filter(|a| a.kosten() == Cent::NULL);
+    }
+
+    fn versandfehler(
+        &mut self,
+        erlaubnis: &AufrufErlaubnis,
+        eintrag: &mut Option<Gespraech>,
+        status: Option<Ausgang>,
+        meldung: String,
+    ) -> Ergebnis {
+        if let Some((e, status)) = eintrag.as_mut().zip(status) {
+            e.ergebnis = status.kurz().into();
+        }
+        if status == Some(Ausgang::Unklar) {
+            Ergebnis {
+                text: Err(meldung),
+                kosten: "Kosten unbekannt".into(),
+            }
+        } else {
+            self.ohne_kosten(erlaubnis, eintrag, meldung)
+        }
+    }
+
     fn fragen_intern(
         &mut self,
         erlaubnis: &AufrufErlaubnis,
@@ -537,20 +577,16 @@ impl<N: Netz> KiBerater<N> {
         geheim: &mut bool,
     ) -> Ergebnis {
         self.abrechnung = None;
-        let ohne = |t: String| Ergebnis {
-            text: Err(t),
-            kosten: "keine Kosten".into(),
-        };
         let Some(schluessel) = self.schluessel.clone() else {
-            return ohne("kein Schlüssel".into());
+            return self.ohne_kosten(erlaubnis, e, "kein Schlüssel".into());
         };
         if self.gesperrt() {
-            return ohne("KI gesperrt".into());
+            return self.ohne_kosten(erlaubnis, e, "KI gesperrt".into());
         }
         // Auch wer mit Erlaubnis fragt, wartet eine Pause des Anbieters ab (zweite Pruefung
         // direkt vor dem Senden; die erste ist `angebunden`, vor der Reservierung).
         if let Some(p) = self.pause() {
-            return ohne(format!("pausiert: {p}"));
+            return self.ohne_kosten(erlaubnis, e, format!("pausiert: {p}"));
         }
         let deckel = *erlaubnis.deckel();
         let reserviert = erlaubnis.buchung().reserviert;
@@ -560,27 +596,26 @@ impl<N: Netz> KiBerater<N> {
         // gesicherte Obergrenze.
         let inhalt = self.anbieter.anfrage(&deckel, system, frage);
         if !erlaubnis.eingabe_passt(&inhalt) {
-            return ohne("Anfrage über dem Deckel, nicht gesendet".into());
+            return self.ohne_kosten(
+                erlaubnis,
+                e,
+                "Anfrage über dem Deckel, nicht gesendet".into(),
+            );
         }
         let mut bearer = String::new();
         let kopf = self.anbieter.kopf(schluessel.als_str(), &mut bearer);
         let antwort = match self.sende(&kopf, &inhalt, reserviert) {
             Ok(a) => a,
             Err((status, meldung)) => {
-                if let Some((e, status)) = e.as_mut().zip(status) {
-                    e.ergebnis = status.kurz().into();
-                    if status == Ausgang::Netz {
-                        e.kosten_cent = Some(0);
-                    }
-                }
-                return ohne(meldung);
+                return self.versandfehler(erlaubnis, e, status, meldung);
             }
         };
         if let Some(e) = e {
             *geheim = self.erfasse_http(e, &antwort);
         }
         if antwort.status != 200 {
-            return ohne(self.ablehnung(&antwort, reserviert));
+            let grund = self.ablehnung(&antwort, reserviert);
+            return self.ohne_kosten(erlaubnis, e, grund);
         }
         // Geheimnisschutz fuer jede Antwort, nicht nur fuer Fehler: Gibt der Anbieter den
         // Schluessel zurueck, wird kein Text davon verwendet. Geprueft wird hier roh und unten
@@ -603,7 +638,10 @@ impl<N: Netz> KiBerater<N> {
                     self.bereinigt(&e)
                 };
                 let m = self.sperre(&format!("Antwort unlesbar, Kosten unbekannt: {e}"));
-                return ohne(m);
+                return Ergebnis {
+                    text: Err(m),
+                    kosten: "Kosten unbekannt".into(),
+                };
             }
         };
         let v = gelesen.verbrauch;
@@ -745,7 +783,7 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a
             }
             Err(g) => {
-                self.abrechnung = None;
+                self.behalte_nur_nullabrechnung();
                 let mut a = depot_sim::abstimmung::AbstimmungsAntwort::unverwertbar();
                 a.eigene.einschaetzung = sauber(&self.bereinigt(&g));
                 a
@@ -827,7 +865,7 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a
             }
             Err(grund) => {
-                self.abrechnung = None;
+                self.behalte_nur_nullabrechnung();
                 Antwort {
                     prognose: None,
                     verwertbar: false,
@@ -873,7 +911,7 @@ impl<N: Netz> Berater for KiBerater<N> {
             }
             // Ohne verwertbare Antwort keine Zustimmung (R31).
             Err(grund) => {
-                self.abrechnung = None;
+                self.behalte_nur_nullabrechnung();
                 Urteil {
                     verwertbar: false,
                     zustimmung: false,
