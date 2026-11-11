@@ -430,7 +430,7 @@ pub(crate) fn ein_tag(
                 let mut vergabe = jr.kennungsvergabe();
                 let auftraege = notbremse_auftraege(z.grenzen, topf, &tag.kurse, &mut vergabe)
                     .ok_or_else(|| halt("Notbremse: Kurs fehlt; Halt ohne Verkauf"))?;
-                fuehre_aus(jr, z, topf.id(), &auftraege, &mut *beteiligte.konto)?;
+                fuehre_aus(jr, z, topf.id(), &auftraege, None, &mut *beteiligte.konto)?;
             }
             return Err(halt(format!("Wächter: {befund:?}")));
         }
@@ -624,7 +624,7 @@ fn erneuere_schutzverkaeufe(
         let mut vergabe = j.kennungsvergabe();
         let auftraege = notbremse_auftraege(z.grenzen, &topf, &z.tag.kurse, &mut vergabe)
             .ok_or_else(|| halt("Notbremse: Kurs fehlt; Halt ohne Verkauf"))?;
-        fuehre_aus(j, z, topf.id(), &auftraege, konto)?;
+        fuehre_aus(j, z, topf.id(), &auftraege, None, konto)?;
     }
     Ok(())
 }
@@ -820,10 +820,12 @@ fn frage_topf(
         .cloned()
         .ok_or_else(|| halt(format!("{} fehlt im Journal", topf_name(id))))?;
     let t = topf_name(id);
+    let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let lage = Lage {
         datum: tag.datum,
         topf: &topf,
         kurse: &tag.kurse,
+        positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
     let wartet = j
@@ -865,10 +867,12 @@ fn zweite_meinung(
     let id = topf.id();
     let zweiter = andere(id.berater());
     let t = topf_name(id);
+    let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let lage = Lage {
         datum: tag.datum,
         topf: &topf,
         kurse: &tag.kurse,
+        positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
     if vorschlag.is_some() && !pruefer.angebunden() {
@@ -947,13 +951,15 @@ fn topf_zyklus(
         begruende(j, tag, REGELWERK, &format!("{t}: {b:?}"))?;
     }
     if ent.verkaeufe.is_empty() {
-        return fuehre_aus(j, z, id, &ent.kaeufe, konto);
+        return fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto);
     }
-    let alle = fuehre_aus(j, z, id, &ent.verkaeufe, konto);
+    let alle = fuehre_aus(j, z, id, &ent.verkaeufe, None, konto);
     // Das Regelwerk rechnet die Kaeufe mit dem Erloes der Verkaeufe: Sie gehen nur raus, wenn
     // alle Verkaeufe ausgefuehrt sind und das bereits abgerechnete Geld ausreicht.
     match alle {
-        Ok(()) if verkauft(j, &ent.verkaeufe) => fuehre_aus(j, z, id, &ent.kaeufe, konto),
+        Ok(()) if verkauft(j, &ent.verkaeufe) => {
+            fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto)
+        }
         Ok(()) if ent.kaeufe.is_empty() => Ok(()),
         Ok(()) => begruende(
             j,
@@ -985,6 +991,7 @@ fn fuehre_aus(
     z: &Zyklus<'_>,
     id: TopfId,
     auftraege: &[GenehmigterAuftrag],
+    vorschlag: Option<&Vorschlag>,
     konto: &mut dyn Broker,
 ) -> Result<(), LaufFehler> {
     let tag = z.tag;
@@ -1023,6 +1030,19 @@ fn fuehre_aus(
                 continue;
             }
             Err(e) => return Err(journal(e)),
+        }
+        // Erst nach der Reservierung und vor dem Versand dauerhaft belegen. In der
+        // Folgeberatung zählt diese These erst, sobald der Auftrag ausgeführt wurde.
+        if let Some(these) = vorschlag
+            .and_then(|v| v.begruendung.get(&a.auftrag().isin))
+            .filter(|text| !text.trim().is_empty())
+        {
+            begruende(
+                j,
+                tag,
+                crate::positionskauf::KAUFTHESE,
+                &format!("{nr} {these}"),
+            )?;
         }
         let versand = z
             .uhr
@@ -1198,6 +1218,7 @@ mod tests {
             datum,
             topf: &topf,
             kurse: &kurse,
+            positionskaeufe: &[],
             ereignisse: &["Meldung".into()],
         };
         let prognose = Weltprognose {

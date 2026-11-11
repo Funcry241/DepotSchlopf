@@ -37,6 +37,7 @@ pub struct Lage<'a> {
     pub topf: &'a Topf,
     pub kurse: &'a Kurse,
     pub ereignisse: &'a [String],
+    pub positionskaeufe: &'a [crate::Positionskauf],
 }
 
 /// So beginnt die Einschaetzung oder Begruendung, wenn ein Berater gefragt wurde, seine Antwort

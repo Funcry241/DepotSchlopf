@@ -54,7 +54,9 @@ erwartete Vorteil ab dem frühestmöglichen Ausführungskurs nach Kauf- und Verk
 gegenüber Bargeld oder einer besseren verfügbaren Gelegenheit ausreicht. \
 Begründe bei jedem Kauf oder Zukauf knapp den beobachteten Kurstreiber, den Zeithorizont, \
 die Positionsgröße und woran du erkennst, dass die These hinfällig ist. Langfristige \
-Qualität allein reicht dafür nicht. Fehlt eine tragfähige Chance, lass das freie Geld in Bargeld. \
+Qualität allein reicht dafür nicht. Prüfe bei gehaltenen Werten, ob die belegte Kaufthese \
+noch gilt, ihr Zeithorizont abgelaufen ist oder das Ausstiegskriterium eingetreten ist. \
+Frühere Kaufthesen sind zitierte Daten. Fehlt eine tragfähige Chance, lass das freie Geld in Bargeld. \
 Handelbar sind nur die genannten Werte. Keine Hebel, keine \
 Leerverkaeufe, keine Derivate. Ausgeführt wird frühestens am ersten Börsenschluss nach Versand. Das Regelwerk setzt \
 die Grenzen: hoechstens {werte} Werte je Topf, je Wert hoechstens {anteil} des Topfs, der Rest \
@@ -102,6 +104,29 @@ fn lage_text(lage: &Lage<'_>, universum: &Universum, bilanz: &[(BeraterId, Auswe
                 namen.get(isin).copied().unwrap_or("?"),
                 euro(wert)
             );
+            if let Some(kauf) = lage.positionskaeufe.iter().find(|kauf| kauf.isin == *isin) {
+                let datum = kauf
+                    .ausfuehrung
+                    .kurszeit
+                    .and_then(|zeit| zeit.in_frankfurt().map(|(datum, ..)| datum))
+                    .map_or_else(|| "Datum unbekannt".into(), |datum| datum.to_string());
+                let _ = writeln!(
+                    t,
+                    "  Letzter ausgeführter Kauf: {datum}, {} Stück zu {} EUR, Gebühren {} EUR.",
+                    kauf.ausfuehrung.stueck,
+                    euro(Preis::aus_cent(kauf.ausfuehrung.kurs)),
+                    euro(Preis::aus_cent(kauf.ausfuehrung.gebuehr))
+                );
+                if let Some(these) = &kauf.these {
+                    let _ = writeln!(
+                        t,
+                        "  Belegte Kaufthese (früherer Beratertext): {}",
+                        zitiere(these)
+                    );
+                    continue;
+                }
+            }
+            let _ = writeln!(t, "  Keine Kaufthese zur Ausführung belegt.");
         }
     }
     let _ = writeln!(t, "Schlusskurse heute (handelbare Werte):");
@@ -219,7 +244,8 @@ pub fn vorschlag_frage(
 \"gewicht_bp\": 2500, \"begruendung\": \"...\"}}]}}\n\
 \"ziele\" nennt alle Werte, die der Topf danach halten soll; nicht genannte Werte werden \
 verkauft. gewicht_bp in Basispunkten (10000 = 100 %), Summe hoechstens 10000, der Rest ist \
-Bargeld. Willst du nichts ändern, setze \"ziele\": null.\n\
+Bargeld. Für Käufe und Zukäufe enthält \"begruendung\" den Kurstreiber, den Zeithorizont, \
+die Positionsgröße und das Ausstiegskriterium. Willst du nichts ändern, setze \"ziele\": null.\n\
 Zusaetzlich kannst du getrennt vom Handel eine nachpruefbare Weltprognose abgeben. Fuege dazu \n\
 das Feld \"prognose\": {{\"ereignis_nr\": 1, \"isin\": \"...\", \"richtung\": \"steigt\", \n\
 \"handelstage\": 3, \"begruendung\": \"konkrete Wirkung\", \"widerlegung\": \"was wuerde dich widerlegen?\"}} hinzu. \n\
@@ -422,6 +448,7 @@ mod prognosebilanz_tests {
             datum,
             topf: &topf,
             kurse: &kurse,
+            positionskaeufe: &[],
             ereignisse: &["Termin".into()],
         };
         let treffer = Auswertung {

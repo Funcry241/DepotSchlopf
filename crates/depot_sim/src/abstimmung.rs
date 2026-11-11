@@ -101,10 +101,12 @@ fn frage(
         Err(s) if budgetgrenze(&s) => return Ok(None),
         Err(s) => return Err(crate::lauf::halt(format!("Abstimmungsreservierung: {s:?}"))),
     };
+    let positionskaeufe = crate::positionskauf::lies(buch.stand(), &topf.topf);
     let lage = Lage {
         datum: zyklus.tag.datum,
         topf: &topf.topf,
         kurse: &zyklus.tag.kurse,
+        positionskaeufe: &positionskaeufe,
         ereignisse: &zyklus.tag.ereignisse,
     };
     let erste = zweite.abstimmen(erlaubnis, &lage, dialog);
