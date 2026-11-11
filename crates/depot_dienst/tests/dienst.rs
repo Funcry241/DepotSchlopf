@@ -2729,6 +2729,45 @@ fn vorbereiten_braucht_bestaetigung_und_automatik_braucht_schlagzeilen() -> Resu
 }
 
 #[test]
+fn live_zeigt_den_tatsaechlichen_stand_der_vorbereitungsautomatik() -> Result<(), String> {
+    use depot_dienst::zeitplan::VorbereitungsPlan;
+
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(12, 0)?;
+    assert!(d.schritt(t).is_none());
+    for (an, vorbereitung, fehler, erwartet) in [
+        (false, VorbereitungsPlan::An, None, "Zeitplan aus."),
+        (true, VorbereitungsPlan::Aus, None, "ist ausgeschaltet."),
+        (true, VorbereitungsPlan::An, None, "ist eingeschaltet."),
+        (
+            true,
+            VorbereitungsPlan::An,
+            Some("Zeitplan nicht lesbar"),
+            "Zeitplan angehalten.",
+        ),
+    ] {
+        {
+            let mut z = d.sperre();
+            z.zeitplan.an = an;
+            z.zeitplan.nachrichten_an = true;
+            z.zeitplan.vorbereitung = vorbereitung;
+            z.zeitplan_fehler = fehler.map(str::to_owned);
+        }
+        let live = get(&d, "/teil/live", t);
+        let abschnitt = live
+            .split_once("<section id=\"vorbereitung\">")
+            .and_then(|(_, rest)| rest.split_once("</section>"))
+            .map(|(abschnitt, _)| abschnitt)
+            .ok_or("Vorbereitung fehlt")?;
+        assert!(abschnitt.contains("Noch keine separate Vorbereitung belegt."));
+        assert!(abschnitt.contains(erwartet), "{abschnitt}");
+        assert!(abschnitt.contains("Heute ist Handelstag."));
+        assert!(!abschnitt.contains("Automatik einrichten"));
+    }
+    Ok(())
+}
+
+#[test]
 fn vorbereitung_zeigt_frankfurter_zeitfenster_und_prueft_alte_bestaetigungen() -> Result<(), String>
 {
     let d = dienst(ordner()?, true);

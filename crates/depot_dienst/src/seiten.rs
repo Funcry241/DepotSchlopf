@@ -1266,6 +1266,28 @@ pub fn live(token: &str, start: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
     live_mit_ki(token, start, z, jetzt, &Aufrufe::default())
 }
 
+fn vorbereitung_auf_live(token: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
+    let stand = match z.automatik_status() {
+        "angehalten" => "Automatische Vorbereitung pausiert: Zeitplan angehalten.",
+        "aus" => "Automatische Vorbereitung pausiert: Zeitplan aus.",
+        _ if z.zeitplan.vorbereitung.aktiv() && z.zeitplan.nachrichten_an => {
+            "Automatische Vorbereitung an börsenfreien Tagen ist eingeschaltet."
+        }
+        _ => "Automatische Vorbereitung an börsenfreien Tagen ist ausgeschaltet.",
+    };
+    let mut s = format!("<p>{stand} <a href=\"/einrichtung#zeitplan\">Zeitplan ansehen</a></p>");
+    if let Some(grund) = z
+        .vorbereitung_pruefen(jetzt)
+        .err()
+        .and_then(vorbereitung_meldung)
+    {
+        let _ = write!(s, "<p class=\"leise\">{}</p>", maskiere(grund));
+    } else if let Some(knopf) = abhilfe_knopf(token, z, Abhilfe::Vorbereiten, false) {
+        s.push_str(&knopf);
+    }
+    s
+}
+
 pub(crate) fn live_mit_ki(
     token: &str,
     start: &str,
@@ -1286,13 +1308,8 @@ pub(crate) fn live_mit_ki(
         Some(l) => s.push_str(&depot_lage::html::inhalt_mit(
             &l.bild,
             &|a| {
-                if a == Abhilfe::Vorbereiten
-                    && let Some(grund) = z
-                        .vorbereitung_pruefen(jetzt)
-                        .err()
-                        .and_then(vorbereitung_meldung)
-                {
-                    return Some(format!("<p class=\"leise\">{}</p>", maskiere(grund)));
+                if a == Abhilfe::Vorbereiten {
+                    return Some(vorbereitung_auf_live(token, z, jetzt));
                 }
                 abhilfe_knopf(token, z, a, false)
             },

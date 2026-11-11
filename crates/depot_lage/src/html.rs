@@ -229,8 +229,7 @@ fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
         }
         s.push_str("</ol></details>");
     } else {
-        s.push_str("<p>Noch keine Vorbereitung belegt. An börsenfreien Tagen können Dachs und Maus \
-            die nächsten Handelstage vorbereiten. <a href=\"/einrichtung#zeitplan\">Automatik einrichten</a>.</p>");
+        s.push_str("<p>Noch keine separate Vorbereitung belegt.</p>");
     }
     s.push_str("<p class=\"leise\">Belegte Quellen bleiben auch ohne KI-Einschätzung sichtbar. Je KI ist höchstens ein kurzer Aufruf möglich. \
         An Handelstagen fließen die Hypothesen in die reguläre Beratung ein.</p>");
