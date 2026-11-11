@@ -24,6 +24,7 @@ use crate::zeit::{Datum, Zeitpunkt};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Boerse {
     Xetra,
+    /// Gemeinsame reguläre Aktien-Sitzungen für NYSE und Nasdaq.
     Nyse,
 }
 

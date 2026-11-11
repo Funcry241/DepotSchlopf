@@ -260,10 +260,9 @@ SGU,"STAR GROUP, L.P.",2026-12-14,2026-09-30,,USD,
     #[test]
     fn nur_werte_der_liste_und_felder() -> Result<(), String> {
         let t = lies_kalender(VORLAGE, &liste()?).map_err(|e| format!("{e:?}"))?;
-        let (Some(jpm), Some(ko)) = (t.first(), t.get(1)) else {
-            return Err(format!("zwei Termine erwartet: {t:?}"));
+        let [jpm, ko, nvidia] = t.as_slice() else {
+            return Err(format!("drei Termine erwartet: {t:?}"));
         };
-        assert_eq!(t.len(), 2);
         assert_eq!(jpm.kennung(), "ergebnis-jpm-2026-12-31");
         assert_eq!(
             jpm.titel(),
@@ -278,6 +277,7 @@ SGU,"STAR GROUP, L.P.",2026-12-14,2026-09-30,,USD,
             vec!["US46625H1005".to_string()]
         );
         assert_eq!(jpm.verlaesslichkeit(), Verlaesslichkeit::Angekuendigt);
+        assert_eq!(nvidia.kennung(), "ergebnis-nvda-2026-10-31");
         assert_eq!(
             ko.titel(),
             "Coca-Cola: Quartalszahlen (Quartal bis 31.12.2026), vor Börsenbeginn"
@@ -288,7 +288,7 @@ SGU,"STAR GROUP, L.P.",2026-12-14,2026-09-30,,USD,
     #[test]
     fn name_mit_komma_ist_kein_fehler() -> Result<(), String> {
         let liste = liste()?;
-        assert_eq!(lies_kalender(VORLAGE, &liste).map(|t| t.len()), Ok(2));
+        assert_eq!(lies_kalender(VORLAGE, &liste).map(|t| t.len()), Ok(3));
         let kurz = VORLAGE.replace(",2026-12-14,2026-09-30,,USD,", ",2026-12-14");
         assert_eq!(lies_kalender(&kurz, &liste), Err(KalenderFehler::Zeile(5)));
         Ok(())

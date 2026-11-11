@@ -230,7 +230,7 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
         }
     };
     println!(
-        "[Sammler] Hole {} Werte (Xetra: Alpha Vantage, NYSE: Tiingo mit EZB-Referenzkursen), {} Sekunden Abstand ...",
+        "[Sammler] Hole {} Werte (Xetra: Alpha Vantage, US-Börsen: Tiingo mit EZB-Referenzkursen), {} Sekunden Abstand ...",
         werte.len(),
         PAUSE.as_secs()
     );
@@ -603,14 +603,15 @@ fn kursdiagnose(wurzel: &Path) -> ExitCode {
         println!("[Sammler] Keine Kurssperre vorhanden: kein Prüfabruf nötig, nichts abgerufen.");
         return ExitCode::SUCCESS;
     }
-    println!(
-        "[Sammler] Prüfabruf: bis zu 15 Werte, 15 Sekunden Abstand, ein Versuch je Wert. \
-              Verbraucht Abrufkontingent. Keine Kurse oder Antworten werden gespeichert; die Sperre bleibt bestehen."
-    );
     let Ok(werte) = beobachtungsliste() else {
         eprintln!("[Sammler] FEHLER: Beobachtungsliste ungültig, nichts abgerufen.");
         return ExitCode::FAILURE;
     };
+    println!(
+        "[Sammler] Prüfabruf: bis zu {} Werte, 15 Sekunden Abstand, ein Versuch je Wert. \
+         Verbraucht Abrufkontingent. Keine Kurse oder Antworten werden gespeichert; die Sperre bleibt bestehen.",
+        werte.len()
+    );
     let (zugang, _) = zugang_laden(&werte, Schluessel::aus_anmeldeverwaltung);
     let daten = wurzel.join("daten");
     depot_sammler::diagnose::pruefabruf(

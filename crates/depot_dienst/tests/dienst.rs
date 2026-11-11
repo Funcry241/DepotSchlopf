@@ -1203,7 +1203,7 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
     let html = get(&d, "/teil/live", t);
     let termine = some(html.find("<b>17:40 Uhr</b> · Termine"), "Terminabruf")?;
     let xetra = some(html.find("<b>17:51 Uhr</b> · Kurse Xetra"), "Xetra-Abruf")?;
-    let nyse = some(html.find("<b>22:10 Uhr</b> · Kurse NYSE"), "NYSE-Abruf")?;
+    let nyse = some(html.find("<b>22:10 Uhr</b> · Kurse US-Börsen"), "US-Abruf")?;
     assert!(termine < xetra && xetra < nyse);
     assert!(html.contains("Kurse Xetra abrufen · ohne KI"));
     assert!(html.contains(&format!("Dachs ({})", depot_kern::modelle::MODELL_DACHS)));

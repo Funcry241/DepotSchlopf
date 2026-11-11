@@ -68,7 +68,7 @@ impl Art {
             Art::Kurse => "Kurse abrufen",
             Art::Kursdiagnose => "Kurssperre sicher untersuchen",
             Art::KurseVon(Boerse::Xetra) => "Kurse Xetra abrufen",
-            Art::KurseVon(Boerse::Nyse) => "Kurse NYSE abrufen",
+            Art::KurseVon(Boerse::Nyse) => "Kurse US-Börsen abrufen",
             Art::Termine => "Termine abrufen",
             Art::Nachrichten => "Schlagzeilen abrufen",
             Art::Gemini => "Gemini-Zuarbeit",

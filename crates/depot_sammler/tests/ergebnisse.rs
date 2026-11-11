@@ -98,7 +98,7 @@ fn nur_werte_der_liste_werden_belegt() -> Result<(), String> {
     let b = b.map_err(|e| format!("{e:?}"))?;
     assert_eq!(abrufe, 1);
     assert_eq!(b.fehler, None);
-    assert_eq!((b.neu, b.geaendert, b.unveraendert), (2, 0, 0));
+    assert_eq!((b.neu, b.geaendert, b.unveraendert), (3, 0, 0));
     let j = vorbedingung(Journal::oeffnen(&journal), "Journal öffnen")?;
     let mut k: Vec<String> = j
         .stand()
@@ -108,7 +108,14 @@ fn nur_werte_der_liste_werden_belegt() -> Result<(), String> {
         .map(|t| t.termin().kennung().to_string())
         .collect();
     k.sort();
-    assert_eq!(k, vec!["ergebnis-jpm-2026-12-31", "ergebnis-ko-2026-12-31"]);
+    assert_eq!(
+        k,
+        vec![
+            "ergebnis-jpm-2026-12-31",
+            "ergebnis-ko-2026-12-31",
+            "ergebnis-nvda-2026-10-31"
+        ]
+    );
     let datei = b.rohdatei.ok_or("keine Rohdatei")?;
     assert_eq!(
         datei.file_name().and_then(|n| n.to_str()),
@@ -138,7 +145,7 @@ fn verschoben_wird_fortgeschrieben_und_einmal_am_tag() -> Result<(), String> {
     let (b, abrufe) = lauf(&journal, &roh, &neu, utc(11, 22)?, &zugang()?)?;
     let b = b.map_err(|e| format!("{e:?}"))?;
     assert_eq!(abrufe, 1);
-    assert_eq!((b.neu, b.geaendert, b.unveraendert), (0, 1, 0));
+    assert_eq!((b.neu, b.geaendert, b.unveraendert), (0, 1, 1));
     assert_eq!(b.fehlen, vec!["ergebnis-ko-2026-12-31".to_string()]);
     Ok(())
 }

@@ -18,7 +18,7 @@ use crate::zeit::{Datum, Zeitpunkt};
 /// Name der Quelle fuer Xetra-Werte im Journal (`kurs;quelle;…`).
 pub const QUELLE: &str = "alphavantage";
 
-/// Name der Quelle fuer Werte der NYSE im Journal: Tiingo (freigegeben am 05.11.2026). Die
+/// Name der Quelle für US-Werte im Journal: Tiingo (freigegeben am 05.11.2026). Die
 /// kostenlose Stufe von Tiingo hat ein eigenes Kontingent, unabhaengig von Alpha Vantage.
 pub const QUELLE_US: &str = "tiingo";
 
@@ -53,7 +53,7 @@ pub fn hoechstens_werte(quelle_name: &str) -> usize {
 /// Ein Eintrag der Liste: ISIN, Boerse, Kuerzel bei der Quelle, Name.
 pub type Eintrag<'a> = (&'a str, Boerse, &'a str, &'a str);
 
-const WERTE: [Eintrag<'static>; 15] = [
+const WERTE: [Eintrag<'static>; 16] = [
     ("DE0007164600", Boerse::Xetra, "SAP.DEX", "SAP"),
     ("DE0007236101", Boerse::Xetra, "SIE.DEX", "Siemens"),
     ("DE0008404005", Boerse::Xetra, "ALV.DEX", "Allianz"),
@@ -74,6 +74,7 @@ const WERTE: [Eintrag<'static>; 15] = [
     ("US4781601046", Boerse::Nyse, "JNJ", "Johnson & Johnson"),
     ("US30231G1022", Boerse::Nyse, "XOM", "Exxon Mobil"),
     ("US92826C8394", Boerse::Nyse, "V", "Visa"),
+    ("US67066G1040", Boerse::Nyse, "NVDA", "NVIDIA"),
 ];
 
 /// Ein beobachteter Wert.
@@ -82,7 +83,7 @@ pub struct Wert {
     pub isin: Isin,
     pub boerse: Boerse,
     /// Kuerzel bei der Quelle: fuer Xetra Grossbuchstaben und Ziffern, dann `.DEX`; fuer die
-    /// NYSE ein bis fuenf Grossbuchstaben, hoechstens mit einer Klasse wie `.B`.
+    /// US-Werte ein bis fünf Großbuchstaben, hoechstens mit einer Klasse wie `.B`.
     pub kuerzel: String,
     pub name: String,
 }
@@ -257,6 +258,24 @@ pub fn als_universum(werte: &[Wert]) -> Universum {
 #[cfg(test)]
 mod papierorder_tests {
     use super::*;
+
+    #[test]
+    fn nvidia_laeuft_ueber_tiingo_mit_us_boersenfrist() -> Result<(), String> {
+        let isin = Isin::neu("US67066G1040").map_err(|e| format!("{e:?}"))?;
+        let nvidia = beobachtungsliste()?
+            .into_iter()
+            .find(|wert| wert.isin == isin)
+            .ok_or("NVIDIA fehlt")?;
+        assert_eq!(nvidia.kuerzel, "NVDA");
+        assert_eq!(quelle(nvidia.boerse), QUELLE_US);
+        assert!(!VERGLEICH_ISIN.contains(&isin.als_str()));
+        let thanksgiving = Datum::neu(2026, 11, 26).ok_or("Thanksgiving")?;
+        let folgetag = Datum::neu(2026, 11, 27).ok_or("Freitag")?;
+        let versand = Zeitpunkt::new_york(thanksgiving, 10, 0, 0).ok_or("Versandzeit")?;
+        let schluss = Zeitpunkt::new_york(folgetag, 13, 0, 0).ok_or("Börsenschluss")?;
+        assert_eq!(papierorder_schluss(&isin, versand), Some(schluss));
+        Ok(())
+    }
 
     #[test]
     fn papierorder_wartet_auf_ihre_boerse() -> Result<(), String> {

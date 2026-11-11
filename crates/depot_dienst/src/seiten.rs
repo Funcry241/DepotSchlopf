@@ -1610,7 +1610,7 @@ pub(crate) fn quellen_teil(token: &str, start: &str, z: &Zustand) -> String {
     for (art, name, aktion) in [
         (
             Art::Kurse,
-            "Schlusskurse aller Börsen der Liste (Xetra: Alpha Vantage, NYSE: Tiingo mit \
+            "Schlusskurse aller Börsen der Liste (Xetra: Alpha Vantage, US-Börsen: Tiingo mit \
              EZB-Referenzkursen; je mit Schlüssel)",
             "Kurse prüfen",
         ),

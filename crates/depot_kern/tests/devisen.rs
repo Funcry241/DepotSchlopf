@@ -306,3 +306,41 @@ fn attribute_vollstaendig_und_eindeutig() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Rekonstruierte Schlusskurse und EZB-Referenzkurse aus docs/befunde/nvidia-rueckblick.md.
+#[test]
+fn nvidia_morgenlauf_sieht_nur_bereits_beendete_us_sitzungen() -> Result<(), String> {
+    let nvidia = isin("US67066G1040")?;
+    let boerse = depot_kern::liste::boerse_von(&nvidia).ok_or("NVIDIA fehlt")?;
+    let devisen = lies(&ezb(&[
+        ("2026-11-06", "1.1165"),
+        ("2026-11-09", "1.1193"),
+        ("2026-11-10", "1.1214"),
+    ]))?;
+    let tage = [(6, "186.64"), (9, "178.67"), (10, "168.89")]
+        .into_iter()
+        .map(|(t, kurs)| {
+            Ok(Tageskurs {
+                datum: tag(2026, 11, t)?,
+                schluss: euro(kurs)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    for (morgen, handelstag, preis) in [
+        (9, 6, "167.165248"),
+        (10, 9, "159.626552"),
+        (11, 10, "150.606384"),
+    ] {
+        let abruf = utc(2026, 11, morgen, 6, 30)?;
+        let (kurse, _) = schlusskurse_in_euro(
+            abruf,
+            vec![(nvidia.clone(), boerse, tage.clone())],
+            &devisen,
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        let kurs = kurse.eintrag(&nvidia).ok_or("NVIDIA-Kurs fehlt")?;
+        assert_eq!(kurs.handelstag(), tag(2026, 11, handelstag)?);
+        assert_eq!(kurs.preis(), euro(preis)?);
+    }
+    Ok(())
+}

@@ -60,7 +60,7 @@ impl Wer {
         match self {
             Wer::Gemini => "Gemini",
             Wer::Kursquelle => "Kursquelle (Alpha Vantage)",
-            Wer::KursquelleUs => "Kursquelle NYSE (Tiingo)",
+            Wer::KursquelleUs => "Kursquelle US-Börsen (Tiingo)",
             Wer::Berater(BeraterId::Dachs) => "Dachs (Claude, Anthropic)",
             Wer::Berater(BeraterId::Maus) => "Maus (GPT, OpenAI)",
         }
