@@ -677,7 +677,8 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
 fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
     let mut s = String::from("<section id=\"zeitstrahl\"><h2>Zeitstrahl</h2>");
     if z.automatik_status() != "an" {
-        let _ = write!(s, "<p>{}</p>", maskiere(&naechster_text(z, heute)));
+        let klasse = automatik_halt_klasse(z);
+        let _ = write!(s, "<p{klasse}>{}</p>", maskiere(&naechster_text(z, heute)));
     } else if let Some(heute) = heute {
         s.push_str("<p class=\"leise\">Geplante Startzeiten in Frankfurter Ortszeit.</p>");
         zeitstrahl_tag(&mut s, z, heute, true, ki);
@@ -860,11 +861,17 @@ fn zeitstrahl_stand(
     }
 }
 
+fn automatik_halt_klasse(z: &Zustand) -> &'static str {
+    if z.automatik_fehler().is_some() {
+        " class=\"halt\""
+    } else {
+        ""
+    }
+}
+
 fn naechster_abschnitt(z: &Zustand, heute: Option<Datum>) -> String {
     let planung = maskiere(&naechster_text(z, heute));
-    if z.automatik_fehler().is_some() {
-        return format!("<p class=\"halt\">{planung}</p>");
-    }
+    let klasse = automatik_halt_klasse(z);
     let titel = if z.warteschlange.is_empty() {
         "Nächster geplanter Lauf: "
     } else {
@@ -876,13 +883,18 @@ fn naechster_abschnitt(z: &Zustand, heute: Option<Datum>) -> String {
         ""
     };
     if let Some(a) = z.warteschlange.front() {
+        let naechster = if z.verlauf_fehler.is_some() {
+            "Wartet"
+        } else {
+            "Als Nächstes"
+        };
         format!(
-            "<p>Als Nächstes: {} ({})</p><p>{titel}{planung}</p>",
+            "<p>{naechster}: {} ({})</p><p{klasse}>{titel}{planung}</p>",
             maskiere(a.art.name()),
             anlass_text(a.anlass)
         )
     } else {
-        format!("<p>{titel}{planung}</p>")
+        format!("<p{klasse}>{titel}{planung}</p>")
     }
 }
 
@@ -1068,7 +1080,10 @@ fn taetigkeit(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
     if let Some(f) = &z.verlauf_fehler {
         let _ = write!(s, "<p class=\"kopf halt\">{}</p>", maskiere(f));
     }
-    if let Some(h) = &z.verlauf_hinweis {
+    for h in [&z.verlauf_vermerkfehler, &z.verlauf_hinweis]
+        .into_iter()
+        .flatten()
+    {
         let _ = write!(s, "<p class=\"offen\">{}</p>", maskiere(h));
     }
     s.push_str("</section>");

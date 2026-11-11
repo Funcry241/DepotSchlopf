@@ -1846,6 +1846,51 @@ fn ohne_schreibbaren_verlauf_startet_nichts() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn fehlender_abschlussvermerk_zeigt_hinweis_und_haelt_zeitplan_nicht_an() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let datei = depot_dienst::verlauf::pfad(&wurzel);
+    let sicherung = datei.with_extension("test-sicherung");
+    let d = dienst(wurzel, true);
+    d.sperre().zeitplan.an = true;
+    let t = donnerstag(12, 0)?;
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(t), "Terminabruf startet")?;
+    fs::rename(&datei, &sicherung).map_err(|e| e.to_string())?;
+    fs::create_dir(&datei).map_err(|e| e.to_string())?;
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+
+    let seite = get(&d, "/teil/live", t);
+    assert!(seite.contains("nicht im Verlauf vermerkt"));
+    assert!(seite.contains("Geplante Startzeiten in Frankfurter Ortszeit"));
+    assert!(!seite.contains("Zeitplan angehalten"));
+    assert!(get(&d, "/einrichtung", t).contains("<b>an</b>"));
+
+    fs::remove_dir(&datei).map_err(|e| e.to_string())?;
+    fs::rename(&sicherung, &datei).map_err(|e| e.to_string())?;
+    d.einreihen(Art::Kurse, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(t), "weiterer Abruf startet")?;
+    assert!(d.sperre().verlauf_vermerkfehler.is_none());
+    d.verfolge(nr, kind, || donnerstag(12, 2).ok());
+    Ok(())
+}
+
+#[test]
+fn angehaltene_automatik_zeigt_wartenden_handauftrag_und_rot_im_zeitstrahl() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(12, 0)?;
+    {
+        let mut z = d.sperre();
+        z.zeitplan.an = true;
+        z.erledigt_fehler = Some("Laufstand unlesbar".into());
+    }
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    let html = get(&d, "/teil/live", t);
+    assert!(html.contains("Als Nächstes: Termine abrufen (von Hand)"));
+    assert!(html.contains(r#"<h2>Zeitstrahl</h2><p class="halt">Zeitplan angehalten"#));
+    Ok(())
+}
+
 /// Ein Starter, der diese Zeilen ausgibt und dann scheitert.
 fn zeilen_starter(zeilen: &'static [&'static str]) -> Starter {
     Box::new(move |_art: Art, _wurzel: &Path| {

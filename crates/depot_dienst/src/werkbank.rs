@@ -214,6 +214,8 @@ pub struct Zustand {
     pub verlauf_hinweis: Option<String>,
     /// Der Verlauf liess sich zuletzt nicht schreiben; bis das wieder geht, startet nichts.
     pub verlauf_fehler: Option<String>,
+    /// Ein Abschluss oder ausgefallener Papiertag ließ sich nicht vermerken.
+    pub verlauf_vermerkfehler: Option<String>,
     /// Die Boersen der Liste (`depot_kern::liste::boersen`), je eine mit eigenem Kursabruf.
     pub boersen: Vec<Boerse>,
     pub(crate) protokoll_datei: Option<crate::protokoll::Datei>,
@@ -691,6 +693,7 @@ impl Dienst {
                 programm_meldung: None,
                 verlauf_hinweis,
                 verlauf_fehler: None,
+                verlauf_vermerkfehler: None,
                 boersen: depot_kern::liste::boersen(),
                 protokoll_datei: None,
                 protokoll_fehler: None,
@@ -783,6 +786,8 @@ impl Dienst {
     }
 
     fn protokoll_beginnen(&self, z: &mut Zustand, a: &Auftrag) {
+        z.verlauf_fehler = None;
+        z.verlauf_vermerkfehler = None;
         z.protokoll_fehler = None;
         self.protokoll_schutz
             .lock()
@@ -984,7 +989,6 @@ impl Dienst {
                 ablegen(&mut z, auftrag);
                 return None;
             }
-            z.verlauf_fehler = None;
             self.protokoll_beginnen(&mut z, &auftrag);
             if anlass == Anlass::Zeitplan
                 && matches!(art, Art::Termine | Art::KurseVon(_) | Art::Papier)
@@ -1123,7 +1127,7 @@ impl Dienst {
             frueher: Frueher::Nein,
         };
         if let Err(e) = crate::verlauf::vermerke(&self.wurzel, &crate::verlauf::ende_zeile(&a)) {
-            z.verlauf_fehler = Some(format!("Ausgelassenen Papiertag nicht vermerkt: {e}"));
+            z.verlauf_vermerkfehler = Some(format!("Ausgelassenen Papiertag nicht vermerkt: {e}"));
             return;
         }
         z.naechste_nr = nr.saturating_add(1);
@@ -1152,6 +1156,7 @@ impl Dienst {
                 && z.laufend.is_none()
                 && z.warteschlange.is_empty()
                 && z.verlauf_fehler.is_none()
+                && z.verlauf_vermerkfehler.is_none()
                 && z.zeitplan_fehler.is_none()
                 && (8..23).contains(&h)
                 && z.verlauf
@@ -1356,7 +1361,7 @@ fn einreihen(
 /// Vermerkt das Ende; ein Schreibfehler steht sofort unter Taetigkeit.
 fn ende_vermerken(wurzel: &Path, z: &mut Zustand, a: &Auftrag) {
     if let Err(e) = crate::verlauf::vermerke(wurzel, &crate::verlauf::ende_zeile(a)) {
-        z.verlauf_fehler = Some(format!(
+        z.verlauf_vermerkfehler = Some(format!(
             "Ende von {} nicht im Verlauf vermerkt ({e}); nach einem Neustart erschiene der Lauf \
              als unterbrochen.",
             a.kennung
@@ -1468,6 +1473,7 @@ fn vorbereitung_faellig(z: &Zustand, jetzt: Zeitpunkt) -> bool {
         && z.erledigt_fehler.is_none()
         && z.zeitplan_fehler.is_none()
         && z.verlauf_fehler.is_none()
+        && z.verlauf_vermerkfehler.is_none()
         && !z
             .verlauf
             .iter()
