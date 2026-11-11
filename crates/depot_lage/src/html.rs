@@ -77,6 +77,11 @@ padding:14px 16px;margin:12px 0}\
 table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:4px 8px 4px 0;\
 border-bottom:1px solid var(--linie);vertical-align:top}th{font-weight:600}\
 td.z,th.z{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}\
+.budget-uebersicht{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,245px),1fr));gap:12px}\
+.budget-karte{min-width:0;border:1px solid var(--linie);border-radius:8px;padding:12px;overflow-wrap:anywhere}\
+.budget-karte h3{font-size:15px;margin:0 0 2px}.budget-karte p{margin:0}\
+.budget-karte dl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:8px;margin:12px 0 0}\
+.budget-karte dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}\
 .kopf{font-size:17px;font-weight:600}.breit{overflow-x:auto}\
 ol.gespraech{list-style:none;padding:0;margin:0}ol.gespraech li{padding:6px 0;\
 border-bottom:1px solid var(--linie)}ol.gespraech b{display:inline-block;min-width:90px}";
@@ -236,16 +241,10 @@ fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
 }
 
 fn budget(l: &Lagebild, s: &mut String) {
-    if l.budget.is_empty() {
+    if l.budget.is_empty() && l.gemini_budget.is_none() {
         return;
     }
-    s.push_str(
-        "<section><h2>KI-Budget</h2><div class=\"breit\"><table><tr><th>KI</th>\
-         <th>Status</th><th class=\"z\">Verbraucht im Monat</th>\
-         <th class=\"z\">Gebucht im Monat</th><th class=\"z\">Verfügbar im Monat</th>\
-         <th class=\"z\">Heute / Tagesrahmen frei</th><th class=\"z\">Jahr</th><th class=\"z\">je Aufruf</th>\
-         </tr>",
-    );
+    s.push_str("<section><h2>KI-Budget</h2><div class=\"budget-uebersicht\">");
     for b in &l.budget {
         let klasse = match b.status {
             BudgetStatus::Bereit => "gut",
@@ -259,12 +258,12 @@ fn budget(l: &Lagebild, s: &mut String) {
         };
         let _ = write!(
             s,
-            "<tr><td>{}</td><td class=\"{klasse}\">{}</td>\
-             <td class=\"z\">{}<br><span class=\"leise\">{} Aufrufe abgerechnet{unbekannt}</span></td>\
-             <td class=\"z\">{} von {}<br><span class=\"leise\">{}/{} Aufrufe</span></td>\
-             <td class=\"z\"><b>{}</b><br><span class=\"leise\">{} Handelstage übrig</span></td>\
-             <td class=\"z\">{} · {}/{} Aufrufe<br>noch {}</td>\
-             <td class=\"z\">{} von {}</td><td class=\"z\">{}</td></tr>",
+            "<article class=\"budget-karte\"><h3>{}</h3><p class=\"{klasse}\">{}</p><dl>\
+             <dt>Verbraucht im Monat</dt><dd>{}<br><span class=\"leise\">{} Aufrufe abgerechnet{unbekannt}</span></dd>\
+             <dt>Gebucht im Monat</dt><dd>{} von {}<br><span class=\"leise\">{}/{} Aufrufe</span></dd>\
+             <dt>Verfügbar im Monat</dt><dd><b>{}</b><br><span class=\"leise\">{} Handelstage übrig</span></dd>\
+             <dt>Heute / Tagesrahmen frei</dt><dd>{} · {}/{} Aufrufe<br>noch {}</dd>\
+             <dt>Jahr</dt><dd>{} von {}</dd><dt>Je Aufruf</dt><dd>{}</dd></dl></article>",
             berater_text(b.berater),
             maskiere(&b.status.text()),
             euro(b.monat_verbraucht),
@@ -284,8 +283,24 @@ fn budget(l: &Lagebild, s: &mut String) {
             geld(b.je_aufruf),
         );
     }
+    if let Some(gemini) = l.gemini_budget {
+        let (klasse, status) = if gemini.an {
+            ("gut", "Eingeschaltet")
+        } else {
+            ("leise", "Ausgeschaltet")
+        };
+        let aufrufe = gemini.aufrufe.map_or_else(
+            || "unbekannt".into(),
+            |n| format!("{n} von {}", depot_kern::gemini::TAGESGRENZE),
+        );
+        let _ = write!(
+            s,
+            "<article class=\"budget-karte\"><h3>Gemini</h3><p class=\"{klasse}\">{status}</p>\
+             <dl><dt>Tarif</dt><dd>Gratis-Projekt</dd><dt>Aufrufe heute</dt><dd>{aufrufe}</dd></dl></article>"
+        );
+    }
     s.push_str(
-        "</table></div><p class=\"leise\"><b>Verbraucht</b> ist, was die Anbieter je Aufruf \
+        "</div><p class=\"leise\"><b>Verbraucht</b> ist, was die Anbieter je Aufruf \
          gemeldet haben (daten/anbieter.txt). <b>Gebucht</b> sind bestätigte tatsächliche Kosten \
          plus ungeklärte Höchstkosten im Journal. Fehlende Abrechnungen bleiben voll gebucht. \
          <b>Verfügbar</b> ist der Monatsrest. Der Tagesrahmen verteilt ihn auf die verbleibenden \

@@ -180,6 +180,13 @@ pub struct Grenzwert {
     pub wert: String,
 }
 
+/// Schaltzustand und heutige Aufrufe der kostenlosen Gemini-Zuarbeit.
+#[derive(Clone, Copy, Debug)]
+pub struct GeminiBudget {
+    pub an: bool,
+    pub aufrufe: Option<usize>,
+}
+
 /// Das ganze Lagebild.
 #[derive(Clone, Debug)]
 pub struct Lagebild {
@@ -190,6 +197,7 @@ pub struct Lagebild {
     pub naechster_schritt: String,
     pub punkte: Vec<Punkt>,
     pub budget: Vec<KiBudget>,
+    pub gemini_budget: Option<GeminiBudget>,
     pub depot: Option<DepotLage>,
     /// Neueste zuerst.
     pub gespraech: Vec<Beitrag>,
@@ -924,6 +932,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         naechster_schritt: naechster_schritt(&punkte),
         punkte,
         budget,
+        gemini_budget: None,
         depot: depot_lage,
         gespraech,
         grenzen: grenzwerte(),

@@ -59,6 +59,7 @@ margin:6px 0}\
 @media(max-width:600px),(max-height:700px){.speicher-aktionen{position:static}}\
 label{display:block;margin:6px 0}\
 .einstellungsgruppe{border:2px solid var(--halt)}\
+.quellen-tabelle td:last-child button{width:100%}\
 .zugang-tabelle input{width:100%}.zugang-tabelle td{overflow-wrap:anywhere}\
 @media(max-width:600px){.zugang-tabelle,.zugang-tabelle tbody,\
 .zugang-tabelle tr,.zugang-tabelle td{display:block;width:100%}\
@@ -1409,12 +1410,10 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
          der Windows-Anmeldeinformationsverwaltung, nie im Projektordner. Die Seite zeigt keinen \
          Schlüssel, nur ob einer hinterlegt ist und was der Anbieter beim letzten Aufruf dazu \
          sagte. Geprüft wird nur bei echten Läufen, nie mit eigenen, kostenpflichtigen \
-         Testaufrufen. <b>Speichern heißt hier zugleich aktiv:</b> Der nächste Lauf liest ihn.</p><table class=\"zugang-tabelle\">\
-         <tr><th>Wofür</th><th>Stand</th><th>Neu hinterlegen</th></tr>",
+         Testaufrufen. <b>Speichern heißt hier zugleich aktiv:</b> Der nächste Lauf liest ihn.</p>",
     );
+    s.push_str(SCHLUESSEL_TABELLE);
     for (w, st) in &e.schluessel {
-        let klasse = st.klasse();
-        let text = maskiere(&st.text());
         let kontingent = if *w == Wer::Kursquelle {
             e.alpha_kontingent.map_or_else(
                 || "<br>Alpha-Vantage-Kontingent derzeit unlesbar".into(),
@@ -1428,25 +1427,39 @@ fn schluessel_teil(token: &str, e: &Einrichtung, s: &mut String) {
         } else {
             String::new()
         };
-        let _ = write!(
-            s,
-            "<tr><td>{}<br><span class=\"leise\">{}</span></td>\
-             <td data-titel=\"Stand\"><span class=\"{klasse}\">{text}</span>{kontingent}</td><td data-titel=\"Neu hinterlegen\">\
-             <form method=\"post\" action=\"/schluessel\" data-aenderungen>\
-             <input type=\"hidden\" name=\"t\" value=\"{}\">\
-             <input type=\"hidden\" name=\"wer\" value=\"{}\">\
-             <input aria-label=\"Schlüssel für {}\" type=\"password\" name=\"wert\" autocomplete=\"new-password\" required> \
-             <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Noch keinen neuen Schlüssel eingegeben.</p><button data-speichern-hervorheben type=\"submit\">Schlüssel speichern</button></div>\
-             <div class=\"leise\">{}</div></form></td></tr>",
-            maskiere(w.name()),
-            maskiere(w.adresse()),
-            maskiere(token),
-            w.kurz(),
-            maskiere(w.name()),
-            regel(*w)
-        );
+        schluessel_zeile(s, token, *w, *st, &kontingent);
     }
     s.push_str("</table></section>");
+}
+
+pub(crate) const SCHLUESSEL_TABELLE: &str =
+    "<table class=\"zugang-tabelle\"><tr><th>Wofür</th><th>Stand</th><th>Neu hinterlegen</th></tr>";
+
+pub(crate) fn schluessel_zeile(
+    s: &mut String,
+    token: &str,
+    wer: Wer,
+    stand: SchluesselStand,
+    zusatz: &str,
+) {
+    let klasse = stand.klasse();
+    let text = maskiere(&stand.text());
+    let name = maskiere(wer.name());
+    let _ = write!(
+        s,
+        "<tr><td>{name}<br><span class=\"leise\">{}</span></td>\
+         <td data-titel=\"Stand\"><span class=\"{klasse}\">{text}</span>{zusatz}</td><td data-titel=\"Neu hinterlegen\">\
+         <form method=\"post\" action=\"/schluessel\" data-aenderungen>\
+         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <input type=\"hidden\" name=\"wer\" value=\"{}\">\
+         <input aria-label=\"Schlüssel für {name}\" type=\"password\" name=\"wert\" autocomplete=\"new-password\" required>\
+         <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Noch keinen neuen Schlüssel eingegeben.</p><button data-speichern-hervorheben type=\"submit\">Schlüssel speichern</button></div>\
+         <div class=\"leise\">{}</div></form></td></tr>",
+        maskiere(wer.adresse()),
+        maskiere(token),
+        wer.kurz(),
+        regel(wer)
+    );
 }
 
 /// Was bei einer abgebrochenen KI-Anfrage geschieht, in Alltagssprache (Maus, 05.11.2026).
@@ -1592,7 +1605,7 @@ pub(crate) fn quellen_teil(token: &str, start: &str, z: &Zustand) -> String {
          Jeder Verbindungstest startet einen echten Abruf. DepotSchlopf speichert die Ergebnisse im Journal. \
          Das Protokoll steht auf Live unter Tätigkeit. An börsenfreien Tagen kann ein erfolgreicher \
          Schlagzeilenabruf die eingeschaltete automatische Vorbereitung auslösen. Diese nutzt KI-Budget.</p>\
-         <div class=\"breit\"><table><tr><th>Quelle</th><th>Letzter Abruf</th><th></th></tr>",
+         <div class=\"breit\"><table class=\"quellen-tabelle\"><tr><th>Quelle</th><th>Letzter Abruf</th><th></th></tr>",
     );
     for (art, name, aktion) in [
         (

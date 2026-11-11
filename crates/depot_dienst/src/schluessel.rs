@@ -191,7 +191,7 @@ pub fn ablegen(wer: Wer, text: &str) -> Result<(), String> {
 #[cfg(windows)]
 pub(crate) fn fuer_protokoll() -> Result<Vec<String>, ()> {
     let mut alle = Vec::new();
-    for wer in ALLE {
+    for wer in ALLE.into_iter().chain([Wer::Gemini]) {
         match eintrag(wer).map_err(|_| ())?.get_password() {
             Ok(text) => alle.push(wer.pruefe(&text).map_err(|_| ())?),
             Err(keyring_core::Error::NoEntry) => {}
