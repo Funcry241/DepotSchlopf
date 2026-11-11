@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use depot_kern::json::{Json, erstes_objekt};
 use depot_kern::{BeraterId, Cent, Datum};
 use depot_lage::gespraeche::{self, Gespraech};
 use depot_lage::html::maskiere;
@@ -46,26 +47,148 @@ fn zweck_text(zweck: &str) -> &str {
         "zweitmeinung" => "Zweitmeinung",
         "abstimmung" => "Abstimmung",
         "vorbereitung" => "Vorbereitung",
+        "nachrichten-vorsortieren" => "Nachrichten vorsortieren",
         wert => wert,
     }
 }
 
-fn zahl(wert: Option<impl ToString>) -> String {
-    wert.map_or_else(|| "–".into(), |n| n.to_string())
+fn kosten(e: &Gespraech, buchungen: &[(BeraterId, Cent)]) -> Option<u64> {
+    let cent = e.kosten_cent?;
+    let Some(nr) = e.buchung else {
+        return Some(cent);
+    };
+    let (berater, gebucht) = buchungen.get(nr)?;
+    let wer = match berater {
+        BeraterId::Dachs => "dachs",
+        BeraterId::Maus => "maus",
+    };
+    (wer == e.wer && u64::try_from(gebucht.0).ok() == Some(cent)).then_some(cent)
 }
 
-fn kosten(e: &Gespraech, buchungen: &[(BeraterId, Cent)]) -> (Option<u64>, bool) {
-    let Some(nr) = e.buchung else {
-        return (e.kosten_cent, false);
+fn absatz(s: &mut String, vorspann: &str, text: &str) {
+    let _ = write!(s, "<p>{vorspann}{}</p>", maskiere(text));
+}
+
+fn urteil(s: &mut String, obj: &Json, feld: &str, ja: &str, nein: &str) {
+    if let Some(zustimmung) = obj.feld(feld).and_then(Json::wahr) {
+        absatz(s, "", if zustimmung { ja } else { nein });
+    }
+}
+
+fn handelsziele(s: &mut String, obj: &Json) {
+    match obj.feld("ziele") {
+        Some(Json::Null) => absatz(s, "", "Keine neuen Handelsziele."),
+        Some(Json::Liste(ziele)) if ziele.is_empty() => {
+            absatz(s, "", "Ziel: vollständig in Bargeld wechseln.");
+        }
+        Some(Json::Liste(ziele)) => {
+            for ziel in ziele {
+                let isin = ziel.feld("isin").and_then(Json::text);
+                let gewicht = ziel.feld("gewicht_bp").and_then(Json::ganz);
+                if let (Some(isin), Some(gewicht)) = (isin, gewicht) {
+                    let prozent = depot_lage::html::prozent(gewicht);
+                    let grund = ziel.feld("begruendung").and_then(Json::text).unwrap_or("");
+                    absatz(
+                        s,
+                        "Ziel: ",
+                        &format!("{isin} {}. {grund}", prozent.trim_start_matches(['+', '±'])),
+                    );
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn antwort_text(s: &mut String, antwort: &str) {
+    let Ok(obj) = erstes_objekt(antwort) else {
+        let text = antwort.trim();
+        if text.is_empty() || text.contains(['{', '}']) || text.starts_with(['[', '`']) {
+            absatz(s, "", "Keine lesbare Antwort belegt.");
+        } else {
+            absatz(s, "", text);
+        }
+        return;
     };
-    let betrag = buchungen.get(nr).and_then(|(berater, cent)| {
-        let wer = match berater {
-            BeraterId::Dachs => "dachs",
-            BeraterId::Maus => "maus",
-        };
-        (wer == e.wer).then(|| u64::try_from(cent.0).ok()).flatten()
-    });
-    (betrag, true)
+    let vorher = s.len();
+    if let Some(text) = obj.feld("einschaetzung").and_then(Json::text) {
+        absatz(s, "", text);
+    }
+    urteil(
+        s,
+        &obj,
+        "zustimmung",
+        "Stimmt dem Vorschlag zu.",
+        "Lehnt den Vorschlag ab.",
+    );
+    urteil(
+        s,
+        &obj,
+        "zustimmung_fremd",
+        "Stimmt dem fremden Vorschlag zu.",
+        "Lehnt den fremden Vorschlag ab.",
+    );
+    if let Some(text) = obj.feld("begruendung").and_then(Json::text) {
+        absatz(s, "Begründung: ", text);
+    }
+    handelsziele(s, &obj);
+    if let Some(prognose) = obj.feld("prognose") {
+        let isin = prognose.feld("isin").and_then(Json::text);
+        let richtung = prognose.feld("richtung").and_then(Json::text);
+        let tage = prognose.feld("handelstage").and_then(Json::anzahl);
+        if let (Some(isin), Some(richtung), Some(tage)) = (isin, richtung, tage) {
+            let richtung = if richtung == "faellt" {
+                "fällt"
+            } else {
+                richtung
+            };
+            absatz(
+                s,
+                "Prognose: ",
+                &format!("{isin} {richtung} innerhalb von {tage} Handelstagen."),
+            );
+        }
+        if let Some(text) = prognose.feld("begruendung").and_then(Json::text) {
+            absatz(s, "Begründung der Prognose: ", text);
+        }
+        if let Some(text) = prognose.feld("widerlegung").and_then(Json::text) {
+            absatz(s, "Woran sie scheitert: ", text);
+        }
+    }
+    for meldung in obj
+        .feld("meldungen")
+        .and_then(Json::liste)
+        .unwrap_or_default()
+    {
+        if let Some(text) = meldung.feld("kurz").and_then(Json::text) {
+            absatz(s, "", text);
+        }
+    }
+    if s.len() == vorher {
+        absatz(s, "", "Keine lesbare Antwort belegt.");
+    }
+}
+
+fn fehler_text(e: &Gespraech) -> &'static str {
+    match e.ergebnis.as_str() {
+        "guthaben" => "Beim Anbieter fehlt Guthaben. Bitte lade es im Anbieterkonto auf.",
+        "abgelehnt" => {
+            "Der Anbieter hat den Aufruf abgelehnt. Prüfe die Zugangsdaten in der Einrichtung."
+        }
+        "netz" => "Der Anbieter war nicht erreichbar.",
+        "limit" => {
+            "Das Limit des Anbieters ist erreicht. DepotSchlopf wartet auf den nächsten möglichen Aufruf."
+        }
+        "ueberlastet" => "Der Anbieter war überlastet.",
+        "kosten" => {
+            "Die Kostengrenze wurde überschritten. Prüfe den Kostenschutz in der Einrichtung."
+        }
+        "uebersprungen" if e.fehler.as_deref().is_some_and(|f| f.contains("Schlüssel")) => {
+            "Kein Zugangsschlüssel verfügbar. Prüfe die Einrichtung."
+        }
+        "uebersprungen" => "Die KI wurde bei diesem Lauf nicht gefragt.",
+        _ => "Keine lesbare Antwort belegt.",
+    }
 }
 
 fn eintrag(s: &mut String, e: &Gespraech, buchungen: &[(BeraterId, Cent)]) {
@@ -74,40 +197,26 @@ fn eintrag(s: &mut String, e: &Gespraech, buchungen: &[(BeraterId, Cent)]) {
     } else {
         "Haupt-KI"
     };
-    let kosten = match kosten(e, buchungen) {
-        (Some(cent), true) => format!("{cent} ct (gebucht)"),
-        (Some(cent), false) => format!("{cent} ct (laut Antwort)"),
-        (None, true) => "Buchung nicht lesbar".into(),
-        (None, false) => "–".into(),
-    };
     let _ = write!(
         s,
-        "<article><h3>{} ({})</h3><p>{rolle} · {} · {} · {}</p>\
-         <p>HTTP {} · Token ein/aus {}/{} · Kosten {kosten}</p>",
+        "<article><h4>{} ({})</h4><p>{rolle} · {} · {}",
         maskiere(name(&e.wer)),
         maskiere(&e.modell),
         depot_lage::zeit_text(e.zeit),
         maskiere(zweck_text(&e.zweck)),
-        maskiere(status(&e.ergebnis)),
-        zahl(e.http),
-        zahl(e.token_ein),
-        zahl(e.token_aus),
     );
-    if let Some(grund) = &e.fehler {
-        let _ = write!(s, "<p>{}</p>", maskiere(grund));
+    if let Some(cent) = kosten(e, buchungen) {
+        let _ = write!(s, " · {cent} ct");
+    } else if e.buchung.is_some() {
+        s.push_str(" · Kosten noch offen");
     }
-    for (titel, text) in [
-        ("Systemtext", &e.system),
-        ("Frage", &e.frage),
-        ("Antwort", &e.antwort),
-    ] {
-        if let Some(t) = text {
-            let _ = write!(
-                s,
-                "<details><summary>{titel}</summary><pre style=\"white-space:pre-wrap;overflow-wrap:anywhere\">{}</pre></details>",
-                maskiere(t)
-            );
-        }
+    s.push_str("</p>");
+    if e.ergebnis == "ok"
+        && let Some(antwort) = &e.antwort
+    {
+        antwort_text(s, antwort);
+    } else {
+        absatz(s, "", fehler_text(e));
     }
     s.push_str("</article>");
 }
@@ -165,54 +274,46 @@ fn tag_lesen(daten: &Path, datum: Datum) -> Tag {
     }
 }
 
-fn tagesstand(s: &mut String, tag: &Tag, wer: &str, lauf: &str, buchungen: &[(BeraterId, Cent)]) {
-    let _ = write!(s, "<h3>{}</h3>", depot_lage::datum_text(tag.datum));
-    if tag.lesefehler {
-        s.push_str("<p>Gesprächsdatei nicht lesbar.</p>");
-        return;
-    }
+fn tagesstand(
+    s: &mut String,
+    tag: &Tag,
+    wer: &str,
+    lauf: &str,
+    buchungen: &[(BeraterId, Cent)],
+    leer_zeigen: bool,
+) {
     let sichtbar: Vec<_> = tag
         .eintraege
         .iter()
         .filter(|e| (wer.is_empty() || wer == e.wer) && (lauf.is_empty() || lauf == e.lauf))
         .collect();
-    let mut nach_ki = BTreeMap::<&str, usize>::new();
-    let mut anzahl = 0_usize;
-    let mut cent = 0_u64;
-    let mut gebucht = 0_u64;
-    let mut unbekannt = false;
-    for e in &sichtbar {
-        if e.ergebnis != "uebersprungen" {
-            let n = nach_ki.entry(name(&e.wer)).or_default();
-            *n = n.saturating_add(1);
-            anzahl = anzahl.saturating_add(1);
-        }
-        if e.ergebnis != "uebersprungen" || e.buchung.is_some() {
-            let (betrag, buchung) = kosten(e, buchungen);
-            cent = cent.saturating_add(betrag.unwrap_or_default());
-            if buchung {
-                gebucht = gebucht.saturating_add(betrag.unwrap_or_default());
-            }
-            unbekannt |= betrag.is_none();
-        }
+    if sichtbar.is_empty() && !tag.lesefehler && tag.fehler == 0 && !leer_zeigen {
+        return;
+    }
+    let _ = write!(s, "<h3>{}</h3>", depot_lage::datum_text(tag.datum));
+    if tag.lesefehler {
+        s.push_str("<p>Gesprächsdatei nicht lesbar.</p>");
+        return;
     }
     if sichtbar.is_empty() {
         s.push_str("<p>Keine Gespräche an diesem Tag für die Auswahl.</p>");
-    } else {
+    }
+    let (ausgelassen, aufrufe): (Vec<_>, Vec<_>) = sichtbar
+        .into_iter()
+        .partition(|e| e.ergebnis == "uebersprungen");
+    for e in aufrufe {
+        eintrag(s, e, buchungen);
+    }
+    if !ausgelassen.is_empty() {
         let _ = write!(
             s,
-            "<p>{anzahl} Aufrufe · bekannte Kosten {cent} ct · davon gebucht {gebucht} ct"
+            "<details><summary>Nicht gefragt ({})</summary>",
+            ausgelassen.len()
         );
-        if unbekannt {
-            s.push_str(" · Kosten teils unbekannt");
-        }
-        for (name, n) in nach_ki {
-            let _ = write!(s, " · {} {n}", maskiere(name));
-        }
-        s.push_str("</p>");
-        for e in sichtbar {
+        for e in ausgelassen {
             eintrag(s, e, buchungen);
         }
+        s.push_str("</details>");
     }
     if tag.fehler > 0 {
         let _ = write!(s, "<p>Nicht lesbare Zeilen: {}</p>", tag.fehler);
@@ -228,7 +329,7 @@ pub(crate) fn inhalt(
 ) -> String {
     let mut s = String::from(
         "<section id=\"gespraeche\"><h2>KI-Gespräche</h2>\
-        <p>Lokales Protokoll für Haupt- und Zusatz-KIs. Übersprungene Anfragen stehen separat in der Liste.</p>",
+        <p>Antworten und Begründungen von Dachs, Maus und den Zusatz-KIs.</p>",
     );
     let einzel = Datum::lies(datum);
     if !datum.is_empty() && einzel.is_none() {
@@ -253,8 +354,12 @@ pub(crate) fn inhalt(
         Vec::new()
     };
     filter(&mut s, einzel, wer, lauf, &tage);
+    let vor_tagen = s.len();
     for tag in tage {
-        tagesstand(&mut s, &tag, wer, lauf, &buchungen);
+        tagesstand(&mut s, &tag, wer, lauf, &buchungen, einzel.is_some());
+    }
+    if s.len() == vor_tagen {
+        s.push_str("<p>Keine Gespräche für die Auswahl.</p>");
     }
     s.push_str("</section>");
     s
@@ -265,7 +370,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn buchung_hat_vorrang_vor_kosten_laut_antwort() -> Result<(), &'static str> {
+    fn ungeklärte_kosten_erscheinen_nicht_als_betrag() -> Result<(), &'static str> {
         let zeit = depot_kern::Zeitpunkt::lies("2026-11-10T10:00:00Z").ok_or("Zeit fehlt")?;
         let (datum, ..) = zeit.in_frankfurt().ok_or("Datum fehlt")?;
         let tag = Tag {
@@ -294,12 +399,12 @@ mod tests {
         let mut buchungen = vec![(BeraterId::Maus, Cent(1)); 7];
         buchungen.push((BeraterId::Dachs, Cent(20)));
         let mut html = String::new();
-        tagesstand(&mut html, &tag, "", "", &buchungen);
-        assert!(html.contains("Kosten 20 ct (gebucht)"));
-        assert!(html.contains("bekannte Kosten 20 ct · davon gebucht 20 ct"));
+        tagesstand(&mut html, &tag, "", "", &buchungen, true);
+        assert!(html.contains("Kosten noch offen"));
+        assert!(!html.contains("20 ct") && !html.contains("3 ct"));
         let mut html = String::new();
-        tagesstand(&mut html, &tag, "", "", &[]);
-        assert!(html.contains("Buchung nicht lesbar") && !html.contains("3 ct"));
+        tagesstand(&mut html, &tag, "", "", &[], true);
+        assert!(html.contains("Kosten noch offen") && !html.contains("3 ct"));
         Ok(())
     }
 }

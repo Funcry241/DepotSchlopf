@@ -3288,9 +3288,9 @@ fn gespraeche_zeigt_alle_ki_rollen_filtert_und_maskiert() -> Result<(), String> 
         token_aus: Some(45),
         buchung: None,
         kosten_cent: Some(3),
-        system: None,
+        system: Some("Systemtext bleibt im Protokoll".into()),
         frage: Some("Frage von Dachs".into()),
-        antwort: Some("<script>Antwort von Dachs</script>".into()),
+        antwort: Some(r#"{"einschaetzung":"<script>Antwort von Dachs</script>","ziele":[{"isin":"DE0007164600","gewicht_bp":2000,"begruendung":"Konkreter Kurstreiber."}]}"#.into()),
         fehler: None,
     };
     anhaengen(&daten, &eintrag).map_err(|e| e.to_string())?;
@@ -3301,6 +3301,23 @@ fn gespraeche_zeigt_alle_ki_rollen_filtert_und_maskiert() -> Result<(), String> 
             rolle: "zusatz".into(),
             modell: "Zusatzmodell".into(),
             frage: Some("Frage von Gemini".into()),
+            antwort: Some(
+                r#"{"meldungen":[{"kurz":"Gemini fasst die Meldung zusammen."}]}"#.into(),
+            ),
+            ..eintrag.clone()
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    anhaengen(
+        &daten,
+        &Gespraech {
+            wer: "maus".into(),
+            modell: "Maus-Modell".into(),
+            zweck: "zweitmeinung".into(),
+            ergebnis: "guthaben".into(),
+            http: Some(429),
+            antwort: None,
+            fehler: Some(r#"{"error":"insufficient_quota"}"#.into()),
             ..eintrag
         },
     )
@@ -3315,11 +3332,23 @@ fn gespraeche_zeigt_alle_ki_rollen_filtert_und_maskiert() -> Result<(), String> 
     assert!(alles.contains("KI-Gespräche") && alles.contains("Zusatz-KI"));
     assert!(alles.contains("Dachs (Hauptmodell)") && alles.contains("Gemini (Zusatzmodell)"));
     assert!(alles.contains("&lt;script&gt;Antwort von Dachs&lt;/script&gt;"));
+    assert!(alles.contains("DE0007164600 20,00 %. Konkreter Kurstreiber."));
+    assert!(alles.contains("Beim Anbieter fehlt Guthaben."));
     assert!(alles.contains("Nicht lesbare Zeilen: 1"));
-    assert!(!alles.contains("<script>Antwort von Dachs</script>"));
+    for technik in [
+        "<script>Antwort von Dachs</script>",
+        "Systemtext bleibt im Protokoll",
+        "Frage von Dachs",
+        "insufficient_quota",
+        "gewicht_bp",
+        "HTTP 429",
+        "Token ein/aus",
+    ] {
+        assert!(!alles.contains(technik), "{technik}");
+    }
     let gefiltert = get(&d, &format!("/gespraeche?tag={tag}&wer=gemini"), zeit);
-    assert!(gefiltert.contains("Frage von Gemini"));
-    assert!(!gefiltert.contains("Frage von Dachs"));
+    assert!(gefiltert.contains("Gemini fasst die Meldung zusammen."));
+    assert!(!gefiltert.contains("Antwort von Dachs"));
     Ok(())
 }
 
@@ -3404,8 +3433,8 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
             buchung: None,
             kosten_cent: None,
             system: None,
-            frage: Some(frage.into()),
-            antwort: None,
+            frage: None,
+            antwort: Some(frage.into()),
             fehler: None,
         };
         anhaengen(&daten, &e).map_err(|e| e.to_string())?;
