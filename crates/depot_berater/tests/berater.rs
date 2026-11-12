@@ -509,7 +509,10 @@ fn fehlendes_guthaben_gibt_reservierung_im_journal_frei() -> Result<(), String> 
         r#"{"error":{"code":"insufficient_quota"}}"#,
         None,
     ));
-    let mut maus = berater(&ort, BeraterId::Maus, netz)?;
+    let protokoll = ort.dir.join("anbieter.txt");
+    let heute = || Zeitpunkt::lies("2026-11-06T22:59:00Z");
+    let morgen = || Zeitpunkt::lies("2026-11-06T23:01:00Z");
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?.mit_protokoll(protokoll.clone(), heute);
     let erlaubnis = ort.erlaubnis(BeraterId::Maus, 1)?;
     let nr = erlaubnis.buchungsnummer();
     assert!(erlaubnis.buchung().reserviert > Cent::NULL);
@@ -527,6 +530,11 @@ fn fehlendes_guthaben_gibt_reservierung_im_journal_frei() -> Result<(), String> 
             .map(|b| b.reserviert),
         Some(Cent::NULL)
     );
+    assert!(!maus.angebunden(), "kein zweiter Versuch in diesem Lauf");
+    let neu = berater(&ort, BeraterId::Maus, Attrappe::default())?;
+    assert!(!neu.mit_protokoll(protokoll.clone(), heute).angebunden());
+    let neu = berater(&ort, BeraterId::Maus, Attrappe::default())?;
+    assert!(neu.mit_protokoll(protokoll, morgen).angebunden());
     Ok(())
 }
 
@@ -938,19 +946,24 @@ fn jeder_aufruf_steht_im_anbieterprotokoll() -> Result<(), String> {
         abgelehnt(429, "{\"type\":\"rate_limit_error\"}", Some(90)),
     ];
     let mut texte = Vec::new();
-    for antwort in antworten {
+    let mut text = String::new();
+    for (nr, antwort) in antworten.into_iter().enumerate() {
         // Je Aufruf ein eigenes Journal: Das Tageskontingent gilt hier nicht.
         let mut ort = Ort::neu()?;
         let mut netz = Attrappe::default();
         netz.antworten.push_back(antwort);
+        let aufrufprotokoll = protokoll.with_extension(format!("{nr}.txt"));
         let mut dachs = berater(&ort, BeraterId::Dachs, netz)?
-            .mit_protokoll(protokoll.clone(), uhr)
+            .mit_protokoll(aufrufprotokoll.clone(), uhr)
             .mit_gespraechen("lauf-test".into(), None);
         let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
         texte.push(mit_lage(|l| dachs.vorschlagen(e, l))?.einschaetzung);
         assert!(!ort.sperre().exists());
+        text.push_str(&vorbedingung(
+            fs::read_to_string(aufrufprotokoll),
+            "Protokoll",
+        )?);
     }
-    let text = vorbedingung(fs::read_to_string(&protokoll), "Protokoll")?;
     assert!(!text.contains(SCHLUESSEL));
     let (e, schlecht) = lies_alle(&text);
     assert_eq!(schlecht, 0);

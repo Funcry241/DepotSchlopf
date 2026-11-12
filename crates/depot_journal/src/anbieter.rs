@@ -272,6 +272,17 @@ pub fn pausiert(protokoll: &[Eintrag], wer: Wer, jetzt: Zeitpunkt) -> bool {
     letzte_meldung(protokoll, wer).is_some_and(|e| limit_gilt(e, jetzt))
 }
 
+/// Nach einer Guthabenablehnung ist der nächste Versuch am nächsten Frankfurter Tag möglich.
+pub fn guthabenpause(protokoll: &[Eintrag], wer: Wer, jetzt: Zeitpunkt) -> bool {
+    letzte_meldung(protokoll, wer).is_some_and(|e| {
+        e.ergebnis == Ergebnis::Guthaben
+            && match (e.zeit.in_frankfurt(), jetzt.in_frankfurt()) {
+                (Some((seit, ..)), Some((heute, ..))) => seit >= heute,
+                _ => true,
+            }
+    })
+}
+
 /// Haengt einen Eintrag an `pfad` an und schreibt ihn auf den Datentraeger.
 ///
 /// # Errors
