@@ -314,10 +314,10 @@ fn sichere(ziel: &Path, rest: &[u8]) -> Result<(), JournalFehler> {
     match da {
         Ok(da) if da == rest => Ok(()),
         Ok(_) => Err(halt(format!(
-            "{}: Quarantaene weicht vom Rest ab; nichts gekürzt",
+            "{}: Quarantäne weicht vom Rest ab; nichts gekürzt",
             ziel.display()
         ))),
-        Err(e) => Err(halt(format!("{}: Quarantaene: {e}", ziel.display()))),
+        Err(e) => Err(halt(format!("{}: Quarantäne: {e}", ziel.display()))),
     }
 }
 
@@ -422,7 +422,7 @@ impl Journal {
         }
         if datei_da(&vermerk_pfad(pfad))? {
             return Err(halt(
-                "Journal fehlt, der Vermerk ist da: Datenbestand unvollstaendig",
+                "Journal fehlt, der Vermerk ist da: Datenbestand unvollständig",
             ));
         }
         Ok(false)
@@ -511,7 +511,7 @@ impl Journal {
             ))
         })?;
         let (mut zeilen, k) = pruefe_zeilen(bestaetigt, &kettenanfang())
-            .map_err(|e| halt(format!("bestätigter Stand beschaedigt: {e}")))?;
+            .map_err(|e| halt(format!("bestätigter Stand beschädigt: {e}")))?;
         if k != v.kette {
             return Err(halt("weicht vom bestätigten Stand ab"));
         }
@@ -532,9 +532,9 @@ impl Journal {
             return Err(halt("mehr als der vermerkte Anhang"));
         } else if rest_laenge == v.geplant {
             let (z, k2) = pruefe_zeilen(rest, &k)
-                .map_err(|e| halt(format!("unbestaetigter Eintrag beschaedigt: {e}")))?;
+                .map_err(|e| halt(format!("unbestätigter Eintrag beschädigt: {e}")))?;
             if z.len() != 1 {
-                return Err(halt("unbestaetigter Anhang ist nicht genau ein Eintrag"));
+                return Err(halt("unbestätigter Anhang ist nicht genau ein Eintrag"));
             }
             zeilen.extend(z);
             neu.laenge = v
@@ -543,7 +543,7 @@ impl Journal {
                 .ok_or_else(|| halt("Laenge"))?;
             neu.kette = k2;
         } else if rest.contains(&b'\n') {
-            return Err(halt("unvollstaendiger Anhang mit Zeilenende: beschaedigt"));
+            return Err(halt("unvollständiger Anhang mit Zeilenende: beschädigt"));
         } else {
             abschneiden = true;
         }
@@ -614,10 +614,10 @@ impl Journal {
                 "Vorbereitung nur über ihre geprüften Methoden".into(),
             )),
             Art::Ki | Art::KiAbrechnung | Art::KiGrenzen => Err(JournalFehler::Abgelehnt(
-                "KI-Eintraege entstehen nur über reserviere".into(),
+                "KI-Einträge entstehen nur über reserviere".into(),
             )),
             Art::Auftrag => Err(JournalFehler::Abgelehnt(
-                "Auftraege entstehen nur über reserviere_auftrag".into(),
+                "Aufträge entstehen nur über reserviere_auftrag".into(),
             )),
             Art::Zustand => Err(JournalFehler::Abgelehnt(
                 "Auftragszustände entstehen nur über melde und gleiche_ab".into(),
@@ -759,7 +759,7 @@ impl Journal {
             ));
         }
         let bargeld = self.stand.papier_freigabe_bargeld().ok_or_else(|| {
-            JournalFehler::Abgelehnt("Papierfreigabe: keine freigabefaehige Sperre".into())
+            JournalFehler::Abgelehnt("Papierfreigabe: keine freigabefähige Sperre".into())
         })?;
         let abweichungen = crate::konto::abweichungen(&self.stand, &konto.auszug());
         if !abweichungen.is_empty() {

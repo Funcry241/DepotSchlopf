@@ -601,7 +601,7 @@ fn pruefe_vorschlag(
 /// Auftraege uebrig lassen; Deckung, Kaufgrenze und Positionszahl fuer alle Auftraege.
 #[allow(
     clippy::too_many_arguments,
-    reason = "die Planungsschritte teilen genau diese Zwischenstaende"
+    reason = "die Planungsschritte teilen genau diese Zwischenstände"
 )]
 fn freiwillig(
     e: &Eingabe<'_>,

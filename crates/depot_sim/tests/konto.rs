@@ -408,7 +408,7 @@ fn befund_6_n01_abweichung_zwischen_zwei_tagen_haelt_beim_neustart() -> Result<(
     let erg = lauf(&mut j, &s, &mut dachs, &mut maus, &mut pk);
     drop(j);
     match &erg {
-        Err(LaufFehler::Halt(m)) if m.contains("Kontowaechter") => {}
+        Err(LaufFehler::Halt(m)) if m.contains("Kontowächter beim Wiederanlauf: [Bargeld") => {}
         _ => return Err(format!("kein Halt des Kontowaechters: {erg:?}")),
     }
     if ort.bytes()? != vorher

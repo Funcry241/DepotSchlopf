@@ -486,7 +486,7 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
     }
     if stand.seit_abschluss() > 0 {
         return Err(halt(format!(
-            "{} Eintraege nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
+            "{} Einträge nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
              abgeschlossen. Halt bis zur Prüfung; niemand wird neu gefragt",
             stand.seit_abschluss()
         )));

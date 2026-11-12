@@ -1145,7 +1145,7 @@ fn k26_01_fehlendes_journal_bei_vermerk_ist_halt() -> Result<(), String> {
     fs::remove_file(&p).map_err(|e| format!("Vorbedingung loeschen: {e}"))?;
     let e = Journal::eingerichtet(&p);
     assert!(
-        matches!(&e, Err(JournalFehler::Halt(m)) if m.contains("unvollstaendig")),
+        matches!(&e, Err(JournalFehler::Halt(m)) if m.contains("Datenbestand unvollständig")),
         "{e:?}"
     );
     let o = Journal::oeffnen(&p).map(|_| ());

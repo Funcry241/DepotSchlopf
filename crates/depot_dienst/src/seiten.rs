@@ -2155,19 +2155,19 @@ pub fn einrichtung(
 pub const APP_JS: &str = r#""use strict";
 (function () {
   // Änderungen bleiben im Formular; insbesondere kein Schlüssel in Browser-Speichern.
-  var verlaesst = false;
+  var gehtWeg = false;
   var andererStart = false;
   var bearbeitet = new WeakSet();
   function formulare() { return Array.from(document.querySelectorAll("form[data-aenderungen]")); }
-  function geaendert(f) {
+  function istGeaendert(f) {
     return f.dataset.entwurf === "ja" || Array.from(f.querySelectorAll("input:not([type=hidden])")).some(function (i) {
       if (!bearbeitet.has(i) || (i.type === "password" && i.matches(":autofill"))) { return false; }
       return i.type === "checkbox" ? i.checked !== i.defaultChecked : i.value !== i.defaultValue;
     });
   }
-  function offen(ausser) { return formulare().some(function (f) { return f !== ausser && geaendert(f); }); }
+  function offen(ausser) { return formulare().some(function (f) { return f !== ausser && istGeaendert(f); }); }
   function zeige(f) {
-    var neu = geaendert(f);
+    var neu = istGeaendert(f);
     f.classList.toggle("ungespeichert", neu);
     var status = f.querySelector("[data-speicherstand]");
     if (status) { status.textContent = neu ? "Noch nicht gespeichert. Bitte unten speichern, damit deine Änderungen gelten." : "Keine ungespeicherten Änderungen in diesem Formular."; }
@@ -2184,7 +2184,7 @@ pub const APP_JS: &str = r#""use strict";
     if (status) { status.textContent = "Noch nicht gespeichert. Bitte prüfe das markierte Feld. Deine übrigen Eingaben bleiben stehen."; }
   }, true);
   window.addEventListener("beforeunload", function (e) {
-    if (!verlaesst && offen()) { e.preventDefault(); e.returnValue = ""; }
+    if (!gehtWeg && offen()) { e.preventDefault(); e.returnValue = ""; }
   });
   formulare().forEach(zeige);
   // Delegiert, da Live auch laufende Protokolle regelmäßig ersetzt.
@@ -2211,7 +2211,7 @@ pub const APP_JS: &str = r#""use strict";
     }
   });
   // Doppelklicks: Ein abgesendetes Formular sperrt seinen Knopf. Der Dienst lehnt doppelte
-  // Auftraege ohnehin ab; so sieht man sofort, dass der Klick angekommen ist.
+  // Aufträge ohnehin ab; so sieht man sofort, dass der Klick angekommen ist.
   document.addEventListener("submit", function (e) {
     if (andererStart) { e.preventDefault(); return; }
     if (offen(e.target) && !window.confirm("In einem anderen Formular stehen noch ungespeicherte Änderungen. Sie werden bei dieser Aktion verworfen. Trotzdem fortfahren?")) {
@@ -2221,7 +2221,7 @@ pub const APP_JS: &str = r#""use strict";
     if (b) {
       if (b.disabled) { e.preventDefault(); return; }
       if (b.dataset.gesendet) { e.preventDefault(); return; }
-      verlaesst = true;
+      gehtWeg = true;
       b.dataset.gesendet = b.textContent;
       setTimeout(function () { b.disabled = true; b.textContent = "wird gesendet …"; }, 0);
     }
@@ -2235,7 +2235,7 @@ pub const APP_JS: &str = r#""use strict";
   var generation = 0;
   var timer = new Set();
   var anfragen = new Set();
-  function spaeter(f, ms) {
+  function planeAbruf(f, ms) {
     if (pausiert || neuladen) { return; }
     var id = setTimeout(function () { timer.delete(id); f(); }, ms);
     timer.add(id);
@@ -2297,7 +2297,7 @@ pub const APP_JS: &str = r#""use strict";
       banner.textContent = "Verbindung zu DepotSchlopf unterbrochen. Die Seite versucht es automatisch erneut. Lass das DepotSchlopf-Fenster offen.";
       banner.hidden = false;
     } finally {
-      if (g === generation) { spaeter(verbindung, fehler ? 5000 : 2000); }
+      if (g === generation) { planeAbruf(verbindung, fehler ? 5000 : 2000); }
     }
   }
   var teile = Array.from(document.querySelectorAll("[data-teil]")).map(function (ziel) {
@@ -2323,12 +2323,12 @@ pub const APP_JS: &str = r#""use strict";
           });
         }
       } catch (_) { fehler = true; }
-      finally { if (g === generation) { spaeter(hole, fehler ? 5000 : 2000); } }
+      finally { if (g === generation) { planeAbruf(hole, fehler ? 5000 : 2000); } }
     };
   });
   function starte() {
-    spaeter(verbindung, 0);
-    teile.forEach(function (f) { spaeter(f, 2000); });
+    planeAbruf(verbindung, 0);
+    teile.forEach(function (f) { planeAbruf(f, 2000); });
   }
   window.addEventListener("pagehide", function () {
     pausiert = true;
@@ -2338,7 +2338,7 @@ pub const APP_JS: &str = r#""use strict";
     anfragen.forEach(function (a) { a.abort(); });
   });
   window.addEventListener("pageshow", function (e) {
-    verlaesst = false;
+    gehtWeg = false;
     formulare().forEach(zeige);
     document.querySelectorAll("button[data-gesendet]").forEach(function (b) {
       b.textContent = b.dataset.gesendet;

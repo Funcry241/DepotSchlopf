@@ -378,7 +378,7 @@ impl Journal {
         if order.status == KontoStatus::Gefuellt && zustand != Some(AuftragsZustand::Gefuellt) {
             return Ok(Some(Abweichung::Unbuchbar {
                 nr,
-                grund: format!("laut Konto gefuellt, laut Journal {zustand:?}"),
+                grund: format!("laut Konto gefüllt, laut Journal {zustand:?}"),
             }));
         }
         Ok(None)

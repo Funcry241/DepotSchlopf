@@ -256,7 +256,7 @@ pub fn lauf(
         let abweichungen = j.gleiche_ab(&*konto).map_err(journal)?;
         if !abweichungen.is_empty() {
             return Err(halt(format!(
-                "Kontowaechter beim Wiederanlauf: {abweichungen:?}. Halt bis zur Prüfung; \
+                "Kontowächter beim Wiederanlauf: {abweichungen:?}. Halt bis zur Prüfung; \
                  niemand wird gefragt, nichts gesendet"
             )));
         }
@@ -264,7 +264,7 @@ pub fn lauf(
     let st = j.stand();
     if st.seit_abschluss() > 0 {
         return Err(halt(format!(
-            "{} Eintraege nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
+            "{} Einträge nach dem letzten Abschluss: ein Tag ist angefangen und nicht \
              abgeschlossen. Halt bis zur Prüfung; niemand wird neu gefragt",
             st.seit_abschluss()
         )));
