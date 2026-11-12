@@ -179,7 +179,7 @@ pub fn oeffne_browser() {
             .args(["/C", "start", "", &adresse])
             .spawn();
     }
-    println!("[Dienst] Oberflaeche: {adresse}");
+    println!("[Dienst] Oberfläche: {adresse}");
 }
 
 /// Aktuelle UTC-Zeit des Dienstes.

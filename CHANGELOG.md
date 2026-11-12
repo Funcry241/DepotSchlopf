@@ -27,6 +27,10 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Die KI-Abstimmung berücksichtigt widerrufene Zustimmungen und prüft vor jeder Runde den verbleibenden Kosten- und Aufrufrahmen. `run.cmd update prüfen` und `run.cmd update pruefen` rufen dieselbe Prüfung auf. (#101)
+- Die Kodex-Sprachprüfung erkennt weitere ASCII-Umschreibungen in sichtbaren Meldungen. (#102)
+- Die tägliche Vorbereitung bemisst ihren KI-Rahmen anhand der verbleibenden Handelstage einschließlich des nächsten Handelstags. Ohne weitere Handelstage im Monat bleibt höchstens ein kurzer Aufruf möglich. (#103)
+
 - Die Zusatz-KIs sind wie die seltenen Einstellungen gegliedert. Der Browser warnt beim Verlassen bei bearbeiteten Formularfeldern oder einem offenen Entwurf.
 - Das Laufprotokoll speichert die Ausgaben in ihrer Reihenfolge. Bei einem Kursabruf ohne verwendbare Daten zeigt es je Börse, ob der Handel bei Abrufbeginn noch lief oder welche Schlusskurse nach Börsenschluss belegt sind.
 

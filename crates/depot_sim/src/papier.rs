@@ -38,7 +38,7 @@ pub trait Broker: Konto {
     fn sende(&mut self, auftrag: &GenehmigterAuftrag) -> Sendeantwort;
     /// Versand mit belegter Zeit fuer einen Auftrag im Papiertag.
     fn sende_am(&mut self, _auftrag: &GenehmigterAuftrag, _zeit: Zeitpunkt) -> Sendeantwort {
-        Sendeantwort::Abgelehnt("Konto unterstuetzt keinen zeitbelegten Versand".into())
+        Sendeantwort::Abgelehnt("Konto unterstützt keinen zeitbelegten Versand".into())
     }
     /// Storniert im Halt offene Kaeufe und bestaetigt, dass keine mehr offen sind.
     fn stoppe_kaeufe(&mut self) -> bool {

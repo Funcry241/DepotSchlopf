@@ -1272,7 +1272,7 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
                 "{wer:?}: {} Bytes",
                 inhalt.len()
             );
-            assert!(inhalt.contains("weitere ausgelassen, Platz erschoepft"));
+            assert!(inhalt.contains("weitere ausgelassen, Platz erschöpft"));
             assert!(inhalt.contains("Termin 00"), "die ersten bleiben");
         }
     }

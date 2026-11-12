@@ -342,7 +342,7 @@ pub(crate) fn kontowaechter(
         KONTOWAECHTER,
         "Abweichung zum Konto: Halt bis zur Prüfung; kein Verkauf, kein Ausgleich",
     )?;
-    Err(halt(format!("Kontowaechter: {abweichungen:?}")))
+    Err(halt(format!("Kontowächter: {abweichungen:?}")))
 }
 
 pub(crate) struct Beteiligte<'a, 'b, 'c> {

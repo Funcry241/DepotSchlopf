@@ -158,7 +158,7 @@ pub fn sammle_nachrichten(
             b.sicherheitsabbruch = true;
             break;
         }
-        b.quellen.push(format!("{quelle}: {} aktuelle Schlagzeilen; {ausgelassen} ungültige, künftige oder zu alte Eintraege ausgelassen.", nachrichten.len()));
+        b.quellen.push(format!("{quelle}: {} aktuelle Schlagzeilen; {ausgelassen} ungültige, künftige oder zu alte Einträge ausgelassen.", nachrichten.len()));
         gelesen.push(Gelesen {
             quelle: quelle.into(),
             abruf,

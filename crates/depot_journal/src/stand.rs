@@ -952,7 +952,7 @@ impl Stand {
                 .get(&nr)
                 .map_or(Cent::NULL, |(_, n)| *n)
                 .checked_add(netto)
-                .ok_or("Verkaufserloes: Überlauf")?;
+                .ok_or("Verkaufserlös: Überlauf")?;
             self.abrechnungen.insert(nr, (valuta, gesamt));
         }
         self.toepfe.insert(topf.id(), topf);
@@ -1012,7 +1012,7 @@ impl Stand {
             .kurs
             .mal_stueck(aus.stueck)
             .and_then(|v| v.checked_sub(aus.gebuehr))
-            .ok_or("Verkaufserloes: Überlauf")?;
+            .ok_or("Verkaufserlös: Überlauf")?;
         let valuta = papier_valuta(ausfuehrungstag).ok_or("Valuta ausserhalb des Kalenders")?;
         Ok((netto > Cent::NULL).then_some((valuta, netto)))
     }
@@ -1103,7 +1103,7 @@ fn buche(topf: &Topf, b: &AuftragsBeleg, a: &crate::auftrag::Ausfuehrung) -> Res
         return Err(format!("Auftrag {}: Ausführung nicht buchbar", b.nr));
     };
     let mut neu = Topf::neu(topf.id(), bargeld)
-        .map_err(|_| format!("Auftrag {}: Bargeld wuerde negativ", b.nr))?;
+        .map_err(|_| format!("Auftrag {}: Bargeld würde negativ", b.nr))?;
     for (isin, n) in topf.positionen() {
         neu.setze_bestand(isin.clone(), *n);
     }

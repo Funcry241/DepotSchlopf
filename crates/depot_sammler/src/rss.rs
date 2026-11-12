@@ -224,7 +224,7 @@ pub fn lies(
     loop {
         match reader
             .read_event()
-            .map_err(|_| "RSS unvollstaendig oder fehlerhaft")?
+            .map_err(|_| "RSS unvollständig oder fehlerhaft")?
         {
             Event::Start(e) => l.element(&e)?,
             Event::Empty(e) => {
@@ -236,10 +236,10 @@ pub fn lies(
             Event::CData(t) => l.text(&t.xml10_content())?,
             Event::GeneralRef(r) => {
                 let s = format!("&{};", r.xml10_content());
-                let t = quick_xml::escape::unescape(&s).map_err(|_| "Unbekannte XML-Entitaet")?;
+                let t = quick_xml::escape::unescape(&s).map_err(|_| "Unbekannte XML-Entität")?;
                 l.text(&t)?;
             }
-            Event::DocType(_) => return Err("DTD und externe Entitaeten sind nicht erlaubt".into()),
+            Event::DocType(_) => return Err("DTD und externe Entitäten sind nicht erlaubt".into()),
             Event::Decl(d) => {
                 if l.wurzel || l.deklaration {
                     return Err("XML-Deklaration an falscher Stelle".into());
@@ -260,7 +260,7 @@ pub fn lies(
         }
     }
     if !l.wurzel || !l.kanal || !l.offen.is_empty() {
-        return Err("RSS unvollstaendig".into());
+        return Err("RSS unvollständig".into());
     }
     Ok((l.nachrichten, l.ausgelassen, l.dekodiert))
 }
