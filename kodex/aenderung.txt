@@ -1,9 +1,8 @@
 klasse: Funktion
-zweck: Frankfurter Datumsbereiche für den Analyse-Export auswählbar machen
+zweck: Historische Tagesendstände mit Journalbelegen in den Analyse-Export aufnehmen
 pfade:
 crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/lib.rs
-crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/analyse/historie.rs
 crates/depot_dienst/tests/dienst.rs
-crates/depot_dienst/tests/update.rs
-crates/depot_journal/src/gespraeche.rs
+crates/depot_journal/src/stand.rs
+crates/depot_journal/src/lib.rs

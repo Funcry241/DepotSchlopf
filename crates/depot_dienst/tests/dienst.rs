@@ -3777,7 +3777,12 @@ fn heute_exportieren_liefert_zip_ohne_schreibzugriff() -> Result<(), String> {
     assert!(antwort.contains("Content-Type: application/zip"));
     assert!(antwort.contains("filename=\"DepotSchlopf_Analyse_2026-11-05.zip\""));
     assert!(antwort.contains("\r\n\r\nPK"));
-    for datei in ["LIESMICH.md", "01_ueberblick.md", "MANIFEST.txt"] {
+    for datei in [
+        "LIESMICH.md",
+        "01_ueberblick.md",
+        "03_journal.md",
+        "MANIFEST.txt",
+    ] {
         assert!(antwort.contains(datei));
     }
     let zeitraum = formular_post(

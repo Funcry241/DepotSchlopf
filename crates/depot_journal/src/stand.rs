@@ -202,6 +202,14 @@ pub struct Abschluss {
     pub abdruck: String,
 }
 
+/// Die am Abschluss belegten Bestände und der bis dahin aufgebaute Kursbestand.
+#[derive(Debug)]
+pub struct Schlussbeleg<'a> {
+    pub abschluss: &'a Abschluss,
+    pub toepfe: &'a BTreeMap<TopfId, Topf>,
+    pub kurse: &'a [KursBeleg],
+}
+
 /// Format 1: Journale bis PR #15. Ein Auftrag darin ist mit seinem Ergebnis im naechsten Topf
 /// gebucht und hat keine Zustaende.
 pub const FORMAT_ALT: u8 = 1;
@@ -239,6 +247,7 @@ pub struct Stand {
     /// Je abgeschlossenem Tag die Toepfe zum Abschluss, aufsteigend (#118). Entsteht nur beim
     /// Lesen; das Journal schreibt dafuer nichts.
     tagesschluesse: Vec<(Datum, BTreeMap<TopfId, Topf>)>,
+    schlussbelege: Vec<(Abschluss, usize)>,
 }
 
 pub(crate) fn papier_freigabe_text(tag: Datum, bargeld: Cent) -> String {
@@ -407,6 +416,21 @@ impl Stand {
     /// angefangener Tag ohne Abschluss erscheint nicht.
     pub fn tagesschluesse(&self) -> &[(Datum, BTreeMap<TopfId, Topf>)] {
         &self.tagesschluesse
+    }
+
+    /// Der Abschluss und die bis zu seiner Journalzeile vorliegenden Kursbelege.
+    pub fn schlussbeleg(&self, tag: Datum) -> Option<Schlussbeleg<'_>> {
+        let index = self
+            .tagesschluesse
+            .binary_search_by_key(&tag, |(tag, _)| *tag)
+            .ok()?;
+        let (_, toepfe) = self.tagesschluesse.get(index)?;
+        let (abschluss, kursanzahl) = self.schlussbelege.get(index)?;
+        Some(Schlussbeleg {
+            abschluss,
+            toepfe,
+            kurse: self.kurse.get(..*kursanzahl)?,
+        })
     }
 
     /// Der letzte Tagesabschluss.
@@ -704,6 +728,7 @@ impl Stand {
             .map(|hoch| hoch.max(a.hoechststand));
         self.papier_neustart = None;
         self.tagesschluesse.push((a.datum, self.toepfe.clone()));
+        self.schlussbelege.push((a.clone(), self.kurse.len()));
         self.abschluss = Some(a);
         self.seit_abschluss = 0;
         Ok(())
