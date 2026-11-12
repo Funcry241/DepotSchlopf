@@ -482,6 +482,83 @@ fn fehlende_antwort_sperrt_abgewiesene_nicht() -> Result<(), String> {
     let a = mit_lage(|l| maus.vorschlagen(e, l))?;
     assert!(a.vorschlag.is_none());
     assert!(ort.sperre().exists(), "{a:?}");
+    assert!(maus.abrechnung().is_none());
+    Ok(())
+}
+
+#[test]
+fn unbrauchbare_antwort_mit_belegtem_verbrauch_wird_abgerechnet() -> Result<(), String> {
+    let ein = 10_000;
+    let aus = 1_000;
+    let antwort =
+        |r: Result<Rueckmeldung, NetzFehler>, alt: &str, neu: &str| -> Result<_, String> {
+            let r = vorbedingung(r, "Anbieterantwort")?;
+            let text = String::from_utf8(r.inhalt).map_err(|e| e.to_string())?;
+            assert!(text.contains(alt));
+            Ok(ok(&text.replace(alt, neu)))
+        };
+    for (wer, r, abstimmung) in [
+        (
+            BeraterId::Dachs,
+            antwort(claude(VORSCHLAG, ein, aus, 0), "end_turn", "max_tokens")?,
+            false,
+        ),
+        (
+            BeraterId::Maus,
+            antwort(gpt(VORSCHLAG, ein, aus), "completed", "incomplete")?,
+            false,
+        ),
+        (BeraterId::Dachs, claude(SCHLUESSEL, ein, aus, 0), false),
+        (BeraterId::Maus, gpt("{}", ein, aus), true),
+    ] {
+        let mut ort = Ort::neu()?;
+        let mut netz = Attrappe::default();
+        netz.antworten.push_back(r);
+        let mut ki = berater(&ort, wer, netz)?
+            .mit_protokoll(ort.dir.join("anbieter.txt"), uhr)
+            .mit_gespraechen("probe-abrechnung".into(), None);
+        let erlaubnis = ort.erlaubnis(wer, 1)?;
+        let nr = erlaubnis.buchungsnummer();
+        let soll = some(erlaubnis.deckel().kosten_ist(ein, aus), "Kosten")?;
+        assert!(soll > Cent::NULL && soll < erlaubnis.buchung().reserviert);
+        let ergebnis = mit_lage(|lage| {
+            if abstimmung {
+                let dialog = depot_sim::abstimmung::AbstimmungsStand {
+                    runde: 1,
+                    eigener_vorschlag: None,
+                    fremder_vorschlag: None,
+                    eigene_erstmeinung: String::new(),
+                    fremde_beitraege: String::new(),
+                };
+                ki.abstimmen(erlaubnis, lage, &dialog).eigene
+            } else {
+                ki.vorschlagen(erlaubnis, lage)
+            }
+        })?;
+        assert!(!ergebnis.verwertbar);
+        assert!(!ergebnis.einschaetzung.contains(SCHLUESSEL));
+        let abrechnung = some(ki.abrechnung(), "Abrechnung trotz verworfener Antwort")?;
+        assert_eq!(abrechnung.kosten(), soll);
+        vorbedingung(ort.journal.rechne_ki_ab(&abrechnung), "Abrechnung buchen")?;
+        assert_eq!(
+            ort.journal
+                .stand()
+                .ki()
+                .buchungen()
+                .get(nr)
+                .map(|b| b.reserviert),
+            Some(soll)
+        );
+        let (tag, ..) = some(uhr().and_then(Zeitpunkt::in_frankfurt), "Protokolltag")?;
+        let (eintraege, fehler) = vorbedingung(
+            depot_journal::gespraeche::lesen(&ort.dir, tag),
+            "Gesprächsprotokoll",
+        )?;
+        assert_eq!(fehler, 0);
+        let e = some(eintraege.first(), "Gespräch")?;
+        assert_eq!(e.kosten_cent, u64::try_from(soll.0).ok());
+        assert!(!format!("{e:?}").contains(SCHLUESSEL));
+    }
     Ok(())
 }
 

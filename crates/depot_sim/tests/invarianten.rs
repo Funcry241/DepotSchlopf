@@ -275,7 +275,12 @@ impl depot_sim::Berater for Spieler {
                 }
                 v
             }),
-            Schritt::Aendern(bp) => vorschlag(self.wer, bp).ok(),
+            Schritt::Aendern(bp) => vorschlag(self.wer, bp).ok().map(|mut v| {
+                for grund in v.begruendung.values_mut() {
+                    *grund = format!("Begründung der Änderung (Runde {})", stand.runde);
+                }
+                v
+            }),
             Schritt::Zurueck => None,
         };
         self.kosten = e.abrechnung(100, 100);
@@ -482,6 +487,38 @@ fn journal_eines_tages(runden: &[(Zug, Zug)]) -> Result<Vec<u8>, String> {
         }
     }
     vorbedingung(fs::read(&ort.journal), "Journal lesen")
+}
+
+#[test]
+fn abstimmungsjournal_belegt_aenderung_und_letzte_kaufthese() -> Result<(), String> {
+    let bytes = journal_eines_tages(&[
+        ((Schritt::Aendern(1_000), true), (Schritt::Behalten, true)),
+        ((Schritt::Behalten, true), (Schritt::Behalten, true)),
+    ])?;
+    let ort = Ort::neu()?;
+    let vermerk = some(vermerk_fuer(&bytes, 0), "Vermerk")?;
+    let journal = vorbedingung(oeffne_mit(&ort, &bytes, &vermerk)?, "Journal")?;
+    let gruende = journal.stand().begruendungen();
+    let isin = sap()?;
+    let aenderung =
+        format!("Abstimmung Runde 1: {isin} 1000 bp: Begründung der Änderung (Runde 1)");
+    assert_eq!(
+        gruende
+            .iter()
+            .filter(|(_, wer, text)| wer == "Dachs" && text == &aenderung)
+            .count(),
+        1
+    );
+    assert!(
+        !gruende
+            .iter()
+            .any(|(_, _, text)| text.starts_with(&format!("Abstimmung Runde 2: {isin}")))
+    );
+    assert!(
+        gruende.iter().any(|(_, wer, text)| wer == "Kaufthese"
+            && text.ends_with("Begründung der Änderung (Runde 1)"))
+    );
+    Ok(())
 }
 
 /// Zeilenenden (Position nach jedem `\n`) eines Journals.

@@ -1,5 +1,5 @@
 //! Begrenzter Austausch nach fixierten unabhängigen Erst- und Zweitmeinungen.
-use crate::lauf::{TopfAntwort, Zyklus, journal};
+use crate::lauf::{TopfAntwort, Zyklus, begruende, journal};
 use crate::{Antwort, Berater, Lage, LaufFehler};
 use depot_journal::{Journal, KiZweck};
 use depot_kern::{BeraterId, Vorschlag};
@@ -115,27 +115,35 @@ fn frage(
     if let Some(abrechnung) = zweite.abrechnung() {
         buch.rechne_ki_ab(&abrechnung).map_err(journal)?;
     }
+    let vorschlag = erste.eigene.vorschlag.as_ref();
+    let geaendert = !gleiche_ziele(vorschlag, dialog.eigener_vorschlag.as_ref());
+    let runde = dialog.runde;
+    let wer = match topf.topf.id().berater() {
+        BeraterId::Dachs => "Dachs",
+        BeraterId::Maus => "Maus",
+    };
     let text = format!(
-        "Abstimmung Runde {}: verwertbar={}; Änderung={}; Ziele={:?}; Zustimmung zum fremden Stand={}; Grund: {}",
-        dialog.runde,
+        "Abstimmung Runde {runde}: verwertbar={}; Änderung={geaendert}; Ziele={:?}; Zustimmung zum fremden Stand={}; Grund: {}",
         erste.eigene.verwertbar,
-        !gleiche_ziele(
-            erste.eigene.vorschlag.as_ref(),
-            dialog.eigener_vorschlag.as_ref()
-        ),
-        erste.eigene.vorschlag.as_ref().map(|v| &v.zielgewichte_bp),
+        vorschlag.map(|v| &v.zielgewichte_bp),
         erste.zustimmung_fremd,
         crate::vorbereitung::text_fuer_frage(&erste.eigene.einschaetzung)
     );
-    buch.begruende(
-        zyklus.tag.datum,
-        match topf.topf.id().berater() {
-            BeraterId::Dachs => "Dachs",
-            BeraterId::Maus => "Maus",
-        },
-        &text,
-    )
-    .map_err(journal)?;
+    begruende(buch, zyklus.tag, wer, &text)?;
+    if erste.eigene.verwertbar
+        && geaendert
+        && let Some(vorschlag) = vorschlag
+    {
+        for (isin, bp) in &vorschlag.zielgewichte_bp {
+            let grund = vorschlag.begruendung.get(isin).map_or("", String::as_str);
+            begruende(
+                buch,
+                zyklus.tag,
+                wer,
+                &format!("Abstimmung Runde {runde}: {isin} {bp} bp: {grund}"),
+            )?;
+        }
+    }
     Ok(Some(erste))
 }
 

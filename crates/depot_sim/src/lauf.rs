@@ -171,7 +171,12 @@ fn sauber(text: &str) -> String {
     }
 }
 
-fn begruende(j: &mut Journal, tag: &Tag, wer: &str, text: &str) -> Result<(), LaufFehler> {
+pub(crate) fn begruende(
+    j: &mut Journal,
+    tag: &Tag,
+    wer: &str,
+    text: &str,
+) -> Result<(), LaufFehler> {
     j.begruende(tag.datum, wer, &sauber(text)).map_err(journal)
 }
 

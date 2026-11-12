@@ -1,4 +1,8 @@
 klasse: Funktion
-zweck: Unzulässige Dateipfade vor dem Bau eines Updates abweisen
+zweck: Belegte KI-Kosten abrechnen und geänderte Abstimmungsziele begründen
 pfade:
-crates/depot_lauf/src/update.rs
+crates/depot_berater/src/ki.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/tests/invarianten.rs
