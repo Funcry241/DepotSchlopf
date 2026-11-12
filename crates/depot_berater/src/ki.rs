@@ -549,11 +549,6 @@ impl<N: Netz> KiBerater<N> {
         }
     }
 
-    /// Bei einer verworfenen Antwort bleibt die Abrechnung sicher kostenloser Aufrufe gültig.
-    fn behalte_nur_nullabrechnung(&mut self) {
-        self.abrechnung = self.abrechnung.take().filter(|a| a.kosten() == Cent::NULL);
-    }
-
     fn versandfehler(
         &mut self,
         erlaubnis: &AufrufErlaubnis,
@@ -674,14 +669,12 @@ impl<N: Netz> KiBerater<N> {
                 kosten,
             };
         }
+        self.abrechnung = erlaubnis.abrechnung(v.token_ein, v.token_aus);
         if geheim {
             return Ergebnis {
                 text: Err(GEHEIMNIS.into()),
                 kosten,
             };
-        }
-        if gelesen.text.is_ok() {
-            self.abrechnung = erlaubnis.abrechnung(v.token_ein, v.token_aus);
         }
         Ergebnis {
             text: gelesen.text.map_err(|e| self.bereinigt(&e)),
@@ -789,7 +782,6 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a
             }
             Err(g) => {
-                self.behalte_nur_nullabrechnung();
                 let mut a = depot_sim::abstimmung::AbstimmungsAntwort::unverwertbar();
                 a.eigene.einschaetzung = sauber(&self.bereinigt(&g));
                 a
@@ -870,19 +862,16 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a.einschaetzung = format!("{} [{}]", a.einschaetzung, e.kosten);
                 a
             }
-            Err(grund) => {
-                self.behalte_nur_nullabrechnung();
-                Antwort {
-                    prognose: None,
-                    verwertbar: false,
-                    einschaetzung: format!(
-                        "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
-                        sauber(&self.bereinigt(&grund)),
-                        e.kosten
-                    ),
-                    vorschlag: None,
-                }
-            }
+            Err(grund) => Antwort {
+                prognose: None,
+                verwertbar: false,
+                einschaetzung: format!(
+                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
+                    sauber(&self.bereinigt(&grund)),
+                    e.kosten
+                ),
+                vorschlag: None,
+            },
         }
     }
 
@@ -916,18 +905,15 @@ impl<N: Netz> Berater for KiBerater<N> {
                 u
             }
             // Ohne verwertbare Antwort keine Zustimmung (R31).
-            Err(grund) => {
-                self.behalte_nur_nullabrechnung();
-                Urteil {
-                    verwertbar: false,
-                    zustimmung: false,
-                    begruendung: format!(
-                        "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
-                        sauber(&self.bereinigt(&grund)),
-                        e.kosten
-                    ),
-                }
-            }
+            Err(grund) => Urteil {
+                verwertbar: false,
+                zustimmung: false,
+                begruendung: format!(
+                    "{KEINE_VERWERTBARE_ANTWORT}: {} [{}]",
+                    sauber(&self.bereinigt(&grund)),
+                    e.kosten
+                ),
+            },
         }
     }
 }
