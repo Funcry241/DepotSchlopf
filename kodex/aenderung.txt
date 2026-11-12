@@ -1,8 +1,9 @@
 klasse: Funktion
-zweck: Historische Tagesendstände mit Journalbelegen in den Analyse-Export aufnehmen
+zweck: Bestätigte Journaleinträge und geschwärzte Originalzeilen im Analyse-Export bereitstellen
 pfade:
 crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/historie.rs
-crates/depot_dienst/tests/dienst.rs
-crates/depot_journal/src/stand.rs
-crates/depot_journal/src/lib.rs
+crates/depot_dienst/src/analyse/journal.rs
+crates/depot_dienst/src/analyse/rohdaten.rs
+crates/depot_dienst/src/analyse/schutz.rs
+crates/depot_dienst/src/verlauf.rs
+crates/depot_journal/src/datei.rs
