@@ -17,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sha2::{Digest, Sha256};
 
 use crate::abbild::Abbild;
-use crate::zip::Zip;
+use depot_export::Zip;
 
 pub const EXPORT: &str = "assistant_export_latest.zip";
 

@@ -3744,3 +3744,43 @@ fn automatisch_aufgehobene_kurssperre_erzeugt_einen_hinweis() -> Result<(), Stri
     assert!(gezeigt(&meldungen).is_empty());
     Ok(())
 }
+
+#[test]
+fn heute_exportieren_liefert_zip_ohne_schreibzugriff() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let jetzt = donnerstag(12, 0)?;
+    let daten = wurzel.join("daten");
+    let journal = daten.join("journal.txt");
+    let vermerk = daten.join("journal.vermerk");
+    depot_journal::Journal::einrichten(&journal).map_err(|e| format!("{e:?}"))?;
+    let lies = |p| fs::read(p).map_err(|e| e.to_string());
+    let vorher = (lies(&journal)?, lies(&vermerk)?);
+    let umwelt = Attrappe::default();
+    let post = formular_post("/export", &format!("t={TOKEN}"));
+    let lesen = behandle(&d, &umwelt, &post, jetzt);
+    assert_eq!(status(&lesen)?, 200);
+    let antwort = text(&lesen);
+    assert!(antwort.contains("Content-Type: application/zip"));
+    assert!(antwort.contains("filename=\"DepotSchlopf_Analyse_2026-11-05.zip\""));
+    assert!(antwort.contains("\r\n\r\nPK"));
+    for datei in ["LIESMICH.md", "01_ueberblick.md", "MANIFEST.txt"] {
+        assert!(antwort.contains(datei));
+    }
+    assert_eq!((lies(&journal)?, lies(&vermerk)?), vorher);
+
+    let sperre = depot_journal::Journal::oeffnen(&journal).map_err(|e| format!("{e:?}"))?;
+    assert_eq!(status(&behandle(&d, &umwelt, &post, jetzt))?, 409);
+    drop(sperre);
+
+    let fremd = anfrage(
+        "POST",
+        "/export",
+        &[("Host", HOST), ("Origin", "https://example.org")],
+        &format!("t={TOKEN}"),
+    );
+    assert_eq!(status(&behandle(&d, &umwelt, &fremd, jetzt))?, 403);
+    let get = anfrage("GET", "/export", &[("Host", HOST)], "");
+    assert_eq!(status(&behandle(&d, &umwelt, &get, jetzt))?, 405);
+    fs::remove_dir_all(wurzel).map_err(|e| e.to_string())
+}

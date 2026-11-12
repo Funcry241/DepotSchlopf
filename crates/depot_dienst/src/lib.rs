@@ -20,6 +20,7 @@
 )]
 
 pub mod aktualisierung;
+mod analyse;
 pub mod autostart;
 mod gemini;
 mod gespraeche;
@@ -196,7 +197,15 @@ const HTML: &str = "text/html; charset=utf-8";
 fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
     let ki =
         zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), heute(jetzt));
-    seiten::live_mit_ki(&d.token, &d.start, &d.sperre(), jetzt, &ki)
+    let mut inhalt = analyse::formular(d);
+    inhalt.push_str(&seiten::live_mit_ki(
+        &d.token,
+        &d.start,
+        &d.sperre(),
+        jetzt,
+        &ki,
+    ));
+    inhalt
 }
 
 fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {
@@ -224,6 +233,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     match a.pfad.as_str() {
         "/" => live_seite(d, a, jetzt),
         "/gespraeche" => gespraechsseite(d, a, tag),
+        "/export" => seiten::fehler(405, "Verwende Heute exportieren auf der Live-Seite."),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
         "/teil/live" => antwort(200, HTML, live_inhalt(d, jetzt).as_bytes()),
         "/teil/journal" => antwort(
@@ -328,13 +338,14 @@ pub fn gespraeche_beim_start(wurzel: &std::path::Path) {
 
 fn gespraechsseite(d: &Dienst, a: &Anfrage, heute: Option<depot_kern::Datum>) -> Vec<u8> {
     let abfrage = formular(a.abfrage.as_bytes()).unwrap_or_default();
-    let inhalt = gespraeche::inhalt(
+    let mut inhalt = analyse::formular(d);
+    inhalt.push_str(&gespraeche::inhalt(
         &d.wurzel.join("daten"),
         heute,
         feld(&abfrage, "tag").unwrap_or_default(),
         feld(&abfrage, "wer").unwrap_or_default(),
         feld(&abfrage, "lauf").unwrap_or_default(),
-    );
+    ));
     let seite = seiten::rahmen(
         "/gespraeche",
         None,
@@ -435,6 +446,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     }
     match a.pfad.as_str() {
         "/ausfuehren" => auftrag_einreihen(d, &f, jetzt),
+        "/export" => analyse::exportieren(d, u, jetzt),
         "/gemini" => gemini::speichern(d, &f),
         "/schluessel" => {
             let (Some(wer), Some(wert)) =

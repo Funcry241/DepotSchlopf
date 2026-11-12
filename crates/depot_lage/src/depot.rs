@@ -15,6 +15,7 @@ pub struct Position {
     pub stueck: u64,
     /// Wert zum juengsten Schlusskurs, abgerundet; `None` ohne Kurs.
     pub wert: Option<Cent>,
+    pub kurs: Option<depot_kern::Preis>,
 }
 
 /// Ein Topf.
@@ -72,6 +73,7 @@ fn topf_lage(t: &Topf, kurse: Option<&depot_kern::Kurse>, werte: &[Wert]) -> Top
             isin: isin.als_str().to_string(),
             name: name(werte, isin.als_str()),
             stueck: *stueck,
+            kurs: kurse.and_then(|k| k.kurs(isin)),
             wert: kurse
                 .and_then(|k| k.kurs(isin))
                 .and_then(|p| p.mal_stueck(*stueck, Rundung::Ab)),
@@ -101,24 +103,7 @@ pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
         .iter()
         .rev()
         .take(AUFTRAEGE_MAX)
-        .map(|a| AuftragZeile {
-            nr: a.beleg.nr,
-            topf: a.beleg.topf,
-            name: name(werte, a.beleg.isin.als_str()),
-            richtung: match a.beleg.richtung {
-                Richtung::Kauf => "Kauf",
-                Richtung::Verkauf => "Verkauf",
-            },
-            stueck: a.beleg.stueck,
-            limit: a.beleg.limit,
-            anlass: match a.beleg.anlass {
-                Anlass::Umschichtung => "Vorschlag",
-                Anlass::AusstiegPositivliste => "Ausstieg Positivliste",
-                Anlass::Abbau => "Abbau",
-                Anlass::Notbremse => "Notbremse",
-            },
-            zustand: format!("{:?}", a.zustand),
-        })
+        .map(|a| auftrag_zeile(a, werte))
         .collect();
     DepotLage {
         kurse_vom: kurse.map(|k| k.handelstag),
@@ -129,4 +114,34 @@ pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
         auftraege,
         vergleich: crate::vergleich::vergleich_lage(s, werte),
     }
+}
+
+pub fn auftrag_zeile(a: &depot_journal::AuftragsLage, werte: &[Wert]) -> AuftragZeile {
+    AuftragZeile {
+        nr: a.beleg.nr,
+        topf: a.beleg.topf,
+        name: name(werte, a.beleg.isin.als_str()),
+        richtung: match a.beleg.richtung {
+            Richtung::Kauf => "Kauf",
+            Richtung::Verkauf => "Verkauf",
+        },
+        stueck: a.beleg.stueck,
+        limit: a.beleg.limit,
+        anlass: match a.beleg.anlass {
+            Anlass::Umschichtung => "Vorschlag",
+            Anlass::AusstiegPositivliste => "Ausstieg Positivliste",
+            Anlass::Abbau => "Abbau",
+            Anlass::Notbremse => "Notbremse",
+        },
+        zustand: format!("{:?}", a.zustand),
+    }
+}
+
+/// Belegter Wert des letzten abgeschlossenen Papiertags zum Schlusskurs dieses Tags.
+pub fn letzter_tagesschluss(s: &Stand, werte: &[Wert], vor: Datum) -> Option<Cent> {
+    let (tag, toepfe) = s.tagesschluesse().iter().rfind(|(tag, _)| *tag < vor)?;
+    let kurse = depot_sim::tageskurse_am(s, &als_universum(werte), *tag).ok()?;
+    toepfe.values().try_fold(Cent::NULL, |summe, topf| {
+        summe.checked_add(topf.wert_gerundet(&kurse.heute, Rundung::Ab)?)
+    })
 }

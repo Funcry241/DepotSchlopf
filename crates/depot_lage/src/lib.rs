@@ -33,7 +33,12 @@ mod zugang;
 
 pub use betrieb::{AnbieterHinweis, Betrieb, SchluesselStand};
 pub use budget::{BudgetStatus, KiBudget, ki_budget, mit_verbrauch};
-pub use depot::{AuftragZeile, DepotLage, Position, TopfLage};
+pub use depot::{AuftragZeile, DepotLage, Position, TopfLage, auftrag_zeile, letzter_tagesschluss};
+
+/// Derselbe Depotstand wie in Live, aus dem bereits geprüften Journal.
+pub fn depotstand(stand: &Stand, werte: &[Wert]) -> DepotLage {
+    depot::depot_lage(stand, werte)
+}
 pub use depot_sim::papierlauf::{
     PapierFreigabeAngebot, PapierFreigabeFehler, papier_freigabe_angebot, papier_freigeben,
 };

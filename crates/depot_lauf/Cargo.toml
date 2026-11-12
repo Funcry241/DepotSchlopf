@@ -18,6 +18,7 @@ name = "depotschlopf"
 path = "src/main.rs"
 
 [dependencies]
+depot_export = { workspace = true }
 depot_kodex = { workspace = true }
 sha2 = { workspace = true }
 
