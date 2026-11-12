@@ -209,8 +209,32 @@ pub fn vermerke_geprueft(wurzel: &Path, baum: &str) {
     }
 }
 
+/// Prüft die Pfade mit dem installierten Updater, bevor der neue Stand gebaut wird.
+fn pruefe_baumpfade(wurzel: &Path, commit: &str) -> Result<(), String> {
+    let roh = abbild::git_roh(
+        wurzel,
+        &["ls-tree", "-r", "-z", "--name-only", "--full-tree", commit],
+    )?;
+    let pfade = std::str::from_utf8(&roh).map_err(
+        |_| "Der neue Stand enthält einen ungültigen Dateinamen. Update nicht eingespielt.",
+    )?;
+    for pfad in pfade.split_terminator('\0') {
+        let cargo_pfad = pfad.split('/').any(|teil| {
+            let teil = teil.trim_end_matches([' ', '.']);
+            teil.eq_ignore_ascii_case(".cargo") || teil.eq_ignore_ascii_case("build.rs")
+        });
+        if cargo_pfad || depot_kodex::pfade::rolle(pfad) == depot_kodex::pfade::Rolle::Unbekannt {
+            return Err(format!(
+                "Der neue Stand enthält den unzulässigen Pfad {pfad:?}. Update nicht eingespielt."
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Prueft den neuen Stand in seiner Kopie mit dem ganzen Gate.
 fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<abbild::Abbild, String> {
+    pruefe_baumpfade(wurzel, &k.neu)?;
     let ablage = abbild::ablage(wurzel);
     println!("[Update] Kopie von {} anlegen", kurz(&k.neu));
     let abbild = abbild::festhalten_commit(wurzel, &ablage, "update", &k.neu)?;
@@ -482,6 +506,42 @@ mod tests {
             &["bundle", "create", "../ursprung.bundle", "main"],
         )?;
         g(&a.andere, &["rev-parse", "HEAD"])
+    }
+
+    #[test]
+    fn update_lehnt_unzulaessige_baumpfade_vor_der_pruefkopie_ab() -> Result<(), String> {
+        let a = aufbau()?;
+        g(&a.andere, &["rm", "a.txt"])?;
+        fs::write(a.andere.join("README.md"), "# Probe\n").map_err(|e| e.to_string())?;
+        g(&a.andere, &["add", "README.md"])?;
+        g(&a.andere, &["commit", "-qm", "zulässiger Stand"])?;
+        let alt = g(&a.andere, &["rev-parse", "HEAD"])?;
+        pruefe_baumpfade(&a.andere, &alt)?;
+
+        for pfad in [
+            ".cargo/config.toml",
+            "docs/.CARGO/config",
+            "crates/probe/src/build.rs",
+            "unbekannt.sh",
+        ] {
+            let datei = a.andere.join(pfad);
+            fs::create_dir_all(datei.parent().ok_or("Ordner fehlt")?).map_err(|e| e.to_string())?;
+            fs::write(datei, "Probe\n").map_err(|e| e.to_string())?;
+            g(&a.andere, &["add", "--", pfad])?;
+            g(&a.andere, &["commit", "-qm", "unzulässiger Stand"])?;
+            let k = Kandidat {
+                alt: alt.clone(),
+                neu: g(&a.andere, &["rev-parse", "HEAD"])?,
+                staende: Vec::new(),
+            };
+            let fehler = pruefe_kopie(&a.andere, &k)
+                .err()
+                .ok_or("Update hätte abgelehnt werden müssen")?;
+            assert!(fehler.contains(pfad), "{fehler}");
+            assert!(!abbild::ablage(&a.andere).join("update").exists());
+            g(&a.andere, &["reset", "--hard", &alt])?;
+        }
+        Ok(())
     }
 
     #[test]
