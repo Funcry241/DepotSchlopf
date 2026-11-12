@@ -1,6 +1,6 @@
 //! Lokaler, lesender Export von Frankfurter Betriebstagen.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read as _};
@@ -10,9 +10,10 @@ use depot_export::Zip;
 use depot_journal::{Journal, JournalFehler, Stand};
 use depot_kern::json::{Json, erstes_objekt};
 use depot_kern::{BeraterId, Cent, Datum, Grenzen, Isin, Zeitpunkt, abdruck::sha256_hex};
+use depot_lage::gespraeche::Gespraech;
 use depot_lage::{datum_text, zeit_text};
 
-use crate::{Dienst, Umwelt, http, protokoll::Schutz, schluessel, seiten, verlauf};
+use crate::{Dienst, Umwelt, gespraeche, http, protokoll::Schutz, schluessel, seiten, verlauf};
 
 mod historie;
 mod journal;
@@ -111,9 +112,11 @@ pub(crate) fn formular(d: &Dienst, heute: Option<Datum>) -> String {
     let token = depot_lage::html::maskiere(&d.token);
     format!(
         "<form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <input type=\"hidden\" name=\"ki_texte\" value=\"ja\">\
          <button type=\"submit\" name=\"zeitraum\" value=\"heute\">Heute exportieren</button>\
          </form><details id=\"analyse-zeitraum\"><summary>Zeitraum exportieren</summary>\
          <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <p><label><input type=\"checkbox\" name=\"ki_texte\" value=\"ja\" checked> Fragen und Systemtexte im Gesprächsbericht aufnehmen</label></p>\
          <p><label><input type=\"checkbox\" name=\"rohdaten\" value=\"ja\"> Geschwärzte Rohdaten und Laufprotokolle beilegen</label></p>\
          <button type=\"submit\" name=\"zeitraum\" value=\"heute\" formnovalidate>Heute</button> \
          <button type=\"submit\" name=\"zeitraum\" value=\"gestern\" formnovalidate>Gestern</button> \
@@ -543,11 +546,122 @@ fn ki_entscheidung(aus: &mut String, antwort: &str) {
     }
 }
 
-fn ki(daten: &Path, zeitraum: Zeitraum, stand: Option<&Stand>, luecken: &mut String) -> String {
-    let mut aus = "# KI-Ergebnisse\n".to_owned();
+fn ki_textblock(aus: &mut String, text: &str) {
+    let laengste_folge = text
+        .split(|c| c != '~')
+        .map(str::len)
+        .max()
+        .unwrap_or_default();
+    let zaun = "~".repeat(laengste_folge.saturating_add(1).max(3));
+    let _ = writeln!(aus, "\n{zaun}\n{text}\n{zaun}\n");
+}
+
+fn ki_aufruf(aus: &mut String, e: &Gespraech, tag: Datum, stand: Option<&Stand>) {
+    let kosten = stand.and_then(|s| {
+        let b = s.ki().buchungen().get(e.buchung?)?;
+        let wer = match b.berater {
+            BeraterId::Dachs => "dachs",
+            BeraterId::Maus => "maus",
+        };
+        (wer == e.wer && b.datum == tag).then_some(b.reserviert)
+    });
+    let http = e.http.map_or_else(|| "–".into(), |s| s.to_string());
+    let token = |n: Option<u64>| n.map_or_else(|| "–".into(), |n| n.to_string());
+    let _ = writeln!(
+        aus,
+        "\n#### {} · {} · {}\n\n- {} · {} · HTTP {http} · Token {}/{} · Journalbuchung {}",
+        zeit_text(e.zeit),
+        gespraeche::name(feste_kennung(&e.wer)),
+        feste_kennung(&e.modell),
+        gespraeche::zweck_text(feste_kennung(&e.zweck)),
+        gespraeche::status(feste_kennung(&e.ergebnis)),
+        token(e.token_ein),
+        token(e.token_aus),
+        geld(kosten)
+    );
+    if let Some(antwort) = e.antwort.as_deref() {
+        ki_entscheidung(aus, antwort);
+    }
+}
+
+fn ki_laeufe(
+    aus: &mut String,
+    tag: Datum,
+    stand: Option<&Stand>,
+    eintraege: &[Gespraech],
+    mit_ki_texten: bool,
+) {
+    let mut laeufe = BTreeMap::<_, Vec<_>>::new();
+    for e in eintraege.iter().filter(|e| {
+        e.zeit
+            .in_frankfurt()
+            .is_some_and(|(datum, ..)| datum == tag)
+    }) {
+        laeufe.entry(e.lauf.as_str()).or_default().push(e);
+    }
+    if laeufe.is_empty() {
+        aus.push_str("- Keine lesbaren KI-Einträge für diesen Tag belegt.\n");
+    }
+    for (lauf, mut aufrufe) in laeufe {
+        aufrufe.sort_by_key(|e| e.zeit);
+        let _ = writeln!(aus, "\n### Lauf {}", feste_kennung(lauf));
+        let mut systemtexte = BTreeMap::new();
+        for e in aufrufe {
+            ki_aufruf(aus, e, tag, stand);
+            if !mit_ki_texten {
+                continue;
+            }
+            aus.push_str("\n**Frage**\n");
+            if let Some(frage) = e.frage.as_deref().filter(|text| !text.trim().is_empty()) {
+                ki_textblock(aus, frage);
+            } else {
+                aus.push_str("\nKeine Frage im Gesprächsprotokoll belegt.\n");
+            }
+            if let Some(system) = e.system.as_deref().filter(|text| !text.trim().is_empty()) {
+                let nummer = systemtexte.len().saturating_add(1);
+                match systemtexte.entry(system) {
+                    std::collections::btree_map::Entry::Vacant(eintrag) => {
+                        eintrag.insert(nummer);
+                        let _ = writeln!(aus, "\n**Systemtext {nummer}**");
+                        ki_textblock(aus, system);
+                    }
+                    std::collections::btree_map::Entry::Occupied(eintrag) => {
+                        let _ = writeln!(
+                            aus,
+                            "\nSystemtext: siehe Systemtext {} dieses Laufs.",
+                            eintrag.get()
+                        );
+                    }
+                }
+            } else {
+                aus.push_str("\nKein Systemtext im Gesprächsprotokoll belegt.\n");
+            }
+        }
+    }
+}
+
+fn ki(
+    daten: &Path,
+    zeitraum: Zeitraum,
+    stand: Option<&Stand>,
+    mit_ki_texten: bool,
+    luecken: &mut String,
+) -> String {
+    let mut aus = "# KI-Gespräche\n".to_owned();
+    if !mit_ki_texten {
+        aus.push_str("\nFragen und Systemtexte wurden für diesen Bericht abgewählt.\n");
+    }
     let mut lesebudget = KI_LESEN_MAX;
     for tag in zeitraum.tage() {
-        ki_tag(&mut aus, daten, tag, stand, &mut lesebudget, luecken);
+        ki_tag(
+            &mut aus,
+            daten,
+            tag,
+            stand,
+            mit_ki_texten,
+            &mut lesebudget,
+            luecken,
+        );
     }
     aus
 }
@@ -557,6 +671,7 @@ fn ki_tag(
     daten: &Path,
     tag: Datum,
     stand: Option<&Stand>,
+    mit_ki_texten: bool,
     lesebudget: &mut u64,
     luecken: &mut String,
 ) {
@@ -564,37 +679,7 @@ fn ki_tag(
     let _ = writeln!(aus, "\n## {datum}");
     let gespr = depot_lage::gespraeche::lesen_begrenzt(daten, tag, lesebudget);
     if let Ok(Some((eintraege, fehler))) = gespr {
-        if eintraege.is_empty() {
-            aus.push_str("- Keine lesbaren KI-Einträge belegt.\n");
-        }
-        for e in eintraege {
-            let kosten = stand.and_then(|s| {
-                let b = s.ki().buchungen().get(e.buchung?)?;
-                let wer = match b.berater {
-                    BeraterId::Dachs => "dachs",
-                    BeraterId::Maus => "maus",
-                };
-                (wer == e.wer && b.datum == tag).then_some(b.reserviert)
-            });
-            let http = e.http.map_or_else(|| "–".into(), |s| s.to_string());
-            let token = |n: Option<u64>| n.map_or_else(|| "–".into(), |n| n.to_string());
-            let _ = writeln!(
-                aus,
-                "- {} · Lauf {} · {} / {} · {} · {} · HTTP {http} · Token {}/{} · Journalbuchung {}",
-                zeit_text(e.zeit),
-                feste_kennung(&e.lauf),
-                feste_kennung(&e.wer),
-                feste_kennung(&e.modell),
-                feste_kennung(&e.zweck),
-                feste_kennung(&e.ergebnis),
-                token(e.token_ein),
-                token(e.token_aus),
-                geld(kosten)
-            );
-            if let Some(antwort) = e.antwort.as_deref() {
-                ki_entscheidung(aus, antwort);
-            }
-        }
+        ki_laeufe(aus, tag, stand, &eintraege, mit_ki_texten);
         let _ = writeln!(aus, "\nUnlesbare Gesprächszeilen: {fehler}.");
     } else {
         let grund = if gespr.is_err() {
@@ -697,6 +782,11 @@ fn programmstand(version: Option<&str>) -> String {
     )
 }
 
+struct Exportoptionen {
+    rohdaten: bool,
+    ki_texte: bool,
+}
+
 struct Journalpaket {
     kurz: String,
     depotdetails: String,
@@ -712,7 +802,7 @@ fn journalpaket(
     tag: Datum,
     zeitraum: Zeitraum,
     sperren: &str,
-    mit_rohdaten: bool,
+    optionen: &Exportoptionen,
     luecken: &mut String,
 ) -> Result<Journalpaket, JournalFehler> {
     match Journal::pruefe_lesend_mit_eintraegen(
@@ -724,9 +814,9 @@ fn journalpaket(
                 kurz,
                 depotdetails,
                 orders,
-                ki: ki(daten, zeitraum, Some(stand), luecken),
+                ki: ki(daten, zeitraum, Some(stand), optionen.ki_texte, luecken),
                 historie: historie::bericht(zeitraum, Some(stand), luecken),
-                journal: journal::auszug(zeitraum, stand, eintraege, original, mit_rohdaten),
+                journal: journal::auszug(zeitraum, stand, eintraege, original, optionen.rohdaten),
             }
         },
     ) {
@@ -740,7 +830,7 @@ fn journalpaket(
                 kurz: "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n".into(),
                 depotdetails: String::new(),
                 orders: "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
-                ki: ki(daten, zeitraum, None, luecken),
+                ki: ki(daten, zeitraum, None, optionen.ki_texte, luecken),
                 historie: historie::bericht(zeitraum, None, luecken),
                 journal: journal::Auszug::default(),
             })
@@ -792,7 +882,10 @@ pub(crate) fn exportieren(
             "Datenordner fehlt oder ist kein reguläres Verzeichnis.",
         );
     }
-    let mit_rohdaten = http::feld(felder, "rohdaten") == Some("ja");
+    let optionen = Exportoptionen {
+        rohdaten: http::feld(felder, "rohdaten") == Some("ja"),
+        ki_texte: http::feld(felder, "ki_texte") == Some("ja"),
+    };
     let mut luecken = String::new();
     let betrieb = betrieb(d, &daten, zeitraum, &mut luecken);
     let konfiguration = konfiguration(d, u, &daten);
@@ -810,7 +903,7 @@ pub(crate) fn exportieren(
         tag,
         zeitraum,
         &sperren,
-        mit_rohdaten,
+        &optionen,
         &mut luecken,
     )
     else {
@@ -820,7 +913,7 @@ pub(crate) fn exportieren(
         );
     };
     let mut roh = rohdaten::Rohdaten::default();
-    let roh_hinweis = if mit_rohdaten {
+    let roh_hinweis = if optionen.rohdaten {
         roh.datei(
             "rohdaten/journal.txt".into(),
             journal.original,
@@ -936,6 +1029,62 @@ mod tests {
         assert!(aus.contains("Zustimmung: ja"));
         assert!(aus.contains("DE0007164600: 25,00 %"));
         assert!(!aus.contains("geloeschterZugang"));
+    }
+
+    #[test]
+    fn ki_texte_sind_je_lauf_zugeordnet_und_werden_geschwaerzt() -> Result<(), String> {
+        let zeit = Zeitpunkt::lies("2026-11-12T10:00:00Z").ok_or("Zeit")?;
+        let (tag, ..) = zeit.in_frankfurt().ok_or("Datum")?;
+        let geheim = "geschuetzterWertFuerDieExportprobe";
+        let eintrag = Gespraech {
+            zeit,
+            lauf: "probe".into(),
+            wer: "dachs".into(),
+            rolle: "haupt".into(),
+            modell: "probe".into(),
+            zweck: "erstmeinung".into(),
+            ergebnis: "ok".into(),
+            http: Some(200),
+            token_ein: None,
+            token_aus: None,
+            buchung: None,
+            kosten_cent: None,
+            system: Some("Gemeinsamer Systemtext".into()),
+            frage: Some(format!("Erste Frage\n~~~\n{geheim}\nLetzte Zeile")),
+            antwort: Some(r#"{"zustimmung":true}"#.into()),
+            fehler: None,
+        };
+        let mut wiederholung = eintrag.clone();
+        wiederholung.frage = None;
+        let mut variante = eintrag.clone();
+        variante.system = Some("Abweichender Systemtext".into());
+        variante.frage = None;
+        let mut fremder_tag = eintrag.clone();
+        fremder_tag.zeit = Zeitpunkt::lies("2026-11-11T22:59:59Z").ok_or("Zeit")?;
+        fremder_tag.frage = Some("Außerhalb des Tages".into());
+        let eintraege = [eintrag, wiederholung, variante, fremder_tag];
+        let mut aus = String::new();
+        ki_laeufe(&mut aus, tag, None, &eintraege, true);
+        let mut schutz = Schutz::default();
+        schutz.merken(geheim);
+        let (aus, zeilen) = schutz::Exportschutz::neu(&schutz).text(&aus, false);
+        assert_eq!(zeilen, 1);
+        assert!(!aus.contains(geheim));
+        assert!(!aus.contains("Außerhalb des Tages"));
+        assert!(aus.contains("~~~~\nErste Frage\n~~~\n[Zeile geschwärzt]\nLetzte Zeile\n~~~~"));
+        assert!(
+            aus.find("Zustimmung: ja").ok_or("Urteil fehlt")?
+                < aus.find("**Frage**").ok_or("Frage fehlt")?
+        );
+        assert_eq!(aus.matches("Gemeinsamer Systemtext").count(), 1);
+        assert!(aus.contains("siehe Systemtext 1 dieses Laufs"));
+        assert!(aus.contains("Abweichender Systemtext"));
+        assert!(aus.contains("Keine Frage im Gesprächsprotokoll belegt."));
+        let mut aus = String::new();
+        ki_laeufe(&mut aus, tag, None, &eintraege, false);
+        assert!(aus.contains("Zustimmung: ja"));
+        assert!(!aus.contains("Erste Frage") && !aus.contains("Systemtext"));
+        Ok(())
     }
 
     #[test]

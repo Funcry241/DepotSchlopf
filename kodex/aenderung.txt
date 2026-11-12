@@ -1,9 +1,5 @@
 klasse: Funktion
-zweck: Bestätigte Journaleinträge und geschwärzte Originalzeilen im Analyse-Export bereitstellen
+zweck: KI-Fragen und Systemtexte lesbar und geschwärzt im Analyse-Export aufnehmen
 pfade:
 crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/journal.rs
-crates/depot_dienst/src/analyse/rohdaten.rs
-crates/depot_dienst/src/analyse/schutz.rs
-crates/depot_dienst/src/verlauf.rs
-crates/depot_journal/src/datei.rs
+crates/depot_dienst/src/gespraeche.rs
