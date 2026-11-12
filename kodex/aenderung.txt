@@ -1,22 +1,4 @@
-klasse: FestschreibungAenderung
-zweck: Heutigen Depotstand und Betriebsverlauf lesend als Analyse-ZIP exportieren
+klasse: KodexAenderung
+zweck: Überholte GitHub-Prüfläufe desselben Pull Requests abbrechen
 pfade:
-Cargo.lock
-Cargo.toml
-crates/depot_dienst/Cargo.toml
-crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/http.rs
-crates/depot_dienst/src/lib.rs
-crates/depot_dienst/src/verlauf.rs
-crates/depot_dienst/tests/dienst.rs
-crates/depot_export/Cargo.toml
-crates/depot_export/src/lib.rs
-crates/depot_journal/src/datei.rs
-crates/depot_lage/src/depot.rs
-crates/depot_lage/src/lib.rs
-crates/depot_lauf/Cargo.toml
-crates/depot_lauf/src/export.rs
-crates/depot_lauf/src/main.rs
-crates/depot_lauf/src/zip.rs
-kodex/festschreibung.txt
-kodex/freigabe.txt
+.github/workflows/kodex.yml
