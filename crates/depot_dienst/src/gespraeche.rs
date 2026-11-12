@@ -41,7 +41,7 @@ pub(crate) fn status(ergebnis: &str) -> &str {
     }
 }
 
-fn zweck_text(zweck: &str) -> &str {
+pub(crate) fn zweck_text(zweck: &str) -> &str {
     match zweck {
         "erstmeinung" => "Erstmeinung",
         "zweitmeinung" => "Zweitmeinung",
