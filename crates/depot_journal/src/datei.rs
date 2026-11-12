@@ -367,9 +367,12 @@ fn lies_vermerk(pfad: &Path) -> Result<Vermerk, JournalFehler> {
     if !datei_da(pfad)? {
         return Err(halt("Anhangsvermerk fehlt"));
     }
-    fs::read_to_string(pfad)
+    let mut text = String::new();
+    File::open(pfad)
+        .and_then(|f| f.take(4097).read_to_string(&mut text))
         .ok()
-        .and_then(|t| Vermerk::lies(&t))
+        .filter(|n| *n <= 4096)
+        .and_then(|_| Vermerk::lies(&text))
         .ok_or_else(|| halt("Anhangsvermerk unlesbar"))
 }
 
@@ -431,10 +434,19 @@ impl Journal {
         pfad: &Path,
         pruefe: impl FnOnce(&Stand) -> R,
     ) -> Result<R, JournalFehler> {
+        Self::pruefe_lesend_begrenzt(pfad, u64::MAX, pruefe)
+    }
+
+    /// Prüft einen gemeinsamen Journalstand, ohne mehr als das Leselimit zu laden.
+    pub fn pruefe_lesend_begrenzt<R>(
+        pfad: &Path,
+        leselimit: u64,
+        pruefe: impl FnOnce(&Stand) -> R,
+    ) -> Result<R, JournalFehler> {
         if !Self::eingerichtet(pfad)? {
             return Err(halt("nicht eingerichtet: Journal und Vermerk fehlen"));
         }
-        let mut datei = File::open(pfad).map_err(|e| halt(format!("Journal lesen: {e}")))?;
+        let datei = File::open(pfad).map_err(|e| halt(format!("Journal lesen: {e}")))?;
         match datei.try_lock_shared() {
             Ok(()) => {}
             Err(TryLockError::WouldBlock) => return Err(JournalFehler::Belegt),
@@ -442,9 +454,13 @@ impl Journal {
         }
         let vermerk = lies_vermerk(&vermerk_pfad(pfad))?;
         let mut inhalt = Vec::new();
-        datei
+        (&datei)
+            .take(leselimit.saturating_add(1))
             .read_to_end(&mut inhalt)
             .map_err(|e| halt(format!("Journal lesen: {e}")))?;
+        if als_u64(inhalt.len()).map_err(halt)? > leselimit {
+            return Err(halt("Journal überschreitet die Lesegrenze"));
+        }
         if vermerk.geplant != 0 || als_u64(inhalt.len()).map_err(halt)? != vermerk.laenge {
             return Err(halt(
                 "Journal hat einen offenen oder unvollständigen Anhang",

@@ -141,14 +141,40 @@ pub struct Geladen {
 
 /// Liest den Verlauf. Ein Start ohne Ende wird als unterbrochen gezeigt.
 pub fn lies(text: &str) -> Geladen {
+    lies_bis(text, VERLAUF)
+}
+
+/// Liest den gewählten Zeitraum ohne die Kürzung der Live-Ansicht und ohne zu schreiben.
+pub(crate) fn lies_zeitraum(text: &str, von: depot_kern::Datum, bis: depot_kern::Datum) -> Geladen {
+    let mut gelesen = lies_bis(text, usize::MAX);
+    gelesen.auftraege.retain(|lauf| {
+        lauf.start
+            .in_frankfurt()
+            .is_some_and(|(tag, ..)| (von..=bis).contains(&tag))
+            || lauf
+                .ende
+                .and_then(Zeitpunkt::in_frankfurt)
+                .is_some_and(|(tag, ..)| (von..=bis).contains(&tag))
+    });
+    gelesen
+}
+
+fn lies_bis(text: &str, max: usize) -> Geladen {
     let mut zeilen: Vec<Zeile> = Vec::new();
+    let mut positionen = std::collections::BTreeMap::new();
     let mut unlesbar = 0_usize;
     for z in text.lines().filter(|z| !z.is_empty()) {
         match lies_zeile(z) {
-            Some(neu) => match zeilen.iter_mut().find(|x| x.kennung == neu.kennung) {
+            Some(neu) => match positionen
+                .get(&neu.kennung)
+                .and_then(|&i| zeilen.get_mut(i))
+            {
                 Some(alt) if neu.ende.is_some() => *alt = neu,
                 Some(_) => unlesbar = unlesbar.saturating_add(1),
-                None => zeilen.push(neu),
+                None => {
+                    positionen.insert(neu.kennung.clone(), zeilen.len());
+                    zeilen.push(neu);
+                }
             },
             None => unlesbar = unlesbar.saturating_add(1),
         }
@@ -156,7 +182,7 @@ pub fn lies(text: &str) -> Geladen {
     let auftraege = zeilen
         .into_iter()
         .rev()
-        .take(VERLAUF)
+        .take(max)
         .map(|z| {
             let (ende, erfolg, frueher, protokoll) = match z.ende {
                 Some((ende, erfolg)) => (

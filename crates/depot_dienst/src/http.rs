@@ -233,8 +233,21 @@ fn status_text(status: u16) -> &'static str {
 
 /// Eine vollstaendige Antwort.
 pub fn antwort(status: u16, typ: &str, rumpf: &[u8]) -> Vec<u8> {
+    antwort_mit_kopf(status, typ, "", rumpf)
+}
+
+pub(crate) fn download(name: &str, rumpf: &[u8]) -> Vec<u8> {
+    antwort_mit_kopf(
+        200,
+        "application/zip",
+        &format!("Content-Disposition: attachment; filename=\"{name}\"\r\n"),
+        rumpf,
+    )
+}
+
+fn antwort_mit_kopf(status: u16, typ: &str, kopf: &str, rumpf: &[u8]) -> Vec<u8> {
     let mut a = format!(
-        "HTTP/1.1 {status} {}\r\nContent-Type: {typ}\r\nContent-Length: {}\r\n{SICHERHEIT}\r\n",
+        "HTTP/1.1 {status} {}\r\nContent-Type: {typ}\r\nContent-Length: {}\r\n{kopf}{SICHERHEIT}\r\n",
         status_text(status),
         rumpf.len()
     )
