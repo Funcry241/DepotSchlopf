@@ -254,7 +254,7 @@ pub fn pruefe_inhalt(anzeige: &str, inhalt: &[u8]) -> Vec<String> {
         .into_iter()
         .map(|t| {
             format!(
-                "{anzeige}, Zeile {}: Geheimnismuster ({}). Zugangsdaten gehoeren nie in den \
+                "{anzeige}, Zeile {}: Geheimnismuster ({}). Zugangsdaten gehören nie in den \
                  Projektordner (R28).",
                 t.zeile, t.art
             )
@@ -304,7 +304,7 @@ pub fn pruefe(wurzel: &Path) -> Vec<String> {
     let dateien = if mit_git {
         match crate::git::projektdateien(wurzel) {
             Ok(d) => d,
-            Err(e) => return vec![format!("Geheimnispruefung: Dateiliste fehlt: {e}")],
+            Err(e) => return vec![format!("Geheimnisprüfung: Dateiliste fehlt: {e}")],
         }
     } else {
         let mut d = Vec::new();
@@ -335,7 +335,7 @@ pub fn pruefe(wurzel: &Path) -> Vec<String> {
                     }
                 }
             }
-            Err(e) => fehler.push(format!("Geheimnispruefung: Index nicht lesbar: {e}")),
+            Err(e) => fehler.push(format!("Geheimnisprüfung: Index nicht lesbar: {e}")),
         }
     }
     fehler

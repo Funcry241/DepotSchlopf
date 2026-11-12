@@ -13,7 +13,7 @@
 //!   des Abhaengigkeitsbaums und erreicht nie Regelwerk, Journal oder Gate.
 //! - Nur lokal lauschen duerfen die Crates aus `NETZ_LOKAL`: `TcpListener::bind` nur woertlich
 //!   auf `Ipv4Addr::LOCALHOST`, dazu angenommene Verbindungen; kein Verbindungsaufbau, kein UDP,
-//!   keine Namensaufloesung, kein Netz-Crate. Auch von ihnen haengt kein anderes Crate ab.
+//!   keine Namensauflösung, kein Netz-Crate. Auch von ihnen haengt kein anderes Crate ab.
 //!
 //! - Geprueft wird, was kompiliert werden kann: Im Crate liegen nur `Cargo.toml`, `src/` und
 //!   `tests/`; darin nur `.rs`-Dateien, und jede wird vollstaendig geprueft. `#[path]` und
@@ -247,7 +247,7 @@ fn pruefe_lokal(anzeige: &str, t: &[Token]) -> Vec<String> {
         };
         if LOKAL_VERBOTEN.contains(&w.as_str()) && gemeldet.insert(w.clone()) {
             fehler.push(format!(
-                "{anzeige}: {w} im nur lokalen Crate: kein Weg hinaus, keine Namensaufloesung"
+                "{anzeige}: {w} im nur lokalen Crate: kein Weg hinaus, keine Namensauflösung"
             ));
         }
         if w == "extern"
@@ -255,7 +255,7 @@ fn pruefe_lokal(anzeige: &str, t: &[Token]) -> Vec<String> {
                 .is_some_and(|x| x.ist_wort("crate"))
         {
             fehler.push(format!(
-                "{anzeige}: extern crate im nur lokalen Crate (koennte std umbenennen)"
+                "{anzeige}: extern crate im nur lokalen Crate (könnte std umbenennen)"
             ));
         }
         if w == "bind" && !bind_lokal(t, i) {
@@ -483,7 +483,7 @@ fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
                 || NETZ_LOKAL.contains(&name.as_str())
             {
                 fehler.push(format!(
-                    "crates/{krate}: haengt von {name} ab: Netzzugang ohne Erlaubnis"
+                    "crates/{krate}: hängt von {name} ab: Netzzugang ohne Erlaubnis"
                 ));
             }
         }
@@ -492,7 +492,7 @@ fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
         for name in manifest::abhaengigkeits_namen(&m) {
             if !REIN.contains(&name.as_str()) && !RUHIG.contains(&name.as_str()) {
                 fehler.push(format!(
-                    "crates/{krate}: reines Crate haengt von {name} ab (nur reine Crates und {})",
+                    "crates/{krate}: reines Crate hängt von {name} ab (nur reine Crates und {})",
                     RUHIG.join(", ")
                 ));
             }

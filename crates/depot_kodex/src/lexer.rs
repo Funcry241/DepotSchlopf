@@ -102,7 +102,7 @@ impl Leser {
             self.weiter(1);
         }
         if self.an(0) != Some('"') {
-            return Err(self.fehler("roher Text ohne Anfuehrungszeichen"));
+            return Err(self.fehler("roher Text ohne Anführungszeichen"));
         }
         self.weiter(1);
         let start = self.i;

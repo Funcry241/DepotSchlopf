@@ -60,7 +60,7 @@ pub fn pruefe(wurzel: &Path) -> Vec<String> {
         return vec![format!("{ESSENZ} fehlt")];
     };
     if !essenz.contains("advisory only") {
-        fehler.push(format!("{ESSENZ}: Autoritaetsgrenze (advisory only) fehlt"));
+        fehler.push(format!("{ESSENZ}: Autoritätsgrenze (advisory only) fehlt"));
     }
     let r = regeln(&essenz);
     let reg = match fs::read_to_string(wurzel.join(REGISTER)) {
