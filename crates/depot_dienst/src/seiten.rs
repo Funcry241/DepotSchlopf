@@ -433,7 +433,7 @@ fn vorbereitung_meldung(code: &str) -> Option<&'static str> {
             "Vorbereitung ist von 08:00 bis vor 23:00 Uhr Frankfurter Zeit möglich."
         }
         "vorbereitung_handelstag" => {
-            "Heute ist Handelstag. Die Vorbereitung fließt in den Papiertag ein."
+            "Heute ist Handelstag. Eine Vorbereitung gibt es nur an börsenfreien Tagen."
         }
         "vorbereitung_begonnen" => {
             "Vorbereitung heute bereits begonnen. DepotSchlopf fragt die KI heute dafür nicht erneut."
@@ -688,7 +688,11 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
             zeitstrahl_tag(&mut s, z, tag, false, ki);
         }
         if z.zeitplan.nachrichten_an {
-            s.push_str("<p><b>Schlagzeilen</b> · ohne KI · täglich von 08:00 bis vor 23:00 Uhr, frühestens alle 90 Minuten, wenn der Dienst frei ist.</p>");
+            s.push_str("<p><b>Schlagzeilen</b> · Abruf ohne KI");
+            if ki.gemini_aktiv {
+                s.push_str(", danach optional kostenlose Gemini-Zuarbeit");
+            }
+            s.push_str(" · täglich von 08:00 bis vor 23:00 Uhr, frühestens alle 90 Minuten, wenn der Dienst frei ist.</p>");
             if z.zeitplan.vorbereitung.aktiv()
                 && !crate::zeitplan::handelstag(heute)
                 && !ki_auftraege(z, heute).any(|a| a.art == Art::Vorbereiten)
@@ -1238,12 +1242,17 @@ pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String 
             );
         }
     }
-    if !z.warteschlange.is_empty() {
-        let _ = write!(
-            s,
-            "<p>Danach warten {} Aufträge.</p>",
-            z.warteschlange.len()
-        );
+    let danach = if z.laufend.is_some() || z.neustart {
+        z.warteschlange.len()
+    } else {
+        z.warteschlange.len().saturating_sub(1)
+    };
+    match danach {
+        0 => {}
+        1 => s.push_str("<p>Danach wartet 1 Auftrag.</p>"),
+        n => {
+            let _ = write!(s, "<p>Danach warten {n} Aufträge.</p>");
+        }
     }
     s.push_str("</div>");
     if z.auftrag_stand(Art::Update).is_none()
@@ -1491,7 +1500,7 @@ pub const KI_VERBINDUNG: &str = "<details id=\"ki-verbindung\"><summary>Wenn die
      <li><b>Die Anfrage war schon abgeschickt, dann brach die Verbindung ab</b>: Sie kann beim \
      Anbieter angekommen sein und Geld gekostet haben, ohne dass DepotSchlopf die Antwort kennt. \
      Ein zweiter Versuch könnte doppelt kosten. Deshalb fragt DepotSchlopf nicht noch einmal, \
-     sondern sperrt beide KIs. Du siehst im Konto des Anbieters nach, was der Aufruf gekostet \
+     sondern hält Dachs und Maus an. Du siehst im Konto des Anbieters nach, was der Aufruf gekostet \
      hat, und hebst die Sperre hier auf.</li></ul></details>";
 
 fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
@@ -1520,7 +1529,8 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
         s,
         "<p><span class=\"halt\">gesperrt</span>: Ein KI-Aufruf hat mehr gekostet als \
          reserviert, oder seine Kosten sind unbekannt, etwa weil die Verbindung nach dem \
-         Absenden abbrach. Bis zur Prüfung fragt der Papiertag keine KI.</p><pre>{}</pre>{}\
+         Absenden abbrach. Bis zur Prüfung pausieren Dachs und Maus beim Papiertag und bei der Vorbereitung. \
+         Eingeschaltete kostenlose Gemini-Zuarbeit kann weiterlaufen.</p><pre>{}</pre>{}\
          <p class=\"leise\">So prüfen: im Konto des Anbieters die Kosten des genannten Aufrufs \
          ansehen. Aufheben ändert nichts am Kassenbuch: Die Reservierung bleibt gebucht und zählt \
          im Budget. Jeder weitere Aufruf durchläuft wieder die Kostenprüfung und sperrt bei einer \
@@ -1768,6 +1778,11 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
             "Mit „Nur speichern“ bleiben automatische Läufe ausgeschaltet.",
         )
     };
+    let kurse_hinweis = if crate::zeitplan::morgenplan(p) {
+        "Im Morgenlauf gilt der letzte abgeschlossene Handelstag je Börse."
+    } else {
+        "Beim Abendplan wird jede andere Börse der Liste zehn Minuten nach ihrem eigenen Schluss abgerufen."
+    };
     let speichern_hervorheben = if p.an || !gesperrt.is_empty() {
         " data-speichern-hervorheben"
     } else {
@@ -1788,8 +1803,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <input type=\"hidden\" name=\"planstand\" value=\"{stand}\">\
          <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
          <label>Kursabruf um <input type=\"time\" name=\"kurse\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
-         <p class=\"leise\">Jede andere Börse der Liste wird zehn Minuten nach ihrem eigenen \
-         Schluss abgerufen, wenn ausdrücklich ein alter Abendplan eingestellt ist. Im Morgenlauf gilt der letzte abgeschlossene Handelstag je Börse.</p>\
+         <p class=\"leise\">{kurse_hinweis}</p>\
          <label><input type=\"checkbox\" name=\"papier_danach\" value=\"ja\"{}> \
          Nach dem letzten Kursabruf des Tages den Papiertag starten (wenn ein Abruf des Tages \
          erfolgreich war; gilt nur bei eingeschaltetem Zeitplan)</label>\

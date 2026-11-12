@@ -12,12 +12,13 @@ use depot_kern::{Datum, Zeitpunkt};
 use depot_lage::gespraeche::{self, Gespraech};
 use depot_lage::html::maskiere;
 
-use crate::gespraeche::{name, status};
+use crate::gespraeche::{gemini_uebersprungen, name, status};
 
 #[derive(Default)]
 pub(crate) struct Aufrufe {
     je_lauf: BTreeMap<String, BTreeMap<Beteiligung, BTreeSet<String>>>,
     handzeiten: BTreeMap<String, Vec<Zeitpunkt>>,
+    pub(crate) gemini_aktiv: bool,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -36,17 +37,23 @@ struct Kurz {
     modell: String,
     optional: bool,
     ergebnis: String,
+    gefragt: bool,
 }
 
 impl From<Gespraech> for Kurz {
     fn from(e: Gespraech) -> Self {
+        let ergebnis = gemini_uebersprungen(&e).map_or_else(
+            || status(&e.ergebnis).to_owned(),
+            |grund| format!("Nicht gefragt: {grund}"),
+        );
         Self {
             zeit: e.zeit,
             lauf: e.lauf,
             wer: e.wer,
             modell: e.modell,
             optional: e.rolle == "zusatz",
-            ergebnis: e.ergebnis,
+            ergebnis,
+            gefragt: e.ergebnis != "uebersprungen",
         }
     }
 }
@@ -99,7 +106,10 @@ impl Aufrufe {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|tag, _| Some(*tag) == heute || Some(*tag) == gestern);
-        let mut aus = Self::default();
+        let mut aus = Self {
+            gemini_aktiv: gespraeche::gemini_aktiv(daten),
+            ..Self::default()
+        };
         for tag in heute.into_iter().chain(gestern) {
             let Some(eintraege) = cache.tag(daten, tag, || {
                 gespraeche::lesen(daten, tag).map(|(e, _)| e.into_iter().map(Kurz::from).collect())
@@ -118,7 +128,7 @@ impl Aufrufe {
                     wer: e.wer.clone(),
                     modell: e.modell.clone(),
                     optional: e.optional,
-                    gefragt: e.ergebnis != "uebersprungen",
+                    gefragt: e.gefragt,
                 };
                 aus.je_lauf
                     .entry(e.lauf.clone())
@@ -171,13 +181,13 @@ impl Aufrufe {
         for (m, ergebnisse) in modelle {
             let ergebnis = ergebnisse
                 .iter()
-                .map(|e| status(e))
+                .map(String::as_str)
                 .collect::<Vec<_>>()
                 .join(", ");
             let modell = if m.gefragt {
                 m.modell.as_str()
             } else {
-                "kein Modell aufgerufen"
+                "nicht gefragt"
             };
             let optional = if m.optional { " · optional" } else { "" };
             let klasse = if m.optional {
