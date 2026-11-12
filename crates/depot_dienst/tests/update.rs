@@ -998,6 +998,17 @@ test('Eigenes Speichern nutzt den angeklickten Knopf; fremde Eingaben brauchen E
   assert.ok(!ok.verhindert);assert.equal(anderer.disabled,true);assert.equal(f.button.disabled,false);
   const verlassen=ereignis();b.events.beforeunload(verlassen);assert.ok(!verlassen.verhindert);
 });
+test('Ein ZIP-Download lässt den Exportknopf für den nächsten Export bedienbar',async()=>{
+  const f=formular(),b=browser();
+  f.dataset.download='';
+  for (let i=0;i<2;i++) {
+    const exportieren=ereignis(f,f.button);b.docEvents.submit(exportieren);
+    await b.advance(0);
+    assert.ok(!exportieren.verhindert);
+    assert.equal(f.button.disabled,false);
+    assert.equal(f.button.dataset.gesendet,undefined);
+  }
+});
 test('Neustart verwirft ungespeicherte Zugangsdaten nicht automatisch',async()=>{
   const f=formular({type:'password',value:'nur-im-formular',defaultValue:''});
   const b=browser({forms:[f],response:()=>reply(health('neu'))});

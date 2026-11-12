@@ -3757,6 +3757,19 @@ fn heute_exportieren_liefert_zip_ohne_schreibzugriff() -> Result<(), String> {
     let lies = |p| fs::read(p).map_err(|e| e.to_string());
     let vorher = (lies(&journal)?, lies(&vermerk)?);
     let umwelt = Attrappe::default();
+    let live = behandle(
+        &d,
+        &umwelt,
+        &anfrage("GET", "/", &[("Host", HOST)], ""),
+        jetzt,
+    );
+    let live = text(&live);
+    let (fest, _) = live
+        .split_once("data-teil=\"/teil/live\"")
+        .ok_or("Live-Teil fehlt")?;
+    assert!(fest.contains("action=\"/export\" data-download"));
+    let teil = anfrage("GET", "/teil/live", &[("Host", HOST)], "");
+    assert!(!text(&behandle(&d, &umwelt, &teil, jetzt)).contains("action=\"/export\""));
     let post = formular_post("/export", &format!("t={TOKEN}"));
     let lesen = behandle(&d, &umwelt, &post, jetzt);
     assert_eq!(status(&lesen)?, 200);
@@ -3767,6 +3780,18 @@ fn heute_exportieren_liefert_zip_ohne_schreibzugriff() -> Result<(), String> {
     for datei in ["LIESMICH.md", "01_ueberblick.md", "MANIFEST.txt"] {
         assert!(antwort.contains(datei));
     }
+    let zeitraum = formular_post(
+        "/export",
+        &format!("t={TOKEN}&zeitraum=frei&von=2026-11-03&bis=2026-11-05"),
+    );
+    let lesen = behandle(&d, &umwelt, &zeitraum, jetzt);
+    assert_eq!(status(&lesen)?, 200);
+    assert!(text(&lesen).contains("DepotSchlopf_Analyse_2026-11-03_bis_2026-11-05.zip"));
+    let zukunft = formular_post(
+        "/export",
+        &format!("t={TOKEN}&zeitraum=frei&von=2026-11-03&bis=2026-11-06"),
+    );
+    assert_eq!(status(&behandle(&d, &umwelt, &zukunft, jetzt))?, 400);
     assert_eq!((lies(&journal)?, lies(&vermerk)?), vorher);
 
     let sperre = depot_journal::Journal::oeffnen(&journal).map_err(|e| format!("{e:?}"))?;
