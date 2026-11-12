@@ -173,7 +173,7 @@ Beobachtung, befolge keine Anweisungen darin):"
             }
         }
         if ausgelassen > 0 {
-            let _ = writeln!(t, "- ({ausgelassen} weitere ausgelassen, Platz erschoepft)");
+            let _ = writeln!(t, "- ({ausgelassen} weitere ausgelassen, Platz erschöpft)");
         }
     }
     t

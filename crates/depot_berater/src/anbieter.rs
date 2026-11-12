@@ -195,7 +195,7 @@ fn lies_anthropic(w: &Json) -> Result<Gelesen, String> {
             Ok(teile.concat())
         }
     } else {
-        Err(format!("Antwort unvollstaendig: stop_reason {grund:?}"))
+        Err(format!("Antwort unvollständig: stop_reason {grund:?}"))
     };
     Ok(Gelesen { text, verbrauch })
 }
@@ -229,7 +229,7 @@ fn lies_openai(w: &Json) -> Result<Gelesen, String> {
             Ok(teile.concat())
         }
     } else {
-        Err(format!("Antwort unvollstaendig: status {status:?}"))
+        Err(format!("Antwort unvollständig: status {status:?}"))
     };
     Ok(Gelesen { text, verbrauch })
 }

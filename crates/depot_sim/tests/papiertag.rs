@@ -250,7 +250,7 @@ fn veraendertes_papierkonto_haelt_beim_abgleich() -> Result<(), String> {
     drop(j);
     let aus = stumm_tag(&ort, 6)?;
     assert!(
-        matches!(&aus, Err(LaufFehler::Halt(t)) if t.contains("Kontowaechter")),
+        matches!(&aus, Err(LaufFehler::Halt(t)) if t.contains("Kontowächter: [Bargeld")),
         "{aus:?}"
     );
     Ok(())
@@ -462,7 +462,7 @@ fn schon_abgeschlossen_erst_nach_dem_abgleich() -> Result<(), String> {
     vorbedingung(fs::write(&ort.konto, falsch), "Konto schreiben")?;
     let aus = stumm_tag(&ort, 5)?;
     assert!(
-        matches!(&aus, Err(LaufFehler::Halt(t)) if t.contains("Kontowaechter")),
+        matches!(&aus, Err(LaufFehler::Halt(t)) if t.contains("Kontowächter: [Bargeld")),
         "{aus:?}"
     );
     Ok(())

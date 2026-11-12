@@ -47,7 +47,7 @@ pub fn mit_journal<R>(daten: &Path, f: impl FnOnce(Zugang<'_>) -> R) -> R {
         return match spur(&daten.join(PAPIERKONTO)) {
             Ok(false) => f(Zugang::NichtEingerichtet),
             Ok(true) => f(Zugang::Fehler(
-                "Papierkonto ohne Journal und Vermerk: Datenbestand unvollstaendig",
+                "Papierkonto ohne Journal und Vermerk: Datenbestand unvollständig",
             )),
             Err(t) => f(Zugang::Fehler(&t)),
         };

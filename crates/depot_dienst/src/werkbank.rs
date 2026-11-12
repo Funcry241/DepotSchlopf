@@ -1346,7 +1346,7 @@ fn einreihen(
         return Err("läuft schon oder wartet schon");
     }
     if z.warteschlange.len() >= WARTEN_MAX {
-        return Err("zu viele wartende Auftraege");
+        return Err("zu viele wartende Aufträge");
     }
     z.warteschlange.push_back(WartenderAuftrag {
         art,

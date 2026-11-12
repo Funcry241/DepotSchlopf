@@ -1,4 +1,19 @@
-klasse: KodexAenderung
-zweck: Überholte GitHub-Prüfläufe desselben Pull Requests abbrechen
+klasse: Funktion
+zweck: Sichtbare Meldungen korrigieren und Änderungen zu PR 101 bis 103 nachtragen
 pfade:
-.github/workflows/kodex.yml
+CHANGELOG.md
+crates/depot_berater/src/anbieter.rs
+crates/depot_berater/src/frage.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_export/src/lib.rs
+crates/depot_journal/src/stand.rs
+crates/depot_lage/src/zugang.rs
+crates/depot_lauf/src/abbild.rs
+crates/depot_sammler/src/nachrichten.rs
+crates/depot_sammler/src/rss.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/papier.rs
+crates/depot_sim/src/papiertag.rs
+crates/depot_sim/tests/papiertag.rs

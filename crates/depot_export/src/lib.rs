@@ -44,7 +44,7 @@ fn u32_le(v: &mut Vec<u8>, x: u32) {
 
 impl Zip {
     /// # Errors
-    /// Datei oder Archiv zu gross (ueber 4 GB) oder zu viele Eintraege.
+    /// Datei oder Archiv zu gross (ueber 4 GB) oder zu viele Einträge.
     pub fn datei(&mut self, name: &str, daten: &[u8]) -> Result<(), String> {
         self.eintrag(name, daten, daten, 0)
     }
@@ -104,7 +104,7 @@ impl Zip {
         u32_le(c, versatz);
         c.extend_from_slice(name.as_bytes());
 
-        self.anzahl = self.anzahl.checked_add(1).ok_or("zu viele Eintraege")?;
+        self.anzahl = self.anzahl.checked_add(1).ok_or("zu viele Einträge")?;
         Ok(())
     }
 

@@ -472,7 +472,7 @@ pub fn tageslage(stand: &Stand, handelstag: Datum) -> Result<Tageslage, LaufFehl
                 return Err(halt(PapierHalt::Gesamtverlust.meldung()));
             }
             if stand.notbremse_aktiv() {
-                return Err(halt("Notbremse aktiv; keine neuen Auftraege"));
+                return Err(halt("Notbremse aktiv; keine neuen Aufträge"));
             }
             return Ok(Tageslage::Abgeschlossen(a.datum));
         }
@@ -647,7 +647,7 @@ pub(crate) fn papiertag_mit_uhr(
         let abweichungen = j.gleiche_ab(&*beteiligte.konto).map_err(journal)?;
         if !abweichungen.is_empty() {
             return Err(halt(format!(
-                "Kontowaechter: {abweichungen:?}. Halt bis zur Prüfung; niemand wird gefragt, \
+                "Kontowächter: {abweichungen:?}. Halt bis zur Prüfung; niemand wird gefragt, \
                  nichts gesendet"
             )));
         }

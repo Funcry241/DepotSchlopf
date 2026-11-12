@@ -282,7 +282,7 @@ fn kopie_anlegen(
     let fremd = fremde_cargo_konfiguration(&kopie, cargo_home().as_deref());
     if !fremd.is_empty() {
         return Err(format!(
-            "Cargo-Konfiguration oberhalb der Kopie wuerde das Gate beeinflussen: {}",
+            "Cargo-Konfiguration oberhalb der Kopie würde das Gate beeinflussen: {}",
             fremd
                 .iter()
                 .map(|f| f.display().to_string())
