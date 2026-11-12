@@ -1,15 +1,8 @@
-klasse: Funktion
-zweck: Verbliebene Umschreibungen in sichtbaren Texten aus Befund 100 korrigieren
+klasse: KodexAenderung
+zweck: Sichtbare ASCII-Umschreibungen über eine allgemeine Sprachregel erkennen
 pfade:
-crates/depot_berater/src/frage.rs
-crates/depot_dienst/src/seiten.rs
-crates/depot_journal/src/datei.rs
-crates/depot_journal/src/konto.rs
-crates/depot_journal/src/lib.rs
-crates/depot_journal/src/stand.rs
-crates/depot_journal/tests/befunde.rs
-crates/depot_lauf/src/export.rs
-crates/depot_regelwerk/src/entscheidung.rs
-crates/depot_sim/src/lauf.rs
-crates/depot_sim/src/papiertag.rs
-crates/depot_sim/tests/konto.rs
+crates/depot_kodex/src/essenz.rs
+crates/depot_kodex/src/geheimnis.rs
+crates/depot_kodex/src/lexer.rs
+crates/depot_kodex/src/quellscan.rs
+crates/depot_kodex/tests/sprache.rs
