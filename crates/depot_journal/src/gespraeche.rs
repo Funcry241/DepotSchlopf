@@ -231,7 +231,7 @@ pub fn gebuchte_kosten(daten: &Path) -> Result<Vec<(BeraterId, Cent)>, crate::Jo
     })
 }
 
-pub fn lesen(daten: &Path, tag: Datum) -> io::Result<(Vec<Gespraech>, usize)> {
+fn oeffnen(daten: &Path, tag: Datum) -> io::Result<Option<File>> {
     let oeffnen = || {
         verzeichnis(daten)?;
         let pfad = datei(daten, tag);
@@ -240,14 +240,49 @@ pub fn lesen(daten: &Path, tag: Datum) -> io::Result<(Vec<Gespraech>, usize)> {
         }
         File::open(pfad)
     };
-    let handle = match oeffnen() {
-        Ok(f) => f,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok((Vec::new(), 0)),
-        Err(e) => return Err(e),
+    match oeffnen() {
+        Ok(f) => Ok(Some(f)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+pub fn lesen(daten: &Path, tag: Datum) -> io::Result<(Vec<Gespraech>, usize)> {
+    let Some(handle) = oeffnen(daten, tag)? else {
+        return Ok((Vec::new(), 0));
     };
     let mut bytes = Vec::new();
     handle.take(MAX_DATEI).read_to_end(&mut bytes)?;
-    bytes.truncate(vollstaendige_laenge(&bytes));
+    Ok(aus_bytes(&bytes, tag))
+}
+
+/// Liest eine ganze Tagesdatei aus einem über mehrere Tage geteilten Budget.
+pub fn lesen_begrenzt(
+    daten: &Path,
+    tag: Datum,
+    lesebudget: &mut u64,
+) -> io::Result<Option<(Vec<Gespraech>, usize)>> {
+    let Some(mut handle) = oeffnen(daten, tag)? else {
+        return Ok(None);
+    };
+    let grenze = (*lesebudget).min(MAX_DATEI);
+    let zu_gross = || io::Error::other("Lesegrenze der Gesprächsdatei überschritten");
+    if handle.metadata()?.len() > grenze {
+        return Err(zu_gross());
+    }
+    let mut bytes = Vec::new();
+    let gelesen = (&mut handle).take(grenze).read_to_end(&mut bytes);
+    let laenge = u64::try_from(bytes.len()).map_err(io::Error::other)?;
+    *lesebudget = lesebudget.saturating_sub(laenge);
+    gelesen?;
+    if laenge == grenze && handle.metadata()?.len() > grenze {
+        return Err(zu_gross());
+    }
+    Ok(Some(aus_bytes(&bytes, tag)))
+}
+
+fn aus_bytes(bytes: &[u8], tag: Datum) -> (Vec<Gespraech>, usize) {
+    let (bytes, _) = bytes.split_at(vollstaendige_laenge(bytes));
     let mut eintraege = Vec::new();
     let mut fehler = 0_usize;
     for zeile in bytes.split(|b| *b == b'\n').filter(|z| !z.is_empty()) {
@@ -256,7 +291,7 @@ pub fn lesen(daten: &Path, tag: Datum) -> io::Result<(Vec<Gespraech>, usize)> {
             _ => fehler = fehler.saturating_add(1),
         }
     }
-    Ok((eintraege, fehler))
+    (eintraege, fehler)
 }
 
 pub fn aufraeumen(daten: &Path, heute: Datum) -> io::Result<()> {
@@ -331,6 +366,37 @@ pub fn gemini_aufrufe(daten: &Path, tag: Datum) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tagesdateien_teilen_sich_das_lesebudget() -> io::Result<()> {
+        let daten =
+            std::env::temp_dir().join(format!("depot_gespraeche_budget_{}", std::process::id()));
+        fs::create_dir_all(ordner(&daten))?;
+        let ergebnis = (|| {
+            let erster =
+                Datum::lies("2026-11-10").ok_or_else(|| io::Error::other("Datum fehlt"))?;
+            let zweiter = erster
+                .plus_tage(1)
+                .ok_or_else(|| io::Error::other("Datum fehlt"))?;
+            let dritter = zweiter
+                .plus_tage(1)
+                .ok_or_else(|| io::Error::other("Datum fehlt"))?;
+            fs::write(datei(&daten, erster), b"alt\n")?;
+            fs::write(datei(&daten, zweiter), b"neu\n")?;
+            let mut budget = 7;
+            assert_eq!(
+                lesen_begrenzt(&daten, erster, &mut budget)?,
+                Some((Vec::new(), 1))
+            );
+            assert_eq!(budget, 3);
+            assert!(lesen_begrenzt(&daten, zweiter, &mut budget).is_err());
+            assert_eq!(lesen_begrenzt(&daten, dritter, &mut budget)?, None);
+            assert_eq!(budget, 3);
+            Ok(())
+        })();
+        fs::remove_dir_all(daten)?;
+        ergebnis
+    }
 
     #[test]
     fn nur_aeltere_tagesdateien_werden_aufgeraeumt() -> io::Result<()> {

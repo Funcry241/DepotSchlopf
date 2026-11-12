@@ -1,7 +1,9 @@
-klasse: KodexAenderung
-zweck: Indexblobs gebündelt prüfen und Prüfphasen messen
+klasse: Funktion
+zweck: Frankfurter Datumsbereiche für den Analyse-Export auswählbar machen
 pfade:
-crates/depot_kodex/src/geheimnis.rs
-crates/depot_kodex/src/git.rs
-crates/depot_kodex/src/main.rs
-crates/depot_kodex/tests/befunde.rs
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/dienst.rs
+crates/depot_dienst/tests/update.rs
+crates/depot_journal/src/gespraeche.rs

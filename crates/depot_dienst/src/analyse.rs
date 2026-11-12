@@ -1,5 +1,6 @@
-//! Lokaler, lesender Export eines Frankfurter Betriebstags.
+//! Lokaler, lesender Export von Frankfurter Betriebstagen.
 
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read as _};
@@ -18,16 +19,105 @@ const JOURNAL_MAX: u64 = 48 * MIB;
 const TEXT_MAX: u64 = 2 * MIB;
 const ZIP_MAX: usize = 25 * 1024 * 1024;
 
-pub(crate) fn formular(d: &Dienst) -> String {
-    format!(
-        "<form method=\"post\" action=\"/export\"><input type=\"hidden\" name=\"t\" value=\"{}\">\
-         <button type=\"submit\">Heute exportieren</button></form>",
-        depot_lage::html::maskiere(&d.token)
-    )
+const KI_LESEN_MAX: u64 = 8 * MIB;
+const MAX_TAGE: u8 = 31;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Zeitraum {
+    von: Datum,
+    bis: Datum,
 }
 
-fn am(zeit: Zeitpunkt, tag: Datum) -> bool {
-    zeit.in_frankfurt().is_some_and(|(d, ..)| d == tag)
+impl Zeitraum {
+    fn aus_formular(heute: Datum, felder: &[(String, String)]) -> Result<Self, &'static str> {
+        let feld = |name| http::feld(felder, name);
+        let (von, bis) = match feld("zeitraum") {
+            Some("heute") => (Some(heute), Some(heute)),
+            Some("gestern") => (heute.plus_tage(-1), heute.plus_tage(-1)),
+            Some("woche") => (
+                heute
+                    .wochentag()
+                    .and_then(|w| heute.plus_tage(1_i64.saturating_sub(i64::from(w)))),
+                Some(heute),
+            ),
+            Some("handelstage") => {
+                let mut handelstage = std::iter::successors(Some(heute), |tag| tag.plus_tage(-1))
+                    .take(usize::from(MAX_TAGE))
+                    .filter(|tag| depot_kern::liste::handelstag(*tag));
+                let bis = handelstage.next();
+                (handelstage.nth(3), bis)
+            }
+            Some("frei") => (
+                feld("von").and_then(Datum::lies),
+                feld("bis").and_then(Datum::lies),
+            ),
+            None if feld("von").is_none() && feld("bis").is_none() => (Some(heute), Some(heute)),
+            _ => return Err("Wähle einen Zeitraum für den Analyse-Export."),
+        };
+        let (Some(von), Some(bis)) = (von, bis) else {
+            return Err("Der Zeitraum braucht ein gültiges Von- und Bis-Datum.");
+        };
+        if von > bis {
+            return Err("Das Von-Datum muss vor oder am Bis-Datum liegen.");
+        }
+        if bis > heute {
+            return Err("Das Bis-Datum darf höchstens heute sein.");
+        }
+        if bis
+            .plus_tage(1_i64.saturating_sub(i64::from(MAX_TAGE)))
+            .is_some_and(|frueh| von < frueh)
+        {
+            return Err("Der Analyse-Export umfasst höchstens 31 Kalendertage.");
+        }
+        Ok(Self { von, bis })
+    }
+
+    fn enthaelt(self, zeit: Zeitpunkt) -> bool {
+        zeit.in_frankfurt()
+            .is_some_and(|(tag, ..)| (self.von..=self.bis).contains(&tag))
+    }
+
+    fn tage(self) -> impl Iterator<Item = Datum> {
+        std::iter::successors(Some(self.von), |tag| tag.plus_tage(1))
+            .take_while(move |tag| *tag <= self.bis)
+    }
+
+    fn titel(self) -> String {
+        if self.von == self.bis {
+            datum_text(self.von)
+        } else {
+            format!("{} bis {}", datum_text(self.von), datum_text(self.bis))
+        }
+    }
+
+    fn dateiname(self) -> String {
+        if self.von == self.bis {
+            format!("DepotSchlopf_Analyse_{}.zip", self.von)
+        } else {
+            format!("DepotSchlopf_Analyse_{}_bis_{}.zip", self.von, self.bis)
+        }
+    }
+}
+
+pub(crate) fn formular(d: &Dienst, heute: Option<Datum>) -> String {
+    let Some(heute) = heute else {
+        return String::new();
+    };
+    let token = depot_lage::html::maskiere(&d.token);
+    format!(
+        "<form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <button type=\"submit\" name=\"zeitraum\" value=\"heute\">Heute exportieren</button>\
+         </form><details id=\"analyse-zeitraum\"><summary>Zeitraum exportieren</summary>\
+         <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <button type=\"submit\" name=\"zeitraum\" value=\"gestern\">Gestern</button> \
+         <button type=\"submit\" name=\"zeitraum\" value=\"handelstage\">Letzte 5 Handelstage</button> \
+         <button type=\"submit\" name=\"zeitraum\" value=\"woche\">Diese Woche</button></form>\
+         <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <p><label>Von <input type=\"date\" name=\"von\" value=\"{heute}\" required></label> \
+         <label>Bis <input type=\"date\" name=\"bis\" value=\"{heute}\" required></label> \
+         <button type=\"submit\" name=\"zeitraum\" value=\"frei\">Zeitraum exportieren</button></p>\
+         <p>Frankfurter Datum, höchstens 31 Kalendertage.</p></form></details>"
+    )
 }
 
 fn geld(wert: Option<Cent>) -> String {
@@ -81,17 +171,31 @@ fn quelle(pfad: &Path, name: &str, luecken: &mut String) -> String {
     }
 }
 
-fn betrieb(d: &Dienst, daten: &Path, tag: Datum, luecken: &mut String) -> String {
+fn betrieb(d: &Dienst, daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -> String {
     let z = d.sperre();
     let text = quelle(&verlauf::pfad(&d.wurzel), "Dienstverlauf", luecken);
-    let mut verlauf = verlauf::lies_zeitraum(&text, tag, tag);
-    if let Some(lauf) = z.laufend.as_ref().filter(|a| am(a.start, tag)) {
+    let mut verlauf = verlauf::lies_zeitraum(&text, zeitraum.von, zeitraum.bis);
+    if let Some(lauf) = z.laufend.as_ref().filter(|a| zeitraum.enthaelt(a.start)) {
         verlauf.auftraege.retain(|a| a.kennung != lauf.kennung);
         verlauf.auftraege.insert(0, lauf.clone());
     }
     let laufend = z.laufend.as_ref().map(|a| a.kennung.clone());
     drop(z);
     let mut aus = "# Betrieb und Abrufe\n\n## Dienstverlauf\n".to_owned();
+    let lauftage: BTreeSet<_> = verlauf
+        .auftraege
+        .iter()
+        .flat_map(|lauf| [Some(lauf.start), lauf.ende])
+        .flatten()
+        .filter_map(|zeit| zeit.in_frankfurt().map(|(tag, ..)| tag))
+        .collect();
+    for tag in zeitraum.tage().filter(|tag| !lauftage.contains(tag)) {
+        let _ = writeln!(
+            aus,
+            "- {}: kein Lauf im verfügbaren Verlauf belegt.",
+            datum_text(tag)
+        );
+    }
     for lauf in verlauf.auftraege {
         let status = if laufend.as_ref() == Some(&lauf.kennung) {
             "läuft gerade"
@@ -125,7 +229,7 @@ fn betrieb(d: &Dienst, daten: &Path, tag: Datum, luecken: &mut String) -> String
     );
     let (eintraege, unlesbar) = depot_lage::anbieter::lies_alle(&text);
     aus.push_str("\n## Anbieterprotokoll\n");
-    for e in eintraege.into_iter().filter(|e| am(e.zeit, tag)) {
+    for e in eintraege.into_iter().filter(|e| zeitraum.enthaelt(e.zeit)) {
         let http = e.http.map_or_else(|| "–".into(), |s| s.to_string());
         let _ = writeln!(
             aus,
@@ -201,7 +305,13 @@ fn letzter_boersenschluss(jetzt: Zeitpunkt, tag: Datum) -> Option<Datum> {
         .max()
 }
 
-fn depot(stand: &Stand, jetzt: Zeitpunkt, tag: Datum, sperren: &str) -> (String, String, String) {
+fn depot(
+    stand: &Stand,
+    jetzt: Zeitpunkt,
+    tag: Datum,
+    sperren: &str,
+    zeitraum: Zeitraum,
+) -> (String, String, String) {
     let Ok(werte) = depot_kern::liste::beobachtungsliste() else {
         return (
             "Depotstand nicht verfügbar: Beobachtungsliste unlesbar.\n".into(),
@@ -267,7 +377,7 @@ fn depot(stand: &Stand, jetzt: Zeitpunkt, tag: Datum, sperren: &str) -> (String,
         .map_or_else(|| "aus".into(), depot_journal::PapierHalt::meldung);
     let _ = writeln!(kurz, "- Notbremse: {notbremse}{sperren}");
     let details = depotdetails(stand, &lage, &werte);
-    (kurz, details, orderbewegungen(stand, &werte, tag))
+    (kurz, details, orderbewegungen(stand, &werte, zeitraum))
 }
 
 fn depotdetails(
@@ -329,17 +439,17 @@ fn depotdetails(
     details
 }
 
-fn orderbewegungen(stand: &Stand, werte: &[depot_kern::liste::Wert], tag: Datum) -> String {
+fn orderbewegungen(stand: &Stand, werte: &[depot_kern::liste::Wert], zeitraum: Zeitraum) -> String {
     let mut details = String::new();
-    details.push_str("\n## Heute belegte Orderbewegungen\n");
+    details.push_str("\n## Im Zeitraum belegte Orderbewegungen\n");
     for a in stand.auftraege() {
-        let versand = a.versand.is_some_and(|z| am(z, tag));
+        let versand = a.versand.filter(|z| zeitraum.enthaelt(*z));
         let fuellungen = || {
             a.ausfuehrungen
                 .iter()
-                .filter(|f| f.kurszeit.is_some_and(|z| am(z, tag)))
+                .filter(|f| f.kurszeit.is_some_and(|z| zeitraum.enthaelt(z)))
         };
-        if versand || fuellungen().next().is_some() {
+        if versand.is_some() || fuellungen().next().is_some() {
             let order = depot_lage::auftrag_zeile(a, werte);
             let _ = writeln!(
                 details,
@@ -351,10 +461,14 @@ fn orderbewegungen(stand: &Stand, werte: &[depot_kern::liste::Wert], tag: Datum)
                 geld(Some(order.limit)),
                 order.zustand
             );
+            if let Some(zeit) = versand {
+                let _ = writeln!(details, "  - Versand: {}", zeit_text(zeit));
+            }
             for f in fuellungen() {
                 let _ = writeln!(
                     details,
-                    "  - {} Stück zu {} · Gebühr {}",
+                    "  - {} · {} Stück zu {} · Gebühr {}",
+                    f.kurszeit.map_or_else(|| "nicht belegt".into(), zeit_text),
                     f.stueck,
                     geld(Some(f.kurs)),
                     geld(Some(f.gebuehr))
@@ -413,18 +527,30 @@ fn ki_entscheidung(aus: &mut String, antwort: &str) {
     }
 }
 
-fn ki(daten: &Path, tag: Datum, stand: Option<&Stand>, luecken: &mut String) -> String {
-    let mut aus = "# KI-Ergebnisse\n\n".to_owned();
-    let ordner = daten.join("gespraeche");
-    let pfad = ordner.join(format!("{tag}.jsonl"));
-    let gespr = if fs::symlink_metadata(ordner).is_ok_and(|m| m.is_dir())
-        && fs::symlink_metadata(pfad).is_ok_and(|m| m.is_file() && m.len() <= 8 * MIB)
-    {
-        depot_lage::gespraeche::lesen(daten, tag).ok()
-    } else {
-        None
-    };
-    if let Some((eintraege, fehler)) = gespr {
+fn ki(daten: &Path, zeitraum: Zeitraum, stand: Option<&Stand>, luecken: &mut String) -> String {
+    let mut aus = "# KI-Ergebnisse\n".to_owned();
+    let mut lesebudget = KI_LESEN_MAX;
+    for tag in zeitraum.tage() {
+        ki_tag(&mut aus, daten, tag, stand, &mut lesebudget, luecken);
+    }
+    aus
+}
+
+fn ki_tag(
+    aus: &mut String,
+    daten: &Path,
+    tag: Datum,
+    stand: Option<&Stand>,
+    lesebudget: &mut u64,
+    luecken: &mut String,
+) {
+    let datum = datum_text(tag);
+    let _ = writeln!(aus, "\n## {datum}");
+    let gespr = depot_lage::gespraeche::lesen_begrenzt(daten, tag, lesebudget);
+    if let Ok(Some((eintraege, fehler))) = gespr {
+        if eintraege.is_empty() {
+            aus.push_str("- Keine lesbaren KI-Einträge belegt.\n");
+        }
         for e in eintraege {
             let kosten = stand.and_then(|s| {
                 let b = s.ki().buchungen().get(e.buchung?)?;
@@ -450,15 +576,21 @@ fn ki(daten: &Path, tag: Datum, stand: Option<&Stand>, luecken: &mut String) -> 
                 geld(kosten)
             );
             if let Some(antwort) = e.antwort.as_deref() {
-                ki_entscheidung(&mut aus, antwort);
+                ki_entscheidung(aus, antwort);
             }
         }
         let _ = writeln!(aus, "\nUnlesbare Gesprächszeilen: {fehler}.");
     } else {
-        luecken.push_str("- KI-Gespräche: keine verwendbare Tagesdatei vorhanden.\n");
+        let grund = if gespr.is_err() {
+            "Tagesdatei unlesbar oder oberhalb der Lesegrenze."
+        } else {
+            "keine Tagesdatei vorhanden."
+        };
+        let _ = writeln!(aus, "- KI-Gespräche: {grund}");
+        let _ = writeln!(luecken, "- KI-Gespräche am {datum}: {grund}");
     }
     if let Some(s) = stand {
-        aus.push_str("\n## Tagesbuchungen im Journal\n");
+        aus.push_str("\n### Tagesbuchungen im Journal\n");
         for wer in [BeraterId::Dachs, BeraterId::Maus] {
             let summe = s
                 .ki()
@@ -472,16 +604,25 @@ fn ki(daten: &Path, tag: Datum, stand: Option<&Stand>, luecken: &mut String) -> 
     } else {
         aus.push_str("\nJournalbuchungen unverifiziert.\n");
     }
-    aus
 }
 
 fn archiv(
     schutz: &Schutz,
-    tag: Datum,
+    zeitraum: Zeitraum,
     jetzt: Zeitpunkt,
     dateien: &[(&str, String)],
 ) -> Result<Vec<u8>, String> {
-    let mut manifest = format!("depotschlopf-analyse-v1\ntag={tag}\nerstellt_utc={jetzt}\n");
+    let mut manifest = if zeitraum.von == zeitraum.bis {
+        format!(
+            "depotschlopf-analyse-v1\ntag={}\nerstellt_utc={jetzt}\n",
+            zeitraum.von
+        )
+    } else {
+        format!(
+            "depotschlopf-analyse-v1\nvon={}\nbis={}\nerstellt_utc={jetzt}\n",
+            zeitraum.von, zeitraum.bis
+        )
+    };
     let mut zip = Zip::default();
     let mut summe = 0_usize;
     for (name, text) in dateien {
@@ -512,9 +653,29 @@ fn archiv(
     Ok(zip)
 }
 
-pub(crate) fn exportieren(d: &Dienst, u: &dyn Umwelt, jetzt: Zeitpunkt) -> Vec<u8> {
+fn programmstand(version: Option<&str>) -> String {
+    let version = version
+        .filter(|v| v.len() == 40 && v.bytes().all(|b| b.is_ascii_hexdigit()))
+        .unwrap_or("unbekannt");
+    format!(
+        "# Programmstand\n\n- Commit: {version}\n- Version: {}\n- System: {}\n",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    )
+}
+
+pub(crate) fn exportieren(
+    d: &Dienst,
+    u: &dyn Umwelt,
+    jetzt: Zeitpunkt,
+    felder: &[(String, String)],
+) -> Vec<u8> {
     let Some((tag, ..)) = jetzt.in_frankfurt() else {
         return seiten::fehler(409, "Frankfurter Datum nicht verfügbar.");
+    };
+    let zeitraum = match Zeitraum::aus_formular(tag, felder) {
+        Ok(zeitraum) => zeitraum,
+        Err(grund) => return seiten::fehler(400, grund),
     };
     let Ok(schluessel) = schluessel::fuer_protokoll() else {
         return seiten::fehler(409, "Schlüsselablage nicht lesbar. Export abgebrochen.");
@@ -531,7 +692,7 @@ pub(crate) fn exportieren(d: &Dienst, u: &dyn Umwelt, jetzt: Zeitpunkt) -> Vec<u
         );
     }
     let mut luecken = String::new();
-    let betrieb = betrieb(d, &daten, tag, &mut luecken);
+    let betrieb = betrieb(d, &daten, zeitraum, &mut luecken);
     let konfiguration = konfiguration(d, u, &daten);
     let sperren = format!(
         " · KI-Sperre: {} · Kurssperre: {}",
@@ -540,12 +701,12 @@ pub(crate) fn exportieren(d: &Dienst, u: &dyn Umwelt, jetzt: Zeitpunkt) -> Vec<u
     );
     let (kurz, depotdetails, orders, ki) =
         match Journal::pruefe_lesend_begrenzt(&daten.join("journal.txt"), JOURNAL_MAX, |s| {
-            let (kurz, depotdetails, orders) = depot(s, jetzt, tag, &sperren);
+            let (kurz, depotdetails, orders) = depot(s, jetzt, tag, &sperren, zeitraum);
             (
                 kurz,
                 depotdetails,
                 orders,
-                ki(&daten, tag, Some(s), &mut luecken),
+                ki(&daten, zeitraum, Some(s), &mut luecken),
             )
         }) {
             Ok(geprueft) => geprueft,
@@ -564,22 +725,18 @@ pub(crate) fn exportieren(d: &Dienst, u: &dyn Umwelt, jetzt: Zeitpunkt) -> Vec<u
                     meldung.into(),
                     String::new(),
                     "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
-                    ki(&daten, tag, None, &mut luecken),
+                    ki(&daten, zeitraum, None, &mut luecken),
                 )
             }
         };
-    let datum = datum_text(tag);
+    let datum = zeitraum.titel();
     let liesmich = format!(
         "# DepotSchlopf · Analyse-Export {datum}\n\n## Aktueller Depotstand\n{kurz}\n\
-         ## Datenbasis\nPapiergeld. Die Zeiten sind Frankfurter Ortszeit.\n\
+         ## Datenbasis\nPapiergeld. Die Zeiten sind Frankfurter Ortszeit. \
+         Depotstand und Konfiguration beziehen sich auf den Exportzeitpunkt.\n\
          Freie Anbietertexte, Prompts und Rohprotokolle sind in diesem Export nicht enthalten.\n\
          ## Lücken\n{luecken}"
     );
-    let version = d
-        .version
-        .as_deref()
-        .filter(|v| v.len() == 40 && v.bytes().all(|b| b.is_ascii_hexdigit()))
-        .unwrap_or("unbekannt");
     let dateien = [
         ("LIESMICH.md", liesmich),
         (
@@ -593,17 +750,10 @@ pub(crate) fn exportieren(d: &Dienst, u: &dyn Umwelt, jetzt: Zeitpunkt) -> Vec<u
         ),
         ("05_betrieb_und_fehler.md", betrieb),
         ("06_konfiguration.md", konfiguration),
-        (
-            "07_version.md",
-            format!(
-                "# Programmstand\n\n- Commit: {version}\n- Version: {}\n- System: {}\n",
-                env!("CARGO_PKG_VERSION"),
-                std::env::consts::OS
-            ),
-        ),
+        ("07_version.md", programmstand(d.version.as_deref())),
     ];
-    match archiv(&schutz, tag, jetzt, &dateien) {
-        Ok(zip) => http::download(&format!("DepotSchlopf_Analyse_{tag}.zip"), &zip),
+    match archiv(&schutz, zeitraum, jetzt, &dateien) {
+        Ok(zip) => http::download(&zeitraum.dateiname(), &zip),
         Err(_) => seiten::fehler(
             409,
             "Export nicht verfügbar. Die Größen- oder Musterprüfung ist fehlgeschlagen.",
@@ -614,6 +764,54 @@ pub(crate) fn exportieren(d: &Dienst, u: &dyn Umwelt, jetzt: Zeitpunkt) -> Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn freie_zeitraeume_verwenden_frankfurter_tage_und_beide_grenzen() -> Result<(), String> {
+        let heute = Datum::lies("2026-03-30").ok_or("Datum")?;
+        let frei = |von: &str, bis: &str| {
+            Zeitraum::aus_formular(
+                heute,
+                &[
+                    ("zeitraum".into(), "frei".into()),
+                    ("von".into(), von.into()),
+                    ("bis".into(), bis.into()),
+                ],
+            )
+        };
+        let zeitraum = frei("2026-03-29", "2026-03-30")?;
+        for (utc, drin) in [
+            ("2026-03-28T22:59:59Z", false),
+            ("2026-03-28T23:00:00Z", true),
+            ("2026-03-30T21:59:59Z", true),
+            ("2026-03-30T22:00:00Z", false),
+        ] {
+            assert_eq!(zeitraum.enthaelt(Zeitpunkt::lies(utc).ok_or("Zeit")?), drin);
+        }
+        assert_eq!(frei("2026-02-28", "2026-03-30")?.tage().count(), 31);
+        assert!(frei("2026-02-27", "2026-03-30").is_err());
+        assert!(frei("2026-03-30", "2026-03-29").is_err());
+        assert!(frei("2026-03-30", "2026-03-31").is_err());
+        assert!(frei("2026-02-29", "2026-03-30").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn schnellwahl_berechnet_den_bereich_am_wochenende() -> Result<(), String> {
+        let heute = Datum::lies("2026-11-08").ok_or("Datum")?;
+        for (wahl, von, bis) in [
+            ("heute", "2026-11-08", "2026-11-08"),
+            ("gestern", "2026-11-07", "2026-11-07"),
+            ("woche", "2026-11-02", "2026-11-08"),
+            ("handelstage", "2026-11-02", "2026-11-06"),
+        ] {
+            let zeitraum = Zeitraum::aus_formular(heute, &[("zeitraum".into(), wahl.into())])?;
+            assert_eq!(
+                (zeitraum.von.to_string(), zeitraum.bis.to_string()),
+                (von.into(), bis.into())
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn entscheidung_exportiert_ziel_und_urteil_ohne_freitext() {

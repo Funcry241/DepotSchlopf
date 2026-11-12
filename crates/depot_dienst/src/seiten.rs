@@ -2217,6 +2217,8 @@ pub const APP_JS: &str = r#""use strict";
     if (offen(e.target) && !window.confirm("In einem anderen Formular stehen noch ungespeicherte Änderungen. Sie werden bei dieser Aktion verworfen. Trotzdem fortfahren?")) {
       e.preventDefault(); return;
     }
+    // Ein Download lässt die Seite offen; der Exportknopf bleibt benutzbar.
+    if (e.target.dataset.download !== undefined) { return; }
     var b = e.submitter || e.target.querySelector("button[type=submit]");
     if (b) {
       if (b.disabled) { e.preventDefault(); return; }
