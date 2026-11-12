@@ -1446,6 +1446,12 @@ fn befund_k10_01_index_inhalt_wird_geprueft() -> Result<(), String> {
         b.schreibe("docs/notiz.md", "# Notiz\nHarmloser Text\n")?;
         let fehler = b.gate();
         git(&b.pfad, &["reset", "-q", "--", "docs/notiz.md"])?;
+        if !fehler
+            .iter()
+            .any(|m| m.starts_with("docs/notiz.md (Index), Zeile") && m.contains("Geheimnismuster"))
+        {
+            return Err(format!("Indexfund fehlt: {fehler:?}"));
+        }
         Ok(fehler)
     };
     let nur_im_arbeitsbaum = |b: &Baum| -> Result<Vec<String>, String> {
@@ -1458,6 +1464,12 @@ fn befund_k10_01_index_inhalt_wird_geprueft() -> Result<(), String> {
         )?;
         let fehler = b.gate();
         git(&b.pfad, &["reset", "-q", "--", "docs/notiz.md"])?;
+        if !fehler
+            .iter()
+            .any(|m| m.starts_with("docs/notiz.md, Zeile") && m.contains("Geheimnismuster"))
+        {
+            return Err(format!("Arbeitsbaumfund fehlt: {fehler:?}"));
+        }
         Ok(fehler)
     };
     alle_faelle(
