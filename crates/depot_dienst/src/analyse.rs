@@ -14,6 +14,8 @@ use depot_lage::{datum_text, zeit_text};
 
 use crate::{Dienst, Umwelt, http, protokoll::Schutz, schluessel, seiten, verlauf};
 
+mod historie;
+
 const MIB: u64 = 1024 * 1024;
 const JOURNAL_MAX: u64 = 48 * MIB;
 const TEXT_MAX: u64 = 2 * MIB;
@@ -699,7 +701,7 @@ pub(crate) fn exportieren(
         an_aus(daten.join("ki.halt").exists()),
         an_aus(daten.join("kurse.halt").exists())
     );
-    let (kurz, depotdetails, orders, ki) =
+    let (kurz, depotdetails, orders, ki, historie) =
         match Journal::pruefe_lesend_begrenzt(&daten.join("journal.txt"), JOURNAL_MAX, |s| {
             let (kurz, depotdetails, orders) = depot(s, jetzt, tag, &sperren, zeitraum);
             (
@@ -707,6 +709,7 @@ pub(crate) fn exportieren(
                 depotdetails,
                 orders,
                 ki(&daten, zeitraum, Some(s), &mut luecken),
+                historie::bericht(zeitraum, Some(s), &mut luecken),
             )
         }) {
             Ok(geprueft) => geprueft,
@@ -726,6 +729,7 @@ pub(crate) fn exportieren(
                     String::new(),
                     "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
                     ki(&daten, zeitraum, None, &mut luecken),
+                    historie::bericht(zeitraum, None, &mut luecken),
                 )
             }
         };
@@ -741,9 +745,13 @@ pub(crate) fn exportieren(
         ("LIESMICH.md", liesmich),
         (
             "01_ueberblick.md",
-            format!("# Aktueller Depotstand\n\n{kurz}{depotdetails}"),
+            format!(
+                "# Aktueller Depotstand\n\n{kurz}{depotdetails}\n{}",
+                historie.ueberblick
+            ),
         ),
         ("02_ki_gespraeche.md", ki),
+        ("03_journal.md", historie.belege),
         (
             "04_orders_und_depot.md",
             format!("# Papierorders und Depot\n{orders}"),
