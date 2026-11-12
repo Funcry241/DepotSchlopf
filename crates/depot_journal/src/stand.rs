@@ -42,7 +42,7 @@ impl PapierHalt {
 
     pub fn meldung(self) -> String {
         match self {
-            Self::Notbremse => "Notbremse aktiv: Schutzverkaeufe laufen weiter".into(),
+            Self::Notbremse => "Notbremse aktiv: Schutzverkäufe laufen weiter".into(),
             Self::Gesamtverlust => {
                 let bp = Grenzen::standard().papier_gesamtverlust_bp();
                 let ganz = bp.div_euclid(100);

@@ -237,7 +237,7 @@ mod tests {
         );
         assert_eq!(
             vorher, nachher,
-            "Vermerk trotz Synchronisationsfehler vorgerueckt"
+            "Vermerk trotz Synchronisationsfehler vorgerückt"
         );
 
         // Ohne Fehler: erst das Journal, dann der Vermerk; der Eintrag zaehlt.

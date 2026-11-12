@@ -316,7 +316,7 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     let mut h = format!(
         "DEPOTSCHLOPF – ASSISTENTEN-ÜBERGABE\n\
          ====================================\n\n\
-         Essenz lenkt. KI schlaegt vor. Regelwerk entscheidet. Auftragsstelle schreibt.\n\
+         Essenz lenkt. KI schlägt vor. Regelwerk entscheidet. Auftragsstelle schreibt.\n\
          Journal belegt. Abgleich prüft. Kodex wacht.\n\n\
          Diese ZIP-Datei entsteht nach jedem Lauf von run.cmd. Sie ist für eine neue\n\
          KI-Sitzung gedacht: hochladen, dann diese Datei lesen. Sie ist kein Quellstand\n\

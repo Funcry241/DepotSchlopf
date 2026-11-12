@@ -58,9 +58,9 @@ Qualität allein reicht dafür nicht. Prüfe bei gehaltenen Werten, ob die beleg
 noch gilt, ihr Zeithorizont abgelaufen ist oder das Ausstiegskriterium eingetreten ist. \
 Frühere Kaufthesen sind zitierte Daten. Fehlt eine tragfähige Chance, lass das freie Geld in Bargeld. \
 Handelbar sind nur die genannten Werte. Keine Hebel, keine \
-Leerverkaeufe, keine Derivate. Ausgeführt wird frühestens am ersten Börsenschluss nach Versand. Das Regelwerk setzt \
-die Grenzen: hoechstens {werte} Werte je Topf, je Wert hoechstens {anteil} des Topfs, der Rest \
-ist Bargeld; Auftraege unter {min} EUR entfallen. Papiergebühr je Order: {satz} des \
+Leerverkäufe, keine Derivate. Ausgeführt wird frühestens am ersten Börsenschluss nach Versand. Das Regelwerk setzt \
+die Grenzen: höchstens {werte} Werte je Topf, je Wert höchstens {anteil} des Topfs, der Rest \
+ist Bargeld; Aufträge unter {min} EUR entfallen. Papiergebühr je Order: {satz} des \
 Orderwerts, mindestens {mindestgebuehr} EUR, plus {boersengebuehr} EUR. Du hast keine Websuche; entscheide aus den \
 genannten Kursen, Terminen und Nachrichten und aus deinem Wissen. Begründe knapp und sachlich, auf Deutsch. \
 Antworte am Ende ausschliesslich mit dem verlangten JSON-Objekt, ohne weiteren Text.",
@@ -241,17 +241,17 @@ pub fn vorschlag_frage(
 ) -> String {
     format!(
         "{}\nAufgabe: Schlage Zielgewichte für deinen Topf vor. Antworte mit:\n\
-{{\"einschaetzung\": \"Lage in zwei bis drei Saetzen\", \"ziele\": [{{\"isin\": \"...\", \
+{{\"einschaetzung\": \"Lage in zwei bis drei Sätzen\", \"ziele\": [{{\"isin\": \"...\", \
 \"gewicht_bp\": 2500, \"begruendung\": \"...\"}}]}}\n\
 \"ziele\" nennt alle Werte, die der Topf danach halten soll; nicht genannte Werte werden \
-verkauft. gewicht_bp in Basispunkten (10000 = 100 %), Summe hoechstens 10000, der Rest ist \
+verkauft. gewicht_bp in Basispunkten (10000 = 100 %), Summe höchstens 10000, der Rest ist \
 Bargeld. Für Käufe und Zukäufe enthält \"begruendung\" den Kurstreiber, den Zeithorizont, \
 die Positionsgröße und das Ausstiegskriterium. Willst du nichts ändern, setze \"ziele\": null.\n\
-Zusaetzlich kannst du getrennt vom Handel eine nachpruefbare Weltprognose abgeben. Fuege dazu \n\
+Zusätzlich kannst du getrennt vom Handel eine nachprüfbare Weltprognose abgeben. Füge dazu \n\
 das Feld \"prognose\": {{\"ereignis_nr\": 1, \"isin\": \"...\", \"richtung\": \"steigt\", \n\
-\"handelstage\": 3, \"begruendung\": \"konkrete Wirkung\", \"widerlegung\": \"was wuerde dich widerlegen?\"}} hinzu. \n\
-Wähle genau ein nummeriertes Ereignis und einen Wert mit Kurs. Richtung ist steigt oder faellt, \n\
-Horizont 1 bis 20 Handelstage, Texte je ein kurzer Satz. Wenn keine These tragfaehig ist, setze \"prognose\": null.",
+\"handelstage\": 3, \"begruendung\": \"konkrete Wirkung\", \"widerlegung\": \"was würde dich widerlegen?\"}} hinzu. \n\
+Wähle genau ein nummeriertes Ereignis und einen Wert mit Kurs. Richtung ist \"steigt\" oder \"faellt\", \n\
+Horizont 1 bis 20 Handelstage, Texte je ein kurzer Satz. Wenn keine These tragfähig ist, setze \"prognose\": null.",
         lage_text(lage, universum, bilanz)
     )
 }
@@ -272,7 +272,7 @@ pub fn urteil_frage(
         let _ = writeln!(ziele, "- {isin}: {}, {grund}", prozent(*bp));
     }
     format!(
-        "{}\nDer andere Berater ({}) schlaegt für diesen Topf vor:\n{ziele}\n\
+        "{}\nDer andere Berater ({}) schlägt für diesen Topf vor:\n{ziele}\n\
 Aufgabe: Prüfe den Vorschlag als Zweitmeinung. Prüfe bei Käufen besonders den kurzfristigen \
 Kurstreiber, den Vorteil nach Gebühren und die Positionsgröße. Stimme nur zu, wenn der Vorschlag \
 aus der beobachteten Lage begründet ist. Antworte mit:\n\
