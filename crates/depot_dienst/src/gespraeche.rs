@@ -183,10 +183,16 @@ fn fehler_text(e: &Gespraech) -> &'static str {
         "kosten" => {
             "Die Kostengrenze wurde überschritten. Prüfe den Kostenschutz in der Einrichtung."
         }
-        "uebersprungen" if e.fehler.as_deref().is_some_and(|f| f.contains("Schlüssel")) => {
-            "Kein Zugangsschlüssel verfügbar. Prüfe die Einrichtung."
-        }
-        "uebersprungen" => "Die KI wurde bei diesem Lauf nicht gefragt.",
+        "uebersprungen" => match e.fehler.as_deref().unwrap_or_default() {
+            f if f.contains("Anbieterguthaben fehlt") => {
+                "Die KI pausiert bis zum nächsten Tag, weil Guthaben fehlt."
+            }
+            f if f.contains("Schlüssel") => {
+                "Kein Zugangsschlüssel verfügbar. Prüfe die Einrichtung."
+            }
+            f if f.contains("Anbieterlimit") => "Die KI pausiert wegen des Anbieterlimits.",
+            _ => "Die KI wurde bei diesem Lauf nicht gefragt.",
+        },
         _ => "Keine lesbare Antwort belegt.",
     }
 }
@@ -199,7 +205,7 @@ fn eintrag(s: &mut String, e: &Gespraech, buchungen: &[(BeraterId, Cent)]) {
     };
     let _ = write!(
         s,
-        "<article><h4>{} ({})</h4><p>{rolle} · {} · {}",
+        "<article><h5>{} ({})</h5><p>{rolle} · {} · {}",
         maskiere(name(&e.wer)),
         maskiere(&e.modell),
         depot_lage::zeit_text(e.zeit),
@@ -274,6 +280,82 @@ fn tag_lesen(daten: &Path, datum: Datum) -> Tag {
     }
 }
 
+fn aufrufe_nach_lauf(s: &mut String, aufrufe: Vec<&Gespraech>, buchungen: &[(BeraterId, Cent)]) {
+    let mut laeufe = BTreeMap::<&str, Vec<&Gespraech>>::new();
+    for e in aufrufe {
+        laeufe.entry(&e.lauf).or_default().push(e);
+    }
+    let mut laeufe: Vec<_> = laeufe.into_iter().collect();
+    laeufe.sort_by_key(|(_, eintraege)| std::cmp::Reverse(eintraege.first().map(|e| e.zeit)));
+    for (_, eintraege) in laeufe {
+        let beginn = eintraege
+            .last()
+            .map(|e| depot_lage::zeit_text(e.zeit))
+            .unwrap_or_default();
+        let _ = write!(s, "<section><h4>Lauf ab {beginn}</h4>");
+        for e in eintraege.into_iter().rev() {
+            eintrag(s, e, buchungen);
+        }
+        s.push_str("</section>");
+    }
+}
+
+fn uebersprungene(s: &mut String, ausgelassen: Vec<&Gespraech>) {
+    let mut gruppen = BTreeMap::<(&str, &str, &str), Vec<&Gespraech>>::new();
+    for e in ausgelassen {
+        gruppen
+            .entry((&e.wer, &e.zweck, fehler_text(e)))
+            .or_default()
+            .push(e);
+    }
+    for ((wer, zweck, grund), eintraege) in gruppen {
+        let _ = write!(
+            s,
+            "<details><summary>{} · {} · {}-mal nicht gefragt</summary><p>{}</p><ul>",
+            maskiere(name(wer)),
+            maskiere(zweck_text(zweck)),
+            eintraege.len(),
+            maskiere(grund)
+        );
+        for e in eintraege {
+            let _ = write!(s, "<li>{}</li>", depot_lage::zeit_text(e.zeit));
+        }
+        s.push_str("</ul></details>");
+    }
+}
+
+fn tagesueberblick(s: &mut String, aufrufe: &[&Gespraech]) {
+    let mut antworten = BTreeMap::<&str, usize>::new();
+    let mut fehler = BTreeMap::<(&str, &str), usize>::new();
+    for e in aufrufe {
+        let wer = name(&e.wer);
+        let anzahl = if e.ergebnis == "ok" && e.antwort.is_some() {
+            antworten.entry(wer).or_default()
+        } else {
+            fehler.entry((wer, fehler_text(e))).or_default()
+        };
+        *anzahl = anzahl.saturating_add(1);
+    }
+    if antworten.is_empty() && fehler.is_empty() {
+        return;
+    }
+    s.push_str("<ul>");
+    for (wer, anzahl) in antworten {
+        let wort = if anzahl == 1 { "Antwort" } else { "Antworten" };
+        let _ = write!(s, "<li>{}: {anzahl} {wort}.</li>", maskiere(wer));
+    }
+    for ((wer, grund), anzahl) in fehler {
+        let wort = if anzahl == 1 { "Aufruf" } else { "Aufrufe" };
+        let _ = write!(
+            s,
+            "<li>{}: {anzahl} {wort} ohne Antwort. {}</li>",
+            maskiere(wer),
+            maskiere(grund)
+        );
+    }
+    s.push_str("</ul>");
+}
+
 fn tagesstand(
     s: &mut String,
     tag: &Tag,
@@ -301,18 +383,15 @@ fn tagesstand(
     let (ausgelassen, aufrufe): (Vec<_>, Vec<_>) = sichtbar
         .into_iter()
         .partition(|e| e.ergebnis == "uebersprungen");
-    for e in aufrufe {
-        eintrag(s, e, buchungen);
-    }
+    tagesueberblick(s, &aufrufe);
+    aufrufe_nach_lauf(s, aufrufe, buchungen);
     if !ausgelassen.is_empty() {
         let _ = write!(
             s,
             "<details><summary>Nicht gefragt ({})</summary>",
             ausgelassen.len()
         );
-        for e in ausgelassen {
-            eintrag(s, e, buchungen);
-        }
+        uebersprungene(s, ausgelassen);
         s.push_str("</details>");
     }
     if tag.fehler > 0 {
@@ -405,6 +484,27 @@ mod tests {
         let mut html = String::new();
         tagesstand(&mut html, &tag, "", "", &[], true);
         assert!(html.contains("Kosten noch offen") && !html.contains("3 ct"));
+        let eintrag = tag.eintraege.first().ok_or("Gespräch fehlt")?;
+        let ausgelassen = Gespraech {
+            wer: "gemini".into(),
+            ergebnis: "uebersprungen".into(),
+            fehler: Some("Schlüssel fehlt".into()),
+            ..eintrag.clone()
+        };
+        let tag = Tag {
+            eintraege: vec![
+                eintrag.clone(),
+                eintrag.clone(),
+                ausgelassen.clone(),
+                ausgelassen,
+            ],
+            ..tag
+        };
+        let mut html = String::new();
+        tagesstand(&mut html, &tag, "", "", &[], true);
+        assert_eq!(html.matches("<h4>Lauf ab").count(), 1);
+        assert_eq!(html.matches("Kein Zugangsschlüssel verfügbar").count(), 1);
+        assert!(html.contains("2-mal nicht gefragt"));
         Ok(())
     }
 }

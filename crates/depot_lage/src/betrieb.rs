@@ -103,8 +103,8 @@ impl AnbieterHinweis {
                 )
             }
             AnbieterHinweis::Guthaben(z) => format!(
-                "Beim Anbieter fehlt Guthaben ({}). Bitte im Konto des Anbieters aufladen; der \
-                 nächste Papiertag versucht es wieder.",
+                "Beim Anbieter fehlt Guthaben ({}). Bitte im Anbieterkonto aufladen. Der nächste \
+                 Versuch erfolgt frühestens am nächsten Frankfurter Tag.",
                 zeit_text(z)
             ),
             AnbieterHinweis::Ueberlastet(z) => format!(

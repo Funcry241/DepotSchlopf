@@ -62,7 +62,7 @@ pub struct KiBerater<N: Netz> {
     weiterer_schluessel: Option<Schluessel>,
     /// Der Anbieter hat in diesem Lauf ein Limit gemeldet; bis zum Ende des Laufs pausiert,
     /// auch wenn das Protokoll nicht geschrieben werden konnte.
-    limit_im_lauf: bool,
+    pause_im_lauf: Option<Ausgang>,
     /// Wartet vor einem neuen Versand; in Tests ohne echtes Warten.
     schlafe: fn(Duration),
     vorbereitung: Option<Zeitpunkt>,
@@ -109,7 +109,7 @@ impl<N: Netz> KiBerater<N> {
             gespraechslauf: None,
             zuarbeit: crate::zusatz::Zuarbeit::default(),
             weiterer_schluessel: None,
-            limit_im_lauf: false,
+            pause_im_lauf: None,
             schlafe: std::thread::sleep,
             vorbereitung: None,
             abrechnung: None,
@@ -300,12 +300,12 @@ impl<N: Netz> KiBerater<N> {
         &self.netz
     }
 
-    /// Muss dieser Berater gerade pausieren? Ja, wenn der Anbieter ein Limit gemeldet hat, das
-    /// nach `depot_journal::anbieter::pausiert` noch gilt, in diesem Lauf ein Limit kam, oder
-    /// das Protokoll nicht lesbar ist (dann im Zweifel kein Aufruf). Ohne Protokoll: nein.
+    /// Prüft Anbieterlimit, Guthabenpause und Lesbarkeit des Anbieterprotokolls.
     pub fn pause(&self) -> Option<String> {
-        if self.limit_im_lauf {
-            return Some("Anbieterlimit in diesem Lauf".into());
+        match self.pause_im_lauf {
+            Some(Ausgang::Guthaben) => return Some("Anbieterguthaben fehlt".into()),
+            Some(Ausgang::Limit) => return Some("Anbieterlimit in diesem Lauf".into()),
+            _ => {}
         }
         let (pfad, uhr) = self.protokoll.as_ref()?;
         let Some(jetzt) = uhr() else {
@@ -317,7 +317,13 @@ impl<N: Netz> KiBerater<N> {
             Err(e) => return Some(format!("{} nicht lesbar: {e}", pfad.display())),
         };
         let (eintraege, _) = anbieter::lies_alle(&text);
-        anbieter::pausiert(&eintraege, self.protokoll_wer(), jetzt)
+        let wer = self.protokoll_wer();
+        if anbieter::guthabenpause(&eintraege, wer, jetzt) {
+            return Some(
+                "Anbieterguthaben fehlt, nächster Versuch frühestens am nächsten Tag".into(),
+            );
+        }
+        anbieter::pausiert(&eintraege, wer, jetzt)
             .then(|| "Anbieterlimit, Wartezeit läuft noch".to_string())
     }
 
@@ -378,8 +384,8 @@ impl<N: Netz> KiBerater<N> {
         let roh = String::from_utf8_lossy(&antwort.inhalt);
         let kurz: String = roh.chars().take(300).collect();
         let art = anbieter::einordnen(antwort.status, &kurz);
-        if art == Ausgang::Limit {
-            self.limit_im_lauf = true;
+        if matches!(art, Ausgang::Limit | Ausgang::Guthaben) {
+            self.pause_im_lauf = Some(art);
         }
         self.vermerke(
             art,
