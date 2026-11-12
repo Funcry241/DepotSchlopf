@@ -1,4 +1,4 @@
-klasse: KodexAenderung
-zweck: Linux-Prüfungen parallel ausführen und Prüfjobs zeitlich begrenzen
+klasse: Funktion
+zweck: Unzulässige Dateipfade vor dem Bau eines Updates abweisen
 pfade:
-.github/workflows/kodex.yml
+crates/depot_lauf/src/update.rs
