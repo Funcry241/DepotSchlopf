@@ -180,7 +180,7 @@ fn betriebsleiste_zeigt_auftrag_wartehinweis_und_abschluss_auf_beiden_seiten() -
         assert!(html.contains("aria-label=\"Auftrag läuft\""));
         assert!(html.contains("Verbindung weg. Nächster Versuch &lt;17:45&gt;."));
         assert!(!html.contains("<17:45>"));
-        assert!(html.contains("Danach warten 1 Aufträge."));
+        assert!(html.contains("Danach wartet 1 Auftrag."));
         assert!(html.contains("href=\"/#taetigkeit\""));
         if pfad != "/teil/kopf" {
             assert!(html.contains("id=\"betriebsleiste\" data-teil=\"/teil/kopf\""));

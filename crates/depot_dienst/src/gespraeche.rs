@@ -169,7 +169,26 @@ fn antwort_text(s: &mut String, antwort: &str) {
     }
 }
 
+pub(crate) fn gemini_uebersprungen(e: &Gespraech) -> Option<&'static str> {
+    use depot_kern::gemini::{
+        self, JOURNAL_UNVERFUEGBAR, KEIN_HANDELSTAG, KEINE_NACHRICHTEN, WARTET_AUF_UPDATE,
+    };
+    if e.wer != gemini::DIENST || e.ergebnis != "uebersprungen" {
+        return None;
+    }
+    match e.fehler.as_deref()? {
+        JOURNAL_UNVERFUEGBAR => Some(JOURNAL_UNVERFUEGBAR),
+        KEINE_NACHRICHTEN => Some(KEINE_NACHRICHTEN),
+        KEIN_HANDELSTAG => Some(KEIN_HANDELSTAG),
+        WARTET_AUF_UPDATE => Some(WARTET_AUF_UPDATE),
+        _ => None,
+    }
+}
+
 fn fehler_text(e: &Gespraech) -> &'static str {
+    if let Some(grund) = gemini_uebersprungen(e) {
+        return grund;
+    }
     match e.ergebnis.as_str() {
         "guthaben" => "Beim Anbieter fehlt Guthaben. Bitte lade es im Anbieterkonto auf.",
         "abgelehnt" => {

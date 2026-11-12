@@ -343,7 +343,7 @@ fn in_frankfurt(z: depot_kern::Zeitpunkt) -> Option<(Datum, (u8, u8))> {
 
 // Zeitpläne aus dem Morgenfenster von #140 behalten ihre Bedeutung; die Laufzeitgrenze
 // ergibt sich unabhängig davon aus den Börsenschlüssen.
-fn morgenplan(plan: &Zeitplan) -> bool {
+pub(crate) fn morgenplan(plan: &Zeitplan) -> bool {
     ((7, 0)..=(8, 30)).contains(&plan.kurse)
 }
 

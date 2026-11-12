@@ -9,7 +9,7 @@ use depot_journal::anbieter::{self, Eintrag, Ergebnis, Wer};
 use depot_journal::gespraeche::{self, Gespraech};
 use depot_journal::{Journal, NachrichtBeleg};
 use depot_kern::abdruck::sha256_hex;
-use depot_kern::gemini::{ADRESSE, DIENST, MODELL, RUECKLAGE, TAGESGRENZE};
+use depot_kern::gemini::{self, ADRESSE, DIENST, MODELL, RUECKLAGE, TAGESGRENZE};
 use depot_kern::json::{self, Json, zitiere};
 use depot_kern::{Datum, Universum, Zeitpunkt};
 
@@ -277,29 +277,38 @@ fn senden(
     }
 }
 
-pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum, vorrang: bool) {
-    let Some((tag, ..)) = jetzt.in_frankfurt() else {
-        return;
-    };
-    if !gespraeche::gemini_aktiv(daten) || daten.join("update_offen.txt").exists() {
-        return;
+fn vorlauf_frage(
+    daten: &Path,
+    tag: Datum,
+    jetzt: Zeitpunkt,
+    universum: &Universum,
+) -> Result<String, &'static str> {
+    if daten.join("update_offen.txt").exists() {
+        return Err(gemini::WARTET_AUF_UPDATE);
     }
     let ziel = if depot_kern::liste::handelstag(tag) {
         tag
-    } else if let Some(ziel) = depot_sim::vorbereitung::naechster_handelstag(tag) {
-        ziel
     } else {
-        return;
+        depot_sim::vorbereitung::naechster_handelstag(tag).ok_or(gemini::KEIN_HANDELSTAG)?
     };
-    let Ok(Some(frage)) = Journal::pruefe_lesend(&daten.join("journal.txt"), |stand| {
+    Journal::pruefe_lesend(&daten.join("journal.txt"), |stand| {
         frage(
             &depot_sim::papiertag::nachrichtenbelege_am(stand, ziel, jetzt),
             universum,
             ziel != tag,
         )
-    }) else {
+    })
+    .map_err(|_| gemini::JOURNAL_UNVERFUEGBAR)?
+    .ok_or(gemini::KEINE_NACHRICHTEN)
+}
+
+pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum, vorrang: bool) {
+    let Some((tag, ..)) = jetzt.in_frankfurt() else {
         return;
     };
+    if !gespraeche::gemini_aktiv(daten) {
+        return;
+    }
     let mut e = Gespraech {
         zeit: jetzt,
         lauf: lauf.into(),
@@ -318,7 +327,9 @@ pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum
         antwort: None,
         fehler: None,
     };
-    let resultat = Schluessel::fuer_dienst(DIENST, ADRESSE).and_then(|schluessel| {
+    let resultat = (|| {
+        let frage = vorlauf_frage(daten, tag, jetzt, universum)?;
+        let schluessel = Schluessel::fuer_dienst(DIENST, ADRESSE)?;
         if !sauber(&frage, &schluessel) {
             return Err("Nachrichten enthalten Zugangsdaten".into());
         }
@@ -340,7 +351,7 @@ pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum
             eprintln!("[Hinweis] Gemini-Anbieterpause konnte nicht gespeichert werden.");
         }
         Ok(())
-    });
+    })();
     if let Err(grund) = resultat {
         e.fehler = Some(grund);
     }
@@ -433,6 +444,44 @@ mod tests {
 
     fn universum() -> Result<Universum, String> {
         depot_kern::liste::beobachtungsliste().map(|w| depot_kern::liste::als_universum(&w))
+    }
+
+    #[test]
+    fn vorlauf_ohne_nachrichten_belegt_den_grund_ohne_anbieteraufruf() -> Result<(), String> {
+        let daten =
+            std::env::temp_dir().join(format!("depot_gemini_vorlauf_{}", std::process::id()));
+        std::fs::create_dir(&daten).map_err(|e| e.to_string())?;
+        let ergebnis = (|| {
+            let zeit = Zeitpunkt::lies("2026-11-10T08:00:00Z").ok_or("Zeit")?;
+            let (tag, ..) = zeit.in_frankfurt().ok_or("Datum")?;
+            let liste = universum()?;
+            std::fs::write(gespraeche::gemini_pfad(&daten), "gratisprojekt=ja\n")
+                .map_err(|e| e.to_string())?;
+            vorlauf(&daten, zeit, "journal-fehlt", &liste, false);
+            Journal::einrichten(&daten.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
+            vorlauf(&daten, zeit, "keine-nachrichten", &liste, false);
+            std::fs::write(daten.join("update_offen.txt"), "Probe").map_err(|e| e.to_string())?;
+            vorlauf(&daten, zeit, "update-offen", &liste, false);
+            let (e, fehler) = gespraeche::lesen(&daten, tag).map_err(|e| e.to_string())?;
+            assert_eq!(fehler, 0);
+            assert_eq!(
+                e.iter().map(|g| g.fehler.as_deref()).collect::<Vec<_>>(),
+                [
+                    Some(gemini::JOURNAL_UNVERFUEGBAR),
+                    Some(gemini::KEINE_NACHRICHTEN),
+                    Some(gemini::WARTET_AUF_UPDATE)
+                ],
+            );
+            assert!(
+                e.iter().all(|g| g.ergebnis == "uebersprungen"
+                    && g.http.is_none()
+                    && g.frage.is_none())
+            );
+            assert!(!daten.join(anbieter::DATEI).exists());
+            Ok(())
+        })();
+        let _ = std::fs::remove_dir_all(daten);
+        ergebnis
     }
 
     #[test]

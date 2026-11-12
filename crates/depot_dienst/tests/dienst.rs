@@ -1210,6 +1210,12 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
     assert!(html.contains(&format!("Maus ({})", depot_kern::modelle::MODELL_MAUS)));
     assert!(html.contains("nach dem letzten Kursabruf, wenn mindestens einer erfolgreich war"));
     assert!(html.contains("täglich von 08:00 bis vor 23:00 Uhr"));
+    assert!(!html.contains("danach optional kostenlose Gemini-Zuarbeit"));
+    let schalter = depot_lage::gespraeche::gemini_pfad(&d.wurzel.join("daten"));
+    fs::write(schalter, "gratisprojekt=ja\n").map_err(|e| e.to_string())?;
+    assert!(get(&d, "/teil/live", t).contains("danach optional kostenlose Gemini-Zuarbeit"));
+    assert!(get(&d, "/einrichtung", t).contains("Beim Abendplan wird jede andere Börse"));
+
     {
         let mut z = d.sperre();
         z.erledigt.kurse = Some(tag);
@@ -1220,6 +1226,11 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
     d.sperre().erledigt.termine = Some(tag);
     let html = get(&d, "/teil/live", donnerstag(22, 20)?);
     assert!(html.contains("Nächster Börsentag · Fr 06.11.2026"));
+    d.sperre().zeitplan.kurse = (7, 30);
+    let einrichtung = get(&d, "/einrichtung", t);
+    assert!(einrichtung.contains("Im Morgenlauf gilt der letzte abgeschlossene Handelstag"));
+    assert!(!einrichtung.contains("Beim Abendplan wird jede andere Börse"));
+
     Ok(())
 }
 
@@ -3497,6 +3508,21 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
 }
 
 #[test]
+fn betriebsleiste_zaehlt_nur_auftraege_nach_dem_naechsten() -> Result<(), String> {
+    let d = dienst(ordner()?, false);
+    let jetzt = donnerstag(17, 39)?;
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    let html = get(&d, "/teil/kopf", jetzt);
+    assert!(html.contains("Als Nächstes: Termine"));
+    assert!(!html.contains("Danach warte"));
+    d.einreihen(Art::Nachrichten, Anlass::Hand)?;
+    assert!(get(&d, "/teil/kopf", jetzt).contains("Danach wartet 1 Auftrag."));
+    d.einreihen(Art::Kurse, Anlass::Hand)?;
+    assert!(get(&d, "/teil/kopf", jetzt).contains("Danach warten 2 Aufträge."));
+    Ok(())
+}
+
+#[test]
 fn gemini_ohne_anfrage_hat_eigenen_lauf_und_keine_erfolgsmeldung() -> Result<(), String> {
     use depot_dienst::werkbank::{Auftrag, Frueher};
     use depot_lage::gespraeche::{Gespraech, anhaengen};
@@ -3534,17 +3560,17 @@ fn gemini_ohne_anfrage_hat_eigenen_lauf_und_keine_erfolgsmeldung() -> Result<(),
             system: None,
             frage: None,
             antwort: None,
-            fehler: Some("Schlüssel fehlt".into()),
+            fehler: Some(depot_kern::gemini::KEINE_NACHRICHTEN.into()),
         },
     )
     .map_err(|e| e.to_string())?;
     let html = get(&d, "/teil/live", zeit);
     let (zeitstrahl, taetigkeit) = some(html.split_once("id=\"taetigkeit\""), "Tätigkeit")?;
     assert!(zeitstrahl.contains(&format!("wer=gemini&amp;lauf={lauf}")));
-    assert!(zeitstrahl.contains("Nicht gefragt · optional"));
+    assert!(zeitstrahl.contains("Nicht gefragt: Keine belegten Nachrichten. · optional"));
     let (_, gemini_zeile) = some(taetigkeit.split_once(&lauf), "Gemini-Zeile")?;
     let (gemini_ergebnis, _) = some(gemini_zeile.split_once("</tr>"), "Gemini-Ergebnis")?;
-    assert!(gemini_ergebnis.contains("Nicht gefragt"));
+    assert!(gemini_ergebnis.contains("Nicht gefragt: Keine belegten Nachrichten."));
     assert!(!gemini_ergebnis.contains("erfolgreich"));
     Ok(())
 }
