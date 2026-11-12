@@ -15,6 +15,9 @@ use depot_lage::{datum_text, zeit_text};
 use crate::{Dienst, Umwelt, http, protokoll::Schutz, schluessel, seiten, verlauf};
 
 mod historie;
+mod journal;
+mod rohdaten;
+mod schutz;
 
 const MIB: u64 = 1024 * 1024;
 const JOURNAL_MAX: u64 = 48 * MIB;
@@ -111,10 +114,11 @@ pub(crate) fn formular(d: &Dienst, heute: Option<Datum>) -> String {
          <button type=\"submit\" name=\"zeitraum\" value=\"heute\">Heute exportieren</button>\
          </form><details id=\"analyse-zeitraum\"><summary>Zeitraum exportieren</summary>\
          <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
-         <button type=\"submit\" name=\"zeitraum\" value=\"gestern\">Gestern</button> \
-         <button type=\"submit\" name=\"zeitraum\" value=\"handelstage\">Letzte 5 Handelstage</button> \
-         <button type=\"submit\" name=\"zeitraum\" value=\"woche\">Diese Woche</button></form>\
-         <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <p><label><input type=\"checkbox\" name=\"rohdaten\" value=\"ja\"> Geschwärzte Rohdaten und Laufprotokolle beilegen</label></p>\
+         <button type=\"submit\" name=\"zeitraum\" value=\"heute\" formnovalidate>Heute</button> \
+         <button type=\"submit\" name=\"zeitraum\" value=\"gestern\" formnovalidate>Gestern</button> \
+         <button type=\"submit\" name=\"zeitraum\" value=\"handelstage\" formnovalidate>Letzte 5 Handelstage</button> \
+         <button type=\"submit\" name=\"zeitraum\" value=\"woche\" formnovalidate>Diese Woche</button>\
          <p><label>Von <input type=\"date\" name=\"von\" value=\"{heute}\" required></label> \
          <label>Bis <input type=\"date\" name=\"bis\" value=\"{heute}\" required></label> \
          <button type=\"submit\" name=\"zeitraum\" value=\"frei\">Zeitraum exportieren</button></p>\
@@ -173,10 +177,16 @@ fn quelle(pfad: &Path, name: &str, luecken: &mut String) -> String {
     }
 }
 
-fn betrieb(d: &Dienst, daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -> String {
+struct Betrieb {
+    bericht: String,
+    verlauf: String,
+    anbieter: String,
+}
+
+fn betrieb(d: &Dienst, daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -> Betrieb {
     let z = d.sperre();
-    let text = quelle(&verlauf::pfad(&d.wurzel), "Dienstverlauf", luecken);
-    let mut verlauf = verlauf::lies_zeitraum(&text, zeitraum.von, zeitraum.bis);
+    let original = quelle(&verlauf::pfad(&d.wurzel), "Dienstverlauf", luecken);
+    let mut verlauf = verlauf::lies_zeitraum(&original, zeitraum.von, zeitraum.bis);
     if let Some(lauf) = z.laufend.as_ref().filter(|a| zeitraum.enthaelt(a.start)) {
         verlauf.auftraege.retain(|a| a.kennung != lauf.kennung);
         verlauf.auftraege.insert(0, lauf.clone());
@@ -242,7 +252,11 @@ fn betrieb(d: &Dienst, daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -
         );
     }
     let _ = writeln!(aus, "\nUnlesbare Anbieterzeilen: {unlesbar}.");
-    aus
+    Betrieb {
+        bericht: aus,
+        verlauf: original,
+        anbieter: text,
+    }
 }
 
 fn konfiguration(d: &Dienst, u: &dyn Umwelt, daten: &Path) -> String {
@@ -608,11 +622,12 @@ fn ki_tag(
     }
 }
 
-fn archiv(
+fn archiv<'a>(
     schutz: &Schutz,
     zeitraum: Zeitraum,
     jetzt: Zeitpunkt,
-    dateien: &[(&str, String)],
+    liesmich: &str,
+    dateien: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> Result<Vec<u8>, String> {
     let mut manifest = if zeitraum.von == zeitraum.bis {
         format!(
@@ -625,13 +640,11 @@ fn archiv(
             zeitraum.von, zeitraum.bis
         )
     };
+    let schutz = schutz::Exportschutz::neu(schutz);
     let mut zip = Zip::default();
     let mut summe = 0_usize;
-    for (name, text) in dateien {
-        let text = schutz.bereinige_zeilen(text);
-        if schutz.bereinige_zeilen(&text) != text {
-            return Err("Musterprüfung des Exports fehlgeschlagen.".into());
-        }
+    let mut bericht = String::from("\n## Schwärzungsbericht\n\n");
+    let mut schreibe = |name: &str, text: &str| {
         summe = summe.saturating_add(text.len());
         if summe > ZIP_MAX {
             return Err("Analyse überschreitet die Größenbegrenzung.".into());
@@ -642,9 +655,27 @@ fn archiv(
             text.len(),
             sha256_hex(text.as_bytes())
         );
-        zip.datei_gepackt(name, text.as_bytes())?;
+        zip.datei_gepackt(name, text.as_bytes())
+    };
+    for (name, text) in dateien {
+        let jsonl = Path::new(name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"));
+        let (text, zeilen) = schutz.text(text, jsonl);
+        if schutz.text(&text, jsonl).1 != 0 {
+            return Err("Musterprüfung des Exports fehlgeschlagen.".into());
+        }
+        let _ = writeln!(bericht, "- {name}: {zeilen} Zeilen geschwärzt.");
+        schreibe(name, &text)?;
     }
-    if schutz.bereinige_zeilen(&manifest) != manifest {
+    let (mut liesmich, zeilen) = schutz.text(liesmich, false);
+    let _ = writeln!(bericht, "- LIESMICH.md: {zeilen} Zeilen geschwärzt.");
+    liesmich.push_str(&bericht);
+    if schutz.text(&liesmich, false).1 != 0 {
+        return Err("Musterprüfung des Schwärzungsberichts fehlgeschlagen.".into());
+    }
+    schreibe("LIESMICH.md", &liesmich)?;
+    if schutz.text(&manifest, false).1 != 0 {
         return Err("Musterprüfung des Manifests fehlgeschlagen.".into());
     }
     zip.datei_gepackt("MANIFEST.txt", manifest.as_bytes())?;
@@ -666,6 +697,78 @@ fn programmstand(version: Option<&str>) -> String {
     )
 }
 
+struct Journalpaket {
+    kurz: String,
+    depotdetails: String,
+    orders: String,
+    ki: String,
+    historie: historie::Historie,
+    journal: journal::Auszug,
+}
+
+fn journalpaket(
+    daten: &Path,
+    jetzt: Zeitpunkt,
+    tag: Datum,
+    zeitraum: Zeitraum,
+    sperren: &str,
+    mit_rohdaten: bool,
+    luecken: &mut String,
+) -> Result<Journalpaket, JournalFehler> {
+    match Journal::pruefe_lesend_mit_eintraegen(
+        &daten.join("journal.txt"),
+        JOURNAL_MAX,
+        |stand, eintraege, original| {
+            let (kurz, depotdetails, orders) = depot(stand, jetzt, tag, sperren, zeitraum);
+            Journalpaket {
+                kurz,
+                depotdetails,
+                orders,
+                ki: ki(daten, zeitraum, Some(stand), luecken),
+                historie: historie::bericht(zeitraum, Some(stand), luecken),
+                journal: journal::auszug(zeitraum, stand, eintraege, original, mit_rohdaten),
+            }
+        },
+    ) {
+        Ok(paket) => Ok(paket),
+        Err(JournalFehler::Belegt) => Err(JournalFehler::Belegt),
+        Err(_) => {
+            luecken.push_str(
+                "- Journalstand nicht bestätigt. Order-, Depot- und Kostenzahlen fehlen.\n",
+            );
+            Ok(Journalpaket {
+                kurz: "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n".into(),
+                depotdetails: String::new(),
+                orders: "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
+                ki: ki(daten, zeitraum, None, luecken),
+                historie: historie::bericht(zeitraum, None, luecken),
+                journal: journal::Auszug::default(),
+            })
+        }
+    }
+}
+
+fn exportschutz(token: &str) -> Result<Schutz, ()> {
+    let schluessel = schluessel::fuer_protokoll()?;
+    let mut schutz = Schutz::default();
+    for geheim in schluessel
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(token))
+    {
+        schutz.merken(geheim);
+    }
+    Ok(schutz)
+}
+
+fn sperrentext(daten: &Path) -> String {
+    format!(
+        " · KI-Sperre: {} · Kurssperre: {}",
+        an_aus(daten.join("ki.halt").exists()),
+        an_aus(daten.join("kurse.halt").exists())
+    )
+}
+
 pub(crate) fn exportieren(
     d: &Dienst,
     u: &dyn Umwelt,
@@ -679,13 +782,9 @@ pub(crate) fn exportieren(
         Ok(zeitraum) => zeitraum,
         Err(grund) => return seiten::fehler(400, grund),
     };
-    let Ok(schluessel) = schluessel::fuer_protokoll() else {
+    let Ok(schutz) = exportschutz(&d.token) else {
         return seiten::fehler(409, "Schlüsselablage nicht lesbar. Export abgebrochen.");
     };
-    let mut schutz = Schutz::default();
-    for geheim in schluessel.iter().chain(std::iter::once(&d.token)) {
-        schutz.merken(geheim);
-    }
     let daten = d.wurzel.join("daten");
     if !fs::symlink_metadata(&daten).is_ok_and(|m| m.is_dir()) {
         return seiten::fehler(
@@ -693,56 +792,54 @@ pub(crate) fn exportieren(
             "Datenordner fehlt oder ist kein reguläres Verzeichnis.",
         );
     }
+    let mit_rohdaten = http::feld(felder, "rohdaten") == Some("ja");
     let mut luecken = String::new();
     let betrieb = betrieb(d, &daten, zeitraum, &mut luecken);
     let konfiguration = konfiguration(d, u, &daten);
-    let sperren = format!(
-        " · KI-Sperre: {} · Kurssperre: {}",
-        an_aus(daten.join("ki.halt").exists()),
-        an_aus(daten.join("kurse.halt").exists())
-    );
-    let (kurz, depotdetails, orders, ki, historie) =
-        match Journal::pruefe_lesend_begrenzt(&daten.join("journal.txt"), JOURNAL_MAX, |s| {
-            let (kurz, depotdetails, orders) = depot(s, jetzt, tag, &sperren, zeitraum);
-            (
-                kurz,
-                depotdetails,
-                orders,
-                ki(&daten, zeitraum, Some(s), &mut luecken),
-                historie::bericht(zeitraum, Some(s), &mut luecken),
-            )
-        }) {
-            Ok(geprueft) => geprueft,
-            Err(JournalFehler::Belegt) => {
-                return seiten::fehler(
-                    409,
-                    "Journal gerade in Benutzung. Bitte gleich noch einmal.",
-                );
-            }
-            Err(_) => {
-                luecken.push_str(
-                    "- Journalstand nicht bestätigt. Order-, Depot- und Kostenzahlen fehlen.\n",
-                );
-                let meldung = "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n";
-                (
-                    meldung.into(),
-                    String::new(),
-                    "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
-                    ki(&daten, zeitraum, None, &mut luecken),
-                    historie::bericht(zeitraum, None, &mut luecken),
-                )
-            }
-        };
+    let sperren = sperrentext(&daten);
+    let Ok(Journalpaket {
+        kurz,
+        depotdetails,
+        orders,
+        ki,
+        historie,
+        journal,
+    }) = journalpaket(
+        &daten,
+        jetzt,
+        tag,
+        zeitraum,
+        &sperren,
+        mit_rohdaten,
+        &mut luecken,
+    )
+    else {
+        return seiten::fehler(
+            409,
+            "Journal gerade in Benutzung. Bitte gleich noch einmal.",
+        );
+    };
+    let mut roh = rohdaten::Rohdaten::default();
+    let roh_hinweis = if mit_rohdaten {
+        roh.datei(
+            "rohdaten/journal.txt".into(),
+            journal.original,
+            &mut luecken,
+        );
+        roh.sammeln(&d.wurzel, &betrieb, zeitraum, &mut luecken);
+        "Die Rohdaten enthalten ausgewählte Originalzeilen und geschwärzte Laufprotokolle. Der Journal-Auszug enthält weder Kopf noch lückenlose Prüfkette. Die KI-Abrechnung steht im Journal."
+    } else {
+        "Rohdaten und Laufprotokolle wurden nicht ausgewählt."
+    };
     let datum = zeitraum.titel();
     let liesmich = format!(
         "# DepotSchlopf · Analyse-Export {datum}\n\n## Aktueller Depotstand\n{kurz}\n\
          ## Datenbasis\nPapiergeld. Die Zeiten sind Frankfurter Ortszeit. \
          Depotstand und Konfiguration beziehen sich auf den Exportzeitpunkt.\n\
-         Freie Anbietertexte, Prompts und Rohprotokolle sind in diesem Export nicht enthalten.\n\
+         {roh_hinweis}\n\
          ## Lücken\n{luecken}"
     );
     let dateien = [
-        ("LIESMICH.md", liesmich),
         (
             "01_ueberblick.md",
             format!(
@@ -751,16 +848,24 @@ pub(crate) fn exportieren(
             ),
         ),
         ("02_ki_gespraeche.md", ki),
-        ("03_journal.md", historie.belege),
+        ("03_journal.md", historie.belege + &journal.bericht),
         (
             "04_orders_und_depot.md",
             format!("# Papierorders und Depot\n{orders}"),
         ),
-        ("05_betrieb_und_fehler.md", betrieb),
+        ("05_betrieb_und_fehler.md", betrieb.bericht),
         ("06_konfiguration.md", konfiguration),
         ("07_version.md", programmstand(d.version.as_deref())),
     ];
-    match archiv(&schutz, zeitraum, jetzt, &dateien) {
+    let dateien = dateien
+        .iter()
+        .map(|(name, text)| (*name, text.as_str()))
+        .chain(
+            roh.dateien
+                .iter()
+                .map(|(name, text)| (name.as_str(), text.as_str())),
+        );
+    match archiv(&schutz, zeitraum, jetzt, &liesmich, dateien) {
         Ok(zip) => http::download(&zeitraum.dateiname(), &zip),
         Err(_) => seiten::fehler(
             409,

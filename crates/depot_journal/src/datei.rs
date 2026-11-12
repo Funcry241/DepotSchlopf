@@ -443,6 +443,15 @@ impl Journal {
         leselimit: u64,
         pruefe: impl FnOnce(&Stand) -> R,
     ) -> Result<R, JournalFehler> {
+        Self::pruefe_lesend_mit_eintraegen(pfad, leselimit, |stand, _, _| pruefe(stand))
+    }
+
+    /// Liefert Stand, Einträge und Originaltext aus derselben bestätigten Lesung.
+    pub fn pruefe_lesend_mit_eintraegen<R>(
+        pfad: &Path,
+        leselimit: u64,
+        pruefe: impl FnOnce(&Stand, &[(Art, String)], &str) -> R,
+    ) -> Result<R, JournalFehler> {
         if !Self::eingerichtet(pfad)? {
             return Err(halt("nicht eingerichtet: Journal und Vermerk fehlen"));
         }
@@ -470,8 +479,9 @@ impl Journal {
         if kette != vermerk.kette {
             return Err(halt("Journal weicht vom bestätigten Stand ab"));
         }
-        let (_, stand) = nachrechnen(&zeilen)?;
-        let ergebnis = pruefe(&stand);
+        let (eintraege, stand) = nachrechnen(&zeilen)?;
+        let original = std::str::from_utf8(&inhalt).map_err(|_| halt("Journal ist kein UTF-8"))?;
+        let ergebnis = pruefe(&stand, &eintraege, original);
         let _ = datei.unlock();
         Ok(ergebnis)
     }
