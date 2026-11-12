@@ -17,6 +17,7 @@
 //! Die Meldung nennt Datei, Zeile und Art, nie das Geheimnis selbst. Ein Treffer ist ein
 //! Fehler; eine Ausnahmeliste gibt es nicht. Beispiele in Tests entstehen erst zur Laufzeit.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
@@ -294,6 +295,26 @@ fn alle_dateien(wurzel: &Path, dir: &Path, aus: &mut Vec<String>, fehler: &mut V
     }
 }
 
+fn arbeitsinhalt(wurzel: &Path, rel: &str, fehler: &mut Vec<String>) -> Option<Vec<u8>> {
+    let pfad = wurzel.join(rel);
+    match fs::symlink_metadata(&pfad) {
+        // Im Arbeitsbaum gelöscht: Der Index wird unabhängig geprüft.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            fehler.push(format!("{rel}: nicht lesbar: {e}"));
+            None
+        }
+        Ok(m) if !m.is_file() => None,
+        Ok(_) => match fs::read(&pfad) {
+            Ok(inhalt) => Some(inhalt),
+            Err(e) => {
+                fehler.push(format!("{rel}: nicht lesbar: {e}"));
+                None
+            }
+        },
+    }
+}
+
 /// Prueft jede Datei, die ein Commit mitnehmen koennte, in beiden Staenden: im Arbeitsbaum
 /// (verfolgt oder neu und nicht ignoriert) und im Index, denn den nimmt ein Commit (K10-01).
 /// Ohne Git jede Datei ausser `target/`. Links werden nicht verfolgt, ihr Ziel nicht gelesen.
@@ -311,31 +332,27 @@ pub fn pruefe(wurzel: &Path) -> Vec<String> {
         alle_dateien(wurzel, wurzel, &mut d, &mut fehler);
         d
     };
-    for d in dateien {
-        let p = wurzel.join(&d);
-        match fs::symlink_metadata(&p) {
-            // Im Arbeitsbaum geloescht: nichts zu pruefen.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => fehler.push(format!("{d}: nicht lesbar: {e}")),
-            Ok(m) if !m.is_file() => {}
-            Ok(_) => match fs::read(&p) {
-                Ok(inhalt) => fehler.extend(pruefe_inhalt(&d, &inhalt)),
-                Err(e) => fehler.push(format!("{d}: nicht lesbar: {e}")),
-            },
-        }
-    }
-    if mit_git {
-        match crate::git::index_dateien(wurzel) {
-            Ok(index) => {
-                for datei in index {
-                    let anzeige = format!("{} (Index)", datei.pfad);
-                    match crate::git::blob(wurzel, &datei.blob) {
-                        Ok(inhalt) => fehler.extend(pruefe_inhalt(&anzeige, &inhalt)),
-                        Err(e) => fehler.push(format!("{anzeige}: nicht lesbar: {e}")),
-                    }
+    let mut verbleibend: BTreeSet<_> = dateien.into_iter().collect();
+    if mit_git
+        && let Err(e) = crate::git::index_inhalte(wurzel, |pfad, indexinhalt| {
+            if verbleibend.remove(pfad)
+                && let Some(inhalt) = arbeitsinhalt(wurzel, pfad, &mut fehler)
+            {
+                let meldungen = pruefe_inhalt(pfad, &inhalt);
+                if meldungen.is_empty() && inhalt == indexinhalt {
+                    return;
                 }
+                fehler.extend(meldungen);
             }
-            Err(e) => fehler.push(format!("Geheimnisprüfung: Index nicht lesbar: {e}")),
+            fehler.extend(pruefe_inhalt(&format!("{pfad} (Index)"), indexinhalt));
+        })
+    {
+        fehler.push(format!("Geheimnisprüfung: Index nicht lesbar: {e}"));
+    }
+    // Neue Dateien sowie Dateien ohne lesbaren Indexeintrag ebenfalls prüfen.
+    for pfad in verbleibend {
+        if let Some(inhalt) = arbeitsinhalt(wurzel, &pfad, &mut fehler) {
+            fehler.extend(pruefe_inhalt(&pfad, &inhalt));
         }
     }
     fehler

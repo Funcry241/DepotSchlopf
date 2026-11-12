@@ -16,9 +16,12 @@
 mod testumgebung;
 
 use std::process::{Command, ExitCode};
+use std::time::Instant;
 
 fn cargo(args: &[&str]) -> bool {
-    println!("[Kodex] cargo {}", args.join(" "));
+    let schritt = args.join(" ");
+    let start = Instant::now();
+    println!("[Kodex] cargo {schritt}");
     let mut befehl = Command::new("cargo");
     befehl.args(args);
     let _testumgebung = if args.first() == Some(&"test") {
@@ -38,7 +41,12 @@ fn cargo(args: &[&str]) -> bool {
     } else {
         None
     };
-    befehl.status().is_ok_and(|s| s.success())
+    let erfolgreich = befehl.status().is_ok_and(|s| s.success());
+    println!(
+        "[Kodex] cargo {schritt} · Dauer: {} ms",
+        start.elapsed().as_millis()
+    );
+    erfolgreich
 }
 
 fn basis_aus(args: &[String]) -> &str {

@@ -1,8 +1,7 @@
 klasse: KodexAenderung
-zweck: Sichtbare ASCII-Umschreibungen über eine allgemeine Sprachregel erkennen
+zweck: Indexblobs gebündelt prüfen und Prüfphasen messen
 pfade:
-crates/depot_kodex/src/essenz.rs
 crates/depot_kodex/src/geheimnis.rs
-crates/depot_kodex/src/lexer.rs
-crates/depot_kodex/src/quellscan.rs
-crates/depot_kodex/tests/sprache.rs
+crates/depot_kodex/src/git.rs
+crates/depot_kodex/src/main.rs
+crates/depot_kodex/tests/befunde.rs
