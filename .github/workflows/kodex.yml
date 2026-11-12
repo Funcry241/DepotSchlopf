@@ -14,8 +14,9 @@ permissions:
   contents: read
 
 jobs:
-  kodex:
+  kodex-linux-gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,8 +31,6 @@ jobs:
             BASIS="${{ github.event.before }}"
           fi
           cargo run --locked -p depot_lauf -- alles --basis "$BASIS"
-      - name: Alter Updater bei laufendem Dienst
-        run: python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$RUNNER_TEMP/depot-update-alt"
       - name: Assistenten-Export bereitstellen
         if: always()
         uses: actions/upload-artifact@v4
@@ -41,9 +40,41 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  kodex-linux-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rust-Werkzeugkette aus rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Alter Updater bei laufendem Dienst
+        run: python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$RUNNER_TEMP/depot-update-alt"
+
+  kodex:
+    # Der bisherige Linux-Check bleibt das gemeinsame Ergebnis beider Prüfungen.
+    needs: [kodex-linux-gate, kodex-linux-update]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Beide Linux-Prüfungen bestätigen
+        env:
+          GATE: ${{ needs.kodex-linux-gate.result }}
+          UPDATE: ${{ needs.kodex-linux-update.result }}
+        run: |
+          printf 'Linux-Gate: %s\nLinux-Update: %s\n' "$GATE" "$UPDATE"
+          test "$GATE" = success && test "$UPDATE" = success
+
   kodex-windows-gate:
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
+      - name: Temporäre Dateien im Arbeitsbereich des Runners ablegen
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - name: Zeilenenden beim Checkout festlegen
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
@@ -72,7 +103,13 @@ jobs:
 
   kodex-windows-update:
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
+      - name: Temporäre Dateien im Arbeitsbereich des Runners ablegen
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - name: Zeilenenden beim Checkout festlegen
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4

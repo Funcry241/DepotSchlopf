@@ -1,8 +1,4 @@
-klasse: Funktion
-zweck: Fehlendes KI-Guthaben bis zum nächsten Tag pausieren und Gespräche nach Läufen gruppieren
+klasse: KodexAenderung
+zweck: Linux-Prüfungen parallel ausführen und Prüfjobs zeitlich begrenzen
 pfade:
-crates/depot_berater/src/ki.rs
-crates/depot_berater/tests/berater.rs
-crates/depot_dienst/src/gespraeche.rs
-crates/depot_journal/src/anbieter.rs
-crates/depot_lage/src/betrieb.rs
+.github/workflows/kodex.yml
