@@ -27,6 +27,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Live, Einrichtung und KI-Gespräche verwenden einheitliche Zugangsnamen, Abruftexte und Kostenangaben. Die Grenzwertanzeige enthält auch die Gesamtverlustsperre, Kursgrenzen und Gebühren. Gemini ist nach dem Einschalten direkt im Gesprächsfilter verfügbar (#151).
+
 - Die KI-Abstimmung berücksichtigt widerrufene Zustimmungen und prüft vor jeder Runde den verbleibenden Kosten- und Aufrufrahmen. `run.cmd update prüfen` und `run.cmd update pruefen` rufen dieselbe Prüfung auf. (#101)
 - Die Kodex-Sprachprüfung erkennt weitere ASCII-Umschreibungen in sichtbaren Meldungen. (#102)
 - Die tägliche Vorbereitung bemisst ihren KI-Rahmen anhand der verbleibenden Handelstage einschließlich des nächsten Handelstags. Ohne weitere Handelstage im Monat bleibt höchstens ein kurzer Aufruf möglich. (#103)

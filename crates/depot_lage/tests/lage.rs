@@ -305,11 +305,11 @@ fn sperrdatei_ist_halt() -> Result<(), String> {
 fn fehlender_schluessel_von_tiingo_ist_offen() -> Result<(), String> {
     let mut u = umgebung(abends(5)?, Zugang::NichtEingerichtet);
     let l = lagebild(&u);
-    let p = punkt(&l, "Kursquelle Tiingo (NYSE)")?;
+    let p = punkt(&l, "Kursquelle Tiingo (US-Börsen)")?;
     assert_eq!((p.ampel, p.abhilfe), (Ampel::Gut, None), "{p:?}");
     u.kursquelle_us = Hinterlegt::Nein;
     let l = lagebild(&u);
-    let p = punkt(&l, "Kursquelle Tiingo (NYSE)")?;
+    let p = punkt(&l, "Kursquelle Tiingo (US-Börsen)")?;
     assert_eq!(
         (p.ampel, p.abhilfe),
         (Ampel::Offen, Some(Abhilfe::SchluesselKursquelleUs))
@@ -318,7 +318,8 @@ fn fehlender_schluessel_von_tiingo_ist_offen() -> Result<(), String> {
     u.journal = Zugang::Belegt;
     let l = lagebild(&u);
     assert!(
-        l.naechster_schritt.starts_with("Kursquelle Tiingo (NYSE)"),
+        l.naechster_schritt
+            .starts_with("Kursquelle Tiingo (US-Börsen)"),
         "{}",
         l.naechster_schritt
     );
@@ -331,7 +332,7 @@ fn fehlender_schluessel_der_kursquelle_ist_offen() -> Result<(), String> {
     u.kursquelle = Hinterlegt::Nein;
     let l = lagebild(&u);
     assert_eq!(
-        punkt(&l, "Kursquelle Alpha Vantage")?.abhilfe,
+        punkt(&l, "Kursquelle Alpha Vantage (Xetra)")?.abhilfe,
         Some(Abhilfe::SchluesselKursquelle)
     );
     assert_eq!(

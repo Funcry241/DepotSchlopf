@@ -57,13 +57,7 @@ impl Wer {
     }
 
     pub fn name(self) -> &'static str {
-        match self {
-            Wer::Gemini => "Gemini",
-            Wer::Kursquelle => "Kursquelle (Alpha Vantage)",
-            Wer::KursquelleUs => "Kursquelle US-Börsen (Tiingo)",
-            Wer::Berater(BeraterId::Dachs) => "Dachs (Claude, Anthropic)",
-            Wer::Berater(BeraterId::Maus) => "Maus (GPT, OpenAI)",
-        }
+        self.protokoll().anzeigename()
     }
 
     /// Name im Anbieterprotokoll.

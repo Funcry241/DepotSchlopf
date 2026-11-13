@@ -361,8 +361,8 @@ fn schluessel_punkt(name: &'static str, st: SchluesselStand, abhilfe: Abhilfe) -
 
 fn berater_name(b: BeraterId) -> &'static str {
     match b {
-        BeraterId::Dachs => "Dachs (Claude)",
-        BeraterId::Maus => "Maus (GPT)",
+        BeraterId::Dachs => Wer::Dachs.anzeigename(),
+        BeraterId::Maus => Wer::Maus.anzeigename(),
     }
 }
 
@@ -703,6 +703,29 @@ pub fn grenzwerte() -> Vec<Grenzwert> {
         w("Halt bei Tagesverlust", bp(g.tagesverlust_bp())),
         w("Notbremse unter Höchststand", bp(g.notbremse_bp())),
         w(
+            "Papier-Sperre bei Gesamtverlust",
+            bp(g.papier_gesamtverlust_bp()),
+        ),
+        w(
+            "Kurshöchstalter",
+            format!("{} Minuten", g.kurs_hoechstalter_s() / 60),
+        ),
+        w("Maximaler Kurssprung", bp(g.max_kurssprung_bp())),
+        w("Maximaler Limitabstand", bp(g.limit_abstand_bp())),
+        w(
+            "Papiergebühr je Order",
+            format!(
+                "{} vom Volumen, mindestens {}, plus {} Börsengebühr",
+                bp(g.gebuehren().prozent_bp()),
+                g.gebuehren().minimum(),
+                g.gebuehren().boersengebuehr()
+            ),
+        ),
+        w(
+            "Gemini-Aufrufe je Tag",
+            depot_kern::gemini::TAGESGRENZE.to_string(),
+        ),
+        w(
             "ETFs",
             if g.etf_freigegeben() {
                 "freigegeben".into()
@@ -739,7 +762,7 @@ fn schluessel_punkte(
     let kursquelle = betrieb::schluessel_stand(u.kursquelle, &u.anbieter, Wer::Kursquelle);
     let mut schluessel = vec![(Wer::Kursquelle, kursquelle)];
     punkte.push(schluessel_punkt(
-        "Kursquelle Alpha Vantage",
+        Wer::Kursquelle.anzeigename(),
         kursquelle,
         Abhilfe::SchluesselKursquelle,
     ));
@@ -751,7 +774,7 @@ fn schluessel_punkte(
         let st = betrieb::schluessel_stand(u.kursquelle_us, &u.anbieter, Wer::Tiingo);
         schluessel.push((Wer::Tiingo, st));
         punkte.push(schluessel_punkt(
-            "Kursquelle Tiingo (NYSE)",
+            Wer::Tiingo.anzeigename(),
             st,
             Abhilfe::SchluesselKursquelleUs,
         ));

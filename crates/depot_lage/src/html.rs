@@ -158,6 +158,10 @@ fn vorbereitungsthese(
     }
 }
 
+/// Gemeinsamer Hinweis zur Häufigkeit der Vorbereitung.
+pub const VORBEREITUNG_HAEUFIGKEIT: &str =
+    "Je KI ist an einem börsenfreien Tag höchstens ein kurzer Aufruf möglich.";
+
 fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
     s.push_str("<section id=\"vorbereitung\"><h2>Vorbereitung auf den nächsten Handelstag</h2>");
     if let Some(p) = &l.vorbereitung {
@@ -231,8 +235,10 @@ fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
     } else {
         s.push_str("<p>Noch keine separate Vorbereitung belegt.</p>");
     }
-    s.push_str("<p class=\"leise\">Belegte Quellen bleiben auch ohne KI-Einschätzung sichtbar. Je KI ist höchstens ein kurzer Aufruf möglich. \
-        An Handelstagen fließen die Hypothesen in die reguläre Beratung ein.</p>");
+    let _ = write!(
+        s,
+        "<p class=\"leise\">Belegte Quellen bleiben auch ohne KI-Einschätzung sichtbar. {VORBEREITUNG_HAEUFIGKEIT} An Handelstagen werden die Hypothesen in den regulären Aufrufen neu geprüft.</p>"
+    );
     if let Some(k) = knopf(Abhilfe::Vorbereiten) {
         s.push_str(&k);
     }
@@ -518,9 +524,10 @@ fn gespraech(l: &Lagebild, s: &mut String) {
     s.push_str("</section>");
 }
 
-fn grenzen(l: &Lagebild, s: &mut String) {
-    s.push_str("<section><h2>Grenzen und Budgets</h2><table>");
-    for g in &l.grenzen {
+/// Gemeinsame Anzeige der geltenden Grenzen in Live und Einrichtung.
+pub fn grenzen(s: &mut String, werte: &[crate::Grenzwert]) {
+    s.push_str("<section id=\"grenzen\"><h2>Grenzen und Budgets</h2><table>");
+    for g in werte {
         let _ = write!(
             s,
             "<tr><td>{}</td><td class=\"z\">{}</td></tr>",
@@ -528,10 +535,7 @@ fn grenzen(l: &Lagebild, s: &mut String) {
             maskiere(&g.wert)
         );
     }
-    s.push_str(
-        "</table><p class=\"leise\">Diese Werte gelten. Sie stehen in der Festschreibung und \
-         ändern sich nur über eine Grenzfreigabe, nie mit einem Klick.</p></section>",
-    );
+    s.push_str("</table><p class=\"leise\">Diese Schutzgrenzen gelten für jeden Lauf. Änderungen brauchen deine ausdrückliche Freigabe. Verbrauch und Rest je KI stehen auf Live.</p></section>");
 }
 
 /// Die Abschnitte des Lagebilds ohne Seitenrahmen. `knopf` setzt zu jeder Abhilfe ein
@@ -553,7 +557,7 @@ pub fn inhalt_mit(l: &Lagebild, knopf: Knopf<'_>, mit_betrieb: bool) -> String {
     depot(l, &mut s);
     prognosen(l, &mut s);
     gespraech(l, &mut s);
-    grenzen(l, &mut s);
+    grenzen(&mut s, &l.grenzen);
     s
 }
 

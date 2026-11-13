@@ -230,8 +230,8 @@ fn eintrag(s: &mut String, e: &Gespraech, buchungen: &[(BeraterId, Cent)]) {
         depot_lage::zeit_text(e.zeit),
         maskiere(zweck_text(&e.zweck)),
     );
-    if let Some(cent) = kosten(e, buchungen) {
-        let _ = write!(s, " · {cent} ct");
+    if let Some(cent) = kosten(e, buchungen).and_then(|c| i64::try_from(c).ok()) {
+        let _ = write!(s, " · {}", Cent(cent));
     } else if e.buchung.is_some() {
         s.push_str(" · Kosten noch offen");
     }
@@ -246,8 +246,18 @@ fn eintrag(s: &mut String, e: &Gespraech, buchungen: &[(BeraterId, Cent)]) {
     s.push_str("</article>");
 }
 
-fn filter(s: &mut String, datum: Option<Datum>, wer: &str, lauf: &str, tage: &[Tag]) {
+fn filter(
+    s: &mut String,
+    datum: Option<Datum>,
+    wer: &str,
+    lauf: &str,
+    tage: &[Tag],
+    gemini_an: bool,
+) {
     let mut namen = BTreeMap::from([("dachs", "Dachs"), ("maus", "Maus")]);
+    if gemini_an {
+        namen.insert("gemini", name("gemini"));
+    }
     for e in tage.iter().flat_map(|t| &t.eintraege) {
         namen.insert(&e.wer, name(&e.wer));
     }
@@ -451,7 +461,14 @@ pub(crate) fn inhalt(
     } else {
         Vec::new()
     };
-    filter(&mut s, einzel, wer, lauf, &tage);
+    filter(
+        &mut s,
+        einzel,
+        wer,
+        lauf,
+        &tage,
+        gespraeche::gemini_aktiv(daten),
+    );
     let vor_tagen = s.len();
     for tag in tage {
         tagesstand(&mut s, &tag, wer, lauf, &buchungen, einzel.is_some());
@@ -499,10 +516,10 @@ mod tests {
         let mut html = String::new();
         tagesstand(&mut html, &tag, "", "", &buchungen, true);
         assert!(html.contains("Kosten noch offen"));
-        assert!(!html.contains("20 ct") && !html.contains("3 ct"));
+        assert!(!html.contains("0,20 €") && !html.contains("0,03 €"));
         let mut html = String::new();
         tagesstand(&mut html, &tag, "", "", &[], true);
-        assert!(html.contains("Kosten noch offen") && !html.contains("3 ct"));
+        assert!(html.contains("Kosten noch offen") && !html.contains("0,03 €"));
         let eintrag = tag.eintraege.first().ok_or("Gespräch fehlt")?;
         let ausgelassen = Gespraech {
             wer: "gemini".into(),

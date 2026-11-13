@@ -222,6 +222,75 @@ fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     antwort(200, HTML, s.as_bytes())
 }
 
+fn einrichtungsseite(
+    d: &Dienst,
+    u: &dyn Umwelt,
+    a: &Anfrage,
+    jetzt: Zeitpunkt,
+    tag: Option<depot_kern::Datum>,
+) -> Vec<u8> {
+    // Erst ausserhalb der Sperre nachsehen, was gespeichert ist.
+    let datei = werkbank::lies_falls_da(&d.wurzel.join("daten").join("zeitplan.txt"));
+    let (protokoll, _) = anbieterprotokoll(&d.wurzel.join("daten"));
+    let gespeichert = seiten::Einrichtung {
+        schluessel: schluessel::ALLE
+            .into_iter()
+            .map(|w| {
+                (
+                    w,
+                    schluessel_stand(u.schluessel(w), &protokoll, w.protokoll()),
+                )
+            })
+            .collect(),
+        ki_halt: werkbank::lies_falls_da(&kostenschutz::pfad(&d.wurzel)),
+        kurse_halt: werkbank::lies_falls_da(&kostenschutz::kurse_pfad(&d.wurzel)),
+        papier_freigabe: depot_lage::papier_freigabe_angebot(&d.wurzel),
+        alpha_kontingent: depot_lage::abrufkontingent::stand(&d.wurzel.join("daten"), jetzt).ok(),
+        zeitplan_gespeichert: None,
+        entwurf: formular(a.abfrage.as_bytes())
+            .map(|f| seiten::Entwurf::aus_formular(&f))
+            .unwrap_or_default(),
+        autostart: u.autostart(&d.wurzel),
+        wurzel: d.wurzel.display().to_string(),
+        grenzen: grenzwerte(),
+        abgelehnt: werkbank::lies_falls_da(&rueckfall::abgelehnt_pfad(&d.wurzel)).map(|t| {
+            t.unwrap_or_default()
+                .lines()
+                .map(|z| rueckfall::kurz(z.trim()).to_string())
+                .filter(|z| !z.is_empty())
+                .collect()
+        }),
+    };
+    let gemini_schluessel = u.schluessel(Wer::Gemini);
+    let gemini_stand = if gemini_schluessel == Hinterlegt::Unbekannt {
+        depot_lage::SchluesselStand::Unbekannt
+    } else {
+        schluessel_stand(gemini_schluessel, &protokoll, Wer::Gemini.protokoll())
+    };
+    let zusatz = gemini::einrichtung(d, gemini_stand, tag, &a.abfrage);
+    let zustand = d.sperre();
+    let gespeichert = seiten::Einrichtung {
+        zeitplan_gespeichert: match datei {
+            Ok(Some(t)) => Some(t == zustand.zeitplan.als_text()),
+            Ok(None) => None,
+            Err(_) => Some(false),
+        },
+        ..gespeichert
+    };
+    let inhalt = seiten::einrichtung(&d.token, &d.start, &zustand, tag, &gespeichert, &zusatz);
+    drop(zustand);
+    let seite = seiten::rahmen(
+        "/einrichtung",
+        None,
+        gemini::seiten_meldung(&a.abfrage),
+        &inhalt,
+        d.version.as_deref(),
+        &betriebsleiste(d, tag),
+        seiten::meldungs_aktion(&a.abfrage),
+    );
+    antwort(200, HTML, seite.as_bytes())
+}
+
 fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let tag = heute(jetzt);
     match a.pfad.as_str() {
@@ -238,7 +307,13 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/teil/quellen" => antwort(
             200,
             HTML,
-            seiten::quellen_teil(&d.token, &d.start, &d.sperre()).as_bytes(),
+            seiten::quellen_teil(
+                &d.token,
+                &d.start,
+                &d.sperre(),
+                depot_lage::abrufkontingent::stand(&d.wurzel.join("daten"), jetzt).ok(),
+            )
+            .as_bytes(),
         ),
         "/teil/kopf" => antwort(200, HTML, betriebsleiste(d, tag).as_bytes()),
         "/teil/update" => antwort(
@@ -248,74 +323,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         ),
         "/bestaetigen" => auftrag_bestaetigen(d, a, jetzt),
         "/protokoll" | "/protokoll.txt" => protokoll_lesen(d, a, tag),
-        "/einrichtung" => {
-            // Erst ausserhalb der Sperre nachsehen, was gespeichert ist.
-            let datei = werkbank::lies_falls_da(&d.wurzel.join("daten").join("zeitplan.txt"));
-            let (protokoll, _) = anbieterprotokoll(&d.wurzel.join("daten"));
-            let gespeichert = seiten::Einrichtung {
-                schluessel: schluessel::ALLE
-                    .into_iter()
-                    .map(|w| {
-                        (
-                            w,
-                            schluessel_stand(u.schluessel(w), &protokoll, w.protokoll()),
-                        )
-                    })
-                    .collect(),
-                ki_halt: werkbank::lies_falls_da(&kostenschutz::pfad(&d.wurzel)),
-                kurse_halt: werkbank::lies_falls_da(&kostenschutz::kurse_pfad(&d.wurzel)),
-                papier_freigabe: depot_lage::papier_freigabe_angebot(&d.wurzel),
-                alpha_kontingent: depot_lage::abrufkontingent::stand(
-                    &d.wurzel.join("daten"),
-                    jetzt,
-                )
-                .ok(),
-                zeitplan_gespeichert: None,
-                entwurf: formular(a.abfrage.as_bytes())
-                    .map(|f| seiten::Entwurf::aus_formular(&f))
-                    .unwrap_or_default(),
-                autostart: u.autostart(&d.wurzel),
-                wurzel: d.wurzel.display().to_string(),
-                grenzen: grenzwerte(),
-                abgelehnt: werkbank::lies_falls_da(&rueckfall::abgelehnt_pfad(&d.wurzel)).map(
-                    |t| {
-                        t.unwrap_or_default()
-                            .lines()
-                            .map(|z| rueckfall::kurz(z.trim()).to_string())
-                            .filter(|z| !z.is_empty())
-                            .collect()
-                    },
-                ),
-            };
-            let zustand = d.sperre();
-            let gespeichert = seiten::Einrichtung {
-                zeitplan_gespeichert: match datei {
-                    Ok(Some(t)) => Some(t == zustand.zeitplan.als_text()),
-                    Ok(None) => None,
-                    Err(_) => Some(false),
-                },
-                ..gespeichert
-            };
-            let mut inhalt = seiten::einrichtung(&d.token, &d.start, &zustand, tag, &gespeichert);
-            drop(zustand);
-            let gemini_schluessel = u.schluessel(Wer::Gemini);
-            let gemini_stand = if gemini_schluessel == Hinterlegt::Unbekannt {
-                depot_lage::SchluesselStand::Unbekannt
-            } else {
-                schluessel_stand(gemini_schluessel, &protokoll, Wer::Gemini.protokoll())
-            };
-            inhalt.push_str(&gemini::einrichtung(d, gemini_stand, tag, &a.abfrage));
-            let seite = seiten::rahmen(
-                "/einrichtung",
-                None,
-                gemini::seiten_meldung(&a.abfrage),
-                &inhalt,
-                d.version.as_deref(),
-                &betriebsleiste(d, tag),
-                seiten::meldungs_aktion(&a.abfrage),
-            );
-            antwort(200, HTML, seite.as_bytes())
-        }
+        "/einrichtung" => einrichtungsseite(d, u, a, jetzt, tag),
         "/app.js" => antwort(
             200,
             "text/javascript; charset=utf-8",

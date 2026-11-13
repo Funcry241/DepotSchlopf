@@ -984,7 +984,7 @@ fn gesamtstatus_ergaenzt_den_zeitplan() -> Result<(), String> {
     }
     let s = live(&d);
     assert!(
-        s.contains(">KI eingeschränkt<") && s.contains("Automatik: Zeitplan aus"),
+        s.contains(">Läuft ohne KI<") && s.contains("Automatik: Zeitplan aus"),
         "{s}"
     );
     assert!(s.contains("Maus: kein Schlüssel."), "{s}");
@@ -1190,7 +1190,8 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
     let t = donnerstag(17, 39)?;
     let tag = some(t.datum(), "Tag des Zeitplans")?;
     let html = get(&d, "/teil/live", t);
-    assert!(html.contains("<h2>Zeitstrahl</h2><p>Zeitplan aus"));
+    assert!(!html.contains("<h2>Zeitstrahl</h2><p>Zeitplan aus"));
+    assert_eq!(get(&d, "/", t).matches("Zeitplan aus.").count(), 1);
     {
         let mut z = d.sperre();
         z.boersen = vec![Boerse::Xetra, Boerse::Nyse];
@@ -1545,7 +1546,7 @@ fn quellenbereich_zeigt_den_tatsaechlichen_abruf_und_sein_ergebnis() -> Result<(
     let quellen = || get(&d, "/teil/quellen", t);
     assert!(quellen().contains("data-start="));
     assert!(quellen().contains("Kein Abruf im Verlauf"));
-    for beschriftung in ["Kurse prüfen", "EZB-Termine prüfen", "Schlagzeilen prüfen"] {
+    for beschriftung in ["Kurse abrufen", "Termine abrufen", "Schlagzeilen abrufen"] {
         assert!(quellen().contains(&format!(">{beschriftung}</button>")));
     }
     let xetra = Art::KurseVon(Boerse::Xetra);
@@ -1605,7 +1606,7 @@ fn einrichten_bleibt_auf_der_config_seite_und_zeigt_den_arbeitsstand() -> Result
     assert!(pos("id=\"quellen\"")? < pos("id=\"zeitplan\"")?);
     assert!(pos("id=\"zeitplan\"")? < pos("id=\"update\"")?);
     assert!(pos("id=\"update\"")? < pos("id=\"selten\"")?);
-    assert!(pos("id=\"selten\"")? < pos("id=\"journal\"")?);
+    assert!(pos("id=\"schluessel\"")? < pos("id=\"quellen\"")?);
     assert!(pos("id=\"schluessel\"")? < pos("id=\"autostart\"")?);
     assert!(pos("id=\"autostart\"")? < pos("id=\"werkzeuge\"")?);
     assert!(html.contains("name=\"ziel\" value=\"einrichtung\""));
@@ -1658,7 +1659,7 @@ fn journal_knopf_zeigt_arbeitsstand() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let t = donnerstag(12, 0)?;
     assert!(d.schritt(t).is_none());
-    assert!(get(&d, "/", t).contains(">Einrichten</button>"));
+    assert!(get(&d, "/", t).contains(">Journal einrichten</button>"));
     assert_eq!(
         get(&d, "/teil/live", t)
             .matches("Journal: Noch nicht eingerichtet.")
@@ -1666,10 +1667,10 @@ fn journal_knopf_zeigt_arbeitsstand() -> Result<(), String> {
         1
     );
     d.einreihen(Art::Einrichten, Anlass::Hand)?;
-    assert!(get(&d, "/teil/live", t).contains("disabled>Einrichten · wartet"));
+    assert!(get(&d, "/teil/live", t).contains("disabled>Journal einrichten · wartet"));
     let (nr, kind) = some(d.schritt(t), "Start")?;
     let live = get(&d, "/teil/live", t);
-    assert!(live.contains("disabled>Einrichten · läuft"));
+    assert!(live.contains("disabled>Journal einrichten · läuft"));
     assert!(live.contains("Der Lauf wird vorbereitet"));
     d.verfolge(nr, kind, || donnerstag(12, 0).ok());
     Ok(())
@@ -2747,7 +2748,12 @@ fn live_zeigt_den_tatsaechlichen_stand_der_vorbereitungsautomatik() -> Result<()
     let t = donnerstag(12, 0)?;
     assert!(d.schritt(t).is_none());
     for (an, vorbereitung, fehler, erwartet) in [
-        (false, VorbereitungsPlan::An, None, "Zeitplan aus."),
+        (
+            false,
+            VorbereitungsPlan::An,
+            None,
+            "Automatische Vorbereitung pausiert.",
+        ),
         (true, VorbereitungsPlan::Aus, None, "ist ausgeschaltet."),
         (true, VorbereitungsPlan::An, None, "ist eingeschaltet."),
         (
@@ -3572,6 +3578,39 @@ fn gemini_ohne_anfrage_hat_eigenen_lauf_und_keine_erfolgsmeldung() -> Result<(),
     let (gemini_ergebnis, _) = some(gemini_zeile.split_once("</tr>"), "Gemini-Ergebnis")?;
     assert!(gemini_ergebnis.contains("Nicht gefragt: Keine belegten Nachrichten."));
     assert!(!gemini_ergebnis.contains("erfolgreich"));
+    Ok(())
+}
+
+#[test]
+fn einrichtung_zeigt_grenzen_und_gemini_filter_vor_dem_ersten_aufruf() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let zeit = donnerstag(17, 39)?;
+    let seite = get(&d, "/einrichtung", zeit);
+    let journal = some(seite.find("id=\"journal\""), "Journal")?;
+    let zugaenge = some(seite.find("id=\"schluessel\""), "Zugangsdaten")?;
+    let selten = some(seite.find("id=\"selten\""), "Seltene Einstellungen")?;
+    let zusatz = some(seite.find("id=\"zusatz\""), "Zusatz-KIs")?;
+    let dienst = some(seite.find("<h2>Dienst</h2>"), "Dienst")?;
+    assert!(journal < zugaenge && zugaenge < selten && selten < zusatz && zusatz < dienst);
+    for text in [
+        "Kursquelle Alpha Vantage (Xetra)",
+        "Kursquelle Tiingo (US-Börsen)",
+        "Papier-Sperre bei Gesamtverlust</td><td class=\"z\">30 %",
+        "Kurshöchstalter",
+        "Maximaler Kurssprung",
+        "Maximaler Limitabstand",
+        "Papiergebühr je Order",
+        "Gemini-Aufrufe je Tag",
+    ] {
+        assert!(seite.contains(text), "{text}");
+    }
+    assert!(!get(&d, "/gespraeche", zeit).contains("<option value=\"gemini\""));
+    fs::write(
+        depot_lage::gespraeche::gemini_pfad(&d.wurzel.join("daten")),
+        "gratisprojekt=ja\n",
+    )
+    .map_err(|e| e.to_string())?;
+    assert!(get(&d, "/gespraeche", zeit).contains("<option value=\"gemini\">Gemini"));
     Ok(())
 }
 

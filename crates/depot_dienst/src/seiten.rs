@@ -58,7 +58,7 @@ margin:6px 0}\
 #neuverbinden{padding:12px}\
 @media(max-width:600px),(max-height:700px){.speicher-aktionen{position:static}}\
 label{display:block;margin:6px 0}\
-.einstellungsgruppe{border:2px solid var(--halt)}\
+.einstellungsgruppe{border:2px solid var(--halt)}.zusatz-einstellungen{border:1px solid var(--linie)}\
 .quellen-tabelle td:last-child button{width:100%}\
 .zugang-tabelle input{width:100%}.zugang-tabelle td{overflow-wrap:anywhere}\
 @media(max-width:600px){.zugang-tabelle,.zugang-tabelle tbody,\
@@ -127,24 +127,29 @@ fn bestaetigungslink(art: Art, text: &str, sha: Option<&str>, primaer: bool) -> 
     )
 }
 
+const ZEITFENSTER: &str = "von 08:00 bis vor 23:00 Uhr Frankfurter Zeit";
+const VORBEREITUNG_HAEUFIGKEIT: &str = depot_lage::html::VORBEREITUNG_HAEUFIGKEIT;
+
 pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> String {
     let (text, ziel, knopf, haken) = if art == Art::Vorbereiten {
         (
-            "Dachs und Maus bereiten den nächsten Handelstag unabhängig vor. Das verbraucht echtes KI-Budget innerhalb der bisherigen Grenzen. Keine Orders. Höchstens einmal je börsenfreiem Tag zwischen 08 und 23 Uhr Frankfurt.",
+            format!(
+                "Dachs und Maus bereiten den nächsten Handelstag unabhängig vor. Das verbraucht echtes KI-Budget. Die Vorbereitung erzeugt keine Orders. {VORBEREITUNG_HAEUFIGKEIT} Möglich {ZEITFENSTER}."
+            ),
             "/",
-            "Vorbereitung starten",
+            Art::Vorbereiten.name(),
             "Ich nutze das vorhandene KI-Budget für diese Vorbereitung.",
         )
     } else if sha.is_some() {
         (
-            "Das Update sichert deine Papierdaten und prüft die neue Version. Das dauert ein paar Minuten. Danach startet DepotSchlopf neu.",
+            "Das Update sichert deine Papierdaten und prüft die neue Version. Das dauert ein paar Minuten. Danach startet DepotSchlopf neu.".to_owned(),
             "/einrichtung#update",
             "Update einspielen",
             "Ich spiele diese Version ein.",
         )
     } else {
         (
-            "Der Papiertag handelt mit Papiergeld. Sind Dachs oder Maus eingerichtet und verfügbar, können ihre Antworten echtes KI-Budget verbrauchen.",
+            "Der Papiertag handelt mit Papiergeld. Sind Dachs oder Maus eingerichtet und verfügbar, können ihre Antworten echtes KI-Budget verbrauchen.".to_owned(),
             "/",
             "Papiertag starten",
             "Ich starte jetzt den Papiertag.",
@@ -174,28 +179,28 @@ fn abhilfe_knopf(token: &str, z: &Zustand, a: Abhilfe, primaer: bool) -> Option<
             token,
             z,
             Art::Einrichten,
-            "Einrichten",
+            Art::Einrichten.name(),
             primaer,
         )),
         Abhilfe::KurseAbrufen => Some(auftrag_knopf(
             token,
             z,
             Art::Kurse,
-            "Kurse abrufen",
+            Art::Kurse.name(),
             primaer,
         )),
         Abhilfe::Vorbereiten => Some(auftrag_knopf(
             token,
             z,
             Art::Vorbereiten,
-            "Vorbereitung starten",
+            Art::Vorbereiten.name(),
             primaer,
         )),
         Abhilfe::TermineAbrufen => Some(auftrag_knopf(
             token,
             z,
             Art::Termine,
-            "Termine abrufen",
+            Art::Termine.name(),
             primaer,
         )),
         Abhilfe::PapiertagStarten => Some(auftrag_knopf(
@@ -208,13 +213,13 @@ fn abhilfe_knopf(token: &str, z: &Zustand, a: Abhilfe, primaer: bool) -> Option<
         Abhilfe::SchluesselKursquelle
         | Abhilfe::SchluesselKursquelleUs
         | Abhilfe::SchluesselBerater(_) => {
-            Some("<a href=\"/einrichtung#schluessel\">Zur Einrichtung</a>".into())
+            Some("<a href=\"/einrichtung#schluessel\">Zugangsdaten prüfen</a>".into())
         }
         Abhilfe::KostenschutzPruefen => {
-            Some("<a href=\"/einrichtung#kostenschutz\">Zur Prüfung</a>".into())
+            Some("<a href=\"/einrichtung#kostenschutz\">Kostenschutz prüfen</a>".into())
         }
         Abhilfe::KurssperrePruefen => {
-            Some("<a href=\"/einrichtung#kurssperre\">Zur Prüfung</a>".into())
+            Some("<a href=\"/einrichtung#kurssperre\">Kurssperre prüfen</a>".into())
         }
         Abhilfe::Pruefen | Abhilfe::Warten => None,
     }
@@ -461,7 +466,7 @@ pub fn meldungs_aktion(abfrage: &str) -> (&'static str, &'static str) {
             ("/einrichtung#zeitplan", "Einrichtung prüfen")
         }
         "schluessel" | "schluessel_protokoll" | "schluessel_ungueltig" | "schluessel_fehler" => {
-            ("/einrichtung#schluessel", "Zu den Zugangsdaten")
+            ("/einrichtung#schluessel", "Zugangsdaten prüfen")
         }
         "update_suche" | "updatesuche_belegt" | "update_bestaetigen" | "vorbereitung_update" => {
             ("/einrichtung#update", "Zum Update")
@@ -666,9 +671,7 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
         None => "Kein Lauf in den nächsten Tagen geplant.".into(),
     };
     if z.zeitplan.nachrichten_an {
-        format!(
-            "{boersenlauf} · Schlagzeilen täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten."
-        )
+        format!("{boersenlauf} · Schlagzeilen täglich {ZEITFENSTER}, frühestens alle 90 Minuten.")
     } else {
         boersenlauf
     }
@@ -676,10 +679,12 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
 
 fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
     let mut s = String::from("<section id=\"zeitstrahl\"><h2>Zeitstrahl</h2>");
-    if z.automatik_status() != "an" {
+    if z.automatik_status() == "angehalten" {
         let klasse = automatik_halt_klasse(z);
         let _ = write!(s, "<p{klasse}>{}</p>", maskiere(&naechster_text(z, heute)));
-    } else if let Some(heute) = heute {
+    } else if z.zeitplan.an
+        && let Some(heute) = heute
+    {
         s.push_str("<p class=\"leise\">Geplante Startzeiten in Frankfurter Ortszeit.</p>");
         zeitstrahl_tag(&mut s, z, heute, true, ki);
         if let Some((_, tag, _)) = naechster_fuer(&z.zeitplan, &z.erledigt, heute, &z.boersen)
@@ -692,7 +697,10 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
             if ki.gemini_aktiv {
                 s.push_str(", danach optional kostenlose Gemini-Zuarbeit");
             }
-            s.push_str(" · täglich von 08:00 bis vor 23:00 Uhr, frühestens alle 90 Minuten, wenn der Dienst frei ist.</p>");
+            let _ = write!(
+                s,
+                " · täglich {ZEITFENSTER}, frühestens alle 90 Minuten, wenn der Dienst frei ist.</p>"
+            );
             if z.zeitplan.vorbereitung.aktiv()
                 && !crate::zeitplan::handelstag(heute)
                 && !ki_auftraege(z, heute).any(|a| a.art == Art::Vorbereiten)
@@ -702,7 +710,7 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
                 s.push_str("</p>");
             }
         }
-    } else {
+    } else if z.zeitplan.an {
         s.push_str("<p>Die aktuelle Frankfurter Ortszeit ist nicht verfügbar.</p>");
     }
     if let Some(tag) = heute {
@@ -873,18 +881,24 @@ fn automatik_halt_klasse(z: &Zustand) -> &'static str {
     }
 }
 
-fn naechster_abschnitt(z: &Zustand, heute: Option<Datum>) -> String {
-    let planung = maskiere(&naechster_text(z, heute));
-    let klasse = automatik_halt_klasse(z);
-    let titel = if z.warteschlange.is_empty() {
-        "Nächster geplanter Lauf: "
-    } else {
-        "Danach laut Zeitplan: "
-    };
-    let titel = if z.automatik_status() == "an" {
-        titel
-    } else {
-        ""
+fn naechster_abschnitt(z: &Zustand, heute: Option<Datum>, aus_zeigen: bool) -> String {
+    let planung = match z.automatik_status() {
+        "aus" if aus_zeigen => {
+            "<p>Zeitplan aus. <a href=\"/einrichtung#zeitplan\">Zeitplan ansehen</a></p>".into()
+        }
+        "aus" => String::new(),
+        _ => {
+            let klasse = automatik_halt_klasse(z);
+            let planung = maskiere(&naechster_text(z, heute));
+            let titel = if z.automatik_status() != "an" {
+                ""
+            } else if z.warteschlange.is_empty() {
+                "Nächster geplanter Lauf: "
+            } else {
+                "Danach laut Zeitplan: "
+            };
+            format!("<p{klasse}>{titel}{planung}</p>")
+        }
     };
     if let Some(a) = z.warteschlange.front() {
         let naechster = if z.verlauf_fehler.is_some() {
@@ -893,12 +907,12 @@ fn naechster_abschnitt(z: &Zustand, heute: Option<Datum>) -> String {
             "Als Nächstes"
         };
         format!(
-            "<p>{naechster}: {} ({})</p><p{klasse}>{titel}{planung}</p>",
+            "<p>{naechster}: {} ({})</p>{planung}",
             maskiere(a.art.name()),
             anlass_text(a.anlass)
         )
     } else {
-        format!("<p{klasse}>{titel}{planung}</p>")
+        planung
     }
 }
 
@@ -906,7 +920,7 @@ fn naechster_abschnitt(z: &Zustand, heute: Option<Datum>) -> String {
 pub fn fehler(status: u16, text: &str) -> Vec<u8> {
     let inhalt = format!(
         "<section><h2>Aktion nicht ausgeführt</h2><p>{}</p>\
-         <p><a href=\"/\">Zurück zu Live</a> · <a href=\"/einrichtung\">Zur Einrichtung</a></p></section>",
+         <p><a href=\"/\">Zurück zu Live</a> · <a href=\"/einrichtung\">Zugangsdaten prüfen</a></p></section>",
         maskiere(text)
     );
     crate::http::antwort(
@@ -974,7 +988,7 @@ fn ergebnis(a: &Auftrag, z: &Zustand) -> (&'static str, &'static str) {
     match a.erfolg {
         Some(true) if a.art == Art::Gemini => ("leise", "Lauf beendet"),
         Some(true) => ("gut", "erfolgreich"),
-        Some(false) => ("halt", "abgebrochen"),
+        Some(false) => ("halt", "fehlgeschlagen"),
         None => ("offen", "läuft"),
     }
 }
@@ -1054,7 +1068,7 @@ fn taetigkeit(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
             .collect();
         let _ = write!(s, "<p>Wartet: {}</p>", maskiere(&liste.join(", ")));
     }
-    s.push_str(&naechster_abschnitt(z, heute));
+    s.push_str(&naechster_abschnitt(z, heute, false));
     letzter_fehler_hinweis(&mut s, z);
     if !z.verlauf.is_empty() {
         s.push_str(
@@ -1159,7 +1173,6 @@ fn gesamtstatus_teil(token: &str, z: &Zustand, einrichtung: bool) -> String {
     });
     let (klasse, titel) = match (&journal, b.gruende()) {
         (Some((grund, _)), [einziger]) if grund == einziger => ("offen", "Journal in Arbeit"),
-        _ if matches!(b, depot_lage::Betrieb::OhneKi(_)) => (b.klasse(), "KI eingeschränkt"),
         _ => (b.klasse(), b.titel()),
     };
     let automatik = z.automatik_status();
@@ -1231,7 +1244,7 @@ pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String 
         s.push_str("<div class=\"betrieb aktiv\"><strong>Update: Neustart wird vorbereitet.</strong><p>Die Oberfläche verbindet sich von selbst neu.</p>");
     } else {
         s.push_str("<div class=\"betrieb\"><strong>Im Moment läuft kein Auftrag.</strong>");
-        s.push_str(&naechster_abschnitt(z, heute));
+        s.push_str(&naechster_abschnitt(z, heute, true));
         if let Some(a) = z.verlauf.front() {
             let (_, ergebnis) = ergebnis(a, z);
             let _ = write!(
@@ -1278,7 +1291,7 @@ pub fn live(token: &str, start: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
 fn vorbereitung_auf_live(token: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
     let stand = match z.automatik_status() {
         "angehalten" => "Automatische Vorbereitung pausiert: Zeitplan angehalten.",
-        "aus" => "Automatische Vorbereitung pausiert: Zeitplan aus.",
+        "aus" => "Automatische Vorbereitung pausiert.",
         _ if z.zeitplan.vorbereitung.aktiv() && z.zeitplan.nachrichten_an => {
             "Automatische Vorbereitung an börsenfreien Tagen ist eingeschaltet."
         }
@@ -1605,7 +1618,7 @@ fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
          Quellenkontingent und können mehrere Minuten dauern. Das Ergebnis steht auf Live \
          unter Tätigkeit im kopierbaren Protokoll.</p>{}\
          <p class=\"leise\">So prüfen: Beim Anbieter nachsehen, ob der Schlüssel noch gilt, und \
-         ihn bei Zweifel neu ausstellen und unter Schlüssel neu hinterlegen. Aufheben ändert nichts \
+         ihn bei Zweifel neu ausstellen und unter Zugangsdaten neu hinterlegen. Aufheben ändert nichts \
          am Journal. Der nächste Abruf holt alle Kurse neu und prüft sie wie immer. Der Grund \
          bleibt in daten/kurse_halt_aufgehoben.txt.</p>\
          <form method=\"post\" action=\"/kurssperre\">\
@@ -1627,7 +1640,12 @@ fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
     );
 }
 
-pub(crate) fn quellen_teil(token: &str, start: &str, z: &Zustand) -> String {
+pub(crate) fn quellen_teil(
+    token: &str,
+    start: &str,
+    z: &Zustand,
+    alpha: Option<(usize, usize)>,
+) -> String {
     let mut s = marke(start);
     s.push_str(
         "<section id=\"quellen\"><h2>Datenquellen und Verbindungstest</h2><p class=\"leise\">\
@@ -1636,22 +1654,16 @@ pub(crate) fn quellen_teil(token: &str, start: &str, z: &Zustand) -> String {
          Schlagzeilenabruf die eingeschaltete automatische Vorbereitung auslösen. Diese nutzt KI-Budget.</p>\
          <div class=\"breit\"><table class=\"quellen-tabelle\"><tr><th>Quelle</th><th>Letzter Abruf</th><th></th></tr>",
     );
-    for (art, name, aktion) in [
+    for (art, name) in [
         (
             Art::Kurse,
             "Schlusskurse aller Börsen der Liste (Xetra: Alpha Vantage, US-Börsen: Tiingo mit \
              EZB-Referenzkursen; je mit Schlüssel)",
-            "Kurse prüfen",
         ),
-        (
-            Art::Termine,
-            "Termine der EZB (ohne Schlüssel)",
-            "EZB-Termine prüfen",
-        ),
+        (Art::Termine, "Termine der EZB (ohne Schlüssel)"),
         (
             Art::Nachrichten,
             "Schlagzeilen: tagesschau und BBC World (kostenlos, ohne Schlüssel; mindestens 90 Minuten Abrufpause)",
-            "Schlagzeilen prüfen",
         ),
     ] {
         // Ein Kursabruf je Boerse zaehlt fuer die Kursquellen mit.
@@ -1675,8 +1687,23 @@ pub(crate) fn quellen_teil(token: &str, start: &str, z: &Zustand) -> String {
             s,
             "<tr><td>{}</td><td>{zuletzt}</td><td>{}</td></tr>",
             maskiere(name),
-            auftrag_knopf(token, z, art, aktion, false)
+            auftrag_knopf(token, z, art, art.name(), false)
         );
+        if art == Art::Kurse {
+            let kontingent = alpha.map_or_else(
+                || "Alpha-Vantage-Tageskontingent unbekannt.".into(),
+                |(heute, _)| {
+                    format!(
+                        "Heute {heute} von {} Alpha-Vantage-Anfragen.",
+                        depot_lage::abrufkontingent::AV_TAG
+                    )
+                },
+            );
+            let _ = write!(
+                s,
+                "<tr><td colspan=\"3\" class=\"leise\">{kontingent}</td></tr>"
+            );
+        }
     }
     s.push_str("</table></div></section>");
     s
@@ -1795,7 +1822,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          Test selbstständig laufen soll.</p>{gespeichert}{voraussetzung}\
          {schalter}\
          <h3>Uhrzeiten und automatische Läufe</h3>\
-         <p>Änderungen gelten ab dem Speichern. Kurs- und Terminläufe richten sich nach den Handelstagen der Börsenliste und nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich zwischen 08 und 23 Uhr, frühestens alle 90 Minuten. An börsenfreien Tagen kann ein erfolgreicher Abruf die unten aktivierte Vorbereitung auslösen. Diese Vorbereitung nutzt KI-Budget. \
+         <p>Änderungen gelten ab dem Speichern. Kurs- und Terminläufe richten sich nach den Handelstagen der Börsenliste und nach Frankfurter Zeit. Zusätzliche Schlagzeilen lassen sich unten einschalten: täglich {ZEITFENSTER}, frühestens alle 90 Minuten. An börsenfreien Tagen kann ein erfolgreicher Abruf die unten aktivierte Vorbereitung auslösen. Diese Vorbereitung nutzt KI-Budget. \
          Für beide Börsen ist 07:30 Uhr Frankfurter Zeit voreingestellt.</p>\
          {entwurf_hinweis}\
          <form id=\"zeitplan-formular\" method=\"post\" action=\"/zeitplan\" data-aenderungen data-entwurf=\"{entwurf}\">\
@@ -1811,8 +1838,8 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          Zusätzlich tagsüber Schlagzeilen abrufen (empfohlen für das Weltmodell, kostenlos; \
          gilt nur bei eingeschaltetem Zeitplan)</label>\
          <label><input type=\"checkbox\" name=\"vorbereitung_an\" value=\"ja\"{}> \
-         An börsenfreien Tagen den nächsten Handelstag vorbereiten (empfohlen; braucht Schlagzeilen und eingeschalteten Zeitplan; höchstens ein Aufruf je KI und Tag zwischen 08 und 23 Uhr). \
-         Erst nach bestätigtem Update verfügbar. Der Quellenstand wird auch bei fehlendem KI-Budget belegt. Für KI-Aufrufe gelten der Tagesrahmen und die Rücklage für Erstmeinungen. An Handelstagen werden die Erkenntnisse in den regulären Aufrufen neu geprüft.</label>\
+         An börsenfreien Tagen den nächsten Handelstag vorbereiten (empfohlen; braucht Schlagzeilen und eingeschalteten Zeitplan). {VORBEREITUNG_HAEUFIGKEIT} Möglich {ZEITFENSTER}. \
+         Erst nach bestätigtem Update verfügbar. Der Quellenstand wird auch bei fehlendem KI-Budget belegt. Für KI-Aufrufe gelten der Tagesrahmen und die Rücklage für Erstmeinungen. An Handelstagen werden die Hypothesen in den regulären Aufrufen neu geprüft.</label>\
          <label><input type=\"checkbox\" name=\"hinweis_an\" value=\"ja\"{}> \
          Windows-Hinweis bei Eingriff (empfohlen; zeigt im Infobereich eine Sprechblase, sobald \
          ein neuer Grund für „Eingriff nötig“ entsteht oder ein Papiertag ausgefallen ist; löst \
@@ -1966,23 +1993,6 @@ fn update_teil(token: &str, start: &str, z: &Zustand, e: &Einrichtung, s: &mut S
     s.push_str("</details></section>");
 }
 
-fn grenzen_teil(e: &Einrichtung, s: &mut String) {
-    s.push_str(
-        "<section id=\"grenzen\"><h2>Grenzen und Budgets</h2><p class=\"leise\">Nur zur Ansicht. \
-         Diese Schutzgrenzen gelten für jeden Lauf. Änderungen brauchen deine ausdrückliche Freigabe \
-         und werden außerhalb dieses Formulars geprüft. Verbrauch und Rest je KI stehen auf Live.</p><table>",
-    );
-    for g in &e.grenzen {
-        let _ = write!(
-            s,
-            "<tr><td>{}</td><td class=\"z\">{}</td></tr>",
-            maskiere(g.name),
-            maskiere(&g.wert)
-        );
-    }
-    s.push_str("</table></section>");
-}
-
 fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
     let Some(angebot) = &e.papier_freigabe else {
         return;
@@ -2011,7 +2021,7 @@ fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
 pub(crate) fn journal_teil(token: &str, start: &str, z: &Zustand) -> String {
     let mut s = marke(start);
     s.push_str(
-        "<section id=\"journal\"><h2>1. Journal</h2><p>Hier hält DepotSchlopf seine Läufe und Papierdaten dauerhaft fest.</p>",
+        "<section id=\"journal\"><h2>Journal</h2><p>Hier hält DepotSchlopf seine Läufe und Papierdaten dauerhaft fest.</p>",
     );
     match z
         .lage
@@ -2087,15 +2097,25 @@ fn erste_schritte(z: &Zustand, e: &Einrichtung) -> String {
 }
 
 /// Der Inhalt der Einrichtung.
+fn journal_und_zugaenge(token: &str, start: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
+    let _ = write!(
+        s,
+        "<div data-teil=\"/teil/journal\">{}</div>",
+        journal_teil(token, start, z)
+    );
+    schluessel_teil(token, e, s);
+}
+
 pub fn einrichtung(
     token: &str,
     start: &str,
     z: &Zustand,
     heute: Option<Datum>,
     e: &Einrichtung,
+    zusatz: &str,
 ) -> String {
     let mut s = String::from(
-        "<section><h2>Einrichtung – Schritt für Schritt</h2><p>Hier legst du fest, wie DepotSchlopf für dich arbeitet. Du kannst die Einrichtung jederzeit später fortsetzen. Änderungen gelten nach dem Speichern; an jedem Formular steht, was als Nächstes geschieht.</p><p><a href=\"#zeitplan\">Automatische Läufe einrichten</a> · <a href=\"#schluessel\">Zugangsdaten einrichten</a></p></section>",
+        "<section><h2>Einrichtung – Schritt für Schritt</h2><p>Hier legst du fest, wie DepotSchlopf für dich arbeitet. Du kannst die Einrichtung jederzeit später fortsetzen. Änderungen gelten nach dem Speichern; an jedem Formular steht, was als Nächstes geschieht.</p><p><a href=\"#zeitplan\">Automatische Läufe einrichten</a> · <a href=\"#schluessel\">Zugangsdaten prüfen</a></p></section>",
     );
     let _ = write!(
         s,
@@ -2104,6 +2124,7 @@ pub fn einrichtung(
     );
     if !z.zeitplan.an {
         s.push_str(&erste_schritte(z, e));
+        journal_und_zugaenge(token, start, z, e, &mut s);
     }
     if !matches!(&e.ki_halt, Ok(None)) {
         kostenschutz_teil(token, e, &mut s);
@@ -2113,20 +2134,15 @@ pub fn einrichtung(
     let _ = write!(
         s,
         "<div data-teil=\"/teil/quellen\">{}</div>",
-        quellen_teil(token, start, z)
+        quellen_teil(token, start, z, e.alpha_kontingent)
     );
     zeitplan_teil(token, z, e, &mut s);
     update_teil(token, start, z, e, &mut s);
     s.push_str("<section id=\"selten\" class=\"einstellungsgruppe\" aria-labelledby=\"selten-titel\"><h2 id=\"selten-titel\">Seltene Einstellungen</h2><p>Für die erste Einrichtung oder wenn sich etwas ändert: Zugangsdaten, Datenspeicherung, Windows-Start und technische Prüfungen.</p>");
     if z.zeitplan.an {
         s.push_str(&erste_schritte(z, e));
+        journal_und_zugaenge(token, start, z, e, &mut s);
     }
-    let _ = write!(
-        s,
-        "<div data-teil=\"/teil/journal\">{}</div>",
-        journal_teil(token, start, z)
-    );
-    schluessel_teil(token, e, &mut s);
     autostart_teil(token, e, &mut s);
     s.push_str("<section id=\"werkzeuge\"><h2>Werkzeuge</h2><p>Diese Prüfungen brauchst du nur bei der ersten Einrichtung oder wenn etwas nicht funktioniert.</p>");
     if matches!(&e.ki_halt, Ok(None)) {
@@ -2137,7 +2153,7 @@ pub fn einrichtung(
         s.push_str(KI_VERBINDUNG);
     }
     if matches!(&e.kurse_halt, Ok(None)) {
-        s.push_str("<p id=\"kurssperre\">Kurssperre: keine Sperre.</p>");
+        s.push_str("<p id=\"kurssperre\">Kurssperre · <span class=\"gut\">frei</span></p>");
     }
     if e.papier_freigabe.is_none() {
         s.push_str("<p id=\"papierfreigabe\" class=\"leise\">Derzeit wird keine Papierfreigabe angeboten. Den Betriebszustand siehst du oben.</p>");
@@ -2151,11 +2167,13 @@ pub fn einrichtung(
          <button type=\"submit\">Freigabedialog testen</button></form></div></section>",
         maskiere(token)
     );
-    grenzen_teil(e, &mut s);
+    depot_lage::html::grenzen(&mut s, &e.grenzen);
+    s.push_str("</section>");
+    s.push_str(zusatz);
     let _ = write!(
         s,
         "<section><h2>Dienst</h2><p>Erreichbar nur auf diesem Rechner: \
-         http://127.0.0.1:{}/ · Projektordner {}</p></section></section>",
+         http://127.0.0.1:{}/ · Projektordner {}</p></section>",
         crate::http::PORT,
         maskiere(&e.wurzel)
     );

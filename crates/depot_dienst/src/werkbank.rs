@@ -16,7 +16,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use depot_kern::{Boerse, Datum, Zeitpunkt};
-use depot_lage::anbieter::Wer as Quelle;
 use depot_lage::{Betrieb, Lagebild, SchluesselStand, TagStand, ortszeit};
 
 use crate::hinweis::Gedaechtnis;
@@ -237,16 +236,6 @@ pub enum ZeitplanAbgelehnt {
     Datei(String),
 }
 
-fn quelle_name(w: Quelle) -> &'static str {
-    match w {
-        Quelle::Kursquelle => "Kursquelle Alpha Vantage",
-        Quelle::Tiingo => "Kursquelle Tiingo",
-        Quelle::Dachs => "Dachs (Claude)",
-        Quelle::Maus => "Maus (GPT)",
-        Quelle::Gemini => "Gemini",
-    }
-}
-
 /// Ein Auftrag von Hand, der so kurz nach dem Ende desselben Auftrags kommt, gilt als
 /// Doppelklick oder erneutes Absenden und wird nicht eingereiht.
 pub const DOPPELT_SEKUNDEN: i64 = 30;
@@ -373,7 +362,7 @@ impl Zustand {
                     SchluesselStand::Hinterlegt | SchluesselStand::Geprueft(_)
                 )
             })
-            .map(|(w, st)| format!("{}: Schlüssel {}", quelle_name(*w), st.text()))
+            .map(|(w, st)| format!("{}: Schlüssel {}", w.anzeigename(), st.text()))
             .collect();
         if l.bild.schluessel.is_empty() {
             fehlt.push("Stand der Schlüssel unbekannt".into());
