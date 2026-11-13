@@ -2,3 +2,5 @@ klasse: KodexAenderung
 zweck: Ablehnung einer Kodex-Änderung ohne Grenzfreigabe auf GitHub nachweisen
 pfade:
 crates/depot_kodex/src/quellscan.rs
+kodex/festschreibung.txt
+kodex/freigabe.txt
