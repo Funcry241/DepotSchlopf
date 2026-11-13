@@ -4012,3 +4012,197 @@ fn sicherung_formulare_speichern_und_starten() -> Result<(), String> {
     );
     Ok(())
 }
+
+#[test]
+fn depot_seite_da() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let html = get(&d, "/depot", donnerstag(12, 0)?);
+    assert!(html.contains("200 OK"), "{html}");
+    assert!(
+        html.contains("aria-current=\"page\" href=\"/depot\"")
+            || html.contains("href=\"/depot\" aria-current=\"page\"")
+    );
+    Ok(())
+}
+
+#[test]
+fn menue_ueberall() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    for pfad in ["/", "/gespraeche", "/einrichtung"] {
+        assert!(
+            get(&d, pfad, donnerstag(12, 0)?).contains("href=\"/depot\""),
+            "{pfad}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn depot_ohne_journal() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let html = get(&d, "/depot", donnerstag(12, 0)?);
+    assert!(html.contains("Noch kein Depot: Es entsteht mit dem ersten Papiertag."));
+    Ok(())
+}
+
+#[test]
+fn depot_kein_auffrischen() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let html = get(&d, "/depot", donnerstag(12, 0)?);
+    assert_eq!(html.matches("data-teil=").count(), 1);
+    assert!(html.contains("Seite neu laden für den neuesten Stand"));
+    Ok(())
+}
+
+#[test]
+fn depot_journal_kaputt() -> Result<(), String> {
+    let wurzel = ordner()?;
+    fs::write(wurzel.join("daten/journal.txt"), "kaputt\n").map_err(|e| e.to_string())?;
+    let d = dienst(wurzel, true);
+    let html = get(&d, "/depot", donnerstag(12, 0)?);
+    assert!(html.contains("class=\"halt\">Halt:"), "{html}");
+    assert!(!html.contains("Gesamtwert"));
+    Ok(())
+}
+
+fn depot_mit_positionen() -> Result<Arc<Dienst>, String> {
+    use depot_journal::{Journal, KursBeleg};
+    use depot_kern::{Cent, Herkunft, Isin, Kurs, Topf, TopfId};
+
+    let wurzel = ordner()?;
+    let journal = wurzel.join("daten/journal.txt");
+    Journal::einrichten(&journal).map_err(|e| format!("{e:?}"))?;
+    let mut j = Journal::oeffnen(&journal).map_err(|e| format!("{e:?}"))?;
+    let mut topf = Topf::neu(TopfId::A, Cent(566_667)).map_err(|e| format!("{e:?}"))?;
+    let abruf = donnerstag(17, 40)?;
+    let tag = some(abruf.frankfurt_tag(), "Kurstag")?;
+    let schluss = some(Boerse::Xetra.schluss(tag), "Schluss")?;
+    for (isin, preis) in [
+        ("DE0007164600", 333_333),
+        ("DE0008404005", 90_000),
+        ("DE000BASF111", 10_000),
+    ] {
+        let isin = Isin::neu(isin).map_err(|e| format!("{e:?}"))?;
+        topf.setze_bestand(isin.clone(), 1);
+        for datum in [tag, some(Boerse::Xetra.bezugstag(tag), "Vortag")?] {
+            let zeit = some(Boerse::Xetra.schluss(datum), "Schluss")?;
+            let kurs = Kurs::neu(
+                Cent(preis),
+                "EUR",
+                datum,
+                zeit.min(schluss),
+                Herkunft::Quelle,
+            )
+            .map_err(|e| format!("{e:?}"))?;
+            let beleg = KursBeleg::neu("alphavantage", abruf, b"Depotprobe", isin.clone(), kurs)
+                .map_err(|e| format!("{e:?}"))?;
+            j.belege_kurs(&beleg).map_err(|e| format!("{e:?}"))?;
+        }
+    }
+    j.setze_topf(&topf).map_err(|e| format!("{e:?}"))?;
+    drop(j);
+    Ok(dienst(wurzel, true))
+}
+
+#[test]
+fn depot_sortierung() -> Result<(), String> {
+    let d = depot_mit_positionen()?;
+    let html = get(&d, "/depot", donnerstag(18, 0)?);
+    let tabelle = some(
+        html.split_once("Wo bin ich investiert?"),
+        "Positionstabelle",
+    )?
+    .1;
+    let mut zuletzt = 0;
+    for wort in ["SAP", "Allianz", "BASF", "Bargeld"] {
+        let stelle = some(tabelle.find(wort), wort)?;
+        assert!(stelle > zuletzt);
+        zuletzt = stelle;
+    }
+    Ok(())
+}
+
+#[test]
+fn depot_anteil() -> Result<(), String> {
+    let d = depot_mit_positionen()?;
+    let html = get(&d, "/depot", donnerstag(18, 0)?);
+    assert!(html.contains("33,33 %"), "{html}");
+    Ok(())
+}
+
+#[test]
+fn depot_einstand_nicht_belegt() -> Result<(), String> {
+    let d = depot_mit_positionen()?;
+    let html = get(&d, "/depot", donnerstag(18, 0)?);
+    assert!(html.contains("<td>nicht belegt</td><td>–</td>"));
+    Ok(())
+}
+
+#[test]
+fn depot_tagesergebnis_ohne_vortag() -> Result<(), String> {
+    let d = depot_mit_positionen()?;
+    assert!(get(&d, "/depot", donnerstag(18, 0)?).contains("noch kein Vortag"));
+    Ok(())
+}
+
+fn depot_mit_order() -> Result<Arc<Dienst>, String> {
+    use depot_journal::Art::{Auftrag, Topf, Zustand};
+    let wurzel = ordner()?;
+    let inhalt = depot_journal::inhalt_fuer(&[
+        (Topf, "A;500000;"),
+        (Auftrag, "1;A;DE0007164600;Kauf;10;10000;Umschichtung"),
+        (Zustand, "1;gesendet"),
+        (Zustand, "1;angenommen"),
+    ]);
+    let vermerk = some(depot_journal::vermerk_fuer(&inhalt, 0), "Journalvermerk")?;
+    fs::write(wurzel.join("daten/journal.txt"), inhalt).map_err(|e| e.to_string())?;
+    fs::write(wurzel.join("daten/journal.vermerk"), vermerk).map_err(|e| e.to_string())?;
+    Ok(dienst(wurzel, true))
+}
+
+#[test]
+fn depot_ohne_technik() -> Result<(), String> {
+    let d = depot_mit_order()?;
+    let html = get(&d, "/depot", donnerstag(18, 0)?);
+    assert!(html.contains("liegt beim Papiermakler"), "{html}");
+    for roh in [
+        "Some(",
+        "None",
+        "Teilgefuellt",
+        "Reserviert",
+        "DE0007164600",
+    ] {
+        assert!(!html.contains(roh), "{roh}");
+    }
+    Ok(())
+}
+
+#[test]
+fn live_zustand_in_worten() -> Result<(), String> {
+    let d = depot_mit_order()?;
+    let zeit = donnerstag(18, 0)?;
+    let bild = depot_lage::mit_journal(&d.wurzel.join("daten"), |journal| {
+        lagebild(&Umgebung {
+            jetzt: zeit,
+            journal,
+            kursquelle: Hinterlegt::Nein,
+            kursquelle_us: Hinterlegt::Nein,
+            berater: [
+                (BeraterId::Dachs, Hinterlegt::Nein),
+                (BeraterId::Maus, Hinterlegt::Nein),
+            ],
+            sperren: Vec::new(),
+            anbieter: Vec::new(),
+            anbieter_unlesbar: 0,
+            ki_halt: None,
+        })
+    });
+    d.sperre().lage = Some(depot_dienst::werkbank::Lage { stand: zeit, bild });
+    let html = get(&d, "/teil/live", zeit);
+    assert!(
+        html.contains("liegt beim Papiermakler") && html.contains("Mehr zum Depot"),
+        "{html}"
+    );
+    assert!(!html.contains("Angenommen"));
+    Ok(())
+}

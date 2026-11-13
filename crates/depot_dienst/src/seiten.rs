@@ -547,11 +547,12 @@ pub fn rahmen(
          beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu. Wenn du das schwarze \
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div>\
          <p id=\"neuverbinden\" hidden><a id=\"neuverbinden-link\" class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
-         <nav aria-label=\"Hauptnavigation\"><h1>DepotSchlopf</h1>{}{}{}\
+         <nav aria-label=\"Hauptnavigation\"><h1>DepotSchlopf</h1>{}{}{}{}\
          <span class=\"leise\">Nur Papiergeld.</span>{version}</nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit DepotSchlopf läuft. \
          Du kannst es minimieren.</p>",
         nav("/", "Live"),
+        nav("/depot", "Depot"),
         nav("/gespraeche", "KI-Gespräche"),
         nav("/einrichtung", "Einrichtung")
     );

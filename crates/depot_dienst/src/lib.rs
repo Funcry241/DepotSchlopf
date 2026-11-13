@@ -22,6 +22,7 @@
 pub mod aktualisierung;
 mod analyse;
 pub mod autostart;
+mod depotseite;
 mod gemini;
 mod gespraeche;
 pub mod hinweis;
@@ -325,6 +326,18 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let tag = heute(jetzt);
     match a.pfad.as_str() {
         "/" => live_seite(d, a, jetzt),
+        "/depot" => {
+            let html = seiten::rahmen(
+                "/depot",
+                None,
+                None,
+                &depotseite::inhalt(&d.wurzel.join("daten"), jetzt),
+                d.version.as_deref(),
+                &betriebsleiste(d, heute(jetzt)),
+                seiten::meldungs_aktion(&a.abfrage),
+            );
+            antwort(200, HTML, html.as_bytes())
+        }
         "/gespraeche" => gespraechsseite(d, a, tag),
         "/export" => seiten::fehler(405, "Verwende das Analyse-Exportformular."),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),

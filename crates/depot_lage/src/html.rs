@@ -421,7 +421,7 @@ fn depot(l: &Lagebild, s: &mut String) {
         }
         s.push_str("</table></div>");
     }
-    s.push_str("</section>");
+    s.push_str("<p><a href=\"/depot\">Mehr zum Depot</a></p></section>");
 }
 
 /// Basispunkte als Prozent mit Vorzeichen: `+2,46 %`, `−0,01 %`, `±0,00 %`.
