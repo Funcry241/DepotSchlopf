@@ -70,3 +70,6 @@ arithmetic_side_effects = "deny"
 [profile.strict]
 inherits = "release"
 overflow-checks = true
+
+[profile.dev.package.depot_kodex]
+opt-level = 2

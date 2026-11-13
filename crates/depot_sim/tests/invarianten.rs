@@ -445,14 +445,28 @@ fn abstimmung_fuehrt_nur_aus_was_beide_zuletzt_tragen() -> Result<(), String> {
             folgen.push(f);
         }
     }
+    let offen = pruefe_abstimmungsfolgen(&folgen, 4, pruefe)?;
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
+}
+
+fn pruefe_abstimmungsfolgen(
+    folgen: &[Vec<(Zug, Zug)>],
+    arbeiterzahl: usize,
+    pruefung: impl Fn(&[(Zug, Zug)]) -> Result<Vec<String>, String> + Sync,
+) -> Result<Vec<String>, String> {
     // Jede Folge hat ein eigenes Journal und Papierkonto. Die Ergebnisse bleiben geordnet.
-    let offen = std::thread::scope(|scope| -> Result<Vec<String>, String> {
+    std::thread::scope(|scope| -> Result<Vec<String>, String> {
         let mut arbeiter = Vec::new();
-        for teil in folgen.chunks(folgen.len().div_ceil(4)) {
+        let pruefung = &pruefung;
+        for teil in folgen.chunks(folgen.len().div_ceil(arbeiterzahl).max(1)) {
             arbeiter.push(scope.spawn(move || -> Result<Vec<String>, String> {
                 let mut offen = Vec::new();
                 for f in teil {
-                    offen.extend(pruefe(f)?);
+                    offen.extend(pruefung(f)?);
                     if offen.len() > 10 {
                         break;
                     }
@@ -470,12 +484,38 @@ fn abstimmung_fuehrt_nur_aus_was_beide_zuletzt_tragen() -> Result<(), String> {
         }
         offen.truncate(11);
         Ok(offen)
-    })?;
-    if offen.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("{offen:#?}"))
+    })
+}
+
+#[test]
+fn abstimmungsfolgen_bei_einem_und_vier_arbeitern() -> Result<(), String> {
+    let zuege = alle_zuege();
+    let mut zufall = Zufall(STARTWERTE.first().copied().ok_or("Startwert")?);
+    let folgen: Vec<_> = (0..16)
+        .map(|_| {
+            let zug = zuege.get(zufall.bis(zuege.len())).copied().ok_or("Zug")?;
+            Ok(vec![(zug, (Schritt::Behalten, true))])
+        })
+        .collect::<Result<_, String>>()?;
+    for arbeiterzahl in [1, 4] {
+        let offen = pruefe_abstimmungsfolgen(&folgen, arbeiterzahl, pruefe)?;
+        assert!(offen.is_empty(), "{offen:?}");
+        let fehlerfall = folgen.first().ok_or("Erste Folge")?;
+        let offen = pruefe_abstimmungsfolgen(&folgen, arbeiterzahl, |folge| {
+            let mut offen = pruefe(folge)?;
+            if folge == fehlerfall {
+                offen.push("Absichtlich falscher Modellbefund".into());
+            }
+            Ok(offen)
+        })?;
+        assert!(!offen.is_empty());
+        assert!(
+            offen
+                .iter()
+                .all(|meldung| meldung == "Absichtlich falscher Modellbefund")
+        );
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------
