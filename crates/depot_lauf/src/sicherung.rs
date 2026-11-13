@@ -366,6 +366,7 @@ mod tests {
             fs::read(&stand).map_err(|e| e.to_string())?,
             "unverändert".as_bytes()
         );
+        sperre.unlock().map_err(|e| e.to_string())?;
         drop(sperre);
         sichern(&ort.projekt(), false)
     }
