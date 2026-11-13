@@ -216,7 +216,7 @@ pub fn sichern_nach(
             .file_name()
             .to_str()
             .and_then(|name| name.strip_suffix(".tmp"))
-            .is_some_and(eigener_name)
+            .is_some_and(depot_export::sicherung::sicherungsname)
             && eintrag
                 .file_type()
                 .map_err(|e| format!("Sicherungsordner: {e}"))?
@@ -247,28 +247,14 @@ pub fn sichern_nach(
     Ok(name)
 }
 
-fn eigener_name(name: &str) -> bool {
-    let Some((uhr, commit)) = name.strip_prefix("utc-").and_then(|s| s.split_once('_')) else {
-        return false;
-    };
-    let Some((sekunden, nanos)) = uhr.split_once('-') else {
-        return false;
-    };
-    sekunden.len() == 20
-        && nanos.len() == 9
-        && sekunden
-            .bytes()
-            .chain(nanos.bytes())
-            .all(|b| b.is_ascii_digit())
-        && crate::update::ist_commit(commit)
-}
-
 fn begrenze(wurzel: &Path, max: usize) -> Result<(), String> {
     let mut namen = Vec::new();
     for e in fs::read_dir(wurzel).map_err(|e| format!("Sicherungen auflisten: {e}"))? {
         let e = e.map_err(|e| format!("Sicherungen auflisten: {e}"))?;
         let name = e.file_name();
-        if name.to_str().is_some_and(eigener_name)
+        if name
+            .to_str()
+            .is_some_and(depot_export::sicherung::sicherungsname)
             && e.file_type()
                 .map_err(|e| format!("Sicherung prüfen: {e}"))?
                 .is_dir()
