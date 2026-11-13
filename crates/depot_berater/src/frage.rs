@@ -74,17 +74,74 @@ Antworte am Ende ausschliesslich mit dem verlangten JSON-Objekt, ohne weiteren T
     )
 }
 
-/// Die Lage als Text: Topf, Kurse, Termine.
-fn lage_text(lage: &Lage<'_>, universum: &Universum, bilanz: &[(BeraterId, Auswertung)]) -> String {
-    let mut t = String::new();
-    let _ = writeln!(t, "Datum: {}", lage.datum);
-    let _ = writeln!(
-        t,
-        "Topf {:?}: Bargeld {} EUR, davon für Käufe frei {} EUR",
-        lage.topf.id(),
-        euro(Preis::aus_cent(lage.topf.bargeld())),
-        euro(Preis::aus_cent(lage.kaufbar))
-    );
+fn bewegung(bp: i64) -> String {
+    let betrag = bp.unsigned_abs().checked_div(10).unwrap_or(0);
+    let vorzeichen = match bp.signum() {
+        1 => "+",
+        -1 => "−",
+        _ => "",
+    };
+    format!(
+        "{vorzeichen}{},{} %",
+        betrag.checked_div(10).unwrap_or(0),
+        betrag.checked_rem(10).unwrap_or(0)
+    )
+}
+
+fn verlauf_text(lage: &Lage<'_>, isin: &Isin) -> String {
+    use depot_sim::kursverlauf::Verlauf;
+    match lage
+        .verlauf
+        .iter()
+        .find(|(wert, _)| wert == isin)
+        .map(|(_, v)| *v)
+    {
+        Some(Verlauf::Da {
+            t1_bp,
+            t5_bp,
+            t20_bp,
+            unter_hoch_bp,
+            ..
+        }) => format!(
+            "1T {}, 5T {}, 20T {}, {} unter 20T-Hoch",
+            bewegung(t1_bp),
+            bewegung(t5_bp),
+            bewegung(t20_bp),
+            bewegung(unter_hoch_bp).trim_start_matches('+')
+        ),
+        _ => "zu wenig Verlauf".into(),
+    }
+}
+
+fn gewinnschwelle(t: &mut String) {
+    let grenzen = Grenzen::standard();
+    let gebuehren = grenzen.gebuehren();
+    gewinnschwelle_mit(t, grenzen.min_order(), |order| gebuehren.fuer(order));
+}
+
+fn gewinnschwelle_mit(
+    t: &mut String,
+    mindestorder: depot_kern::Cent,
+    gebuehr: impl Fn(depot_kern::Cent) -> Option<depot_kern::Cent>,
+) {
+    for order in [mindestorder, depot_kern::Cent(100_000)] {
+        let Some((summe, bp)) = gebuehr(order)
+            .and_then(|g| g.checked_add(g))
+            .and_then(|g| Some((g, g.in_bp_von(order)?)))
+        else {
+            continue;
+        };
+        let _ = writeln!(
+            t,
+            "Eine Order über {} EUR kostet hin und zurück {} EUR Gebühren, also mindestens {} Kursgewinn.",
+            euro(Preis::aus_cent(order)),
+            euro(Preis::aus_cent(summe)),
+            bewegung(bp).trim_start_matches('+')
+        );
+    }
+}
+
+fn positionen_text(t: &mut String, lage: &Lage<'_>, universum: &Universum) {
     let namen: BTreeMap<&Isin, &str> = universum
         .instrumente()
         .iter()
@@ -106,11 +163,21 @@ fn lage_text(lage: &Lage<'_>, universum: &Universum, bilanz: &[(BeraterId, Auswe
                 euro(wert)
             );
             if let Some(kauf) = lage.positionskaeufe.iter().find(|kauf| kauf.isin == *isin) {
-                let datum = kauf
+                let kauftag = kauf
                     .ausfuehrung
                     .kurszeit
-                    .and_then(|zeit| zeit.in_frankfurt().map(|(datum, ..)| datum))
-                    .map_or_else(|| "Datum unbekannt".into(), |datum| datum.to_string());
+                    .and_then(depot_kern::Zeitpunkt::frankfurt_tag);
+                let datum =
+                    kauftag.map_or_else(|| "Datum unbekannt".into(), |datum| datum.to_string());
+                if let Some(tage) = kauftag.and_then(|kauf| {
+                    let bis = lage
+                        .kurse
+                        .eintrag(isin)
+                        .map_or(lage.datum, depot_kern::Kurs::handelstag);
+                    depot_sim::kursverlauf::haltedauer(isin, kauf, bis)
+                }) {
+                    let _ = writeln!(t, "  Gehalten seit {tage} Handelstagen.");
+                }
                 let _ = writeln!(
                     t,
                     "  Letzter ausgeführter Kauf: {datum}, {} Stück zu {} EUR, Gebühren {} EUR.",
@@ -130,17 +197,33 @@ fn lage_text(lage: &Lage<'_>, universum: &Universum, bilanz: &[(BeraterId, Auswe
             let _ = writeln!(t, "  Keine Kaufthese zur Ausführung belegt.");
         }
     }
+}
+
+/// Die Lage als Text: Topf, Kurse, Termine.
+fn lage_text(lage: &Lage<'_>, universum: &Universum, bilanz: &[(BeraterId, Auswertung)]) -> String {
+    let mut t = String::new();
+    let _ = writeln!(t, "Datum: {}", lage.datum);
+    let _ = writeln!(
+        t,
+        "Topf {:?}: Bargeld {} EUR, davon für Käufe frei {} EUR",
+        lage.topf.id(),
+        euro(Preis::aus_cent(lage.topf.bargeld())),
+        euro(Preis::aus_cent(lage.kaufbar))
+    );
+    positionen_text(&mut t, lage, universum);
     let _ = writeln!(t, "Schlusskurse heute (handelbare Werte):");
     for i in universum.instrumente() {
         let _ = writeln!(
             t,
-            "- {} ({}, {:?}): {} EUR",
+            "- {} ({}, {:?}): {} EUR · {}",
             i.name,
             i.isin,
             i.art,
-            euro(lage.kurse.kurs(&i.isin))
+            euro(lage.kurse.kurs(&i.isin)),
+            verlauf_text(lage, &i.isin),
         );
     }
+    gewinnschwelle(&mut t);
     if !bilanz.is_empty() {
         let _ = writeln!(
             t,
@@ -470,6 +553,7 @@ mod prognosebilanz_tests {
             topf: &topf,
             kaufbar: topf.bargeld(),
             kurse: &kurse,
+            verlauf: &[],
             positionskaeufe: &[],
             ereignisse: &["Termin".into()],
         };
@@ -491,5 +575,17 @@ mod prognosebilanz_tests {
         assert!(frage.contains("- Ereignis 1: Termin"));
         assert!(!frage.contains("- Ereignis 2:"));
         Ok(())
+    }
+
+    #[test]
+    fn aus_grenzen() {
+        use depot_kern::Cent;
+        let grenzen = Grenzen::standard();
+        let mut text = String::new();
+        gewinnschwelle_mit(&mut text, grenzen.min_order(), |order| {
+            grenzen.gebuehren().fuer(order)?.checked_add(Cent(50))
+        });
+        assert!(text.contains("4,00 EUR Gebühren, also mindestens 4,0 %"));
+        assert!(text.contains("4,00 EUR Gebühren, also mindestens 0,4 %"));
     }
 }

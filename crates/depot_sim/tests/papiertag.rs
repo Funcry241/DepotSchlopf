@@ -129,6 +129,113 @@ fn stumm_tag(ort: &Ort, heute: u8) -> Result<Result<Ausgang, LaufFehler>, String
     ))
 }
 
+fn verlaufsbeleg(j: &mut Journal, tag: Datum, abruf: Zeitpunkt, euro: i64) -> Result<(), String> {
+    let zeit = some(Zeitpunkt::frankfurt(tag, 17, 35, 0), "Schluss")?;
+    let preis = some(Preis::aus_cent(Cent(euro.saturating_mul(100))), "Preis")?;
+    let kurs = vorbedingung(
+        Kurs::exakt(preis, "EUR", tag, zeit, Herkunft::Quelle),
+        "Kurs",
+    )?;
+    let beleg = vorbedingung(
+        KursBeleg::neu("alphavantage", abruf, b"Verlaufsbeleg", sap()?, kurs),
+        "Beleg",
+    )?;
+    vorbedingung(j.belege_kurs(&beleg), "Kurs schreiben")
+}
+
+fn verlaufsprobe(j: &mut Journal, fehlt: &[i64]) -> Result<(Datum, Zeitpunkt, Vec<Datum>), String> {
+    let bis = tag(13)?;
+    let wissen = some(Zeitpunkt::frankfurt(bis, 18, 0, 0), "Wissensstand")?;
+    let abruf = some(Zeitpunkt::frankfurt(bis, 17, 40, 0), "Abruf")?;
+    let mut tage = vec![bis];
+    let mut datum = bis;
+    for i in 0_i64..=20 {
+        if !fehlt.contains(&i) {
+            verlaufsbeleg(j, datum, abruf, 121_i64.saturating_sub(i))?;
+        }
+        datum = some(depot_kern::Boerse::Xetra.bezugstag(datum), "Handelstag")?;
+        tage.push(datum);
+    }
+    Ok((bis, wissen, tage))
+}
+
+#[test]
+fn verlauf_21_tage() -> Result<(), String> {
+    use depot_sim::kursverlauf::{Verlauf, kursverlauf};
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let (bis, wissen, _) = verlaufsprobe(&mut j, &[])?;
+    assert_eq!(
+        kursverlauf(j.stand(), &sap()?, bis, wissen),
+        Verlauf::Da {
+            t1_bp: 83,
+            t5_bp: 431,
+            t20_bp: 1980,
+            unter_hoch_bp: 0,
+            ueber_tief_bp: 1980,
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn zu_wenig_verlauf() -> Result<(), String> {
+    use depot_sim::kursverlauf::{Verlauf, kursverlauf};
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let (bis, wissen, _) = verlaufsprobe(&mut j, &[20])?;
+    assert_eq!(
+        kursverlauf(j.stand(), &sap()?, bis, wissen),
+        Verlauf::ZuWenig
+    );
+    Ok(())
+}
+
+#[test]
+fn luecke_3_tage() -> Result<(), String> {
+    use depot_sim::kursverlauf::{Verlauf, kursverlauf};
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let (bis, wissen, _) = verlaufsprobe(&mut j, &[7, 8, 9])?;
+    assert_eq!(
+        kursverlauf(j.stand(), &sap()?, bis, wissen),
+        Verlauf::ZuWenig
+    );
+    Ok(())
+}
+
+#[test]
+fn boersenfrei_zaehlt_nicht() -> Result<(), String> {
+    use depot_sim::kursverlauf::kursverlauf;
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let (bis, wissen, _) = verlaufsprobe(&mut j, &[])?;
+    let vorher = kursverlauf(j.stand(), &sap()?, bis, wissen);
+    let samstag = tag(7)?;
+    verlaufsbeleg(&mut j, samstag, wissen, 999)?;
+    assert_eq!(kursverlauf(j.stand(), &sap()?, bis, wissen), vorher);
+    Ok(())
+}
+
+#[test]
+fn letzter_beleg_je_tag() -> Result<(), String> {
+    use depot_sim::kursverlauf::{Verlauf, kursverlauf};
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let (bis, wissen, tage) = verlaufsprobe(&mut j, &[20])?;
+    let datum = *some(tage.get(20), "Ältester Handelstag")?;
+    for (minute, preis) in [(40, 99), (41, 101), (42, 999)] {
+        let abruf = some(Zeitpunkt::frankfurt(bis, 17, minute, 0), "Abruf")?;
+        verlaufsbeleg(&mut j, datum, abruf, preis)?;
+    }
+    let wissen = some(Zeitpunkt::frankfurt(bis, 17, 41, 0), "Wissensstand")?.min(wissen);
+    assert!(matches!(
+        kursverlauf(j.stand(), &sap()?, bis, wissen),
+        Verlauf::Da { t20_bp: 1980, .. }
+    ));
+    Ok(())
+}
+
 #[test]
 fn erster_papiertag_eroeffnet_depot_und_schliesst_ab() -> Result<(), String> {
     let ort = Ort::neu()?;

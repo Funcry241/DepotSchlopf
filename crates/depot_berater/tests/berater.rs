@@ -50,6 +50,7 @@ fn eingefrorene_vorbereitung_entspricht_auch_bei_langen_texten_der_gesendeten_au
         topf: &topf,
         kaufbar: topf.bargeld(),
         kurse: &kurse,
+        verlauf: &[],
         positionskaeufe: &[],
         ereignisse: &aus,
     };
@@ -92,6 +93,7 @@ fn vorbereitungsclient_akzeptiert_these_ohne_kurs_aber_keine_handelsziele() -> R
         topf: &topf,
         kaufbar: topf.bargeld(),
         kurse: &kurse,
+        verlauf: &[],
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -318,10 +320,112 @@ fn mit_lage<T>(f: impl FnOnce(&Lage<'_>) -> T) -> Result<T, String> {
         topf: &topf,
         kaufbar: topf.bargeld(),
         kurse: &kurse,
+        verlauf: &[],
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
     Ok(f(&lage))
+}
+
+#[test]
+fn frage_enthaelt_5t() -> Result<(), String> {
+    use depot_sim::kursverlauf::Verlauf;
+    let werte = vorbedingung(depot_kern::liste::beobachtungsliste(), "Liste")?;
+    let universum = depot_kern::liste::als_universum(&werte);
+    let verlauf: Vec<_> = werte
+        .iter()
+        .take(2)
+        .map(|wert| {
+            (
+                wert.isin.clone(),
+                Verlauf::Da {
+                    t1_bp: 83,
+                    t5_bp: -210,
+                    t20_bp: 1980,
+                    unter_hoch_bp: 0,
+                    ueber_tief_bp: 1980,
+                },
+            )
+        })
+        .collect();
+    let frage = mit_lage(|l| {
+        depot_berater::frage::vorschlag_frage(
+            &Lage {
+                verlauf: &verlauf,
+                ..*l
+            },
+            &universum,
+            &[],
+        )
+    })?;
+    assert_eq!(
+        frage.matches("1T +0,8 %, 5T −2,1 %, 20T +19,8 %").count(),
+        2
+    );
+    assert_eq!(
+        frage.matches("zu wenig Verlauf").count(),
+        werte.len().saturating_sub(2)
+    );
+    Ok(())
+}
+
+#[test]
+fn schwelle_100() -> Result<(), String> {
+    let universum = universum()?;
+    let frage = mit_lage(|l| depot_berater::frage::vorschlag_frage(l, &universum, &[]))?;
+    assert!(
+        frage.contains("100,00 EUR kostet hin und zurück 3,00 EUR Gebühren, also mindestens 3,0 %")
+    );
+    Ok(())
+}
+
+#[test]
+fn schwelle_1000() -> Result<(), String> {
+    let universum = universum()?;
+    let frage = mit_lage(|l| depot_berater::frage::vorschlag_frage(l, &universum, &[]))?;
+    assert!(
+        frage.contains(
+            "1.000,00 EUR kostet hin und zurück 3,00 EUR Gebühren, also mindestens 0,3 %"
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn gehalten_seit() -> Result<(), String> {
+    let universum = universum()?;
+    let isin = sap()?;
+    let frage = mit_lage(|lage| {
+        let bis = lage
+            .kurse
+            .eintrag(&isin)
+            .map_or(lage.datum, Kurs::handelstag);
+        let boerse = depot_kern::Boerse::Xetra;
+        let datum = (0..7).try_fold(bis, |datum, _| boerse.bezugstag(datum));
+        let mut topf = lage.topf.clone();
+        topf.setze_bestand(isin.clone(), 1);
+        let kaufe = [depot_sim::Positionskauf {
+            isin: isin.clone(),
+            ausfuehrung: depot_journal::Ausfuehrung {
+                stueck: 1,
+                kurs: Cent(25_000),
+                gebuehr: Cent(150),
+                kurszeit: datum.and_then(|datum| boerse.schluss(datum)),
+            },
+            these: None,
+        }];
+        depot_berater::frage::vorschlag_frage(
+            &Lage {
+                topf: &topf,
+                positionskaeufe: &kaufe,
+                ..*lage
+            },
+            &universum,
+            &[],
+        )
+    })?;
+    assert!(frage.contains("Gehalten seit 7 Handelstagen."), "{frage}");
+    Ok(())
 }
 
 #[test]
@@ -1316,11 +1420,27 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
         .map(|i| format!("Termin {i:02}: {lang}"))
         .chain((0..30).map(|i| format!("Nachricht {i:02}: {lang}")))
         .collect();
+    let verlauf: Vec<_> = werte
+        .iter()
+        .map(|w| {
+            (
+                w.isin.clone(),
+                depot_sim::kursverlauf::Verlauf::Da {
+                    t1_bp: -210,
+                    t5_bp: 530,
+                    t20_bp: 1_040,
+                    unter_hoch_bp: 320,
+                    ueber_tief_bp: 1_040,
+                },
+            )
+        })
+        .collect();
     let lage = Lage {
         datum: d,
         topf: &topf,
         kaufbar: topf.bargeld(),
         kurse: &kurse,
+        verlauf: &verlauf,
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -1337,6 +1457,16 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
             .map(|w| (w.isin.clone(), lang.clone()))
             .collect(),
     };
+    let mit = depot_berater::frage::vorschlag_frage(&lage, &universum, &[]);
+    let ohne = depot_berater::frage::vorschlag_frage(
+        &Lage {
+            verlauf: &[],
+            ..lage
+        },
+        &universum,
+        &[],
+    );
+    assert!(mit.len().saturating_sub(ohne.len()) < 2_000);
     for wer in [BeraterId::Dachs, BeraterId::Maus] {
         let mut ort = Ort::neu()?;
         let netz = Attrappe {
@@ -1541,6 +1671,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
         topf: &topf,
         kaufbar: Cent(45_000),
         kurse: &kurse,
+        verlauf: &[],
         positionskaeufe: &[],
         ereignisse: &[],
     };
