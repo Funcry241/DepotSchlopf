@@ -33,6 +33,16 @@ pub enum Wer {
 }
 
 impl Wer {
+    pub fn anzeigename(self) -> &'static str {
+        match self {
+            Self::Kursquelle => "Kursquelle Alpha Vantage (Xetra)",
+            Self::Tiingo => "Kursquelle Tiingo (US-Börsen)",
+            Self::Dachs => "Dachs (Claude)",
+            Self::Maus => "Maus (GPT)",
+            Self::Gemini => "Gemini",
+        }
+    }
+
     pub fn kurz(self) -> &'static str {
         match self {
             Wer::Kursquelle => "kursquelle",
