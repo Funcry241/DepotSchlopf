@@ -130,7 +130,7 @@ impl Netz for Erfunden {
     ) -> Result<Vec<u8>, NetzFehler> {
         assert!(adresse.starts_with("https://api.tiingo.com/"));
         assert!(!adresse.contains(TI) && !adresse.contains("token="));
-        assert!(autorisiert == format!("Token {TI}"));
+        assert_eq!(autorisiert, format!("Token {TI}"));
         self.hole(adresse)
     }
 
