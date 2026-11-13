@@ -30,6 +30,8 @@ pub enum Boerse {
 
 /// Stunde und Minute des Xetra-Schlusses in Frankfurt.
 pub const XETRA_SCHLUSS: (u8, u8) = (17, 35);
+/// Früheste Preisermittlung in der Xetra-Schlussauktion der Jahresschlussbörse 2026.
+const XETRA_SCHLUSS_KURZ: (u8, u8) = (14, 5);
 /// Stunde und Minute des NYSE-Schlusses in New York.
 pub const NYSE_SCHLUSS: (u8, u8) = (16, 0);
 /// Stunde und Minute des NYSE-Schlusses an verkuerzten Tagen.
@@ -80,7 +82,11 @@ impl Boerse {
     pub fn schluss(self, datum: Datum) -> Option<Zeitpunkt> {
         match self {
             Boerse::Xetra => {
-                let (h, m) = XETRA_SCHLUSS;
+                let (h, m) = if (datum.jahr(), datum.monat(), datum.tag()) == (2026, 12, 30) {
+                    XETRA_SCHLUSS_KURZ
+                } else {
+                    XETRA_SCHLUSS
+                };
                 Zeitpunkt::frankfurt(datum, h, m, 0)
             }
             Boerse::Nyse => {
@@ -246,6 +252,53 @@ mod tests {
         // Der 26.12. und der 31.12. sind in New York Handelstage.
         assert!(Boerse::Nyse.handelstag(d(2028, 12, 26)?));
         assert!(Boerse::Nyse.handelstag(d(2026, 12, 31)?));
+        Ok(())
+    }
+
+    #[test]
+    fn xetra_30_12_2026_verkuerzt() -> Result<(), String> {
+        let tag = d(2026, 12, 30)?;
+        assert!(Boerse::Xetra.handelstag(tag));
+        assert_eq!(
+            Boerse::Xetra.schluss(tag),
+            Zeitpunkt::frankfurt(tag, 14, 5, 0)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn xetra_29_12_normal() -> Result<(), String> {
+        let tag = d(2026, 12, 29)?;
+        assert_eq!(
+            Boerse::Xetra.schluss(tag),
+            Zeitpunkt::frankfurt(tag, 17, 35, 0)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn xetra_31_12_kein_handel() -> Result<(), String> {
+        assert!(!Boerse::Xetra.handelstag(d(2026, 12, 31)?));
+        Ok(())
+    }
+
+    #[test]
+    fn erster_schluss_30_12() -> Result<(), String> {
+        let tag = d(2026, 12, 30)?;
+        assert_eq!(
+            crate::liste::erster_schluss(tag, &Boerse::ALLE),
+            Zeitpunkt::frankfurt(tag, 14, 5, 0)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn nyse_30_12_normal() -> Result<(), String> {
+        let tag = d(2026, 12, 30)?;
+        assert_eq!(
+            Boerse::Nyse.schluss(tag),
+            Zeitpunkt::new_york(tag, 16, 0, 0)
+        );
         Ok(())
     }
 
