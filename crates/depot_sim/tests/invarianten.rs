@@ -445,13 +445,32 @@ fn abstimmung_fuehrt_nur_aus_was_beide_zuletzt_tragen() -> Result<(), String> {
             folgen.push(f);
         }
     }
-    let mut offen = Vec::new();
-    for f in &folgen {
-        offen.extend(pruefe(f)?);
-        if offen.len() > 10 {
-            break;
+    // Jede Folge hat ein eigenes Journal und Papierkonto. Die Ergebnisse bleiben geordnet.
+    let offen = std::thread::scope(|scope| -> Result<Vec<String>, String> {
+        let mut arbeiter = Vec::new();
+        for teil in folgen.chunks(folgen.len().div_ceil(4)) {
+            arbeiter.push(scope.spawn(move || -> Result<Vec<String>, String> {
+                let mut offen = Vec::new();
+                for f in teil {
+                    offen.extend(pruefe(f)?);
+                    if offen.len() > 10 {
+                        break;
+                    }
+                }
+                Ok(offen)
+            }));
         }
-    }
+        let mut offen = Vec::new();
+        for arbeit in arbeiter {
+            offen.extend(
+                arbeit
+                    .join()
+                    .map_err(|_| "Abstimmungsprüfung abgebrochen")??,
+            );
+        }
+        offen.truncate(11);
+        Ok(offen)
+    })?;
     if offen.is_empty() {
         Ok(())
     } else {
