@@ -89,7 +89,15 @@ pub fn pruefe(wurzel: &Path, diff: &BTreeSet<String>) -> Vec<String> {
         Ok(t) => String::from_utf8_lossy(&t).into_owned(),
         Err(e) => return vec![format!("Grenzfreigabe {FREIGABE} nicht lesbar: {e}")],
     };
-    let f = match lies(&text) {
+    let neu = match fs::read(wurzel.join(crate::FESTSCHREIBUNG)) {
+        Ok(t) => sha_bytes(&normalisiert(&t)),
+        Err(e) => return vec![format!("Grenzfreigabe: Festschreibung nicht lesbar: {e}")],
+    };
+    pruefe_werte(&text, &neu, &diff_hash(wurzel, diff))
+}
+
+pub(crate) fn pruefe_werte(text: &str, neu: &str, d: &str) -> Vec<String> {
+    let f = match lies(text) {
         Ok(f) => f,
         Err(e) => return vec![format!("Grenzfreigabe {FREIGABE}: {e}")],
     };
@@ -101,17 +109,12 @@ pub fn pruefe(wurzel: &Path, diff: &BTreeSet<String>) -> Vec<String> {
     if feld("erteilt") != "Wolfgang" {
         fehler.push(format!("Grenzfreigabe: erteilt ist {:?}", feld("erteilt")));
     }
-    let neu = match fs::read(wurzel.join(crate::FESTSCHREIBUNG)) {
-        Ok(t) => sha_bytes(&normalisiert(&t)),
-        Err(e) => return vec![format!("Grenzfreigabe: Festschreibung nicht lesbar: {e}")],
-    };
     if feld("festschreibung") != neu {
         fehler.push(format!(
             "Grenzfreigabe passt nicht zur Festschreibung: freigegeben {}, im Baum {neu}",
             feld("festschreibung")
         ));
     }
-    let d = diff_hash(wurzel, diff);
     if feld("diff") != d {
         fehler.push(format!(
             "Grenzfreigabe passt nicht zum Diff: freigegeben {}, im Baum {d}. \

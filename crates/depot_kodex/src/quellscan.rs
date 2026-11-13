@@ -356,6 +356,137 @@ fn bind_lokal(t: &[Token], i: usize) -> bool {
         && schliessende(t, innen).and_then(|j| j.checked_add(1)) == Some(zu)
 }
 
+const START_MODULE: &[&str] = &[
+    "depot_kodex/src/git.rs",
+    "depot_kodex/src/main.rs",
+    "depot_kodex/src/testumgebung.rs",
+    "depot_lauf/src/abbild.rs",
+    "depot_lauf/src/export.rs",
+    "depot_lauf/src/main.rs",
+    "depot_lauf/src/update/update_dialog.rs",
+    "depot_dienst/src/lib.rs",
+    "depot_dienst/src/werkbank.rs",
+    "depot_dienst/src/waechter.rs",
+    "depot_dienst/src/rueckfall.rs",
+    "depot_dienst/src/programmstand.rs",
+    "depot_dienst/src/papierdialog.rs",
+    "depot_dienst/src/hinweis.rs",
+    "depot_dienst/src/bin/depot_waechter.rs",
+];
+
+const DYNAMISCHE_STARTS: [(&str, usize, &str); 5] = [
+    (
+        "depot_lauf/src/update/update_dialog.rs",
+        1,
+        "PowerShell unter SystemRoot",
+    ),
+    (
+        "depot_dienst/src/papierdialog.rs",
+        1,
+        "PowerShell unter SystemRoot",
+    ),
+    (
+        "depot_dienst/src/hinweis.rs",
+        1,
+        "PowerShell unter SystemRoot",
+    ),
+    (
+        "depot_dienst/src/programmstand.rs",
+        1,
+        "geprüfter Programmstand",
+    ),
+    (
+        "depot_dienst/src/bin/depot_waechter.rs",
+        1,
+        "geprüfter Programmstand",
+    ),
+];
+
+fn ohne_testmodule(t: &[Token]) -> Vec<Token> {
+    let mut produktiv = Vec::new();
+    let mut i = 0usize;
+    while let Some(tok) = t.get(i) {
+        if tok.ist("#")
+            && t.get(i.saturating_add(1)).is_some_and(|x| x.ist("["))
+            && let Some(ende) = folge(t, i.saturating_add(2), &["cfg", "(", "test"])
+            && t.get(ende).is_some_and(|x| x.ist(")"))
+            && t.get(ende.saturating_add(1)).is_some_and(|x| x.ist("]"))
+            && let Some(anfang) = t.get(ende.saturating_add(2)..).and_then(|rest| {
+                rest.iter()
+                    .take_while(|x| !x.ist(";"))
+                    .position(|x| x.ist("{"))
+            })
+        {
+            let block = ende.saturating_add(2).saturating_add(anfang);
+            let mut tiefe = 0usize;
+            for (index, token) in t.iter().enumerate().skip(block) {
+                if token.ist("{") {
+                    tiefe = tiefe.saturating_add(1);
+                } else if token.ist("}") {
+                    tiefe = tiefe.saturating_sub(1);
+                    if tiefe == 0 {
+                        i = index.saturating_add(1);
+                        break;
+                    }
+                }
+            }
+            if i > block {
+                continue;
+            }
+        }
+        produktiv.push(tok.clone());
+        i = i.saturating_add(1);
+    }
+    produktiv
+}
+
+fn pruefe_starts(anzeige: &str, t: &[Token]) -> Vec<String> {
+    let pfad = anzeige.strip_prefix("crates/").unwrap_or(anzeige);
+    let t = ohne_testmodule(t);
+    let importe = rust::importe(&t).unwrap_or_default();
+    let prozess = |pfad: &[String]| rust::enthaelt(pfad, &["std", "process", "Command"]);
+    let befehle: BTreeSet<_> = importe
+        .iter()
+        .filter(|i| prozess(&i.pfad))
+        .filter_map(|i| i.alias.as_deref())
+        .chain(std::iter::once("Command"))
+        .collect();
+    let mut fund = importe.iter().any(|i| prozess(&i.pfad))
+        || rust::pfade(&t, &importe).iter().any(|p| prozess(p));
+    let mut dynamisch = 0usize;
+    for (i, tok) in t.iter().enumerate() {
+        let Token::Wort(name) = tok else { continue };
+        if !befehle.contains(name.as_str()) {
+            continue;
+        }
+        let Some(arg) = folge(&t, i, &[name, "::", "new", "("]) else {
+            continue;
+        };
+        fund = true;
+        let literal = t.get(arg) == Some(&Token::Textliteral)
+            && t.get(arg.saturating_add(1))
+                .is_some_and(|x| x.ist(")") || x.ist(","));
+        if !literal {
+            dynamisch = dynamisch.saturating_add(1);
+        }
+    }
+    if fund && !START_MODULE.contains(&pfad) {
+        return vec![format!(
+            "{anzeige}: Programmstart außerhalb der erlaubten Module"
+        )];
+    }
+    let erlaubt = DYNAMISCHE_STARTS
+        .iter()
+        .find(|(name, _, _)| *name == pfad)
+        .map_or(0, |(_, n, _)| *n);
+    if dynamisch != erlaubt {
+        return vec![format!(
+            "{anzeige}: {dynamisch} dynamische Programmstarts, erlaubt: {erlaubt}"
+        )];
+    }
+    Vec::new()
+}
+
 /// Prueft eine Quelldatei. `produktiv` heisst: liegt unter `src/`.
 pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> Vec<String> {
     let mut fehler = Vec::new();
@@ -408,6 +539,7 @@ pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> 
             return fehler;
         }
     };
+    fehler.extend(pruefe_starts(anzeige, &t));
     let mut pfade: Vec<Vec<String>> = importe.iter().map(|i| i.pfad.clone()).collect();
     pfade.extend(rust::pfade(&t, &importe));
     let rein = REIN.contains(&krate);
@@ -759,5 +891,61 @@ mod tests {
             HARTE_LINTS.join(", ")
         );
         assert!(!pruefe_kopf("m.rs", &spaet).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod start_tests {
+    fn pruefe_starts(pfad: &str, text: &str) -> Vec<String> {
+        super::pruefe_starts(pfad, &crate::lexer::zerlege(text).unwrap_or_default())
+    }
+
+    #[test]
+    fn alias_import() {
+        assert!(
+            !pruefe_starts(
+                "depot_sim/src/lauf.rs",
+                "use std::process::{Command as Befehl};"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn hilfsfunktion() {
+        assert!(
+            !pruefe_starts(
+                "depot_lage/src/lib.rs",
+                "fn starte(p: &str) { Command::new(p); }"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn dynamisch_aus_liste() {
+        assert!(
+            pruefe_starts(
+                "depot_dienst/src/hinweis.rs",
+                "Command::new(pfad); Command::new(\"git\");"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn dynamisch_frei() {
+        assert!(!pruefe_starts("depot_dienst/src/lib.rs", "Command::new(eingabe);").is_empty());
+    }
+
+    #[test]
+    fn s4_zweiter_dynamischer_start() {
+        assert!(
+            !pruefe_starts(
+                "depot_dienst/src/hinweis.rs",
+                "Command::new(pfad); Command::new(pfad);"
+            )
+            .is_empty()
+        );
     }
 }

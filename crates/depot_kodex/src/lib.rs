@@ -40,6 +40,7 @@ pub mod git;
 pub mod lexer;
 pub mod manifest;
 pub mod pfade;
+pub mod pr;
 pub mod quellscan;
 pub mod rust;
 pub mod toml;

@@ -65,6 +65,20 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
 
+    if let [befehl, basis_opt, basis, kandidat_opt, kandidat] = args.as_slice()
+        && befehl == "pruefe-pr"
+        && basis_opt == "--basis"
+        && kandidat_opt == "--kandidat"
+    {
+        return match depot_kodex::pr::pruefe(&wurzel, basis, kandidat) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(fehler) => {
+                eprintln!("[Kodex] {fehler}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     if args.first().map(String::as_str) == Some("festschreibung") {
         return match depot_kodex::festschreibung::berechne(&wurzel) {
             Ok(f) => {
