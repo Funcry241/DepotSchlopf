@@ -33,7 +33,10 @@ mod zugang;
 
 pub use betrieb::{AnbieterHinweis, Betrieb, SchluesselStand};
 pub use budget::{BudgetStatus, KiBudget, ki_budget, mit_verbrauch};
-pub use depot::{AuftragZeile, DepotLage, Position, TopfLage, auftrag_zeile, letzter_tagesschluss};
+pub use depot::{
+    AuftragZeile, DepotLage, Position, Tagesergebnis, TopfLage, auftrag_zeile,
+    letzter_tagesschluss, zustand_text,
+};
 
 /// Derselbe Depotstand wie in Live, aus dem bereits geprüften Journal.
 pub fn depotstand(stand: &Stand, werte: &[Wert]) -> DepotLage {

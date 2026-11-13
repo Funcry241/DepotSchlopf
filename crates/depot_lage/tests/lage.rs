@@ -1277,3 +1277,245 @@ fn vergleich_ohne_kurs_ist_nicht_bewertbar() -> Result<(), String> {
     assert!(html::seite(&l).contains("nicht bewertbar"));
     Ok(())
 }
+
+fn depot_testjournal(eintraege: &[(depot_journal::Art, &str)]) -> Result<Ort, String> {
+    let ort = Ort::neu()?;
+    let bytes = depot_journal::inhalt_fuer(eintraege);
+    let vermerk = some(depot_journal::vermerk_fuer(&bytes, 0), "Vermerk")?;
+    vorbedingung(fs::write(&ort.journal, bytes), "Journal")?;
+    vorbedingung(
+        fs::write(ort.journal.with_extension("vermerk"), vermerk),
+        "Vermerk",
+    )?;
+    Ok(ort)
+}
+
+fn kaufbuch(stueck: u64, kurs: u64, danach: &[(depot_journal::Art, &str)]) -> Result<Ort, String> {
+    use depot_journal::Art::{Auftrag, Topf, Zustand};
+    let kauf = format!("1;A;DE0007164600;Kauf;{stueck};{kurs};Umschichtung");
+    let aus = format!("1;ausfuehrung;{stueck};{kurs};150");
+    let mut eintraege = vec![
+        (Topf, "A;500000;"),
+        (Auftrag, kauf.as_str()),
+        (Zustand, "1;gesendet"),
+        (Zustand, "1;angenommen"),
+        (Zustand, aus.as_str()),
+    ];
+    eintraege.extend_from_slice(danach);
+    depot_testjournal(&eintraege)
+}
+
+fn depot_vom(ort: &Ort) -> Result<depot_lage::DepotLage, String> {
+    let j = ort.oeffnen()?;
+    Ok(depot_lage::depotstand(
+        j.stand(),
+        &vorbedingung(beobachtungsliste(), "Werteliste")?,
+    ))
+}
+
+fn topf_a(depot: &depot_lage::DepotLage) -> Result<&depot_lage::TopfLage, String> {
+    some(depot.toepfe.iter().find(|t| t.topf == TopfId::A), "Topf A")
+}
+
+#[test]
+fn einstand_nur_kaeufe() -> Result<(), String> {
+    let depot = depot_vom(&kaufbuch(10, 12_345, &[])?)?;
+    let topf = topf_a(&depot)?;
+    let einstand = some(
+        some(topf.positionen.first(), "Position")?.einstand,
+        "Einstand",
+    )?;
+    assert_eq!(einstand, Cent(123_600));
+    assert_eq!(topf.bargeld.checked_add(einstand), Some(Cent(500_000)));
+    Ok(())
+}
+
+#[test]
+fn einstand_zwei_kaeufe() -> Result<(), String> {
+    use depot_journal::Art::{Auftrag, Zustand};
+    let depot = depot_vom(&kaufbuch(
+        10,
+        2_000,
+        &[
+            (Auftrag, "2;A;DE0007164600;Kauf;5;2600;Umschichtung"),
+            (Zustand, "2;gesendet"),
+            (Zustand, "2;angenommen"),
+            (Zustand, "2;ausfuehrung;5;2600;150"),
+        ],
+    )?)?;
+    let p = some(topf_a(&depot)?.positionen.first(), "Position")?;
+    assert_eq!((p.stueck, p.einstand), (15, Some(Cent(33_300))));
+    Ok(())
+}
+
+fn verkaufsbuch(menge: u64) -> Result<Ort, String> {
+    use depot_journal::Art::{Auftrag, Zustand};
+    kaufbuch(
+        7,
+        1_000,
+        &[
+            (
+                Auftrag,
+                &format!("2;A;DE0007164600;Verkauf;{menge};1000;Notbremse"),
+            ),
+            (Zustand, "2;gesendet"),
+            (Zustand, "2;angenommen"),
+            (Zustand, &format!("2;ausfuehrung;{menge};1000;150")),
+        ],
+    )
+}
+
+#[test]
+fn einstand_teilverkauf_rundet_auf() -> Result<(), String> {
+    let depot = depot_vom(&verkaufsbuch(2)?)?;
+    let p = some(topf_a(&depot)?.positionen.first(), "Position")?;
+    assert_eq!((p.stueck, p.einstand), (5, Some(Cent(5_108))));
+    Ok(())
+}
+
+#[test]
+fn einstand_ganz_verkauft() -> Result<(), String> {
+    assert!(
+        topf_a(&depot_vom(&verkaufsbuch(7)?)?)?
+            .positionen
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
+fn einstand_nicht_belegt() -> Result<(), String> {
+    let ort = kaufbuch(
+        6,
+        1_000,
+        &[(depot_journal::Art::Topf, "A;490000;DE0007164600:10")],
+    )?;
+    let depot = depot_vom(&ort)?;
+    let p = some(topf_a(&depot)?.positionen.first(), "Position")?;
+    assert_eq!((p.stueck, p.einstand, p.gv), (10, None, None));
+    Ok(())
+}
+
+#[test]
+fn gv_rundet_gegen_uns() -> Result<(), String> {
+    let ort = kaufbuch(1, 10_000, &[])?;
+    let mut j = ort.oeffnen()?;
+    belege_preise(&mut j, 12, "100", "99.999999")?;
+    let werte = vorbedingung(beobachtungsliste(), "Werteliste")?;
+    let depot = depot_lage::depotstand(j.stand(), &werte);
+    let p = some(topf_a(&depot)?.positionen.first(), "Position")?;
+    assert_eq!(
+        (p.einstand, p.wert, p.gv),
+        (Some(Cent(10_150)), Some(Cent(9_999)), Some(Cent(-151)))
+    );
+    assert_eq!(html::prozent(some(p.gv_bp, "Rendite")?), "−1,49 %");
+    Ok(())
+}
+
+#[test]
+fn cash_teile_ergeben_bargeld() -> Result<(), String> {
+    use depot_journal::Art::{Abrechnungstag, Auftrag, Zustand};
+    let ort = kaufbuch(
+        7,
+        1_000,
+        &[
+            (Abrechnungstag, "2026-11-12"),
+            (Auftrag, "2;A;DE0007164600;Verkauf;2;1000;Notbremse"),
+            (Zustand, "2;gesendet"),
+            (Zustand, "2;angenommen"),
+            (Zustand, "2;ausfuehrung;2;1000;150"),
+            (Auftrag, "3;A;DE0007164600;Kauf;2;1000;Umschichtung"),
+        ],
+    )?;
+    let depot = depot_vom(&ort)?;
+    let j = ort.oeffnen()?;
+    let topf = topf_a(&depot)?;
+    let frei = some(topf.frei, "Freies Bargeld")?;
+    let vorgemerkt = some(topf.vorgemerkt, "Vorgemerkt")?;
+    let valuta = some(topf.nicht_gutgeschrieben, "Ausstehend")?;
+    assert_eq!(
+        frei.checked_add(vorgemerkt)
+            .and_then(|v| v.checked_add(valuta)),
+        Some(topf.bargeld)
+    );
+    assert_eq!(
+        Some(frei),
+        depot_journal::konto::verfuegbar(&depot_kern::Grenzen::standard(), j.stand(), TopfId::A)
+    );
+    assert_eq!((vorgemerkt, valuta), (Cent(2_150), Cent(1_850)));
+    assert_eq!(topf.naechste_valuta, depot_journal::papier_valuta(tag(12)?));
+    Ok(())
+}
+
+fn tagesergebnis_buch(zwei_abschluesse: bool) -> Result<Ort, String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(500_000)), "Topf")?;
+    topf.setze_bestand(
+        vorbedingung(depot_kern::Isin::neu("DE0007164600"), "ISIN")?,
+        1,
+    );
+    vorbedingung(j.setze_topf(&topf), "Topf A")?;
+    vorbedingung(
+        j.setze_topf(&vorbedingung(Topf::neu(TopfId::B, Cent(490_000)), "Topf")?),
+        "Topf B",
+    )?;
+    belege_preise(&mut j, 11, "99", "100")?;
+    if zwei_abschluesse {
+        vorbedingung(
+            j.schliesse_ab(tag(11)?, Cent(1_000_000), &"0".repeat(64)),
+            "Erster Abschluss",
+        )?;
+    }
+    belege_preise(&mut j, 12, "100", "200")?;
+    vorbedingung(
+        j.schliesse_ab(tag(12)?, Cent(1_010_000), &"1".repeat(64)),
+        "Letzter Abschluss",
+    )?;
+    Ok(ort)
+}
+
+#[test]
+fn tagesergebnis_morgens() -> Result<(), String> {
+    let ort = tagesergebnis_buch(true)?;
+    let j = ort.oeffnen()?;
+    let jetzt = some(Zeitpunkt::frankfurt(tag(13)?, 8, 0, 0), "Morgen")?;
+    let lage = lagebild(&umgebung(jetzt, Zugang::Offen(j.stand())));
+    assert_eq!(
+        some(lage.depot, "Depot")?.tagesergebnis,
+        depot_lage::Tagesergebnis::Belegt {
+            tag: tag(12)?,
+            betrag: Cent(10_000),
+            bp: Some(100),
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn tagesergebnis_ohne_vortag() -> Result<(), String> {
+    let depot = depot_vom(&tagesergebnis_buch(false)?)?;
+    assert_eq!(depot.tagesergebnis, depot_lage::Tagesergebnis::OhneVortag);
+    Ok(())
+}
+
+#[test]
+fn zustand_in_worten() {
+    use depot_journal::AuftragsZustand as Z;
+    for (zustand, text) in [
+        (Z::Reserviert, "vorgemerkt, noch nicht gesendet"),
+        (Z::Gesendet, "gesendet"),
+        (Z::Unbekannt, "Versand ungeklärt, wird abgeglichen"),
+        (Z::Angenommen, "liegt beim Papiermakler"),
+        (Z::Teilgefuellt, "teilweise ausgeführt"),
+        (Z::Gefuellt, "ausgeführt"),
+        (Z::Abgelehnt, "abgelehnt"),
+        (Z::Storniert, "storniert"),
+        (Z::Verfallen, "verfallen"),
+        (Z::Verworfen, "nicht gesendet, verworfen"),
+        (Z::Alt, "ausgeführt (altes Journal)"),
+    ] {
+        assert_eq!(depot_lage::zustand_text(zustand), text);
+        assert_ne!(format!("{zustand:?}"), text);
+    }
+}

@@ -222,6 +222,7 @@ pub struct Stand {
     format: u8,
     toepfe: BTreeMap<TopfId, Topf>,
     auftraege: Vec<AuftragsLage>,
+    ausfuehrungsfolge: Vec<(usize, usize)>,
     beobachtungen: Vec<(Datum, String)>,
     rss_abrufe: BTreeMap<String, Zeitpunkt>,
     kurse: Vec<KursBeleg>,
@@ -295,6 +296,16 @@ impl Stand {
     /// Alle Auftraege mit ihrem Zustand, in der Reihenfolge ihrer Kennungen.
     pub fn auftraege(&self) -> &[AuftragsLage] {
         &self.auftraege
+    }
+
+    /// Ausführungen in der Reihenfolge ihrer Buchung im Journal.
+    pub fn ausfuehrungsfolge(&self) -> impl Iterator<Item = (&AuftragsBeleg, &crate::Ausfuehrung)> {
+        self.ausfuehrungsfolge
+            .iter()
+            .filter_map(|(auftrag, ausfuehrung)| {
+                let lage = self.auftraege.get(*auftrag)?;
+                Some((&lage.beleg, lage.ausfuehrungen.get(*ausfuehrung)?))
+            })
     }
 
     /// Der Auftrag mit dieser Kennung.
@@ -518,13 +529,27 @@ impl Stand {
         &self.abrechnungen
     }
 
+    /// Gebuchte Verkaufserlöse, die wegen ihrer Valuta noch nicht für Käufe frei sind.
+    pub fn nicht_gutgeschrieben(&self, topf: TopfId) -> Option<Cent> {
+        self.gesperrt(topf)
+    }
+
+    /// Nächster Valuta-Tag eines noch nicht freigegebenen Verkaufserlöses.
+    pub fn naechste_valuta(&self, topf: TopfId) -> Option<Datum> {
+        self.offene_valuta(topf).map(|(valuta, _)| *valuta).min()
+    }
+
     pub(crate) fn gesperrt(&self, topf: TopfId) -> Option<Cent> {
+        self.offene_valuta(topf)
+            .try_fold(Cent::NULL, |summe, (_, netto)| summe.checked_add(*netto))
+    }
+
+    fn offene_valuta(&self, topf: TopfId) -> impl Iterator<Item = &(Datum, Cent)> {
         self.auftraege
             .iter()
-            .filter(|l| l.beleg.topf == topf)
+            .filter(move |l| l.beleg.topf == topf)
             .filter_map(|l| self.abrechnungen.get(&l.beleg.nr))
             .filter(|(valuta, _)| self.abrechnungstag.is_none_or(|tag| *valuta > tag))
-            .try_fold(Cent::NULL, |summe, (_, netto)| summe.checked_add(*netto))
     }
 
     /// Wendet einen Eintrag an. Ein Fehler laesst den Stand unveraendert.
@@ -979,6 +1004,10 @@ impl Stand {
                 .checked_add(netto)
                 .ok_or("Verkaufserlös: Überlauf")?;
             self.abrechnungen.insert(nr, (valuta, gesamt));
+        }
+        if matches!(m, Meldung::Ausfuehrung(_)) {
+            self.ausfuehrungsfolge
+                .push((index, alt.ausfuehrungen.len()));
         }
         self.toepfe.insert(topf.id(), topf);
         if let Some(platz) = self.auftraege.get_mut(index) {
