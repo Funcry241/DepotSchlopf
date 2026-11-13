@@ -1,8 +1,8 @@
-klasse: KodexAenderung
-zweck: Windows-Update gezielt prüfen und den installierten Altstand abdecken
+klasse: FestschreibungAenderung
+zweck: Kodex optimieren und Gegenproben für parallele Invarianten ergänzen
 pfade:
-.github/pull_request_template.md
-.github/scripts/pruefe_update_alt.py
-.github/scripts/test_windows_update.py
-.github/scripts/windows_update.py
-.github/workflows/kodex.yml
+Cargo.toml
+crates/depot_journal/tests/invarianten.rs
+crates/depot_sim/tests/invarianten.rs
+kodex/festschreibung.txt
+kodex/freigabe.txt

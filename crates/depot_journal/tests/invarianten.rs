@@ -270,11 +270,23 @@ fn auftrag_folgt_fuer_jede_meldungsfolge_der_zustandstabelle() -> Result<(), Str
             folgen.push(f);
         }
     }
+    let offen = pruefe_auftragsfolgen(&folgen, &alphabet, 4)?;
+    if offen.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{offen:#?}"))
+    }
+}
+
+fn pruefe_auftragsfolgen(
+    folgen: &[Vec<usize>],
+    alphabet: &[(&str, Meldung)],
+    arbeiterzahl: usize,
+) -> Result<Vec<String>, String> {
     // Jeder Arbeiter verwendet einen eigenen Journalpfad für seine Folgen.
-    let offen = std::thread::scope(|scope| -> Result<Vec<String>, String> {
+    std::thread::scope(|scope| -> Result<Vec<String>, String> {
         let mut arbeiter = Vec::new();
-        for teil in folgen.chunks(folgen.len().div_ceil(4)) {
-            let alphabet = &alphabet;
+        for teil in folgen.chunks(folgen.len().div_ceil(arbeiterzahl).max(1)) {
             arbeiter.push(scope.spawn(move || -> Result<Vec<String>, String> {
                 let p = neuer_pfad("auftrag")?;
                 let mut offen = Vec::new();
@@ -293,12 +305,27 @@ fn auftrag_folgt_fuer_jede_meldungsfolge_der_zustandstabelle() -> Result<(), Str
         }
         offen.truncate(21);
         Ok(offen)
-    })?;
-    if offen.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("{offen:#?}"))
+    })
+}
+
+#[test]
+fn auftragsfolgen_bei_einem_und_vier_arbeitern() -> Result<(), String> {
+    let alphabet = meldungen();
+    let mut zufall = Zufall::neu(STARTWERTE.first().copied().ok_or("Startwert")?);
+    let folgen: Vec<_> = (0..32)
+        .map(|_| vec![0, 2, zufall.bis(alphabet.len())])
+        .collect();
+    for arbeiterzahl in [1, 4] {
+        assert!(pruefe_auftragsfolgen(&folgen, &alphabet, arbeiterzahl)?.is_empty());
+
+        let mut fehlerhafte_folgen = folgen.clone();
+        fehlerhafte_folgen.push(vec![alphabet.len()]);
+        assert_eq!(
+            pruefe_auftragsfolgen(&fehlerhafte_folgen, &alphabet, arbeiterzahl),
+            Err("Vorbedingung: Alphabet".into())
+        );
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------
