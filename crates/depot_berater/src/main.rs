@@ -40,7 +40,7 @@ fn jetzt() -> Option<Zeitpunkt> {
 }
 
 fn heute() -> Option<Datum> {
-    jetzt()?.datum()
+    jetzt()?.frankfurt_tag()
 }
 
 fn schluessel(wer: BeraterId) -> Option<Schluessel> {

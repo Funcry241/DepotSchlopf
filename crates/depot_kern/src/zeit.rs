@@ -306,6 +306,11 @@ impl Zeitpunkt {
         Some((ort.datum()?, h, m, s, sommer))
     }
 
+    /// Kalendertag in Frankfurter Ortszeit.
+    pub fn frankfurt_tag(self) -> Option<Datum> {
+        self.in_frankfurt().map(|(tag, ..)| tag)
+    }
+
     /// Uhrzeit in New York (EST, im Sommer EDT). Umgestellt wird nach US-Recht am zweiten
     /// Sonntag im Maerz und am ersten Sonntag im November um 02:00 Uhr Ortszeit. `None` wie bei
     /// `frankfurt`.

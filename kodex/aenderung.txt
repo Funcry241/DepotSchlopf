@@ -1,5 +1,11 @@
-klasse: KodexAenderung
-zweck: Geprüften alten Updater in CI-Folgeläufen wiederverwenden
+klasse: Funktion
+zweck: Beraterstart und KI-Verbrauch nach Frankfurter Kalendertag führen
 pfade:
-.github/scripts/pruefe_update_alt.py
-.github/workflows/kodex.yml
+CHANGELOG.md
+crates/depot_berater/src/ki.rs
+crates/depot_berater/src/main.rs
+crates/depot_kern/src/zeit.rs
+crates/depot_lage/src/budget.rs
+crates/depot_lage/tests/betrieb.rs
+crates/depot_sim/src/papiertag.rs
+crates/depot_sim/src/vorbereitung.rs

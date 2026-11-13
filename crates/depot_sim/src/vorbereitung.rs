@@ -52,16 +52,8 @@ pub fn naechster_handelstag(tag: Datum) -> Option<Datum> {
 
 /// Nur 08 bis 23 Uhr Frankfurt: dieselben erlaubten Zeiten wie die Schlagzeilen.
 pub fn tag_jetzt(zeit: Zeitpunkt) -> Option<Datum> {
-    for stunden in [1_i64, 2] {
-        let ort = zeit.sekunden().checked_add(stunden.checked_mul(3_600)?)?;
-        let ort = Zeitpunkt::aus_sekunden(ort)?;
-        let tag = ort.datum()?;
-        let (h, m, s) = ort.uhrzeit()?;
-        if (8..23).contains(&h) && Zeitpunkt::frankfurt(tag, h, m, s) == Some(zeit) {
-            return Some(tag);
-        }
-    }
-    None
+    let (tag, stunde, ..) = zeit.in_frankfurt()?;
+    (8..23).contains(&stunde).then_some(tag)
 }
 
 fn sauber(s: &str) -> String {
