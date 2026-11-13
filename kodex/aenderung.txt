@@ -1,8 +1,5 @@
-klasse: Funktion
-zweck: Manuelle Sperrenaufhebung am Desktop bestätigen
+klasse: TestOnly
+zweck: Unabhängige Folgen der Invariantenprüfungen parallel ausführen
 pfade:
-CHANGELOG.md
-crates/depot_dienst/src/lib.rs
-crates/depot_dienst/src/papierdialog.rs
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/tests/dienst.rs
+crates/depot_journal/tests/invarianten.rs
+crates/depot_sim/tests/invarianten.rs

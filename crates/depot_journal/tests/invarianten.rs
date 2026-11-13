@@ -241,8 +241,6 @@ fn pruefe_folge(
 #[test]
 fn auftrag_folgt_fuer_jede_meldungsfolge_der_zustandstabelle() -> Result<(), String> {
     let alphabet = meldungen();
-    let p = neuer_pfad("auftrag")?;
-    let mut offen = Vec::new();
     let n = alphabet.len();
     let mut folgen: Vec<Vec<usize>> = vec![Vec::new()];
     for laenge in 1..=3_u32 {
@@ -272,12 +270,30 @@ fn auftrag_folgt_fuer_jede_meldungsfolge_der_zustandstabelle() -> Result<(), Str
             folgen.push(f);
         }
     }
-    for f in &folgen {
-        offen.extend(pruefe_folge(&p, f, &alphabet)?);
-        if offen.len() > 20 {
-            break;
+    // Jeder Arbeiter verwendet einen eigenen Journalpfad für seine Folgen.
+    let offen = std::thread::scope(|scope| -> Result<Vec<String>, String> {
+        let mut arbeiter = Vec::new();
+        for teil in folgen.chunks(folgen.len().div_ceil(4)) {
+            let alphabet = &alphabet;
+            arbeiter.push(scope.spawn(move || -> Result<Vec<String>, String> {
+                let p = neuer_pfad("auftrag")?;
+                let mut offen = Vec::new();
+                for f in teil {
+                    offen.extend(pruefe_folge(&p, f, alphabet)?);
+                    if offen.len() > 20 {
+                        break;
+                    }
+                }
+                Ok(offen)
+            }));
         }
-    }
+        let mut offen = Vec::new();
+        for arbeit in arbeiter {
+            offen.extend(arbeit.join().map_err(|_| "Auftragsprüfung abgebrochen")??);
+        }
+        offen.truncate(21);
+        Ok(offen)
+    })?;
     if offen.is_empty() {
         Ok(())
     } else {
