@@ -59,18 +59,24 @@ def laufender_dienst():
             entsperren(sperre)
 
 
-def pruefe(wurzel, arbeit):
+def pruefe(wurzel, arbeit, alt_bau, cache_treffer):
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
     env.update(GIT_CONFIG_GLOBAL="NUL" if os.name == "nt" else "/dev/null",
                GIT_CONFIG_NOSYSTEM="1", GIT_ALLOW_PROTOCOL="file")
     protokoll = arbeit / "gegenprobe.log"
     neu = git(["rev-parse", "HEAD"], wurzel, env)
     altquelle, ursprung, projekt = (arbeit / p for p in ("alt", "ursprung.git", "projekt"))
-    git(["clone", "--local", "--no-hardlinks", "--no-checkout", str(wurzel), str(altquelle)], arbeit, env)
-    git(["checkout", "--detach", ALT], altquelle, env)
-    bau_env = dict(env, CARGO_TARGET_DIR=str(arbeit / "bau-alt"))
-    print("[Gegenprobe] Baue den installierten alten Updater.", flush=True)
-    lauf(["cargo", "build", "--locked", "-p", "depot_lauf"], altquelle, protokoll, bau_env)
+    altprogramm = alt_bau / "debug" / ("depotschlopf.exe" if os.name == "nt" else "depotschlopf")
+    if cache_treffer:
+        if not altprogramm.is_file():
+            raise RuntimeError("Im Cache fehlt das Programm des alten Updaters.")
+        print("[Gegenprobe] Verwende den bereits gebauten alten Updater.", flush=True)
+    else:
+        git(["clone", "--local", "--no-hardlinks", "--no-checkout", str(wurzel), str(altquelle)], arbeit, env)
+        git(["checkout", "--detach", ALT], altquelle, env)
+        bau_env = dict(env, CARGO_TARGET_DIR=str(alt_bau))
+        print("[Gegenprobe] Baue den installierten alten Updater.", flush=True)
+        lauf(["cargo", "build", "--locked", "-p", "depot_lauf"], altquelle, protokoll, bau_env)
     git(["clone", "--bare", "--local", "--no-hardlinks", str(wurzel), str(ursprung)], arbeit, env)
     git(["update-ref", "refs/heads/main", neu], ursprung, env)
     git(["clone", "--local", "--no-hardlinks", "--branch", "main", str(ursprung), str(projekt)], arbeit, env)
@@ -92,7 +98,6 @@ def pruefe(wurzel, arbeit):
     # Nur der äußere lokale Ersatz für GitHub darf die lokale Quelle abrufen.
     update_env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="protocol.file.allow",
                       GIT_CONFIG_VALUE_0="always")
-    altprogramm = arbeit / "bau-alt/debug" / ("depotschlopf.exe" if os.name == "nt" else "depotschlopf")
     print("[Gegenprobe] Halte Dienst-Port und Wächtersperre während des alten Updates.", flush=True)
     with laufender_dienst() as pfad:
         lauf([str(altprogramm), "update", neu], projekt, protokoll, update_env)
@@ -116,9 +121,21 @@ def pruefe(wurzel, arbeit):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--isolierte-pruefmaschine", action="store_true", required=True)
-    parser.add_argument("--arbeit", type=Path, required=True,
+    parser.add_argument("--isolierte-pruefmaschine", action="store_true")
+    parser.add_argument("--arbeit", type=Path,
                         help="Neuer leerer Arbeitsordner; bleibt für die Diagnose erhalten.")
+    parser.add_argument("--alt-commit", action="store_true", help="Commit des alten Updaters ausgeben")
+    parser.add_argument("--alt-bau", type=Path, help="Bauordner des alten Updaters")
+    parser.add_argument("--cache-treffer", action="store_true", help="Das vorhandene alte Programm verwenden")
     args = parser.parse_args()
-    args.arbeit.mkdir(parents=True, exist_ok=False)
-    pruefe(Path.cwd().resolve(), args.arbeit.resolve())
+    if args.alt_commit:
+        print(ALT)
+    else:
+        if not args.isolierte_pruefmaschine or args.arbeit is None:
+            parser.error("--isolierte-pruefmaschine und --arbeit sind für die Gegenprobe erforderlich")
+        if args.cache_treffer and args.alt_bau is None:
+            parser.error("--cache-treffer benötigt --alt-bau")
+        arbeit = args.arbeit.resolve()
+        alt_bau = args.alt_bau.resolve() if args.alt_bau is not None else arbeit / "bau-alt"
+        arbeit.mkdir(parents=True, exist_ok=False)
+        pruefe(Path.cwd().resolve(), arbeit, alt_bau, args.cache_treffer)
