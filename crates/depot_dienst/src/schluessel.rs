@@ -129,14 +129,25 @@ impl Wer {
 }
 
 #[cfg(windows)]
+static ANMELDEVERWALTUNG: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(windows)]
 fn eintrag(wer: Wer) -> Result<keyring_core::Entry, String> {
+    windows_eintrag(wer, wer.adresse())
+}
+
+#[cfg(windows)]
+fn windows_eintrag(wer: Wer, adresse: &str) -> Result<keyring_core::Entry, String> {
     use std::collections::HashMap;
 
     use keyring_core::api::CredentialStoreApi;
     use windows_native_keyring_store::Store;
 
     let store = Store::new().map_err(|e| format!("Anmeldeverwaltung: {e}"))?;
-    let ziel = HashMap::from([("target", wer.adresse())]);
+    let mut ziel = HashMap::from([("target", adresse)]);
+    if wer == Wer::Gemini {
+        ziel.insert("persistence", "Local");
+    }
     store
         .build(wer.dienst(), BENUTZER, Some(&ziel))
         .map_err(|e| format!("Anmeldeverwaltung: {e}"))
@@ -145,6 +156,9 @@ fn eintrag(wer: Wer) -> Result<keyring_core::Entry, String> {
 /// Ist ein Schluessel hinterlegt? Liest nur die Merkmale des Eintrags, nicht den Schluessel.
 #[cfg(windows)]
 pub fn status(wer: Wer) -> Hinterlegt {
+    let Ok(_sperre) = ANMELDEVERWALTUNG.lock() else {
+        return Hinterlegt::Unbekannt;
+    };
     match eintrag(wer).map(|e| e.get_attributes()) {
         Ok(Ok(_)) => Hinterlegt::Ja,
         Ok(Err(keyring_core::Error::NoEntry)) => Hinterlegt::Nein,
@@ -165,14 +179,29 @@ pub fn status(_wer: Wer) -> Hinterlegt {
 #[cfg(windows)]
 pub fn ablegen(wer: Wer, text: &str) -> Result<(), String> {
     let s = wer.pruefe(text)?;
+    let _sperre = ANMELDEVERWALTUNG
+        .lock()
+        .map_err(|_| "Anmeldeinformationsverwaltung nicht verfügbar")?;
     let eintrag = eintrag(wer)?;
+    if wer == Wer::Gemini {
+        return gemini_ablegen(&eintrag, &s);
+    }
     eintrag
         .set_password(&s)
         .map_err(|_| format!("Anmeldeverwaltung: {} nicht gespeichert", wer.adresse()))?;
-    if wer == Wer::Gemini && !eintrag.get_password().is_ok_and(|gelesen| gelesen == s) {
-        return Err("Anmeldeverwaltung: Gemini-Schlüssel konnte nicht zurückgelesen werden".into());
-    }
     Ok(())
+}
+
+#[cfg(windows)]
+fn gemini_ablegen(eintrag: &keyring_core::Entry, wert: &str) -> Result<(), String> {
+    eintrag
+        .set_password(wert)
+        .map_err(|_| "Windows konnte den Gemini-Schlüssel nicht speichern.")?;
+    if eintrag.get_password().is_ok_and(|gelesen| gelesen == wert) {
+        Ok(())
+    } else {
+        Err("Der gespeicherte Gemini-Schlüssel konnte nicht zurückgelesen werden.".into())
+    }
 }
 
 /// Ausserhalb von Windows gibt es keinen Ort fuer Schluessel.
@@ -189,6 +218,7 @@ pub fn ablegen(wer: Wer, text: &str) -> Result<(), String> {
 /// Lädt ausschließlich zum Entfernen von Geheimnissen aus Diagnoseausgaben.
 #[cfg(windows)]
 pub(crate) fn fuer_protokoll() -> Result<Vec<String>, ()> {
+    let _sperre = ANMELDEVERWALTUNG.lock().map_err(|_| ())?;
     let mut alle = Vec::new();
     for wer in ALLE.into_iter().chain([Wer::Gemini]) {
         match eintrag(wer).map_err(|_| ())?.get_password() {
@@ -207,4 +237,38 @@ pub(crate) fn fuer_protokoll() -> Result<Vec<String>, ()> {
 )]
 pub(crate) fn fuer_protokoll() -> Result<Vec<String>, ()> {
     Ok(Vec::new())
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "Benötigt eine interaktive Windows-Anmeldung mit Anmeldeinformationsverwaltung"]
+    fn gemini_wird_lokal_gespeichert_und_ist_neu_lesbar() -> Result<(), String> {
+        let jetzt = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?;
+        let ziel = format!(
+            "DepotSchlopf/Test/gemini/{}-{}",
+            std::process::id(),
+            jetzt.as_nanos()
+        );
+        let eintrag = windows_eintrag(Wer::Gemini, &ziel)?;
+        let probe = "Nur_Ein_Erfundener_Testwert";
+        let ergebnis = (|| -> Result<(), String> {
+            gemini_ablegen(&eintrag, probe)?;
+            let leser = windows_eintrag(Wer::Gemini, &ziel)?;
+            if !leser.get_password().is_ok_and(|wert| wert == probe) {
+                return Err("Der neue Eintrag kann nicht zurückgelesen werden.".into());
+            }
+            let merkmale = leser.get_attributes().map_err(|e| e.to_string())?;
+            if merkmale.get("persistence").map(String::as_str) != Some("Local") {
+                return Err("Die Anmeldeinformation wurde nicht lokal gespeichert.".into());
+            }
+            Ok(())
+        })();
+        let geloescht = eintrag.delete_credential().map_err(|e| e.to_string());
+        ergebnis.and(geloescht)
+    }
 }
