@@ -308,7 +308,9 @@ pub fn starter(stand: &Stand) -> Starter {
             | Art::Nachrichten
             | Art::Einrichten => (&sammler, art.argumente()),
             Art::Papier | Art::Vorbereiten | Art::Gemini => (&berater, art.argumente()),
-            Art::UpdatePruefen | Art::Update | Art::PapierAusgelassen => return cargo(art, wurzel),
+            Art::UpdatePruefen | Art::Update | Art::PapierAusgelassen | Art::Sicherung => {
+                return cargo(art, wurzel);
+            }
         };
         let mut c = Command::new(programm);
         c.current_dir(wurzel).args(args);

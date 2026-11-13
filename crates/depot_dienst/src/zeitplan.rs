@@ -323,6 +323,7 @@ impl Erledigt {
             | Art::Nachrichten
             | Art::Gemini
             | Art::Vorbereiten
+            | Art::Sicherung
             | Art::PapierAusgelassen
             | Art::UpdatePruefen
             | Art::Update => {}

@@ -59,7 +59,34 @@ pub fn update_sperren(daten: &Path) -> Result<File, String> {
     Ok(f)
 }
 
+/// Exklusive Sperre für die externe Sicherung und das Einspielen eines Updates.
+pub fn sicherung_sperren(daten: &Path, belegt: &str) -> Result<File, String> {
+    let pfad = daten.join("sicherung.lock");
+    match fs::symlink_metadata(&pfad) {
+        Ok(m) if m.is_file() => {}
+        Ok(_) => return Err("Sicherungssperre ist keine reguläre Datei".into()),
+        Err(e) if e.kind() == ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("Sicherungssperre: {e}")),
+    }
+    let sperre = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(pfad)
+        .map_err(|e| format!("Sicherungssperre: {e}"))?;
+    sperre.try_lock().map_err(|e| match e {
+        std::fs::TryLockError::WouldBlock => belegt.to_owned(),
+        std::fs::TryLockError::Error(e) => format!("Sicherungssperre: {e}"),
+    })?;
+    Ok(sperre)
+}
+
 pub fn journal_sperren(daten: &Path) -> Result<Option<File>, String> {
+    journal_sperren_fuer(daten, "Update-Sicherung")
+}
+
+pub fn journal_sperren_fuer(daten: &Path, zweck: &str) -> Result<Option<File>, String> {
     let pfad = daten.join("journal.txt");
     match fs::symlink_metadata(&pfad) {
         Ok(m) if m.is_file() => {}
@@ -69,11 +96,22 @@ pub fn journal_sperren(daten: &Path) -> Result<Option<File>, String> {
     }
     let f = File::open(pfad).map_err(|e| format!("Journal: {e}"))?;
     f.try_lock_shared()
-        .map_err(|e| format!("Journal für die Update-Sicherung belegt oder nicht sperrbar: {e}"))?;
+        .map_err(|e| format!("Journal für die {zweck} belegt oder nicht sperrbar: {e}"))?;
     Ok(Some(f))
 }
 
 pub fn lesen(daten: &Path) -> Result<Datenstand, String> {
+    lies_auswahl(daten, &[])
+}
+
+pub fn lies_sicherung(daten: &Path) -> Result<Datenstand, String> {
+    lies_auswahl(
+        daten,
+        &["anbieter.txt", "zeitplan.txt", "kurse.halt", "gemini.txt"],
+    )
+}
+
+fn lies_auswahl(daten: &Path, weitere: &[&str]) -> Result<Datenstand, String> {
     let mut stand = Datenstand::new();
     if !verzeichnis(daten)? {
         return Ok(stand);
@@ -85,7 +123,10 @@ pub fn lesen(daten: &Path) -> Result<Datenstand, String> {
             continue;
         };
         let klein = name.to_ascii_lowercase();
-        if !DATEIEN.contains(&klein.as_str()) && !klein.starts_with("kassenbuch") {
+        if !DATEIEN.contains(&klein.as_str())
+            && !weitere.contains(&klein.as_str())
+            && !klein.starts_with("kassenbuch")
+        {
             continue;
         }
         let typ = eintrag.file_type().map_err(|e| format!("{name}: {e}"))?;
@@ -111,11 +152,23 @@ pub fn kopiere(stand: &Datenstand, ziel: &Path) -> Result<(), String> {
             })
             .map_err(|e| format!("Kopie {name}: {e}"))?;
         let kopie = fs::read(&pfad).map_err(|e| format!("Kopie {name} prüfen: {e}"))?;
-        if Sha256::digest(&kopie) != Sha256::digest(original) {
-            return Err(format!("SHA-256 der Kopie von {name} stimmt nicht"));
-        }
+        pruefe_kopie(name, original, &kopie)?;
     }
     Ok(())
+}
+
+fn pruefe_kopie(name: &str, original: &[u8], kopie: &[u8]) -> Result<(), String> {
+    if Sha256::digest(kopie) != Sha256::digest(original) {
+        return Err(format!("SHA-256 der Kopie von {name} stimmt nicht"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn prueft_nach_dem_kopieren() {
+    assert!(pruefe_kopie("journal.txt", b"ganz", b"gan").is_err());
+    assert!(pruefe_kopie("journal.txt", b"ganz", b"ganz").is_ok());
 }
 
 pub struct Probe(pub PathBuf);
@@ -140,14 +193,47 @@ pub fn sichern(daten: &Path, stand: &Datenstand, alt: &str) -> Result<(), String
     if stand.is_empty() {
         return Ok(());
     }
-    let wurzel = daten.join("sicherung");
-    if !verzeichnis(&wurzel)? {
-        privat_anlegen(&wurzel).map_err(|e| format!("Sicherungsordner: {e}"))?;
+    let name = sichern_nach(&daten.join("sicherung"), stand, alt, MAX_SICHERUNGEN)?;
+    println!("[Update] Geprüfte Sicherung: daten/sicherung/{name}");
+    Ok(())
+}
+
+pub fn sichern_nach(
+    wurzel: &Path,
+    stand: &Datenstand,
+    commit: &str,
+    max: usize,
+) -> Result<String, String> {
+    if !crate::update::ist_commit(commit) {
+        return Err("Ungültiger Commit für Sicherung".into());
+    }
+    if !verzeichnis(wurzel)? {
+        privat_anlegen(wurzel).map_err(|e| format!("Sicherungsordner: {e}"))?;
+    }
+    for eintrag in fs::read_dir(wurzel).map_err(|e| format!("Sicherungen auflisten: {e}"))? {
+        let eintrag = eintrag.map_err(|e| format!("Sicherungen auflisten: {e}"))?;
+        if eintrag
+            .file_name()
+            .to_str()
+            .and_then(|name| name.strip_suffix(".tmp"))
+            .is_some_and(eigener_name)
+            && eintrag
+                .file_type()
+                .map_err(|e| format!("Sicherungsordner: {e}"))?
+                .is_dir()
+        {
+            fs::remove_dir_all(eintrag.path())
+                .map_err(|e| format!("Unfertige Sicherung aufräumen: {e}"))?;
+        }
     }
     let utc = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| format!("Zeit für Datensicherung: {e}"))?;
-    let name = format!("utc-{:020}-{:09}_{alt}", utc.as_secs(), utc.subsec_nanos());
+    let name = format!(
+        "utc-{:020}-{:09}_{commit}",
+        utc.as_secs(),
+        utc.subsec_nanos()
+    );
     let ziel = wurzel.join(&name);
     let staging = wurzel.join(format!("{name}.tmp"));
     privat_anlegen(&staging).map_err(|e| format!("Sicherungsordner: {e}"))?;
@@ -157,8 +243,8 @@ pub fn sichern(daten: &Path, stand: &Datenstand, alt: &str) -> Result<(), String
         let _ = fs::remove_dir_all(&staging);
         return Err(e);
     }
-    println!("[Update] Geprüfte Sicherung: daten/sicherung/{name}");
-    begrenze(&wurzel)
+    begrenze(wurzel, max)?;
+    Ok(name)
 }
 
 fn eigener_name(name: &str) -> bool {
@@ -177,7 +263,7 @@ fn eigener_name(name: &str) -> bool {
         && crate::update::ist_commit(commit)
 }
 
-fn begrenze(wurzel: &Path) -> Result<(), String> {
+fn begrenze(wurzel: &Path, max: usize) -> Result<(), String> {
     let mut namen = Vec::new();
     for e in fs::read_dir(wurzel).map_err(|e| format!("Sicherungen auflisten: {e}"))? {
         let e = e.map_err(|e| format!("Sicherungen auflisten: {e}"))?;
@@ -191,7 +277,7 @@ fn begrenze(wurzel: &Path) -> Result<(), String> {
         }
     }
     namen.sort_unstable();
-    let zu_viel = namen.len().saturating_sub(MAX_SICHERUNGEN);
+    let zu_viel = namen.len().saturating_sub(max);
     for name in namen.into_iter().take(zu_viel) {
         fs::remove_dir_all(wurzel.join(name))
             .map_err(|e| format!("Alte Sicherung entfernen: {e}"))?;

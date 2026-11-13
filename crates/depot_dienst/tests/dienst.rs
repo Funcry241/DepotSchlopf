@@ -3955,3 +3955,60 @@ fn heute_exportieren_liefert_zip_ohne_schreibzugriff() -> Result<(), String> {
     assert_eq!(status(&behandle(&d, &umwelt, &get, jetzt))?, 405);
     fs::remove_dir_all(wurzel).map_err(|e| e.to_string())
 }
+
+#[test]
+fn ohne_ziel_kein_lauf() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let zeit = donnerstag(23, 30)?;
+    assert!(d.schritt(zeit).is_none());
+    assert!(get(&d, "/teil/live", zeit).contains("Sicherung: aus"));
+    assert!(get(&d, "/einrichtung", zeit).contains("Jetzt sichern"));
+    Ok(())
+}
+
+#[test]
+fn zeitplan_alte_datei() -> Result<(), String> {
+    let wurzel = eingeschaltet(ordner()?)?;
+    let datei = wurzel.join("daten/zeitplan.txt");
+    let vorher = fs::read_to_string(&datei).map_err(|e| e.to_string())?;
+    assert!(!vorher.contains("sicherung"));
+    assert!(Zeitplan::lies(&vorher).is_ok());
+    let d = dienst(wurzel, true);
+    assert!(get(&d, "/teil/live", donnerstag(12, 0)?).contains("Sicherung: aus"));
+    Ok(())
+}
+
+#[test]
+fn sicherung_formulare_speichern_und_starten() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let zeit = donnerstag(12, 0)?;
+    let html = get(&d, "/einrichtung", zeit);
+    let (_, formular) = some(html.split_once("id=\"sicherung\""), "Sicherungsabschnitt")?;
+    assert!(formular.contains("action=\"/sicherung-ziel\""));
+    assert!(formular.contains("action=\"/ausfuehren\""));
+    assert!(formular.contains(&format!("name=\"t\" value=\"{TOKEN}\"")));
+    let ziel = if cfg!(windows) {
+        "C%3A%5CDepotSicherung"
+    } else {
+        "%2FDepotSicherung"
+    };
+    let speichern = formular_post("/sicherung-ziel", &format!("t={TOKEN}&ziel={ziel}"));
+    let antwort = text(&behandle(&d, &Attrappe::default(), &speichern, zeit));
+    assert!(
+        antwort.contains("Location: /einrichtung#sicherung"),
+        "{antwort}"
+    );
+    assert!(wurzel.join("daten/sicherung_ziel.txt").is_file());
+    let starten = formular_post("/ausfuehren", &format!("t={TOKEN}&art=sicherung"));
+    let antwort = text(&behandle(&d, &Attrappe::default(), &starten, zeit));
+    assert!(
+        antwort.contains("Location: /einrichtung?m=auftrag#sicherung"),
+        "{antwort}"
+    );
+    assert_eq!(
+        d.sperre().warteschlange.front().map(|a| a.art),
+        Some(Art::Sicherung)
+    );
+    Ok(())
+}
