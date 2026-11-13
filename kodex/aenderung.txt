@@ -1,16 +1,4 @@
 klasse: KodexAenderung
-zweck: Kodex an Freigabe binden und Kandidaten mit dem Basisstand prüfen
+zweck: Ablehnung einer Kodex-Änderung ohne Grenzfreigabe auf GitHub nachweisen
 pfade:
-.github/workflows/kodex-basis.yml
-crates/depot_kodex/src/festschreibung.rs
-crates/depot_kodex/src/freigabe.rs
-crates/depot_kodex/src/git.rs
-crates/depot_kodex/src/lexer.rs
-crates/depot_kodex/src/lib.rs
-crates/depot_kodex/src/main.rs
-crates/depot_kodex/src/pr.rs
 crates/depot_kodex/src/quellscan.rs
-crates/depot_kodex/tests/pr.rs
-docs/befunde/kodex-basis.md
-kodex/festschreibung.txt
-kodex/freigabe.txt

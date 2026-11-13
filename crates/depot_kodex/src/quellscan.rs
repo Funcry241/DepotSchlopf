@@ -949,3 +949,5 @@ mod start_tests {
         );
     }
 }
+
+// Gegenprobe für den Kandidatenstatus aus dem Basisstand.
