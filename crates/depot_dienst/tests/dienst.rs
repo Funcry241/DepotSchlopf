@@ -3803,6 +3803,34 @@ fn gemini_laeuft_vor_papier_und_speichert_stderr() -> Result<(), String> {
 }
 
 #[test]
+fn otter_auf_live_bleibt_ausserhalb_der_aktualisierten_teile() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let zeit = donnerstag(12, 0)?;
+    let html = get(&d, "/", zeit);
+    assert_eq!(html.matches("class=\"otter\"").count(), 1);
+    assert!(html.contains("prefers-reduced-motion:no-preference"));
+    assert!(html.contains("</div>\n<div class=\"otter\" aria-hidden=\"true\">"));
+    for pfad in ["/teil/kopf", "/teil/live", "/einrichtung"] {
+        assert!(!get(&d, pfad, zeit).contains("class=\"otter\""), "{pfad}");
+    }
+    Ok(())
+}
+
+#[test]
+fn otter_wird_bei_einem_auftrag_wach_und_ruht_danach() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let zeit = donnerstag(12, 0)?;
+    let pose = |pose| get(&d, "/teil/kopf", zeit).contains(&format!("data-otter=\"{pose}\""));
+    assert!(pose("ruht"));
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(zeit), "Termine gestartet")?;
+    assert!(pose("wach"));
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+    assert!(pose("ruht"));
+    Ok(())
+}
+
+#[test]
 fn betriebsleiste_zeigt_kurssperre_mit_art_zeit_und_grund() -> Result<(), String> {
     let wurzel = ordner()?;
     let daten = wurzel.join("daten");
@@ -3820,6 +3848,7 @@ fn betriebsleiste_zeigt_kurssperre_mit_art_zeit_und_grund() -> Result<(), String
     let html = get(&d, "/teil/kopf", zeit);
     assert!(html.contains("Kurssperre seit") && html.contains("Prüfgrund · sicherheit"));
     assert!(html.contains(&depot_lage::zeit_text(zeit)));
+    assert!(html.contains("data-otter=\"pfote\""));
     assert!(html.contains("/einrichtung#kurssperre"));
     Ok(())
 }

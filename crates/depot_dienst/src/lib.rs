@@ -27,6 +27,7 @@ mod gespraeche;
 pub mod hinweis;
 pub mod http;
 pub mod kostenschutz;
+mod otter;
 mod papierdialog;
 pub use papierdialog::DialogErgebnis;
 pub mod programmstand;
@@ -212,9 +213,8 @@ fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
 }
 
 fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {
-    let mut s = seiten::betriebsleiste(&d.start, &d.sperre(), tag);
-    seiten::kurssperre_status(&d.wurzel.join("daten"), tag, &mut s);
-    s
+    let kurssperre = seiten::kurssperre_status(&d.wurzel.join("daten"), tag);
+    seiten::betriebsleiste_mit_kurssperre(&d.start, &d.sperre(), tag, kurssperre.as_deref())
 }
 
 fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {

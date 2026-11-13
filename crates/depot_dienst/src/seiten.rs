@@ -11,6 +11,7 @@ use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, ortszeit, zeit
 use crate::autostart;
 use crate::http::feld;
 use crate::kostenschutz;
+use crate::otter;
 use crate::schluessel::Wer;
 use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand};
 use crate::zeitplan::{Zeitplan, geplante_abrufe, lies_uhrzeit, naechster_fuer, uhrzeit_text};
@@ -536,11 +537,12 @@ pub fn rahmen(
             )
         },
     );
+    let otter_stil = if hier == "/" { otter::STIL } else { "" };
     let _ = write!(
         s,
         "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <title>DepotSchlopf</title><style>{STIL}{STIL_DIENST}</style></head><body>\
+         <title>DepotSchlopf</title><style>{STIL}{STIL_DIENST}{otter_stil}</style></head><body>\
          <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt, etwa \
          beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu. Wenn du das schwarze \
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div>\
@@ -576,9 +578,20 @@ pub fn rahmen(
     let teil = teil
         .map(|t| format!(" data-teil=\"{}\"", maskiere(t)))
         .unwrap_or_default();
+    if hier == "/" {
+        s.push_str("<div class=\"live-kopf\">");
+    }
+    let _ = write!(
+        s,
+        "<div id=\"betriebsleiste\" data-teil=\"/teil/kopf\" role=\"status\" aria-live=\"polite\">{betrieb}</div>"
+    );
+    if hier == "/" {
+        s.push_str(otter::BILD);
+        s.push_str("</div>");
+    }
     let _ = writeln!(
         s,
-        "<div id=\"betriebsleiste\" data-teil=\"/teil/kopf\" role=\"status\" aria-live=\"polite\">{betrieb}</div><div id=\"teil\"{teil}>{inhalt}</div></main>\
+        "<div id=\"teil\"{teil}>{inhalt}</div></main>\
          <script src=\"/app.js\"></script></body></html>"
     );
     s
@@ -1233,7 +1246,21 @@ fn gesamtstatus_teil(token: &str, z: &Zustand, einrichtung: bool) -> String {
 
 /// Gemeinsame, unabhängig von Formularen aufgefrischte Betriebsleiste.
 pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
+    betriebsleiste_mit_kurssperre(start, z, heute, None)
+}
+
+pub(crate) fn betriebsleiste_mit_kurssperre(
+    start: &str,
+    z: &Zustand,
+    heute: Option<Datum>,
+    kurssperre: Option<&str>,
+) -> String {
     let mut s = marke(start);
+    let _ = write!(
+        s,
+        "<span hidden data-otter=\"{}\"></span>",
+        otter::pose(z, kurssperre.is_some())
+    );
     if let Some(a) = &z.laufend {
         let _ = write!(
             s,
@@ -1288,6 +1315,9 @@ pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String 
         );
     }
     s.push_str(&update_hinweis(z));
+    if let Some(text) = kurssperre {
+        s.push_str(text);
+    }
     s
 }
 
@@ -1570,10 +1600,10 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
     );
 }
 
-pub(crate) fn kurssperre_status(daten: &std::path::Path, heute: Option<Datum>, s: &mut String) {
+pub(crate) fn kurssperre_status(daten: &std::path::Path, heute: Option<Datum>) -> Option<String> {
     use depot_lage::kurssperre;
     let text = match kurssperre::lies(daten) {
-        Ok(None) => return,
+        Ok(None) => return None,
         Ok(Some(sperre)) => {
             let zeit = sperre.seit.map_or_else(|| "unbekannt".into(), zeit_text);
             let naechste = if sperre.art != kurssperre::Art::Unklar {
@@ -1593,11 +1623,10 @@ pub(crate) fn kurssperre_status(daten: &std::path::Path, heute: Option<Datum>, s
         }
         Err(_) => "Kurssperre: Datei unlesbar".into(),
     };
-    let _ = write!(
-        s,
+    Some(format!(
         "<div class=\"betrieb halt\">{} · <a href=\"/einrichtung#kurssperre\">Einrichtung</a></div>",
         maskiere(&text)
-    );
+    ))
 }
 
 fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {

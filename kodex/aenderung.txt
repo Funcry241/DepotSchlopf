@@ -1,9 +1,8 @@
 klasse: Funktion
-zweck: Depotdaten für Einstand, Bargeld und Tagesergebnis aus dem Journal lesen
+zweck: Otter mit drei Posen neben der Betriebsleiste auf Live anzeigen
 pfade:
 CHANGELOG.md
-crates/depot_dienst/src/analyse.rs
-crates/depot_journal/src/stand.rs
-crates/depot_lage/src/depot.rs
-crates/depot_lage/src/lib.rs
-crates/depot_lage/tests/lage.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/otter.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/dienst.rs
