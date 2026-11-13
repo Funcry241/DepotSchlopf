@@ -152,6 +152,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Behoben
 
+- Der Xetra-Kalender setzt für den 30. Dezember 2026 die früheste Preisermittlung der Schlussauktion um 14:05 Uhr Frankfurter Zeit an. Das Lagebild verwendet den Frankfurter Kalendertag für Monatsverbrauch und Vorbereitungshinweise (#158, #190).
+
 - Widerruf in der KI-Abstimmung (#108): Eine widerrufene Zustimmung zu einem Handelsvorschlag bleibt auch bei abgebrochener Runde widerrufen.
 
 - Kodex: Ein unveränderter Stand (frischer Klon von main) wird nicht mehr wegen fehlender Deklaration abgelehnt.

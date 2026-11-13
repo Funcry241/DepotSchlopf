@@ -172,13 +172,13 @@ fn vorbereitung(l: &Lagebild, knopf: Knopf<'_>, s: &mut String) {
             zeit_text(p.zeit),
             p.ereignisse.len()
         );
-        if l.jetzt
-            .datum()
-            .is_some_and(|d| Some(d) != p.zeit.datum() && !depot_kern::liste::handelstag(d))
+        let heute = l.jetzt.frankfurt_tag();
+        if heute
+            .is_some_and(|d| Some(d) != p.zeit.frankfurt_tag() && !depot_kern::liste::handelstag(d))
         {
             s.push_str("<p class=\"offen\">Heute ist noch kein neuer Wissensstand belegt. Angezeigt wird der letzte belegte Stand.</p>");
         }
-        if l.jetzt.datum().is_some_and(|d| d > p.fuer) {
+        if heute.is_some_and(|d| d > p.fuer) {
             s.push_str("<p class=\"leise\">Das Ziel-Datum ist vergangen. Bei neuen Entscheidungen werden die Thesen erneut geprüft.</p>");
         }
         for b in [BeraterId::Dachs, BeraterId::Maus] {

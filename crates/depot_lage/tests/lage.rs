@@ -271,6 +271,68 @@ fn vorbereitung_zeigt_beide_ergebnisse_maskiert_und_nur_echte_antworten_gruen() 
 }
 
 #[test]
+fn lagebild_zeigt_neuen_monatsverbrauch_um_frankfurter_mitternacht() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let j = ort.oeffnen()?;
+    let monat = tag(1)?;
+    let vormonat = some(Datum::neu(2026, 10, 31), "Vormonat")?;
+    let jetzt = some(Zeitpunkt::frankfurt(monat, 0, 30, 0), "Jetzt")?;
+    let zeit = some(Zeitpunkt::frankfurt(monat, 0, 15, 0), "Anbieteraufruf")?;
+    assert_eq!(jetzt.datum(), Some(vormonat));
+
+    let mut alt = Eintrag::neu(
+        some(
+            Zeitpunkt::frankfurt(vormonat, 23, 55, 0),
+            "Alter Anbieteraufruf",
+        )?,
+        Wer::Dachs,
+        Ergebnis::Ok,
+        None,
+    );
+    alt.ist = depot_lage::anbieter::Kosten::Betrag(Cent(19));
+    let mut neu = Eintrag::neu(zeit, Wer::Dachs, Ergebnis::Ok, None);
+    neu.ist = depot_lage::anbieter::Kosten::Betrag(Cent(23));
+
+    let mut u = umgebung(jetzt, Zugang::Offen(j.stand()));
+    u.anbieter = vec![alt, neu];
+    let l = lagebild(&u);
+    let budget = some(
+        l.budget.iter().find(|b| b.berater == BeraterId::Dachs),
+        "Dachs-Budget",
+    )?;
+    assert_eq!(budget.monat_verbraucht, Cent(23));
+    assert_eq!(budget.monat_abgerechnet, 1);
+    Ok(())
+}
+
+#[test]
+fn vorbereitungshinweise_wechseln_um_frankfurter_mitternacht() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let wissensstand = abends(7)?;
+    let ziel = tag(9)?;
+    vorbedingung(
+        j.starte_vorbereitung(wissensstand, ziel, vec!["Belegter Quellenstand".into()]),
+        "Vorbereitung",
+    )?;
+
+    let sonntag = some(Zeitpunkt::frankfurt(tag(8)?, 0, 30, 0), "Sonntag")?;
+    let html = html::inhalt(
+        &lagebild(&umgebung(sonntag, Zugang::Offen(j.stand()))),
+        &|_| None,
+    );
+    assert!(html.contains("Heute ist noch kein neuer Wissensstand belegt"));
+
+    let dienstag = some(Zeitpunkt::frankfurt(tag(10)?, 0, 30, 0), "Dienstag")?;
+    let html = html::inhalt(
+        &lagebild(&umgebung(dienstag, Zugang::Offen(j.stand()))),
+        &|_| None,
+    );
+    assert!(html.contains("Das Ziel-Datum ist vergangen"));
+    Ok(())
+}
+
+#[test]
 fn belegtes_journal_wartet_und_unlesbares_haelt() -> Result<(), String> {
     let l = lagebild(&umgebung(abends(5)?, Zugang::Belegt));
     assert_eq!(punkt(&l, "Journal")?.abhilfe, Some(Abhilfe::Warten));

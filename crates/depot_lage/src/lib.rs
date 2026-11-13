@@ -883,7 +883,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut punkte = vec![journal_punkt(u.journal)];
     sperr_punkte(u, &mut punkte);
     let (schluessel, hinweise) = schluessel_punkte(u, &mut punkte);
-    let heute = u.jetzt.datum();
+    let heute = u.jetzt.frankfurt_tag();
     let werte = beobachtungsliste();
     let mut budget = Vec::new();
     let mut depot_lage = None;
