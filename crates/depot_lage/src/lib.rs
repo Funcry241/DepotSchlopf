@@ -24,6 +24,7 @@
 pub mod betrieb;
 /// Das Anbieterprotokoll, fuer die Oberflaeche.
 pub use depot_journal::{abrufkontingent, anbieter, gespraeche, kurssperre};
+pub use depot_sim::ausfuehrung;
 mod budget;
 mod depot;
 pub mod depotverlauf;

@@ -71,6 +71,11 @@ pub struct DepotLage {
     pub hoechststand: Option<Cent>,
     /// Neueste zuerst.
     pub auftraege: Vec<AuftragZeile>,
+    pub ausfuehrungen: Vec<(
+        TopfId,
+        crate::ausfuehrung::Kennzahlen,
+        crate::ausfuehrung::Kennzahlen,
+    )>,
     /// Vergleich seit Start (#118); `None` vor dem ersten abgeschlossenen Papiertag.
     pub vergleich: Option<crate::vergleich::VergleichLage>,
 }
@@ -196,6 +201,22 @@ pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
         .map(|a| auftrag_zeile(a, werte))
         .collect();
     let kurse_vom = kurse.map(|k| k.handelstag);
+    let ausfuehrungen = kurse_vom
+        .or_else(|| s.abschluss().map(|a| a.datum))
+        .map_or_else(Vec::new, |tag| {
+            let buch = crate::ausfuehrung::ausfuehrungsbuch(s);
+            let ab = crate::ausfuehrung::letzte_20_tage(tag);
+            s.toepfe()
+                .keys()
+                .map(|topf| {
+                    (
+                        *topf,
+                        crate::ausfuehrung::je_ki(&buch, *topf, Richtung::Kauf, ab),
+                        crate::ausfuehrung::je_ki(&buch, *topf, Richtung::Verkauf, ab),
+                    )
+                })
+                .collect()
+        });
     DepotLage {
         kurse_vom,
         tagesergebnis: tagesergebnis(s, werte, kurse_vom, gesamt),
@@ -204,6 +225,7 @@ pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
         letzter_abschluss: s.abschluss().map(|a| a.datum),
         hoechststand: s.historischer_hoechststand(),
         auftraege,
+        ausfuehrungen,
         vergleich: crate::vergleich::vergleich_lage(s, werte),
     }
 }

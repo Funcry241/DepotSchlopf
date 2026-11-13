@@ -3922,6 +3922,7 @@ fn heute_exportieren_liefert_zip_ohne_schreibzugriff() -> Result<(), String> {
         "LIESMICH.md",
         "01_ueberblick.md",
         "03_journal.md",
+        "ausfuehrungen.csv",
         "MANIFEST.txt",
     ] {
         assert!(antwort.contains(datei));

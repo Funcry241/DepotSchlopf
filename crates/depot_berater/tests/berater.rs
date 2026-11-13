@@ -51,6 +51,7 @@ fn eingefrorene_vorbereitung_entspricht_auch_bei_langen_texten_der_gesendeten_au
         kaufbar: topf.bargeld(),
         kurse: &kurse,
         verlauf: &[],
+        kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         positionskaeufe: &[],
         ereignisse: &aus,
     };
@@ -94,6 +95,7 @@ fn vorbereitungsclient_akzeptiert_these_ohne_kurs_aber_keine_handelsziele() -> R
         kaufbar: topf.bargeld(),
         kurse: &kurse,
         verlauf: &[],
+        kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -321,6 +323,7 @@ fn mit_lage<T>(f: impl FnOnce(&Lage<'_>) -> T) -> Result<T, String> {
         kaufbar: topf.bargeld(),
         kurse: &kurse,
         verlauf: &[],
+        kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -366,6 +369,35 @@ fn frage_enthaelt_5t() -> Result<(), String> {
         frage.matches("zu wenig Verlauf").count(),
         werte.len().saturating_sub(2)
     );
+    Ok(())
+}
+
+#[test]
+fn frage_hinweis() -> Result<(), String> {
+    let universum = universum()?;
+    let frage = mit_lage(|lage| {
+        depot_berater::frage::vorschlag_frage(
+            &Lage {
+                kaufbilanz: depot_sim::ausfuehrung::Kennzahlen {
+                    gefuellt: 14,
+                    verfallen: 4,
+                    mittlere_bewegung_bp: Some(230),
+                    mittlerer_fuellpreis_bp: None,
+                },
+                ..*lage
+            },
+            &universum,
+            &[],
+        )
+    })?;
+    let hinweis = some(
+        frage
+            .lines()
+            .find(|l| l.starts_with("Hinweis: Deine Kauforders")),
+        "Hinweis",
+    )?;
+    assert!(hinweis.contains("14 von 18 gefüllt, 4 verfallen (im Mittel +2,3 %"));
+    assert!(hinweis.len() < 200);
     Ok(())
 }
 
@@ -1441,6 +1473,7 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
         kaufbar: topf.bargeld(),
         kurse: &kurse,
         verlauf: &verlauf,
+        kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -1672,6 +1705,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
         kaufbar: Cent(45_000),
         kurse: &kurse,
         verlauf: &[],
+        kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         positionskaeufe: &[],
         ereignisse: &[],
     };

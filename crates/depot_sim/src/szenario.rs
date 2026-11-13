@@ -39,6 +39,7 @@ pub struct Lage<'a> {
     pub kaufbar: Cent,
     pub kurse: &'a Kurse,
     pub verlauf: &'a [(Isin, crate::kursverlauf::Verlauf)],
+    pub kaufbilanz: crate::ausfuehrung::Kennzahlen,
     pub ereignisse: &'a [String],
     pub positionskaeufe: &'a [crate::Positionskauf],
 }

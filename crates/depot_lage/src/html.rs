@@ -346,6 +346,43 @@ fn tage(l: &Lagebild, s: &mut String) {
     s.push_str("</table></div></section>");
 }
 
+pub fn ausfuehrungsbilanz(depot: &crate::DepotLage, text: &mut String) {
+    use crate::ausfuehrung::Kennzahlen;
+    let quote = |k: Kennzahlen| {
+        let gesamt = k.gefuellt.saturating_add(k.verfallen);
+        let bp = i64::try_from(k.gefuellt).ok().and_then(|anzahl| {
+            anzahl
+                .checked_mul(10_000)?
+                .checked_div(i64::try_from(gesamt).ok()?)
+        });
+        bp.map_or_else(
+            || "–".into(),
+            |bp| format!("{} ({}/{gesamt})", prozent(bp), k.gefuellt),
+        )
+    };
+    let abstand = |bp: Option<i64>| bp.map_or_else(|| "–".into(), |wert| format!("{wert:+} bp"));
+    if depot.ausfuehrungen.iter().all(|(_, kauf, verkauf)| {
+        kauf.gefuellt == 0 && kauf.verfallen == 0 && verkauf.gefuellt == 0 && verkauf.verfallen == 0
+    }) {
+        return;
+    }
+    text.push_str("<h3>Ausführungen der letzten 20 Handelstage</h3><ul>");
+    for (topf, kauf, verkauf) in &depot.ausfuehrungen {
+        let _ = write!(
+            text,
+            "<li>{} · Kauf gefüllt {} (Ø Füllabstand {}) · Verkauf gefüllt {} (Ø Füllabstand {}) · Verfallene Käufe {} (Ø Kursbewegung {})</li>",
+            topf_text(*topf),
+            quote(*kauf),
+            abstand(kauf.mittlerer_fuellpreis_bp),
+            quote(*verkauf),
+            abstand(verkauf.mittlerer_fuellpreis_bp),
+            kauf.verfallen,
+            abstand(kauf.mittlere_bewegung_bp)
+        );
+    }
+    text.push_str("</ul>");
+}
+
 fn depot(l: &Lagebild, s: &mut String) {
     let Some(d) = &l.depot else {
         return;
@@ -398,6 +435,7 @@ fn depot(l: &Lagebild, s: &mut String) {
     if let Some(v) = &d.vergleich {
         vergleich(v, s);
     }
+    ausfuehrungsbilanz(d, s);
     if !d.auftraege.is_empty() {
         s.push_str(
             "<h2 style=\"margin-top:12px\">Aufträge</h2><div class=\"breit\"><table><tr>\
