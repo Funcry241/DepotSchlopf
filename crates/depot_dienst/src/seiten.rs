@@ -1403,7 +1403,10 @@ fn regel(w: Wer) -> &'static str {
     match w {
         Wer::Kursquelle => "8 bis 64 Großbuchstaben und Ziffern",
         Wer::KursquelleUs => "20 bis 64 Kleinbuchstaben und Ziffern",
-        Wer::Berater(_) | Wer::Gemini => "20 bis 256 Zeichen aus A-Z, a-z, 0-9, _ und -",
+        Wer::Berater(_) => "20 bis 256 Zeichen aus A-Z, a-z, 0-9, _ und -",
+        Wer::Gemini => {
+            "Kopiere den vollständigen API-Schlüssel aus Google AI Studio. Schlüssel mit AQ. werden unterstützt."
+        }
     }
 }
 
