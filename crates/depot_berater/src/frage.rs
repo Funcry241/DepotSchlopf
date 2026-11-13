@@ -224,6 +224,19 @@ fn lage_text(lage: &Lage<'_>, universum: &Universum, bilanz: &[(BeraterId, Auswe
         );
     }
     gewinnschwelle(&mut t);
+    let k = lage.kaufbilanz;
+    let entschieden = k.gefuellt.saturating_add(k.verfallen);
+    if entschieden > 0 {
+        let bewegung = k.mittlere_bewegung_bp.map_or_else(
+            || "Bewegung nicht belegt".into(),
+            |bp| format!("im Mittel {} Kursbewegung", bewegung(bp)),
+        );
+        let _ = writeln!(
+            t,
+            "Hinweis: Deine Kauforders der letzten 20 Handelstage: {} von {entschieden} gefüllt, {} verfallen ({bewegung}).",
+            k.gefuellt, k.verfallen
+        );
+    }
     if !bilanz.is_empty() {
         let _ = writeln!(
             t,
@@ -554,6 +567,7 @@ mod prognosebilanz_tests {
             kaufbar: topf.bargeld(),
             kurse: &kurse,
             verlauf: &[],
+            kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
             positionskaeufe: &[],
             ereignisse: &["Termin".into()],
         };

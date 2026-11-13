@@ -805,9 +805,59 @@ struct Journalpaket {
     kurz: String,
     depotdetails: String,
     orders: String,
+    ausfuehrungen: String,
     ki: String,
     historie: historie::Historie,
     journal: journal::Auszug,
+}
+
+fn ausfuehrungen_csv(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
+    use depot_lage::ausfuehrung::{Richtung, ausfuehrungsbuch};
+    let mut csv = String::from(
+        "Nr;Topf;ISIN;Richtung;Stück;Versand UTC;Frist UTC;Zustand;Bezug EUR;Limit EUR;Limit bp;Füllpreis EUR;Füllpreis bp;Schluss EUR;Schluss bp\n",
+    );
+    let Some(stand) = stand else { return csv };
+    let preis = |wert: Option<depot_kern::Preis>| {
+        wert.map_or_else(String::new, depot_kern::Preis::euro_text)
+    };
+    let bp = |wert: Option<i64>| wert.map_or_else(String::new, |wert| wert.to_string());
+    let zeit = |wert: Option<Zeitpunkt>| wert.map_or_else(String::new, |wert| wert.to_string());
+    for z in ausfuehrungsbuch(stand) {
+        let fuellung = stand.auftrag(z.nr).is_some_and(|a| {
+            a.ausfuehrungen
+                .iter()
+                .any(|f| f.kurszeit.is_some_and(|t| zeitraum.enthaelt(t)))
+        });
+        if !fuellung
+            && !z.versand.is_some_and(|t| zeitraum.enthaelt(t))
+            && !z.frist.is_some_and(|t| zeitraum.enthaelt(t))
+        {
+            continue;
+        }
+        let richtung = match z.richtung {
+            Richtung::Kauf => "Kauf",
+            Richtung::Verkauf => "Verkauf",
+        };
+        let _ = writeln!(
+            csv,
+            "{};{:?};{};{richtung};{};{};{};{};{};{};{};{};{};{};{}",
+            z.nr,
+            z.topf,
+            z.isin,
+            z.stueck,
+            zeit(z.versand),
+            zeit(z.frist),
+            depot_lage::zustand_text(z.zustand),
+            preis(z.bezug),
+            preis(depot_kern::Preis::aus_cent(z.limit)),
+            bp(z.limit_bp),
+            preis(z.fuellpreis),
+            bp(z.fuellpreis_bp),
+            preis(z.schluss),
+            bp(z.schluss_bp)
+        );
+    }
+    csv
 }
 
 fn journalpaket(
@@ -828,6 +878,7 @@ fn journalpaket(
                 kurz,
                 depotdetails,
                 orders,
+                ausfuehrungen: ausfuehrungen_csv(Some(stand), zeitraum),
                 ki: ki(daten, zeitraum, Some(stand), optionen.ki_texte, luecken),
                 historie: historie::bericht(zeitraum, Some(stand), luecken),
                 journal: journal::auszug(zeitraum, stand, eintraege, original, optionen.rohdaten),
@@ -844,6 +895,7 @@ fn journalpaket(
                 kurz: "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n".into(),
                 depotdetails: String::new(),
                 orders: "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
+                ausfuehrungen: ausfuehrungen_csv(None, zeitraum),
                 ki: ki(daten, zeitraum, None, optionen.ki_texte, luecken),
                 historie: historie::bericht(zeitraum, None, luecken),
                 journal: journal::Auszug::default(),
@@ -908,6 +960,7 @@ pub(crate) fn exportieren(
         kurz,
         depotdetails,
         orders,
+        ausfuehrungen,
         ki,
         historie,
         journal,
@@ -963,15 +1016,9 @@ pub(crate) fn exportieren(
         ("05_betrieb_und_fehler.md", betrieb.bericht),
         ("06_konfiguration.md", konfiguration),
         ("07_version.md", programmstand(d.version.as_deref())),
+        ("ausfuehrungen.csv", ausfuehrungen),
     ];
-    let dateien = dateien
-        .iter()
-        .map(|(name, text)| (*name, text.as_str()))
-        .chain(
-            roh.dateien
-                .iter()
-                .map(|(name, text)| (name.as_str(), text.as_str())),
-        );
+    let dateien = mit_rohdaten(&dateien, &roh);
     match archiv(&schutz, zeitraum, jetzt, &liesmich, dateien) {
         Ok(zip) => http::download(&zeitraum.dateiname(), &zip),
         Err(_) => seiten::fehler(
@@ -981,9 +1028,34 @@ pub(crate) fn exportieren(
     }
 }
 
+fn mit_rohdaten<'a>(
+    dateien: &'a [(&'a str, String)],
+    roh: &'a rohdaten::Rohdaten,
+) -> impl Iterator<Item = (&'a str, &'a str)> {
+    dateien
+        .iter()
+        .map(|(name, text)| (*name, text.as_str()))
+        .chain(
+            roh.dateien
+                .iter()
+                .map(|(name, text)| (name.as_str(), text.as_str())),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_csv() -> Result<(), String> {
+        let tag = Datum::neu(2026, 11, 10).ok_or("Datum")?;
+        let zeitraum = Zeitraum { von: tag, bis: tag };
+        let csv = ausfuehrungen_csv(Some(&Stand::default()), zeitraum);
+        assert!(csv.starts_with("Nr;Topf;ISIN;Richtung;Stück;"));
+        assert!(csv.contains("Füllpreis EUR;Füllpreis bp;Schluss EUR;Schluss bp\n"));
+        assert_eq!(csv, ausfuehrungen_csv(None, zeitraum));
+        Ok(())
+    }
 
     #[test]
     fn freie_zeitraeume_verwenden_frankfurter_tage_und_beide_grenzen() -> Result<(), String> {

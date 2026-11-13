@@ -869,6 +869,7 @@ fn frage_topf(
         kaufbar: kaufbudget(j, z.grenzen, id)?,
         kurse: &tag.kurse,
         verlauf: &verlauf,
+        kaufbilanz: crate::ausfuehrung::kaufbilanz(j.stand(), topf.id(), tag.datum),
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -928,6 +929,7 @@ fn zweite_meinung(
         kaufbar: kaufbudget(j, z.grenzen, id)?,
         kurse: &tag.kurse,
         verlauf: &verlauf,
+        kaufbilanz: crate::ausfuehrung::kaufbilanz(j.stand(), topf.id(), tag.datum),
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -1279,6 +1281,7 @@ mod tests {
             kaufbar: topf.bargeld(),
             kurse: &kurse,
             verlauf: &[],
+            kaufbilanz: crate::ausfuehrung::Kennzahlen::default(),
             positionskaeufe: &[],
             ereignisse: &["Meldung".into()],
         };

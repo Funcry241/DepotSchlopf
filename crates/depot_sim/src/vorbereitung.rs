@@ -140,6 +140,7 @@ pub fn vorbereiten<'a>(
                             kaufbar: Cent::NULL,
                             kurse: &kurse,
                             verlauf: &[],
+                            kaufbilanz: crate::ausfuehrung::Kennzahlen::default(),
                             positionskaeufe: &[],
                             ereignisse: &ereignisse,
                         },

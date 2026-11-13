@@ -115,6 +115,7 @@ fn frage(
         kaufbar,
         kurse: &zyklus.tag.kurse,
         verlauf: &verlauf,
+        kaufbilanz: crate::ausfuehrung::kaufbilanz(buch.stand(), topf.topf.id(), zyklus.tag.datum),
         positionskaeufe: &positionskaeufe,
         ereignisse: &zyklus.tag.ereignisse,
     };

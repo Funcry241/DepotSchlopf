@@ -294,6 +294,7 @@ pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> String {
         let bar = cash(&lage, &mut text);
         positionen(&lage, bar, &mut text);
         orders(stand, &werte, &mut text);
+        depot_lage::html::ausfuehrungsbilanz(&lage, &mut text);
         let verlauf = depotverlauf(stand, &werte);
         let ab = jetzt.frankfurt_tag().and_then(|heute| zeitraum.ab(heute));
         let startgeld = verlauf.first().and_then(|punkt| {
@@ -344,6 +345,7 @@ mod tests {
             letzter_abschluss: None,
             hoechststand: None,
             auftraege: Vec::new(),
+            ausfuehrungen: Vec::new(),
             vergleich: None,
         }
     }
