@@ -777,18 +777,15 @@ fn alpha_limit_laesst_tiingo_weiterlaufen() -> Result<(), String> {
     Ok(())
 }
 
-fn lauf_ueber_ezb_feiertag(schluss: u16) -> Result<(Bericht, Journal), String> {
+fn lauf_ueber_ezb_feiertag(
+    schluss: u16,
+    referenzen: &[(&str, &str)],
+) -> Result<(Bericht, Journal), String> {
     let (journal, roh) = ordner()?;
     let csv = format!(
         "date,close,high,low\n2026-04-02,100,100,100\n2026-04-06,105,105,105\n2026-04-07,{schluss},{schluss},{schluss}\n"
     );
-    let mut netz = Erfunden::neu(&[
-        (
-            "ezb",
-            Ok(ezb(&[("2026-04-02", "1.1"), ("2026-04-07", "1.1")])),
-        ),
-        ("jpm", Ok(csv)),
-    ]);
+    let mut netz = Erfunden::neu(&[("ezb", Ok(ezb(referenzen))), ("jpm", Ok(csv))]);
     let b = vorbedingung(
         lauf(
             &journal,
@@ -808,7 +805,7 @@ fn lauf_ueber_ezb_feiertag(schluss: u16) -> Result<(Bericht, Journal), String> {
 
 #[test]
 fn ueber_feiertag_innerhalb_15() -> Result<(), String> {
-    let (b, j) = lauf_ueber_ezb_feiertag(110)?;
+    let (b, j) = lauf_ueber_ezb_feiertag(110, &[("2026-04-02", "1.1"), ("2026-04-07", "1.1")])?;
     assert!(
         b.pruefung.is_empty() && b.ausgelassen.is_empty() && b.verwendbar(),
         "{b:?}"
@@ -825,7 +822,7 @@ fn ueber_feiertag_innerhalb_15() -> Result<(), String> {
 
 #[test]
 fn ueber_feiertag_sprung_bleibt_sprung() -> Result<(), String> {
-    let (b, _) = lauf_ueber_ezb_feiertag(120)?;
+    let (b, _) = lauf_ueber_ezb_feiertag(120, &[("2026-04-02", "1.1"), ("2026-04-07", "1.1")])?;
     assert!(
         matches!(
             b.ausgelassen.as_slice(),
@@ -835,6 +832,24 @@ fn ueber_feiertag_sprung_bleibt_sprung() -> Result<(), String> {
             }]
         ),
         "{b:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn vortag_ganz_ohne_ezb() -> Result<(), String> {
+    let (b, j) = lauf_ueber_ezb_feiertag(110, &[("2026-04-07", "1.1")])?;
+    assert!(
+        matches!(b.ausgelassen.as_slice(), [DatenFehler::KeinVergleichskurs(isin)]
+            if isin.als_str() == "US46625H1005"),
+        "{b:?}"
+    );
+    assert!(!b.verwendbar(), "{b:?}");
+    assert!(
+        j.stand()
+            .kurse()
+            .iter()
+            .all(|b| b.isin().als_str() != "US46625H1005")
     );
     Ok(())
 }

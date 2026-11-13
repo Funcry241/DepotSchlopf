@@ -5,4 +5,5 @@ CHANGELOG.md
 crates/depot_kern/src/devisen.rs
 crates/depot_kern/src/quelle.rs
 crates/depot_kern/tests/devisen.rs
+crates/depot_sammler/src/sammeln.rs
 crates/depot_sammler/tests/tiingo.rs
