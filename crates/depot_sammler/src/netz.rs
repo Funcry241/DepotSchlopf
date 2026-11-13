@@ -76,6 +76,29 @@ pub trait Netz {
     /// # Errors
     /// Jeder Fehler beim Abruf, eingeordnet als voruebergehend oder nicht.
     fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler>;
+    /// Wie `hole`, mit einem Authorization-Header.
+    /// # Errors
+    /// Der Abruf scheitert oder der Netzweg unterstützt keine Autorisierung.
+    fn hole_autorisiert(
+        &mut self,
+        _adresse: &str,
+        _autorisiert: &str,
+    ) -> Result<Vec<u8>, NetzFehler> {
+        Err(NetzFehler::endgueltig(
+            "Autorisierter Abruf nicht verfügbar",
+        ))
+    }
+}
+
+pub(crate) fn hole(
+    netz: &mut dyn Netz,
+    adresse: &str,
+    autorisiert: Option<&str>,
+) -> Result<Vec<u8>, NetzFehler> {
+    match autorisiert {
+        Some(wert) => netz.hole_autorisiert(adresse, wert),
+        None => netz.hole(adresse),
+    }
 }
 
 /// Abruf ueber HTTPS.
@@ -118,7 +141,25 @@ fn einordnen(e: &ureq::Error) -> NetzFehler {
 
 impl Netz for Https {
     fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler> {
-        let mut antwort = self.0.get(adresse).call().map_err(|e| einordnen(&e))?;
+        self.abruf(adresse, None)
+    }
+
+    fn hole_autorisiert(
+        &mut self,
+        adresse: &str,
+        autorisiert: &str,
+    ) -> Result<Vec<u8>, NetzFehler> {
+        self.abruf(adresse, Some(autorisiert))
+    }
+}
+
+impl Https {
+    fn abruf(&self, adresse: &str, autorisiert: Option<&str>) -> Result<Vec<u8>, NetzFehler> {
+        let mut anfrage = self.0.get(adresse);
+        if let Some(wert) = autorisiert {
+            anfrage = anfrage.header("Authorization", wert);
+        }
+        let mut antwort = anfrage.call().map_err(|e| einordnen(&e))?;
         if antwort.status() != 200 {
             return Err(NetzFehler::endgueltig(format!(
                 "Status {}",
@@ -234,12 +275,22 @@ pub fn hole_mit_wiederholung(
     frist_ab: &dyn Fn(Zeitpunkt) -> Option<Zeitpunkt>,
     takt: &mut Takt<'_>,
 ) -> Result<Vec<u8>, Ausfall> {
+    hole_mit_autorisierung(netz, adresse, None, frist_ab, takt)
+}
+
+pub(crate) fn hole_mit_autorisierung(
+    netz: &mut dyn Netz,
+    adresse: &str,
+    autorisiert: Option<&str>,
+    frist_ab: &dyn Fn(Zeitpunkt) -> Option<Zeitpunkt>,
+    takt: &mut Takt<'_>,
+) -> Result<Vec<u8>, Ausfall> {
     let von = WARTEZEITEN.len().saturating_add(1);
     let mut versuch = 1_usize;
     let mut warten = WARTEZEITEN.iter();
     let mut frist: Option<Option<Zeitpunkt>> = None;
     loop {
-        let fehler = match netz.hole(adresse) {
+        let fehler = match hole(netz, adresse, autorisiert) {
             Ok(roh) => {
                 if versuch > 1 {
                     (takt.melde)(&Verlauf::WiederDa { versuch });

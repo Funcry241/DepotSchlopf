@@ -122,7 +122,12 @@ pub fn pruefabruf(
             schlafe(Duration::from_secs(15));
         }
         begonnen = true;
-        let roh = netz.hole(&crate::sammeln::adresse(wert, key, None));
+        let autorisiert = crate::sammeln::autorisierung(a, key);
+        let roh = crate::netz::hole(
+            netz,
+            &crate::sammeln::adresse(wert, key, None),
+            autorisiert.as_deref(),
+        );
         let Ok(roh) = roh else {
             // Ein Netzfehler kann eine URL mit Zugang oder einen Antwortausschnitt enthalten.
             ausgabe(&format!(
@@ -173,18 +178,22 @@ fn pruefadresse(
     quelle: Quelle,
     zugang: &Zugang,
     werte: &[Wert],
-) -> Option<(String, Option<Anbieter>)> {
+) -> Option<(String, Option<Anbieter>, Option<String>)> {
     let anbieter = match quelle {
         Quelle::AlphaVantage => Anbieter::AlphaVantage,
         Quelle::Tiingo => Anbieter::Tiingo,
-        Quelle::Ezb => return Some((crate::ADRESSE_DEVISEN.into(), None)),
+        Quelle::Ezb => return Some((crate::ADRESSE_DEVISEN.into(), None, None)),
         Quelle::Rss => return None,
     };
     let wert = werte
         .iter()
         .find(|w| Anbieter::fuer(w.boerse) == anbieter)?;
     let key = zugang.von(anbieter)?;
-    Some((crate::sammeln::adresse(wert, key, None), Some(anbieter)))
+    Some((
+        crate::sammeln::adresse(wert, key, None),
+        Some(anbieter),
+        crate::sammeln::autorisierung(anbieter, key),
+    ))
 }
 
 fn saubere_daten(quelle: Quelle, roh: &[u8]) -> bool {
@@ -221,7 +230,7 @@ pub fn pruefe_altsperre(
     let Some(quelle) = sperre.quelle else {
         return Ok(KeinBedarf);
     };
-    let Some((adresse, anbieter)) = pruefadresse(quelle, zugang, werte) else {
+    let Some((adresse, anbieter, autorisiert)) = pruefadresse(quelle, zugang, werte) else {
         return Ok(KeinBedarf);
     };
     let (tag, ..) = jetzt.in_frankfurt().ok_or("Prüfuhr unlesbar")?;
@@ -230,7 +239,7 @@ pub fn pruefe_altsperre(
     {
         return Ok(Morgen);
     }
-    let Ok(roh) = netz.hole(&adresse) else {
+    let Ok(roh) = crate::netz::hole(netz, &adresse, autorisiert.as_deref()) else {
         return Ok(Morgen);
     };
     let limit = anbieter.is_some_and(|a| alpha_limit(zugang, a, &roh));

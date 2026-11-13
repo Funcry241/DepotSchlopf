@@ -123,6 +123,17 @@ impl Erfunden {
 }
 
 impl Netz for Erfunden {
+    fn hole_autorisiert(
+        &mut self,
+        adresse: &str,
+        autorisiert: &str,
+    ) -> Result<Vec<u8>, NetzFehler> {
+        assert!(adresse.starts_with("https://api.tiingo.com/"));
+        assert!(!adresse.contains(TI) && !adresse.contains("token="));
+        assert_eq!(autorisiert, format!("Token {TI}"));
+        self.hole(adresse)
+    }
+
     fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler> {
         self.abgerufen.push(adresse.to_string());
         let schluessel = if adresse == ADRESSE_DEVISEN {
@@ -223,9 +234,7 @@ fn abrufadresse_tiingo() -> Result<(), String> {
     let a = adresse(l.first().ok_or("Vorbedingung")?, &s, ab);
     assert_eq!(
         a,
-        format!(
-            "https://api.tiingo.com/tiingo/daily/aapl/prices?startDate=2026-10-21&format=csv&columns=date,close,high,low&token={TI}"
-        )
+        "https://api.tiingo.com/tiingo/daily/aapl/prices?startDate=2026-10-21&format=csv&columns=date,close,high,low"
     );
     let b = adresse(l.get(1).ok_or("Vorbedingung")?, &s, ab);
     assert!(

@@ -47,3 +47,5 @@ In der Einrichtung unter „Update“ steht „Start nach einem Neustart:“ mit
 - `auftraege_starten_die_programme_des_stands`
 
 Für den Test unter Windows: Einmal `run.cmd` (Gate offen), dann `DepotSchlopf.cmd`, mindestens 20 Sekunden laufen lassen. Die Einrichtung meldet „Programmstand … gesichert“. Danach Windows neu starten. Der Autostart startet den Dienst, und die Einrichtung meldet „Gestartet aus dem geprüften Programmstand … ohne Cargo“.
+
+Die SHA-256-Abdrücke erkennen beschädigte Dateien. Wer Programme und die dazugehörigen Abdrücke gemeinsam verändern kann, kann die Prüfung umgehen. Die Abdrücke belegen daher keine Herkunft der Programme.
