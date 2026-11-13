@@ -1,12 +1,7 @@
 klasse: Funktion
-zweck: Sicherungsziel im Windows-Dialog wählen und die Anzahl vorhandener Sicherungen anzeigen
+zweck: Gemini-Schlüssel lokal speichern und die Rückmeldung in der Einrichtung eindeutig anzeigen
 pfade:
-crates/depot_dienst/src/lib.rs
-crates/depot_dienst/src/papierdialog.rs
+crates/depot_dienst/src/gemini.rs
+crates/depot_dienst/src/schluessel.rs
 crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/src/sicherung.rs
-crates/depot_dienst/src/werkbank.rs
 crates/depot_dienst/tests/dienst.rs
-crates/depot_export/src/lib.rs
-crates/depot_export/src/sicherung.rs
-crates/depot_lauf/src/updatedaten.rs

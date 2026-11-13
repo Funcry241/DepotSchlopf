@@ -135,12 +135,20 @@ struct Attrappe {
     sperrfreigabe: bool,
     sperrdatei_wechsel: Option<PathBuf>,
     gemini_schluessel: Option<Hinterlegt>,
+    gemini_speicherprobe: bool,
     sicherungsziel: Option<String>,
 }
 
 impl Umwelt for Attrappe {
     fn schluessel(&self, wer: Wer) -> Hinterlegt {
-        if wer == Wer::Gemini {
+        if wer == Wer::Gemini && self.gemini_speicherprobe {
+            let abgelegt = self.abgelegt.lock().unwrap_or_else(PoisonError::into_inner);
+            if abgelegt.iter().any(|(wer, _)| *wer == Wer::Gemini) {
+                Hinterlegt::Ja
+            } else {
+                Hinterlegt::Nein
+            }
+        } else if wer == Wer::Gemini {
             self.gemini_schluessel.unwrap_or(Hinterlegt::Ja)
         } else {
             Hinterlegt::Ja
@@ -3747,6 +3755,38 @@ fn gemini_bleibt_ohne_bestaetigtes_gratisprojekt_aus() -> Result<(), String> {
     assert!(budget.contains("<dt>Aufrufe heute</dt><dd>0 von 5</dd>"));
     assert!(sende("an=nein").contains("/einrichtung#zusatz"));
     assert!(!depot_lage::gespraeche::gemini_aktiv(&ziel));
+    Ok(())
+}
+
+#[test]
+fn gemini_speichern_uebernimmt_schluessel_aus_der_einrichtung() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(17, 50)?;
+    let umwelt = Attrappe {
+        gemini_speicherprobe: true,
+        ..Attrappe::default()
+    };
+    let einrichtung = |pfad: &str| {
+        text(&behandle(
+            &d,
+            &umwelt,
+            &anfrage("GET", pfad, &[("Host", HOST)], ""),
+            t,
+        ))
+    };
+    let vorher = einrichtung("/einrichtung");
+    assert!(vorher.contains(">fehlt</span>"));
+    assert!(vorher.contains(">Gemini-Schlüssel speichern</button>"));
+
+    let probe = "Nur_Ein_Erfundener_Testwert";
+    let post = formular_post("/schluessel", &format!("t={TOKEN}&wer=gemini&wert={probe}"));
+    let antwort = text(&behandle(&d, &umwelt, &post, t));
+    assert!(antwort.contains("/einrichtung?m=schluessel&wer=gemini#zusatz"));
+    let danach = einrichtung("/einrichtung?m=schluessel&wer=gemini");
+    let (_, zusatz) = some(danach.split_once("id=\"zusatz\""), "Gemini-Abschnitt")?;
+    assert!(zusatz.contains("hinterlegt, noch nicht benutzt"));
+    assert!(zusatz.contains("Schlüssel in der Anmeldeinformationsverwaltung gespeichert."));
+    assert!(!danach.contains(probe) && !antwort.contains(probe));
     Ok(())
 }
 

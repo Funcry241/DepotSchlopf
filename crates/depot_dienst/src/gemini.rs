@@ -12,7 +12,7 @@ use std::path::Path;
 
 const SCHLUESSEL_NICHT_BESTAETIGT: (&str, &str) = (
     "halt",
-    "Gemini-Schlüssel konnte nicht bestätigt werden. Prüfe den Eintrag DepotSchlopf/gemini in der Windows-Anmeldeinformationsverwaltung.",
+    "Gemini-Schlüssel konnte nicht bestätigt werden. Gib ihn erneut ein und klicke auf „Gemini-Schlüssel speichern“. Wenn die Meldung wieder erscheint, starte DepotSchlopf mit deinem normalen Windows-Benutzerkonto neu.",
 );
 
 pub(crate) fn speichern(d: &Dienst, formular: &[(String, String)]) -> Vec<u8> {

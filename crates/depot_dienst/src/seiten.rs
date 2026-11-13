@@ -1538,6 +1538,11 @@ pub(crate) fn schluessel_zeile(
     let klasse = stand.klasse();
     let text = maskiere(&stand.text());
     let name = maskiere(wer.name());
+    let knopf = if wer == Wer::Gemini {
+        "Gemini-Schlüssel speichern"
+    } else {
+        "Schlüssel speichern"
+    };
     let _ = write!(
         s,
         "<tr><td>{name}<br><span class=\"leise\">{}</span></td>\
@@ -1546,7 +1551,7 @@ pub(crate) fn schluessel_zeile(
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"wer\" value=\"{}\">\
          <input aria-label=\"Schlüssel für {name}\" type=\"password\" name=\"wert\" autocomplete=\"new-password\" required>\
-         <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Noch keinen neuen Schlüssel eingegeben.</p><button data-speichern-hervorheben type=\"submit\">Schlüssel speichern</button></div>\
+         <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Noch keinen neuen Schlüssel eingegeben.</p><button data-speichern-hervorheben type=\"submit\">{knopf}</button></div>\
          <div class=\"leise\">{}</div></form></td></tr>",
         maskiere(wer.adresse()),
         maskiere(token),
