@@ -5,8 +5,9 @@
 //! umgerechnet ist. Die EZB veroeffentlicht ihre Referenzkurse an Geschaeftstagen gegen 16:00
 //! Uhr in Frankfurt, also vor dem Schluss der NYSE. Fehlt der Kurs des Tages, gibt es keinen
 //! Euro-Kurs; ein aelterer Tag ersetzt ihn nie (an den Feiertagen des Zahlungssystems TARGET,
-//! an denen die NYSE handelt, etwa am 1. Mai und 26. Dezember, faellt ein Wert der NYSE damit
-//! aus und wird als ausgelassen gefuehrt).
+//! an denen die NYSE handelt, etwa am Ostermontag, 1. Mai und 26. Dezember, faellt ein Wert der NYSE damit
+//! aus und wird als ausgelassen gefuehrt). Für den Kursvergleich wird der jüngste
+//! frühere Schluss mit eigenem Referenzkurs verwendet.
 //!
 //! Gelesen wird der Text, wie die EZB ihn liefert (`eurofxref-hist-90d.xml`): je Tag ein
 //! `<Cube time="JJJJ-MM-TT">` mit einem `<Cube currency="USD" rate="1.1224"/>` darin. Netz kennt

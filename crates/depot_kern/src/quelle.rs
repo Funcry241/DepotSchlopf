@@ -178,11 +178,11 @@ pub fn schlusskurse(
 
 /// Wie `schlusskurse`, aber ein Schluss in Dollar wird mit dem Referenzkurs der EZB desselben
 /// Tages in Euro umgerechnet (`Devisen::in_euro`, abgerundet auf sechs Nachkommastellen).
-/// Umgerechnet werden nur die beiden Tage, die als `heute` und `vortag` zaehlen.
+/// Als Vergleich gilt der jüngste frühere Schluss mit Referenzkurs desselben Tages.
 ///
 /// # Errors
-/// Wie `schlusskurse`; dazu `KeinDevisenkurs`, wenn die EZB fuer einen dieser Tage keinen
-/// Dollarkurs nennt. Ein aelterer Referenzkurs ersetzt ihn nie.
+/// Wie `schlusskurse`; dazu `KeinDevisenkurs`, wenn die EZB für den Bezugstag keinen
+/// Dollarkurs nennt. Ohne einen früheren Schluss mit eigenem Referenzkurs fehlt der Vergleich.
 pub fn schlusskurse_in_euro(
     abruf: Zeitpunkt,
     werte: Vec<(Isin, Boerse, Vec<Tageskurs>)>,
@@ -246,8 +246,15 @@ fn schlusskurse_mit(
         if let Some((t, zeit)) = letzte.next() {
             heute.push((isin.clone(), kurs_in_euro(boerse, t, zeit, devisen)?));
         }
-        if let Some((t, zeit)) = letzte.next() {
-            vortag.push((isin, kurs_in_euro(boerse, t, zeit, devisen)?));
+        for (t, zeit) in letzte {
+            match kurs_in_euro(boerse, t, zeit, devisen) {
+                Ok(kurs) => {
+                    vortag.push((isin, kurs));
+                    break;
+                }
+                Err(QuellenFehler::KeinDevisenkurs(_)) => {}
+                Err(e) => return Err(e),
+            }
         }
     }
     Ok((
