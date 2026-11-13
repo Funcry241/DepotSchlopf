@@ -1519,3 +1519,74 @@ fn zustand_in_worten() {
         assert_ne!(format!("{zustand:?}"), text);
     }
 }
+
+#[test]
+fn lagebild_zeigt_gesperrten_wert() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(500_000)), "Topf")?;
+    let sap = vorbedingung(depot_kern::Isin::neu("DE0007164600"), "SAP")?;
+    topf.setze_bestand(sap.clone(), 1);
+    vorbedingung(j.setze_topf(&topf), "Topf")?;
+    let heute = tag(9)?;
+    let abruf = some(Zeitpunkt::frankfurt(heute, 7, 30, 0), "Morgen")?;
+    for wert in beobachtungsliste()? {
+        let bezug = some(wert.boerse.bezugstag(heute), "Bezug")?;
+        let vergleich = some(wert.boerse.bezugstag(bezug), "Vergleich")?;
+        for datum in [bezug, vergleich] {
+            if wert.isin == sap && datum == bezug {
+                continue;
+            }
+            let kurs = vorbedingung(
+                Kurs::neu(
+                    Cent(20_000),
+                    "EUR",
+                    datum,
+                    some(wert.boerse.schluss(datum), "Schluss")?,
+                    Herkunft::Quelle,
+                ),
+                "Kurs",
+            )?;
+            let beleg = vorbedingung(
+                KursBeleg::neu(
+                    depot_kern::liste::quelle(wert.boerse),
+                    abruf,
+                    b"Morgenprobe",
+                    wert.isin.clone(),
+                    kurs,
+                ),
+                "Beleg",
+            )?;
+            vorbedingung(j.belege_kurs(&beleg), "Kurs belegen")?;
+        }
+        if wert.isin == sap {
+            let datum = some(wert.boerse.bezugstag(vergleich), "Ersatz")?;
+            let kurs = vorbedingung(
+                Kurs::neu(
+                    Cent(20_000),
+                    "EUR",
+                    datum,
+                    some(wert.boerse.schluss(datum), "Schluss")?,
+                    Herkunft::Quelle,
+                ),
+                "Ersatzkurs",
+            )?;
+            let beleg = vorbedingung(
+                KursBeleg::neu("alphavantage", abruf, b"Morgenprobe", sap.clone(), kurs),
+                "Ersatzbeleg",
+            )?;
+            vorbedingung(j.belege_kurs(&beleg), "Ersatz belegen")?;
+        }
+    }
+    let l = lagebild(&umgebung(abruf, Zugang::Offen(j.stand())));
+    let punkt = some(
+        l.punkte.iter().find(|p| p.name == "Schlusskurse"),
+        "Schlusskurse",
+    )?;
+    assert_eq!(punkt.ampel, Ampel::Offen);
+    assert!(
+        punkt.text.contains("gesperrt") && punkt.text.contains("SAP"),
+        "{punkt:?}"
+    );
+    Ok(())
+}

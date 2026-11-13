@@ -23,12 +23,14 @@
 //! Was ein angefangener Tag gekostet hat, steht im Journal; ihn zu wiederholen, waere eine
 //! zweite Frage fuer denselben Zyklus.
 
+use std::collections::BTreeSet;
+
 use depot_journal::{
     AuftragsZustand, Journal, JournalFehler, Meldung, PapierHalt, PrognoseBeleg, Weltprognose,
 };
 use depot_kern::liste::papierorder_schluss;
 use depot_kern::{
-    BeraterId, Cent, Grenzen, Herkunft, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
+    BeraterId, Cent, Grenzen, Herkunft, Isin, Kurse, Rundung, Topf, TopfId, Universum, Vorschlag,
     Zeitpunkt,
 };
 use depot_ki::Sperre;
@@ -304,6 +306,8 @@ pub fn lauf(
                 abdruck,
                 uhr: None,
                 vollstaendige_kurse: false,
+                gesperrt: &BTreeSet::new(),
+                bewertung: &tag.kurse,
             };
             hoch = ein_tag(j, &z, hoch, &fehler, &mut beteiligte)?;
         }
@@ -371,6 +375,8 @@ pub(crate) struct Zyklus<'a> {
     /// Reale Versandzeit im Papiertag. Die historische Beispielszenario-Simulation hat keine Uhr.
     pub(crate) uhr: Option<&'a dyn Fn() -> Option<Zeitpunkt>>,
     pub(crate) vollstaendige_kurse: bool,
+    pub(crate) gesperrt: &'a BTreeSet<Isin>,
+    pub(crate) bewertung: &'a Kurse,
 }
 
 /// Ein Tag. Liefert den Hoechststand nach dem Tag.
@@ -414,7 +420,7 @@ pub(crate) fn ein_tag(
         return Ok(hoch);
     }
     let toepfe: Vec<Topf> = jr.stand().toepfe().values().cloned().collect();
-    let heute = depotwert(toepfe.iter(), &tag.kurse, Rundung::Ab);
+    let heute = depotwert(toepfe.iter(), z.bewertung, Rundung::Ab);
     let befund = match (heute, depotwert(toepfe.iter(), z.vortag, Rundung::Auf)) {
         (Some(wert), Some(gestern)) => waechter(z.grenzen, wert, gestern, hoch),
         _ => WaechterBefund::Unplausibel,
@@ -459,7 +465,7 @@ pub(crate) fn ein_tag(
         }
     }
     // Fuer den Hoechststand zaehlt der aufgerundete Wert (siehe `depotwert`).
-    let heute = depotwert(jr.stand().toepfe().values(), &tag.kurse, Rundung::Auf)
+    let heute = depotwert(jr.stand().toepfe().values(), z.bewertung, Rundung::Auf)
         .ok_or_else(|| rechnung("Depotwert"))?;
     let b = beteiligte;
     let topf_a = frage_topf(jr, z, TopfId::A, b.dachs)?;
@@ -470,7 +476,11 @@ pub(crate) fn ein_tag(
     let [topf_a, topf_b] =
         crate::abstimmung::berate(jr, z, erste, [topf_a, topf_b], b.dachs, b.maus)?;
     beide_topfzyklen(jr, z, [topf_a, topf_b], &mut *b.konto)?;
-    let hoch = hoch.max(heute);
+    let hoch = if z.gesperrt.is_empty() {
+        hoch.max(heute)
+    } else {
+        hoch
+    };
     jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
     Ok(hoch)
@@ -486,13 +496,17 @@ pub(crate) fn beratungszeit(z: &Zyklus<'_>) -> bool {
     };
     jetzt.am_tag(z.tag.datum)
         && jetzt >= z.tag.kurse.stand()
-        && z.universum.isins().iter().all(|isin| {
-            z.tag
-                .kurse
-                .abruf(isin)
-                .and_then(|abruf| jetzt.sekunden_seit(abruf))
-                .is_some_and(|alter| alter <= z.grenzen.kurs_hoechstalter_s())
-        })
+        && z.universum
+            .isins()
+            .iter()
+            .filter(|i| !z.gesperrt.contains(*i))
+            .all(|isin| {
+                z.tag
+                    .kurse
+                    .abruf(isin)
+                    .and_then(|abruf| jetzt.sekunden_seit(abruf))
+                    .is_some_and(|alter| alter <= z.grenzen.kurs_hoechstalter_s())
+            })
 }
 
 fn beide_topfzyklen(
@@ -547,7 +561,7 @@ fn pruefe_papier_verlustsperre(
     }
     let stand = j.stand();
     let wert = if kurse_ok || stand.gehalten().is_empty() {
-        depotwert(stand.toepfe().values(), &z.tag.kurse, Rundung::Ab)
+        depotwert(stand.toepfe().values(), z.bewertung, Rundung::Ab)
     } else {
         None
     };
@@ -626,6 +640,19 @@ fn erneuere_schutzverkaeufe(
                 .ok_or_else(|| rechnung("Offener Verkauf"))?;
             topf.setze_bestand(l.beleg.isin.clone(), frei);
         }
+        for isin in z.gesperrt {
+            if topf.stueck(isin) != 0 {
+                topf.setze_bestand(isin.clone(), 0);
+                begruende(
+                    j,
+                    z.tag,
+                    WAECHTER,
+                    &format!(
+                        "Notbremse: {isin} heute gesperrt, Verkauf beim nächsten Lauf mit gültigem Kurs."
+                    ),
+                )?;
+            }
+        }
         let mut vergabe = j.kennungsvergabe();
         let auftraege = notbremse_auftraege(z.grenzen, &topf, &z.tag.kurse, &mut vergabe)
             .ok_or_else(|| halt("Notbremse: Kurs fehlt; Halt ohne Verkauf"))?;
@@ -648,7 +675,7 @@ fn markt_offener_orders(
     let handelbar = z.universum.isins();
     let eintraege = kurse
         .alle()
-        .filter(|(isin, _)| kurse_ok && handelbar.contains(*isin))
+        .filter(|(isin, _)| kurse_ok && handelbar.contains(*isin) && !z.gesperrt.contains(*isin))
         .filter_map(|(isin, kurs)| Some((isin.clone(), kurs.clone(), kurse.abruf(isin)?)))
         .collect();
     let stand = z
@@ -848,7 +875,16 @@ fn frage_topf(
         .offene_auftraege()
         .find(|l| l.versand.is_some() && l.beleg.topf == id)
         .map(|l| l.beleg.nr);
-    let (vorschlag, erste_verwertbar) = if let Some(nr) = wartet {
+    let gesperrt = z.gesperrt.iter().find(|isin| topf.stueck(isin) != 0);
+    let (vorschlag, erste_verwertbar) = if let Some(isin) = gesperrt {
+        begruende(
+            j,
+            tag,
+            AUFTRAGSSTELLE,
+            &format!("{t}: {isin} heute gesperrt; keine freiwilligen Aufträge, KI nicht gefragt."),
+        )?;
+        (None, false)
+    } else if let Some(nr) = wartet {
         begruende(
             j,
             tag,
@@ -1189,6 +1225,8 @@ mod tests {
             abdruck: "Probe",
             uhr: Some(&uhr),
             vollstaendige_kurse: true,
+            gesperrt: &BTreeSet::new(),
+            bewertung: &tag.kurse,
         };
         assert!(beratungszeit(&zyklus));
         jetzt.set(Zeitpunkt::aus_sekunden(

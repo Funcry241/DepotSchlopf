@@ -1,9 +1,15 @@
 klasse: Funktion
-zweck: Belegbaren NYSE-Vergleichskurs nach EZB-Feiertagen verwenden
+zweck: Einzelne gehaltene Werte im Morgenlauf sicher sperren
 pfade:
 CHANGELOG.md
-crates/depot_kern/src/devisen.rs
-crates/depot_kern/src/quelle.rs
-crates/depot_kern/tests/devisen.rs
+crates/depot_lage/src/depot.rs
+crates/depot_lage/src/lib.rs
+crates/depot_lage/tests/lage.rs
+crates/depot_regelwerk/src/daten.rs
+crates/depot_regelwerk/tests/befunde.rs
 crates/depot_sammler/src/sammeln.rs
 crates/depot_sammler/tests/tiingo.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/lib.rs
+crates/depot_sim/src/papiertag.rs
+crates/depot_sim/tests/papiertag.rs

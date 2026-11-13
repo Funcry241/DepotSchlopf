@@ -1932,3 +1932,333 @@ fn montagmorgen_versendet_order_fuer_montag_und_belegt_spaeter_dessen_schluss() 
     assert!(vorbedingung(j.gleiche_ab(&k), "Kontoabgleich")?.is_empty());
     Ok(())
 }
+
+fn belege_sperrprobe(
+    j: &mut Journal,
+    isin: &Isin,
+    preise: &[(u8, i64)],
+    abruf: Zeitpunkt,
+) -> Result<(), String> {
+    for (nr, cent) in preise {
+        let datum = tag(*nr)?;
+        let kurs = vorbedingung(
+            Kurs::neu(
+                Cent(*cent),
+                "EUR",
+                datum,
+                some(depot_kern::Boerse::Xetra.schluss(datum), "Schluss")?,
+                Herkunft::Quelle,
+            ),
+            "Kurs",
+        )?;
+        let beleg = vorbedingung(
+            KursBeleg::neu("alphavantage", abruf, b"Sperrprobe", isin.clone(), kurs),
+            "Beleg",
+        )?;
+        vorbedingung(j.belege_kurs(&beleg), "Kurs belegen")?;
+    }
+    Ok(())
+}
+
+#[test]
+fn gesperrt_ohne_vergleichskurs_haelt() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let sap = sap()?;
+    let mut toepfe = start()?;
+    some(toepfe.first_mut(), "Topf A")?.setze_bestand(sap.clone(), 10);
+    let mut k = Papierdatei::oeffnen(&ort.konto, false, &toepfe)?;
+    let mut j = ort.oeffnen()?;
+    for topf in &toepfe {
+        vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+    }
+    vorbedingung(
+        j.schliesse_ab(tag(6)?, Cent(1_200_000), &"a".repeat(64)),
+        "Abschluss",
+    )?;
+    let montag = tag(9)?;
+    let abruf = some(Zeitpunkt::frankfurt(montag, 7, 30, 0), "Abruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(5, 20_000)], abruf)?;
+    belege_sperrprobe(&mut j, &allianz()?, &[(5, 35_000), (6, 35_000)], abruf)?;
+    let vorher = j.eintraege().to_vec();
+    let aus = papiertag(
+        &mut j,
+        montag,
+        &universum()?,
+        &toepfe,
+        &mut Stumm,
+        &mut Stumm,
+        &mut k,
+    );
+    assert!(matches!(aus, Err(LaufFehler::Halt(grund)) if grund.contains("ohne Vergleichskurs")));
+    assert_eq!(j.eintraege(), vorher);
+    Ok(())
+}
+
+#[test]
+fn alle_gehaltenen_gesperrt_schliesst_ab() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut a = vorbedingung(Topf::neu(TopfId::A, Cent(300_000)), "Topf A")?;
+    let mut b = vorbedingung(Topf::neu(TopfId::B, Cent(400_000)), "Topf B")?;
+    a.setze_bestand(sap.clone(), 10);
+    b.setze_bestand(allianz.clone(), 3);
+    let toepfe = [a, b];
+    let mut k = Papierdatei::oeffnen(&ort.konto, false, &toepfe)?;
+    let mut j = ort.oeffnen()?;
+    for topf in &toepfe {
+        vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+    }
+    vorbedingung(
+        j.schliesse_ab(tag(6)?, Cent(1_005_000), &"a".repeat(64)),
+        "Abschluss",
+    )?;
+    let montag = tag(9)?;
+    let abruf = some(Zeitpunkt::frankfurt(montag, 7, 30, 0), "Abruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(4, 20_000), (5, 20_000)], abruf)?;
+    belege_sperrprobe(&mut j, &allianz, &[(4, 35_000), (5, 35_000)], abruf)?;
+    let (mut dachs, mut maus) = kaeufer(montag, &sap);
+    let aus = papiertag(
+        &mut j,
+        montag,
+        &universum()?,
+        &toepfe,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    assert!(
+        matches!(aus, Ok(Ausgang::Abgeschlossen { datum, .. }) if datum == montag),
+        "{aus:?}"
+    );
+    assert_eq!(dachs.aufrufe, 0);
+    assert_eq!(maus.aufrufe, 0);
+    assert_eq!(k.konto().sendungen(), 0);
+    for isin in [sap, allianz] {
+        let prefix = format!("{}{isin} · ", depot_sim::ERSATZKURS);
+        assert!(j.stand().begruendungen().iter().any(|(d, wer, text)| {
+            *d == montag && wer == depot_sim::AUSWAHL && text.starts_with(&prefix)
+        }));
+    }
+    Ok(())
+}
+
+fn gemischter_morgen(
+    sap_cent: i64,
+    allianz_alt: i64,
+    allianz_neu: i64,
+    hoch: Cent,
+    halt: Option<depot_journal::PapierHalt>,
+) -> Result<(Ort, Result<Ausgang, LaufFehler>, u32, u32), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut a = vorbedingung(Topf::neu(TopfId::A, Cent(200_000)), "Topf A")?;
+    let mut b = vorbedingung(Topf::neu(TopfId::B, Cent(200_000)), "Topf B")?;
+    a.setze_bestand(sap.clone(), 10);
+    b.setze_bestand(allianz.clone(), 10);
+    let toepfe = [a, b];
+    let mut k = Papierdatei::oeffnen(&ort.konto, false, &toepfe)?;
+    let mut j = ort.oeffnen()?;
+    for topf in &toepfe {
+        vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+    }
+    if let Some(halt) = halt {
+        vorbedingung(j.beginne_abrechnung(tag(6)?), "Abrechnung")?;
+        vorbedingung(j.belege_papier_halt(tag(6)?, halt), "Sperre")?;
+    }
+    vorbedingung(j.schliesse_ab(tag(6)?, hoch, &"a".repeat(64)), "Abschluss")?;
+    let montag = tag(9)?;
+    let abruf = some(Zeitpunkt::frankfurt(montag, 7, 30, 0), "Abruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(4, sap_cent), (5, sap_cent)], abruf)?;
+    belege_sperrprobe(
+        &mut j,
+        &allianz,
+        &[(5, allianz_alt), (6, allianz_neu)],
+        abruf,
+    )?;
+    let (mut dachs, mut maus) = kaeufer(montag, &allianz);
+    let aus = papiertag(
+        &mut j,
+        montag,
+        &universum()?,
+        &toepfe,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    drop(j);
+    Ok((ort, aus, dachs.aufrufe, maus.aufrufe))
+}
+
+#[test]
+fn morgens_gehaltener_wert_mit_fehler_sperrt_nur_ihn() -> Result<(), String> {
+    let (ort, aus, dachs, maus) = gemischter_morgen(20_000, 40_000, 40_000, Cent(1_000_000), None)?;
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    assert_eq!(dachs, 0);
+    assert!(maus > 0);
+    let j = ort.oeffnen()?;
+    assert!(j.stand().begruendungen().iter().any(|(_, _, text)| {
+        text.contains("DE0007164600 heute gesperrt") && text.contains("KI nicht gefragt")
+    }));
+    let sap = sap()?;
+    assert!(j.stand().offene_auftraege().all(|a| a.beleg.isin != sap));
+    Ok(())
+}
+
+#[test]
+fn kein_hoechststand_mit_gesperrtem_wert() -> Result<(), String> {
+    let (_, aus, _, _) = gemischter_morgen(20_000, 40_000, 43_000, Cent(1_000_000), None)?;
+    assert!(
+        matches!(
+            aus,
+            Ok(Ausgang::Abgeschlossen {
+                hoechststand: Cent(1_000_000),
+                ..
+            })
+        ),
+        "{aus:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn verlust_im_rest_loest_tageshalt_aus() -> Result<(), String> {
+    let (_, aus, dachs, maus) = gemischter_morgen(20_000, 40_000, 34_500, Cent(1_000_000), None)?;
+    assert!(
+        matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Tagesverlust")),
+        "{aus:?}"
+    );
+    assert_eq!((dachs, maus), (0, 0));
+    Ok(())
+}
+
+#[test]
+fn kleiner_verlust_im_rest_kein_halt() -> Result<(), String> {
+    let (_, aus, dachs, maus) = gemischter_morgen(20_000, 40_000, 37_000, Cent(1_000_000), None)?;
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    assert_eq!(dachs, 0);
+    assert!(maus > 0);
+    Ok(())
+}
+
+#[test]
+fn gesamtverlust_im_rest_sperrt() -> Result<(), String> {
+    let (ort, aus, dachs, maus) = gemischter_morgen(20_000, 40_000, 34_500, Cent(1_350_000), None)?;
+    assert!(
+        matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("30 %")),
+        "{aus:?}"
+    );
+    let j = ort.oeffnen()?;
+    assert!(j.stand().papier_verlustsperre_aktiv());
+    assert_eq!((dachs, maus), (0, 0));
+    let auftraege: Vec<_> = j.stand().offene_auftraege().collect();
+    assert_eq!(auftraege.len(), 1);
+    assert_eq!(
+        some(auftraege.first(), "Schutzauftrag")?.beleg.isin,
+        allianz()?
+    );
+    Ok(())
+}
+
+#[test]
+fn offene_order_des_gesperrten_werts_fuellt_nicht() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut j = ort.oeffnen()?;
+    let mut toepfe = start()?;
+    some(toepfe.first_mut(), "Topf A")?.setze_bestand(sap.clone(), 1);
+    let mut k = Papierdatei::oeffnen(&ort.konto, false, &toepfe)?;
+    let freitag = tag(6)?;
+    let abruf = some(Zeitpunkt::frankfurt(freitag, 7, 30, 0), "Abruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(4, 20_000), (5, 20_000)], abruf)?;
+    belege_sperrprobe(&mut j, &allianz, &[(4, 35_000), (5, 35_000)], abruf)?;
+    let (mut dachs, mut maus) = kaeufer(freitag, &sap);
+    vorbedingung(
+        papiertag(
+            &mut j,
+            freitag,
+            &universum()?,
+            &toepfe,
+            &mut dachs,
+            &mut maus,
+            &mut k,
+        ),
+        "Freitag",
+    )?;
+    let order = some(j.stand().offene_auftraege().next(), "SAP-Order")?;
+    assert_eq!(order.beleg.isin, sap);
+    let nr = order.beleg.nr;
+    let montag = tag(9)?;
+    let abruf = some(Zeitpunkt::frankfurt(montag, 7, 30, 0), "Abruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(6, 16_000)], abruf)?;
+    belege_sperrprobe(&mut j, &allianz, &[(6, 35_000)], abruf)?;
+    vorbedingung(
+        papiertag(
+            &mut j,
+            montag,
+            &universum()?,
+            &toepfe,
+            &mut Stumm,
+            &mut Stumm,
+            &mut k,
+        ),
+        "Montag",
+    )?;
+    let order = some(j.stand().auftrag(nr), "SAP-Order")?;
+    assert_eq!(order.zustand, depot_journal::AuftragsZustand::Verfallen);
+    assert!(order.ausfuehrungen.is_empty());
+    Ok(())
+}
+
+#[test]
+fn notbremse_verkauft_alle_ausser_gesperrtem() -> Result<(), String> {
+    let (ort, aus, _, _) = gemischter_morgen(
+        20_000,
+        40_000,
+        40_000,
+        Cent(1_000_000),
+        Some(depot_journal::PapierHalt::Notbremse),
+    )?;
+    assert!(matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Notbremse")));
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut j = ort.oeffnen()?;
+    let auftraege: Vec<_> = j.stand().offene_auftraege().collect();
+    assert_eq!(auftraege.len(), 1);
+    assert_eq!(
+        some(auftraege.first(), "Schutzauftrag")?.beleg.isin,
+        allianz
+    );
+    assert!(j.stand().begruendungen().iter().any(|(_, _, text)| {
+        text.contains(sap.als_str()) && text.contains("Verkauf beim nächsten Lauf")
+    }));
+    let dienstag = tag(10)?;
+    let abruf = some(Zeitpunkt::frankfurt(dienstag, 7, 30, 0), "Abruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(9, 20_000)], abruf)?;
+    belege_sperrprobe(&mut j, &allianz, &[(9, 40_000)], abruf)?;
+    drop(j);
+    assert!(
+        matches!(stumm_tag(&ort, 10)?, Err(LaufFehler::Halt(ref grund)) if grund.contains("Notbremse"))
+    );
+    let j = ort.oeffnen()?;
+    assert!(j.stand().offene_auftraege().any(|a| a.beleg.isin == sap));
+    Ok(())
+}
+
+#[test]
+fn verlustsperre_aktiv_mit_gesperrtem_wert() -> Result<(), String> {
+    let (ort, aus, _, _) = gemischter_morgen(
+        20_000,
+        40_000,
+        40_000,
+        Cent(1_000_000),
+        Some(depot_journal::PapierHalt::Gesamtverlust),
+    )?;
+    assert!(matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("30 %")));
+    let j = ort.oeffnen()?;
+    let auftraege: Vec<_> = j.stand().offene_auftraege().collect();
+    assert_eq!(auftraege.len(), 1);
+    assert_eq!(
+        some(auftraege.first(), "Schutzauftrag")?.beleg.isin,
+        allianz()?
+    );
+    Ok(())
+}

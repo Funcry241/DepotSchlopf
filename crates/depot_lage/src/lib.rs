@@ -470,6 +470,46 @@ fn tag_punkte(s: &Stand, heute: Datum, jetzt: Zeitpunkt, werte: &[Wert], punkte:
     termin_und_tag(s, heute, &heute_ist, punkte);
 }
 
+fn kurs_sperrpunkt(
+    k: &depot_sim::Tageskurse,
+    gesperrt: &[depot_regelwerk::DatenFehler],
+    mut text: String,
+) -> Punkt {
+    let werte = beobachtungsliste().unwrap_or_default();
+    let gruende: Vec<_> = gesperrt
+        .iter()
+        .filter_map(|befund| {
+            let isin = befund.isin()?;
+            let grund = format!("{befund:?}");
+            Some(format!(
+                "{}: {}",
+                depot::name(&werte, isin.als_str()),
+                tage::befunde_text(std::iter::once(grund.as_str())).join("; ")
+            ))
+        })
+        .collect();
+    let _ = write!(
+        text,
+        " Gehaltener Wert gesperrt: {}. Keine freiwilligen Aufträge im betroffenen Topf.",
+        gruende.join("; ")
+    );
+    let ohne_vergleich = gesperrt
+        .iter()
+        .filter_map(depot_regelwerk::DatenFehler::isin)
+        .any(|isin| k.vortag.eintrag(isin).is_none());
+    if ohne_vergleich {
+        text.push_str(" Ohne Vergleichskurs ist das Depot nicht bewertbar.");
+        punkt(
+            "Schlusskurse",
+            Ampel::Halt,
+            text,
+            Some(Abhilfe::KurseAbrufen),
+        )
+    } else {
+        punkt("Schlusskurse", Ampel::Offen, text, None)
+    }
+}
+
 fn kurs_punkt(
     k: &depot_sim::Tageskurse,
     wahl: &depot_regelwerk::Tageswerte,
@@ -494,6 +534,7 @@ fn kurs_punkt(
                 .universum
                 .instrumente()
                 .iter()
+                .filter(|w| !wahl.gesperrt.iter().any(|f| f.isin() == Some(&w.isin)))
                 .filter_map(|w| k.heute.eintrag(&w.isin).map(depot_kern::Kurs::handelstag))
                 .collect();
             let tage: Vec<_> = tage.into_iter().map(datum_text).collect();
@@ -516,6 +557,10 @@ fn kurs_punkt(
                 " Heute nicht handelbar, der Papiertag läuft ohne sie: {}.",
                 tage::befunde_text(roh.iter().map(String::as_str)).join("; ")
             );
+        }
+        if !wahl.gesperrt.is_empty() {
+            punkte.push(kurs_sperrpunkt(k, &wahl.gesperrt, text));
+            return;
         }
         punkte.push(punkt("Schlusskurse", Ampel::Gut, text, None));
     } else {

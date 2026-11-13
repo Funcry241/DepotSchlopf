@@ -77,6 +77,8 @@ pub struct Tageswerte {
     pub universum: Universum,
     /// Kandidaten, die heute nicht handelbar sind, mit Grund. Der Zyklus laeuft ohne sie.
     pub ausgelassen: Vec<DatenFehler>,
+    /// Morgens gesperrte gehaltene Werte. Ihre Kurse gelten nicht für Aufträge.
+    pub gesperrt: Vec<DatenFehler>,
     /// Befunde, an denen der Zyklus ausfaellt: zum Abruf, zu einem gehaltenen Wert, oder kein
     /// Wert handelbar. Leer = der Zyklus laeuft.
     pub fehler: Vec<DatenFehler>,
@@ -99,6 +101,7 @@ pub fn waehle_tageswerte(
         universum,
         gehalten,
         pruefe_kurse(grenzen, universum, handelstag, heute, vortag),
+        false,
     )
 }
 
@@ -120,21 +123,27 @@ pub fn waehle_morgenwerte(
         tag.is_some_and(|tag| bezug.stand().in_frankfurt().is_some_and(|(d, ..)| d == tag)),
         |isin, eintrag| morgen_befund(grenzen, start, tag, bezug, isin, eintrag),
     );
-    teile_tageswerte(universum, gehalten, befunde)
+    teile_tageswerte(universum, gehalten, befunde, true)
 }
 
 fn teile_tageswerte(
     universum: &Universum,
     gehalten: &BTreeSet<Isin>,
     befunde: Vec<DatenFehler>,
+    sperre_gehaltene: bool,
 ) -> Tageswerte {
     let mut fehler = Vec::new();
     let mut ausgelassen = Vec::new();
+    let mut gesperrt = Vec::new();
     for befund in befunde {
         match befund.isin() {
             Some(i) if !gehalten.contains(i) => ausgelassen.push(befund),
+            Some(_) if sperre_gehaltene => gesperrt.push(befund),
             _ => fehler.push(befund),
         }
+    }
+    if fehler.iter().any(|f| f.isin().is_none()) {
+        fehler.append(&mut gesperrt);
     }
     let raus: BTreeSet<&Isin> = ausgelassen.iter().filter_map(DatenFehler::isin).collect();
     let tageswerte = Universum::neu(
@@ -151,6 +160,7 @@ fn teile_tageswerte(
     Tageswerte {
         universum: tageswerte,
         ausgelassen,
+        gesperrt,
         fehler,
     }
 }

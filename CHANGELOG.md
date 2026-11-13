@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Der Morgenlauf sperrt gehaltene Werte mit unplausiblen Kursen einzeln. Ein belegter Vergleichskurs dient zur Bewertung; Schutz und Handel der übrigen Werte verwenden ihre eigenen gültigen Kurse (#158).
+
 ### Hinzugefügt
 
 - Auf Live sitzt ein kleiner Otter neben der Betriebsleiste. Er döst, schaut bei einem laufenden Auftrag auf den Bildschirm und hebt die Pfote, wenn ein Eingriff nötig ist (#200).
