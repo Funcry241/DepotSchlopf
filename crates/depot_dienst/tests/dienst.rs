@@ -4145,6 +4145,65 @@ fn depot_tagesergebnis_ohne_vortag() -> Result<(), String> {
     Ok(())
 }
 
+fn depot_mit_verlauf(tage: &[depot_kern::Datum]) -> Result<Arc<Dienst>, String> {
+    use depot_journal::Journal;
+    use depot_kern::{Cent, Isin, Topf, TopfId};
+
+    let wurzel = ordner()?;
+    let journal = wurzel.join("daten/journal.txt");
+    Journal::einrichten(&journal).map_err(|e| format!("{e:?}"))?;
+    let mut j = Journal::oeffnen(&journal).map_err(|e| format!("{e:?}"))?;
+    let mut topf = Topf::neu(TopfId::A, Cent(900_000)).map_err(|e| format!("{e:?}"))?;
+    topf.setze_bestand(Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?, 1);
+    j.setze_topf(&topf).map_err(|e| format!("{e:?}"))?;
+    for tag in tage {
+        j.schliesse_ab(*tag, Cent(1_000_000), &"a".repeat(64))
+            .map_err(|e| format!("{e:?}"))?;
+    }
+    drop(j);
+    Ok(dienst(wurzel, true))
+}
+
+#[test]
+fn zeitraum_links() -> Result<(), String> {
+    let alt = some(depot_kern::Datum::neu(2026, 7, 13), "Alter Abschluss")?;
+    let neu = some(depot_kern::Datum::neu(2026, 10, 13), "Neuer Abschluss")?;
+    let d = depot_mit_verlauf(&[alt, neu])?;
+    let jetzt = some(
+        Zeitpunkt::frankfurt(
+            some(depot_kern::Datum::neu(2026, 11, 13), "Heute")?,
+            18,
+            0,
+            0,
+        ),
+        "Uhrzeit",
+    )?;
+    let html = get(&d, "/depot?zeitraum=3m", jetzt);
+    assert!(html.contains("/depot?zeitraum=3m\" aria-current=\"true\">3 Monate</a>"));
+    assert!(html.contains("<th scope=\"row\">13.10.2026</th>"));
+    assert!(!html.contains("<th scope=\"row\">13.07.2026</th>"));
+    Ok(())
+}
+
+#[test]
+fn zeitraum_leer() -> Result<(), String> {
+    let alt = some(depot_kern::Datum::neu(2026, 9, 10), "Alter Abschluss")?;
+    let d = depot_mit_verlauf(&[alt])?;
+    let jetzt = some(
+        Zeitpunkt::frankfurt(
+            some(depot_kern::Datum::neu(2026, 11, 13), "Heute")?,
+            18,
+            0,
+            0,
+        ),
+        "Uhrzeit",
+    )?;
+    let html = get(&d, "/depot?zeitraum=1m", jetzt);
+    assert!(html.contains("Im gewählten Zeitraum gibt es noch keinen abgeschlossenen Papiertag."));
+    assert!(!html.contains("<svg"));
+    Ok(())
+}
+
 fn depot_mit_order() -> Result<Arc<Dienst>, String> {
     use depot_journal::Art::{Auftrag, Topf, Zustand};
     let wurzel = ordner()?;

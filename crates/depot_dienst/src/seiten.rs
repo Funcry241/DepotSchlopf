@@ -18,8 +18,9 @@ use crate::zeitplan::{Zeitplan, geplante_abrufe, lies_uhrzeit, naechster_fuer, u
 use crate::zeitstrahl_ki::{self, Aufrufe};
 
 const STIL_DIENST: &str = "\
-nav{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;--nav-akzent:#005c97}\
-@media (prefers-color-scheme:dark){nav{--nav-akzent:#74c7ff}}\
+:root{--nav-akzent:#005c97}\
+nav{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}\
+@media (prefers-color-scheme:dark){:root{--nav-akzent:#74c7ff}}\
 nav a{color:inherit;text-decoration:none;padding:6px 10px;border-bottom:3px solid transparent;\
 border-radius:6px 6px 0 0}\
 nav a:hover{background:var(--flaeche)}\

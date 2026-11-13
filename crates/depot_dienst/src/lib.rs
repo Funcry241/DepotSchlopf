@@ -327,11 +327,15 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     match a.pfad.as_str() {
         "/" => live_seite(d, a, jetzt),
         "/depot" => {
+            let abfrage = formular(a.abfrage.as_bytes()).unwrap_or_default();
+            let zeitraum = depot_lage::depotverlauf::Zeitraum::aus_abfrage(
+                feld(&abfrage, "zeitraum").unwrap_or_default(),
+            );
             let html = seiten::rahmen(
                 "/depot",
                 None,
                 None,
-                &depotseite::inhalt(&d.wurzel.join("daten"), jetzt),
+                &depotseite::inhalt(&d.wurzel.join("daten"), jetzt, zeitraum),
                 d.version.as_deref(),
                 &betriebsleiste(d, heute(jetzt)),
                 seiten::meldungs_aktion(&a.abfrage),
