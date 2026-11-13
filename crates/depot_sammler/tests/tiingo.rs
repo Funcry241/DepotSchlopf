@@ -853,3 +853,44 @@ fn vortag_ganz_ohne_ezb() -> Result<(), String> {
     );
     Ok(())
 }
+
+#[test]
+fn morgenlauf_gesperrter_wert_ist_verwendbar() -> Result<(), String> {
+    let (journal, roh) = ordner()?;
+    {
+        let mut j = vorbedingung(Journal::oeffnen(&journal), "Journal")?;
+        let mut topf = vorbedingung(
+            depot_kern::Topf::neu(depot_kern::TopfId::A, depot_kern::Cent(500_000)),
+            "Topf",
+        )?;
+        topf.setze_bestand(
+            vorbedingung(depot_kern::Isin::neu("DE0007164600"), "SAP")?,
+            1,
+        );
+        vorbedingung(j.setze_topf(&topf), "Topf belegen")?;
+    }
+    let csv = "timestamp,open,high,low,close,volume\r\n2026-11-04,200,200,200,200,100\r\n2026-11-03,200,200,200,200,100\r\n";
+    let werte = vorbedingung(
+        pruefe_liste(&[("DE0007164600", Boerse::Xetra, "SAP.DEX", "SAP")]),
+        "Liste",
+    )?;
+    let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(csv.into()))]);
+    let b = vorbedingung(
+        lauf(
+            &journal,
+            &roh,
+            &mut netz,
+            &zugang()?,
+            vec![utc(11, 6, 6, 29)?, utc(11, 6, 6, 30)?],
+            &werte,
+        )?,
+        "Morgenabruf",
+    )?;
+    assert!(b.verwendbar(), "{b:?}");
+    assert!(
+        b.ausgelassen
+            .iter()
+            .any(|b| b.isin().is_some_and(|i| i.als_str() == "DE0007164600"))
+    );
+    Ok(())
+}

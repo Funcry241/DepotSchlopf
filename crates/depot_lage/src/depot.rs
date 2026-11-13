@@ -78,7 +78,7 @@ pub struct DepotLage {
 /// So viele Auftraege zeigt das Lagebild hoechstens.
 pub const AUFTRAEGE_MAX: usize = 20;
 
-fn name(werte: &[Wert], isin: &str) -> String {
+pub(crate) fn name(werte: &[Wert], isin: &str) -> String {
     werte
         .iter()
         .find(|w| w.isin.als_str() == isin)

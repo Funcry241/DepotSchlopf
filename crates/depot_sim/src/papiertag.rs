@@ -25,7 +25,7 @@
 //! Schlusskurs nach Versand. Fehlt an diesem Boersentag ein gepruefter Kurs oder liegt er
 //! ausserhalb des Limits, verfallen sie.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use depot_journal::{Journal, KursBeleg, NachrichtBeleg, PapierHalt, Stand};
@@ -623,11 +623,57 @@ fn tagesauswahl(
     };
     if morgens && !wahl.fehler.is_empty() {
         return Err(halt(format!(
-            "Morgenlauf ohne gültige Bezugskurse: {:?}; ausgelassen: {:?}",
+            "Morgenlauf: Abruf unbrauchbar: {:?}; ausgelassen: {:?}",
             wahl.fehler, wahl.ausgelassen
         )));
     }
     Ok(wahl)
+}
+
+/// Bewertung zum Vergleichskurs für gesperrte Positionen. Ein solcher Kurs dient
+/// allein der Bewertung, niemals dem Versand oder der Ausführung von Aufträgen.
+///
+/// # Errors
+/// Ein gesperrter Wert hat keinen Vergleichskurs, oder die Kurse sind widersprüchlich.
+pub fn bewertungskurse(
+    heute: &Kurse,
+    vortag: &Kurse,
+    gesperrt: &BTreeSet<Isin>,
+) -> Result<Kurse, LaufFehler> {
+    let mut kurse: Vec<_> = heute
+        .alle()
+        .filter(|(isin, _)| !gesperrt.contains(*isin))
+        .filter_map(|(isin, kurs)| Some((isin.clone(), kurs.clone(), heute.abruf(isin)?)))
+        .collect();
+    for isin in gesperrt {
+        let (kurs, abruf) = vortag
+            .eintrag(isin)
+            .zip(vortag.abruf(isin))
+            .ok_or_else(|| {
+                halt(format!(
+                    "{isin}: heute gesperrt und ohne Vergleichskurs; Depot nicht bewertbar"
+                ))
+            })?;
+        kurse.push((isin.clone(), kurs.clone(), abruf));
+    }
+    Kurse::mit_abrufen(heute.stand(), kurse).map_err(|e| halt(format!("Bewertungskurse: {e:?}")))
+}
+
+/// Journalpräfix für die beim Tagesabschluss verwendete Ersatzbewertung.
+pub const ERSATZKURS: &str = "heute gesperrt: ";
+
+fn handelskurse(heute: &Kurse, gesperrt: &BTreeSet<Isin>) -> Result<Option<Kurse>, LaufFehler> {
+    if gesperrt.is_empty() {
+        return Ok(None);
+    }
+    let eintraege = heute
+        .alle()
+        .filter(|(isin, _)| !gesperrt.contains(*isin))
+        .filter_map(|(isin, kurs)| Some((isin.clone(), kurs.clone(), heute.abruf(isin)?)))
+        .collect();
+    Kurse::mit_abrufen(heute.stand(), eintraege)
+        .map(Some)
+        .map_err(|e| halt(format!("Handelskurse: {e:?}")))
 }
 
 pub(crate) fn papiertag_mit_uhr(
@@ -657,6 +703,14 @@ pub(crate) fn papiertag_mit_uhr(
     }
     let grenzen = Grenzen::standard();
     let wahl = tagesauswahl(j.stand(), &grenzen, universum, &k, wissen_bis)?;
+    let gesperrt: BTreeSet<_> = wahl
+        .gesperrt
+        .iter()
+        .filter_map(depot_regelwerk::DatenFehler::isin)
+        .cloned()
+        .collect();
+    let bewertung = bewertungskurse(&k.heute, &k.vortag, &gesperrt)?;
+    let handelbar = handelskurse(&k.heute, &gesperrt)?;
     let letzter = j.stand().abschluss().cloned();
     j.stelle_um().map_err(journal)?;
     j.belege_wissensstichtag(heute, wissen_bis)
@@ -691,12 +745,26 @@ pub(crate) fn papiertag_mit_uhr(
         j.begruende(tag.datum, AUSWAHL, &format!("heute nicht handelbar: {f:?}"))
             .map_err(journal)?;
     }
+    for fehler in &wahl.gesperrt {
+        if let Some(isin) = fehler.isin() {
+            j.begruende(
+                tag.datum,
+                AUSWAHL,
+                &format!("{ERSATZKURS}{isin} · {fehler:?}"),
+            )
+            .map_err(journal)?;
+        }
+    }
     let ab = abdruck(
         letzter.as_ref().map(|a| a.abdruck.as_str()),
         &tag,
         &k.vortag,
         wissen_bis,
     );
+    let tag = match handelbar {
+        Some(kurse) => Tag { kurse, ..tag },
+        None => tag,
+    };
     let nr = tagnummer(tag.datum).ok_or_else(|| rechnung("Tagnummer"))?;
     let belegte_zeit = || match uhr {
         Some(uhr) => uhr().filter(|zeit| *zeit >= wissen_bis),
@@ -710,7 +778,9 @@ pub(crate) fn papiertag_mit_uhr(
         nr,
         abdruck: &ab,
         uhr: Some(&belegte_zeit),
-        vollstaendige_kurse: wahl.ausgelassen.is_empty(),
+        vollstaendige_kurse: wahl.ausgelassen.is_empty() && gesperrt.is_empty(),
+        gesperrt: &gesperrt,
+        bewertung: &bewertung,
     };
     let hoechststand = ein_tag(j, &z, hoch, &wahl.fehler, beteiligte)?;
     Ok(Ausgang::Abgeschlossen {

@@ -754,7 +754,15 @@ fn pruefe(
             waehle_tageswerte(&grenzen, &universum, &gehalten, tag, &heute, &vortag)
         };
         bericht.pruefung = wahl.fehler;
+        // Ohne Vergleichskurs kann der Papiertag den gesperrten Bestand nicht bewerten.
+        bericht.pruefung.extend(
+            wahl.gesperrt
+                .iter()
+                .filter(|f| f.isin().is_some_and(|i| vortag.eintrag(i).is_none()))
+                .cloned(),
+        );
         bericht.ausgelassen = wahl.ausgelassen;
+        bericht.ausgelassen.extend(wahl.gesperrt);
     }
     Ok(())
 }

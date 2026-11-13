@@ -1264,3 +1264,73 @@ fn nur_gehaltene_werte_sind_pflicht() {
     assert_eq!(t.fehler, vec![DatenFehler::KeinWertHandelbar]);
     assert!(t.universum.instrumente().is_empty());
 }
+
+fn morgenprobe(
+    abruftag: Datum,
+    starttag: Datum,
+    gehalten: &BTreeSet<Isin>,
+) -> depot_regelwerk::Tageswerte {
+    let start = Zeitpunkt::frankfurt(starttag, 7, 30, 0).unwrap_or_else(|| unreachable!("Start"));
+    let abruf = Zeitpunkt::frankfurt(abruftag, 7, 30, 0).unwrap_or_else(|| unreachable!("Abruf"));
+    let werte = depot_kern::liste::beobachtungsliste().unwrap_or_else(|e| unreachable!("{e}"));
+    let werte: Vec<_> = werte.into_iter().filter(|w| w.isin == isin(0)).collect();
+    let universum = depot_kern::liste::als_universum(&werte);
+    let alt = Datum::neu(2026, 10, 29).unwrap_or_else(|| unreachable!("Alter Kurs"));
+    let zeit = depot_kern::Boerse::Xetra
+        .schluss(alt)
+        .unwrap_or_else(|| unreachable!("Schluss"));
+    let kurs = Kurs::neu(Cent(10_000), "EUR", alt, zeit, Herkunft::Quelle)
+        .unwrap_or_else(|e| unreachable!("{e:?}"));
+    let bezug = Kurse::neu(abruf, vec![(isin(0), kurs)]).unwrap_or_else(|e| unreachable!("{e:?}"));
+    depot_regelwerk::waehle_morgenwerte(
+        &Grenzen::standard(),
+        &universum,
+        gehalten,
+        start,
+        &bezug,
+        &vortagskurse(&preise_alle(10_000)),
+    )
+}
+
+#[test]
+fn morgenwerte_gehaltener_fehler_ist_gesperrt() {
+    let sap = isin(0);
+    let t = morgenprobe(handelstag(), handelstag(), &BTreeSet::from([sap.clone()]));
+    assert!(t.fehler.is_empty(), "{t:?}");
+    assert!(
+        t.gesperrt
+            .iter()
+            .any(|f| matches!(f, DatenFehler::KursNichtVomBezugstag { isin, .. } if *isin == sap))
+    );
+    assert!(t.universum.isins().contains(&sap));
+}
+
+#[test]
+fn morgenwerte_abruffehler_bleibt_fehler() {
+    let morgen = Datum::neu(2026, 11, 3).unwrap_or_else(|| unreachable!("Start"));
+    let t = morgenprobe(handelstag(), morgen, &BTreeSet::from([isin(0)]));
+    assert!(t.fehler.contains(&DatenFehler::AbrufNichtAmHandelstag));
+    assert!(t.gesperrt.is_empty());
+}
+
+#[test]
+fn morgenwerte_nichts_gehalten_alles_kaputt() {
+    let t = morgenprobe(handelstag(), handelstag(), &BTreeSet::new());
+    assert_eq!(t.fehler, [DatenFehler::KeinWertHandelbar]);
+    assert!(t.gesperrt.is_empty());
+}
+
+#[test]
+fn tageswerte_gehaltener_fehler_bleibt_fehler() {
+    let sap = isin(0);
+    let t = waehle_tageswerte(
+        &Grenzen::standard(),
+        &universum(),
+        &BTreeSet::from([sap.clone()]),
+        handelstag(),
+        &kurse(&Preise::new()),
+        &vortagskurse(&preise_alle(10_000)),
+    );
+    assert!(t.fehler.contains(&DatenFehler::KursFehlt(sap)));
+    assert!(t.gesperrt.is_empty());
+}
