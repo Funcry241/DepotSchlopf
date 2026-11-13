@@ -862,11 +862,13 @@ fn frage_topf(
         .ok_or_else(|| halt(format!("{} fehlt im Journal", topf_name(id))))?;
     let t = topf_name(id);
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
+    let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let lage = Lage {
         datum: tag.datum,
         topf: &topf,
         kaufbar: kaufbudget(j, z.grenzen, id)?,
         kurse: &tag.kurse,
+        verlauf: &verlauf,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -919,11 +921,13 @@ fn zweite_meinung(
     let zweiter = andere(id.berater());
     let t = topf_name(id);
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
+    let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let lage = Lage {
         datum: tag.datum,
         topf: &topf,
         kaufbar: kaufbudget(j, z.grenzen, id)?,
         kurse: &tag.kurse,
+        verlauf: &verlauf,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -1274,6 +1278,7 @@ mod tests {
             topf: &topf,
             kaufbar: topf.bargeld(),
             kurse: &kurse,
+            verlauf: &[],
             positionskaeufe: &[],
             ereignisse: &["Meldung".into()],
         };

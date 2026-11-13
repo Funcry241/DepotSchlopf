@@ -139,6 +139,7 @@ pub fn vorbereiten<'a>(
                             topf: &topf,
                             kaufbar: Cent::NULL,
                             kurse: &kurse,
+                            verlauf: &[],
                             positionskaeufe: &[],
                             ereignisse: &ereignisse,
                         },

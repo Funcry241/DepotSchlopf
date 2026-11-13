@@ -103,11 +103,18 @@ fn frage(
         Err(s) => return Err(crate::lauf::halt(format!("Abstimmungsreservierung: {s:?}"))),
     };
     let positionskaeufe = crate::positionskauf::lies(buch.stand(), &topf.topf);
+    let verlauf = crate::kursverlauf::fuer_lage(
+        buch.stand(),
+        &zyklus.tag.kurse,
+        zyklus.universum,
+        zyklus.tag.datum,
+    );
     let lage = Lage {
         datum: zyklus.tag.datum,
         topf: &topf.topf,
         kaufbar,
         kurse: &zyklus.tag.kurse,
+        verlauf: &verlauf,
         positionskaeufe: &positionskaeufe,
         ereignisse: &zyklus.tag.ereignisse,
     };

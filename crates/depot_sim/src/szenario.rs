@@ -38,6 +38,7 @@ pub struct Lage<'a> {
     /// Bargeld nach Abzug offener Käufe und noch nicht abgerechneter Erlöse.
     pub kaufbar: Cent,
     pub kurse: &'a Kurse,
+    pub verlauf: &'a [(Isin, crate::kursverlauf::Verlauf)],
     pub ereignisse: &'a [String],
     pub positionskaeufe: &'a [crate::Positionskauf],
 }

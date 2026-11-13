@@ -24,6 +24,7 @@
 
 mod abdruck;
 pub mod abstimmung;
+pub mod kursverlauf;
 pub mod lauf;
 pub mod papier;
 pub mod papierdatei;
