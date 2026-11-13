@@ -28,6 +28,16 @@ class WindowsUpdateTest(unittest.TestCase):
             with self.subTest(pfad=pfad):
                 self.assertTrue(update_noetig("pull_request", [pfad]))
 
+    def test_windows_starter_und_crate_manifeste_loesen_update_aus(self):
+        for pfad, erwartet in (
+            ("run.cmd", True),
+            ("DepotSchlopf.cmd", True),
+            ("crates/depot_dienst/Cargo.toml", True),
+            ("crates/depot_dienst/src/seiten.rs", False),
+        ):
+            with self.subTest(pfad=pfad):
+                self.assertEqual(update_noetig("pull_request", [pfad]), erwartet)
+
     def test_fehler_und_unklare_filterentscheidung_sperren(self):
         for werte in (
             ("failure", "false", "success", "skipped"),

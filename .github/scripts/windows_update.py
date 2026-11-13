@@ -1,5 +1,6 @@
 """Entscheidung und Sammelprüfung für die Windows-Update-Gegenprobe."""
 import argparse
+from fnmatch import fnmatchcase
 import os
 import subprocess
 
@@ -12,7 +13,8 @@ def update_noetig(ereignis, pfade):
     return any(
         pfad != "kodex/aenderung.txt"
         and (
-            pfad in {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml"}
+            pfad in {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "run.cmd", "DepotSchlopf.cmd"}
+            or (pfad.count("/") == 2 and fnmatchcase(pfad, "crates/*/Cargo.toml"))
             or pfad.startswith(("crates/depot_lauf/", "crates/depot_kodex/", "kodex/", ".github/"))
         )
         for pfad in pfade

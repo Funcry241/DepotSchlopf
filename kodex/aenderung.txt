@@ -1,8 +1,5 @@
-klasse: Funktion
-zweck: Cargo-Manifeste und Lockdatei vor einem Update prüfen
+klasse: KodexAenderung
+zweck: Windows-Starter und Crate-Manifeste in der Update-Gegenprobe berücksichtigen
 pfade:
-CHANGELOG.md
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/tests/update.rs
-crates/depot_lauf/src/update.rs
-crates/depot_lauf/src/update/update_dialog.rs
+.github/scripts/test_windows_update.py
+.github/scripts/windows_update.py
