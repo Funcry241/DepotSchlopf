@@ -35,6 +35,7 @@ pub mod protokoll;
 pub mod rueckfall;
 pub mod schluessel;
 pub mod seiten;
+mod sicherung;
 pub mod verlauf;
 pub mod waechter;
 pub mod werkbank;
@@ -209,7 +210,20 @@ const HTML: &str = "text/html; charset=utf-8";
 fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
     let ki =
         zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), heute(jetzt));
-    seiten::live_mit_ki(&d.token, &d.start, &d.sperre(), jetzt, &ki)
+    let z = d.sperre();
+    let mut html = seiten::live_mit_ki(&d.token, &d.start, &z, jetzt, &ki);
+    if sicherung::ziel(&d.wurzel).is_empty() {
+        html.push_str("<p class=\"leise\">Sicherung: aus</p>");
+    } else {
+        html.push_str(&sicherungsstand(d, &z, jetzt));
+    }
+    html
+}
+
+fn sicherungsstand(d: &Dienst, z: &werkbank::Zustand, jetzt: Zeitpunkt) -> String {
+    let laeuft = z.laufend.as_ref().is_some_and(|a| a.art == Art::Sicherung);
+    let stand = sicherung::lies(&d.wurzel);
+    stand.html(jetzt, laeuft || stand.laeuft(&d.wurzel))
 }
 
 fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {
@@ -278,8 +292,13 @@ fn einrichtungsseite(
     } else {
         schluessel_stand(gemini_schluessel, &protokoll, Wer::Gemini.protokoll())
     };
-    let zusatz = gemini::einrichtung(d, gemini_stand, tag, &a.abfrage);
+    let mut zusatz = gemini::einrichtung(d, gemini_stand, tag, &a.abfrage);
     let zustand = d.sperre();
+    zusatz.push_str(&sicherung::formular(
+        &d.token,
+        &sicherung::ziel(&d.wurzel),
+        &sicherungsstand(d, &zustand, jetzt),
+    ));
     let gespeichert = seiten::Einrichtung {
         zeitplan_gespeichert: match datei {
             Ok(Some(t)) => Some(t == zustand.zeitplan.als_text()),
@@ -497,6 +516,16 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             http::umleitung(&format!("/einrichtung?m={meldung}{ziel}"))
         }
         "/zeitplan" => zeitplan_aendern(d, &f),
+        "/sicherung-ziel" => match feld(&f, "ziel") {
+            Some(ziel) => {
+                let _zustand = d.sperre();
+                match sicherung::setze_ziel(&d.wurzel, ziel) {
+                    Ok(()) => http::umleitung("/einrichtung#sicherung"),
+                    Err(fehler) => seiten::fehler(400, &fehler),
+                }
+            }
+            None => seiten::fehler(400, "Sicherungsziel fehlt"),
+        },
         "/kostenschutz" => kostenschutz_aufheben(d, u, &f, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, u, &f, Sperre::Kurse),
         "/papierfreigabe" => papier_freigeben(d, u, &f),
@@ -588,6 +617,13 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
             let sha = feld(f, "sha").unwrap_or_default();
             let m = d.update_von_hand(sha).err().unwrap_or("update");
             return http::umleitung(&format!("/einrichtung?m={m}#update"));
+        }
+        Art::Sicherung => {
+            if d.von_hand(art, jetzt).is_ok() {
+                "/einrichtung?m=auftrag#sicherung"
+            } else {
+                "/einrichtung?m=auftrag_belegt#sicherung"
+            }
         }
         Art::UpdatePruefen => {
             if d.von_hand(art, jetzt).is_ok() {

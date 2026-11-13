@@ -65,6 +65,13 @@ fn git(wurzel: &Path, args: &[&str]) -> Result<String, String> {
     abbild::git_text(wurzel, args)
 }
 
+fn sperren_zum_einspielen(daten: &Path) -> Result<(fs::File, fs::File), String> {
+    let update = crate::updatedaten::update_sperren(daten)?;
+    let sicherung =
+        crate::updatedaten::sicherung_sperren(daten, "Eine Sicherung läuft gerade. Kein Update.")?;
+    Ok((update, sicherung))
+}
+
 /// Was vor jedem Update gelten muss: auf `main`, nichts Verfolgtes geaendert, kein anderer Lauf
 /// mit Sperre, kein unbestaetigtes Update.
 fn vorbedingungen(wurzel: &Path) -> Result<(), String> {
@@ -527,17 +534,17 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
         println!("[Update] Kandidat: {}", k.neu);
         return ExitCode::SUCCESS;
     }
-    let ergebnis = crate::updatedaten::update_sperren(&wurzel.join("daten")).and_then(|sperre| {
-        let ergebnis = pruefe_kopie(wurzel, &k, update_dialog::bestaetigen).and_then(|kopie| {
+    let daten = wurzel.join("daten");
+    let ergebnis = (|| {
+        let _sperren = sperren_zum_einspielen(&daten)?;
+        pruefe_kopie(wurzel, &k, update_dialog::bestaetigen).and_then(|kopie| {
             einspielen_mit_datenprobe(wurzel, &k, &abbild::ablage(wurzel), |probe| {
                 pruefe_datenkopie(wurzel, &kopie, probe)
             })?;
             vermerke_geprueft(wurzel, &kopie.baum);
             Ok(())
-        });
-        let _ = sperre.unlock();
-        ergebnis
-    });
+        })
+    })();
     match ergebnis {
         Ok(()) => {
             println!(
@@ -651,6 +658,80 @@ mod tests {
         )?;
         fs::create_dir_all(projekt.join("daten")).map_err(|e| e.to_string())?;
         Ok(Aufbau { projekt, andere })
+    }
+
+    #[test]
+    fn abgestuerzte_sicherung_blockiert_update_nicht() -> Result<(), String> {
+        let a = aufbau()?;
+        let daten = a.projekt.join("daten");
+        let status = Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
+            .args(["--exact", "update::tests::sicherungssperre_kind"])
+            .env("DEPOT_TEST_SICHERUNG_KIND", &daten)
+            .status()
+            .map_err(|e| e.to_string())?;
+        assert!(!status.success());
+        assert!(daten.join("sicherung.lock").is_file());
+        assert!(daten.join("sicherung_stand.txt").is_file());
+        let _sperren = sperren_zum_einspielen(&daten)?;
+        vorbedingungen(&a.projekt)
+    }
+
+    #[test]
+    fn sicherungssperre_kind() -> Result<(), String> {
+        let Some(daten) = std::env::var_os("DEPOT_TEST_SICHERUNG_KIND") else {
+            return Ok(());
+        };
+        let daten = PathBuf::from(daten);
+        let _sperre = crate::updatedaten::sicherung_sperren(&daten, "Belegt")?;
+        fs::write(
+            daten.join("sicherung_stand.txt"),
+            "sicherung-stand-v1\nergebnis=laeuft\n",
+        )
+        .map_err(|e| e.to_string())?;
+        std::process::exit(5);
+    }
+
+    #[test]
+    fn laufende_sicherung_blockiert_update() -> Result<(), String> {
+        let a = aufbau()?;
+        let daten = a.projekt.join("daten");
+        let _sperre = crate::updatedaten::sicherung_sperren(&daten, "Belegt")?;
+        let vorher = git(&a.projekt, &["rev-parse", "HEAD"])?;
+        let stand = daten.join("sicherung_stand.txt");
+        fs::write(&stand, b"unberuehrt").map_err(|e| e.to_string())?;
+        assert!(
+            sperren_zum_einspielen(&daten)
+                .is_err_and(|e| e == "Eine Sicherung läuft gerade. Kein Update.")
+        );
+        assert_eq!(git(&a.projekt, &["rev-parse", "HEAD"])?, vorher);
+        assert_eq!(fs::read(&stand).map_err(|e| e.to_string())?, b"unberuehrt");
+        assert!(!offen_pfad(&a.projekt).exists());
+        let _update = crate::updatedaten::update_sperren(&daten)?;
+        Ok(())
+    }
+
+    #[test]
+    fn laufendes_update_blockiert_sicherung() -> Result<(), String> {
+        let a = aufbau()?;
+        let daten = a.projekt.join("daten");
+        let _sperren = sperren_zum_einspielen(&daten)?;
+        let stand = daten.join("sicherung_stand.txt");
+        fs::write(&stand, b"unberuehrt").map_err(|e| e.to_string())?;
+        let ziel = a.andere.join("DepotSchlopf");
+        let tmp = ziel.join(format!("utc-{:020}-{:09}_{}.tmp", 1, 0, "a".repeat(40)));
+        fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+        fs::write(
+            daten.join("sicherung_ziel.txt"),
+            a.andere.display().to_string(),
+        )
+        .map_err(|e| e.to_string())?;
+        assert_eq!(
+            crate::sicherung::sichern(&a.projekt, false),
+            Err("Sicherung oder Update läuft gerade".into())
+        );
+        assert_eq!(fs::read(&stand).map_err(|e| e.to_string())?, b"unberuehrt");
+        assert!(tmp.is_dir());
+        Ok(())
     }
 
     fn neuer_stand(a: &Aufbau, text: &str) -> Result<String, String> {

@@ -9,6 +9,7 @@ rem   run.cmd nachrichten      nur die Nachrichten holen und im Journal belegen 
 rem   run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)
 rem   run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)
 rem   run.cmd lage             Lagebild nach daten/lage.html (Bereitschaft, KI-Budget, Depot)
+rem   run.cmd sichern          Daten auf das eingestellte Ziel sichern und pruefen
 rem   run.cmd update pruefen   neue Staende auf main nennen
 rem   run.cmd update           neuen Stand im Pruefordner mit dem Gate pruefen, nur dann vorwaerts einspielen
 rem   run.cmd hilfe            Hilfe

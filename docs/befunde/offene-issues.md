@@ -22,10 +22,9 @@ Stellen und bestehenden Regressionstests kontrolliert; die neue Oberfläche
 | Dialogtest ohne Schreiben | `testdialog_ist_ohne_sperre_verfuegbar_und_schreibt_nichts`: unveränderte Journal-, Vermerk- und Konto-Bytes |
 | Nein als Voreinstellung, Abbruch nach 120 Sekunden | `depot_dienst/src/papierdialog.rs`; der echte Windows-Dialog benötigt weiterhin einen sichtbaren Praxistest nach normalem Start und Autostart |
 
-Eine Sicherung auf einem anderen Datenträger und das Aufräumen unfertiger
-Sicherungen nach einem Absturz bleiben spätere Verbesserungen. Sie werden hier
-nicht als bereits umgesetzt ausgegeben. Automatisierte Windows-Prüfungen ersetzen
-keinen sichtbaren Dialogtest im angemeldeten Benutzerkonto.
+Die [externe Sicherung](sicherung.md) kann einen zweiten Datenträger nutzen und räumt
+unfertige Sicherungen nach einem Absturz auf. Für den Windows-Dialog bleibt der sichtbare
+Praxistest im angemeldeten Benutzerkonto vorgesehen.
 
 ## #58: Verständliche Einrichtung und Rückmeldung
 

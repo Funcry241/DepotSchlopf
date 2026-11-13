@@ -38,6 +38,7 @@ pub enum Art {
     Gemini,
     Vorbereiten,
     Papier,
+    Sicherung,
     /// Dauerhafter Verlaufseintrag ohne gestarteten Prozess.
     PapierAusgelassen,
     /// Neue Staende auf `main` nennen (`run.cmd update pruefen`).
@@ -46,7 +47,7 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 11] = [
+const ALLE_ARTEN: [Art; 12] = [
     Art::Einrichten,
     Art::Kurse,
     Art::Kursdiagnose,
@@ -56,6 +57,7 @@ const ALLE_ARTEN: [Art; 11] = [
     Art::Nachrichten,
     Art::Vorbereiten,
     Art::Papier,
+    Art::Sicherung,
     Art::UpdatePruefen,
     Art::Update,
 ];
@@ -73,6 +75,7 @@ impl Art {
             Art::Gemini => "Gemini-Zuarbeit",
             Art::Vorbereiten => "Nächsten Handelstag vorbereiten",
             Art::Papier => "Papiertag",
+            Art::Sicherung => "Daten sichern",
             Art::PapierAusgelassen => "Papiertag ausgelassen: vor Börsenschluss nicht gestartet",
             Art::UpdatePruefen => "Nach Update suchen",
             Art::Update => "Update einspielen",
@@ -92,6 +95,7 @@ impl Art {
             Art::Gemini => "gemini-vorlauf",
             Art::Vorbereiten => "vorbereiten",
             Art::Papier => "papier",
+            Art::Sicherung => "sicherung",
             Art::PapierAusgelassen => "papier_ausgelassen",
             Art::UpdatePruefen => "update_pruefen",
             Art::Update => "update",
@@ -115,6 +119,7 @@ impl Art {
             Art::Gemini => &["gemini-vorlauf"],
             Art::Vorbereiten => &["vorbereiten"],
             Art::Papier => &["papier"],
+            Art::Sicherung => &["sichern"],
             Art::PapierAusgelassen => &["papier_ausgelassen"],
             Art::UpdatePruefen => &["update", "pruefen"],
             Art::Update => &["update"],
@@ -933,7 +938,7 @@ impl Dienst {
         let mut z = self.sperre();
         (!self.update_offen()).then_some(())?;
         self.vermerke_ausgelassen(&mut z, jetzt);
-        Self::zeitplan_pruefen(&mut z, jetzt);
+        self.zeitplan_pruefen(&mut z, jetzt);
         if z.laufend.is_none()
             && let Some(wartend) = z.warteschlange.pop_front()
         {
@@ -996,6 +1001,7 @@ impl Dienst {
                 update_commit.as_deref(),
                 &auftrag.kennung,
                 gemini_vorrang,
+                anlass,
             ) {
                 Ok(kind) => {
                     z.laufend = Some(auftrag);
@@ -1067,6 +1073,7 @@ impl Dienst {
         update_commit: Option<&str>,
         kennung: &str,
         gemini_vorrang: bool,
+        anlass: Anlass,
     ) -> std::io::Result<Laufprozess> {
         if art == Art::Update && update_commit.is_none_or(|sha| !crate::rueckfall::ist_commit(sha))
         {
@@ -1077,6 +1084,7 @@ impl Dienst {
         let (ausgabe, schreiber) = pipe()?;
         let kind = (self.starter)(art, &self.wurzel)
             .args(update_commit)
+            .args((art == Art::Sicherung && anlass == Anlass::Zeitplan).then_some("--auto"))
             .args(gemini_vorrang.then_some("papiertag"))
             .env(depot_lage::gespraeche::LAUF_ENV, kennung)
             .stdin(Stdio::null())
@@ -1126,13 +1134,32 @@ impl Dienst {
         let _ = self.zeitplan_start_vermerken(z, Art::Papier, jetzt);
     }
 
-    fn zeitplan_pruefen(z: &mut Zustand, jetzt: Zeitpunkt) {
+    fn zeitplan_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
         if z.neustart || z.erledigt_fehler.is_some() {
             return;
         }
         let Some((tag, h, m, _, _)) = ortszeit(jetzt) else {
             return;
         };
+        if z.laufend.is_none()
+            && z.warteschlange.is_empty()
+            && !crate::sicherung::ziel(&self.wurzel).is_empty()
+            && !z.verlauf.iter().any(|a| {
+                a.art == Art::Sicherung
+                    && a.anlass == Anlass::Zeitplan
+                    && a.start.in_frankfurt().is_some_and(|(d, ..)| d == tag)
+            })
+            && {
+                let stand = crate::sicherung::lies(&self.wurzel);
+                stand.auto_faellig(
+                    jetzt,
+                    crate::sicherung::nachholen(&self.wurzel, &stand, jetzt),
+                )
+            }
+        {
+            let _ = einreihen(z, Art::Sicherung, Anlass::Zeitplan, None);
+            return;
+        }
         let Some(art) = faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen) else {
             if z.laufend.is_none() && z.warteschlange.is_empty() && vorbereitung_faellig(z, jetzt) {
                 let _ = einreihen(z, Art::Vorbereiten, Anlass::Zeitplan, None);
@@ -1208,7 +1235,7 @@ impl Dienst {
         }
         // Folgt jetzt der Papiertag, steht er gleich in der Warteschlange.
         if let Some(jetzt) = ende {
-            Self::zeitplan_pruefen(&mut z, jetzt);
+            self.zeitplan_pruefen(&mut z, jetzt);
         }
         if let Some(anlass) = nachrichten_lauf
             && !self.update_offen()
@@ -1488,7 +1515,7 @@ fn zeitplan_auftrag_erlaubt(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> bool {
             })
         }
         Art::Nachrichten => rss_zeitplan_an(z, jetzt),
-        Art::Gemini => true,
+        Art::Gemini | Art::Sicherung => true,
         Art::Vorbereiten => vorbereitung_faellig(z, jetzt),
         _ => false,
     }

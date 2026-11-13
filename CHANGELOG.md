@@ -10,6 +10,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Hinzugefügt
 
+- Geprüfte Sicherungen auf einen vorhandenen Zielordner, täglich ab 23:30 und jederzeit von Hand (#123).
+
 - Berechnung des historischen Papierdepotwerts je belegtem Tagesabschluss mit Angabe der Kurstage, Ersatzbewertungen und fehlenden Kursen (#192).
 
 - Auf Live sitzt ein kleiner Otter neben der Betriebsleiste. Er döst, schaut bei einem laufenden Auftrag auf den Bildschirm und hebt die Pfote, wenn ein Eingriff nötig ist (#200).
