@@ -479,7 +479,9 @@ mod status_tests {
         let ort = Ort::neu()?;
         let wurzel = ort.projekt();
         let daten = wurzel.join("daten");
-        drop(sicherung_sperren(&daten, "Belegt")?);
+        sicherung_sperren(&daten, "Belegt")?
+            .unlock()
+            .map_err(|e| e.to_string())?;
         let snapshot = || -> Result<std::collections::BTreeMap<_, _>, String> {
             fs::read_dir(&daten)
                 .map_err(|e| e.to_string())?
