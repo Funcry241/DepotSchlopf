@@ -652,7 +652,7 @@ fn auftrag_laeuft_mit_protokoll_und_eindeutiger_kennung() -> Result<(), String> 
     let seite = seiten::live(TOKEN, "s", &z, t);
     assert!(seite.contains(&format!("{detail}>")));
     assert!(seite.contains("data-protokoll-kopieren>Auszug kopieren"));
-    assert!(seite.contains("<pre>lauf termine\n</pre>"));
+    assert!(seite.contains("<pre class=\"konsole\" tabindex=\"0\">lauf termine\n</pre>"));
     drop(z);
     assert!(d.schritt(t).is_none());
     assert!(d.sperre().lage.is_some(), "danach das Lagebild");
@@ -2561,11 +2561,49 @@ fn lange_diagnose_bleibt_nach_neustart_kopierbar() -> Result<(), String> {
     assert!(live.contains("Letzter fehlgeschlagener Lauf"));
     let html = get(&neu, &format!("/protokoll?lauf={kennung}"), t);
     assert!(html.contains("data-protokoll-kopieren>Protokoll kopieren"));
+    assert!(html.contains("<pre class=\"konsole\" tabindex=\"0\">"));
     assert!(html.contains("Diagnosezeile 0\n"));
     let download = get(&neu, &format!("/protokoll.txt?lauf={kennung}"), t);
     assert!(download.contains(&gespeichert));
     assert!(get(&neu, "/protokoll.txt?lauf=..%2Fjournal", t).starts_with("HTTP/1.1 400"));
     fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[test]
+fn konsole_stil_hell_dunkel() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let html = get(&d, "/", donnerstag(12, 0)?);
+    assert!(html.contains(":root{--konsole:#f0f0ec}"));
+    assert!(html.contains("@media (prefers-color-scheme:dark){:root{--konsole:#10100f}}"));
+    assert!(html.contains(".konsole{border:1px solid var(--linie)"));
+    assert!(html.contains("max-height:24em;overflow:auto"));
+    Ok(())
+}
+
+#[test]
+fn app_js_rettet_scrollstand() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let js = get(&d, "/app.js", donnerstag(12, 0)?);
+    let (vorher, nachher) = some(js.split_once("ziel.innerHTML = t"), "Auffrischung")?;
+    assert!(vorher.contains("pre.konsole"));
+    assert!(vorher.contains("pre.scrollHeight - pre.scrollTop - pre.clientHeight < 20"));
+    assert!(nachher.contains("konsolePosition(d, vorher && vorher.position)"));
+    assert!(js.contains("navigator.clipboard.writeText(log.textContent)"));
+    Ok(())
+}
+
+#[test]
+fn andere_pre_unveraendert() -> Result<(), String> {
+    let wurzel = ordner()?;
+    fs::write(kostenschutz::pfad(&wurzel), "Kosten unbekannt").map_err(|e| e.to_string())?;
+    fs::write(kostenschutz::kurse_pfad(&wurzel), "Kursabruf angehalten")
+        .map_err(|e| e.to_string())?;
+    let d = dienst(wurzel, true);
+    let html = get(&d, "/einrichtung", donnerstag(12, 0)?);
+    assert!(html.contains("<pre>Kosten unbekannt</pre>"));
+    assert!(html.contains("<pre>Kursabruf angehalten</pre>"));
+    assert!(!html.contains("<pre class=\"konsole\""));
     Ok(())
 }
 

@@ -18,6 +18,8 @@ use crate::zeitplan::{Zeitplan, geplante_abrufe, lies_uhrzeit, naechster_fuer, u
 use crate::zeitstrahl_ki::{self, Aufrufe};
 
 const STIL_DIENST: &str = "\
+:root{--konsole:#f0f0ec}\
+@media (prefers-color-scheme:dark){:root{--konsole:#10100f}}\
 :root{--nav-akzent:#005c97}\
 nav{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}\
 @media (prefers-color-scheme:dark){:root{--nav-akzent:#74c7ff}}\
@@ -52,6 +54,8 @@ input[type=password],input[type=time]{font:inherit;padding:3px 6px;border:1px so
 border-radius:6px;background:var(--grund);color:var(--text);max-width:100%}\
 pre{white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,Consolas,monospace;\
 margin:6px 0}\
+.konsole{border:1px solid var(--linie);border-radius:6px;background:var(--konsole);\
+padding:8px 10px;margin:6px 0 12px;max-height:24em;overflow:auto}\
 .banner{position:sticky;top:0;z-index:3;background:var(--halt);color:#fff;padding:8px 16px;font-weight:600}\
 .meldung{background:var(--flaeche);border-left:4px solid currentColor;padding-left:10px}\
 .meldungs-aktion{margin-top:-4px}.speicher-aktionen{position:sticky;bottom:0;background:var(--flaeche);border:2px solid var(--linie);border-radius:8px;padding:12px;margin-top:12px;z-index:1}\
@@ -959,7 +963,7 @@ pub(crate) fn protokoll_seite(kennung: &str, text: &str) -> String {
          <a href=\"/protokoll.txt?lauf={0}\" download=\"DepotSchlopf-{0}.log\">Herunterladen</a></p>\
          <details open><summary>Vollständiges gespeichertes Protokoll</summary>\
          <button type=\"button\" data-protokoll-kopieren>Protokoll kopieren</button> \
-         <span class=\"leise\" role=\"status\"></span><pre>{1}</pre></details></section>",
+         <span class=\"leise\" role=\"status\"></span><pre class=\"konsole\" tabindex=\"0\">{1}</pre></details></section>",
         maskiere(kennung),
         maskiere(text)
     )
@@ -984,7 +988,7 @@ fn protokoll(a: &Auftrag, offen: bool) -> String {
          <a href=\"/protokoll.txt?lauf={0}\" download=\"DepotSchlopf-{0}.log\">Herunterladen</a></p>\
          <p class=\"leise\">Auszug mit den letzten 500 Zeilen. Es bleiben höchstens 20 Protokolle, \
          je bis zu 16 MiB. Überlange Zeilen und eine erreichte Größenbegrenzung werden im Protokoll vermerkt.</p>\
-         <pre>{text}</pre></details>",
+         <pre class=\"konsole\" tabindex=\"0\">{text}</pre></details>",
         maskiere(&a.kennung),
         if offen { " open" } else { "" },
         a.protokoll.len()
@@ -2385,6 +2389,18 @@ pub const APP_JS: &str = r#""use strict";
       if (g === generation) { planeAbruf(verbindung, fehler ? 5000 : 2000); }
     }
   }
+  function konsolePosition(d, vorher) {
+    var pre = d.querySelector("pre.konsole");
+    if (!pre || !d.open) { return; }
+    pre.scrollTop = vorher == null || vorher.unten ? pre.scrollHeight : vorher.scrollTop;
+  }
+  document.querySelectorAll("details[open]").forEach(function (d) { konsolePosition(d, null); });
+  document.addEventListener("toggle", function (e) {
+    var d = e.target;
+    if (!(d instanceof HTMLDetailsElement) || !d.open || d.dataset.konsoleGeoeffnet) { return; }
+    d.dataset.konsoleGeoeffnet = "ja";
+    konsolePosition(d, null);
+  }, true);
   var teile = Array.from(document.querySelectorAll("[data-teil]")).map(function (ziel) {
     var url = ziel.getAttribute("data-teil");
     var zuletzt = null;
@@ -2398,13 +2414,25 @@ pub const APP_JS: &str = r#""use strict";
         // Der zentrale Verbindungstest wartet auf die Bestätigung und lädt genau einmal neu.
         if (start && neu && neu !== start) { return; }
         if (t !== zuletzt) {
-          var offen = {};
-          ziel.querySelectorAll("details[id]").forEach(function (d) { offen[d.id] = d.open; });
+          var protokolle = new Map();
+          ziel.querySelectorAll("details[id]").forEach(function (d) {
+            var pre = d.querySelector("pre.konsole");
+            protokolle.set(d.id, {
+              offen: d.open,
+              geoeffnet: d.dataset.konsoleGeoeffnet,
+              position: pre && d.open ? {
+                unten: pre.scrollHeight - pre.scrollTop - pre.clientHeight < 20,
+                scrollTop: pre.scrollTop
+              } : null
+            });
+          });
           ziel.innerHTML = t;
           zuletzt = t;
-          Object.keys(offen).forEach(function (id) {
-            var d = document.getElementById(id);
-            if (d) { d.open = offen[id]; }
+          ziel.querySelectorAll("details[id]").forEach(function (d) {
+            var vorher = protokolle.get(d.id);
+            if (vorher) { d.open = vorher.offen; }
+            if (d.open || (vorher && vorher.geoeffnet)) { d.dataset.konsoleGeoeffnet = "ja"; }
+            konsolePosition(d, vorher && vorher.position);
           });
         }
       } catch (_) { fehler = true; }
