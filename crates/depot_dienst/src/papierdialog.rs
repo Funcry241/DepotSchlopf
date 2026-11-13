@@ -73,11 +73,6 @@ pub fn testen() -> DialogErgebnis {
 
 #[cfg(windows)]
 fn zeige(text: &str) -> DialogErgebnis {
-    use std::os::windows::process::CommandExt;
-    use std::path::PathBuf;
-    use std::process::Command;
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const DIALOG: &str = "
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -87,23 +82,86 @@ $wahl = [System.Windows.Forms.MessageBox]::Show(
 if ($wahl -eq [System.Windows.Forms.DialogResult]::Yes) { exit 0 }
 exit 2
 ";
-    let Some(systemroot) = std::env::var_os("SystemRoot") else {
+    let Ok(mut kind) = powershell_dialog(DIALOG)
+        .and_then(|mut befehl| befehl.env("DEPOTSCHLOPF_PAPIER_DIALOG", text).spawn())
+    else {
         return DialogErgebnis::NichtVerfuegbar;
     };
-    let Ok(mut kind) = Command::new(
+    warte_auf_bestaetigung(&mut kind, Duration::from_secs(120))
+}
+
+#[cfg(windows)]
+fn powershell_dialog(skript: &str) -> std::io::Result<std::process::Command> {
+    use std::os::windows::process::CommandExt;
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let systemroot =
+        std::env::var_os("SystemRoot").ok_or_else(|| std::io::Error::other("SystemRoot fehlt"))?;
+    let mut befehl = Command::new(
         PathBuf::from(systemroot)
             .join("System32")
             .join("WindowsPowerShell")
             .join("v1.0")
             .join("powershell.exe"),
-    )
-    .creation_flags(CREATE_NO_WINDOW)
-    .args(["-NoProfile", "-NonInteractive", "-STA", "-Command", DIALOG])
-    .env("DEPOTSCHLOPF_PAPIER_DIALOG", text)
-    .spawn() else {
-        return DialogErgebnis::NichtVerfuegbar;
-    };
-    warte_auf_bestaetigung(&mut kind, Duration::from_secs(120))
+    );
+    befehl.creation_flags(CREATE_NO_WINDOW).args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-STA",
+        "-Command",
+        skript,
+    ]);
+    Ok(befehl)
+}
+
+#[cfg(windows)]
+pub(crate) fn sicherungsziel_waehlen() -> Result<Option<String>, String> {
+    use std::io::Read as _;
+    use std::process::Stdio;
+
+    const DIALOG: &str = "
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = [System.Windows.Forms.FolderBrowserDialog]::new()
+$fenster = [System.Windows.Forms.Form]::new()
+$fenster.TopMost = $true
+try {
+    $dialog.Description = 'DepotSchlopf: USB-Laufwerk oder Ordner für die Sicherung auswählen'
+    $dialog.RootFolder = [System.Environment+SpecialFolder]::MyComputer
+    $dialog.ShowNewFolderButton = $false
+    if ($dialog.ShowDialog($fenster) -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }
+    [Console]::Write($dialog.SelectedPath)
+    exit 0
+} finally {
+    $dialog.Dispose()
+    $fenster.Dispose()
+}
+";
+    let fehler = || "Der Windows-Ordnerdialog konnte nicht geöffnet werden.".to_owned();
+    let mut kind = powershell_dialog(DIALOG)
+        .and_then(|mut befehl| befehl.stdout(Stdio::piped()).stderr(Stdio::null()).spawn())
+        .map_err(|_| fehler())?;
+    let mut ausgabe = kind.stdout.take().ok_or_else(fehler)?;
+    // Die Pipe parallel lesen, damit auch lange Pfade den Dialogprozess nicht blockieren.
+    let leser = std::thread::spawn(move || {
+        let mut pfad = String::new();
+        ausgabe.read_to_string(&mut pfad).map(|_| pfad)
+    });
+    match warte_auf_bestaetigung(&mut kind, Duration::from_secs(120)) {
+        DialogErgebnis::Ja => leser
+            .join()
+            .map_err(|_| fehler())?
+            .map(Some)
+            .map_err(|_| fehler()),
+        DialogErgebnis::Nein => Ok(None),
+        DialogErgebnis::ZeitAbgelaufen => {
+            Err("Der Ordnerdialog wurde nach zwei Minuten geschlossen.".into())
+        }
+        DialogErgebnis::NichtVerfuegbar => Err(fehler()),
+    }
 }
 
 #[cfg(not(windows))]

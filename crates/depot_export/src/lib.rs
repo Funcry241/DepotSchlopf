@@ -12,6 +12,8 @@
     clippy::cast_sign_loss
 )]
 
+pub mod sicherung;
+
 /// CRC-32 nach ISO 3309, wie ZIP sie verlangt.
 pub fn crc32(daten: &[u8]) -> u32 {
     let mut crc: u32 = 0xFFFF_FFFF;

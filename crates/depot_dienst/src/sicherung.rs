@@ -159,14 +159,55 @@ impl Stand {
     }
 }
 
-pub fn formular(token: &str, ziel: &str, status: &str) -> String {
+pub fn info(ziel: &str, status: &str) -> String {
+    if ziel.is_empty() {
+        return "<p class=\"leise\">Wähle ein Laufwerk oder einen Ordner für deine Sicherungen.</p>".into();
+    }
+    let ziel = Path::new(ziel);
+    let anzahl = match fs::read_dir(ziel.join("DepotSchlopf")) {
+        Ok(eintraege) => eintraege
+            .map(|eintrag| {
+                let eintrag = eintrag?;
+                Ok(eintrag.file_type()?.is_dir()
+                    && eintrag
+                        .file_name()
+                        .to_str()
+                        .is_some_and(depot_export::sicherung::sicherungsname))
+            })
+            .try_fold(0_usize, |anzahl, fertig: std::io::Result<bool>| {
+                Ok(anzahl.saturating_add(usize::from(fertig?)))
+            }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && ziel.is_dir() => Ok(0),
+        Err(e) => Err(e),
+    };
+    let text = match anzahl {
+        Ok(n) => format!("Sicherungen am Ziel: {n}"),
+        Err(_) => {
+            "Sicherungen am Ziel: Anzahl nicht verfügbar. Prüfe, ob das Laufwerk verbunden ist."
+                .into()
+        }
+    };
+    format!("<p>{text}</p>{status}")
+}
+
+pub fn formular(token: &str, ziel: &str, info: &str) -> String {
+    let auswahl = if cfg!(windows) {
+        "<button type=\"submit\" name=\"aktion\" value=\"waehlen\">Laufwerk oder Ordner wählen</button>"
+    } else {
+        ""
+    };
     format!(
-        "<section id=\"sicherung\"><h2>Sicherung</h2>{status}\
-        <p>Ein Cloud-Ordner (z. B. OneDrive) lädt die Dateien hoch. Das Journal enthält keine Schlüssel, aber dein Papierdepot und deine Belege.</p>\
+        "<section id=\"sicherung\"><h2>Sicherung</h2>\
+        <div data-teil=\"/teil/sicherung\" role=\"status\">{info}</div>\
         <form method=\"post\" action=\"/sicherung-ziel\"><input type=\"hidden\" name=\"t\" value=\"{token}\">\
-        <label>Zielordner <input name=\"ziel\" value=\"{}\"></label> <button>Speichern</button></form>\
-        <form method=\"post\" action=\"/ausfuehren\"><input type=\"hidden\" name=\"t\" value=\"{token}\">\
-        <button name=\"art\" value=\"sicherung\">Jetzt sichern</button></form></section>",
+        <label for=\"sicherungsziel\">Zielordner</label>\
+        <div class=\"sicherungszeile\"><input id=\"sicherungsziel\" type=\"text\" name=\"ziel\" value=\"{}\">\
+        {auswahl}</div><div class=\"sicherungszeile\">\
+        <button class=\"primaer\" type=\"submit\" name=\"aktion\" value=\"starten\">Jetzt sichern</button>\
+        <button type=\"submit\" name=\"aktion\" value=\"speichern\">Ziel speichern</button></div></form>\
+        <details><summary>Hinweis zu Cloud-Ordnern</summary>\
+        <p>Ein Cloud-Ordner wie OneDrive lädt das Papierdepot und seine Belege hoch. Das Journal enthält keine Schlüssel.</p>\
+        </details></section>",
         maskiere(ziel),
     )
 }

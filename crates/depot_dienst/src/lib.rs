@@ -82,6 +82,12 @@ pub trait Umwelt: Send + Sync {
         DialogErgebnis::NichtVerfuegbar
     }
 
+    /// # Errors
+    /// Der native Ordnerdialog ist nicht verfügbar oder konnte nicht geöffnet werden.
+    fn sicherungsziel_waehlen(&self) -> Result<Option<String>, String> {
+        Err("Der Ordnerdialog ist nur unter Windows verfügbar.".into())
+    }
+
     /// Zeigt einen Windows-Hinweis und wartet nicht darauf. Ab Werk: nichts.
     fn hinweis(&self, _titel: &str, _text: &str) {}
 
@@ -126,6 +132,11 @@ impl Umwelt for System {
 
     fn papierdialog_testen(&self) -> DialogErgebnis {
         papierdialog::testen()
+    }
+
+    #[cfg(windows)]
+    fn sicherungsziel_waehlen(&self) -> Result<Option<String>, String> {
+        papierdialog::sicherungsziel_waehlen()
     }
 
     fn hinweis(&self, titel: &str, text: &str) {
@@ -227,6 +238,19 @@ fn sicherungsstand(d: &Dienst, z: &werkbank::Zustand, jetzt: Zeitpunkt) -> Strin
     stand.html(jetzt, laeuft || stand.laeuft(&d.wurzel))
 }
 
+fn sicherungsinfo(d: &Dienst, jetzt: Zeitpunkt) -> String {
+    let (ziel, status) = {
+        let z = d.sperre();
+        let status = if z.warteschlange.iter().any(|a| a.art == Art::Sicherung) {
+            "<p>Sicherung wartet auf den Start.</p>".into()
+        } else {
+            sicherungsstand(d, &z, jetzt)
+        };
+        (sicherung::ziel(&d.wurzel), status)
+    };
+    sicherung::info(&ziel, &status)
+}
+
 fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {
     let kurssperre = seiten::kurssperre_status(&d.wurzel.join("daten"), tag);
     seiten::betriebsleiste_mit_kurssperre(&d.start, &d.sperre(), tag, kurssperre.as_deref())
@@ -294,12 +318,12 @@ fn einrichtungsseite(
         schluessel_stand(gemini_schluessel, &protokoll, Wer::Gemini.protokoll())
     };
     let mut zusatz = gemini::einrichtung(d, gemini_stand, tag, &a.abfrage);
-    let zustand = d.sperre();
     zusatz.push_str(&sicherung::formular(
         &d.token,
         &sicherung::ziel(&d.wurzel),
-        &sicherungsstand(d, &zustand, jetzt),
+        &sicherungsinfo(d, jetzt),
     ));
+    let zustand = d.sperre();
     let gespeichert = seiten::Einrichtung {
         zeitplan_gespeichert: match datei {
             Ok(Some(t)) => Some(t == zustand.zeitplan.als_text()),
@@ -345,6 +369,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/gespraeche" => gespraechsseite(d, a, tag),
         "/export" => seiten::fehler(405, "Verwende das Analyse-Exportformular."),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
+        "/teil/sicherung" => antwort(200, HTML, sicherungsinfo(d, jetzt).as_bytes()),
         "/teil/live" => antwort(200, HTML, live_inhalt(d, jetzt).as_bytes()),
         "/teil/journal" => antwort(
             200,
@@ -533,16 +558,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             http::umleitung(&format!("/einrichtung?m={meldung}{ziel}"))
         }
         "/zeitplan" => zeitplan_aendern(d, &f),
-        "/sicherung-ziel" => match feld(&f, "ziel") {
-            Some(ziel) => {
-                let _zustand = d.sperre();
-                match sicherung::setze_ziel(&d.wurzel, ziel) {
-                    Ok(()) => http::umleitung("/einrichtung#sicherung"),
-                    Err(fehler) => seiten::fehler(400, &fehler),
-                }
-            }
-            None => seiten::fehler(400, "Sicherungsziel fehlt"),
-        },
+        "/sicherung-ziel" => sicherung_einstellen(d, u, &f, jetzt),
         "/kostenschutz" => kostenschutz_aufheben(d, u, &f, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, u, &f, Sperre::Kurse),
         "/papierfreigabe" => papier_freigeben(d, u, &f),
@@ -610,6 +626,38 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, seite.as_bytes())
+}
+
+fn sicherung_einstellen(
+    d: &Dienst,
+    u: &dyn Umwelt,
+    f: &[(String, String)],
+    jetzt: Zeitpunkt,
+) -> Vec<u8> {
+    let aktion = feld(f, "aktion").unwrap_or("speichern");
+    let (ziel, meldung) = match aktion {
+        "waehlen" => match u.sicherungsziel_waehlen() {
+            Ok(Some(ziel)) if !ziel.trim().is_empty() => (ziel, "sicherung_ziel"),
+            Ok(_) => return http::umleitung("/einrichtung#sicherung"),
+            Err(fehler) => return seiten::fehler(503, &fehler),
+        },
+        "speichern" | "starten" => {
+            let Some(ziel) = feld(f, "ziel") else {
+                return seiten::fehler(400, "Sicherungsziel fehlt");
+            };
+            let meldung = match (aktion, ziel.trim().is_empty()) {
+                ("starten", _) => "sicherung_start",
+                (_, true) => "sicherung_aus",
+                _ => "sicherung_ziel",
+            };
+            (ziel.to_owned(), meldung)
+        }
+        _ => return seiten::fehler(400, "Unbekannte Sicherungsaktion"),
+    };
+    match d.sicherung_einstellen(&ziel, aktion == "starten", jetzt) {
+        Ok(()) => http::umleitung(&format!("/einrichtung?m={meldung}#sicherung")),
+        Err((code, fehler)) => seiten::fehler(code, &fehler),
+    }
 }
 
 fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {

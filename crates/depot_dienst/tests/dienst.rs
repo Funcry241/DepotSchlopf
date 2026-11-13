@@ -135,6 +135,7 @@ struct Attrappe {
     sperrfreigabe: bool,
     sperrdatei_wechsel: Option<PathBuf>,
     gemini_schluessel: Option<Hinterlegt>,
+    sicherungsziel: Option<String>,
 }
 
 impl Umwelt for Attrappe {
@@ -153,6 +154,10 @@ impl Umwelt for Attrappe {
             .unwrap_or_else(PoisonError::into_inner)
             .push((wer, s));
         Ok(())
+    }
+
+    fn sicherungsziel_waehlen(&self) -> Result<Option<String>, String> {
+        Ok(self.sicherungsziel.clone())
     }
 
     fn autostart(&self, _wurzel: &Path) -> depot_dienst::autostart::Stand {
@@ -4025,30 +4030,90 @@ fn sicherung_formulare_speichern_und_starten() -> Result<(), String> {
     let html = get(&d, "/einrichtung", zeit);
     let (_, formular) = some(html.split_once("id=\"sicherung\""), "Sicherungsabschnitt")?;
     assert!(formular.contains("action=\"/sicherung-ziel\""));
-    assert!(formular.contains("action=\"/ausfuehren\""));
-    assert!(formular.contains(&format!("name=\"t\" value=\"{TOKEN}\"")));
+    assert!(formular.contains("value=\"starten\">Jetzt sichern"));
+    assert!(formular.contains("data-teil=\"/teil/sicherung\""));
+    assert_eq!(formular.contains("value=\"waehlen\""), cfg!(windows));
     let ziel = if cfg!(windows) {
-        "C%3A%5CDepotSicherung"
+        "E%3A%5C"
     } else {
         "%2FDepotSicherung"
     };
-    let speichern = formular_post("/sicherung-ziel", &format!("t={TOKEN}&ziel={ziel}"));
-    let antwort = text(&behandle(&d, &Attrappe::default(), &speichern, zeit));
-    assert!(
-        antwort.contains("Location: /einrichtung#sicherung"),
-        "{antwort}"
+    let erwartet = if cfg!(windows) {
+        "E:\\"
+    } else {
+        "/DepotSicherung"
+    };
+    let starten = formular_post(
+        "/sicherung-ziel",
+        &format!("t={TOKEN}&aktion=starten&ziel={ziel}"),
     );
-    assert!(wurzel.join("daten/sicherung_ziel.txt").is_file());
-    let starten = formular_post("/ausfuehren", &format!("t={TOKEN}&art=sicherung"));
     let antwort = text(&behandle(&d, &Attrappe::default(), &starten, zeit));
     assert!(
-        antwort.contains("Location: /einrichtung?m=auftrag#sicherung"),
+        antwort.contains("Location: /einrichtung?m=sicherung_start#sicherung"),
         "{antwort}"
+    );
+    assert_eq!(
+        fs::read_to_string(wurzel.join("daten/sicherung_ziel.txt"))
+            .map_err(|e| e.to_string())?
+            .trim(),
+        erwartet
     );
     assert_eq!(
         d.sperre().warteschlange.front().map(|a| a.art),
         Some(Art::Sicherung)
     );
+    assert!(get(&d, "/teil/sicherung", zeit).contains("Sicherung wartet auf den Start"));
+    let wechseln = formular_post(
+        "/sicherung-ziel",
+        &format!("t={TOKEN}&aktion=speichern&ziel="),
+    );
+    assert_eq!(
+        status(&behandle(&d, &Attrappe::default(), &wechseln, zeit))?,
+        409
+    );
+    assert_eq!(
+        fs::read_to_string(wurzel.join("daten/sicherung_ziel.txt"))
+            .map_err(|e| e.to_string())?
+            .trim(),
+        erwartet
+    );
+    Ok(())
+}
+
+#[test]
+fn sicherungsdialog_und_anzahl_am_ziel() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let ziel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let zeit = donnerstag(12, 0)?;
+    let auswahl = formular_post("/sicherung-ziel", &format!("t={TOKEN}&aktion=waehlen"));
+    let antwort = text(&behandle(&d, &Attrappe::default(), &auswahl, zeit));
+    assert!(antwort.contains("Location: /einrichtung#sicherung"));
+    assert!(!wurzel.join("daten/sicherung_ziel.txt").exists());
+
+    let umwelt = Attrappe {
+        sicherungsziel: Some(ziel.display().to_string()),
+        ..Attrappe::default()
+    };
+    let antwort = text(&behandle(&d, &umwelt, &auswahl, zeit));
+    assert!(antwort.contains("Location: /einrichtung?m=sicherung_ziel#sicherung"));
+    assert!(d.sperre().warteschlange.is_empty());
+    assert!(get(&d, "/teil/sicherung", zeit).contains("Sicherungen am Ziel: 0"));
+
+    let sicherungen = ziel.join("DepotSchlopf");
+    let name = format!("utc-00000000000000000001-000000001_{}", "a".repeat(40));
+    fs::create_dir_all(sicherungen.join(&name)).map_err(|e| e.to_string())?;
+    fs::create_dir(sicherungen.join(format!("{name}.tmp"))).map_err(|e| e.to_string())?;
+    fs::create_dir(sicherungen.join("fremd")).map_err(|e| e.to_string())?;
+    assert!(get(&d, "/teil/sicherung", zeit).contains("Sicherungen am Ziel: 1"));
+    fs::remove_dir_all(ziel).map_err(|e| e.to_string())?;
+    assert!(get(&d, "/teil/sicherung", zeit).contains("Anzahl nicht verfügbar"));
+    let ungueltig = formular_post(
+        "/sicherung-ziel",
+        &format!("t={TOKEN}&aktion=starten&ziel=relativ"),
+    );
+    assert_eq!(status(&behandle(&d, &umwelt, &ungueltig, zeit))?, 400);
+    assert!(d.sperre().warteschlange.is_empty());
     Ok(())
 }
 

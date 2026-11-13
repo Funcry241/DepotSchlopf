@@ -877,17 +877,49 @@ impl Dienst {
         if art == Art::Vorbereiten {
             z.vorbereitung_pruefen(jetzt)?;
         }
-        let gerade = z.verlauf.iter().any(|a| {
-            a.art == art
-                && a.frueher == Frueher::Nein
-                && a.ende
-                    .and_then(|e| jetzt.sekunden_seit(e))
-                    .is_some_and(|s| s < DOPPELT_SEKUNDEN)
-        });
-        if gerade {
-            return Err("gerade erst erledigt");
+        von_hand_einreihen(&mut z, art, jetzt)
+    }
+
+    pub(crate) fn sicherung_einstellen(
+        &self,
+        ziel: &str,
+        starten: bool,
+        jetzt: Zeitpunkt,
+    ) -> Result<(), (u16, String)> {
+        let ziel = ziel.trim();
+        if starten && ziel.is_empty() {
+            return Err((
+                400,
+                "Wähle zuerst ein Laufwerk oder einen Zielordner.".into(),
+            ));
         }
-        einreihen(&mut z, art, Anlass::Hand, None)
+        let mut z = self.sperre();
+        let geaendert = crate::sicherung::ziel(&self.wurzel) != ziel;
+        if geaendert
+            && (z.laufend.iter().any(|a| a.art == Art::Sicherung)
+                || z.warteschlange.iter().any(|a| a.art == Art::Sicherung))
+        {
+            return Err((
+                409,
+                "Eine Sicherung läuft oder wartet bereits. Versuche es nach dem Lauf erneut."
+                    .into(),
+            ));
+        }
+        if starten {
+            von_hand_einreihen(&mut z, Art::Sicherung, jetzt).map_err(|grund| {
+                (
+                    409,
+                    format!("Sicherung konnte nicht gestartet werden: {grund}."),
+                )
+            })?;
+        }
+        if geaendert && let Err(fehler) = crate::sicherung::setze_ziel(&self.wurzel, ziel) {
+            if starten {
+                z.warteschlange.pop_back();
+            }
+            return Err((400, fehler));
+        }
+        Ok(())
     }
 
     pub(crate) fn update_von_hand(&self, sha: &str) -> Result<(), &'static str> {
@@ -1332,6 +1364,20 @@ impl Dienst {
             z.verlauf_hinweis = Some(e);
         }
     }
+}
+
+fn von_hand_einreihen(z: &mut Zustand, art: Art, jetzt: Zeitpunkt) -> Result<(), &'static str> {
+    let gerade = z.verlauf.iter().any(|a| {
+        a.art == art
+            && a.frueher == Frueher::Nein
+            && a.ende
+                .and_then(|e| jetzt.sekunden_seit(e))
+                .is_some_and(|s| s < DOPPELT_SEKUNDEN)
+    });
+    if gerade {
+        return Err("gerade erst erledigt");
+    }
+    einreihen(z, art, Anlass::Hand, None)
 }
 
 fn einreihen(

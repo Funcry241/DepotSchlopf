@@ -50,8 +50,10 @@ button.laeuft{border:2px solid var(--offen);color:var(--offen)}\
 #zeitstrahl .optional{border-bottom:1px dashed var(--linie)}\
 section[id]{scroll-margin-top:180px}\
 @media(max-width:600px){#betriebsleiste{position:static}}\
-input[type=password],input[type=time]{font:inherit;padding:3px 6px;border:1px solid var(--linie);\
+input[type=password],input[type=time],#sicherungsziel{font:inherit;padding:3px 6px;border:1px solid var(--linie);\
 border-radius:6px;background:var(--grund);color:var(--text);max-width:100%}\
+#sicherungsziel{box-sizing:border-box;min-height:44px;width:24rem}\
+.sicherungszeile{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 12px}\
 pre{white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,Consolas,monospace;\
 margin:6px 0}\
 .konsole{border:1px solid var(--linie);border-radius:6px;background:var(--konsole);\
@@ -359,6 +361,12 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         return Some(m);
     }
     Some(match code {
+        "sicherung_ziel" => ("gut", "Sicherungsziel gespeichert."),
+        "sicherung_aus" => ("gut", "Sicherung ausgeschaltet."),
+        "sicherung_start" => (
+            "gut",
+            "Sicherung eingereiht. Das Ergebnis erscheint im Abschnitt Sicherung.",
+        ),
         "auftrag" => ("gut", "Auftrag eingereiht. Er steht unter Tätigkeit."),
         "auftrag_belegt" => (
             "offen",
