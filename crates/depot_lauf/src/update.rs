@@ -20,6 +20,8 @@ use std::process::ExitCode;
 
 use crate::abbild;
 
+mod update_dialog;
+
 /// Der einzige Zweig, dem das Update folgt.
 pub const ZWEIG: &str = "main";
 /// Erste Zeile von `daten/update_offen.txt`; `depot_dienst::rueckfall` liest dasselbe Format.
@@ -228,23 +230,167 @@ fn pruefe_baumpfade(wurzel: &Path, commit: &str) -> Result<(), String> {
                 "Der neue Stand enthält den unzulässigen Pfad {pfad:?}. Update nicht eingespielt."
             ));
         }
+        if pfad.rsplit('/').next().is_some_and(|name| {
+            name.trim_end_matches([' ', '.'])
+                .eq_ignore_ascii_case("Cargo.toml")
+        }) {
+            pruefe_manifest(wurzel, commit, pfad)?;
+        }
     }
     Ok(())
 }
 
+/// Prüft vor jedem Cargo-Aufruf den Manifestinhalt des Kandidaten direkt aus Git.
+fn pruefe_manifest(wurzel: &Path, commit: &str, pfad: &str) -> Result<(), String> {
+    use depot_kodex::toml::{self, Wert};
+
+    let roh = abbild::git_roh(wurzel, &["show", &format!("{commit}:{pfad}")])?;
+    let text = std::str::from_utf8(&roh).map_err(|e| format!("{pfad}: {e}"))?;
+    let manifest = toml::lies(text).map_err(|e| format!("{pfad}: {e}"))?;
+    if !matches!(
+        manifest.pfad(&["package", "build"]),
+        None | Some(Wert::Wahr(false))
+    ) || !matches!(
+        manifest.pfad(&["lib", "proc-macro"]),
+        None | Some(Wert::Wahr(false))
+    ) || matches!(
+        manifest.pfad(&["lib", "crate-type"]),
+        Some(Wert::Liste(arten)) if arten.iter().any(|art| art.text() == Some("proc-macro"))
+    ) || manifest.feld("patch").is_some()
+        || manifest.feld("replace").is_some()
+    {
+        return Err(format!(
+            "{pfad}: Buildskripte, prozedurale Makros und umgeleitete Abhängigkeiten sind beim Update unzulässig."
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct LockAenderung {
+    abdruck: String,
+    pakete: Vec<String>,
+}
+
+fn lock_aenderung(wurzel: &Path, k: &Kandidat) -> Result<Option<LockAenderung>, String> {
+    use std::collections::BTreeSet;
+
+    fn pakete(roh: &[u8]) -> Result<BTreeSet<(String, String, String)>, String> {
+        use depot_kodex::toml::{self, Wert};
+        let text = std::str::from_utf8(roh).map_err(|e| e.to_string())?;
+        let lock = toml::lies(text)?;
+        let Some(Wert::Liste(pakete)) = lock.feld("package") else {
+            return Err("Cargo.lock: Paketliste fehlt".into());
+        };
+        pakete
+            .iter()
+            .map(|paket| {
+                let name = paket
+                    .feld("name")
+                    .and_then(Wert::text)
+                    .ok_or("Paketname fehlt")?;
+                let version = paket
+                    .feld("version")
+                    .and_then(Wert::text)
+                    .ok_or("Paketversion fehlt")?;
+                let quelle = paket
+                    .feld("source")
+                    .and_then(Wert::text)
+                    .unwrap_or_default();
+                let pruefsumme = paket
+                    .feld("checksum")
+                    .and_then(Wert::text)
+                    .unwrap_or_default();
+                Ok((
+                    format!("{name} {version}"),
+                    quelle.to_string(),
+                    pruefsumme.to_string(),
+                ))
+            })
+            .collect()
+    }
+
+    let alt = abbild::git_roh(wurzel, &["show", &format!("{}:Cargo.lock", k.alt)])?;
+    let neu = abbild::git_roh(wurzel, &["show", &format!("{}:Cargo.lock", k.neu)])?;
+    if alt == neu {
+        return Ok(None);
+    }
+    let alt_pakete = pakete(&alt)?;
+    let neu_pakete = pakete(&neu)?;
+    Ok(Some(LockAenderung {
+        abdruck: depot_kodex::festschreibung::sha_bytes(&neu),
+        pakete: neu_pakete
+            .difference(&alt_pakete)
+            .map(|(name, _, _)| name.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    }))
+}
+
+fn lock_pakete(a: &LockAenderung) -> String {
+    if a.pakete.is_empty() {
+        "Cargo.lock geändert; keine zusätzlichen Paketversionen".into()
+    } else {
+        a.pakete.join(", ")
+    }
+}
+
+fn pruefe_lock(
+    wurzel: &Path,
+    k: &Kandidat,
+    bestaetigen: impl FnOnce(&str) -> bool,
+) -> Result<(), String> {
+    let Some(a) = lock_aenderung(wurzel, k)? else {
+        return Ok(());
+    };
+    let p = wurzel.join("daten").join("update_abhaengigkeiten.txt");
+    let zeile = format!("update-lock-v1;{};{}", k.neu, a.abdruck);
+    match fs::read_to_string(&p) {
+        Ok(text) if text.lines().any(|z| z == zeile) => return Ok(()),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: {e}", p.display())),
+    }
+    let hinweis = format!("Neue Abhängigkeiten: {}", lock_pakete(&a));
+    if !bestaetigen(&format!(
+        "{hinweis}\nUpdate mit geändertem Cargo.lock freigeben?"
+    )) {
+        return Err(format!(
+            "{hinweis} Bitte von Hand freigeben. Das Update wurde nicht gebaut."
+        ));
+    }
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&p)
+        .and_then(|mut f| {
+            writeln!(f, "{zeile}")?;
+            f.sync_all()
+        })
+        .map_err(|e| format!("{}: {e}", p.display()))
+}
+
 /// Prueft den neuen Stand in seiner Kopie mit dem ganzen Gate.
-fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<abbild::Abbild, String> {
+fn pruefe_kopie(
+    wurzel: &Path,
+    k: &Kandidat,
+    bestaetigen: impl FnOnce(&str) -> bool,
+) -> Result<abbild::Abbild, String> {
     pruefe_baumpfade(wurzel, &k.neu)?;
+    pruefe_lock(wurzel, k, bestaetigen)?;
     let ablage = abbild::ablage(wurzel);
     println!("[Update] Kopie von {} anlegen", kurz(&k.neu));
     let abbild = abbild::festhalten_commit(wurzel, &ablage, "update", &k.neu)?;
     let basis = format!("{}^1", k.neu);
     let args: Vec<String> = vec!["--voll".into(), "--basis".into(), basis];
     println!(
-        "[Update] Gate im Prüfordner: cargo run -p depot_kodex -- {}",
+        "[Update] Gate im Prüfordner: cargo run --locked -p depot_kodex -- {}",
         args.join(" ")
     );
-    let status = abbild::gate_befehl(&abbild.kopie, &ablage.join("bau-update"), &args)
+    let status = abbild::cargo_befehl(&abbild.kopie, &ablage.join("bau-update"))
+        .args(["run", "--locked", "--quiet", "-p", "depot_kodex", "--"])
+        .args(&args)
         .status()
         .map_err(|e| format!("cargo nicht startbar: {e}"))?;
     if !status.success() {
@@ -369,12 +515,20 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
     }
     zeige(&k);
     if nur_pruefen {
+        match lock_aenderung(wurzel, &k) {
+            Ok(Some(a)) => println!("[Update] Cargo.lock: {}", lock_pakete(&a)),
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("[Update] FEHLER: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
         println!("[Update] Nur geprüft; eingespielt wird mit `run.cmd update`.");
         println!("[Update] Kandidat: {}", k.neu);
         return ExitCode::SUCCESS;
     }
     let ergebnis = crate::updatedaten::update_sperren(&wurzel.join("daten")).and_then(|sperre| {
-        let ergebnis = pruefe_kopie(wurzel, &k).and_then(|kopie| {
+        let ergebnis = pruefe_kopie(wurzel, &k, update_dialog::bestaetigen).and_then(|kopie| {
             einspielen_mit_datenprobe(wurzel, &k, &abbild::ablage(wurzel), |probe| {
                 pruefe_datenkopie(wurzel, &kopie, probe)
             })?;
@@ -473,7 +627,8 @@ mod tests {
             &["init", "-q", "-b", "main", &andere.to_string_lossy()],
         )?;
         fs::write(andere.join("a.txt"), "eins\n").map_err(|e| e.to_string())?;
-        g(&andere, &["add", "a.txt"])?;
+        fs::write(andere.join("Cargo.lock"), LOCK).map_err(|e| e.to_string())?;
+        g(&andere, &["add", "a.txt", "Cargo.lock"])?;
         g(&andere, &["commit", "-q", "-m", "eins"])?;
         g(&andere, &["bundle", "create", "../ursprung.bundle", "main"])?;
         // Git liest Bundles unmittelbar. Ein lokales Repository startet dagegen auch
@@ -508,6 +663,165 @@ mod tests {
         g(&a.andere, &["rev-parse", "HEAD"])
     }
 
+    fn manifest_stand(pfad: &str, inhalt: &str) -> Result<(Aufbau, Kandidat), String> {
+        let a = aufbau()?;
+        g(&a.andere, &["rm", "a.txt"])?;
+        let alt = g(&a.andere, &["rev-parse", "HEAD"])?;
+        let datei = a.andere.join(pfad);
+        fs::create_dir_all(datei.parent().ok_or("Manifestordner")?).map_err(|e| e.to_string())?;
+        fs::write(datei, inhalt).map_err(|e| e.to_string())?;
+        g(&a.andere, &["add", "--", pfad])?;
+        g(&a.andere, &["commit", "-qm", "Manifestprobe"])?;
+        let neu = g(&a.andere, &["rev-parse", "HEAD"])?;
+        Ok((
+            a,
+            Kandidat {
+                alt,
+                neu,
+                staende: Vec::new(),
+            },
+        ))
+    }
+
+    fn manifest_abgelehnt(pfad: &str, inhalt: &str) -> Result<(), String> {
+        let (a, k) = manifest_stand(pfad, inhalt)?;
+        let fehler = pruefe_kopie(&a.andere, &k, |_| false)
+            .err()
+            .ok_or("Manifest hätte abgelehnt werden müssen")?;
+        assert!(fehler.contains(pfad), "{fehler}");
+        assert!(!abbild::ablage(&a.andere).join("bau-update").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn manifest_build_abgelehnt() -> Result<(), String> {
+        manifest_abgelehnt(
+            "crates/depot_kern/Cargo.toml",
+            "[package]\nbuild = \"src/x.rs\"\n",
+        )
+    }
+
+    #[test]
+    fn manifest_build_false_erlaubt() -> Result<(), String> {
+        let (a, k) = manifest_stand("crates/depot_kern/Cargo.toml", "[package]\nbuild = false\n")?;
+        pruefe_baumpfade(&a.andere, &k.neu)
+    }
+
+    #[test]
+    fn proc_macro_abgelehnt() -> Result<(), String> {
+        manifest_abgelehnt("crates/depot_kern/Cargo.toml", "[lib]\nproc-macro = true\n")?;
+        manifest_abgelehnt(
+            "crates/depot_kern/Cargo.toml",
+            "[lib]\ncrate-type = ['proc-macro']\n",
+        )
+    }
+
+    #[test]
+    fn patch_abgelehnt() -> Result<(), String> {
+        manifest_abgelehnt("Cargo.toml", "[patch.crates-io]\n")?;
+        manifest_abgelehnt("Cargo.toml", "[replace]\n")
+    }
+
+    #[test]
+    fn unlesbares_manifest_abgelehnt() -> Result<(), String> {
+        manifest_abgelehnt("Cargo.toml", "[package\n")
+    }
+
+    const LOCK: &str = "version = 4\n[[package]]\nname = \"bestand\"\nversion = \"1.0.0\"\n";
+    const LOCK_NEU: &str = "[[package]]\nname = \"foo\"\nversion = \"1.2.3\"\n";
+
+    fn lock_stand(anhang: &str) -> Result<(Aufbau, Kandidat), String> {
+        let a = aufbau()?;
+        g(&a.andere, &["rm", "a.txt"])?;
+        let alt = g(&a.andere, &["rev-parse", "HEAD"])?;
+        fs::create_dir_all(a.andere.join("daten")).map_err(|e| e.to_string())?;
+        fs::write(a.andere.join("Cargo.lock"), format!("{LOCK}{anhang}"))
+            .map_err(|e| e.to_string())?;
+        g(
+            &a.andere,
+            &["commit", "--allow-empty", "-qam", "Neuer Lock-Stand"],
+        )?;
+        let neu = g(&a.andere, &["rev-parse", "HEAD"])?;
+        Ok((
+            a,
+            Kandidat {
+                alt,
+                neu,
+                staende: Vec::new(),
+            },
+        ))
+    }
+
+    #[test]
+    fn lock_unveraendert_geht_durch() -> Result<(), String> {
+        let (a, k) = lock_stand("")?;
+        let mut gefragt = false;
+        pruefe_lock(&a.andere, &k, |_| {
+            gefragt = true;
+            false
+        })?;
+        assert!(!gefragt);
+        Ok(())
+    }
+
+    #[test]
+    fn lock_geaendert_abgelehnt() -> Result<(), String> {
+        let (a, k) = lock_stand(LOCK_NEU)?;
+        let fehler = pruefe_kopie(&a.andere, &k, |_| false)
+            .err()
+            .ok_or("Update hätte abgelehnt werden müssen")?;
+        assert!(fehler.contains("Bitte von Hand freigeben"), "{fehler}");
+        assert!(!abbild::ablage(&a.andere).join("bau-update").exists());
+        assert!(!a.andere.join("daten/update_abhaengigkeiten.txt").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn lock_freigabe_dialog_ja() -> Result<(), String> {
+        let (a, k) = lock_stand(LOCK_NEU)?;
+        pruefe_lock(&a.andere, &k, |hinweis| hinweis.contains("foo 1.2.3"))?;
+        let text = fs::read_to_string(a.andere.join("daten/update_abhaengigkeiten.txt"))
+            .map_err(|e| e.to_string())?;
+        let aenderung = lock_aenderung(&a.andere, &k)?.ok_or("Lock geändert")?;
+        assert_eq!(
+            text,
+            format!("update-lock-v1;{};{}\n", k.neu, aenderung.abdruck)
+        );
+        pruefe_lock(&a.andere, &k, |_| false)
+    }
+
+    #[test]
+    fn lock_freigabe_dialog_nein() -> Result<(), String> {
+        let (a, k) = lock_stand(LOCK_NEU)?;
+        let fehler = pruefe_lock(&a.andere, &k, |_| false)
+            .err()
+            .ok_or("Update hätte abgelehnt werden müssen")?;
+        assert!(fehler.contains("Bitte von Hand freigeben"), "{fehler}");
+        assert!(!a.andere.join("daten/update_abhaengigkeiten.txt").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn lock_freigabe_zeigt_pakete() -> Result<(), String> {
+        let (a, k) = lock_stand(LOCK_NEU)?;
+        let aenderung = lock_aenderung(&a.andere, &k)?.ok_or("Lock geändert")?;
+        assert_eq!(lock_pakete(&aenderung), "foo 1.2.3");
+        Ok(())
+    }
+
+    #[test]
+    fn lock_freigabe_gilt_nicht_fuer_anderen_commit() -> Result<(), String> {
+        let (a, mut k) = lock_stand(LOCK_NEU)?;
+        pruefe_lock(&a.andere, &k, |_| true)?;
+        g(
+            &a.andere,
+            &["commit", "--allow-empty", "-qm", "Anderer Commit"],
+        )?;
+        k.neu = g(&a.andere, &["rev-parse", "HEAD"])?;
+        assert!(pruefe_lock(&a.andere, &k, |_| false).is_err());
+        Ok(())
+    }
+
     #[test]
     fn update_lehnt_unzulaessige_baumpfade_vor_der_pruefkopie_ab() -> Result<(), String> {
         let a = aufbau()?;
@@ -534,7 +848,7 @@ mod tests {
                 neu: g(&a.andere, &["rev-parse", "HEAD"])?,
                 staende: Vec::new(),
             };
-            let fehler = pruefe_kopie(&a.andere, &k)
+            let fehler = pruefe_kopie(&a.andere, &k, |_| false)
                 .err()
                 .ok_or("Update hätte abgelehnt werden müssen")?;
             assert!(fehler.contains(pfad), "{fehler}");

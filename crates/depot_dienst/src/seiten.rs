@@ -1944,6 +1944,16 @@ pub(crate) fn update_aktionen(token: &str, start: &str, z: &Zustand) -> String {
             let _ = write!(s, "<li>{}</li>", maskiere(titel));
         }
         s.push_str("</ul>");
+        for hinweis in protokoll
+            .iter()
+            .filter_map(|z| z.strip_prefix("[Update] Cargo.lock: "))
+        {
+            let _ = write!(
+                s,
+                "<p>Neue Abhängigkeiten: {}</p><p>Beim Einspielen ist eine Bestätigung am Windows-Desktop nötig.</p>",
+                maskiere(hinweis)
+            );
+        }
         if z.update_wartet_auf_ruhe() {
             s.push_str(
                 "<p><button type=\"button\" disabled>Update einspielen</button> \

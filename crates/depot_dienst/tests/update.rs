@@ -48,11 +48,24 @@ fn echo_starter() -> Starter {
         #[cfg(windows)]
         let mut c = Command::new("cmd");
         #[cfg(windows)]
-        c.args(["/C", format!("echo {zeile}").as_str()]);
+        {
+            let befehl = if art == Art::UpdatePruefen {
+                format!("echo [Update] Cargo.lock: foo 1.2.3& echo {zeile}")
+            } else {
+                format!("echo {zeile}")
+            };
+            c.args(["/C", &befehl]);
+        }
         #[cfg(not(windows))]
         let mut c = Command::new("sh");
         #[cfg(not(windows))]
-        c.args(["-c", "printf '%s\\n' \"$@\"", "test", &zeile]);
+        {
+            c.args(["-c", "printf '%s\\n' \"$@\"", "test"]);
+            if art == Art::UpdatePruefen {
+                c.arg("[Update] Cargo.lock: foo 1.2.3");
+            }
+            c.arg(&zeile);
+        }
         c
     })
 }
@@ -225,6 +238,16 @@ fn gefundenes_update_ist_global_sichtbar_und_braucht_weiter_bestaetigung() -> Re
     );
     assert!(bestaetige_update(&d)?.contains("m=update#update"));
     assert!(!get(&d, "/teil/kopf")?.contains("Update verfügbar"));
+    Ok(())
+}
+
+#[test]
+fn lock_freigabe_zeigt_pakete_in_der_einrichtung() -> Result<(), String> {
+    let d = dienst(ordner()?);
+    suche_update(&d, mittag()?)?;
+    let html = get(&d, "/teil/update")?;
+    assert!(html.contains("Neue Abhängigkeiten: foo 1.2.3"), "{html}");
+    assert!(html.contains("Bestätigung am Windows-Desktop"), "{html}");
     Ok(())
 }
 
