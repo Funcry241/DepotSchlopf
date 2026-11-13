@@ -10,6 +10,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Hinzugefügt
 
+- Berechnung des historischen Papierdepotwerts je belegtem Tagesabschluss mit Angabe der Kurstage, Ersatzbewertungen und fehlenden Kursen (#192).
+
 - Auf Live sitzt ein kleiner Otter neben der Betriebsleiste. Er döst, schaut bei einem laufenden Auftrag auf den Bildschirm und hebt die Pfote, wenn ein Eingriff nötig ist (#200).
 
 - Optionale Gemini-Zuarbeit (#107, #129) ordnet öffentliche Nachrichten als eigener Auftrag nach erfolgreichen Schlagzeilenabrufen und vor dem Papiertag. Papiertag und Vorbereitung übernehmen eine passende, fertige Zuarbeit aus demselben Nachrichtenstand. Gemini ist standardmäßig ausgeschaltet.

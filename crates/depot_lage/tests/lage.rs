@@ -1590,3 +1590,380 @@ fn lagebild_zeigt_gesperrten_wert() -> Result<(), String> {
     );
     Ok(())
 }
+
+fn historischer_verlauf(ort: &Ort) -> Result<Vec<depot_lage::depotverlauf::Tagespunkt>, String> {
+    let j = ort.oeffnen()?;
+    let werte = depot_kern::liste::beobachtungsliste()?;
+    Ok(depot_lage::depotverlauf::depotverlauf(j.stand(), &werte))
+}
+
+#[test]
+fn verlauf_ein_punkt_je_abschluss() -> Result<(), String> {
+    let ort = tagesergebnis_buch(true)?;
+    {
+        let mut j = ort.oeffnen()?;
+        vorbedingung(j.beginne_abrechnung(tag(13)?), "Tag anfangen")?;
+    }
+    let punkte = historischer_verlauf(&ort)?;
+    assert_eq!(
+        punkte.iter().map(|p| p.tag).collect::<Vec<_>>(),
+        [tag(11)?, tag(12)?]
+    );
+    Ok(())
+}
+
+#[test]
+fn verlauf_summe() -> Result<(), String> {
+    for punkt in historischer_verlauf(&tagesergebnis_buch(true)?)? {
+        let cash = some(punkt.bargeld, "Bargeld")?;
+        let wertpapiere = some(punkt.wertpapiere, "Wertpapiere")?;
+        assert_eq!(punkt.gesamt, cash.checked_add(wertpapiere));
+    }
+    Ok(())
+}
+
+#[test]
+fn verlauf_passt_zum_tagesschluss() -> Result<(), String> {
+    let ort = tagesergebnis_buch(true)?;
+    let punkte = historischer_verlauf(&ort)?;
+    let j = ort.oeffnen()?;
+    let werte = depot_kern::liste::beobachtungsliste()?;
+    assert_eq!(
+        some(punkte.first(), "Erster Punkt")?.gesamt,
+        Some(Cent(1_000_000))
+    );
+    let letzter = some(punkte.last(), "Letzter Punkt")?;
+    assert_eq!(letzter.gesamt, Some(Cent(1_010_000)));
+    assert_eq!(
+        letzter.gesamt,
+        depot_lage::letzter_tagesschluss(j.stand(), &werte, tag(13)?)
+    );
+    Ok(())
+}
+
+#[test]
+fn verlauf_ohne_beobachtung() -> Result<(), String> {
+    let ort = tagesergebnis_buch(false)?;
+    let j = ort.oeffnen()?;
+    let punkte = depot_lage::depotverlauf::depotverlauf(j.stand(), &[]);
+    let punkt = some(punkte.first(), "Abschluss")?;
+    assert!(some(punkt.grund.as_ref(), "Grund")?.contains("nicht mehr in der Beobachtungsliste"));
+    assert_eq!(punkt.gesamt, None);
+    assert_eq!(punkt.bargeld, Some(Cent(990_000)));
+    Ok(())
+}
+
+#[test]
+fn verlauf_leer() -> Result<(), String> {
+    assert!(historischer_verlauf(&Ort::neu()?)?.is_empty());
+    Ok(())
+}
+
+#[test]
+fn zeitraum_monat() -> Result<(), String> {
+    use depot_lage::depotverlauf::Zeitraum;
+    assert_eq!(
+        Zeitraum::aus_abfrage("1m").ab(tag(13)?),
+        Datum::neu(2026, 10, 13)
+    );
+    Ok(())
+}
+
+#[test]
+fn zeitraum_monatsende() -> Result<(), String> {
+    use depot_lage::depotverlauf::Zeitraum;
+    for (art, heute, erwartet) in [
+        ("1m", Datum::neu(2027, 3, 31), Datum::neu(2027, 2, 28)),
+        ("1j", Datum::neu(2028, 2, 29), Datum::neu(2027, 2, 28)),
+        ("3m", Datum::neu(2027, 1, 15), Datum::neu(2026, 10, 15)),
+    ] {
+        assert_eq!(
+            Zeitraum::aus_abfrage(art).ab(some(heute, "Datum")?),
+            erwartet
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn zeitraum_unbekannt() -> Result<(), String> {
+    use depot_lage::depotverlauf::Zeitraum;
+    for text in ["xyz", "", "alles"] {
+        let zeitraum = Zeitraum::aus_abfrage(text);
+        assert_eq!(zeitraum, Zeitraum::Alles);
+        assert_eq!(zeitraum.ab(tag(13)?), None);
+    }
+    Ok(())
+}
+
+#[test]
+fn im_zeitraum_einschliesslich() -> Result<(), String> {
+    let punkte = historischer_verlauf(&tagesergebnis_buch(true)?)?;
+    let ausschnitt = depot_lage::depotverlauf::im_zeitraum(&punkte, Some(tag(12)?));
+    assert_eq!(ausschnitt.len(), 1);
+    assert_eq!(some(ausschnitt.first(), "Punkt")?.tag, tag(12)?);
+    Ok(())
+}
+
+#[test]
+fn zeitraum_ohne_punkte() -> Result<(), String> {
+    let punkte = historischer_verlauf(&tagesergebnis_buch(true)?)?;
+    assert!(depot_lage::depotverlauf::im_zeitraum(&punkte, Datum::neu(2026, 12, 1)).is_empty());
+    Ok(())
+}
+
+fn verlaufsbeleg(
+    j: &mut Journal,
+    isin: &str,
+    boerse: depot_kern::Boerse,
+    datum: Datum,
+    abruf: Zeitpunkt,
+    preis: Cent,
+) -> Result<(), String> {
+    let kurs = vorbedingung(
+        Kurs::neu(
+            preis,
+            "EUR",
+            datum,
+            some(boerse.schluss(datum), "Schluss")?,
+            Herkunft::Quelle,
+        ),
+        "Kurs",
+    )?;
+    let beleg = vorbedingung(
+        KursBeleg::neu(
+            depot_kern::liste::quelle(boerse),
+            abruf,
+            b"Verlaufsprobe",
+            vorbedingung(depot_kern::Isin::neu(isin), "ISIN")?,
+            kurs,
+        ),
+        "Beleg",
+    )?;
+    vorbedingung(j.belege_kurs(&beleg), "Kurs belegen")
+}
+
+#[test]
+fn verlauf_luecke() -> Result<(), String> {
+    use depot_kern::Boerse::Xetra;
+    let ort = tagesergebnis_buch(false)?;
+    let mut j = ort.oeffnen()?;
+    for (nr, isin) in [(13, "DE0008404005"), (16, "DE0007164600")] {
+        let datum = tag(nr)?;
+        verlaufsbeleg(
+            &mut j,
+            isin,
+            Xetra,
+            datum,
+            some(Zeitpunkt::frankfurt(datum, 18, 0, 0), "Abruf")?,
+            Cent(20_000),
+        )?;
+        vorbedingung(
+            j.schliesse_ab(datum, Cent(1_010_000), &"2".repeat(64)),
+            "Abschluss",
+        )?;
+    }
+    drop(j);
+    let punkte = historischer_verlauf(&ort)?;
+    assert!(some(punkte.first(), "Erster")?.gesamt.is_some());
+    let luecke = some(punkte.get(1), "Lücke")?;
+    assert_eq!(luecke.gesamt, None);
+    assert_eq!(luecke.wertpapiere, None);
+    assert_eq!(luecke.bargeld, Some(Cent(990_000)));
+    assert!(some(luecke.grund.as_ref(), "Grund")?.contains("SAP"));
+    assert!(some(punkte.last(), "Letzter")?.gesamt.is_some());
+    Ok(())
+}
+
+#[test]
+fn verlauf_kurstage_morgens() -> Result<(), String> {
+    use depot_kern::Boerse::Xetra;
+    let ort = tagesergebnis_buch(false)?;
+    let mut j = ort.oeffnen()?;
+    let datum = tag(13)?;
+    let abruf = some(Zeitpunkt::frankfurt(datum, 7, 30, 0), "Morgen")?;
+    vorbedingung(j.belege_wissensstichtag(datum, abruf), "Stichtag")?;
+    vorbedingung(
+        j.schliesse_ab(datum, Cent(1_010_000), &"2".repeat(64)),
+        "Abschluss",
+    )?;
+    let spaeter = some(Zeitpunkt::frankfurt(datum, 18, 0, 0), "Später")?;
+    verlaufsbeleg(&mut j, "DE0007164600", Xetra, datum, spaeter, Cent(50_000))?;
+    drop(j);
+    let punkte = historischer_verlauf(&ort)?;
+    let punkt = some(punkte.last(), "Letzter")?;
+    assert_eq!(punkt.tag, datum);
+    assert_eq!(punkt.kurstage, [tag(12)?]);
+    assert_eq!(punkt.gesamt, Some(Cent(1_010_000)));
+    Ok(())
+}
+
+#[test]
+fn verlauf_kurstage_zwei_boersen() -> Result<(), String> {
+    use depot_kern::Boerse::{Nyse, Xetra};
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let mut a = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
+    for isin in ["DE0007164600", "US46625H1005"] {
+        a.setze_bestand(vorbedingung(depot_kern::Isin::neu(isin), "ISIN")?, 1);
+    }
+    vorbedingung(j.setze_topf(&a), "Topf")?;
+    vorbedingung(
+        j.schliesse_ab(tag(5)?, Cent(300_000), &"0".repeat(64)),
+        "Startabschluss",
+    )?;
+    let dez = |tag| some(Datum::neu(2026, 12, tag), "Dezember");
+    let datum = dez(28)?;
+    let abruf = some(Zeitpunkt::frankfurt(datum, 7, 30, 0), "Morgen")?;
+    for (isin, boerse, tage) in [
+        ("DE0007164600", Xetra, [22, 23]),
+        ("US46625H1005", Nyse, [23, 24]),
+    ] {
+        for tag in tage {
+            verlaufsbeleg(&mut j, isin, boerse, dez(tag)?, abruf, Cent(20_000))?;
+        }
+    }
+    vorbedingung(j.belege_wissensstichtag(datum, abruf), "Stichtag")?;
+    vorbedingung(
+        j.schliesse_ab(datum, Cent(140_000), &"2".repeat(64)),
+        "Abschluss",
+    )?;
+    drop(j);
+    let punkte = historischer_verlauf(&ort)?;
+    let punkt = some(punkte.last(), "Letzter")?;
+    assert_eq!(punkt.kurstage, [dez(23)?, dez(24)?]);
+    assert_eq!(punkt.gesamt, Some(Cent(140_000)));
+    Ok(())
+}
+
+#[test]
+fn ersatz_durchgehend() -> Result<(), String> {
+    use depot_kern::Boerse::Xetra;
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let sap = "DE0007164600";
+    let mut a = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
+    a.setze_bestand(vorbedingung(depot_kern::Isin::neu(sap), "SAP")?, 10);
+    vorbedingung(j.setze_topf(&a), "Topf")?;
+    vorbedingung(
+        j.schliesse_ab(tag(5)?, Cent(300_000), &"0".repeat(64)),
+        "Startabschluss",
+    )?;
+    for (nr, vorher, cent) in [(10, 9, 20_000), (11, 10, 28_000), (12, 11, 19_000)] {
+        let datum = tag(nr)?;
+        let abruf = some(Zeitpunkt::frankfurt(datum, 7, 30, 0), "Morgen")?;
+        if nr == 10 {
+            verlaufsbeleg(&mut j, sap, Xetra, tag(6)?, abruf, Cent(20_000))?;
+        }
+        verlaufsbeleg(&mut j, sap, Xetra, tag(vorher)?, abruf, Cent(cent))?;
+        vorbedingung(j.belege_wissensstichtag(datum, abruf), "Stichtag")?;
+        if nr == 11 {
+            vorbedingung(
+                j.begruende(
+                    datum,
+                    depot_sim::AUSWAHL,
+                    &format!("{}{sap} · Kurssprung", depot_sim::ERSATZKURS),
+                ),
+                "Ersatz",
+            )?;
+        }
+        vorbedingung(
+            j.schliesse_ab(datum, Cent(300_000), &"2".repeat(64)),
+            "Abschluss",
+        )?;
+    }
+    drop(j);
+    let punkte = historischer_verlauf(&ort)?;
+    let ersatz = some(punkte.iter().find(|p| !p.ersatz.is_empty()), "Ersatzpunkt")?;
+    assert_eq!(ersatz.gesamt, Some(Cent(300_000)));
+    assert_eq!(ersatz.kurstage, [tag(9)?]);
+    assert_eq!(
+        ersatz.ersatz,
+        [vorbedingung(depot_kern::Isin::neu(sap), "SAP")?]
+    );
+    assert_eq!(some(punkte.last(), "Letzter")?.gesamt, Some(Cent(290_000)));
+    Ok(())
+}
+
+#[test]
+#[ignore = "Laufzeit im Release-Build messen"]
+fn depotverlauf_250_tage() -> Result<(), String> {
+    use depot_kern::Boerse::Xetra;
+    use depot_kern::Isin;
+    use depot_kern::liste::Wert;
+
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
+    let mut werte = Vec::new();
+    for nr in 0..23 {
+        let isin = some(
+            (0..10).find_map(|z| Isin::neu(&format!("DE{nr:09}{z}")).ok()),
+            "ISIN",
+        )?;
+        topf.setze_bestand(isin.clone(), 1);
+        werte.push(Wert {
+            isin,
+            boerse: Xetra,
+            name: format!("Testwert {nr}"),
+            kuerzel: format!("TEST{nr}.DEX"),
+        });
+    }
+    vorbedingung(j.setze_topf(&topf), "Topf")?;
+    let mut datum = some(Datum::neu(2025, 1, 2), "Start")?;
+    for nr in 0..=250 {
+        while Xetra.schluss(datum).is_none() {
+            datum = some(datum.plus_tage(1), "Nächster Tag")?;
+        }
+        let abruf = some(Zeitpunkt::frankfurt(datum, 18, 0, 0), "Abruf")?;
+        for wert in &werte {
+            verlaufsbeleg(
+                &mut j,
+                wert.isin.als_str(),
+                Xetra,
+                datum,
+                abruf,
+                Cent(20_000),
+            )?;
+        }
+        if nr != 0 {
+            vorbedingung(
+                j.schliesse_ab(datum, Cent(560_000), &"2".repeat(64)),
+                "Abschluss",
+            )?;
+        }
+        datum = some(datum.plus_tage(1), "Nächster Tag")?;
+    }
+    let start = std::time::Instant::now();
+    let punkte = depot_lage::depotverlauf::depotverlauf(j.stand(), &werte);
+    println!("250 Abschlüsse × 23 Werte: {:?}", start.elapsed());
+    assert_eq!(punkte.len(), 250);
+    assert!(punkte.iter().all(|p| p.gesamt == Some(Cent(560_000))));
+    Ok(())
+}
+
+#[test]
+fn verlauf_abgelehnte_kurse_sind_unbestaetigt() -> Result<(), String> {
+    let ort = tagesergebnis_buch(false)?;
+    let mut j = ort.oeffnen()?;
+    belege_preise(&mut j, 13, "200", "300")?;
+    vorbedingung(
+        j.begruende(
+            tag(13)?,
+            "Daten",
+            "Zyklus faellt aus: niemand wird gefragt, kein Auftrag",
+        ),
+        "Kursfehler",
+    )?;
+    vorbedingung(
+        j.schliesse_ab(tag(13)?, Cent(1_010_000), &"3".repeat(64)),
+        "Abschluss",
+    )?;
+    drop(j);
+    let punkte = historischer_verlauf(&ort)?;
+    let punkt = some(punkte.last(), "Abschluss")?;
+    assert_eq!(punkt.bargeld, Some(Cent(990_000)));
+    assert_eq!(punkt.gesamt, None);
+    assert!(some(punkt.grund.as_ref(), "Grund")?.contains("Kursprüfung"));
+    Ok(())
+}
