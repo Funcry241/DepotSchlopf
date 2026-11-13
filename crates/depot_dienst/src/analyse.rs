@@ -9,7 +9,7 @@ use std::path::Path;
 use depot_export::Zip;
 use depot_journal::{Journal, JournalFehler, Stand};
 use depot_kern::json::{Json, erstes_objekt};
-use depot_kern::{BeraterId, Cent, Datum, Grenzen, Isin, Zeitpunkt, abdruck::sha256_hex};
+use depot_kern::{BeraterId, Cent, Datum, Isin, Zeitpunkt, abdruck::sha256_hex};
 use depot_lage::gespraeche::Gespraech;
 use depot_lage::{datum_text, zeit_text};
 
@@ -364,10 +364,20 @@ fn depot(
             .and_then(|(delta, vorher)| delta.in_bp_von(vorher));
         format!("{} ({})", geld(delta), prozent(bp))
     };
-    let tagesergebnis = if stand.tagesschluesse().iter().any(|(d, _)| *d < tag) {
-        differenz(depot_lage::letzter_tagesschluss(stand, &werte, tag))
-    } else {
-        "noch kein abgeschlossener Tag".into()
+    let tagesergebnis = match lage.tagesergebnis {
+        depot_lage::Tagesergebnis::OhneKurstag => "nicht belegt".into(),
+        depot_lage::Tagesergebnis::OhneVortag => "noch kein Vortag".into(),
+        depot_lage::Tagesergebnis::NichtBewertbar(tag) => {
+            format!("am {} nicht bewertbar", datum_text(tag))
+        }
+        depot_lage::Tagesergebnis::Belegt { tag, betrag, bp } => {
+            format!(
+                "{} ({}) am {}",
+                geld(Some(betrag)),
+                prozent(bp),
+                datum_text(tag)
+            )
+        }
     };
     let mut kurz = format!(
         "Stand {} · Kurse vom {kurstag}\n\n- Gesamtwert: {}\n- Tagesergebnis: {tagesergebnis}\n- Offene Orders: {}\n",
@@ -376,7 +386,7 @@ fn depot(
         stand.offene_auftraege().count()
     );
     for topf in &lage.toepfe {
-        let frei = depot_journal::konto::verfuegbar(&Grenzen::standard(), stand, topf.topf);
+        let frei = topf.frei;
         let _ = writeln!(
             kurz,
             "- Topf {:?}: {} Bargeld, {} frei für Käufe",
@@ -412,9 +422,13 @@ fn depotdetails(
             let kurs = p
                 .kurs
                 .map_or_else(|| "nicht belegt".into(), depot_kern::Preis::euro_text);
+            let einstand = p.einstand.map_or_else(
+                || "nicht belegt / –".into(),
+                |e| format!("{} / {} ({})", geld(Some(e)), geld(p.gv), prozent(p.gv_bp)),
+            );
             let _ = writeln!(
                 details,
-                "| {:?} | {} | {} | {} | {kurs} | {} | nicht belegt |",
+                "| {:?} | {} | {} | {} | {kurs} | {} | {einstand} |",
                 topf.topf,
                 p.name,
                 p.isin,
