@@ -1,0 +1,5 @@
+- Paket / Issue
+- Kodex-Klasse
+- Gegenprobe aus der Tabelle → Testname und Ergebnis
+- Alter Stand öffnet das Journal (ja / nicht betroffen)
+- Grenzfreigabe (nötig / erteilt am)

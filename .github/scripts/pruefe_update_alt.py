@@ -7,7 +7,7 @@ import socket
 import subprocess
 import tempfile
 
-ALT = "4da352e16cba40b07ff62e50a81f4491523c57b9"
+ALT = "b40490952c6ad49db7cac18f56c27b97adcbcdb4"
 
 
 def lauf(args, cwd, protokoll, env=None):
@@ -65,6 +65,7 @@ def pruefe(wurzel, arbeit, alt_bau, cache_treffer):
                GIT_CONFIG_NOSYSTEM="1", GIT_ALLOW_PROTOCOL="file")
     protokoll = arbeit / "gegenprobe.log"
     neu = git(["rev-parse", "HEAD"], wurzel, env)
+    print(f"[Gegenprobe] Installierter Alt-Commit: {ALT}", flush=True)
     altquelle, ursprung, projekt = (arbeit / p for p in ("alt", "ursprung.git", "projekt"))
     altprogramm = alt_bau / "debug" / ("depotschlopf.exe" if os.name == "nt" else "depotschlopf")
     if cache_treffer:
