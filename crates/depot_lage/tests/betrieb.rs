@@ -230,6 +230,35 @@ fn verbrauch_kommt_aus_dem_protokoll_reserviert_aus_dem_kassenbuch() -> Result<(
     Ok(())
 }
 
+#[test]
+fn ki_verbrauch_wechselt_den_monat_um_frankfurter_mitternacht() -> Result<(), String> {
+    let monat = tag(11, 1)?;
+    let vormonat = tag(10, 31)?;
+    let mut vorher = e(
+        some(
+            Zeitpunkt::frankfurt(vormonat, 23, 59, 59),
+            "Vor Mitternacht",
+        )?,
+        Wer::Dachs,
+        Ergebnis::Ok,
+    );
+    vorher.ist = Kosten::Betrag(Cent(19));
+    let mut nachher = e(
+        some(Zeitpunkt::frankfurt(monat, 0, 30, 0), "Nach Mitternacht")?,
+        Wer::Dachs,
+        Ergebnis::Ok,
+    );
+    nachher.ist = Kosten::Betrag(Cent(23));
+    assert_eq!(nachher.zeit.datum(), Some(vormonat));
+    let protokoll = [vorher, nachher];
+    for (tag, cent) in [(vormonat, 19), (monat, 23)] {
+        let budget = mit_verbrauch(ki_budget(&[], BeraterId::Dachs, tag), &protokoll, tag);
+        assert_eq!(budget.monat_verbraucht, Cent(cent));
+        assert_eq!(budget.monat_abgerechnet, 1);
+    }
+    Ok(())
+}
+
 fn umgebung(jetzt: Zeitpunkt) -> Umgebung<'static> {
     Umgebung {
         jetzt,

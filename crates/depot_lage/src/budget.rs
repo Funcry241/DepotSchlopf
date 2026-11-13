@@ -160,7 +160,7 @@ pub fn ki_budget(buchungen: &[Buchung], berater: BeraterId, heute: Datum) -> KiB
 pub fn mit_verbrauch(mut b: KiBudget, protokoll: &[Eintrag], heute: Datum) -> KiBudget {
     let wer = crate::betrieb::wer_fuer(b.berater);
     for e in protokoll.iter().filter(|e| e.wer == wer) {
-        let Some(d) = e.zeit.datum() else {
+        let Some(d) = e.zeit.frankfurt_tag() else {
             continue;
         };
         if d.jahr() != heute.jahr() || d.monat() != heute.monat() {

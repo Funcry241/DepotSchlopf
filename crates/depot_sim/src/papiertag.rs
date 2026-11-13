@@ -439,7 +439,7 @@ fn pruefe_kurstag(k: Tageskurse, heute: Datum) -> Result<Tageskurse, LaufFehler>
     if k.handelstag != heute {
         return Err(halt(format!(
             "Die neuesten Schlusskurse sind vom {}, heute ist der {}: Ein Tag wird nur mit \
-             seinen eigenen Kursen entschieden. Zuerst run.cmd kurse nach 17:35 Uhr",
+             seinen eigenen Kursen entschieden. Für den Morgenlauf zuerst Kurse im Morgenfenster abrufen",
             datum_text(k.handelstag),
             datum_text(heute)
         )));
