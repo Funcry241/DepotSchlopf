@@ -23,7 +23,7 @@
 //! Was ein angefangener Tag gekostet hat, steht im Journal; ihn zu wiederholen, waere eine
 //! zweite Frage fuer denselben Zyklus.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use depot_journal::{
     AuftragsZustand, Journal, JournalFehler, Meldung, PapierHalt, PrognoseBeleg, Weltprognose,
@@ -667,27 +667,80 @@ fn markt_offener_orders(
     konto: &mut dyn Broker,
     kurse_ok: bool,
 ) -> Result<(), LaufFehler> {
-    let offen: Vec<_> = j.stand().offene_auftraege().map(|l| l.beleg.nr).collect();
-    if offen.is_empty() {
+    let mut gruppen = BTreeMap::<_, BTreeSet<_>>::new();
+    for order in j.stand().offene_auftraege() {
+        if let Some(schluss) = order.frist {
+            gruppen.entry(schluss).or_default().insert(order.beleg.nr);
+        }
+    }
+    if gruppen.is_empty() || !kurse_ok {
         return Ok(());
     }
-    let kurse = &z.tag.kurse;
-    let handelbar = z.universum.isins();
-    let eintraege = kurse
-        .alle()
-        .filter(|(isin, _)| kurse_ok && handelbar.contains(*isin) && !z.gesperrt.contains(*isin))
-        .filter_map(|(isin, kurs)| Some((isin.clone(), kurs.clone(), kurse.abruf(isin)?)))
-        .collect();
     let stand = z
         .uhr
         .and_then(|uhr| uhr())
-        .filter(|zeit| *zeit >= kurse.stand())
+        .filter(|zeit| *zeit >= z.tag.kurse.stand())
         .ok_or_else(|| halt("Keine verlässliche Marktzeit"))?;
-    let kurse = Kurse::mit_abrufen(stand, eintraege)
+    let wissen = j
+        .stand()
+        .wissensstichtag(z.tag.datum)
+        .unwrap_or(stand)
+        .min(stand);
+    let handelbar = z.universum.isins();
+    for (schluss, nummern) in gruppen {
+        let mut eintraege = BTreeMap::new();
+        let mut verfallen = BTreeSet::new();
+        for nr in &nummern {
+            let Some(order) = j.stand().auftrag(*nr) else {
+                continue;
+            };
+            let isin = &order.beleg.isin;
+            if !handelbar.contains(isin) || z.gesperrt.contains(isin) {
+                continue;
+            }
+            let aktuell = z.tag.kurse.eintrag(isin);
+            let im_zeitfenster = depot_kern::liste::boerse_von(isin).is_some_and(|boerse| {
+                let fruehestens = boerse
+                    .bezugstag(z.tag.datum)
+                    .and_then(|letzter| boerse.bezugstag(letzter));
+                schluss
+                    .frankfurt_tag()
+                    .zip(fruehestens)
+                    .is_some_and(|(tag, fruehestens)| tag >= fruehestens)
+            });
+            let beleg = j.stand().kurse().iter().rev().find(|b| {
+                im_zeitfenster
+                    && b.isin() == isin
+                    && b.abruf() <= wissen
+                    && b.kurs().herkunft() == Herkunft::Quelle
+                    && b.kurs().zeitpunkt() == schluss
+            });
+            if let Some(beleg) = beleg {
+                eintraege.insert(isin.clone(), (beleg.kurs().clone(), beleg.abruf()));
+            } else if stand >= schluss && aktuell.is_some_and(|kurs| kurs.zeitpunkt() > schluss) {
+                verfallen.insert(*nr);
+            }
+        }
+        let kurse = Kurse::mit_abrufen(
+            stand,
+            eintraege
+                .into_iter()
+                .map(|(isin, (kurs, abruf))| (isin, kurs, abruf))
+                .collect(),
+        )
         .map_err(|e| halt(format!("Kurse für offene Orders: {e:?}")))?;
-    konto.markt(&kurse);
-    kontowaechter(j, z.tag, &*konto)?;
-    protokolliere_ausfuehrungen(j, z.tag, &offen, Some(&kurse))
+        konto.markt_fuer(&kurse, &nummern);
+        if !verfallen.is_empty() {
+            konto.verfalle(&verfallen);
+        }
+        kontowaechter(j, z.tag, &*konto)?;
+        let erledigt: Vec<_> = nummern
+            .into_iter()
+            .filter(|nr| j.stand().auftrag(*nr).is_some_and(|a| !a.zustand.offen()))
+            .collect();
+        protokolliere_ausfuehrungen(j, z.tag, &erledigt, Some(&kurse))?;
+    }
+    Ok(())
 }
 
 /// Fragt einen Berater, wenn der Kostenschutz es erlaubt. `None` heisst: nicht gefragt; der
@@ -1182,20 +1235,13 @@ fn protokolliere_ausfuehrungen(
         }
         if l.zustand == AuftragsZustand::Verfallen {
             let grund = match (papierkurse, l.frist) {
-                (Some(kurse), Some(schluss)) => {
-                    if schluss.datum() != kurse.stand().datum()
-                        && !depot_kern::liste::morgenlauf(kurse.stand())
-                    {
-                        "Börsentag der Order bereits vorbei"
-                    } else if kurse
+                (Some(kurse), Some(schluss))
+                    if kurse
                         .eintrag(&l.beleg.isin)
                         .map(depot_kern::Kurs::zeitpunkt)
-                        != Some(schluss)
-                    {
-                        "kein geprüfter Kurs am Börsenschluss"
-                    } else {
-                        "Kurs ausserhalb des Limits"
-                    }
+                        != Some(schluss) =>
+                {
+                    "Schlusskurs nicht belegt"
                 }
                 _ => "Kurs ausserhalb des Limits",
             };

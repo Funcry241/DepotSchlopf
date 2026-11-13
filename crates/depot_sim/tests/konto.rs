@@ -122,6 +122,12 @@ impl Broker for Gestoert {
             let _ = self.innen.buche_fremd(b);
         }
     }
+    fn markt_fuer(&mut self, kurse: &Kurse, nummern: &std::collections::BTreeSet<u64>) {
+        self.innen.markt_fuer(kurse, nummern);
+    }
+    fn verfalle(&mut self, nummern: &std::collections::BTreeSet<u64>) {
+        self.innen.verfalle(nummern);
+    }
 }
 
 /// Wie viele Auftraege das Journal als gesendet belegt hat.

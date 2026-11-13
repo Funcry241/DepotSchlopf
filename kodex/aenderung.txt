@@ -1,5 +1,10 @@
 klasse: Funktion
-zweck: Laufprotokolle mit eigenem Scrollbereich lesbar halten
+zweck: Offene Papierorders mit ihrem belegten Börsenschluss abgleichen
 pfade:
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/tests/dienst.rs
+crates/depot_journal/src/stand.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/papier.rs
+crates/depot_sim/src/papierdatei.rs
+crates/depot_sim/src/papiertag.rs
+crates/depot_sim/tests/konto.rs
+crates/depot_sim/tests/papiertag.rs

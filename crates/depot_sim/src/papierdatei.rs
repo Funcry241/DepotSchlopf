@@ -170,6 +170,22 @@ impl Broker for Papierdatei {
         }
     }
 
+    fn markt_fuer(&mut self, kurse: &Kurse, nummern: &std::collections::BTreeSet<u64>) {
+        let vorher = self.konto.clone();
+        self.konto.markt_fuer(kurse, nummern);
+        if self.konto != vorher {
+            self.sichere(vorher);
+        }
+    }
+
+    fn verfalle(&mut self, nummern: &std::collections::BTreeSet<u64>) {
+        let vorher = self.konto.clone();
+        self.konto.verfalle(nummern);
+        if self.konto != vorher {
+            self.sichere(vorher);
+        }
+    }
+
     fn stoerung(&self) -> Option<String> {
         self.fehler
             .as_ref()
