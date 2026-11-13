@@ -310,7 +310,7 @@ fn an_aus(an: bool) -> &'static str {
     if an { "an" } else { "aus" }
 }
 
-fn letzter_boersenschluss(jetzt: Zeitpunkt, tag: Datum) -> Option<Datum> {
+pub(crate) fn letzter_boersenschluss(jetzt: Zeitpunkt, tag: Datum) -> Option<Datum> {
     depot_kern::liste::boersen()
         .into_iter()
         .filter_map(|boerse| {
