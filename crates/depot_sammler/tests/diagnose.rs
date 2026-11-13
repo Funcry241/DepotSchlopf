@@ -11,6 +11,17 @@ struct Quelle {
     antwort: Vec<u8>,
 }
 impl Netz for Quelle {
+    fn hole_autorisiert(
+        &mut self,
+        adresse: &str,
+        autorisiert: &str,
+    ) -> Result<Vec<u8>, NetzFehler> {
+        assert!(adresse.starts_with("https://api.tiingo.com/"));
+        assert!(!adresse.contains(TI) && !adresse.contains("token="));
+        assert!(autorisiert == format!("Token {TI}"));
+        self.hole(adresse)
+    }
+
     fn hole(&mut self, _adresse: &str) -> Result<Vec<u8>, NetzFehler> {
         self.anzahl = self.anzahl.saturating_add(1);
         if self.anzahl == self.bei {

@@ -44,7 +44,7 @@ use depot_kern::{
 use depot_regelwerk::{DatenFehler, waehle_tageswerte};
 
 use crate::liste::{Wert, als_universum};
-use crate::netz::{Ausfall, Netz, Takt, frist, hole_mit_wiederholung};
+use crate::netz::{Ausfall, Netz, Takt, frist, hole_mit_autorisierung, hole_mit_wiederholung};
 use crate::schluessel::{Anbieter, Schluessel, Zugang};
 
 /// Die Referenzkurse der EZB der letzten 90 Tage.
@@ -147,11 +147,14 @@ pub fn adresse(wert: &Wert, schluessel: &Schluessel, ab: Option<Datum>) -> Strin
             let kuerzel = wert.kuerzel.to_ascii_lowercase().replace('.', "-");
             let start = ab.map(|d| format!("startDate={d}&")).unwrap_or_default();
             format!(
-                "https://api.tiingo.com/tiingo/daily/{kuerzel}/prices?{start}format=csv&columns=date,close,high,low&token={}",
-                schluessel.als_str()
+                "https://api.tiingo.com/tiingo/daily/{kuerzel}/prices?{start}format=csv&columns=date,close,high,low"
             )
         }
     }
+}
+
+pub(crate) fn autorisierung(anbieter: Anbieter, schluessel: &Schluessel) -> Option<String> {
+    (anbieter == Anbieter::Tiingo).then(|| format!("Token {}", schluessel.als_str()))
 }
 
 /// Was ein Lauf ueber den Schluessel und eine Quelle sagt, fuer das Anbieterprotokoll. Gezaehlt
@@ -430,7 +433,14 @@ fn lies_wert(
 ) -> Result<Schritt, SammelFehler> {
     let devisen = &v.referenz.devisen;
     let frist_ab = |jetzt: Zeitpunkt| frist(wert.boerse, &Grenzen::standard(), jetzt);
-    let roh = match hole_mit_wiederholung(netz, &adresse(wert, schluessel, v.ab), &frist_ab, takt) {
+    let autorisiert = autorisierung(Anbieter::fuer(wert.boerse), schluessel);
+    let roh = match hole_mit_autorisierung(
+        netz,
+        &adresse(wert, schluessel, v.ab),
+        autorisiert.as_deref(),
+        &frist_ab,
+        takt,
+    ) {
         Ok(r) => r,
         Err(a) => {
             let text = format!("Abruf: {}", zugang.bereinige(a.fehler()));

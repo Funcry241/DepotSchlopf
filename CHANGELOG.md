@@ -27,6 +27,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Tiingo-Kursabrufe und die Kursdiagnose senden den Schlüssel im Authorization-Header. Die Abrufadresse enthält den Schlüssel nicht mehr (#157).
+
 - Der Beraterstart und der angezeigte KI-Monatsverbrauch verwenden den Frankfurter Kalendertag (#158).
 
 - Live, Einrichtung und KI-Gespräche verwenden einheitliche Zugangsnamen, Abruftexte und Kostenangaben. Die Grenzwertanzeige enthält auch die Gesamtverlustsperre, Kursgrenzen und Gebühren. Gemini ist nach dem Einschalten direkt im Gesprächsfilter verfügbar (#151).

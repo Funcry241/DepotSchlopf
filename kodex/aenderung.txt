@@ -1,11 +1,11 @@
 klasse: Funktion
-zweck: Beraterstart und KI-Verbrauch nach Frankfurter Kalendertag führen
+zweck: Tiingo-Schlüssel im Authorization-Header senden
 pfade:
 CHANGELOG.md
-crates/depot_berater/src/ki.rs
-crates/depot_berater/src/main.rs
-crates/depot_kern/src/zeit.rs
-crates/depot_lage/src/budget.rs
-crates/depot_lage/tests/betrieb.rs
-crates/depot_sim/src/papiertag.rs
-crates/depot_sim/src/vorbereitung.rs
+crates/depot_sammler/src/diagnose.rs
+crates/depot_sammler/src/kontingent.rs
+crates/depot_sammler/src/netz.rs
+crates/depot_sammler/src/sammeln.rs
+crates/depot_sammler/tests/diagnose.rs
+crates/depot_sammler/tests/tiingo.rs
+docs/befunde/neustart.md

@@ -51,6 +51,15 @@ impl<N: Netz> Netz for KontingentNetz<'_, N> {
         abrufe.pruefe(jetzt, benoetigt)
     }
 
+    fn hole_autorisiert(
+        &mut self,
+        adresse: &str,
+        autorisiert: &str,
+    ) -> Result<Vec<u8>, NetzFehler> {
+        self.abrufbeginn = (self.uhr)();
+        self.netz.hole_autorisiert(adresse, autorisiert)
+    }
+
     fn hole(&mut self, adresse: &str) -> Result<Vec<u8>, NetzFehler> {
         self.abrufbeginn = (self.uhr)();
         if let Some(query) = adresse.strip_prefix("https://www.alphavantage.co/query?") {
