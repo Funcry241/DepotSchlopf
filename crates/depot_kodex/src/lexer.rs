@@ -15,6 +15,7 @@ pub enum Token {
     Zeichen(&'static str),
     /// Text-, Zeichen- oder Zahlliteral (Inhalt verworfen).
     Literal,
+    Textliteral,
     /// Lebensdauer oder Sprungmarke (`'a`).
     Lebensdauer,
 }
@@ -208,7 +209,7 @@ fn zerlege_mit_text(quelle: &str, sammeln: bool) -> Result<(Vec<Token>, Vec<Stri
             '/' if n == Some('*') => l.block_kommentar()?,
             '"' => {
                 l.text()?;
-                aus.push(Token::Literal);
+                aus.push(Token::Textliteral);
             }
             '\'' => aus.push(l.zeichen_oder_lebensdauer()?),
             _ if c.is_ascii_digit() => {
@@ -240,7 +241,11 @@ fn zerlege_mit_text(quelle: &str, sammeln: bool) -> Result<(Vec<Token>, Vec<Stri
                                 || l.an(1) == Some('#')) =>
                     {
                         l.roher_text()?;
-                        aus.push(Token::Literal);
+                        aus.push(if w == "r" {
+                            Token::Textliteral
+                        } else {
+                            Token::Literal
+                        });
                     }
                     Some('#') if w == "r" => {
                         l.weiter(1);

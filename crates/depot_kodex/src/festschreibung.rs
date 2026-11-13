@@ -89,8 +89,53 @@ fn lints(wurzel_toml: &Wert) -> String {
 ///
 /// # Errors
 /// Wenn Dateien fehlen oder sich nicht lesen lassen.
+fn kodex_dateien(
+    wurzel: &Path,
+    ordner: &Path,
+    liste: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    let pfad = wurzel.join(ordner);
+    for eintrag in fs::read_dir(&pfad).map_err(|e| format!("{}: {e}", pfad.display()))? {
+        let eintrag = eintrag.map_err(|e| e.to_string())?;
+        let relativ = ordner.join(eintrag.file_name());
+        let name = relativ
+            .to_str()
+            .ok_or("Kodexpfad ist kein UTF-8")?
+            .replace('\\', "/");
+        if matches!(
+            name.as_str(),
+            crate::DEKLARATION | crate::FESTSCHREIBUNG | crate::freigabe::FREIGABE
+        ) {
+            continue;
+        }
+        let typ = eintrag.file_type().map_err(|e| format!("{name}: {e}"))?;
+        if typ.is_dir() {
+            kodex_dateien(wurzel, &relativ, liste)?;
+        } else if typ.is_file() {
+            let inhalt = fs::read(eintrag.path()).map_err(|e| format!("{name}: {e}"))?;
+            liste.insert(name, sha_bytes(&normalisiert(&inhalt)));
+        } else {
+            return Err(format!("{name}: keine reguläre Kodexdatei"));
+        }
+    }
+    Ok(())
+}
+
+fn kodex_hash(wurzel: &Path) -> Result<String, String> {
+    let mut liste = BTreeMap::new();
+    for ordner in ["crates/depot_kodex", ".github", "kodex"] {
+        kodex_dateien(wurzel, Path::new(ordner), &mut liste)?;
+    }
+    let mut text = String::new();
+    for (pfad, hash) in liste {
+        let _ = writeln!(text, "{pfad}\t{hash}");
+    }
+    Ok(sha(&text))
+}
+
 pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut f = BTreeMap::new();
+    f.insert("kodex".into(), kodex_hash(wurzel)?);
     f.insert("grenzen".into(), Grenzen::standard().fingerabdruck());
     f.insert(
         "ki_budget".into(),

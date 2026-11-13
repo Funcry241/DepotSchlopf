@@ -1,0 +1,50 @@
+name: Kodex aus der Basis
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  pruefe:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Prüfung am Kandidaten vormerken
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" \
+            -f state=pending -f context=kodex-basis -f target_url="$RUN_URL"
+
+      - name: Nur den Basisstand auschecken
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Kandidat als Git-Objekte holen
+        run: git fetch --no-tags origin "$HEAD_SHA"
+
+      - name: Rust-Werkzeugkette der Basis verwenden
+        run: rustup show
+
+      - name: Kandidaten mit Basis-Kodex prüfen
+        run: cargo run --locked -p depot_kodex -- pruefe-pr --basis "$BASE_SHA" --kandidat "$HEAD_SHA"
+
+      - name: Ergebnis am Kandidaten vermerken
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" = success ]; then state=success; else state=failure; fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" \
+            -f state="$state" -f context=kodex-basis -f target_url="$RUN_URL"
