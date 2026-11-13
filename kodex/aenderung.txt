@@ -1,11 +1,8 @@
 klasse: Funktion
-zweck: Tiingo-Schlüssel im Authorization-Header senden
+zweck: Manuelle Sperrenaufhebung am Desktop bestätigen
 pfade:
 CHANGELOG.md
-crates/depot_sammler/src/diagnose.rs
-crates/depot_sammler/src/kontingent.rs
-crates/depot_sammler/src/netz.rs
-crates/depot_sammler/src/sammeln.rs
-crates/depot_sammler/tests/diagnose.rs
-crates/depot_sammler/tests/tiingo.rs
-docs/befunde/neustart.md
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/papierdialog.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/dienst.rs

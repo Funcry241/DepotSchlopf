@@ -27,6 +27,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Geändert
 
+- Die manuelle Aufhebung von Kostenschutz und Kurssperre braucht eine zusätzliche Bestätigung am Windows-Desktop (#157).
+
 - Tiingo-Kursabrufe und die Kursdiagnose senden den Schlüssel im Authorization-Header. Die Abrufadresse enthält den Schlüssel nicht mehr (#157).
 
 - Der Beraterstart und der angezeigte KI-Monatsverbrauch verwenden den Frankfurter Kalendertag (#158).

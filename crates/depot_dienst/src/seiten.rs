@@ -252,6 +252,14 @@ fn sperr_meldung(code: &str) -> Option<(&'static str, &'static str)> {
             "Nicht aufgehoben: Bitte zuerst bestätigen, dass du den Schlüssel der Kursquelle \
              geprüft und bei Bedarf erneuert hast.",
         ),
+        ("dialog_unbestaetigt", _) => (
+            "offen",
+            "Nicht aufgehoben: Der Windows-Dialog wurde nicht innerhalb von zwei Minuten mit Ja bestätigt.",
+        ),
+        ("dialog_belegt", _) => (
+            "offen",
+            "Nicht aufgehoben: Ein anderer Windows-Freigabedialog ist bereits offen.",
+        ),
         ("belegt", _) => (
             "offen",
             "Nicht aufgehoben: Es läuft oder wartet ein Auftrag. Danach erneut versuchen.",
@@ -1553,6 +1561,7 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
          <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
          <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
          Ich habe die Kosten beim Anbieter geprüft.</label>\
+         <p>Bestätige das Aufheben innerhalb von zwei Minuten im Windows-Dialog.</p>\
          <button type=\"submit\">Sperre aufheben</button></form></section>",
         maskiere(inhalt),
         KI_VERBINDUNG,
@@ -1626,6 +1635,7 @@ fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
          <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
          <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
          Ich habe den Schlüssel der Kursquelle geprüft und bei Bedarf erneuert.</label>\
+         <p>Bestätige das Aufheben innerhalb von zwei Minuten im Windows-Dialog.</p>\
          <button type=\"submit\">Kurssperre aufheben</button></form></section>",
         maskiere(inhalt),
         auftrag_knopf(
