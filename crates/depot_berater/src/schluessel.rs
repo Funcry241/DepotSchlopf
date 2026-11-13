@@ -45,6 +45,13 @@ impl Schluessel {
         Ok(Schluessel(t.to_string()))
     }
 
+    #[cfg(any(windows, test))]
+    pub(crate) fn fuer_gemini(text: &str) -> Result<Self, String> {
+        Ok(Self(
+            depot_kern::gemini::pruefe_schluessel(text)?.to_owned(),
+        ))
+    }
+
     pub(crate) fn als_str(&self) -> &str {
         &self.0
     }
@@ -80,7 +87,8 @@ impl Schluessel {
             .build(dienst, "depotschlopf", Some(&ziel))
             .map_err(|e| format!("Anmeldeverwaltung: {e}"))?;
         match eintrag.get_password() {
-            Ok(text) => Schluessel::neu(&text),
+            Ok(text) if adresse == depot_kern::gemini::ADRESSE => Self::fuer_gemini(&text),
+            Ok(text) => Self::neu(&text),
             Err(keyring_core::Error::NoEntry) => Err(hinweis()),
             Err(_) => Err(format!(
                 "Anmeldeverwaltung: Eintrag {adresse} nicht lesbar. {}",

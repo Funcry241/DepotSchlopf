@@ -112,7 +112,8 @@ impl Wer {
                     return Err("nur Kleinbuchstaben und Ziffern erlaubt");
                 }
             }
-            Wer::Berater(_) | Wer::Gemini => {
+            Wer::Gemini => return depot_kern::gemini::pruefe_schluessel(t).map(str::to_owned),
+            Wer::Berater(_) => {
                 if !(20..=256).contains(&t.len()) {
                     return Err("20 bis 256 Zeichen erwartet");
                 }
@@ -255,7 +256,7 @@ mod tests {
             jetzt.as_nanos()
         );
         let eintrag = windows_eintrag(Wer::Gemini, &ziel)?;
-        let probe = "Nur_Ein_Erfundener_Testwert";
+        let probe = "AQ.Nur_Ein_Erfundener_Testwert";
         let ergebnis = (|| -> Result<(), String> {
             gemini_ablegen(&eintrag, probe)?;
             let leser = windows_eintrag(Wer::Gemini, &ziel)?;

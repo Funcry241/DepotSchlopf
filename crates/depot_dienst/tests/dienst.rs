@@ -469,6 +469,10 @@ fn schluesselregeln() {
     assert!(dachs.pruefe("Attrappe_Maus-abcdefghij").is_ok());
     assert!(dachs.pruefe("Attrappe Maus-abcdefghij").is_err());
     assert!(dachs.pruefe("kurz").is_err());
+    assert!(dachs.pruefe("AQ.Erfundener_Gemini_Testwert").is_err());
+    assert!(Wer::Gemini.pruefe("AQ.Erfundener_Gemini_Testwert").is_ok());
+    assert!(Wer::Gemini.pruefe("AQ.Erfundener.Gemini_Testwert").is_err());
+    assert!(Wer::Gemini.pruefe("AQ.Erfundener\r\nX-Header").is_err());
     assert!(dachs.pruefe(&"a".repeat(257)).is_err());
     // Tiingo wie im Sammler: 20 bis 64 Kleinbuchstaben und Ziffern.
     let tiingo = Wer::KursquelleUs;
@@ -3778,7 +3782,7 @@ fn gemini_speichern_uebernimmt_schluessel_aus_der_einrichtung() -> Result<(), St
     assert!(vorher.contains(">fehlt</span>"));
     assert!(vorher.contains(">Gemini-Schlüssel speichern</button>"));
 
-    let probe = "Nur_Ein_Erfundener_Testwert";
+    let probe = "AQ.Nur_Ein_Erfundener_Testwert";
     let post = formular_post("/schluessel", &format!("t={TOKEN}&wer=gemini&wert={probe}"));
     let antwort = text(&behandle(&d, &umwelt, &post, t));
     assert!(antwort.contains("/einrichtung?m=schluessel&wer=gemini#zusatz"));

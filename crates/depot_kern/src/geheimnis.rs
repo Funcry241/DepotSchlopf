@@ -81,7 +81,7 @@ fn zeilenweise(text: &str, mut f: impl FnMut(&str) -> String) -> String {
 }
 
 fn schluesselzeichen(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-')
+    crate::gemini::api_schluesselzeichen(b)
 }
 
 fn token_ende(text: &str, start: usize) -> usize {
@@ -188,6 +188,15 @@ fn maskiere_roh(text: &str) -> String {
                     .is_some_and(u8::is_ascii_whitespace)
             {
                 bereiche.push(wert(text, leerraum(text, nach), false));
+            }
+        }
+        if text
+            .get(start..)
+            .is_some_and(|rest| rest.starts_with("AQ."))
+        {
+            let ende = token_ende(text, start.saturating_add(3));
+            if ende.saturating_sub(start) >= 20 {
+                bereiche.push((start, ende));
             }
         }
         if passt(text, start, "sk-") {
