@@ -1,8 +1,8 @@
-klasse: Funktion
-zweck: Xetra-Jahresschluss und Frankfurter Kalendertag im Lagebild
+klasse: KodexAenderung
+zweck: Windows-Update gezielt prüfen und den installierten Altstand abdecken
 pfade:
-CHANGELOG.md
-crates/depot_kern/src/boerse.rs
-crates/depot_lage/src/html.rs
-crates/depot_lage/src/lib.rs
-crates/depot_lage/tests/lage.rs
+.github/pull_request_template.md
+.github/scripts/pruefe_update_alt.py
+.github/scripts/test_windows_update.py
+.github/scripts/windows_update.py
+.github/workflows/kodex.yml

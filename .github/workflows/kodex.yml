@@ -14,6 +14,25 @@ permissions:
   contents: read
 
 jobs:
+  windows-update-filter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      update: ${{ steps.filter.outputs.update }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gegenproben für den Windows-Update-Filter
+        run: python -B .github/scripts/test_windows_update.py
+      - name: Windows-Update-Gegenprobe einplanen
+        id: filter
+        env:
+          EREIGNIS: ${{ github.event_name }}
+          BASIS: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python -B .github/scripts/windows_update.py filter "$EREIGNIS" "$BASIS" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
   kodex-linux-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -136,6 +155,8 @@ jobs:
           retention-days: 30
 
   kodex-windows-update:
+    needs: windows-update-filter
+    if: ${{ needs.windows-update-filter.outputs.update == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -192,14 +213,15 @@ jobs:
 
   kodex-windows:
     # Der bisherige Windows-Check bleibt das gemeinsame Ergebnis beider Prüfungen.
-    needs: [kodex-windows-gate, kodex-windows-update]
+    needs: [windows-update-filter, kodex-windows-gate, kodex-windows-update]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Beide Windows-Prüfungen bestätigen
         env:
+          FILTER: ${{ needs.windows-update-filter.result }}
+          UPDATE_NOETIG: ${{ needs.windows-update-filter.outputs.update }}
           GATE: ${{ needs.kodex-windows-gate.result }}
           UPDATE: ${{ needs.kodex-windows-update.result }}
-        run: |
-          printf 'Windows-Gate: %s\nWindows-Update: %s\n' "$GATE" "$UPDATE"
-          test "$GATE" = success && test "$UPDATE" = success
+        run: python -B .github/scripts/windows_update.py sammelcheck
