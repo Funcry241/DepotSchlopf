@@ -985,10 +985,7 @@ impl Stand {
             .get(&neu.beleg.topf)
             .ok_or_else(|| format!("Auftrag {nr}: Topf fehlt"))?;
         let (topf, erloes) = match m {
-            Meldung::Ausfuehrung(a) => (
-                buche(topf, &neu.beleg, a)?,
-                self.neuer_erloes(&neu.beleg, a)?,
-            ),
+            Meldung::Ausfuehrung(a) => (buche(topf, &neu.beleg, a)?, self.neuer_erloes(&neu, a)?),
             _ => (topf.clone(), None),
         };
         self.pruefe_deckung(
@@ -1018,9 +1015,10 @@ impl Stand {
 
     fn neuer_erloes(
         &self,
-        beleg: &AuftragsBeleg,
+        lage: &AuftragsLage,
         aus: &crate::auftrag::Ausfuehrung,
     ) -> Result<Option<(Datum, Cent)>, String> {
+        let beleg = &lage.beleg;
         let Some(tag) = self.abrechnungstag else {
             return if aus.kurszeit.is_some() {
                 Err("Kurszeit ohne Abrechnungstag".into())
@@ -1046,12 +1044,16 @@ impl Stand {
                 Richtung::Kauf => Rundung::Auf,
                 Richtung::Verkauf => Rundung::Ab,
             };
-            if (datum != tag && !vorabend)
+            let stichtag = self.wissensstichtag(tag);
+            let nachgeholt =
+                datum < tag && !vorabend && lage.frist == Some(zeit) && stichtag.is_some();
+            if (datum != tag && !vorabend && !nachgeholt)
                 || !self.kurse.iter().any(|b| {
                     b.isin() == &beleg.isin
                         && b.kurs().herkunft() == Herkunft::Quelle
                         && b.kurs().zeitpunkt() == zeit
-                        && (!vorabend || morgen.is_some_and(|bis| b.abruf() <= bis))
+                        && (!(vorabend || nachgeholt)
+                            || stichtag.is_some_and(|bis| b.abruf() <= bis))
                         && b.kurs().preis().mal_stueck(1, rundung) == Some(aus.kurs)
                 })
             {

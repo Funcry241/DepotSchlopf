@@ -46,6 +46,9 @@ pub trait Broker: Konto {
     }
     /// Der Markt laeuft bis zum Schluss dieses Handelstags.
     fn markt(&mut self, kurse: &Kurse);
+    fn markt_fuer(&mut self, kurse: &Kurse, nummern: &std::collections::BTreeSet<u64>);
+    /// Beendet offene Aufträge, deren Schlusskurs nicht mehr nachholbar ist.
+    fn verfalle(&mut self, nummern: &std::collections::BTreeSet<u64>);
     /// Gibt faellige Verkaufserloese zum Kauf frei.
     fn rechne_ab(&mut self, _tag: Datum) {}
     /// Eine Stoerung des Kontos: Sein Stand ist nicht gesichert. Dann haelt der Lauf an, bevor
@@ -161,7 +164,8 @@ impl Papierkonto {
         v.checked_add(self.gebuehren.fuer(v)?)
     }
 
-    /// Fuehrt eine offene Order ganz aus, wenn der Kurs das Limit einhaelt; sonst verfaellt sie.
+    /// Führt eine offene Order am belegten Schluss aus, wenn der Kurs das Limit einhält.
+    /// Sie wartet auf den Schlusskurs und verfällt bei einem späteren Kurs ohne passenden Beleg.
     fn schluss(&mut self, nr: u64, kurse: &Kurse) {
         let Some(o) = self.orders.get(&nr) else {
             return;
@@ -169,14 +173,10 @@ impl Papierkonto {
         let a = &o.auftrag;
         let mut eintrag = kurse.eintrag(&a.isin);
         if let Some((_, schluss)) = o.versand {
-            let stand = kurse.stand();
-            if stand < schluss {
+            if kurse.stand() < schluss || eintrag.is_none_or(|k| k.zeitpunkt() < schluss) {
                 return;
             }
-            eintrag = eintrag.filter(|k| {
-                (stand.datum() == schluss.datum() || depot_kern::liste::morgenlauf(stand))
-                    && k.zeitpunkt() == schluss
-            });
+            eintrag = eintrag.filter(|k| k.zeitpunkt() == schluss);
         }
         let ausfuehrung = eintrag.and_then(|eintrag| {
             let exakt = eintrag.preis();
@@ -340,14 +340,29 @@ impl Broker for Papierkonto {
     }
 
     fn markt(&mut self, kurse: &Kurse) {
-        let offen: Vec<u64> = self
-            .orders
-            .iter()
-            .filter(|(_, o)| o.status == KontoStatus::Offen)
-            .map(|(nr, _)| *nr)
-            .collect();
-        for nr in offen {
-            self.schluss(nr, kurse);
+        let offen = self.orders.keys().copied().collect();
+        self.markt_fuer(kurse, &offen);
+    }
+
+    fn markt_fuer(&mut self, kurse: &Kurse, nummern: &std::collections::BTreeSet<u64>) {
+        for nr in nummern {
+            if self
+                .orders
+                .get(nr)
+                .is_some_and(|o| o.status == KontoStatus::Offen)
+            {
+                self.schluss(*nr, kurse);
+            }
+        }
+    }
+
+    fn verfalle(&mut self, nummern: &std::collections::BTreeSet<u64>) {
+        for nr in nummern {
+            if let Some(order) = self.orders.get_mut(nr)
+                && order.status == KontoStatus::Offen
+            {
+                order.status = KontoStatus::Verfallen;
+            }
         }
     }
 }
@@ -531,5 +546,106 @@ impl Papierkonto {
             return Err("Papierkonto: nicht in der eigenen Form geschrieben".into());
         }
         Ok(k)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use depot_kern::{Boerse, Herkunft, Kurs};
+    use std::collections::BTreeSet;
+
+    fn zwei_orders() -> Result<(Papierkonto, Isin, Zeitpunkt, Zeitpunkt), String> {
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let mut konto = Papierkonto::eroeffne(&[
+            Topf::neu(depot_kern::TopfId::A, Cent(100_000)).map_err(|e| format!("{e:?}"))?
+        ])
+        .ok_or("Konto")?;
+        let mut fristen = Vec::new();
+        for (nr, tag) in [(1, 9), (2, 10)] {
+            let datum = Datum::neu(2026, 11, tag).ok_or("Datum")?;
+            let versand = Zeitpunkt::frankfurt(datum, 7, 40, 0).ok_or("Versand")?;
+            let frist = Boerse::Xetra.schluss(datum).ok_or("Schluss")?;
+            konto.orders.insert(
+                nr,
+                PapierOrder {
+                    auftrag: Order {
+                        isin: isin.clone(),
+                        richtung: Richtung::Kauf,
+                        stueck: 1,
+                        limit: Cent(6_000),
+                    },
+                    status: KontoStatus::Offen,
+                    ausfuehrungen: Vec::new(),
+                    versand: Some((versand, frist)),
+                },
+            );
+            fristen.push(frist);
+        }
+        Ok((
+            konto,
+            isin,
+            *fristen.first().ok_or("Erste Frist")?,
+            *fristen.get(1).ok_or("Zweite Frist")?,
+        ))
+    }
+
+    fn schlusskurs(isin: &Isin, schluss: Zeitpunkt, cent: i64) -> Result<Kurse, String> {
+        let datum = schluss.frankfurt_tag().ok_or("Datum")?;
+        let kurs = Kurs::neu(Cent(cent), "EUR", datum, schluss, Herkunft::Quelle)
+            .map_err(|e| format!("{e:?}"))?;
+        Kurse::neu(schluss, vec![(isin.clone(), kurs)]).map_err(|e| format!("{e:?}"))
+    }
+
+    #[test]
+    fn zwei_orders_gleiche_isin() -> Result<(), String> {
+        let (mut konto, isin, erste, zweite) = zwei_orders()?;
+        konto.markt_fuer(&schlusskurs(&isin, erste, 5_000)?, &BTreeSet::from([1]));
+        assert_eq!(
+            konto.order(1).map(|o| o.status),
+            Some(KontoStatus::Gefuellt)
+        );
+        assert_eq!(konto.order(2).map(|o| o.status), Some(KontoStatus::Offen));
+        konto.markt_fuer(&schlusskurs(&isin, zweite, 7_000)?, &BTreeSet::from([2]));
+        assert_eq!(
+            konto.order(2).map(|o| o.status),
+            Some(KontoStatus::Verfallen)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn zwei_schlusszeiten() -> Result<(), String> {
+        let (mut konto, isin, erste, zweite) = zwei_orders()?;
+        let allianz = Isin::neu("DE0008404005").map_err(|e| format!("{e:?}"))?;
+        konto.orders.get_mut(&2).ok_or("Zweite Order")?.auftrag.isin = allianz.clone();
+        konto.markt_fuer(&schlusskurs(&isin, erste, 5_000)?, &BTreeSet::from([1]));
+        let offen = konto.order(2).ok_or("Zweite Order")?;
+        assert_eq!(offen.status, KontoStatus::Offen);
+        let datum = Datum::neu(2026, 11, 11).ok_or("Folgetag")?;
+        let spaeter = Boerse::Xetra.schluss(datum).ok_or("Späterer Schluss")?;
+        let belegt = schlusskurs(&allianz, zweite, 5_500)?;
+        let spaeterer_kurs = schlusskurs(&allianz, spaeter, 7_500)?;
+        konto.markt_fuer(&belegt, &BTreeSet::from([2]));
+        konto.markt(&spaeterer_kurs);
+        let gefuellt = konto.order(2).ok_or("Zweite Order")?;
+        assert_eq!(gefuellt.status, KontoStatus::Gefuellt);
+        assert_eq!(gefuellt.versand, offen.versand);
+        let aus = gefuellt.ausfuehrungen.first().ok_or("Ausführung")?;
+        assert_eq!((aus.kurs, aus.kurszeit), (Cent(5_500), Some(zweite)));
+        Ok(())
+    }
+
+    #[test]
+    fn eintrag_vor_schluss_bleibt_offen() -> Result<(), String> {
+        let (mut konto, isin, erste, zweite) = zwei_orders()?;
+        let alter_kurs = schlusskurs(&isin, erste, 5_000)?;
+        let beleg = alter_kurs.eintrag(&isin).cloned().ok_or("Kurs")?;
+        let kurse = Kurse::neu(zweite, vec![(isin, beleg)]).map_err(|e| format!("{e:?}"))?;
+        konto.markt_fuer(&kurse, &BTreeSet::from([2]));
+        let order = konto.order(2).ok_or("Order")?;
+        assert_eq!(order.status, KontoStatus::Offen);
+        assert_eq!(order.versand.map(|(_, frist)| frist), Some(zweite));
+        Ok(())
     }
 }

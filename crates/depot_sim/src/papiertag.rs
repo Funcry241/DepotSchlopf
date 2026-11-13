@@ -21,9 +21,10 @@
 //! Handelstag danach schon abgeschlossen, geschieht nichts. Ein angefangener Tag haelt an wie in
 //! der Simulation; niemand wird neu gefragt.
 //!
-//! **Ausfuehrung:** Bestaetigte Orders bleiben offen bis zum ersten im Papiertag verwendbaren
-//! Schlusskurs nach Versand. Fehlt an diesem Boersentag ein gepruefter Kurs oder liegt er
-//! ausserhalb des Limits, verfallen sie.
+//! **Ausführung:** Bestätigte Orders haben eine feste Schlusszeit. Der belegte Kurs genau
+//! zu dieser Zeit wird am Limit geprüft und kann nach einem ausgefallenen Handelstag
+//! nachgeholt werden. Ohne passenden Schlusskurs verfällt die Order, sobald ein späterer
+//! verwendbarer Kurs vorliegt.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
