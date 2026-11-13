@@ -116,8 +116,8 @@ fn umrechnung_nur_am_selben_tag_abgerundet() -> Result<(), String> {
 }
 
 /// Ein Wert der NYSE ergibt mit Referenzkursen einen Kurs in Euro, heute und am Vortag je mit
-/// dem Kurs seines eigenen Tages. Fehlt der Kurs eines der beiden Tage, ergibt der Wert keinen
-/// Kurs. Ohne Umrechnung bleibt es bei der Ablehnung des Dollars.
+/// dem Kurs seines eigenen Tages. Fehlt der Referenzkurs des früheren Tages, kann der
+/// Bezugskurs trotzdem belegt werden. Ohne Umrechnung bleibt es bei der Ablehnung des Dollars.
 #[test]
 fn nyse_in_euro() -> Result<(), String> {
     let a = isin("US0378331005")?;
@@ -155,14 +155,14 @@ fn nyse_in_euro() -> Result<(), String> {
         Err(QuellenFehler::KeinDevisenkurs(tag(2026, 11, 5)?))
     );
     let ohne_vortag = lies(&ezb(&[("2026-11-05", "1.1224")]))?;
-    assert_eq!(
-        schlusskurse_in_euro(
-            spaet,
-            vec![(a.clone(), Boerse::Nyse, tage.clone())],
-            &ohne_vortag
-        ),
-        Err(QuellenFehler::KeinDevisenkurs(tag(2026, 11, 4)?))
-    );
+    let (h_ohne_vortag, v_ohne_vortag) = schlusskurse_in_euro(
+        spaet,
+        vec![(a.clone(), Boerse::Nyse, tage.clone())],
+        &ohne_vortag,
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(h_ohne_vortag, heute);
+    assert!(v_ohne_vortag.eintrag(&a).is_none());
     assert_eq!(
         schlusskurse(spaet, vec![(a, Boerse::Nyse, tage)]),
         Err(QuellenFehler::Kurs(KursFehler::Waehrung))
@@ -342,5 +342,37 @@ fn nvidia_morgenlauf_sieht_nur_bereits_beendete_us_sitzungen() -> Result<(), Str
         assert_eq!(kurs.handelstag(), tag(2026, 11, handelstag)?);
         assert_eq!(kurs.preis(), euro(preis)?);
     }
+    Ok(())
+}
+
+#[test]
+fn vortag_ueberspringt_ezb_feiertag() -> Result<(), String> {
+    let a = isin("US0378331005")?;
+    let tage = [(2, "100"), (6, "105"), (7, "110")]
+        .into_iter()
+        .map(|(d, preis)| {
+            Ok(Tageskurs {
+                datum: tag(2026, 4, d)?,
+                schluss: euro(preis)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let devisen = lies(&ezb(&[("2026-04-02", "1.1"), ("2026-04-07", "1.1")]))?;
+    let (heute, vortag) = schlusskurse_in_euro(
+        utc(2026, 4, 8, 5, 30)?,
+        vec![(a.clone(), Boerse::Nyse, tage)],
+        &devisen,
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    let h = heute.eintrag(&a).ok_or("Bezugskurs fehlt")?;
+    let v = vortag.eintrag(&a).ok_or("Vergleichskurs fehlt")?;
+    assert_eq!(
+        (h.handelstag(), h.preis()),
+        (tag(2026, 4, 7)?, euro("100")?)
+    );
+    assert_eq!(
+        (v.handelstag(), v.preis()),
+        (tag(2026, 4, 2)?, euro("90.909090")?)
+    );
     Ok(())
 }

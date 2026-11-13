@@ -156,6 +156,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Behoben
 
+- Der NYSE-Kursvergleich überspringt frühere Tage ohne EZB-Referenzkurs und verwendet den jüngsten früheren Schluss mit eigenem Referenzkurs. Der Bezugstag braucht weiterhin seinen eigenen Kurs. Die Sprunggrenze bleibt bei 15 % (#158).
+
 - Der Analyse-Export zeigt den aus den Ausführungen belegten Einstand mit Gewinn oder Verlust. Das Tagesergebnis vergleicht den aktuellen Kurstag mit dem davor liegenden Abschluss, auch morgens vor dem Papiertag (#192).
 
 - Der Xetra-Kalender setzt für den 30. Dezember 2026 die früheste Preisermittlung der Schlussauktion um 14:05 Uhr Frankfurter Zeit an. Das Lagebild verwendet den Frankfurter Kalendertag für Monatsverbrauch und Vorbereitungshinweise (#158, #190).

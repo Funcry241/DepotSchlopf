@@ -776,3 +776,80 @@ fn alpha_limit_laesst_tiingo_weiterlaufen() -> Result<(), String> {
     assert_eq!(netz.abgerufen.len(), 3);
     Ok(())
 }
+
+fn lauf_ueber_ezb_feiertag(
+    schluss: u16,
+    referenzen: &[(&str, &str)],
+) -> Result<(Bericht, Journal), String> {
+    let (journal, roh) = ordner()?;
+    let csv = format!(
+        "date,close,high,low\n2026-04-02,100,100,100\n2026-04-06,105,105,105\n2026-04-07,{schluss},{schluss},{schluss}\n"
+    );
+    let mut netz = Erfunden::neu(&[("ezb", Ok(ezb(referenzen))), ("jpm", Ok(csv))]);
+    let b = vorbedingung(
+        lauf(
+            &journal,
+            &roh,
+            &mut netz,
+            &zugang()?,
+            vec![utc(4, 8, 5, 29)?, utc(4, 8, 5, 30)?],
+            &vorbedingung(
+                pruefe_liste(&[("US46625H1005", Boerse::Nyse, "JPM", "JPMorgan Chase")]),
+                "Liste",
+            )?,
+        )?,
+        "Morgenabruf",
+    )?;
+    Ok((b, vorbedingung(Journal::oeffnen(&journal), "Journal")?))
+}
+
+#[test]
+fn ueber_feiertag_innerhalb_15() -> Result<(), String> {
+    let (b, j) = lauf_ueber_ezb_feiertag(110, &[("2026-04-02", "1.1"), ("2026-04-07", "1.1")])?;
+    assert!(
+        b.pruefung.is_empty() && b.ausgelassen.is_empty() && b.verwendbar(),
+        "{b:?}"
+    );
+    let tage: Vec<_> = j
+        .stand()
+        .kurse()
+        .iter()
+        .map(|b| b.kurs().handelstag())
+        .collect();
+    assert_eq!(tage, [tag(4, 2)?, tag(4, 7)?]);
+    Ok(())
+}
+
+#[test]
+fn ueber_feiertag_sprung_bleibt_sprung() -> Result<(), String> {
+    let (b, _) = lauf_ueber_ezb_feiertag(120, &[("2026-04-02", "1.1"), ("2026-04-07", "1.1")])?;
+    assert!(
+        matches!(
+            b.ausgelassen.as_slice(),
+            [DatenFehler::Kurssprung {
+                sprung_bp: 2_000,
+                ..
+            }]
+        ),
+        "{b:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn vortag_ganz_ohne_ezb() -> Result<(), String> {
+    let (b, j) = lauf_ueber_ezb_feiertag(110, &[("2026-04-07", "1.1")])?;
+    assert!(
+        matches!(b.ausgelassen.as_slice(), [DatenFehler::KeinVergleichskurs(isin)]
+            if isin.als_str() == "US46625H1005"),
+        "{b:?}"
+    );
+    assert!(!b.verwendbar(), "{b:?}");
+    assert!(
+        j.stand()
+            .kurse()
+            .iter()
+            .all(|b| b.isin().als_str() != "US46625H1005")
+    );
+    Ok(())
+}

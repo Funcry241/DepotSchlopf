@@ -112,8 +112,8 @@ impl Bericht {
     /// Schlusskurse belegt sind und die
     /// Pruefung wie im Papiertag nichts meldet, was den Zyklus ausfallen liesse (K19-02): Pflicht
     /// sind die gehaltenen Werte; ein Kandidat mit Fehler oder ohne Abruf faellt nur aus der
-    /// Auswahl des Tages. Belegt bleibt alles, was abgerufen wurde; verwendbar ist es damit
-    /// noch nicht.
+    /// Auswahl des Tages. Die Belegung eines Kurses und seine Handelbarkeit sind getrennt.
+    /// Ein NYSE-Schluss ohne belegbaren Vergleichskurs bleibt im Rohabruf.
     pub fn verwendbar(&self) -> bool {
         !self.sicherheitsabbruch && self.handelstag.is_some() && self.pruefung.is_empty()
     }
@@ -626,17 +626,25 @@ pub fn sammle(
             };
         gelesen.normalisierungen.extend(notizen);
         gelesen.belege(wert, abruf, &roh, &h, &v)?;
-        bericht.werte.push((
-            wert.clone(),
+        let ergebnis = if fehlt_nyse_vergleich(wert, &h, &v) {
+            Ergebnis::Fehler("Nicht belegt: kein NYSE-Vergleichskurs mit EZB-Referenzkurs".into())
+        } else {
             Ergebnis::Belegt {
                 heute: tag_und_preis(h.eintrag(&wert.isin)),
                 vortag: tag_und_preis(v.eintrag(&wert.isin)),
                 rohdatei,
-            },
-        ));
+            }
+        };
+        bericht.werte.push((wert.clone(), ergebnis));
     }
 
     abschliessen(bericht, journal, werte, gelesen)
+}
+
+fn fehlt_nyse_vergleich(wert: &Wert, heute: &Kurse, vortag: &Kurse) -> bool {
+    wert.boerse == Boerse::Nyse
+        && heute.eintrag(&wert.isin).is_some()
+        && vortag.eintrag(&wert.isin).is_none()
 }
 
 /// Was ein Lauf gelesen, aber noch nicht belegt hat.
@@ -663,6 +671,7 @@ impl Gelesen {
         for kurs in [vortag.eintrag(&wert.isin), heute.eintrag(&wert.isin)]
             .into_iter()
             .flatten()
+            .filter(|_| !fehlt_nyse_vergleich(wert, heute, vortag))
         {
             let beleg = KursBeleg::neu(quelle, abruf, roh, wert.isin.clone(), kurs.clone())
                 .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
