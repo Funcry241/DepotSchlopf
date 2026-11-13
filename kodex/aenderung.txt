@@ -1,15 +1,5 @@
-klasse: Funktion
-zweck: DepotSchlopf-Oberfläche und Einrichtungsreihenfolge vereinheitlichen
+klasse: KodexAenderung
+zweck: Geprüften alten Updater in CI-Folgeläufen wiederverwenden
 pfade:
-CHANGELOG.md
-crates/depot_dienst/src/gemini.rs
-crates/depot_dienst/src/gespraeche.rs
-crates/depot_dienst/src/lib.rs
-crates/depot_dienst/src/schluessel.rs
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/src/werkbank.rs
-crates/depot_dienst/tests/dienst.rs
-crates/depot_journal/src/anbieter.rs
-crates/depot_lage/src/html.rs
-crates/depot_lage/src/lib.rs
-crates/depot_lage/tests/lage.rs
+.github/scripts/pruefe_update_alt.py
+.github/workflows/kodex.yml

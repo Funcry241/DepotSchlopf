@@ -49,8 +49,42 @@ jobs:
           fetch-depth: 0
       - name: Rust-Werkzeugkette aus rust-toolchain.toml
         run: rustup toolchain install
+      - name: Cache-Schlüssel für alten Updater bestimmen
+        id: alt
+        shell: bash
+        run: |
+          commit=$(python .github/scripts/pruefe_update_alt.py --alt-commit)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Alten Updater aus Cache laden
+        id: cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/update-alt-bau/debug/depotschlopf
+          key: update-alt-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.alt.outputs.commit }}-${{ hashFiles('rust-toolchain.toml') }}
       - name: Alter Updater bei laufendem Dienst
-        run: python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$RUNNER_TEMP/depot-update-alt"
+        shell: bash
+        env:
+          ALT_CACHE_TREFFER: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          optionen=()
+          if [ "$ALT_CACHE_TREFFER" = true ]; then
+            optionen+=(--cache-treffer)
+          fi
+          python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$RUNNER_TEMP/depot-update-alt" --alt-bau "$RUNNER_TEMP/update-alt-bau" "${optionen[@]}"
+      - name: Geprüften alten Updater für Folgeläufe speichern
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/update-alt-bau/debug/depotschlopf
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: Protokoll der Updater-Gegenprobe bereitstellen
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gegenprobe-update-linux
+          path: ${{ runner.temp }}/depot-update-alt/gegenprobe.log
+          if-no-files-found: ignore
+          retention-days: 30
 
   kodex:
     # Der bisherige Linux-Check bleibt das gemeinsame Ergebnis beider Prüfungen.
@@ -117,9 +151,44 @@ jobs:
           fetch-depth: 0
       - name: Rust-Werkzeugkette aus rust-toolchain.toml
         run: rustup toolchain install
-      - name: Alter Windows-Updater bei laufendem Dienst
+      - name: Cache-Schlüssel für alten Updater bestimmen
+        id: alt
         shell: pwsh
-        run: python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$env:RUNNER_TEMP/depot-update-alt"
+        run: |
+          $commit = python .github/scripts/pruefe_update_alt.py --alt-commit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+      - name: Alten Updater aus Cache laden
+        id: cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/update-alt-bau/debug/depotschlopf.exe
+          key: update-alt-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.alt.outputs.commit }}-${{ hashFiles('rust-toolchain.toml') }}
+      - name: Alter Updater bei laufendem Dienst
+        shell: pwsh
+        env:
+          ALT_CACHE_TREFFER: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          $optionen = @()
+          if ($env:ALT_CACHE_TREFFER -eq "true") {
+            $optionen += "--cache-treffer"
+          }
+          python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$env:RUNNER_TEMP/depot-update-alt" --alt-bau "$env:RUNNER_TEMP/update-alt-bau" @optionen
+          exit $LASTEXITCODE
+      - name: Geprüften alten Updater für Folgeläufe speichern
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/update-alt-bau/debug/depotschlopf.exe
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: Protokoll der Updater-Gegenprobe bereitstellen
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gegenprobe-update-windows
+          path: ${{ runner.temp }}/depot-update-alt/gegenprobe.log
+          if-no-files-found: ignore
+          retention-days: 30
 
   kodex-windows:
     # Der bisherige Windows-Check bleibt das gemeinsame Ergebnis beider Prüfungen.
