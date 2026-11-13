@@ -55,6 +55,18 @@ pub fn bestaetigen(angebot: &PapierFreigabeAngebot) -> bool {
     )) == DialogErgebnis::Ja
 }
 
+pub(crate) fn sperre_bestaetigen(sperre: crate::Sperre) -> bool {
+    let text = match sperre {
+        crate::Sperre::Kostenschutz => {
+            "Sperre des KI-Kostenschutzes aufheben?\nBestätige nur, wenn du die Kosten beim Anbieter geprüft hast."
+        }
+        crate::Sperre::Kurse => {
+            "Kurssperre aufheben?\nBestätige nur, wenn du den Schlüssel der Kursquelle geprüft hast."
+        }
+    };
+    zeige(text) == DialogErgebnis::Ja
+}
+
 pub fn testen() -> DialogErgebnis {
     zeige("TEST – es wird nichts freigegeben.\nPrüfe, ob Nein vorausgewählt ist.")
 }
@@ -71,7 +83,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 $text = $env:DEPOTSCHLOPF_PAPIER_DIALOG
 $wahl = [System.Windows.Forms.MessageBox]::Show(
-    $text, 'DepotSchlopf - Papierfreigabe', 'YesNo', 'Warning', 'Button2', 'DefaultDesktopOnly')
+    $text, 'DepotSchlopf - Freigabe', 'YesNo', 'Warning', 'Button2', 'DefaultDesktopOnly')
 if ($wahl -eq [System.Windows.Forms.DialogResult]::Yes) { exit 0 }
 exit 2
 ";

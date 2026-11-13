@@ -70,6 +70,11 @@ pub trait Umwelt: Send + Sync {
     ) -> Option<Zeitpunkt> {
         None
     }
+    /// Verlangt eine Bestätigung am Desktop für die manuelle Aufhebung.
+    fn sperre_bestaetigen(&self, _sperre: Sperre) -> Option<Zeitpunkt> {
+        None
+    }
+
     fn papierdialog_testen(&self) -> DialogErgebnis {
         DialogErgebnis::NichtVerfuegbar
     }
@@ -108,6 +113,12 @@ impl Umwelt for System {
         } else {
             None
         }
+    }
+
+    fn sperre_bestaetigen(&self, sperre: Sperre) -> Option<Zeitpunkt> {
+        papierdialog::sperre_bestaetigen(sperre)
+            .then(jetzt)
+            .flatten()
     }
 
     fn papierdialog_testen(&self) -> DialogErgebnis {
@@ -486,8 +497,8 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             http::umleitung(&format!("/einrichtung?m={meldung}{ziel}"))
         }
         "/zeitplan" => zeitplan_aendern(d, &f),
-        "/kostenschutz" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kostenschutz),
-        "/kurssperre" => kostenschutz_aufheben(d, &f, jetzt, Sperre::Kurse),
+        "/kostenschutz" => kostenschutz_aufheben(d, u, &f, Sperre::Kostenschutz),
+        "/kurssperre" => kostenschutz_aufheben(d, u, &f, Sperre::Kurse),
         "/papierfreigabe" => papier_freigeben(d, u, &f),
         "/papierdialog-test" => papierdialog_testen(d, u),
         "/autostart" => {
@@ -699,8 +710,8 @@ fn papier_freigeben(d: &Dienst, u: &dyn Umwelt, f: &[(String, String)]) -> Vec<u
 }
 
 /// Welche Sperrdatei ein Formular aufhebt.
-#[derive(Clone, Copy)]
-enum Sperre {
+#[derive(Clone, Copy, Debug)]
+pub enum Sperre {
     Kostenschutz,
     Kurse,
 }
@@ -709,8 +720,8 @@ enum Sperre {
 /// Kurssperre.
 fn kostenschutz_aufheben(
     d: &Dienst,
+    u: &dyn Umwelt,
     f: &[(String, String)],
-    jetzt: Zeitpunkt,
     sperre: Sperre,
 ) -> Vec<u8> {
     let (name, anker) = match sperre {
@@ -726,6 +737,28 @@ fn kostenschutz_aufheben(
             400,
             "Die Sperre hat sich möglicherweise geändert. Öffne die Einrichtung erneut.",
         );
+    };
+    let Ok(_dialog) = d.papierdialog.try_lock() else {
+        return ziel("dialog_belegt");
+    };
+    {
+        let z = d.sperre();
+        if z.laufend.is_some() || !z.warteschlange.is_empty() {
+            return ziel("belegt");
+        }
+        let pfad = match sperre {
+            Sperre::Kostenschutz => kostenschutz::pfad(&d.wurzel),
+            Sperre::Kurse => kostenschutz::kurse_pfad(&d.wurzel),
+        };
+        match werkbank::lies_falls_da(&pfad) {
+            Ok(Some(inhalt)) if kostenschutz::abdruck(&inhalt) == gesehen => {}
+            Ok(Some(_)) => return ziel("geaendert"),
+            Ok(None) => return ziel("frei"),
+            Err(_) => return ziel("fehler"),
+        }
+    }
+    let Some(jetzt) = u.sperre_bestaetigen(sperre) else {
+        return ziel("dialog_unbestaetigt");
     };
     // Unter der Sperre des Zustands: Waehrenddessen startet kein Auftrag.
     let mut z = d.sperre();

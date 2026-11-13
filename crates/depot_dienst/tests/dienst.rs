@@ -132,6 +132,8 @@ struct Attrappe {
     abgelegt: Mutex<Vec<(Wer, String)>>,
     autostart: Mutex<Option<bool>>,
     papierfreigabe: bool,
+    sperrfreigabe: bool,
+    sperrdatei_wechsel: Option<PathBuf>,
     gemini_schluessel: Option<Hinterlegt>,
 }
 
@@ -164,6 +166,13 @@ impl Umwelt for Attrappe {
         self.papierfreigabe
             .then_some("2026-11-05T11:01:23Z")
             .and_then(Zeitpunkt::lies)
+    }
+
+    fn sperre_bestaetigen(&self, _: depot_dienst::Sperre) -> Option<Zeitpunkt> {
+        if let Some(pfad) = &self.sperrdatei_wechsel {
+            fs::write(pfad, "Neue Sperre").ok()?;
+        }
+        self.sperrfreigabe.then(|| donnerstag(18, 1).ok()).flatten()
     }
 
     fn papierdialog_testen(&self) -> depot_dienst::DialogErgebnis {
@@ -1074,6 +1083,14 @@ fn sperre_des_kostenschutzes_gefuehrt_aufheben() -> Result<(), String> {
     assert!(halt.exists());
 
     let r = text(&behandle(&d, &umw, &aufheben(&abdruck, true), t));
+    assert!(r.contains("m=kostenschutz_dialog_unbestaetigt"), "{r}");
+    assert!(halt.exists());
+    let umw = Attrappe {
+        sperrfreigabe: true,
+        ..umw
+    };
+
+    let r = text(&behandle(&d, &umw, &aufheben(&abdruck, true), t));
     assert!(r.contains("m=kostenschutz_aufgehoben"), "{r}");
     assert!(!halt.exists());
     let festgehalten = fs::read_to_string(kostenschutz::protokoll_pfad(&wurzel))
@@ -1102,6 +1119,28 @@ fn sperre_des_kostenschutzes_gefuehrt_aufheben() -> Result<(), String> {
         s.contains("id=\"ki-verbindung\""),
         "Die Erklärung bleibt unter Werkzeuge erreichbar: {s}"
     );
+    Ok(())
+}
+
+#[test]
+fn bestaetigter_dialog_hebt_keine_inzwischen_geaenderte_sperre_auf() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let halt = kostenschutz::pfad(&wurzel);
+    fs::write(&halt, "Alte Sperre").map_err(|e| e.to_string())?;
+    let umw = Attrappe {
+        sperrfreigabe: true,
+        sperrdatei_wechsel: Some(halt.clone()),
+        ..Attrappe::default()
+    };
+    let post = aufheben(&kostenschutz::abdruck("Alte Sperre"), true);
+    let r = text(&behandle(&d, &umw, &post, donnerstag(18, 0)?));
+    assert!(r.contains("m=kostenschutz_geaendert"), "{r}");
+    assert_eq!(
+        fs::read_to_string(halt).map_err(|e| e.to_string())?,
+        "Neue Sperre"
+    );
+    assert!(!kostenschutz::protokoll_pfad(&wurzel).exists());
     Ok(())
 }
 
@@ -1148,6 +1187,14 @@ fn kurssperre_gefuehrt_aufheben() -> Result<(), String> {
     assert!(r.contains("m=kurssperre_belegt"), "{r}");
     assert!(halt.exists(), "die Sperre bleibt");
     d.sperre().warteschlange.clear();
+
+    let r = text(&behandle(&d, &umw, &post(&abdruck, true), t));
+    assert!(r.contains("m=kurssperre_dialog_unbestaetigt"), "{r}");
+    assert!(halt.exists());
+    let umw = Attrappe {
+        sperrfreigabe: true,
+        ..umw
+    };
 
     let r = text(&behandle(&d, &umw, &post(&abdruck, true), t));
     assert!(r.contains("m=kurssperre_aufgehoben"), "{r}");
