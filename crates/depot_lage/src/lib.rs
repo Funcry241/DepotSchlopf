@@ -27,6 +27,7 @@ pub use depot_journal::{abrufkontingent, anbieter, gespraeche, kurssperre};
 mod budget;
 mod depot;
 pub mod depotverlauf;
+pub mod diagramm;
 pub mod html;
 pub mod tage;
 pub mod vergleich;

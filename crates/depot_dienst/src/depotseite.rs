@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use depot_kern::{Cent, Preis, TopfId, Zeitpunkt};
+use depot_lage::depotverlauf::{Tagespunkt, Zeitraum, depotverlauf, im_zeitraum};
 use depot_lage::html::{maskiere, prozent};
 use depot_lage::{DepotLage, Tagesergebnis, Zugang, datum_text, zeit_text};
 
@@ -190,7 +191,80 @@ fn orders(stand: &depot_journal::Stand, werte: &[depot_kern::liste::Wert], text:
     text.push_str("</table></div></section>");
 }
 
-pub fn inhalt(daten: &Path, jetzt: Zeitpunkt) -> String {
+fn zahlen_je_tag(punkte: &[Tagespunkt], text: &mut String) {
+    text.push_str("<details><summary>Zahlen je Tag</summary><div class=\"breit\"><table><thead><tr><th>Tag</th><th>Wertpapiere</th><th>Bargeld</th><th>Gesamt</th><th>Zum Vortag</th></tr></thead><tbody>");
+    let mut vorher: Option<Cent> = None;
+    for punkt in punkte {
+        let gesamt = punkt.grund.as_ref().map_or_else(
+            || geld(punkt.gesamt),
+            |grund| format!("nicht bewertbar: {}", maskiere(grund)),
+        );
+        let aenderung = punkt
+            .gesamt
+            .zip(vorher)
+            .and_then(|(wert, basis)| wert.checked_sub(basis));
+        let _ = write!(
+            text,
+            "<tr><th scope=\"row\">{}</th><td>{}</td><td>{}</td><td>{gesamt}</td><td>{}</td></tr>",
+            datum_text(punkt.tag),
+            geld(punkt.wertpapiere),
+            geld(punkt.bargeld),
+            geld(aenderung)
+        );
+        vorher = punkt.gesamt;
+    }
+    text.push_str("</tbody></table></div></details>");
+}
+
+fn entwicklung(
+    punkte: &[Tagespunkt],
+    startgeld: Option<Cent>,
+    zeitraum: Zeitraum,
+    text: &mut String,
+) {
+    text.push_str("<section><h2>Entwicklung</h2><p aria-label=\"Zeitraum\">");
+    for (auswahl, label) in [
+        (Zeitraum::Monat, "1 Monat"),
+        (Zeitraum::DreiMonate, "3 Monate"),
+        (Zeitraum::Jahr, "1 Jahr"),
+        (Zeitraum::Alles, "Alles"),
+    ] {
+        if auswahl != Zeitraum::Monat {
+            text.push_str(" · ");
+        }
+        let aktiv = if auswahl == zeitraum {
+            " aria-current=\"true\""
+        } else {
+            ""
+        };
+        let _ = write!(
+            text,
+            "<a href=\"/depot?zeitraum={}\"{aktiv}>{label}</a>",
+            auswahl.als_abfrage()
+        );
+    }
+    text.push_str("</p>");
+    if punkte.is_empty() {
+        text.push_str(
+            "<p>Im gewählten Zeitraum gibt es noch keinen abgeschlossenen Papiertag.</p></section>",
+        );
+        return;
+    }
+    text.push_str(
+        "<p>Linien: Gesamt (durchgezogen) · Wertpapiere (gestrichelt) · Bargeld (gepunktet)",
+    );
+    if startgeld.is_some() {
+        text.push_str(" · Startgeld (dünn gestrichelt)");
+    } else {
+        text.push_str(" · Startgeld nicht belegbar");
+    }
+    text.push_str("</p>");
+    text.push_str(&depot_lage::diagramm::svg_mit_startgeld(punkte, startgeld));
+    zahlen_je_tag(punkte, text);
+    text.push_str("</section>");
+}
+
+pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> String {
     let mut text = format!(
         "<section><h2>Depot</h2><p class=\"leise\">Stand {} · Seite neu laden für den neuesten Stand</p></section>",
         zeit_text(jetzt)
@@ -220,6 +294,19 @@ pub fn inhalt(daten: &Path, jetzt: Zeitpunkt) -> String {
         let bar = cash(&lage, &mut text);
         positionen(&lage, bar, &mut text);
         orders(stand, &werte, &mut text);
+        let verlauf = depotverlauf(stand, &werte);
+        let ab = jetzt.frankfurt_tag().and_then(|heute| zeitraum.ab(heute));
+        let startgeld = verlauf.first().and_then(|punkt| {
+            punkt.gesamt.or_else(|| {
+                let (_, toepfe) = stand.tagesschluesse().first()?;
+                toepfe
+                    .values()
+                    .all(|topf| topf.positionen().is_empty())
+                    .then_some(punkt.bargeld)
+                    .flatten()
+            })
+        });
+        entwicklung(im_zeitraum(&verlauf, ab), startgeld, zeitraum, &mut text);
         text.push_str("<p class=\"leise\">Nur Papiergeld. Werte zum abgerundeten Cent, Einstand aufgerundet.</p>");
     });
     text
@@ -276,5 +363,24 @@ mod tests {
         let mut html = String::new();
         assert_eq!(cash(&lage(), &mut html), Some(Cent(500_000)));
         assert!(html.contains("10,00 € (frei ab 17.11.2026)"), "{html}");
+    }
+
+    #[test]
+    fn zahlen_je_tag_markiert_fehlende_bewertung() -> Result<(), String> {
+        let mut html = String::new();
+        let punkt = Tagespunkt {
+            tag: depot_kern::Datum::neu(2026, 11, 13).ok_or("Datum")?,
+            wertpapiere: None,
+            bargeld: Some(Cent(900_000)),
+            gesamt: None,
+            grund: Some("Kurs fehlt für <Siemens>".into()),
+            kurstage: Vec::new(),
+            kursbezug: std::collections::BTreeMap::new(),
+            ersatz: Vec::new(),
+        };
+        zahlen_je_tag(&[punkt], &mut html);
+        assert!(html.contains("nicht bewertbar: Kurs fehlt für &lt;Siemens&gt;"));
+        assert!(html.contains("<td>9.000,00 €</td>"));
+        Ok(())
     }
 }
