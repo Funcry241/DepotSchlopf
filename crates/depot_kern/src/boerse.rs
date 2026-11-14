@@ -113,6 +113,11 @@ fn ostern(datum: Datum, abstand: i64) -> bool {
         .is_some_and(|d| d == datum)
 }
 
+/// Gesetzte Feiertage ohne EZB-Referenzkurs im TARGET-Kalender.
+pub fn target_geschlossen(d: Datum) -> bool {
+    matches!((d.monat(), d.tag()), (1 | 5, 1) | (12, 25 | 26)) || ostern(d, -2) || ostern(d, 1)
+}
+
 fn xetra_feiertag(d: Datum) -> Option<&'static str> {
     match (d.monat(), d.tag()) {
         (1, 1) => return Some("Neujahr"),

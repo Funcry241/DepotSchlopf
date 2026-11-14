@@ -1,4 +1,6 @@
 klasse: Funktion
-zweck: KI-Auftrag für kurzfristigen Papierhandel und Bargeldbegründung schärfen
+zweck: TARGET-Feiertage aus belegbaren NYSE-Kursvergleichen auslassen
 pfade:
-crates/depot_berater/src/frage.rs
+crates/depot_kern/src/boerse.rs
+crates/depot_sim/src/kursverlauf.rs
+crates/depot_sim/tests/papiertag.rs
