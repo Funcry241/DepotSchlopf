@@ -157,6 +157,10 @@ fn entscheidungsbelege(
             eintrag
                 .zweitmeinung
                 .push("Zweitmeinung ausgefallen. Grund im Journal.");
+        } else if grund.starts_with("Antwort verworfen:") {
+            eintrag
+                .vorschlag
+                .push("Erstmeinung verworfen. Grund im Journal.");
         } else if grund.starts_with("Zustimmung:") || grund.starts_with("Veto:") {
             eintrag.zweitmeinung.push(grund);
         } else if wer == "Regelwerk" {
@@ -292,7 +296,7 @@ mod tests {
                     ("Regelwerk", "Topf A: KeinVorschlag"),
                     (
                         "Maus",
-                        "Topf B: Antwort verworfen: Erfundener Erstmeinungsfehler",
+                        "Topf B: Antwort verworfen: Testanbieter: simuliertes HTTP 429",
                     ),
                     ("Regelwerk", "Topf B: KeinVorschlag"),
                 ]
@@ -341,6 +345,7 @@ mod tests {
         let text = bericht(Some(journal.stand()), Zeitraum { von, bis });
         pruefe_entscheidungen(&text)?;
         assert!(text.contains("Zweitmeinung ausgefallen. Grund im Journal."));
+        assert!(text.contains("Erstmeinung verworfen. Grund im Journal."));
         assert!(!text.contains("Testanbieter: simuliertes HTTP 429"));
         let mit_luecke = bericht(Some(journal.stand()), Zeitraum { von: tag(4)?, bis });
         drop(journal);
