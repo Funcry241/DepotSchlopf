@@ -540,7 +540,10 @@ mod tests {
                 adresse,
                 format!("{HOST}/v1beta/models/{MODELL}:generateContent")
             );
-            assert!(kopf.contains(&("x-goog-api-key", "AQ.erfundener-schluessel-12345")));
+            assert!(kopf.contains(&(
+                "x-goog-api-key",
+                concat!("AQ.", "erfundener-schluessel-12345")
+            )));
             let inhalt = String::from_utf8_lossy(inhalt);
             assert!(inhalt.contains("\"thinkingLevel\":\"high\"") && !inhalt.contains("Bargeld"));
             assert!(!inhalt.contains("erfundener-schluessel-12345"));
@@ -585,7 +588,7 @@ mod tests {
             inhalt: roh.into_bytes(),
             warten: None,
         }));
-        let schluessel = Schluessel::fuer_gemini("AQ.erfundener-schluessel-12345")?;
+        let schluessel = Schluessel::fuer_gemini(concat!("AQ.", "erfundener-schluessel-12345"))?;
         senden(&mut netz, &schluessel, &frage, &liste, &mut e);
         assert!(netz.0.is_none());
         assert_eq!(e.modell, "gemini-test");

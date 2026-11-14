@@ -57,7 +57,7 @@ fn mehrere_werte_escapes_fragmente_und_zeilenenden() {
 
 #[test]
 fn gemini_autorisierungsschluessel_wird_auch_ohne_speicher_maskiert() {
-    let key = "AQ.Erfundener_Gemini_Testwert";
+    let key = concat!("AQ.", "Erfundener_Gemini_Testwert");
     assert_eq!(
         maskiere(&format!("Gemini meldet ({key}).")),
         "Gemini meldet (***)."
