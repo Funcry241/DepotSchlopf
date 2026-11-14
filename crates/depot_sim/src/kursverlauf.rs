@@ -23,11 +23,18 @@ pub fn kursverlauf(stand: &Stand, isin: &Isin, bis: Datum, wissen: Zeitpunkt) ->
 
 fn berechne(stand: &Stand, isin: &Isin, bis: Datum, wissen: Zeitpunkt) -> Option<Verlauf> {
     let boerse = depot_kern::liste::boerse_von(isin)?;
+    let fremdwaehrung = boerse.waehrung() == "USD";
+    let vergleichbar = |tag| !fremdwaehrung || !depot_kern::boerse::target_geschlossen(tag);
     let mut tag = bis;
-    let mut tage = vec![tag];
-    for _ in 0..20 {
+    while !vergleichbar(tag) {
         tag = boerse.bezugstag(tag)?;
-        tage.push(tag);
+    }
+    let mut tage = vec![tag];
+    while tage.len() < 21 {
+        tag = boerse.bezugstag(tag)?;
+        if vergleichbar(tag) {
+            tage.push(tag);
+        }
     }
     let mut belege = BTreeMap::new();
     for beleg in stand.kurse().iter().filter(|b| {
