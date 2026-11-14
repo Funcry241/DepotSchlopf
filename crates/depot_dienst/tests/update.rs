@@ -1071,15 +1071,36 @@ test('neuer Dienst in Probe wird erst nach Bestätigung geladen',async()=>{
   assert.deepEqual(b.navigations,[]);
   bereit=true;await b.advance(4000);assert.deepEqual(b.navigations,['/einrichtung#update']);
 });
+test('Abbruch beim bestätigten Update bleibt bis zur Frist neutral',async()=>{
+  let offline=true;
+  const b=browser({response:()=>offline?Promise.reject(Error('offline')):reply(health('neu'))});
+  await b.advance(60000);
+  assert.equal(b.banner.hasAttribute('data-update-wartet'),true);
+  assert.match(b.banner.textContent,/nichts tun/);
+  await b.advance(121000);
+  assert.equal(b.banner.hasAttribute('data-update-wartet'),false);
+  assert.match(b.banner.textContent,/starte DepotSchlopf.cmd erneut/);
+  offline=false;await b.advance(5000);
+  assert.deepEqual(b.navigations,['/einrichtung#update']);
+});
+test('Nach einem beendeten Update bleibt ein späterer Abbruch eine normale Störung',async()=>{
+  let offline=false;
+  const b=browser({response:()=>offline?Promise.reject(Error('offline')):reply(health('alt')+'<span data-update-laeuft="nein"></span>')});
+  await b.advance(0);
+  assert.deepEqual(b.navigations,[]);
+  offline=true;await b.advance(2000);
+  assert.equal(b.banner.hasAttribute('data-update-wartet'),false);
+  assert.match(b.banner.textContent,/Verbindung zu DepotSchlopf unterbrochen/);
+});
 test('abgewiesene Verbindung erholt sich und erkennt auch den Rückfall',async()=>{
-  let offline=true;const b=browser({response:()=>offline?Promise.reject(Error('offline')):reply(health('rueckfall'))});
+  let offline=true;const b=browser({href:'http://127.0.0.1:47410/einrichtung#update',response:()=>offline?Promise.reject(Error('offline')):reply(health('rueckfall'))});
   await b.advance(0);assert.equal(b.banner.hidden,false);assert.equal(b.navigations.length,0);
   offline=false;await b.advance(5000);assert.deepEqual(b.navigations,['/einrichtung#update']);
 });
 test('auch hängender Abruf und hängender Antwortkörper werden abgebrochen und erneut versucht',async()=>{
   for(const body of [false,true]){
     let haengt=true;
-    const b=browser({response:(_,o)=>{
+    const b=browser({href:'http://127.0.0.1:47410/einrichtung#update',response:(_,o)=>{
       if(!haengt)return reply(health());
       const pending=new Promise((_,reject)=>o.signal.addEventListener('abort',()=>reject(Error('aborted'))));
       return body?Promise.resolve({ok:true,text:()=>pending}):pending;

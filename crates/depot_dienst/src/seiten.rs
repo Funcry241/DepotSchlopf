@@ -2349,6 +2349,7 @@ pub const APP_JS: &str = r#""use strict";
   var marke = document.querySelector("[data-start]");
   var start = marke ? marke.getAttribute("data-start") : null;
   var neuladen = false;
+  var updateErwartetSeit = new URL(window.location.href).searchParams.get("m") === "update" ? Date.now() : null;
   var updateWartetSeit = null;
   var updateFrist = 180000;
   var pausiert = false;
@@ -2383,6 +2384,17 @@ pub const APP_JS: &str = r#""use strict";
     ziel.searchParams.delete("m");
     return ziel.pathname + ziel.search + ziel.hash;
   }
+  function zeigeUpdateWartezeit() {
+    var jetzt = Date.now();
+    if (jetzt - updateWartetSeit < updateFrist) {
+      banner.setAttribute("data-update-wartet", "");
+      banner.textContent = "Die neue Version startet gerade. Du musst nichts tun. Die Seite lädt sich von selbst neu.";
+    } else {
+      banner.removeAttribute("data-update-wartet");
+      banner.textContent = "Die neue Version wurde nicht innerhalb von drei Minuten bestätigt. Prüfe das DepotSchlopf-Fenster auf eine Fehlermeldung. Wenn es geschlossen ist, starte DepotSchlopf.cmd erneut.";
+    }
+    banner.hidden = false;
+  }
   async function verbindung() {
     var g = generation;
     var fehler = false;
@@ -2392,19 +2404,17 @@ pub const APP_JS: &str = r#""use strict";
       var neu = kennung(t);
       if (!neu) { throw new Error("Startkennung fehlt"); }
       // Ältere Rückfallstände kennen nur data-start; sie bleiben erreichbar.
+      if (t.indexOf('data-update-laeuft="ja"') !== -1 && updateErwartetSeit === null) {
+        updateErwartetSeit = Date.now();
+      }
       var bereit = t.indexOf('data-bereit="nein"') === -1;
       if (!bereit) {
-        var jetzt = Date.now();
-        if (updateWartetSeit === null) { updateWartetSeit = jetzt; }
-        if (jetzt - updateWartetSeit < updateFrist) {
-          banner.setAttribute("data-update-wartet", "");
-          banner.textContent = "Die neue Version startet gerade. Du musst nichts tun. Die Seite lädt sich von selbst neu.";
-        } else {
-          banner.removeAttribute("data-update-wartet");
-          banner.textContent = "Die neue Version wurde nicht innerhalb von drei Minuten bestätigt. Prüfe das DepotSchlopf-Fenster auf eine Fehlermeldung. Wenn es geschlossen ist, starte DepotSchlopf.cmd erneut.";
-        }
-        banner.hidden = false;
+        if (updateWartetSeit === null) { updateWartetSeit = Date.now(); }
+        zeigeUpdateWartezeit();
         return;
+      }
+      if (t.indexOf('data-update-laeuft="nein"') !== -1) {
+        updateErwartetSeit = null;
       }
       var updateBestaetigt = updateWartetSeit !== null;
       updateWartetSeit = null;
@@ -2427,6 +2437,10 @@ pub const APP_JS: &str = r#""use strict";
     } catch (_) {
       if (g !== generation || pausiert) { return; }
       fehler = true;
+      if (updateWartetSeit === null && updateErwartetSeit !== null) {
+        updateWartetSeit = updateErwartetSeit;
+      }
+      if (updateWartetSeit !== null) { zeigeUpdateWartezeit(); return; }
       banner.removeAttribute("data-update-wartet");
       banner.textContent = "Verbindung zu DepotSchlopf unterbrochen. Die Seite versucht es automatisch erneut. Lass das DepotSchlopf-Fenster offen.";
       banner.hidden = false;
