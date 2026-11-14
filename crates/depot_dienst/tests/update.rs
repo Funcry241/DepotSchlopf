@@ -966,9 +966,15 @@ function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47
   let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={},docEvents={};
   const attributes=new Set();
   const banner={hidden:true,textContent:'',setAttribute:n=>attributes.add(n),removeAttribute:n=>attributes.delete(n),hasAttribute:n=>attributes.has(n)}, reconnect={hidden:true}, reconnectLink={href:'/einrichtung'};
-  const herz={attribute:{},setAttribute(n,v){this.attribute[n]=v;}};
+  const element=()=>({attribute:{},textContent:'',setAttribute(n,v){this.attribute[n]=v;}});
+  const herz=element(),figuren=element(),dachs=element(),maus=element(),otter=element();
   const elements=Array.from({length:parts},(_,i)=>({innerHTML:'alt',getAttribute:()=>urls[i],querySelectorAll:()=>[]}));
-  const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:id==='neuverbinden-link'?reconnectLink:id==='herz'?herz:banner,querySelector:s=>{
+  const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:id==='neuverbinden-link'?reconnectLink:id==='herz'?herz:id==='kopffiguren'?figuren:id==='kopf-dachs'?dachs:id==='kopf-maus'?maus:id==='kopf-otter'?otter:banner,querySelector:s=>{
+    if(s.includes('[data-figuren]')){
+      const f=elements[urls.indexOf('/teil/kopf')]?.innerHTML.match(/<span data-figuren ([^>]+)>/);
+      const attribute=Object.fromEntries(Array.from(f?.[1].matchAll(/(data-[a-z-]+)="([^"]*)"/g)??[],m=>[m[1],m[2]]));
+      return f?{getAttribute:n=>attribute[n]??null}:null;
+    }
     if(s.includes('[data-ampel]')){
       const w=elements[urls.indexOf('/teil/kopf')]?.innerHTML.match(/data-ampel="([^"]+)"/);
       return w?{getAttribute:()=>w[1]}:null;
@@ -980,7 +986,7 @@ function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47
     setTimeout:(f,delay)=>{const id=++nr;timers.set(id,{f,at:now+delay});return id},clearTimeout:id=>timers.delete(id),
     fetch:(url,options)=>{requests.push({url,options});return response(url,options)}
   });
-  return {banner,herz,reconnect,reconnectLink,elements,requests,navigations,events,docEvents,get timers(){return timers},
+  return {banner,herz,figuren,dachs,maus,otter,reconnect,reconnectLink,elements,requests,navigations,events,docEvents,get timers(){return timers},
     async advance(ms){const end=now+ms;for(let i=0;i<200;i++){const due=[...timers.entries()].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;timers.delete(due[0]);now=due[1].at;due[1].f();await new Promise(r=>setImmediate(r));}now=end;}
   };
 }
@@ -1113,6 +1119,20 @@ test('Statusherz folgt der Betriebsleiste und zeigt einen Verbindungsabbruch',as
   assert.equal(b.herz.attribute['aria-label'],'Eingriff nötig');
   offline=false;await b.advance(5000);
   assert.equal(b.herz.attribute['data-zustand'],'gut');
+});
+test('Kopffiguren bleiben stehen und übernehmen nur Daten und Text',async()=>{
+  let denkt='beide';
+  const b=browser({parts:1,urls:['/teil/kopf'],response:u=>reply(health()+(u==='/teil/kopf'?
+    `<span data-figuren data-denkt="${denkt}" data-otter="dran" data-dachs="Beobachtet." data-maus="Keine Änderung." data-otter-satz="Ich bin dran: Kurssperre." data-dachs-titel="Dachs, 11.11.2026"></span>`:''))});
+  await b.advance(2000);
+  assert.equal(b.figuren.attribute['data-denkt'],'beide');
+  assert.equal(b.figuren.attribute['data-otter'],'dran');
+  assert.equal(b.dachs.textContent,'Beobachtet.');
+  assert.equal(b.dachs.attribute.title,'Dachs, 11.11.2026');
+  assert.equal(b.otter.textContent,'Ich bin dran: Kurssperre.');
+  denkt='helfer';await b.advance(2000);
+  assert.equal(b.figuren.attribute['data-denkt'],'helfer');
+  assert.equal(b.maus.textContent,'Keine Änderung.');
 });
 test('abgewiesene Verbindung erholt sich und erkennt auch den Rückfall',async()=>{
   let offline=true;const b=browser({href:'http://127.0.0.1:47410/einrichtung#update',response:()=>offline?Promise.reject(Error('offline')):reply(health('rueckfall'))});

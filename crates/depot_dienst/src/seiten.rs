@@ -556,6 +556,7 @@ pub fn rahmen(
     let otter_stil = if hier == "/" { otter::STIL } else { "" };
     let herz = crate::schmuck::HERZ;
     let herz_stil = crate::schmuck::STIL;
+    let figuren = crate::schmuck::FIGUREN;
     let _ = write!(
         s,
         "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
@@ -566,7 +567,7 @@ pub fn rahmen(
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div>\
          <p id=\"neuverbinden\" hidden><a id=\"neuverbinden-link\" class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
          <nav aria-label=\"Hauptnavigation\"><h1>{herz}DepotSchlopf</h1>{}{}{}{}\
-         <span class=\"leise\">Nur Papiergeld.</span>{version}</nav>\
+         <span class=\"leise\">Nur Papiergeld.</span>{figuren}{version}</nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit DepotSchlopf läuft. \
          Du kannst es minimieren.</p>",
         nav("/", "Live"),
@@ -1285,12 +1286,19 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
     kurssperre: Option<&str>,
 ) -> String {
     let mut s = marke(start);
-    let ampel = crate::schmuck::ampel(z.gesamtstatus().as_ref(), kurssperre.is_some());
+    let betrieb = z.gesamtstatus();
+    let ampel = crate::schmuck::ampel(betrieb.as_ref(), kurssperre.is_some());
     let _ = write!(
         s,
         "<span hidden data-otter=\"{}\" data-ampel=\"{ampel}\"></span>",
         otter::pose(z, kurssperre.is_some())
     );
+    s.push_str(&crate::schmuck::aussagen(
+        z,
+        heute,
+        betrieb.as_ref(),
+        kurssperre,
+    ));
     if let Some(a) = &z.laufend {
         let _ = write!(
             s,
@@ -2371,11 +2379,27 @@ pub const APP_JS: &str = r#""use strict";
     herz.setAttribute("aria-label", text);
     herz.setAttribute("title", text);
   }
+  function kopfaussagen() {
+    var ziel = document.getElementById("kopffiguren");
+    var daten = document.querySelector('#betriebsleiste [data-figuren]');
+    if (!ziel || !daten) { return; }
+    ziel.setAttribute("data-denkt", daten.getAttribute("data-denkt"));
+    ziel.setAttribute("data-otter", daten.getAttribute("data-otter"));
+    ["dachs", "maus", "otter"].forEach(function (wer) {
+      var blase = document.getElementById("kopf-" + wer);
+      if (!blase) { return; }
+      var satz = daten.getAttribute("data-" + (wer === "otter" ? "otter-satz" : wer)) || "";
+      if (blase.textContent !== satz) { blase.textContent = satz; }
+      var titel = daten.getAttribute("data-" + wer + "-titel");
+      if (titel) { blase.setAttribute("title", titel); }
+    });
+  }
   function merkeAmpel() {
     var marke = document.querySelector('#betriebsleiste [data-ampel]');
     var zustand = marke && marke.getAttribute("data-ampel");
     ampel = zustand === "gut" || zustand === "halt" ? zustand : "offen";
     zeigeHerz();
+    kopfaussagen();
   }
   merkeAmpel();
   var marke = document.querySelector("[data-start]");
