@@ -966,14 +966,21 @@ function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47
   let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={},docEvents={};
   const attributes=new Set();
   const banner={hidden:true,textContent:'',setAttribute:n=>attributes.add(n),removeAttribute:n=>attributes.delete(n),hasAttribute:n=>attributes.has(n)}, reconnect={hidden:true}, reconnectLink={href:'/einrichtung'};
+  const herz={attribute:{},setAttribute(n,v){this.attribute[n]=v;}};
   const elements=Array.from({length:parts},(_,i)=>({innerHTML:'alt',getAttribute:()=>urls[i],querySelectorAll:()=>[]}));
-  const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:id==='neuverbinden-link'?reconnectLink:banner,querySelector:()=>known?{getAttribute:()=>known}:null,querySelectorAll:s=>s==='[data-teil]'?elements:s==='form[data-aenderungen]'?forms:[]};
+  const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:id==='neuverbinden-link'?reconnectLink:id==='herz'?herz:banner,querySelector:s=>{
+    if(s.includes('[data-ampel]')){
+      const w=elements[urls.indexOf('/teil/kopf')]?.innerHTML.match(/data-ampel="([^"]+)"/);
+      return w?{getAttribute:()=>w[1]}:null;
+    }
+    return known?{getAttribute:()=>known}:null;
+  },querySelectorAll:s=>s==='[data-teil]'?elements:s==='form[data-aenderungen]'?forms:[]};
   vm.runInNewContext(script,{document,navigator:{},URL,AbortController,Set,Date:{now:()=>now},
     window:{confirm,addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
     setTimeout:(f,delay)=>{const id=++nr;timers.set(id,{f,at:now+delay});return id},clearTimeout:id=>timers.delete(id),
     fetch:(url,options)=>{requests.push({url,options});return response(url,options)}
   });
-  return {banner,reconnect,reconnectLink,elements,requests,navigations,events,docEvents,get timers(){return timers},
+  return {banner,herz,reconnect,reconnectLink,elements,requests,navigations,events,docEvents,get timers(){return timers},
     async advance(ms){const end=now+ms;for(let i=0;i<200;i++){const due=[...timers.entries()].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;timers.delete(due[0]);now=due[1].at;due[1].f();await new Promise(r=>setImmediate(r));}now=end;}
   };
 }
@@ -1091,6 +1098,21 @@ test('Nach einem beendeten Update bleibt ein späterer Abbruch eine normale Stö
   offline=true;await b.advance(2000);
   assert.equal(b.banner.hasAttribute('data-update-wartet'),false);
   assert.match(b.banner.textContent,/Verbindung zu DepotSchlopf unterbrochen/);
+});
+test('Statusherz folgt der Betriebsleiste und zeigt einen Verbindungsabbruch',async()=>{
+  let offline=false;
+  const b=browser({parts:1,urls:['/teil/kopf'],href:'http://127.0.0.1:47410/',response:url=>{
+    if(offline)return Promise.reject(Error('offline'));
+    return reply(health()+(url==='/teil/kopf'?'<span data-ampel="gut"></span>':''));
+  }});
+  await b.advance(2000);
+  assert.equal(b.herz.attribute['data-zustand'],'gut');
+  assert.equal(b.herz.attribute['aria-label'],'Alles läuft');
+  offline=true;await b.advance(2000);
+  assert.equal(b.herz.attribute['data-zustand'],'halt');
+  assert.equal(b.herz.attribute['aria-label'],'Eingriff nötig');
+  offline=false;await b.advance(5000);
+  assert.equal(b.herz.attribute['data-zustand'],'gut');
 });
 test('abgewiesene Verbindung erholt sich und erkennt auch den Rückfall',async()=>{
   let offline=true;const b=browser({href:'http://127.0.0.1:47410/einrichtung#update',response:()=>offline?Promise.reject(Error('offline')):reply(health('rueckfall'))});
