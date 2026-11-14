@@ -17,6 +17,7 @@ use crate::{Dienst, Umwelt, gespraeche, http, protokoll::Schutz, schluessel, sei
 
 mod ablauf;
 mod entscheidungsgrundlage;
+mod fehler;
 mod historie;
 mod journal;
 mod ki_kosten;
@@ -167,43 +168,6 @@ fn textdatei(pfad: &Path) -> Result<Option<String>, &'static str> {
         return Err("Lesegrenze überschritten");
     }
     Ok(Some(text))
-}
-
-fn quelle(pfad: &Path, name: &str, luecken: &mut String) -> String {
-    match textdatei(pfad) {
-        Ok(Some(text)) => text,
-        Ok(None) => {
-            let _ = writeln!(luecken, "- {name}: keine Datei vorhanden.");
-            String::new()
-        }
-        Err(grund) => {
-            let _ = writeln!(luecken, "- {name}: {grund}.");
-            String::new()
-        }
-    }
-}
-
-fn anbieterprotokoll(daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -> String {
-    let mut aus = String::new();
-    let text = quelle(
-        &daten.join(depot_lage::anbieter::DATEI),
-        "Anbieterprotokoll",
-        luecken,
-    );
-    let (eintraege, unlesbar) = depot_lage::anbieter::lies_alle(&text);
-    aus.push_str("\n## Anbieterprotokoll\n");
-    for e in eintraege.into_iter().filter(|e| zeitraum.enthaelt(e.zeit)) {
-        let http = e.http.map_or_else(|| "–".into(), |s| s.to_string());
-        let _ = writeln!(
-            aus,
-            "- {} · {} · {} · HTTP {http}",
-            zeit_text(e.zeit),
-            e.wer.kurz(),
-            e.ergebnis.kurz()
-        );
-    }
-    let _ = writeln!(aus, "\nUnlesbare Anbieterzeilen: {unlesbar}.");
-    aus
 }
 
 fn konfiguration(d: &Dienst, u: &dyn Umwelt, daten: &Path) -> String {
@@ -739,7 +703,7 @@ fn programmstand(version: Option<&str>) -> String {
 
 struct Journalpaket {
     pruefbericht: String,
-    ablauf: String,
+    betrieb: String,
     kurz: String,
     depotdetails: String,
     orders: String,
@@ -802,13 +766,18 @@ fn ausfuehrungen_csv(
     csv
 }
 
+struct Betrieb {
+    ablauf: ablauf::Ablauf,
+    fehler: fehler::Belege,
+}
+
 fn journalpaket(
     daten: &Path,
     jetzt: Zeitpunkt,
     tag: Datum,
     zeitraum: Zeitraum,
     sperren: &str,
-    ablauf: &ablauf::Ablauf,
+    betrieb: &Betrieb,
     luecken: &mut String,
 ) -> Result<Journalpaket, JournalFehler> {
     match Journal::pruefe_lesend_mit_eintraegen(
@@ -820,12 +789,17 @@ fn journalpaket(
             let orders = orders::bericht(stand, eintraege, &buch, zeitraum);
             let historie = historie::bericht(zeitraum, Some(stand), luecken);
             let (ki, gespraechsbelege) = ki(daten, zeitraum, Some(stand), luecken);
-            let pruefbericht = pruefbericht::bericht(Some(stand), zeitraum, ablauf.ampel())
-                + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
+            let pruefbericht = pruefbericht::bericht(
+                Some(stand),
+                zeitraum,
+                betrieb.ablauf.ampel(),
+                betrieb.fehler.ampel(true),
+            ) + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
                 + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege);
             Journalpaket {
                 pruefbericht,
-                ablauf: ablauf.bericht(Some(stand)),
+                betrieb: betrieb.ablauf.bericht(Some(stand))
+                    + &betrieb.fehler.bericht(Some(eintraege), zeitraum),
                 kurz,
                 depotdetails,
                 orders,
@@ -843,8 +817,13 @@ fn journalpaket(
                 "- Journalstand nicht bestätigt. Order-, Depot- und Kostenzahlen fehlen.\n",
             );
             Ok(Journalpaket {
-                pruefbericht: pruefbericht::bericht(None, zeitraum, ablauf.ampel()),
-                ablauf: ablauf.bericht(None),
+                pruefbericht: pruefbericht::bericht(
+                    None,
+                    zeitraum,
+                    betrieb.ablauf.ampel(),
+                    betrieb.fehler.ampel(false),
+                ),
+                betrieb: betrieb.ablauf.bericht(None) + &betrieb.fehler.bericht(None, zeitraum),
                 kurz: "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n".into(),
                 depotdetails: String::new(),
                 orders: "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
@@ -907,12 +886,13 @@ pub(crate) fn exportieren(
     };
     let mut luecken = String::new();
     let ablauf = ablauf::Ablauf::laden(d, zeitraum, jetzt, &mut luecken);
-    let anbieter = anbieterprotokoll(&daten, zeitraum, &mut luecken);
+    let fehler = fehler::Belege::laden(&daten, &ablauf, zeitraum, &mut luecken);
+    let betrieb = Betrieb { ablauf, fehler };
     let konfiguration = konfiguration(d, u, &daten);
     let sperren = sperrentext(&daten);
     let Ok(Journalpaket {
         pruefbericht,
-        ablauf: zeitstrahl,
+        betrieb: betriebsbericht,
         kurz,
         depotdetails,
         orders,
@@ -926,7 +906,7 @@ pub(crate) fn exportieren(
         tag,
         zeitraum,
         &sperren,
-        &ablauf,
+        &betrieb,
         &mut luecken,
     )
     else {
@@ -958,7 +938,7 @@ pub(crate) fn exportieren(
             "04_orders_und_depot.md",
             format!("# Papierorders und Depot\n{orders}"),
         ),
-        ("05_betrieb_und_fehler.md", zeitstrahl + &anbieter),
+        ("05_betrieb_und_fehler.md", betriebsbericht),
         ("06_konfiguration.md", konfiguration),
         ("07_version.md", programmstand(d.version.as_deref())),
         ("ausfuehrungen.csv", ausfuehrungen),

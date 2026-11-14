@@ -8,7 +8,12 @@ use depot_kern::{Datum, TopfId};
 
 use super::Zeitraum;
 
-pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum, ablauf: &str) -> String {
+pub(super) fn bericht(
+    stand: Option<&Stand>,
+    zeitraum: Zeitraum,
+    ablauf: &str,
+    fehler: &str,
+) -> String {
     let mut text = format!("# Prüfbericht · {}\n\n", zeitraum.titel());
     let in_zeitraum = |tag| (zeitraum.von..=zeitraum.bis).contains(&tag);
     let handelstage = zeitraum
@@ -60,7 +65,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum, ablauf: &str) -
         ),
         (
             "Fehler",
-            "05_betrieb_und_fehler.md enthält vorhandene Fehler, Hinweise und Anbieterstatus.",
+            "05_betrieb_und_fehler.md zeigt belegte Ursachen, Reaktionen und Beleglücken.",
         ),
         (
             "Entscheidungen",
@@ -93,7 +98,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum, ablauf: &str) -
             "Entscheidungen" if stand.is_none() => "Rot (Journal fehlt)",
             "Nachher-Blick" => "Rot (noch nicht ausgewertet)",
             "Ablauf" => ablauf,
-            "Fehler" => "Gelb",
+            "Fehler" => fehler,
             _ if stand.is_none() => "Rot",
             _ => "Gelb",
         };
@@ -261,7 +266,7 @@ mod tests {
     #[test]
     fn nicht_bestaetigtes_journal_ist_rot() -> Result<(), String> {
         let tag = depot_kern::Datum::neu(2026, 11, 12).ok_or("Datum")?;
-        let text = bericht(None, Zeitraum { von: tag, bis: tag }, "Gelb");
+        let text = bericht(None, Zeitraum { von: tag, bis: tag }, "Gelb", "Gelb");
         assert!(text.contains("Journal nicht bestätigt"));
         assert!(text.contains("| Orders | Rot |"));
         assert!(!text.contains("KI-Buchungen: 0"));
@@ -343,7 +348,7 @@ mod tests {
         std::fs::write(&pfad, bytes).map_err(|e| e.to_string())?;
         std::fs::write(pfad.with_extension("vermerk"), vermerk).map_err(|e| e.to_string())?;
         let journal = Journal::oeffnen(&pfad).map_err(fehler)?;
-        let text = bericht(Some(journal.stand()), Zeitraum { von, bis }, "Gelb");
+        let text = bericht(Some(journal.stand()), Zeitraum { von, bis }, "Gelb", "Gelb");
         pruefe_entscheidungen(&text)?;
         assert!(text.contains("Zweitmeinung ausgefallen. Grund im Journal."));
         assert!(text.contains("Erstmeinung verworfen. Grund im Journal."));
@@ -351,6 +356,7 @@ mod tests {
         let mit_luecke = bericht(
             Some(journal.stand()),
             Zeitraum { von: tag(4)?, bis },
+            "Gelb",
             "Gelb",
         );
         drop(journal);
@@ -454,7 +460,7 @@ mod tests {
         }
         drop(journal);
         let text = Journal::pruefe_lesend(&pfad, |stand| {
-            bericht(Some(stand), Zeitraum { von, bis }, "Gelb")
+            bericht(Some(stand), Zeitraum { von, bis }, "Gelb", "Gelb")
         })
         .map_err(journalfehler)?;
         std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;

@@ -38,7 +38,10 @@ impl Ablauf {
         let verlauf_verfuegbar = original.is_ok();
         let mut verlauf = match original {
             Ok(Some(original)) => verlauf::lies_zeitraum(&original, zeitraum.von, zeitraum.bis),
-            Ok(None) => Geladen::default(),
+            Ok(None) => {
+                luecken.push_str("- Dienstverlauf: Datei nicht vorhanden.\n");
+                Geladen::default()
+            }
             Err(grund) => {
                 let _ = writeln!(luecken, "- Dienstverlauf: {grund}.");
                 Geladen::default()
@@ -65,10 +68,12 @@ impl Ablauf {
         }
     }
 
-    pub(super) fn ampel(&self) -> &'static str {
-        if !self.verlauf_verfuegbar {
-            "Rot (Dienstverlauf nicht lesbar)"
-        } else if self.verlauf.unlesbar > 0
+    pub(super) fn laeufe(&self) -> &[crate::werkbank::Auftrag] {
+        &self.verlauf.auftraege
+    }
+
+    fn hat_verlaufsluecken(&self) -> bool {
+        self.verlauf.unlesbar > 0
             || self.zeitraum.tage().any(|tag| {
                 zeitplan::handelstag(tag)
                     && Some(tag) != self.jetzt.frankfurt_tag()
@@ -78,7 +83,16 @@ impl Ablauf {
                         .iter()
                         .any(|a| a.start.frankfurt_tag() == Some(tag))
             })
-        {
+    }
+
+    pub(super) fn hat_luecken(&self) -> bool {
+        !self.verlauf_verfuegbar || self.hat_verlaufsluecken()
+    }
+
+    pub(super) fn ampel(&self) -> &'static str {
+        if !self.verlauf_verfuegbar {
+            "Rot (Dienstverlauf nicht lesbar)"
+        } else if self.hat_verlaufsluecken() {
             "Rot (Beleglücken)"
         } else {
             "Gelb"
