@@ -1,7 +1,7 @@
 klasse: Funktion
-zweck: Täglichen Betriebsablauf mit Plan, Laufbelegen und Journalabschluss im Analyse-Export zeigen
+zweck: Belegte Fehler, Warnungen und Reaktionen im Analyse-Export sichtbar machen
 pfade:
 crates/depot_dienst/src/analyse.rs
 crates/depot_dienst/src/analyse/ablauf.rs
+crates/depot_dienst/src/analyse/fehler.rs
 crates/depot_dienst/src/analyse/pruefbericht.rs
-crates/depot_dienst/src/verlauf.rs

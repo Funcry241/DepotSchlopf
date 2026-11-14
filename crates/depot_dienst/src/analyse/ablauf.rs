@@ -38,7 +38,10 @@ impl Ablauf {
         let verlauf_verfuegbar = original.is_ok();
         let mut verlauf = match original {
             Ok(Some(original)) => verlauf::lies_zeitraum(&original, zeitraum.von, zeitraum.bis),
-            Ok(None) => Geladen::default(),
+            Ok(None) => {
+                luecken.push_str("- Dienstverlauf: Datei nicht vorhanden.\n");
+                Geladen::default()
+            }
             Err(grund) => {
                 let _ = writeln!(luecken, "- Dienstverlauf: {grund}.");
                 Geladen::default()
@@ -63,6 +66,10 @@ impl Ablauf {
             erledigt: zustand.erledigt,
             boersen: zustand.boersen.clone(),
         }
+    }
+
+    pub(super) fn laeufe(&self) -> &[crate::werkbank::Auftrag] {
+        &self.verlauf.auftraege
     }
 
     pub(super) fn ampel(&self) -> &'static str {
