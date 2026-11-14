@@ -690,15 +690,12 @@ fn markt_offener_orders(
     for (schluss, nummern) in gruppen {
         let mut eintraege = BTreeMap::new();
         let mut verfallen = BTreeSet::new();
+        let mut nachholfrist_abgelaufen = BTreeSet::new();
         for nr in &nummern {
             let Some(order) = j.stand().auftrag(*nr) else {
                 continue;
             };
             let isin = &order.beleg.isin;
-            if !handelbar.contains(isin) || z.gesperrt.contains(isin) {
-                continue;
-            }
-            let aktuell = z.tag.kurse.eintrag(isin);
             let im_zeitfenster = depot_kern::liste::boerse_von(isin).is_some_and(|boerse| {
                 let fruehestens = boerse
                     .bezugstag(z.tag.datum)
@@ -708,6 +705,14 @@ fn markt_offener_orders(
                     .zip(fruehestens)
                     .is_some_and(|(tag, fruehestens)| tag >= fruehestens)
             });
+            if !handelbar.contains(isin) || z.gesperrt.contains(isin) {
+                if !im_zeitfenster && stand >= schluss {
+                    nachholfrist_abgelaufen.insert(*nr);
+                    verfallen.insert(*nr);
+                }
+                continue;
+            }
+            let aktuell = z.tag.kurse.eintrag(isin);
             let beleg = j.stand().kurse().iter().rev().find(|b| {
                 im_zeitfenster
                     && b.isin() == isin
@@ -738,7 +743,12 @@ fn markt_offener_orders(
             .into_iter()
             .filter(|nr| j.stand().auftrag(*nr).is_some_and(|a| !a.zustand.offen()))
             .collect();
-        protokolliere_ausfuehrungen(j, z.tag, &erledigt, Some(&kurse))?;
+        protokolliere_ausfuehrungen(
+            j,
+            z.tag,
+            &erledigt,
+            Some((&kurse, &nachholfrist_abgelaufen)),
+        )?;
     }
     Ok(())
 }
@@ -1215,7 +1225,7 @@ fn protokolliere_ausfuehrungen(
     j: &mut Journal,
     tag: &Tag,
     nummern: &[u64],
-    papierkurse: Option<&Kurse>,
+    papierabgleich: Option<(&Kurse, &BTreeSet<u64>)>,
 ) -> Result<(), LaufFehler> {
     for nr in nummern {
         let Some(l) = j.stand().auftrag(*nr).cloned() else {
@@ -1234,8 +1244,11 @@ fn protokolliere_ausfuehrungen(
             )?;
         }
         if l.zustand == AuftragsZustand::Verfallen {
-            let grund = match (papierkurse, l.frist) {
-                (Some(kurse), Some(schluss))
+            let grund = match (papierabgleich, l.frist) {
+                (Some((_, abgelaufen)), _) if abgelaufen.contains(nr) => {
+                    "Schlusskurs nicht mehr nachholbar"
+                }
+                (Some((kurse, _)), Some(schluss))
                     if kurse
                         .eintrag(&l.beleg.isin)
                         .map(depot_kern::Kurs::zeitpunkt)

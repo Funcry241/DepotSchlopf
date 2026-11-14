@@ -2611,6 +2611,143 @@ fn schluss_ohne_ezb_verfaellt() -> Result<(), String> {
 }
 
 #[test]
+fn order_ausserhalb_auswahl_verfaellt() -> Result<(), String> {
+    use depot_journal::{AuftragsZustand, verfuegbar};
+    use depot_kern::Grenzen;
+
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut j = ort.oeffnen()?;
+    let start = start()?;
+    let grenzen = Grenzen::standard();
+    let mut k = konto(&ort, &j)?;
+    let montag = tag(16)?;
+    let abruf = some(Zeitpunkt::frankfurt(montag, 7, 30, 0), "Abruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(12, 25_000), (13, 25_000)], abruf)?;
+    belege_sperrprobe(&mut j, &allianz, &[(12, 20_000), (13, 20_000)], abruf)?;
+    let (mut dachs, mut maus) = kaeufer(montag, &allianz);
+    vorbedingung(
+        papiertag(
+            &mut j,
+            montag,
+            &universum()?,
+            &start,
+            &mut dachs,
+            &mut maus,
+            &mut k,
+        ),
+        "Kaufauftrag",
+    )?;
+    let order = some(j.stand().offene_auftraege().next(), "Offener Kauf")?;
+    let (nr, topf) = (order.beleg.nr, order.beleg.topf);
+    assert_eq!(order.beleg.isin, allianz);
+    let bargeld = some(j.stand().toepfe().get(&topf), "Kauftopf")?.bargeld();
+    assert!(some(verfuegbar(&grenzen, j.stand(), topf), "Freies Geld")? < bargeld);
+    let auswahl = Universum::neu(vec![Instrument {
+        isin: sap.clone(),
+        name: "SAP".into(),
+        art: InstrumentArt::Aktie,
+    }]);
+    for (heute, kurse, erwartet) in [
+        (
+            17,
+            [(13, 25_000), (16, 25_000)],
+            AuftragsZustand::Angenommen,
+        ),
+        (19, [(17, 25_000), (18, 25_000)], AuftragsZustand::Verfallen),
+    ] {
+        let heute = tag(heute)?;
+        let abruf = some(Zeitpunkt::frankfurt(heute, 7, 30, 0), "Abruf")?;
+        belege_sperrprobe(&mut j, &sap, &kurse, abruf)?;
+        vorbedingung(
+            papiertag(
+                &mut j, heute, &auswahl, &start, &mut Stumm, &mut Stumm, &mut k,
+            ),
+            "Morgenlauf ohne Allianz",
+        )?;
+        assert_eq!(
+            some(j.stand().auftrag(nr), "Kaufauftrag")?.zustand,
+            erwartet
+        );
+    }
+    drop(j);
+    let j = ort.oeffnen()?;
+    assert_eq!(verfuegbar(&grenzen, j.stand(), topf), Some(bargeld));
+    assert!(j.stand().begruendungen().iter().any(|(_, _, text)| {
+        text.contains(&format!(
+            "Auftrag {nr} verfällt: Schlusskurs nicht mehr nachholbar"
+        ))
+    }));
+    Ok(())
+}
+
+#[test]
+fn gesperrt_drei_tage_verfaellt() -> Result<(), String> {
+    use depot_journal::AuftragsZustand;
+    use depot_regelwerk::Richtung;
+
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf A")?;
+    topf.setze_bestand(sap.clone(), 10);
+    let start = [
+        topf,
+        vorbedingung(Topf::neu(TopfId::B, Cent::NULL), "Topf B")?,
+    ];
+    let mut k = Papierdatei::oeffnen(&ort.konto, false, &start)?;
+    let mut j = ort.oeffnen()?;
+    for topf in &start {
+        vorbedingung(j.setze_topf(topf), "Topf")?;
+    }
+    vorbedingung(
+        j.schliesse_ab(tag(13)?, Cent(500_000), &"a".repeat(64)),
+        "Höchststand",
+    )?;
+    let u = universum()?;
+    let montag = tag(16)?;
+    let abruf = some(Zeitpunkt::frankfurt(montag, 7, 30, 0), "Abruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(12, 25_000), (13, 25_000)], abruf)?;
+    belege_sperrprobe(&mut j, &allianz, &[(12, 20_000), (13, 20_000)], abruf)?;
+    let aus = papiertag(&mut j, montag, &u, &start, &mut Stumm, &mut Stumm, &mut k);
+    assert!(
+        matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Notbremse")),
+        "{aus:?}"
+    );
+    let order = some(j.stand().offene_auftraege().next(), "Offener Verkauf")?;
+    let nr = order.beleg.nr;
+    assert_eq!(order.beleg.richtung, Richtung::Verkauf);
+
+    for (heute, schluss, kurs, erwartet) in [
+        (17, 16, 20_000, AuftragsZustand::Angenommen),
+        (18, 17, 25_000, AuftragsZustand::Angenommen),
+        (19, 18, 20_000, AuftragsZustand::Verfallen),
+    ] {
+        let heute = tag(heute)?;
+        let abruf = some(Zeitpunkt::frankfurt(heute, 7, 30, 0), "Abruf")?;
+        belege_sperrprobe(&mut j, &sap, &[(schluss, kurs)], abruf)?;
+        belege_sperrprobe(&mut j, &allianz, &[(schluss, 20_000)], abruf)?;
+        let aus = papiertag(&mut j, heute, &u, &start, &mut Stumm, &mut Stumm, &mut k);
+        assert!(
+            matches!(aus, Err(LaufFehler::Halt(ref grund)) if grund.contains("Notbremse")),
+            "{aus:?}"
+        );
+        let order = some(j.stand().auftrag(nr), "Verkaufsauftrag")?;
+        assert_eq!(order.zustand, erwartet);
+        assert!(order.ausfuehrungen.is_empty());
+    }
+    assert_eq!(
+        some(j.stand().toepfe().get(&TopfId::A), "Topf A")?.stueck(&sap),
+        10
+    );
+    assert!(
+        j.stand()
+            .offene_auftraege()
+            .all(|order| order.beleg.isin != sap)
+    );
+    Ok(())
+}
+
+#[test]
 fn zwei_tage_ausfall_verfaellt() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
