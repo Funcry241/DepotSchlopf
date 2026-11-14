@@ -1394,6 +1394,58 @@ fn verkaufsnetto_enthaelt_anteiligen_einstand_und_beide_gebuehren() -> Result<()
 }
 
 #[test]
+fn verkauf_ohne_einstand_bleibt_auch_nach_neuem_kauf_unbelegt() -> Result<(), String> {
+    use depot_journal::Art::{Auftrag, Topf, Zustand};
+    let ort = depot_testjournal(&[
+        (Topf, "A;500000;DE0007164600:4"),
+        (Auftrag, "1;A;DE0007164600;Verkauf;2;1000;Notbremse"),
+        (Zustand, "1;gesendet"),
+        (Zustand, "1;angenommen"),
+        (Zustand, "1;ausfuehrung;2;1200;150"),
+        (Auftrag, "2;A;DE0007164600;Kauf;3;1000;Umschichtung"),
+        (Zustand, "2;gesendet"),
+        (Zustand, "2;angenommen"),
+        (Zustand, "2;ausfuehrung;3;1000;150"),
+        (Auftrag, "3;A;DE0007164600;Verkauf;1;1000;Notbremse"),
+        (Zustand, "3;gesendet"),
+        (Zustand, "3;angenommen"),
+        (Zustand, "3;ausfuehrung;1;1200;150"),
+    ])?;
+    let journal = ort.oeffnen()?;
+    let verkaeufe = depot_lage::handelsergebnis::verkaeufe(journal.stand());
+    assert_eq!(
+        verkaeufe
+            .iter()
+            .map(|v| (v.nr, v.netto))
+            .collect::<Vec<_>>(),
+        [(1, None), (3, None)]
+    );
+    Ok(())
+}
+
+#[test]
+fn vergleich_bis_verwendet_letzten_abschluss_bis_zum_stichtag() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut journal = ort.oeffnen()?;
+    let erster = some(Datum::neu(2030, 1, 7), "Erster Tag")?;
+    let letzter = some(erster.plus_tage(2), "Letzter Tag")?;
+    let davor = some(erster.plus_tage(-1), "Vor dem ersten Tag")?;
+    let dazwischen = some(erster.plus_tage(1), "Zwischen den Abschlüssen")?;
+    for tag in [erster, letzter] {
+        vorbedingung(
+            journal.schliesse_ab(tag, Cent(500_000), &"ab".repeat(32)),
+            "Abschluss",
+        )?;
+    }
+    let vergleich = |bis| depot_lage::vergleich::vergleich_bis(journal.stand(), &[], Some(bis));
+    assert!(vergleich(davor).is_none());
+    let v = some(vergleich(dazwischen), "Vergleich")?;
+    assert_eq!((v.start, v.bewertet, v.tage), (erster, erster, 1));
+    assert_eq!(some(vergleich(letzter), "Vergleich")?.bewertet, letzter);
+    Ok(())
+}
+
+#[test]
 fn einstand_teilverkauf_rundet_auf() -> Result<(), String> {
     let depot = depot_vom(&verkaufsbuch(2)?)?;
     let p = some(topf_a(&depot)?.positionen.first(), "Position")?;

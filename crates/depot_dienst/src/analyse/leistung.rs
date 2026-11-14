@@ -63,7 +63,11 @@ pub(super) fn bericht(stand: &Stand, zeitraum: Zeitraum, werte: &BTreeMap<Datum,
         text.push_str("\nVergleichsdepot im Zeitraum nicht belegt.\n");
     }
     text.push_str("\nMesslatte: Auswertung folgt mit #233.\n");
-    verkaeufe(&mut text, stand, zeitraum);
+    verkaeufe(
+        &mut text,
+        &depot_lage::handelsergebnis::verkaeufe(stand),
+        zeitraum,
+    );
     text
 }
 
@@ -79,9 +83,12 @@ fn rueckgang(werte: impl IntoIterator<Item = Cent>) -> Option<i64> {
         })
 }
 
-fn verkaeufe(text: &mut String, stand: &Stand, zeitraum: Zeitraum) {
+fn verkaeufe(
+    text: &mut String,
+    verkaeufe: &[depot_lage::handelsergebnis::Verkauf],
+    zeitraum: Zeitraum,
+) {
     text.push_str("\n### Abgeschlossene Verkäufe nach Gebühren\n\nEine Order zählt einmal zum Datum ihrer letzten belegten Ausführung. Das Netto verrechnet anteiligen Einstand und Kauf- und Verkaufsgebühren. KI-Kosten stehen im Depotvergleich.\n\n");
-    let verkaeufe = depot_lage::handelsergebnis::verkaeufe(stand);
     if verkaeufe.iter().any(|v| v.tag.is_none()) {
         text.push_str(
             "Verkäufe ohne belegtes Ausführungsdatum fehlen in der Zeitraum-Auswertung.\n\n",
@@ -103,7 +110,7 @@ fn verkaeufe(text: &mut String, stand: &Stand, zeitraum: Zeitraum) {
             v.nr,
             v.topf,
             v.isin,
-            geld(v.netto)
+            v.netto.map_or_else(|| "–".into(), |wert| wert.to_string())
         );
         if let Some(netto) = v.netto {
             anzahl = anzahl.saturating_add(1);
@@ -133,6 +140,56 @@ fn verkaeufe(text: &mut String, stand: &Stand, zeitraum: Zeitraum) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bericht_zeigt_fehlenden_tageswert_und_fehlenden_vergleich() -> Result<(), String> {
+        let von = Datum::neu(2030, 1, 7).ok_or("Montag")?;
+        let bis = Datum::neu(2030, 1, 8).ok_or("Dienstag")?;
+        let text = bericht(
+            &Stand::default(),
+            Zeitraum { von, bis },
+            &[(von, Cent(100))].into(),
+        );
+        assert!(text.contains("| 2030-01-08 | nicht belegt |"));
+        assert!(text.contains("Beleglücken können einen größeren Rückgang verdecken"));
+        assert!(text.contains("Vergleichsdepot im Zeitraum nicht belegt"));
+        Ok(())
+    }
+
+    #[test]
+    fn trefferquote_zaehlt_nur_verkaeufe_im_zeitraum_mit_einstand() -> Result<(), String> {
+        use depot_kern::{Isin, TopfId};
+        use depot_lage::handelsergebnis::Verkauf;
+
+        let tag = Datum::neu(2030, 1, 8).ok_or("Tag")?;
+        let davor = tag.plus_tage(-1).ok_or("Vortag")?;
+        let danach = tag.plus_tage(1).ok_or("Folgetag")?;
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let verkauf = |nr, tag, netto| Verkauf {
+            nr,
+            topf: TopfId::A,
+            isin: isin.clone(),
+            tag: Some(tag),
+            netto,
+        };
+        let mut text = String::new();
+        verkaeufe(
+            &mut text,
+            &[
+                verkauf(1, davor, Some(Cent(-10))),
+                verkauf(2, tag, Some(Cent(20))),
+                verkauf(3, tag, None),
+                verkauf(4, danach, Some(Cent(-30))),
+            ],
+            Zeitraum { von: tag, bis: tag },
+        );
+        assert!(!text.contains("| 1 | A |"));
+        assert!(text.contains("| 2 | A |"));
+        assert!(text.contains("| 3 | A | DE0007164600 | – |"));
+        assert!(!text.contains("| 4 | A |"));
+        assert!(text.contains("100,00 % (1 von 1 mit Gewinn)"));
+        Ok(())
+    }
 
     #[test]
     fn rueckgang_verwendet_nur_fruehere_hoechstwerte() {

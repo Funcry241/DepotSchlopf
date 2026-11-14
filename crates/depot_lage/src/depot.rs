@@ -98,6 +98,9 @@ pub(crate) struct Einstand {
 
 impl Einstand {
     /// Bucht eine Ausführung und liefert für Verkäufe den Nettoertrag nach Einstand und Gebühren.
+    /// Der Resteinstand rundet auf volle Cent auf. Je Teilverkauf kann das Netto dadurch
+    /// um weniger als einen Cent höher liegen. Beim vollständigen Verkauf ist der Einstand
+    /// vollständig verrechnet.
     pub(crate) fn buche(
         &mut self,
         richtung: Richtung,
