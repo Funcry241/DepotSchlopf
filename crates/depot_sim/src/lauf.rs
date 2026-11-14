@@ -152,7 +152,7 @@ pub fn gefragt(text: &str) -> Option<Gefragt> {
     (grund.is_some() || r.starts_with(", nicht gefragt")).then_some(Gefragt::NichtAngebunden(grund))
 }
 
-fn topf_name(t: TopfId) -> &'static str {
+pub(crate) fn topf_name(t: TopfId) -> &'static str {
     match t {
         TopfId::A => "Topf A",
         TopfId::B => "Topf B",
@@ -839,6 +839,7 @@ fn frage(
             name(wer),
             &format!("{t}: {wie}: {}", antwort.einschaetzung),
         )?;
+        crate::ausgelassen::belege_ausgelassene(j, z, lage, &mut antwort.vorschlag, name(wer))?;
         if let Some(v) = &antwort.vorschlag {
             for (isin, bp) in &v.zielgewichte_bp {
                 let grund = v.begruendung.get(isin).map_or("", String::as_str);
