@@ -7,17 +7,25 @@ use crate::protokoll::Schutz;
 pub(super) struct Exportschutz<'a> {
     schluessel: &'a Schutz,
     namen: Vec<String>,
+    sec_kontakt: Option<String>,
 }
 
 impl<'a> Exportschutz<'a> {
-    pub(super) fn neu(schluessel: &'a Schutz) -> Self {
+    pub(super) fn neu(schluessel: &'a Schutz, sec_kontakt: Option<&str>) -> Self {
         let namen = ["USERNAME", "USER", "COMPUTERNAME", "HOSTNAME"]
             .into_iter()
             .filter_map(|name| std::env::var(name).ok())
             .filter(|name| name.len() >= 3)
             .map(|name| name.to_lowercase())
             .collect();
-        Self { schluessel, namen }
+        Self {
+            schluessel,
+            namen,
+            sec_kontakt: sec_kontakt
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_lowercase),
+        }
     }
 
     fn personenbezogen(&self, text: &str) -> bool {
@@ -28,6 +36,10 @@ impl<'a> Exportschutz<'a> {
                 || matches!(wort.as_bytes().get(..3), Some([a, b':', b'\\' | b'/']) if a.is_ascii_alphabetic()));
         pfad || text.chars().any(|c| c.is_control() && c != '\t')
             || text.contains('@')
+            || self
+                .sec_kontakt
+                .as_ref()
+                .is_some_and(|kontakt| klein.contains(kontakt))
             || [
                 "iban",
                 "bic",
@@ -164,6 +176,7 @@ mod tests {
         let schutz = Exportschutz {
             schluessel: &schluessel,
             namen: vec!["testperson".into(), "testrechner".into()],
+            sec_kontakt: None,
         };
         let iban = ["DE89", "3704", "0044", "0532", "0130", "00"].join(" ");
         let karte = ["4111", "1111", "1111", "1111"].join(" ");
@@ -184,6 +197,39 @@ mod tests {
                 schutz.text(text, true),
                 ("{\"geschwaerzt\":true}".into(), 1)
             );
+        }
+        for (roh, kodiert) in [
+            (
+                "sk-ant-ErfundenerTestwert".into(),
+                r#"{"text":"s\u006b-ant-ErfundenerTestwert"}"#.into(),
+            ),
+            (
+                "sk-proj-ErfundenerTestwert".into(),
+                r#"{"text":"s\u006b-proj-ErfundenerTestwert"}"#.into(),
+            ),
+            (
+                "AQ.Erfundener_Gemini_Testwert".into(),
+                r#"{"text":"A\u0051.Erfundener_Gemini_Testwert"}"#.into(),
+            ),
+            (
+                format!("AIza{}", "X".repeat(35)),
+                format!(r#"{{"text":"AI\u007aa{}"}}"#, "X".repeat(35)),
+            ),
+            (
+                "Bearer erfundenerWert".into(),
+                r#"{"text":"Bear\u0065r erfundenerWert"}"#.into(),
+            ),
+            (
+                "key=erfundenerWert".into(),
+                r#"{"text":"k\u0065y=erfundenerWert"}"#.into(),
+            ),
+        ] {
+            for text in [roh, kodiert] {
+                assert_eq!(
+                    schutz.text(&text, true),
+                    ("{\"geschwaerzt\":true}".into(), 1)
+                );
+            }
         }
         assert_eq!(
             schutz.text("Depotwert 1.024,68 EUR\r\n", false),
