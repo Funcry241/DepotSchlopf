@@ -371,6 +371,16 @@ pub fn nachrichtenbelege_am(
             von.is_some_and(|von| s >= von) && bis.is_some_and(|bis| s < bis)
         })
         .collect();
+    // Ein korrigierter Titel ersetzt nur ältere, am Stichtag bereits bekannte Fassungen.
+    aus.sort_by_key(|n| std::cmp::Reverse(n.abruf()));
+    let mut urls = BTreeSet::new();
+    aus.retain(|n| {
+        n.text()
+            .rsplit_once(" | ")
+            .map(|(_, url)| url)
+            .filter(|url| url.starts_with("https://") && !url.chars().any(char::is_whitespace))
+            .is_none_or(|url| urls.insert(url))
+    });
     aus.sort_by(|a, b| b.zeit().cmp(&a.zeit()).then_with(|| a.text().cmp(b.text())));
     let werte = depot_kern::liste::beobachtungsliste().unwrap_or_default();
     let bestand = stand.gehalten();
