@@ -27,6 +27,7 @@ pub mod abstimmung;
 pub mod ausfuehrung;
 pub mod kursverlauf;
 pub mod lauf;
+mod nachrichtenbezug;
 pub mod papier;
 pub mod papierdatei;
 pub mod papierlauf;

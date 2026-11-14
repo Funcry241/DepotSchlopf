@@ -2824,3 +2824,66 @@ fn zwei_tage_ausfall_verfaellt() -> Result<(), String> {
     );
     Ok(())
 }
+
+fn belege_schlagzeilen(j: &mut Journal, bezug: u8, rest: u8) -> Result<Zeitpunkt, String> {
+    let d = tag(5)?;
+    let abruf = some(Zeitpunkt::neu(d, 17, 0, 0), "Abruf")?;
+    for (zahl, stunde, titel) in [(bezug, 8, "SAP Meldung"), (rest, 9, "Sportmeldung")] {
+        for nr in 0..zahl {
+            let zeit = some(Zeitpunkt::neu(d, stunde, nr, 0), "Publikation")?;
+            let text = format!("{titel} {nr}");
+            let b = NachrichtBeleg::neu("rss-test", abruf, b"Quelle", zeit, &text)?;
+            vorbedingung(j.belege_nachricht(&b), "Nachricht")?;
+        }
+    }
+    Ok(abruf)
+}
+
+#[test]
+fn bestand_vor_sport() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
+    topf.setze_bestand(sap()?, 1);
+    vorbedingung(j.setze_topf(&topf), "Bestand")?;
+    let jetzt = belege_schlagzeilen(&mut j, 1, 30)?;
+    let n = depot_sim::papiertag::nachrichtenbelege_am(j.stand(), tag(5)?, jetzt);
+    assert_eq!(n.len(), 30);
+    assert!(
+        n.first()
+            .is_some_and(|n| n.text().starts_with("SAP Meldung"))
+    );
+    Ok(())
+}
+
+#[test]
+fn rest_behaelt_zehn() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let jetzt = belege_schlagzeilen(&mut j, 40, 10)?;
+    let n = depot_sim::papiertag::nachrichtenbelege_am(j.stand(), tag(5)?, jetzt);
+    assert_eq!(n.len(), 30);
+    assert_eq!(
+        n.iter()
+            .filter(|n| n.text().starts_with("Sportmeldung"))
+            .count(),
+        10
+    );
+    assert_eq!(
+        n.iter()
+            .filter(|n| n.text().starts_with("SAP Meldung"))
+            .count(),
+        20
+    );
+    Ok(())
+}
+
+#[test]
+fn zeile_markiert() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let jetzt = belege_schlagzeilen(&mut j, 1, 0)?;
+    let welt = depot_sim::weltlage_am(j.stand(), tag(5)?, jetzt);
+    assert!(welt.iter().any(|n| n.ends_with("[betrifft: SAP]")));
+    Ok(())
+}
