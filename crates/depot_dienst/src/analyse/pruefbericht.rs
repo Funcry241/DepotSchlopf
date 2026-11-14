@@ -13,6 +13,7 @@ pub(super) fn bericht(
     zeitraum: Zeitraum,
     ablauf: &str,
     fehler: &str,
+    nachher: &str,
 ) -> String {
     let mut text = format!("# Prüfbericht · {}\n\n", zeitraum.titel());
     let in_zeitraum = |tag| (zeitraum.von..=zeitraum.bis).contains(&tag);
@@ -89,14 +90,14 @@ pub(super) fn bericht(
         ),
         (
             "Nachher-Blick",
-            "Die Auswertung späterer Kurse steht noch aus.",
+            "Der Abschnitt Nachher-Blick zeigt spätere Schlusskurse zu belegten Orders und Prognosen.",
         ),
     ] {
         let ampel = match frage {
             "Nicht-Handeln" if vollstaendig => "Grün",
             "Nicht-Handeln" => "Rot (Belege fehlen)",
             "Entscheidungen" if stand.is_none() => "Rot (Journal fehlt)",
-            "Nachher-Blick" => "Rot (noch nicht ausgewertet)",
+            "Nachher-Blick" => nachher,
             "Ablauf" => ablauf,
             "Fehler" => fehler,
             _ if stand.is_none() => "Rot",
@@ -262,6 +263,16 @@ fn entscheidungsbericht(stand: &Stand, zeitraum: Zeitraum) -> (String, bool, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum, ablauf: &str, fehler: &str) -> String {
+        super::bericht(
+            stand,
+            zeitraum,
+            ablauf,
+            fehler,
+            "Rot (keine auswertbaren Belege)",
+        )
+    }
 
     #[test]
     fn nicht_bestaetigtes_journal_ist_rot() -> Result<(), String> {
@@ -469,7 +480,7 @@ mod tests {
         assert!(text.contains("KI-Buchungen: 1."));
         assert!(text.contains("Orderversand: 0."));
         assert!(text.contains("| Nicht-Handeln | Rot (Belege fehlen) |"));
-        assert!(text.contains("| Nachher-Blick | Rot (noch nicht ausgewertet) |"));
+        assert!(text.contains("| Nachher-Blick | Rot (keine auswertbaren Belege) |"));
         assert!(text.contains("| Orders | Gelb |"));
         Ok(())
     }
