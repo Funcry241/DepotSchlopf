@@ -142,6 +142,37 @@ fn volumen(a: &GenehmigterAuftrag) -> Cent {
         .unwrap_or(Cent(i64::MAX))
 }
 
+#[test]
+fn ersatzkauf_halbiert_ziele_und_behaelt_bestand() {
+    let g = Grenzen::standard();
+    let mut topf = topf_neu(TopfId::A, Cent(450_000));
+    topf.setze_bestand(isin(4), 50);
+    let kurse = kurse_alle(1_000);
+    let v = vorschlag(&[(0, 1_500), (1, 1_500), (2, 1_500), (3, 1_000)]);
+    let e = Eingabe {
+        grenzen: &g,
+        universum: &universum(),
+        topf: &topf,
+        kurse: &kurse,
+        vorschlag: Some(&v),
+        halt: false,
+    };
+    let plan = |e: &Eingabe<'_>| {
+        depot_regelwerk::entscheide_ersatzkauf(e, &mut Kennungsvergabe::nach(0), e.topf.bargeld())
+    };
+    let ent = plan(&e);
+    assert!(ent.verkaeufe.is_empty());
+
+    let leer = topf_neu(TopfId::A, Cent(500_000));
+    let ent = plan(&Eingabe { topf: &leer, ..e });
+    let mengen: Vec<_> = ent.kaeufe.iter().map(|a| a.auftrag().stueck).collect();
+    assert_eq!(mengen, [37, 37, 37, 25]);
+    let klein = topf_neu(TopfId::A, Cent(150_000));
+    let ent = plan(&Eingabe { topf: &klein, ..e });
+    assert!(ent.befunde.contains(&Befund::UnterMindestorder(isin(3))));
+    assert!(!ent.kaeufe.iter().any(|a| a.auftrag().isin == isin(3)));
+}
+
 /// Erstkauf mit dem ganzen Topf: vier Werte zu je 25 %. Am Limit (+1 %) laege der Umschlag
 /// ueber 100 % des Topfs und wird gekuerzt.
 #[test]

@@ -690,7 +690,12 @@ fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), 
 fn verworfene_antwort_und_urteil_stehen_als_verworfen() -> Result<(), String> {
     let (sap, allianz) = (sap()?, allianz()?);
     let d = tag(5)?;
-    for (antwort_gut, urteil_gut) in [(false, true), (true, false), (true, true)] {
+    for (antwort_gut, urteil_gut, zustimmung) in [
+        (false, true, true),
+        (true, false, false),
+        (true, true, false),
+        (true, true, true),
+    ] {
         let ort = Ort::neu()?;
         let mut j = ort.oeffnen()?;
         belege(&mut j, 5, &[(&sap, "230", "231"), (&allianz, "350", "351")])?;
@@ -700,6 +705,7 @@ fn verworfene_antwort_und_urteil_stehen_als_verworfen() -> Result<(), String> {
         }
         for u in maus.urteile.values_mut() {
             u.verwertbar = urteil_gut;
+            u.zustimmung = zustimmung;
         }
         let mut k = konto(&ort, &j)?;
         let aus = papiertag(
@@ -713,11 +719,11 @@ fn verworfene_antwort_und_urteil_stehen_als_verworfen() -> Result<(), String> {
         );
         assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
         let gekauft = !j.stand().auftraege().is_empty();
-        assert_eq!(
-            gekauft,
-            antwort_gut && urteil_gut,
-            "{antwort_gut} {urteil_gut}"
-        );
+        assert_eq!(gekauft, antwort_gut && (!urteil_gut || zustimmung));
+        let ersatz = j.stand().begruendungen().iter().any(|(_, wer, text)| {
+            wer == "Regelwerk" && text.contains("ZweitmeinungAusgefallen · Kaufzielgewichte × 0,5")
+        });
+        assert_eq!(ersatz, antwort_gut && !urteil_gut);
         let mit = |wer: &str| -> Vec<Gefragt> {
             j.stand()
                 .begruendungen()
@@ -753,6 +759,11 @@ fn verworfene_antwort_und_urteil_stehen_als_verworfen() -> Result<(), String> {
             );
         }
     }
+    Ok(())
+}
+
+#[test]
+fn gefragt_erkennt_nur_die_eigenen_begruendungszeilen() {
     // Lesen: nur die eigenen Worte nach dem Topf zaehlen.
     assert_eq!(
         gefragt("Topf A: Antwort verwendet: x"),
@@ -791,7 +802,6 @@ fn verworfene_antwort_und_urteil_stehen_als_verworfen() -> Result<(), String> {
     );
     assert_eq!(gefragt("Topf A: SAP 2000 bp: Antwort verwendet: x"), None);
     assert_eq!(gefragt("Antwort verwendet: x"), None);
-    Ok(())
 }
 
 /// Nur gehaltene Werte sind Pflicht: Fehlt einem Kandidaten der Kurs von heute, laeuft der Tag

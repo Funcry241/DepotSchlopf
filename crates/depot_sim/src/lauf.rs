@@ -35,8 +35,8 @@ use depot_kern::{
 };
 use depot_ki::Sperre;
 use depot_regelwerk::{
-    DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide_mit_kaufbudget,
-    notbremse_auftraege, pruefe_kurse, waechter,
+    DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide_ersatzkauf,
+    entscheide_mit_kaufbudget, notbremse_auftraege, pruefe_kurse, waechter,
 };
 
 use crate::abdruck;
@@ -473,9 +473,13 @@ pub(crate) fn ein_tag(
     let erste = [topf_a.clone(), topf_b.clone()];
     let topf_a = zweite_meinung(jr, z, topf_a, b.maus)?;
     let topf_b = zweite_meinung(jr, z, topf_b, b.dachs)?;
-    let [topf_a, topf_b] =
-        crate::abstimmung::berate(jr, z, erste, [topf_a, topf_b], b.dachs, b.maus)?;
-    beide_topfzyklen(jr, z, [topf_a, topf_b], &mut *b.konto)?;
+    let mut antworten = crate::abstimmung::berate(jr, z, erste, [topf_a, topf_b], b.dachs, b.maus)?;
+    if b.dachs.kostensperre() || b.maus.kostensperre() {
+        for antwort in &mut antworten {
+            antwort.verwerfe_ersatzkauf();
+        }
+    }
+    beide_topfzyklen(jr, z, antworten, &mut *b.konto)?;
     let hoch = if z.gesperrt.is_empty() {
         hoch.max(heute)
     } else {
@@ -890,6 +894,16 @@ pub(crate) struct TopfAntwort {
     pub(crate) vorschlag: Option<Vorschlag>,
     pub(crate) erste_verwertbar: bool,
     zweitmeinung_ausgefallen: bool,
+    ersatzkauf: bool,
+}
+
+impl TopfAntwort {
+    pub(crate) fn verwerfe_ersatzkauf(&mut self) {
+        if self.ersatzkauf {
+            self.vorschlag = None;
+            self.ersatzkauf = false;
+        }
+    }
 }
 
 fn prognosebilanz(stand: &depot_journal::Stand) -> Vec<(BeraterId, depot_journal::Auswertung)> {
@@ -967,6 +981,7 @@ fn frage_topf(
         vorschlag,
         erste_verwertbar,
         zweitmeinung_ausgefallen: false,
+        ersatzkauf: false,
     })
 }
 
@@ -982,6 +997,7 @@ fn zweite_meinung(
         mut vorschlag,
         erste_verwertbar,
         mut zweitmeinung_ausgefallen,
+        mut ersatzkauf,
     } = antwort;
     let (tag, zyklus) = (z.tag, z.nr);
     let id = topf.id();
@@ -1037,7 +1053,10 @@ fn zweite_meinung(
             &format!("{t}: {wort}: {}", urteil.begruendung),
         )?;
         zweitmeinung_ausgefallen = !urteil.verwertbar;
-        if urteil.verwertbar && urteil.zustimmung {
+        ersatzkauf = zweitmeinung_ausgefallen
+            && pruefer.zweitmeinung_technisch_ausgefallen()
+            && !pruefer.kostensperre();
+        if (urteil.verwertbar && urteil.zustimmung) || ersatzkauf {
             vorschlag = Some(v);
         }
     }
@@ -1046,6 +1065,7 @@ fn zweite_meinung(
         vorschlag,
         erste_verwertbar,
         zweitmeinung_ausgefallen,
+        ersatzkauf,
     })
 }
 
@@ -1059,13 +1079,19 @@ fn topf_zyklus(
         topf,
         vorschlag,
         zweitmeinung_ausgefallen,
+        ersatzkauf,
         ..
     } = antwort;
     let tag = z.tag;
     let id = topf.id();
     let t = topf_name(id);
     let mut vergabe = j.kennungsvergabe();
-    let ent = entscheide_mit_kaufbudget(
+    let entscheide = if ersatzkauf {
+        entscheide_ersatzkauf
+    } else {
+        entscheide_mit_kaufbudget
+    };
+    let ent = entscheide(
         &Eingabe {
             grenzen: z.grenzen,
             universum: z.universum,
@@ -1077,6 +1103,14 @@ fn topf_zyklus(
         &mut vergabe,
         kaufbudget(j, z.grenzen, id)?,
     );
+    if ersatzkauf {
+        begruende(
+            j,
+            tag,
+            REGELWERK,
+            &format!("{t}: ZweitmeinungAusgefallen · Kaufzielgewichte × 0,5"),
+        )?;
+    }
     for b in &ent.befunde {
         let grund =
             if zweitmeinung_ausgefallen && matches!(b, depot_regelwerk::Befund::KeinVorschlag) {

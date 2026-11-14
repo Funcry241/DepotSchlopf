@@ -591,6 +591,23 @@ fn jede_suche_sperrt() -> Result<(), String> {
 }
 
 #[test]
+fn guthabenfehler_429_gilt_als_technischer_ausfall() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(Ok(Rueckmeldung {
+        status: 429,
+        inhalt: br#"{"error":{"type":"insufficient_quota"}}"#.to_vec(),
+        warten: None,
+    }));
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?;
+    let e = ort.erlaubnis(BeraterId::Maus, 1)?;
+    let _ = mit_lage(|l| maus.vorschlagen(e, l))?;
+    assert!(maus.zweitmeinung_technisch_ausgefallen());
+    assert!(!maus.kostensperre());
+    Ok(())
+}
+
+#[test]
 fn fehlende_antwort_sperrt_abgewiesene_nicht() -> Result<(), String> {
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();

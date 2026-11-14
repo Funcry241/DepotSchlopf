@@ -229,6 +229,10 @@ pub(crate) fn berate(
         let Some(erste) = frage(buch, zyklus, dachs, &ea, &sa)? else {
             break;
         };
+        // Ein neuer Austausch muss die aktuelle Zustimmung selbst belegen.
+        for antwort in &mut gueltig {
+            antwort.verwerfe_ersatzkauf();
+        }
         if !erste.eigene.verwertbar {
             break;
         }

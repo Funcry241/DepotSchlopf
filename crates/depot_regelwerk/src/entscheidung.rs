@@ -221,7 +221,7 @@ fn leistbare_stueck(g: &Grenzen, limit: Cent, gewuenscht: u64, budget: Cent) -> 
 }
 
 pub fn entscheide(e: &Eingabe<'_>, vergabe: &mut Kennungsvergabe) -> Entscheidung {
-    entscheide_intern(e, vergabe, None)
+    entscheide_intern(e, vergabe, None, false)
 }
 
 /// Plant Käufe mit dem vom Kontowächter berechneten freien Bargeld. Geplante Verkäufe
@@ -231,16 +231,26 @@ pub fn entscheide_mit_kaufbudget(
     vergabe: &mut Kennungsvergabe,
     frei: Cent,
 ) -> Entscheidung {
-    entscheide_intern(e, vergabe, Some(frei))
+    entscheide_intern(e, vergabe, Some(frei), false)
+}
+
+/// Bei technisch ausgefallener Zweitmeinung nur halbierte Kaufziele und zwingende Verkäufe planen.
+pub fn entscheide_ersatzkauf(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    frei: Cent,
+) -> Entscheidung {
+    entscheide_intern(e, vergabe, Some(frei), true)
 }
 
 fn entscheide_intern(
     e: &Eingabe<'_>,
     vergabe: &mut Kennungsvergabe,
     kaufbudget: Option<Cent>,
+    ersatzkauf: bool,
 ) -> Entscheidung {
     let mut befunde = Vec::new();
-    let Some((verkaeufe, kaeufe)) = plane(e, kaufbudget, &mut befunde) else {
+    let Some((verkaeufe, kaeufe)) = plane(e, kaufbudget, ersatzkauf, &mut befunde) else {
         return Entscheidung::nur(Befund::Rechenfehler);
     };
     let Some(mut ent) = genehmige(e.grenzen, &verkaeufe, &kaeufe, vergabe) else {
@@ -292,6 +302,7 @@ fn genehmige(
 fn plane(
     e: &Eingabe<'_>,
     kaufbudget: Option<Cent>,
+    ersatzkauf: bool,
     befunde: &mut Vec<Befund>,
 ) -> Option<(Vec<Kandidat>, Vec<Kandidat>)> {
     let g = e.grenzen;
@@ -339,7 +350,14 @@ fn plane(
                     befunde.push(Befund::VorschlagVerworfen(grund));
                     None
                 }
-                Ok(ziele) => Some(ziele),
+                Ok(mut ziele) => {
+                    if ersatzkauf {
+                        for gewicht in ziele.values_mut() {
+                            *gewicht = gewicht.div_euclid(2);
+                        }
+                    }
+                    Some(ziele)
+                }
             },
         }
     };
@@ -359,6 +377,7 @@ fn plane(
                 tw,
                 ziele,
                 &gesperrt,
+                ersatzkauf,
                 &mut verkaeufe,
                 &mut kaeufe,
                 &mut befunde_frei,
@@ -609,12 +628,16 @@ fn freiwillig(
     topfwert: Preis,
     ziele: &BTreeMap<Isin, i64>,
     gesperrt: &BTreeSet<Isin>,
+    ersatzkauf: bool,
     verkaeufe: &mut Vec<Kandidat>,
     kaeufe: &mut Vec<Kandidat>,
     befunde: &mut Vec<Befund>,
 ) -> Option<()> {
     let g = e.grenzen;
     let mut kandidaten = sammle_kandidaten(e, ziele, topfwert, gesperrt, befunde)?;
+    if ersatzkauf {
+        kandidaten.retain(|k| k.richtung == Richtung::Kauf);
+    }
 
     let mut zwang_volumen = Cent::NULL;
     for k in verkaeufe.iter() {
