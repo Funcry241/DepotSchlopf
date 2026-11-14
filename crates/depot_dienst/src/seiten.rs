@@ -1931,44 +1931,55 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
 }
 
 fn autostart_teil(token: &str, e: &Einrichtung, s: &mut String) {
+    const BESTAETIGUNG: &str = "<label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
+         Ich möchte DepotSchlopf künftig von Hand starten.</label>";
     s.push_str(
         "<section id=\"autostart\"><h2>Autostart mit Windows</h2>\
          <p>Optional. Empfohlen, wenn DepotSchlopf bei deiner Windows-Anmeldung von selbst \
          starten soll. Der Browser bleibt geschlossen.</p>",
     );
-    let (text, knopf, wert, bestaetigung) = match e.autostart {
-        autostart::Stand::An => (
-            "Für diesen Projektordner eingeschaltet.",
-            "Autostart ausschalten",
-            "aus",
-            "<label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
-             Ich möchte DepotSchlopf künftig von Hand starten.</label>",
-        ),
-        autostart::Stand::Aus => ("Aus.", "Autostart einschalten", "an", ""),
+    match &e.autostart {
+        autostart::Stand::An => {
+            s.push_str("<p>Für diesen Projektordner eingeschaltet.</p>");
+            autostart_knopf(s, token, "aus", "Autostart ausschalten", BESTAETIGUNG);
+        }
+        autostart::Stand::Aus => {
+            s.push_str("<p>Aus.</p>");
+            autostart_knopf(s, token, "an", "Autostart einschalten", "");
+        }
+        autostart::Stand::Veraltet { ziel } => {
+            let _ = write!(
+                s,
+                "<p>Autostart zeigt auf einen anderen DepotSchlopf-Ordner (<code>{}</code>).</p>",
+                maskiere(&ziel.to_string_lossy())
+            );
+            autostart_knopf(s, token, "an", "Auf diese Version umstellen", "");
+            autostart_knopf(s, token, "aus", "Autostart entfernen", BESTAETIGUNG);
+        }
         autostart::Stand::Fremd => {
-            s.push_str("<p>Ein Autostart-Eintrag ist bereits vorhanden und gehört nicht zu \
-                diesem Ordner. Öffne die Einrichtung im bisherigen Hauptordner, wenn du ihn ändern willst. \
-                Hast du den Ordner verschoben oder umbenannt, öffne mit Windows-Taste + R und \
-                <code>shell:startup</code> deinen Autostart-Ordner. Entferne dort \
-                <code>DepotSchlopf.cmd</code>, wenn du den Eintrag dem alten Ordner zuordnen kannst. \
-                Lade dann diese Einrichtung neu und schalte den Autostart hier ein.</p></section>");
-            return;
+            s.push_str(
+                "<p>Ein fremder Autostart-Eintrag belegt den Dateinamen. \
+                 Prüfe den Eintrag im Windows-Autostartordner (<code>shell:startup</code>).</p>",
+            );
         }
         autostart::Stand::NichtVerfuegbar => {
             s.push_str(
                 "<p>Hier nicht verfügbar. Der Windows-Autostartordner oder sein Eintrag \
                 ist nicht zugänglich, oder der Projektpfad ist ungeeignet. Du kannst \
-                DepotSchlopf weiterhin von Hand starten.</p></section>",
+                DepotSchlopf weiterhin von Hand starten.</p>",
             );
-            return;
         }
-    };
+    }
+    s.push_str("</section>");
+}
+
+fn autostart_knopf(s: &mut String, token: &str, wert: &str, knopf: &str, bestaetigung: &str) {
     let _ = write!(
         s,
-        "<p>{text}</p><form method=\"post\" action=\"/autostart\">\
+        "<form method=\"post\" action=\"/autostart\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"an\" value=\"{wert}\">\
-         {bestaetigung}<button type=\"submit\">{knopf}</button></form></section>",
+         {bestaetigung}<button type=\"submit\">{knopf}</button></form>",
         maskiere(token)
     );
 }

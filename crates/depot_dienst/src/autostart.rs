@@ -4,10 +4,15 @@
 //! Kein Dienst, keine Registry, keine Adminrechte; entfernen loescht genau diese Datei.
 
 use std::fs;
-use std::io::{ErrorKind, Write as _};
+use std::io::{ErrorKind, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 const DATEI: &str = "DepotSchlopf.cmd";
+const KOPF: &str = "rem Autostart von DepotSchlopf. Entfernen über die Einrichtung.";
+const KOPF_ASCII: &str = "rem Autostart von DepotSchlopf. Entfernen ueber die Einrichtung.";
+const START: &str = "start \"DepotSchlopf\" /min \"";
+const ENDE: &str = "\\DepotSchlopf.cmd\" --ohne-browser";
+const MAX_DATEI: u64 = 4096;
 
 /// Der Autostart-Ordner des Benutzers, wenn `APPDATA` gesetzt ist.
 pub fn ordner() -> Option<PathBuf> {
@@ -28,10 +33,7 @@ pub fn ordner() -> Option<PathBuf> {
 /// Der Pfad enthaelt Zeichen, die in einer Befehlsdatei etwas anderes bedeuten koennten.
 pub fn inhalt(wurzel: &Path) -> Result<String, String> {
     let w = sicherer_pfad(wurzel)?;
-    Ok(format!(
-        "@echo off\r\nrem Autostart von DepotSchlopf. Entfernen über die Einrichtung.\r\n\
-         start \"DepotSchlopf\" /min \"{w}\\{DATEI}\" --ohne-browser\r\n"
-    ))
+    Ok(format!("@echo off\r\n{KOPF}\r\n{START}{w}{ENDE}\r\n"))
 }
 
 /// Ein Pfad als Text, der in einer Befehlsdatei zwischen Anfuehrungszeichen nichts anderes
@@ -51,25 +53,75 @@ pub fn sicherer_pfad(p: &Path) -> Result<&str, String> {
 }
 
 /// Zu welchem Projektordner der Autostart gehört.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stand {
     Aus,
     An,
+    Veraltet { ziel: PathBuf },
     Fremd,
     NichtVerfuegbar,
+}
+
+impl Stand {
+    /// Status ohne lokalen Pfad für den Analyse-Export.
+    pub(crate) fn exporttext(&self) -> &'static str {
+        match self {
+            Self::Aus => "Aus",
+            Self::An => "An",
+            Self::Veraltet { .. } => "Veraltet",
+            Self::Fremd => "Fremd",
+            Self::NichtVerfuegbar => "NichtVerfuegbar",
+        }
+    }
+}
+
+fn eigenes_ziel(text: &str) -> Option<&str> {
+    let mut zeilen = text.lines();
+    if zeilen.next()? != "@echo off" || !matches!(zeilen.next()?, KOPF | KOPF_ASCII) {
+        return None;
+    }
+    let ziel = zeilen.next()?.strip_prefix(START)?.strip_suffix(ENDE)?;
+    if zeilen.next().is_some() {
+        return None;
+    }
+    sicherer_pfad(Path::new(ziel)).ok()
 }
 
 fn datei_stand(p: &Path, soll: &str) -> Stand {
     match fs::symlink_metadata(p) {
         Err(e) if e.kind() == ErrorKind::NotFound => Stand::Aus,
         Err(_) => Stand::NichtVerfuegbar,
-        Ok(m) if !m.is_file() => Stand::Fremd,
-        Ok(_) => match fs::read_to_string(p) {
-            Ok(ist) if ist == soll => Stand::An,
-            Ok(_) => Stand::Fremd,
-            Err(_) => Stand::NichtVerfuegbar,
-        },
+        Ok(m) if !m.is_file() || m.len() > MAX_DATEI => Stand::Fremd,
+        Ok(_) => {
+            let mut text = String::new();
+            if let Err(e) = fs::File::open(p).and_then(|f| {
+                f.take(MAX_DATEI.saturating_add(1))
+                    .read_to_string(&mut text)
+            }) {
+                return if e.kind() == ErrorKind::InvalidData {
+                    Stand::Fremd
+                } else {
+                    Stand::NichtVerfuegbar
+                };
+            }
+            if u64::try_from(text.len()).unwrap_or(u64::MAX) > MAX_DATEI {
+                return Stand::Fremd;
+            }
+            match eigenes_ziel(&text) {
+                Some(ziel) if eigenes_ziel(soll) == Some(ziel) => Stand::An,
+                Some(ziel) if Path::new(ziel).is_absolute() || laufwerkspfad(ziel) => {
+                    Stand::Veraltet {
+                        ziel: PathBuf::from(ziel),
+                    }
+                }
+                _ => Stand::Fremd,
+            }
+        }
     }
+}
+
+fn laufwerkspfad(ziel: &str) -> bool {
+    matches!(ziel.as_bytes(), [laufwerk, b':', b'\\', _, ..] if laufwerk.is_ascii_alphabetic())
 }
 
 /// Stand fuer den aktuellen Projektordner.
@@ -89,10 +141,10 @@ pub fn einrichten(wurzel: &Path) -> Result<(), String> {
     eintrag_aendern(&o.join(DATEI), &inhalt(wurzel)?, true)
 }
 
-/// Entfernt ausschliesslich den Eintrag fuer diesen Projektordner.
+/// Entfernt den eigenen Eintrag, auch wenn er auf einen alten Projektordner zeigt.
 ///
 /// # Errors
-/// Ordner oder Pfad ungeeignet, Eintrag gehoert einem anderen Ordner oder Loeschen fehlgeschlagen.
+/// Ordner oder Pfad ungeeignet, fremder Eintrag oder Löschen fehlgeschlagen.
 pub fn entfernen(wurzel: &Path) -> Result<(), String> {
     let o = ordner().ok_or("Autostart-Ordner unbekannt (APPDATA fehlt)")?;
     eintrag_aendern(&o.join(DATEI), &inhalt(wurzel)?, false)
@@ -100,11 +152,34 @@ pub fn entfernen(wurzel: &Path) -> Result<(), String> {
 
 fn eintrag_aendern(p: &Path, soll: &str, an: bool) -> Result<(), String> {
     let fehler = |e| format!("{}: {e}", p.display());
-    match (datei_stand(p, soll), an) {
+    let stand = datei_stand(p, soll);
+    match (&stand, an) {
         (Stand::Fremd, _) => Err("Ein anderer Autostart-Eintrag ist vorhanden".into()),
         (Stand::NichtVerfuegbar, _) => Err("Autostart-Eintrag nicht lesbar".into()),
         (Stand::Aus, false) | (Stand::An, true) => Ok(()),
-        (Stand::An, false) => fs::remove_file(p).map_err(fehler),
+        (Stand::An | Stand::Veraltet { .. }, false) => fs::remove_file(p).map_err(fehler),
+        (Stand::Veraltet { .. }, true) => {
+            let neben = p.with_extension(format!("{}.neu", crate::neues_token()));
+            let mut datei = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&neben)
+                .map_err(fehler)?;
+            let geschrieben = datei
+                .write_all(soll.as_bytes())
+                .and_then(|()| datei.sync_all());
+            drop(datei);
+            let ergebnis = geschrieben.map_err(fehler).and_then(|()| {
+                if datei_stand(p, soll) != stand {
+                    return Err("Der Autostart-Eintrag wurde inzwischen geändert".into());
+                }
+                depot_journal::dateiersatz::ersetze(&neben, p).map_err(fehler)
+            });
+            if ergebnis.is_err() {
+                let _ = fs::remove_file(neben);
+            }
+            ergebnis
+        }
         (Stand::Aus, true) => {
             let mut datei = fs::OpenOptions::new()
                 .write(true)
@@ -128,22 +203,64 @@ fn eintrag_aendern(p: &Path, soll: &str, an: bool) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    const ALT: &str = r"C:\Test\Alt";
+    const NEU: &str = r"C:\Test\Neu";
+
+    fn mit_eintrag(
+        pruefung: impl FnOnce(&Path, &str, &str) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let ordner = std::env::temp_dir().join(format!("depot-autostart-{}", crate::neues_token()));
+        fs::create_dir(&ordner).map_err(|e| e.to_string())?;
+        let ergebnis = pruefung(
+            &ordner.join(DATEI),
+            &inhalt(Path::new(ALT))?,
+            &inhalt(Path::new(NEU))?,
+        );
+        let entfernt = fs::remove_dir_all(ordner).map_err(|e| e.to_string());
+        ergebnis.and(entfernt)
+    }
+
     #[test]
-    fn pruefordner_kann_fremden_autostart_nicht_aendern() -> Result<(), String> {
-        let o = std::env::temp_dir().join(format!("depot-autostart-{}", crate::neues_token()));
-        fs::create_dir(&o).map_err(|e| e.to_string())?;
-        let p = o.join(DATEI);
-        let echt = inhalt(Path::new("C:\\DepotSchlopf"))?;
-        let probe = inhalt(Path::new("C:\\Pruefordner"))?;
-        assert_eq!(datei_stand(&p, &echt), Stand::Aus);
-        eintrag_aendern(&p, &echt, true)?;
-        assert_eq!(datei_stand(&p, &echt), Stand::An);
-        assert_eq!(datei_stand(&p, &probe), Stand::Fremd);
-        assert!(eintrag_aendern(&p, &probe, true).is_err());
-        assert!(eintrag_aendern(&p, &probe, false).is_err());
-        assert_eq!(datei_stand(&p, &echt), Stand::An);
-        eintrag_aendern(&p, &echt, false)?;
-        assert_eq!(datei_stand(&p, &echt), Stand::Aus);
-        fs::remove_dir(o).map_err(|e| e.to_string())
+    fn veralteter_eigener_eintrag_laesst_sich_umstellen_und_entfernen() -> Result<(), String> {
+        mit_eintrag(|p, alt, neu| {
+            assert_eq!(datei_stand(p, neu), Stand::Aus);
+            for text in [alt.to_owned(), alt.replace(KOPF, KOPF_ASCII)] {
+                fs::write(p, text).map_err(|e| e.to_string())?;
+                assert_eq!(datei_stand(p, alt), Stand::An);
+                assert_eq!(
+                    datei_stand(p, neu),
+                    Stand::Veraltet {
+                        ziel: PathBuf::from(ALT)
+                    }
+                );
+                eintrag_aendern(p, neu, true)?;
+                assert_eq!(datei_stand(p, neu), Stand::An);
+                assert_eq!(fs::read_to_string(p).map_err(|e| e.to_string())?, neu);
+            }
+            eintrag_aendern(p, alt, false)?;
+            assert_eq!(datei_stand(p, neu), Stand::Aus);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn fremde_eintraege_bleiben_unberuehrt() -> Result<(), String> {
+        mit_eintrag(|p, alt, neu| {
+            for text in [
+                format!("{alt}echo fremd\r\n"),
+                alt.replace(DATEI, "Anderes.cmd"),
+                alt.replace("--ohne-browser", "--anderes"),
+                alt.replace(ALT, r"C:\Test\%ALT%"),
+                alt.replace(ALT, r"C:\Test\A&B"),
+                alt.replace(ALT, "Alt"),
+            ] {
+                fs::write(p, &text).map_err(|e| e.to_string())?;
+                assert_eq!(datei_stand(p, neu), Stand::Fremd);
+                assert!(eintrag_aendern(p, neu, true).is_err());
+                assert!(eintrag_aendern(p, neu, false).is_err());
+                assert_eq!(fs::read_to_string(p).map_err(|e| e.to_string())?, text);
+            }
+            Ok(())
+        })
     }
 }

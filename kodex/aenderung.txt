@@ -1,6 +1,7 @@
 klasse: Funktion
-zweck: Update-Frist bei unterbrochener Verbindung weiter anwenden
+zweck: Eigene ältere Windows-Autostarteinträge sicher erkennen und umstellen
 pfade:
-crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/autostart.rs
 crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/tests/update.rs
+crates/depot_dienst/tests/dienst.rs
