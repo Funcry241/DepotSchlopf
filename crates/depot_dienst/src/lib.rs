@@ -438,10 +438,13 @@ fn verbindungsstatus(d: &Dienst, tag: Option<depot_kern::Datum>) -> Vec<u8> {
     let bereit = !rueckfall::offen_pfad(&d.wurzel)
         .try_exists()
         .unwrap_or(true);
+    let zustand = d.sperre();
+    let update_laueft = zustand.auftrag_stand(Art::Update).is_some() || zustand.neustart;
     let text = format!(
-        "{}<span hidden data-bereit=\"{}\"></span>",
-        seiten::status(&d.token, &d.start, &d.sperre(), tag),
-        if bereit { "ja" } else { "nein" }
+        "{}<span hidden data-bereit=\"{}\" data-update-laeuft=\"{}\"></span>",
+        seiten::status(&d.token, &d.start, &zustand, tag),
+        if bereit { "ja" } else { "nein" },
+        if update_laueft { "ja" } else { "nein" },
     );
     antwort(200, HTML, text.as_bytes())
 }
