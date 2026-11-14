@@ -29,7 +29,7 @@ pub struct Treffer {
 }
 
 /// Praefixe von Zugangsschluesseln und die Mindestlaenge des Rests.
-const PRAEFIXE: [(&str, usize); 11] = [
+const PRAEFIXE: [(&str, usize); 13] = [
     ("sk-ant-", 20),
     ("sk-proj-", 20),
     ("sk-", 32),
@@ -41,6 +41,8 @@ const PRAEFIXE: [(&str, usize); 11] = [
     ("xoxb-", 20),
     ("xoxp-", 20),
     ("AKIA", 16),
+    ("AQ.", 17),
+    ("AIza", 35),
 ];
 
 /// Namen, deren zugewiesener Wert ein Geheimnis ist.
@@ -388,6 +390,22 @@ mod tests {
         assert_eq!(arten(&zuweisung), ["Passwort- oder Schlüsselzuweisung"]);
         let zeilen = format!("a\nb\n{}\n", iban.concat());
         assert_eq!(finde(&zeilen).first().map(|t| t.zeile), Some(3));
+    }
+
+    #[test]
+    fn gemini_praefixe_mit_passender_laenge() {
+        for (praefix, min) in [("AQ.", 17_usize), ("AIza", 35_usize)] {
+            let probe = format!("{praefix}{}", "X".repeat(min));
+            let meldung = format!("Schlüssel ({probe}).");
+            assert_eq!(arten(&meldung), ["Zugangsschluessel"]);
+            assert!(arten(&format!("{praefix}{}", "X".repeat(min.saturating_sub(1)))).is_empty());
+            assert!(arten(&format!("Wort{probe}")).is_empty());
+            assert!(
+                pruefe_inhalt("probe.md", meldung.as_bytes())
+                    .iter()
+                    .all(|text| !text.contains(&probe))
+            );
+        }
     }
 
     #[test]
