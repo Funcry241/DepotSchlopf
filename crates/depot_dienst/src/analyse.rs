@@ -722,7 +722,7 @@ fn ki_tag(
 }
 
 fn archiv<'a>(
-    schutz: &Schutz,
+    schutz: &schutz::Exportschutz<'_>,
     zeitraum: Zeitraum,
     jetzt: Zeitpunkt,
     liesmich: &str,
@@ -739,7 +739,6 @@ fn archiv<'a>(
             zeitraum.von, zeitraum.bis
         )
     };
-    let schutz = schutz::Exportschutz::neu(schutz);
     let mut zip = Zip::default();
     let mut summe = 0_usize;
     let mut bericht = String::from("\n## Schwärzungsbericht\n\n");
@@ -904,8 +903,9 @@ fn journalpaket(
     }
 }
 
-fn exportschutz(token: &str) -> Result<Schutz, ()> {
-    let schluessel = schluessel::fuer_protokoll()?;
+fn exportschutz(token: &str, daten: &Path) -> Result<(Schutz, Option<String>), &'static str> {
+    let schluessel = schluessel::fuer_protokoll()
+        .map_err(|()| "Schlüsselablage nicht lesbar. Export abgebrochen.")?;
     let mut schutz = Schutz::default();
     for geheim in schluessel
         .iter()
@@ -914,7 +914,9 @@ fn exportschutz(token: &str) -> Result<Schutz, ()> {
     {
         schutz.merken(geheim);
     }
-    Ok(schutz)
+    let kontakt = crate::werkbank::lies_falls_da(&daten.join("sec_kontakt.txt"))
+        .map_err(|_| "SEC-Kontakt nicht lesbar. Export abgebrochen.")?;
+    Ok((schutz, kontakt))
 }
 
 fn sperrentext(daten: &Path) -> String {
@@ -938,9 +940,6 @@ pub(crate) fn exportieren(
         Ok(zeitraum) => zeitraum,
         Err(grund) => return seiten::fehler(400, grund),
     };
-    let Ok(schutz) = exportschutz(&d.token) else {
-        return seiten::fehler(409, "Schlüsselablage nicht lesbar. Export abgebrochen.");
-    };
     let daten = d.wurzel.join("daten");
     if !fs::symlink_metadata(&daten).is_ok_and(|m| m.is_dir()) {
         return seiten::fehler(
@@ -948,6 +947,10 @@ pub(crate) fn exportieren(
             "Datenordner fehlt oder ist kein reguläres Verzeichnis.",
         );
     }
+    let (schutz, sec_kontakt) = match exportschutz(&d.token, &daten) {
+        Ok(schutz) => schutz,
+        Err(grund) => return seiten::fehler(409, grund),
+    };
     let optionen = Exportoptionen {
         rohdaten: http::feld(felder, "rohdaten") == Some("ja"),
         ki_texte: http::feld(felder, "ki_texte") == Some("ja"),
@@ -997,6 +1000,7 @@ pub(crate) fn exportieren(
          ## Datenbasis\nPapiergeld. Die Zeiten sind Frankfurter Ortszeit. \
          Depotstand und Konfiguration beziehen sich auf den Exportzeitpunkt.\n\
          {roh_hinweis}\n\
+         Alpha-Vantage- und Tiingo-Schlüssel ohne festes Präfix erkennt der Export am hinterlegten Wert.\n\
          ## Lücken\n{luecken}"
     );
     let dateien = [
@@ -1019,7 +1023,23 @@ pub(crate) fn exportieren(
         ("ausfuehrungen.csv", ausfuehrungen),
     ];
     let dateien = mit_rohdaten(&dateien, &roh);
-    match archiv(&schutz, zeitraum, jetzt, &liesmich, dateien) {
+    zip_antwort(
+        &schutz::Exportschutz::neu(&schutz, sec_kontakt.as_deref()),
+        zeitraum,
+        jetzt,
+        &liesmich,
+        dateien,
+    )
+}
+
+fn zip_antwort<'a>(
+    schutz: &schutz::Exportschutz<'_>,
+    zeitraum: Zeitraum,
+    jetzt: Zeitpunkt,
+    liesmich: &str,
+    dateien: impl Iterator<Item = (&'a str, &'a str)>,
+) -> Vec<u8> {
+    match archiv(schutz, zeitraum, jetzt, liesmich, dateien) {
         Ok(zip) => http::download(&zeitraum.dateiname(), &zip),
         Err(_) => seiten::fehler(
             409,
@@ -1045,6 +1065,61 @@ fn mit_rohdaten<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_schwaerzt_aiza_ohne_hinterlegten_schluessel() -> Result<(), String> {
+        let schutz = Schutz::default();
+        let schutz = schutz::Exportschutz::neu(&schutz, None);
+        let tag = Datum::neu(2026, 11, 14).ok_or("Datum")?;
+        let jetzt = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let zeitraum = Zeitraum { von: tag, bis: tag };
+        let wert = format!("AIza{}", "X".repeat(35));
+        let text = format!("Gemini meldet ({wert}).\n");
+        let (bereinigt, anzahl) = schutz.text(&text, false);
+        assert_eq!(bereinigt, "[Zeile geschwärzt]\n");
+        assert_eq!(anzahl, 1);
+        assert_eq!(schutz.text(&bereinigt, false).1, 0);
+        let zip = archiv(
+            &schutz,
+            zeitraum,
+            jetzt,
+            "Analyse",
+            [("fehler.md", text.as_str())],
+        )?;
+        assert!(zip.starts_with(b"PK"));
+        assert_eq!(
+            zip,
+            archiv(
+                &schutz,
+                zeitraum,
+                jetzt,
+                "Analyse",
+                [("fehler.md", "Debug key=andererWert\n")]
+            )?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn export_ohne_zip_bei_resttreffer() -> Result<(), String> {
+        let schutz = Schutz::default();
+        let schutz = schutz::Exportschutz::neu(&schutz, Some("Zeile geschwärzt"));
+        let tag = Datum::neu(2026, 11, 14).ok_or("Datum")?;
+        let jetzt = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let zeitraum = Zeitraum { von: tag, bis: tag };
+        let ergebnis = archiv(
+            &schutz,
+            zeitraum,
+            jetzt,
+            "Analyse",
+            [("fehler.md", "Debug key=andererWert\n")],
+        );
+        assert_eq!(
+            ergebnis,
+            Err("Musterprüfung des Exports fehlgeschlagen.".into())
+        );
+        Ok(())
+    }
 
     #[test]
     fn export_csv() -> Result<(), String> {
@@ -1153,7 +1228,7 @@ mod tests {
         ki_laeufe(&mut aus, tag, None, &eintraege, true);
         let mut schutz = Schutz::default();
         schutz.merken(geheim);
-        let (aus, zeilen) = schutz::Exportschutz::neu(&schutz).text(&aus, false);
+        let (aus, zeilen) = schutz::Exportschutz::neu(&schutz, None).text(&aus, false);
         assert_eq!(zeilen, 1);
         assert!(!aus.contains(geheim));
         assert!(!aus.contains("Außerhalb des Tages"));

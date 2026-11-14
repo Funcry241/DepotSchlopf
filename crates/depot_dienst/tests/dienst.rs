@@ -4413,3 +4413,42 @@ fn live_zustand_in_worten() -> Result<(), String> {
     assert!(!html.contains("Angenommen"));
     Ok(())
 }
+
+#[test]
+fn export_schwaerzt_sec_kontakt_ohne_at() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let journal = daten.join("journal.txt");
+    depot_journal::Journal::einrichten(&journal).map_err(|e| format!("{e:?}"))?;
+    let mut buch = depot_journal::Journal::oeffnen(&journal).map_err(|e| format!("{e:?}"))?;
+    let jetzt = donnerstag(12, 0)?;
+    let tag = some(jetzt.frankfurt_tag(), "Exporttag")?;
+    buch.beobachte(tag, "Testperson Beispiel meldet Befund")
+        .map_err(|e| format!("{e:?}"))?;
+    drop(buch);
+    let kontakt = daten.join("sec_kontakt.txt");
+    let d = dienst(wurzel, true);
+    let post = formular_post("/export", &format!("t={TOKEN}"));
+    let umwelt = Attrappe::default();
+    let ohne = behandle(&d, &umwelt, &post, jetzt);
+    fs::write(&kontakt, "  Testperson Beispiel  \r\n").map_err(|e| e.to_string())?;
+    let mit = behandle(&d, &umwelt, &post, jetzt);
+    assert_eq!(status(&mit)?, 200);
+    assert!(text(&mit).contains("Content-Type: application/zip"));
+    assert_ne!(mit, ohne, "Der SEC-Kontakt muss den Export verändern");
+    Ok(())
+}
+
+#[test]
+fn export_ohne_zip_bei_unlesbarem_sec_kontakt() -> Result<(), String> {
+    let wurzel = ordner()?;
+    fs::create_dir(wurzel.join("daten/sec_kontakt.txt")).map_err(|e| e.to_string())?;
+    let d = dienst(wurzel, true);
+    let post = formular_post("/export", &format!("t={TOKEN}"));
+    let antwort = behandle(&d, &Attrappe::default(), &post, donnerstag(12, 0)?);
+    assert_eq!(status(&antwort)?, 409);
+    let antwort = text(&antwort);
+    assert!(antwort.contains("SEC-Kontakt nicht lesbar"));
+    assert!(!antwort.contains("application/zip"));
+    Ok(())
+}

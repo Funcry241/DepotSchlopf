@@ -199,6 +199,15 @@ fn maskiere_roh(text: &str) -> String {
                 bereiche.push((start, ende));
             }
         }
+        if text
+            .get(start..)
+            .is_some_and(|rest| rest.starts_with("AIza"))
+        {
+            let ende = token_ende(text, start.saturating_add(4));
+            if ende.saturating_sub(start) >= 39 {
+                bereiche.push((start, ende));
+            }
+        }
         if passt(text, start, "sk-") {
             bereiche.push(wert(text, start, false));
         }

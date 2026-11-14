@@ -64,3 +64,38 @@ fn gemini_autorisierungsschluessel_wird_auch_ohne_speicher_maskiert() {
     );
     assert_eq!(mit_schluessel(&format!("Kopf: {key}"), key), "Kopf: ***");
 }
+
+#[test]
+fn aiza_ohne_speicher_wird_maskiert() {
+    let wert = format!("AIza{}", "X".repeat(35));
+    for (text, erwartet) in [
+        (format!("Fehler ({wert})."), "Fehler (***)."),
+        (format!(r#"{{"key":"{wert}"}}"#), r#"{"key":"***"}"#),
+        (
+            format!(r#"{{"text":"Meldung {wert}."}}"#),
+            r#"{"text":"Meldung ***."}"#,
+        ),
+        (format!("Antwort {wert}"), "Antwort ***"),
+    ] {
+        assert_eq!(maskiere(&text), erwartet);
+    }
+}
+
+#[test]
+fn aiza_kurz_und_fremdwort_bleiben() {
+    for text in [
+        format!("AIza{}", "X".repeat(10)),
+        format!("FAIza{}", "X".repeat(35)),
+        "AIza ist ein Präfix".into(),
+    ] {
+        assert_eq!(maskiere(&text), text);
+    }
+}
+
+#[test]
+fn maskiere_ist_idempotent_fuer_aiza() {
+    let text = format!("Antwort (AIza{})", "X".repeat(35));
+    let maskiert = maskiere(&text);
+    assert_eq!(maskiert, "Antwort (***)");
+    assert_eq!(maskiere(&maskiert), maskiert);
+}
