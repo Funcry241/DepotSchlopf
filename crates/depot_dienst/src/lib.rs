@@ -646,7 +646,7 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
 }
 
 fn mindesteinsatz_formular(d: &Dienst) -> String {
-    let mindesteinsatz = depot_sim::papierlauf::papier_mindesteinsatz(&d.wurzel.join("daten"))
+    let mindesteinsatz = depot_lage::papier_mindesteinsatz(&d.wurzel.join("daten"))
         .map(|bp| format!("{bp}"))
         .unwrap_or_default();
     format!(

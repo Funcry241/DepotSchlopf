@@ -6,6 +6,7 @@ crates/depot_berater/src/ki.rs
 crates/depot_dienst/src/analyse/pruefbericht.rs
 crates/depot_dienst/src/lib.rs
 crates/depot_kern/src/grenzen.rs
+crates/depot_lage/src/lib.rs
 crates/depot_sim/src/lauf.rs
 crates/depot_sim/src/papierlauf.rs
 crates/depot_sim/src/papiertag.rs
