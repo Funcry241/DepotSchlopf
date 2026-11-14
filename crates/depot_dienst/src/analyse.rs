@@ -196,6 +196,13 @@ fn betrieb(d: &Dienst, daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -
         .flatten()
         .filter_map(|zeit| zeit.in_frankfurt().map(|(tag, ..)| tag))
         .collect();
+    if let Some(erstes) = lauftage.first().filter(|erstes| **erstes > zeitraum.von) {
+        let _ = writeln!(
+            luecken,
+            "- Dienstverlauf vor {} nicht belegt. Ältere Einträge können gekürzt sein.",
+            datum_text(*erstes)
+        );
+    }
     for tag in zeitraum.tage().filter(|tag| !lauftage.contains(tag)) {
         let _ = writeln!(
             aus,
@@ -368,7 +375,7 @@ fn depot(
         }
     };
     let mut kurz = format!(
-        "Stand {} · Kurse vom {kurstag}\n\n- Gesamtwert: {}\n- Tagesergebnis: {tagesergebnis}\n- Offene Orders: {}\n",
+        "Aktueller Depotstand zum Exportzeitpunkt {} · verwendete Kurse vom {kurstag}\n\n- Gesamtwert: {}\n- Tagesergebnis: {tagesergebnis}\n- Offene Orders: {}\n",
         zeit_text(jetzt),
         geld(lage.gesamt),
         stand.offene_auftraege().count()
@@ -443,7 +450,7 @@ fn depotdetails(
     if let Some(v) = &lage.vergleich {
         let _ = writeln!(
             details,
-            "\n## Vergleich seit {} · bewertet am {}",
+            "\n## Vergleich seit {} · bewertet zu den Schlusskursen vom {}",
             datum_text(v.start),
             datum_text(v.bewertet)
         );
@@ -514,11 +521,16 @@ fn feste_kennung(text: &str) -> &str {
     }
 }
 
-/// Exportiert nur typisierte Teile einer KI-Antwort. Freie Texte bleiben lokal.
+/// Exportiert typisierte Teile einer KI-Antwort.
 fn ki_entscheidung(aus: &mut String, antwort: &str) {
     let Ok(objekt) = erstes_objekt(antwort) else {
         return;
     };
+    match objekt.feld("ziele") {
+        Some(Json::Null) => aus.push_str("  - Ziele: keine Änderung vorgeschlagen.\n"),
+        Some(Json::Liste(ziele)) if ziele.is_empty() => aus.push_str("  - Ziele: leere Liste.\n"),
+        _ => {}
+    }
     for (feld, titel) in [
         ("zustimmung", "Zustimmung"),
         ("zustimmung_fremd", "Zustimmung zum anderen Vorschlag"),
@@ -597,14 +609,25 @@ fn ki_aufruf(aus: &mut String, e: &Gespraech, tag: Datum, stand: Option<&Stand>)
 
 fn ki_laeufe(aus: &mut String, tag: Datum, stand: Option<&Stand>, eintraege: &[Gespraech]) {
     let mut laeufe = BTreeMap::<_, Vec<_>>::new();
+    let mut gemini_uebersprungen = 0_usize;
     for e in eintraege.iter().filter(|e| {
         e.zeit
             .in_frankfurt()
             .is_some_and(|(datum, ..)| datum == tag)
     }) {
-        laeufe.entry(e.lauf.as_str()).or_default().push(e);
+        if e.wer == "gemini" && e.ergebnis == "uebersprungen" {
+            gemini_uebersprungen = gemini_uebersprungen.saturating_add(1);
+        } else {
+            laeufe.entry(e.lauf.as_str()).or_default().push(e);
+        }
     }
-    if laeufe.is_empty() {
+    if gemini_uebersprungen != 0 {
+        let _ = writeln!(
+            aus,
+            "- Gemini nicht gefragt: {gemini_uebersprungen} Einträge."
+        );
+    }
+    if laeufe.is_empty() && gemini_uebersprungen == 0 {
         aus.push_str("- Keine lesbaren KI-Einträge für diesen Tag belegt.\n");
     }
     for (lauf, mut aufrufe) in laeufe {
@@ -649,6 +672,39 @@ fn ki_tag(
         let _ = writeln!(luecken, "- KI-Gespräche am {datum}: {grund}");
     }
     if let Some(s) = stand {
+        for vorbereitung in s
+            .vorbereitungen()
+            .iter()
+            .filter(|v| v.zeit.frankfurt_tag() == Some(tag))
+        {
+            let _ = writeln!(
+                aus,
+                "\n### Vorbereitung für {}",
+                datum_text(vorbereitung.fuer)
+            );
+            let _ = writeln!(
+                aus,
+                "Belegte Fragegrundlage: {} Ereignisse. Einzelheiten in 03_journal.md.",
+                vorbereitung.ereignisse.len()
+            );
+            for antwort in &vorbereitung.antworten {
+                let status = match (antwort.gefragt, antwort.verwertbar) {
+                    (false, _) => "nicht gefragt",
+                    (true, false) => "Antwort nicht verwertbar",
+                    (true, true) => "Antwort verwendet",
+                };
+                let _ = writeln!(aus, "- {:?}: {status}", antwort.berater);
+                if antwort.verwertbar {
+                    for zeile in antwort
+                        .text
+                        .lines()
+                        .filter(|zeile| !zeile.trim().is_empty())
+                    {
+                        let _ = writeln!(aus, "    {zeile}");
+                    }
+                }
+            }
+        }
         aus.push_str("\n### Tagesbuchungen im Journal\n");
         for wer in [BeraterId::Dachs, BeraterId::Maus] {
             let summe = s

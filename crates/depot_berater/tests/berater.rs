@@ -714,7 +714,7 @@ fn abgebrochene_antwort_sperrt() -> Result<(), String> {
 }
 
 #[test]
-fn fehlendes_guthaben_gibt_reservierung_im_journal_frei() -> Result<(), String> {
+fn fehlschlag_429_bucht_null() -> Result<(), String> {
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();
     netz.antworten.push_back(abgelehnt(
@@ -748,6 +748,31 @@ fn fehlendes_guthaben_gibt_reservierung_im_journal_frei() -> Result<(), String> 
     assert!(!neu.mit_protokoll(protokoll.clone(), heute).angebunden());
     let neu = berater(&ort, BeraterId::Maus, Attrappe::default())?;
     assert!(neu.mit_protokoll(protokoll, morgen).angebunden());
+    Ok(())
+}
+
+#[test]
+fn antwort_ohne_kosten_bucht_hoechstbetrag() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(ok(r#"{"output":[{"type":"message","content":[{"type":"output_text","text":"Antwort ohne Verbrauch"}]}]}"#));
+    let mut maus = berater(&ort, BeraterId::Maus, netz)?;
+    let erlaubnis = ort.erlaubnis(BeraterId::Maus, 1)?;
+    let nr = erlaubnis.buchungsnummer();
+    let hoechstbetrag = erlaubnis.buchung().reserviert;
+    assert!(hoechstbetrag > Cent::NULL);
+    let antwort = mit_lage(|lage| maus.vorschlagen(erlaubnis, lage))?;
+    assert!(!antwort.verwertbar);
+    assert!(maus.abrechnung().is_none());
+    assert_eq!(
+        ort.journal
+            .stand()
+            .ki()
+            .buchungen()
+            .get(nr)
+            .map(|b| b.reserviert),
+        Some(hoechstbetrag)
+    );
     Ok(())
 }
 

@@ -189,11 +189,16 @@ impl<N: Netz> KiBerater<N> {
 
     fn ergaenze_frage(
         &self,
-        frage: String,
+        mut frage: String,
         lage: &Lage<'_>,
         system: &str,
         erlaubnis: &AufrufErlaubnis,
     ) -> String {
+        if self.vorbereitung.is_none()
+            && let Some(jetzt) = self.gespraechszeit()
+        {
+            frage::ausfuehrungsschluss(&mut frage, &self.universum, jetzt);
+        }
         let Some(hinweise) = self.zuarbeit.hinweise(lage.ereignisse, &frage) else {
             return frage;
         };
@@ -771,7 +776,10 @@ impl<N: Netz> Berater for KiBerater<N> {
         let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Abstimmung);
         match e
             .text
-            .and_then(|t| frage::lies_abstimmung(&t, self.wer, &self.universum))
+            .and_then(|t| {
+                frage::pruefe_verkaufsgrund(&t, lage)?;
+                frage::lies_abstimmung(&t, self.wer, &self.universum)
+            })
             .and_then(|mut a| {
                 a.eigene = self.ohne_geheimnis_antwort(a.eigene)?;
                 Ok(a)
@@ -843,7 +851,10 @@ impl<N: Netz> Berater for KiBerater<N> {
         );
         match e
             .text
-            .and_then(|t| frage::lies_vorschlag(&t, self.wer, &self.universum))
+            .and_then(|t| {
+                frage::pruefe_verkaufsgrund(&t, lage)?;
+                frage::lies_vorschlag(&t, self.wer, &self.universum)
+            })
             .and_then(|a| {
                 if self.vorbereitung.is_some() && a.vorschlag.is_some() {
                     Err("Vorbereitung enthält unerlaubte Handelsziele".into())

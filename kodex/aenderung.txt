@@ -1,5 +1,9 @@
 klasse: Funktion
-zweck: Neustart nach Updates bis zum Fristablauf neutral anzeigen
+zweck: Gründe für Nicht-Handeln belegen und Orderfragen präzisieren
 pfade:
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/tests/update.rs
+crates/depot_berater/src/frage.rs
+crates/depot_berater/src/ki.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/analyse/pruefbericht.rs
+crates/depot_sim/src/lauf.rs
