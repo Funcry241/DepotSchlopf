@@ -59,6 +59,7 @@ margin:6px 0}\
 .konsole{border:1px solid var(--linie);border-radius:6px;background:var(--konsole);\
 padding:8px 10px;margin:6px 0 12px;max-height:24em;overflow:auto}\
 .banner{position:sticky;top:0;z-index:3;background:var(--halt);color:#fff;padding:8px 16px;font-weight:600}\
+.banner[data-update-wartet]{background:var(--flaeche);color:var(--text);border:1px solid var(--linie)}\
 .meldung{background:var(--flaeche);border-left:4px solid currentColor;padding-left:10px}\
 .meldungs-aktion{margin-top:-4px}.speicher-aktionen{position:sticky;bottom:0;background:var(--flaeche);border:2px solid var(--linie);border-radius:8px;padding:12px;margin-top:12px;z-index:1}\
 .speicher-aktionen p{margin:4px 0}.ungespeichert .speicher-aktionen{border-color:var(--offen)}\
@@ -2348,6 +2349,8 @@ pub const APP_JS: &str = r#""use strict";
   var marke = document.querySelector("[data-start]");
   var start = marke ? marke.getAttribute("data-start") : null;
   var neuladen = false;
+  var updateWartetSeit = null;
+  var updateFrist = 180000;
   var pausiert = false;
   var generation = 0;
   var timer = new Set();
@@ -2391,9 +2394,22 @@ pub const APP_JS: &str = r#""use strict";
       // Ältere Rückfallstände kennen nur data-start; sie bleiben erreichbar.
       var bereit = t.indexOf('data-bereit="nein"') === -1;
       if (!bereit) {
-        banner.textContent = "DepotSchlopf startet und prüft die neue Version. Diese Seite wartet auf die Bestätigung.";
+        var jetzt = Date.now();
+        if (updateWartetSeit === null) { updateWartetSeit = jetzt; }
+        if (jetzt - updateWartetSeit < updateFrist) {
+          banner.setAttribute("data-update-wartet", "");
+          banner.textContent = "Die neue Version startet gerade. Du musst nichts tun. Die Seite lädt sich von selbst neu.";
+        } else {
+          banner.removeAttribute("data-update-wartet");
+          banner.textContent = "Die neue Version wurde nicht innerhalb von drei Minuten bestätigt. Prüfe das DepotSchlopf-Fenster auf eine Fehlermeldung. Wenn es geschlossen ist, starte DepotSchlopf.cmd erneut.";
+        }
         banner.hidden = false;
-      } else if (start && neu !== start) {
+        return;
+      }
+      var updateBestaetigt = updateWartetSeit !== null;
+      updateWartetSeit = null;
+      banner.removeAttribute("data-update-wartet");
+      if (updateBestaetigt || (start && neu !== start)) {
         if (offen()) {
           andererStart = true;
           banner.textContent = "DepotSchlopf wurde neu gestartet. Deine ungespeicherten Eingaben stehen noch hier. Prüfe sie vor dem Neuladen. Zum Speichern braucht diese Seite die neue Verbindung.";
@@ -2411,6 +2427,7 @@ pub const APP_JS: &str = r#""use strict";
     } catch (_) {
       if (g !== generation || pausiert) { return; }
       fehler = true;
+      banner.removeAttribute("data-update-wartet");
       banner.textContent = "Verbindung zu DepotSchlopf unterbrochen. Die Seite versucht es automatisch erneut. Lass das DepotSchlopf-Fenster offen.";
       banner.hidden = false;
     } finally {
@@ -2514,5 +2531,25 @@ mod speicherleiste_tests {
         assert_eq!(leiste, 2);
         assert!(speichern < leiste && leiste < halt);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod update_hinweis_tests {
+    use super::{APP_JS, STIL_DIENST};
+
+    #[test]
+    fn update_hinweis_ist_neutral_bis_zur_frist_und_laedt_nach_bestaetigung() {
+        assert!(
+            STIL_DIENST.contains(
+                ".banner[data-update-wartet]{background:var(--flaeche);color:var(--text)"
+            )
+        );
+        assert!(APP_JS.contains("var updateFrist = 180000"));
+        assert!(APP_JS.contains("jetzt - updateWartetSeit < updateFrist"));
+        assert!(APP_JS.contains("Du musst nichts tun"));
+        assert!(APP_JS.contains("starte DepotSchlopf.cmd erneut"));
+        assert!(APP_JS.contains("if (updateBestaetigt || (start && neu !== start))"));
+        assert!(APP_JS.contains("window.location.replace(wiederverbindungsziel())"));
     }
 }
