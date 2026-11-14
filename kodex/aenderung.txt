@@ -1,15 +1,4 @@
-klasse: FestschreibungAenderung
-zweck: Papier-Mindesteinsatz mit budgetierter Begründungspflicht belegen
+klasse: Funktion
+zweck: KI-Auftrag für kurzfristigen Papierhandel und Bargeldbegründung schärfen
 pfade:
 crates/depot_berater/src/frage.rs
-crates/depot_berater/src/ki.rs
-crates/depot_dienst/src/analyse/pruefbericht.rs
-crates/depot_dienst/src/lib.rs
-crates/depot_kern/src/grenzen.rs
-crates/depot_lage/src/lib.rs
-crates/depot_sim/src/lauf.rs
-crates/depot_sim/src/papierlauf.rs
-crates/depot_sim/src/papiertag.rs
-crates/depot_sim/src/szenario.rs
-kodex/festschreibung.txt
-kodex/freigabe.txt
