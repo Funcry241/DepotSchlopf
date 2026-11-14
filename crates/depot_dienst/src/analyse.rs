@@ -548,6 +548,20 @@ fn ki_entscheidung(aus: &mut String, antwort: &str) {
     }
 }
 
+/// Liest den belegten Gesprächsausschnitt aus der gespeicherten Abstimmungsfrage.
+fn fremde_erstmeinung(aus: &mut String, frage: &str) {
+    let zitat = frage
+        .lines()
+        .find_map(|zeile| zeile.strip_prefix("Fremde fixierte Erst- und Zweitmeinung: "));
+    let Some(Ok(Json::Text(text))) = zitat.map(depot_kern::json::lies) else {
+        return;
+    };
+    let _ = writeln!(aus, "\n**Fremde fixierte Erst- und Zweitmeinung**");
+    for zeile in text.lines().filter(|zeile| !zeile.trim().is_empty()) {
+        let _ = writeln!(aus, "    {zeile}");
+    }
+}
+
 fn ki_aufruf(aus: &mut String, e: &Gespraech, tag: Datum, stand: Option<&Stand>) {
     let kosten = stand.and_then(|s| {
         let b = s.ki().buchungen().get(e.buchung?)?;
@@ -573,6 +587,11 @@ fn ki_aufruf(aus: &mut String, e: &Gespraech, tag: Datum, stand: Option<&Stand>)
     );
     if let Some(antwort) = e.antwort.as_deref() {
         ki_entscheidung(aus, antwort);
+    }
+    if e.zweck == "abstimmung"
+        && let Some(frage) = e.frage.as_deref()
+    {
+        fremde_erstmeinung(aus, frage);
     }
 }
 
@@ -1098,6 +1117,29 @@ mod tests {
         assert!(aus.contains("Zustimmung: ja"));
         assert!(aus.contains("DE0007164600: 25,00 %"));
         assert!(!aus.contains("geloeschterZugang"));
+    }
+
+    #[test]
+    fn fremde_erstmeinung_bleibt_sichtbar() {
+        let zugang = "geschuetzterWertFuerDieExportprobe";
+        let zitat = depot_kern::json::zitiere(&format!(
+            "Topf B: Antwort verwendet: Bargeld behalten.\nLetzte Abstimmung: unverändert.\n{zugang}\nC:\\Users\\Test"
+        ));
+        let frage = format!(
+            "Übrige Frage\nFremde fixierte Erst- und Zweitmeinung: {zitat}\nDein bisheriger Vorschlag: null"
+        );
+        let mut aus = String::new();
+        fremde_erstmeinung(&mut aus, &frage);
+        let mut schutz = Schutz::default();
+        schutz.merken(zugang);
+        let (bericht, zeilen) = schutz::Exportschutz::neu(&schutz, None).text(&aus, false);
+        assert!(bericht.contains("Topf B: Antwort verwendet: Bargeld behalten."));
+        assert!(bericht.contains("Letzte Abstimmung: unverändert."));
+        assert_eq!(zeilen, 2);
+        assert!(!bericht.contains(zugang));
+        assert!(!bericht.contains("Users"));
+        assert!(!bericht.contains("Übrige Frage"));
+        assert!(!bericht.contains("Dein bisheriger Vorschlag"));
     }
 
     #[test]

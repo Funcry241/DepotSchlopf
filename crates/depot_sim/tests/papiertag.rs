@@ -2860,6 +2860,39 @@ fn belege_schlagzeilen(j: &mut Journal, bezug: u8, rest: u8) -> Result<Zeitpunkt
 }
 
 #[test]
+fn frage_entdoppelt_nach_url() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut journal = ort.oeffnen()?;
+    let d = tag(5)?;
+    let publiziert = some(Zeitpunkt::neu(d, 8, 0, 0), "Publikation")?;
+    let stichtag = some(Zeitpunkt::neu(d, 12, 0, 0), "Stichtag")?;
+    for (stunde, text) in [
+        (9, "Alter Titel | https://example.test/eins"),
+        (10, "Korrigierter Titel | https://example.test/eins"),
+        (11, "Korrigierter Titel | https://example.test/zwei"),
+        (13, "Spätere Fassung | https://example.test/eins"),
+    ] {
+        let abruf = some(Zeitpunkt::neu(d, stunde, 0, 0), "Abruf")?;
+        let beleg = NachrichtBeleg::neu("rss-test", abruf, b"Quelle", publiziert, text)?;
+        vorbedingung(journal.belege_nachricht(&beleg), "Nachricht")?;
+    }
+    let ereignisse = depot_sim::papiertag::weltbelege_am(journal.stand(), d, stichtag);
+    assert_eq!(ereignisse.len(), 2);
+    assert!(
+        ereignisse
+            .iter()
+            .any(|e| e.ends_with("https://example.test/eins"))
+    );
+    assert!(
+        ereignisse
+            .iter()
+            .any(|e| e.ends_with("https://example.test/zwei"))
+    );
+    assert!(ereignisse.iter().all(|e| e.contains("Korrigierter Titel")));
+    Ok(())
+}
+
+#[test]
 fn bestand_vor_sport() -> Result<(), String> {
     let ort = Ort::neu()?;
     let mut j = ort.oeffnen()?;
