@@ -139,6 +139,10 @@ Dachs und Maus können nach unabhängig festgehaltenen Erstmeinungen und den Zwe
 
 Die Oberfläche und neue Protokollmeldungen verwenden echte Umlaute. Alte Journaltexte und technische Kennungen bleiben unverändert; du musst keine Daten konvertieren.
 
+### Gesicherter Programmstand
+
+Beim Start prüft DepotSchlopf den gesicherten Programmstand. Es vergleicht die SHA-256-Prüfsummen der Programmdateien mit `stand.txt` im selben Ordner und prüft den lokalen Beleg `daten/geprueft.txt`. Damit erkennt es beschädigte Dateien. Wer Schreibzugriff auf den Ordner hat, kann jedoch Programme und Prüfwerte zusammen austauschen. Die lokale Prüfung kann die Herkunft der Programme daher nicht bestätigen.
+
 ### Was gerade läuft und ob ein Update bereitliegt
 
 Oben auf **Live** und **Einrichtung** zeigt die Betriebsleiste den laufenden Auftrag und seine Wartehinweise. „Fortschritt ansehen“ führt zum Protokoll. Der Balken zeigt Tätigkeit, keinen geschätzten Prozentwert. Nach dem Abschluss steht dort das Ergebnis; ein wartender Auftrag erscheint beim nächsten Start.
