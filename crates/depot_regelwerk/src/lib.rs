@@ -27,6 +27,7 @@ pub use auftrag::{
 };
 pub use daten::{DatenFehler, Tageswerte, pruefe_kurse, waehle_morgenwerte, waehle_tageswerte};
 pub use entscheidung::{
-    Befund, Eingabe, Entscheidung, VerwerfGrund, entscheide, entscheide_mit_kaufbudget,
+    Befund, Eingabe, Entscheidung, VerwerfGrund, entscheide, entscheide_ersatzkauf,
+    entscheide_mit_kaufbudget,
 };
 pub use waechter::{WaechterBefund, notbremse_auftraege, waechter};

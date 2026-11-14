@@ -1,8 +1,13 @@
 klasse: Funktion
-zweck: Befunde aus dem echten Wochenexport bei Fehlern, Kosten und Prognosen beheben
+zweck: Papier-Ersatzkäufe bei technisch ausgefallener Zweitmeinung mit halben Zielgewichten begrenzen
 pfade:
-crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/fehler.rs
-crates/depot_dienst/src/analyse/ki_kosten.rs
-crates/depot_journal/src/stand.rs
+crates/depot_berater/src/ki.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_regelwerk/src/entscheidung.rs
+crates/depot_regelwerk/src/lib.rs
+crates/depot_regelwerk/tests/regelwerk.rs
+crates/depot_sim/src/abstimmung.rs
 crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/szenario.rs
+crates/depot_sim/tests/papiertag.rs
+docs/befunde/simulation.md

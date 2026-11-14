@@ -29,7 +29,7 @@ K15-01 und der ursprüngliche Fall von K15-02 hat Maus als behoben bestätigt. M
 Der Lauf schreibt keine Abwägung vor. Was gekauft wird, schlägt der Berater des Topfes vor und begründet jedes Ziel selbst. Der Rahmen hält nur den Schutz:
 
 - **Kostenschutz (R8):** Jede Frage an einen Berater braucht eine `AufrufErlaubnis` aus `Journal::reserviere`. Ist eine Grenze erreicht, wird nicht gefragt; der Grund steht als Begründung von `Kostenschutz` im Journal.
-- **Zweitmeinung (R31):** Den Vorschlag für Topf A prüft Maus, den für Topf B Dachs. Nur eine ausdrückliche Zustimmung lässt ihn weiter. Ohne Erlaubnis für die Zweitmeinung gibt es keinen freiwilligen Auftrag.
+- **Zweitmeinung (R31):** Den Vorschlag für Topf A prüft Maus, den für Topf B Dachs. Bei einem belegten technischen Ausfall einer eingeholten Zweitmeinung darf das Regelwerk im Papierhandel ersatzweise Käufe mit halbierten Zielgewichten prüfen. Ein Veto oder eine Kostensperre schließt den Ersatzkauf aus. Ohne Erlaubnis für die Zweitmeinung gibt es keinen freiwilligen Auftrag.
 - **Regelwerk (D01):** `entscheide` entscheidet; jeder Befund steht als Begründung von `Regelwerk` im Journal.
 - **Daten (D03):** `pruefe_kurse` gegen den letzten plausiblen Tag. Bei einem Fehler fällt der Zyklus aus; niemand wird gefragt. Ein gestörter Tag verschiebt den Vergleichskurs nicht.
 - **Wächter:** Tagesverlust und unplausible Werte halten an, die Notbremse verkauft alles und hält an. In allen drei Fällen bleibt der Tag offen, also hält auch jeder neue Start (siehe Wiederanlauf), bis Wolfgang geprüft hat.

@@ -67,6 +67,7 @@ pub struct KiBerater<N: Netz> {
     schlafe: fn(Duration),
     vorbereitung: Option<Zeitpunkt>,
     abrechnung: Option<depot_journal::KiAbrechnung>,
+    technischer_ausfall: bool,
 }
 
 impl<N: Netz> fmt::Debug for KiBerater<N> {
@@ -113,6 +114,7 @@ impl<N: Netz> KiBerater<N> {
             schlafe: std::thread::sleep,
             vorbereitung: None,
             abrechnung: None,
+            technischer_ausfall: false,
         }
     }
 
@@ -583,6 +585,7 @@ impl<N: Netz> KiBerater<N> {
         geheim: &mut bool,
     ) -> Ergebnis {
         self.abrechnung = None;
+        self.technischer_ausfall = false;
         let Some(schluessel) = self.schluessel.clone() else {
             return self.ohne_kosten(erlaubnis, e, "kein Schlüssel".into());
         };
@@ -613,6 +616,7 @@ impl<N: Netz> KiBerater<N> {
         let antwort = match self.sende(&kopf, &inhalt, reserviert) {
             Ok(a) => a,
             Err((status, meldung)) => {
+                self.technischer_ausfall = status == Some(Ausgang::Netz);
                 return self.versandfehler(erlaubnis, e, status, meldung);
             }
         };
@@ -620,6 +624,8 @@ impl<N: Netz> KiBerater<N> {
             *geheim = self.erfasse_http(e, &antwort);
         }
         if antwort.status != 200 {
+            self.technischer_ausfall =
+                antwort.status == 429 || (500..=599).contains(&antwort.status);
             let grund = self.ablehnung(&antwort, reserviert);
             return self.ohne_kosten(erlaubnis, e, grund);
         }
@@ -681,6 +687,7 @@ impl<N: Netz> KiBerater<N> {
                 kosten,
             };
         }
+        self.technischer_ausfall = gelesen.text.is_err();
         Ergebnis {
             text: gelesen.text.map_err(|e| self.bereinigt(&e)),
             kosten,
@@ -799,6 +806,14 @@ impl<N: Netz> Berater for KiBerater<N> {
     fn abrechnung(&mut self) -> Option<depot_journal::KiAbrechnung> {
         self.abrechnung.take()
     }
+    fn zweitmeinung_technisch_ausgefallen(&self) -> bool {
+        self.technischer_ausfall
+    }
+
+    fn kostensperre(&self) -> bool {
+        self.gesperrt()
+    }
+
     fn angebunden(&self) -> bool {
         self.schluessel.is_some() && !self.gesperrt() && self.pause().is_none()
     }
@@ -908,7 +923,7 @@ impl<N: Netz> Berater for KiBerater<N> {
         let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Zweitmeinung);
         match e
             .text
-            .and_then(|t| frage::lies_urteil(&t))
+            .and_then(|t| frage::lies_urteil(&t).inspect_err(|_| self.technischer_ausfall = true))
             .and_then(|u| self.ohne_geheimnis_urteil(u))
         {
             Ok(mut u) => {

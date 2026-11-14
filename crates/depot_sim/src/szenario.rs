@@ -73,6 +73,15 @@ pub struct Urteil {
 /// Ein Berater. Jede Frage kostet eine `AufrufErlaubnis`; die gibt es nur, wenn das Journal die
 /// Hoechstkosten vorher gebucht hat (R8). Der Berater verbraucht sie.
 pub trait Berater {
+    fn zweitmeinung_technisch_ausgefallen(&self) -> bool {
+        false
+    }
+
+    /// Eine aktive Kostensperre schließt den Ersatzkauf aus.
+    fn kostensperre(&self) -> bool {
+        false
+    }
+
     fn kann_abstimmen(&self) -> bool {
         false
     }
@@ -170,9 +179,14 @@ pub struct Drehbuch {
     pub urteile: BTreeMap<Datum, Urteil>,
     /// Wie oft der Berater gefragt wurde.
     pub aufrufe: u32,
+    technischer_ausfall: bool,
 }
 
 impl Berater for Drehbuch {
+    fn zweitmeinung_technisch_ausgefallen(&self) -> bool {
+        self.technischer_ausfall
+    }
+
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
         self.aufrufe = self.aufrufe.saturating_add(1);
         self.antworten
@@ -193,6 +207,7 @@ impl Berater for Drehbuch {
         _vorschlag: &Vorschlag,
     ) -> Urteil {
         self.aufrufe = self.aufrufe.saturating_add(1);
+        self.technischer_ausfall = self.urteile.get(&lage.datum).is_some_and(|u| !u.verwertbar);
         self.urteile
             .get(&lage.datum)
             .cloned()
@@ -357,6 +372,7 @@ fn dachs(w: &Werte) -> Option<Drehbuch> {
         .into_iter()
         .collect(),
         aufrufe: 0,
+        technischer_ausfall: false,
     })
 }
 
@@ -405,6 +421,7 @@ fn maus(w: &Werte) -> Option<Drehbuch> {
         .into_iter()
         .collect(),
         aufrufe: 0,
+        technischer_ausfall: false,
     })
 }
 
