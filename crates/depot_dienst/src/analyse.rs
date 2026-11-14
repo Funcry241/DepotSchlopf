@@ -15,6 +15,7 @@ use depot_lage::{datum_text, zeit_text};
 
 use crate::{Dienst, Umwelt, gespraeche, http, protokoll::Schutz, schluessel, seiten, verlauf};
 
+mod entscheidungsgrundlage;
 mod historie;
 mod journal;
 mod ki_kosten;
@@ -602,6 +603,7 @@ fn ki_aufruf(aus: &mut String, e: &Gespraech, tag: Datum, stand: Option<&Stand>)
     if let Some(antwort) = e.antwort.as_deref() {
         ki_entscheidung(aus, antwort);
     }
+    entscheidungsgrundlage::schreibe(aus, e);
     if e.zweck == "abstimmung"
         && let Some(frage) = e.frage.as_deref()
     {
@@ -1241,13 +1243,16 @@ mod tests {
             buchung: None,
             kosten_cent: None,
             system: Some("Gemeinsamer Systemtext".into()),
-            frage: Some(format!("Erste Frage\n~~~\n{geheim}\nLetzte Zeile")),
+            frage: Some(format!(
+                "Erste Frage\n- Ereignis 1: Beispielnachricht\n~~~\n{geheim}\nLetzte Zeile"
+            )),
             antwort: Some(r#"{"zustimmung":true}"#.into()),
             fehler: None,
         };
         let mut aus = String::new();
         ki_laeufe(&mut aus, tag, None, &[eintrag]);
         assert!(aus.contains("Zustimmung: ja"));
+        assert!(aus.contains("Ereignis 1: Beispielnachricht"));
         assert!(!aus.contains("Erste Frage"));
         assert!(!aus.contains("Gemeinsamer Systemtext"));
         assert!(!aus.contains(geheim));
