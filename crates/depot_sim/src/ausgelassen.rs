@@ -92,6 +92,7 @@ mod tests {
         ))?;
         let kurse = vorbedingung(Kurse::neu(zeit, vec![(sap, kurs.clone()), (alv, kurs)]))?;
         let mut v = Vorschlag {
+            limit_bp: std::collections::BTreeMap::new(),
             berater: BeraterId::Dachs,
             zielgewichte_bp: ziele.into_iter().collect(),
             begruendung: std::collections::BTreeMap::new(),

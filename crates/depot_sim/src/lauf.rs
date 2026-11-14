@@ -1236,12 +1236,22 @@ fn topf_zyklus(
         )?;
     }
     for b in &ent.befunde {
-        let grund =
-            if zweitmeinung_ausgefallen && matches!(b, depot_regelwerk::Befund::KeinVorschlag) {
-                format!("{t}: ZweitmeinungAusgefallen")
-            } else {
-                format!("{t}: {b:?}")
-            };
+        let grund = if zweitmeinung_ausgefallen
+            && matches!(b, depot_regelwerk::Befund::KeinVorschlag)
+        {
+            format!("{t}: ZweitmeinungAusgefallen")
+        } else {
+            match b {
+                depot_regelwerk::Befund::LimitabstandAusserhalb {
+                    isin,
+                    gefragt,
+                    verwendet,
+                } => format!(
+                    "{t}: {isin}: Limitabstand {gefragt} bp außerhalb des Rahmens, {verwendet} bp verwendet"
+                ),
+                _ => format!("{t}: {b:?}"),
+            }
+        };
         begruende(j, tag, REGELWERK, &grund)?;
     }
     if ent.verkaeufe.is_empty() {

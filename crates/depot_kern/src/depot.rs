@@ -116,5 +116,6 @@ impl Topf {
 pub struct Vorschlag {
     pub berater: BeraterId,
     pub zielgewichte_bp: BTreeMap<Isin, i64>,
+    pub limit_bp: BTreeMap<Isin, i64>,
     pub begruendung: BTreeMap<Isin, String>,
 }
