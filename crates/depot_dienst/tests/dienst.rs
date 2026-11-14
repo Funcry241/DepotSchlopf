@@ -854,8 +854,8 @@ fn zeitplan_ueber_die_seite_speichern_und_aktivieren() -> Result<(), String> {
 
 #[test]
 fn autostart_nur_mit_harmlosem_pfad() -> Result<(), String> {
-    let gut = autostart::inhalt(Path::new("C:\\Users\\Wolfgang\\DepotSchlopf"))?;
-    assert!(gut.contains("\"C:\\Users\\Wolfgang\\DepotSchlopf\\DepotSchlopf.cmd\" --ohne-browser"));
+    let gut = autostart::inhalt(Path::new("C:\\Test\\Neu"))?;
+    assert!(gut.contains("\"C:\\Test\\Neu\\DepotSchlopf.cmd\" --ohne-browser"));
     for boese in ["C:\\a%PATH%", "C:\\a\"&calc", "C:\\a!x!", "C:\\a\r\nx", ""] {
         assert!(autostart::inhalt(Path::new(boese)).is_err(), "{boese:?}");
     }

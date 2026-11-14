@@ -175,7 +175,7 @@ fn konfiguration(d: &Dienst, u: &dyn Umwelt, daten: &Path) -> String {
     let plan = d.sperre().zeitplan;
     let mut aus = format!(
         "# Aktuelle Konfiguration\n\n- Zeitplan: {}\n- Termine: {:02}:{:02}\n- Xetra: {:02}:{:02}\n\
-         - Papiertag nach Kursabruf: {}\n- Schlagzeilen: {}\n- Autostart: {:?}\n- Gemini: {}\n",
+         - Papiertag nach Kursabruf: {}\n- Schlagzeilen: {}\n- Autostart: {}\n- Gemini: {}\n",
         an_aus(plan.an),
         plan.termine.0,
         plan.termine.1,
@@ -183,7 +183,7 @@ fn konfiguration(d: &Dienst, u: &dyn Umwelt, daten: &Path) -> String {
         plan.kurse.1,
         an_aus(plan.papier_danach),
         an_aus(plan.nachrichten_an),
-        u.autostart(&d.wurzel),
+        u.autostart(&d.wurzel).exporttext(),
         an_aus(
             textdatei(&daten.join("gemini.txt"))
                 .ok()
