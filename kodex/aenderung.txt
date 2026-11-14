@@ -1,6 +1,4 @@
 klasse: Funktion
-zweck: Erstmeinung im Prüfexport zeigen und Nachrichten nach URL entdoppeln
+zweck: Betriebsleiste vor Speicherkästchen zeichnen
 pfade:
-crates/depot_dienst/src/analyse.rs
-crates/depot_sim/src/papiertag.rs
-crates/depot_sim/tests/papiertag.rs
+crates/depot_dienst/src/seiten.rs
