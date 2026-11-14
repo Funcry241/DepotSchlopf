@@ -126,7 +126,10 @@ fn zelle(belege: &[&str]) -> String {
         .replace('|', "&#124;")
 }
 
-fn entscheidungsbericht(stand: &Stand, zeitraum: Zeitraum) -> (String, bool, String) {
+fn entscheidungsbelege(
+    stand: &Stand,
+    zeitraum: Zeitraum,
+) -> BTreeMap<(Datum, TopfId), Entscheidung<'_>> {
     let mut tage = BTreeMap::<(Datum, TopfId), Entscheidung<'_>>::new();
     for (tag, wer, grund) in stand.begruendungen() {
         if !(zeitraum.von..=zeitraum.bis).contains(tag) {
@@ -171,6 +174,11 @@ fn entscheidungsbericht(stand: &Stand, zeitraum: Zeitraum) -> (String, bool, Str
         }
     }
 
+    tage
+}
+
+fn entscheidungsbericht(stand: &Stand, zeitraum: Zeitraum) -> (String, bool, String) {
+    let mut tage = entscheidungsbelege(stand, zeitraum);
     let mut text = String::from(
         "\n## Nicht-Handeln\n\n| Tag | Topf | Vorschlag | Abstimmung | Regelwerk | Order |\n|---|---|---|---|---|---|\n",
     );
@@ -323,6 +331,35 @@ mod tests {
                 .schliesse_ab(t, Cent(500_000), &"0".repeat(64))
                 .map_err(fehler)?;
         }
+        let (bytes, vermerk) = journal_mit_versand(&journal)?;
+        drop(journal);
+        std::fs::write(&pfad, bytes).map_err(|e| e.to_string())?;
+        std::fs::write(pfad.with_extension("vermerk"), vermerk).map_err(|e| e.to_string())?;
+        let journal = Journal::oeffnen(&pfad).map_err(fehler)?;
+        let text = bericht(Some(journal.stand()), Zeitraum { von, bis });
+        pruefe_entscheidungen(&text)?;
+        let mit_luecke = bericht(Some(journal.stand()), Zeitraum { von: tag(4)?, bis });
+        drop(journal);
+        std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
+
+        assert!(text.contains("| Nicht-Handeln | Grün |"));
+        assert!(mit_luecke.contains("| Nicht-Handeln | Rot (Belege fehlen) |"));
+        assert!(text.lines().any(|zeile| {
+            zeile.starts_with("| 2030-01-07 | A |")
+                && zeile.contains("35 %")
+                && zeile.contains("ZweitmeinungAusgefallen | Kein Versand")
+        }));
+        for (t, topf) in [(tag(8)?, "A"), (tag(8)?, "B"), (bis, "B")] {
+            assert!(text.lines().any(|zeile| {
+                zeile.starts_with(&format!("| {t} | {topf} |"))
+                    && zeile.contains("Bargeld behalten")
+                    && zeile.ends_with("| Kein Versand |")
+            }));
+        }
+        Ok(())
+    }
+
+    fn journal_mit_versand(journal: &depot_journal::Journal) -> Result<(Vec<u8>, String), String> {
         // Eine spätere Ausführung ist hier nicht belegt; Versand ist ein eigener Nachweis.
         let eintraege = [
             (depot_journal::Art::Topf, "A;500000;"),
@@ -343,11 +380,10 @@ mod tests {
         testjournal.extend(eintraege);
         let bytes = depot_journal::inhalt_fuer(&testjournal);
         let vermerk = depot_journal::vermerk_fuer(&bytes, 0).ok_or("Testvermerk")?;
-        drop(journal);
-        std::fs::write(&pfad, bytes).map_err(|e| e.to_string())?;
-        std::fs::write(pfad.with_extension("vermerk"), vermerk).map_err(|e| e.to_string())?;
-        let journal = Journal::oeffnen(&pfad).map_err(fehler)?;
-        let text = bericht(Some(journal.stand()), Zeitraum { von, bis });
+        Ok((bytes, vermerk))
+    }
+
+    fn pruefe_entscheidungen(text: &str) -> Result<(), String> {
         let entscheidungen = text
             .split_once("## Entscheidungen")
             .ok_or("Entscheidungen fehlen")?
@@ -368,30 +404,12 @@ mod tests {
                 .any(|zeile| zeile.starts_with("| 2030-01-08 | B |")
                     && zeile.contains("| Kein Beleg | Grund: Beispielentscheidung:"))
         );
-        let mit_luecke = bericht(Some(journal.stand()), Zeitraum { von: tag(4)?, bis });
-        drop(journal);
-        std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
-
-        assert!(text.contains("| Nicht-Handeln | Grün |"));
-        assert!(mit_luecke.contains("| Nicht-Handeln | Rot (Belege fehlen) |"));
-        assert!(text.lines().any(|zeile| {
-            zeile.starts_with("| 2030-01-07 | A |")
-                && zeile.contains("35 %")
-                && zeile.contains("ZweitmeinungAusgefallen | Kein Versand")
-        }));
         assert!(
             entscheidungen
                 .lines()
                 .any(|zeile| zeile.starts_with("| 2030-01-09 | A |")
                     && zeile.ends_with("| Versendet: #1 |"))
         );
-        for (t, topf) in [(tag(8)?, "A"), (tag(8)?, "B"), (bis, "B")] {
-            assert!(text.lines().any(|zeile| {
-                zeile.starts_with(&format!("| {t} | {topf} |"))
-                    && zeile.contains("Bargeld behalten")
-                    && zeile.ends_with("| Kein Versand |")
-            }));
-        }
         Ok(())
     }
 
