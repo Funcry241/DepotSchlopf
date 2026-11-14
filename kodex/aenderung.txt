@@ -1,9 +1,12 @@
 klasse: Funktion
-zweck: Gründe für Nicht-Handeln belegen und Orderfragen präzisieren
+zweck: Belegte Depotentwicklung und Verkaufsergebnisse im Prüfbericht auswerten
 pfade:
-crates/depot_berater/src/frage.rs
-crates/depot_berater/src/ki.rs
-crates/depot_berater/tests/berater.rs
 crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/analyse/historie.rs
+crates/depot_dienst/src/analyse/leistung.rs
 crates/depot_dienst/src/analyse/pruefbericht.rs
-crates/depot_sim/src/lauf.rs
+crates/depot_lage/src/depot.rs
+crates/depot_lage/src/handelsergebnis.rs
+crates/depot_lage/src/lib.rs
+crates/depot_lage/src/vergleich.rs
+crates/depot_lage/tests/lage.rs

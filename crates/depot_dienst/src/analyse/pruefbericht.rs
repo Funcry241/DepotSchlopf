@@ -75,7 +75,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
         ),
         (
             "Depot und Leistung",
-            "01_ueberblick.md enthält den Depotstand und belegte Tageswerte.",
+            "Tageswerte, Vergleich und realisierte Ergebnisse stehen im Abschnitt Depot und Leistung. Die Messlatte steht aus.",
         ),
         (
             "Kosten",

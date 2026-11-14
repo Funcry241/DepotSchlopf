@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use depot_journal::{KursBeleg, Schlussbeleg, Stand};
-use depot_kern::{Cent, Herkunft, Isin, Kurse, Zeitpunkt};
+use depot_kern::{Cent, Datum, Herkunft, Isin, Kurse, Zeitpunkt};
 use depot_lage::datum_text;
 
 use super::{Zeitraum, geld};
@@ -12,6 +12,7 @@ use super::{Zeitraum, geld};
 pub(super) struct Historie {
     pub(super) ueberblick: String,
     pub(super) belege: String,
+    pub(super) depotwerte: BTreeMap<Datum, Cent>,
 }
 
 pub(super) fn bericht(zeitraum: Zeitraum, stand: Option<&Stand>, luecken: &mut String) -> Historie {
@@ -22,6 +23,7 @@ pub(super) fn bericht(zeitraum: Zeitraum, stand: Option<&Stand>, luecken: &mut S
         "# Journalbelege zur Tagesübersicht\n\nAbschluss und Bestände stammen aus der geprüften Journal-Kette. Der Abschlussabdruck bezeichnet die Vorgeschichte. Die Kursabdrücke sind die im Journal gespeicherten SHA-256-Prüfsummen der Quellenantworten.\n",
     );
     let mut abschluss_belegt = false;
+    let mut depotwerte = BTreeMap::new();
     for tag in zeitraum.tage() {
         let datum = datum_text(tag);
         let Some(schluss) = stand.and_then(|s| s.schlussbeleg(tag)) else {
@@ -84,7 +86,9 @@ pub(super) fn bericht(zeitraum: Zeitraum, stand: Option<&Stand>, luecken: &mut S
             geld(bargeld),
             geld(depotwert)
         );
-        if depotwert.is_none() {
+        if let Some(wert) = depotwert {
+            depotwerte.insert(tag, wert);
+        } else {
             let _ = writeln!(
                 luecken,
                 "- Historischer Depotwert am {datum} nicht belegbar. Siehe Journalbelege."
@@ -98,7 +102,11 @@ pub(super) fn bericht(zeitraum: Zeitraum, stand: Option<&Stand>, luecken: &mut S
     } else if !abschluss_belegt {
         belege.push_str("\nIm Zeitraum ist kein Journalabschluss belegt.\n");
     }
-    Historie { ueberblick, belege }
+    Historie {
+        ueberblick,
+        belege,
+        depotwerte,
+    }
 }
 
 fn schreibe_belege(
@@ -143,7 +151,6 @@ fn schreibe_belege(
 mod tests {
     use super::*;
     use depot_journal::{Art, Journal, inhalt_fuer, vermerk_fuer};
-    use depot_kern::Datum;
     use std::fs;
 
     #[test]
@@ -190,7 +197,9 @@ mod tests {
         let gelesen =
             Journal::pruefe_lesend(&pfad, |stand| bericht(zeitraum, Some(stand), &mut luecken));
         fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
-        let Historie { ueberblick, belege } = gelesen.map_err(|e| format!("{e:?}"))?;
+        let Historie {
+            ueberblick, belege, ..
+        } = gelesen.map_err(|e| format!("{e:?}"))?;
         for (tag, werte) in [
             ("2026-11-02", "belegt | 1.000,00 € | 1.024,68 €"),
             ("2026-11-03", "kein Abschluss belegt | – | –"),
