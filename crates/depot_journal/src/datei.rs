@@ -278,7 +278,8 @@ fn schreibe_atomar(ziel: &Path, inhalt: &[u8]) -> Result<(), String> {
         .and_then(|()| sync(&f, "Zwischendatei"))
         .map_err(|e| format!("{}: schreiben: {e}", tmp.display()))?;
     drop(f);
-    fs::rename(&tmp, ziel).map_err(|e| format!("{}: umbenennen: {e}", ziel.display()))?;
+    crate::dateiersatz::ersetze(&tmp, ziel)
+        .map_err(|e| format!("{}: umbenennen: {e}", ziel.display()))?;
     verzeichnis_sync(ziel)
 }
 

@@ -51,6 +51,7 @@ pub mod abrufkontingent;
 pub mod anbieter;
 pub mod auftrag;
 pub mod datei;
+pub mod dateiersatz;
 pub mod gespraeche;
 pub mod kasse;
 mod ki_abrechnung;

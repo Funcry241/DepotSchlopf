@@ -166,7 +166,7 @@ fn schreibe(p: &Path, text: &str) -> io::Result<()> {
     f.write_all(text.as_bytes())?;
     f.sync_all()?;
     drop(f);
-    fs::rename(neben, p)
+    crate::dateiersatz::ersetze(neben, p)
 }
 
 #[derive(Debug)]

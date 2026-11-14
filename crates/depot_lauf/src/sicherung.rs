@@ -72,7 +72,8 @@ impl Stand {
             .and_then(|()| ausgabe.sync_all())
             .map_err(|e| format!("Sicherungsstand: {e}"))?;
         drop(ausgabe);
-        fs::rename(tmp, daten.join(STANDDATEI)).map_err(|e| format!("Sicherungsstand: {e}"))
+        crate::dateiersatz::ersetze(tmp, daten.join(STANDDATEI))
+            .map_err(|e| format!("Sicherungsstand: {e}"))
     }
 }
 
