@@ -87,6 +87,25 @@ pub fn papier_freigeben(
         .map_err(|e| PapierFreigabeFehler::Abgelehnt(format!("{e:?}")))
 }
 
+/// Lokale Papier-Einstellung. Ohne Datei gilt der festgeschriebene Standard.
+///
+/// # Errors
+/// Die gespeicherte Einstellung ist unlesbar oder liegt außerhalb der Grenzen.
+pub fn papier_mindesteinsatz(daten: &Path) -> Result<i64, String> {
+    match std::fs::read_to_string(daten.join("mindesteinsatz.txt")) {
+        Ok(text) => text
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .filter(|bp| (0..=10_000).contains(bp))
+            .ok_or_else(|| "Mindesteinsatz: Erwartet werden 0 bis 10000 Basispunkte".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Ok(depot_kern::Grenzen::standard().mindesteinsatz_bp())
+        }
+        Err(e) => Err(format!("Mindesteinsatz nicht lesbar: {e}")),
+    }
+}
+
 /// Ein Papiertag mit den heute belegten Schlusskursen: Journal `daten/journal.txt`,
 /// Papierkonto `daten/papierkonto.txt`. Liefert die Zeilen fuer die Ausgabe.
 ///
@@ -134,7 +153,7 @@ pub fn papier(
         let sekunden = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
         Zeitpunkt::aus_sekunden(i64::try_from(sekunden).ok()?)
     };
-    let mindesteinsatz_bp = depot_kern::Grenzen::papier_mindesteinsatz(&wurzel.join("daten"))?;
+    let mindesteinsatz_bp = papier_mindesteinsatz(&wurzel.join("daten"))?;
     dachs.setze_mindesteinsatz(mindesteinsatz_bp);
     maus.setze_mindesteinsatz(mindesteinsatz_bp);
     let mut beteiligte = Beteiligte {

@@ -122,22 +122,6 @@ impl Grenzen {
         }
     }
 
-    /// Lokale Papier-Einstellung. Ohne Datei gilt der festgeschriebene Standard.
-    pub fn papier_mindesteinsatz(daten: &std::path::Path) -> Result<i64, String> {
-        match std::fs::read_to_string(daten.join("mindesteinsatz.txt")) {
-            Ok(text) => text
-                .trim()
-                .parse::<i64>()
-                .ok()
-                .filter(|bp| (0..=10_000).contains(bp))
-                .ok_or_else(|| "Mindesteinsatz: Erwartet werden 0 bis 10000 Basispunkte".into()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                Ok(Self::standard().mindesteinsatz_bp())
-            }
-            Err(e) => Err(format!("Mindesteinsatz nicht lesbar: {e}")),
-        }
-    }
-
     /// Ob der belegte Depotwert die Papier-Gesamtverlustgrenze erreicht oder unterschreitet.
     pub fn papier_gesamtverlust_erreicht(&self, wert: Cent, hoch: Cent) -> bool {
         let rest_bp = 10_000_i128.saturating_sub(i128::from(self.papier_gesamtverlust_bp));
