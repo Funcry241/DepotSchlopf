@@ -69,6 +69,8 @@ versiegelt! {
         max_umschlag_bp: i64,
         /// Limit hoechstens so weit vom letzten Schlusskurs.
         limit_abstand_bp: i64,
+        limit_abstand_min_bp: i64,
+        limit_abstand_max_bp: i64,
         /// Kurs springt staerker als das zum Vortag: Daten gelten als unplausibel.
         max_kurssprung_bp: i64,
         /// Tagesverlust des Gesamtdepots, ab dem angehalten wird.
@@ -103,6 +105,8 @@ impl Grenzen {
             min_aenderung_bp: 500,
             max_umschlag_bp: 10_000,
             limit_abstand_bp: 100,
+            limit_abstand_min_bp: 10,
+            limit_abstand_max_bp: 300,
             max_kurssprung_bp: 1_500,
             tagesverlust_bp: 500,
             notbremse_bp: 2_000,

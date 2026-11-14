@@ -1070,7 +1070,17 @@ fn topf_zyklus(
         kaufbudget(j, z.grenzen, id)?,
     );
     for b in &ent.befunde {
-        begruende(j, tag, REGELWERK, &format!("{t}: {b:?}"))?;
+        let grund = match b {
+            depot_regelwerk::Befund::LimitabstandAusserhalb {
+                isin,
+                gefragt,
+                verwendet,
+            } => format!(
+                "{isin}: Limitabstand {gefragt} bp außerhalb des Rahmens, {verwendet} bp verwendet"
+            ),
+            _ => format!("{b:?}"),
+        };
+        begruende(j, tag, REGELWERK, &format!("{t}: {grund}"))?;
     }
     if ent.verkaeufe.is_empty() {
         return fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto);

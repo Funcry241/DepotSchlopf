@@ -485,6 +485,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
             verwertbar: true,
             einschaetzung: "SAP".into(),
             vorschlag: Some(Vorschlag {
+                limit_bp: std::collections::BTreeMap::new(),
                 berater: BeraterId::Dachs,
                 zielgewichte_bp: [(sap.clone(), 2_000)].into_iter().collect(),
                 begruendung: [(sap.clone(), "beobachtet".to_string())]
@@ -631,6 +632,7 @@ fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), 
                     verwertbar: true,
                     einschaetzung: "SAP".into(),
                     vorschlag: Some(Vorschlag {
+                        limit_bp: std::collections::BTreeMap::new(),
                         berater: wer,
                         zielgewichte_bp: [(sap.clone(), 2_000)].into_iter().collect(),
                         begruendung: [(sap.clone(), "beobachtet".to_string())]
@@ -1102,6 +1104,7 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
 
     let liquid = vorbedingung(Topf::neu(TopfId::A, Cent(499_725)), "Liquid")?;
     let vorschlag = Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(isin.clone(), 2_000)].into_iter().collect(),
         begruendung: [(isin, "beobachtet".into())].into_iter().collect(),
@@ -1697,6 +1700,7 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
             verwertbar: true,
             einschaetzung: format!("Unabhängige Erstmeinung {wer:?}"),
             vorschlag: Some(Vorschlag {
+                limit_bp: std::collections::BTreeMap::new(),
                 berater: wer,
                 zielgewichte_bp: [(sap.clone(), 2000)].into_iter().collect(),
                 begruendung: [(sap, "Belegte Lage".into())].into_iter().collect(),

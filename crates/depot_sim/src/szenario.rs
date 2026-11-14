@@ -232,6 +232,7 @@ fn kurse(datum: Datum, preise: &[(&Isin, i64)]) -> Option<Kurse> {
 
 fn vorschlag(berater: BeraterId, ziele: &[(&Isin, i64, &str)]) -> Vorschlag {
     Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
         berater,
         zielgewichte_bp: ziele.iter().map(|(i, bp, _)| ((*i).clone(), *bp)).collect(),
         begruendung: ziele

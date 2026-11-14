@@ -519,6 +519,7 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
     ));
     let mut maus = berater(&ort, BeraterId::Maus, netz)?;
     let v = Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(sap()?, 3_000)].into_iter().collect(),
         begruendung: [(sap()?, "Zahlen".to_string())].into_iter().collect(),
@@ -1026,6 +1027,7 @@ fn zurueckgegebener_schluessel_gelangt_nie_ins_ergebnis() -> Result<(), String> 
     ));
     let mut maus = berater(&ort, BeraterId::Maus, netz)?;
     let v = Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(sap()?, 1_000)].into_iter().collect(),
         begruendung: [(sap()?, "x".to_string())].into_iter().collect(),
@@ -1054,6 +1056,7 @@ fn reservierung_ist_eine_gesicherte_obergrenze() -> Result<(), String> {
     let max = e.deckel().max_token_ein();
     let lang = "x".repeat(usize::try_from(max).map_err(|e| e.to_string())?);
     let v = Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(sap()?, 1_000)].into_iter().collect(),
         begruendung: [(sap()?, lang)].into_iter().collect(),
@@ -1420,6 +1423,23 @@ fn verbindung_nach_dem_absenden_gekappt_sperrt_ohne_zweiten_versand() -> Result<
     Ok(())
 }
 
+fn grosse_lage_vorschlag(werte: &[depot_kern::liste::Wert], lang: &str) -> Vorschlag {
+    Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
+        berater: BeraterId::Dachs,
+        zielgewichte_bp: werte
+            .iter()
+            .take(4)
+            .map(|w| (w.isin.clone(), 2_500))
+            .collect(),
+        begruendung: werte
+            .iter()
+            .take(4)
+            .map(|w| (w.isin.clone(), lang.to_owned()))
+            .collect(),
+    }
+}
+
 /// Die groesste Lage passt unter den Deckel der Eingabe (40.000 Bytes, K25-01): alle Werte der
 /// Beobachtungsliste mit Kurs, vier Positionen, 30 Termine und 30 Nachrichten in der laengsten
 /// Form, mit Zeichen aus vier Bytes und Anfuehrungszeichen. Was nicht passt, wird ausgelassen
@@ -1477,19 +1497,7 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
-    let v = Vorschlag {
-        berater: BeraterId::Dachs,
-        zielgewichte_bp: werte
-            .iter()
-            .take(4)
-            .map(|w| (w.isin.clone(), 2_500))
-            .collect(),
-        begruendung: werte
-            .iter()
-            .take(4)
-            .map(|w| (w.isin.clone(), lang.clone()))
-            .collect(),
-    };
+    let v = grosse_lage_vorschlag(&werte, &lang);
     let mit = depot_berater::frage::vorschlag_frage(&lage, &universum, &[]);
     let ohne = depot_berater::frage::vorschlag_frage(
         &Lage {
@@ -1690,6 +1698,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
         runde: 1,
         eigener_vorschlag: None,
         fremder_vorschlag: Some(depot_kern::Vorschlag {
+            limit_bp: std::collections::BTreeMap::new(),
             berater: BeraterId::Maus,
             zielgewichte_bp: [(isin.clone(), 2000)].into(),
             begruendung: [(isin, antwort.into())].into(),
@@ -1736,5 +1745,12 @@ fn gespraechsfehler_aendert_keinen_erfolgreichen_aufruf() -> Result<(), String> 
     assert!(a.verwertbar && a.vorschlag.is_some());
     assert!(dachs.abrechnung().is_some());
     assert!(!ort.sperre().exists());
+    Ok(())
+}
+
+#[test]
+fn alter_vorschlag_lesbar() -> Result<(), String> {
+    let a = depot_berater::frage::lies_vorschlag(VORSCHLAG, BeraterId::Dachs, &universum()?)?;
+    assert!(some(a.vorschlag, "alter Vorschlag")?.limit_bp.is_empty());
     Ok(())
 }

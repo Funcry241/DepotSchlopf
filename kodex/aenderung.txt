@@ -1,7 +1,19 @@
-klasse: Funktion
-zweck: Belegte Meldungen nach Bezug zum Depot priorisieren
+klasse: FestschreibungAenderung
+zweck: Freiwillige Papierorders mit geprüftem KI-Limitabstand berechnen
 pfade:
-crates/depot_sim/src/lib.rs
-crates/depot_sim/src/nachrichtenbezug.rs
-crates/depot_sim/src/papiertag.rs
+crates/depot_berater/src/frage.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_journal/tests/konto.rs
+crates/depot_kern/src/depot.rs
+crates/depot_kern/src/grenzen.rs
+crates/depot_regelwerk/src/entscheidung.rs
+crates/depot_regelwerk/tests/befunde.rs
+crates/depot_regelwerk/tests/regelwerk.rs
+crates/depot_regelwerk/tests/rundung.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/szenario.rs
+crates/depot_sim/tests/invarianten.rs
 crates/depot_sim/tests/papiertag.rs
+kodex/festschreibung.txt
+kodex/freigabe.txt

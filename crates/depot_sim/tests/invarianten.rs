@@ -227,6 +227,7 @@ struct Spieler {
 
 fn vorschlag(wer: BeraterId, bp: i64) -> Result<Vorschlag, String> {
     Ok(Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
         berater: wer,
         zielgewichte_bp: [(sap()?, bp)].into_iter().collect(),
         begruendung: [(sap()?, "Belegte Lage".into())].into_iter().collect(),

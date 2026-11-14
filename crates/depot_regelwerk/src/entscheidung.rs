@@ -81,6 +81,11 @@ pub enum Befund {
     KaufgrenzeGekuerzt(Isin),
     /// Kein Kauf eines neuen Werts, weil sonst zu viele Werte gehalten wuerden.
     PositionsgrenzeErreicht(Isin),
+    LimitabstandAusserhalb {
+        isin: Isin,
+        gefragt: i64,
+        verwendet: i64,
+    },
     Rechenfehler,
 }
 
@@ -110,13 +115,18 @@ struct Kandidat {
     /// Exakter Kurs; ganze Cent entstehen erst beim Runden zur sicheren Seite.
     kurs: Preis,
     komplett: bool,
+    limit_bp: Option<i64>,
     anlass: Anlass,
 }
 
 impl Kandidat {
     /// Limit: Kauf hoechstens den Limit-Abstand ueber, Verkauf hoechstens darunter.
     fn limit(&self, g: &Grenzen) -> Option<Cent> {
-        limit_fuer(g, self.kurs, self.richtung)
+        limit_fuer(
+            self.limit_bp.unwrap_or(g.limit_abstand_bp()),
+            self.kurs,
+            self.richtung,
+        )
     }
 
     /// Volumen am Limit, dem ungünstigsten Fall (R21).
@@ -148,8 +158,7 @@ impl Kandidat {
 /// Das Limit in ganzen Cent zur sicheren Seite: Ein Kauflimit ist ein Hoechstpreis und wird
 /// abgerundet, ein Verkaufslimit ist ein Mindestpreis und wird aufgerundet. So kauft kein
 /// Auftrag teurer und verkauft keiner billiger als Kurs und Limit-Abstand vorsehen.
-fn limit_fuer(g: &Grenzen, kurs: Preis, richtung: Richtung) -> Option<Cent> {
-    let abstand = g.limit_abstand_bp();
+fn limit_fuer(abstand: i64, kurs: Preis, richtung: Richtung) -> Option<Cent> {
     match richtung {
         Richtung::Kauf => kurs.mal_bp(BP_GANZ.checked_add(abstand)?, Rundung::Ab),
         Richtung::Verkauf => kurs.mal_bp(BP_GANZ.checked_sub(abstand)?, Rundung::Auf),
@@ -442,6 +451,7 @@ fn ausstieg_positivliste(
                 stueck: *gehalten,
                 kurs,
                 komplett: true,
+                limit_bp: None,
                 anlass: Anlass::AusstiegPositivliste,
             });
         }
@@ -480,6 +490,7 @@ fn abbau_anteil(
             stueck: 0,
             kurs,
             komplett: false,
+            limit_bp: None,
             anlass: Anlass::Abbau,
         };
         // Erster Ansatz gegen den Topfwert; `abbau_nachziehen` rechnet ihn gegen den ganzen Plan.
@@ -492,6 +503,7 @@ fn abbau_anteil(
                 stueck,
                 kurs,
                 komplett: behalten == 0,
+                limit_bp: None,
                 anlass: Anlass::Abbau,
             });
         }
@@ -540,6 +552,7 @@ fn abbau_positionen(
             richtung: Richtung::Verkauf,
             stueck: gehalten,
             komplett: true,
+            limit_bp: None,
             anlass: Anlass::Abbau,
         });
     }
@@ -759,6 +772,22 @@ fn sammle_kandidaten(
             }
             continue;
         }
+        let limit_bp = e
+            .vorschlag
+            .and_then(|v| v.limit_bp.get(isin))
+            .copied()
+            .and_then(|bp| {
+                if (g.limit_abstand_min_bp()..=g.limit_abstand_max_bp()).contains(&bp) {
+                    Some(bp)
+                } else {
+                    befunde.push(Befund::LimitabstandAusserhalb {
+                        isin: isin.clone(),
+                        gefragt: bp,
+                        verwendet: g.limit_abstand_bp(),
+                    });
+                    None
+                }
+            });
         let k = if ziel_wert < ist_wert {
             let komplett = ziel_bp == 0;
             let stueck = if komplett {
@@ -772,6 +801,7 @@ fn sammle_kandidaten(
                 stueck,
                 kurs,
                 komplett: komplett || stueck == gehalten,
+                limit_bp,
                 anlass: Anlass::Umschichtung,
             }
         } else {
@@ -781,6 +811,7 @@ fn sammle_kandidaten(
                 stueck: stueck_fuer(ziel_wert.checked_sub(ist_wert)?, kurs)?,
                 kurs,
                 komplett: false,
+                limit_bp,
                 anlass: Anlass::Umschichtung,
             }
         };
@@ -841,5 +872,134 @@ mod tests {
             }
         }
         assert_eq!(groesste_passende(10, |_| None), None);
+    }
+}
+
+#[cfg(test)]
+mod limitabstand_tests {
+    use super::*;
+
+    fn kurs_100() -> Option<Preis> {
+        Preis::aus_cent(Cent(10_000))
+    }
+
+    #[test]
+    fn ohne_angabe_100() {
+        assert_eq!(
+            kurs_100().and_then(|k| limit_fuer(
+                Grenzen::standard().limit_abstand_bp(),
+                k,
+                Richtung::Kauf
+            )),
+            Some(Cent(10_100))
+        );
+    }
+
+    #[test]
+    fn kauf_250() {
+        assert_eq!(
+            kurs_100().and_then(|k| limit_fuer(250, k, Richtung::Kauf)),
+            Some(Cent(10_250))
+        );
+    }
+
+    #[test]
+    fn verkauf_30() {
+        assert_eq!(
+            kurs_100().and_then(|k| limit_fuer(30, k, Richtung::Verkauf)),
+            Some(Cent(9_970))
+        );
+    }
+
+    #[test]
+    fn verlust_am_limit() -> Result<(), String> {
+        let k = Kandidat {
+            isin: Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?,
+            richtung: Richtung::Kauf,
+            stueck: 9,
+            kurs: kurs_100().ok_or("Kurs")?,
+            komplett: false,
+            limit_bp: Some(300),
+            anlass: Anlass::Umschichtung,
+        };
+        let g = Grenzen::standard();
+        let volumen = k.volumen(&g).ok_or("Volumen")?;
+        assert_eq!(volumen, Cent(92_700));
+        assert_eq!(
+            k.verlust(&g),
+            Cent(2_700).checked_add(g.gebuehren().fuer(volumen).ok_or("Gebühr")?)
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod grenzrahmen_tests {
+    use super::*;
+
+    fn entscheide_mit_abstand(abstand: i64) -> Result<Entscheidung, String> {
+        use depot_kern::{BeraterId, Datum, Instrument, InstrumentArt, Kurs, Zeitpunkt};
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 5).ok_or("Tag")?;
+        let jetzt = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let kurs = Kurs::neu(Cent(10_000), "EUR", tag, jetzt, Herkunft::Simulation)
+            .map_err(|e| format!("{e:?}"))?;
+        let kurse = Kurse::neu(jetzt, vec![(isin.clone(), kurs)]).map_err(|e| format!("{e:?}"))?;
+        let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+        let universum = Universum::neu(vec![Instrument {
+            isin: isin.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        }]);
+        let vorschlag = Vorschlag {
+            berater: BeraterId::Dachs,
+            zielgewichte_bp: [(isin.clone(), 4000)].into_iter().collect(),
+            begruendung: BTreeMap::new(),
+            limit_bp: [(isin, abstand)].into_iter().collect(),
+        };
+        Ok(entscheide_mit_kaufbudget(
+            &Eingabe {
+                grenzen: &Grenzen::standard(),
+                universum: &universum,
+                topf: &topf,
+                kurse: &kurse,
+                vorschlag: Some(&vorschlag),
+                halt: false,
+            },
+            &mut Kennungsvergabe::nach(0),
+            Cent(100_000),
+        ))
+    }
+
+    fn rueckfall(abstand: i64) -> Result<(), String> {
+        let e = entscheide_mit_abstand(abstand)?;
+        assert_eq!(
+            e.kaeufe.first().map(|a| a.auftrag().limit),
+            Some(Cent(10_100))
+        );
+        assert!(e.befunde.iter().any(|b| matches!(b, Befund::LimitabstandAusserhalb { gefragt, verwendet: 100, .. } if *gefragt == abstand)));
+        Ok(())
+    }
+
+    #[test]
+    fn ueber_rahmen() -> Result<(), String> {
+        rueckfall(450)
+    }
+
+    #[test]
+    fn unter_rahmen() -> Result<(), String> {
+        rueckfall(5)
+    }
+
+    #[test]
+    fn stueck_am_limit() -> Result<(), String> {
+        let e = entscheide_mit_abstand(300)?;
+        assert_eq!(
+            e.kaeufe
+                .first()
+                .map(|a| (a.auftrag().limit, a.auftrag().stueck)),
+            Some((Cent(10_300), 9))
+        );
+        Ok(())
     }
 }
