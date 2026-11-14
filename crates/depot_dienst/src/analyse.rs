@@ -1,6 +1,6 @@
 //! Lokaler, lesender Export von Frankfurter Betriebstagen.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read as _};
@@ -13,8 +13,9 @@ use depot_kern::{BeraterId, Cent, Datum, Isin, Zeitpunkt, abdruck::sha256_hex};
 use depot_lage::gespraeche::Gespraech;
 use depot_lage::{datum_text, zeit_text};
 
-use crate::{Dienst, Umwelt, gespraeche, http, protokoll::Schutz, schluessel, seiten, verlauf};
+use crate::{Dienst, Umwelt, gespraeche, http, protokoll::Schutz, schluessel, seiten};
 
+mod ablauf;
 mod entscheidungsgrundlage;
 mod historie;
 mod journal;
@@ -182,64 +183,8 @@ fn quelle(pfad: &Path, name: &str, luecken: &mut String) -> String {
     }
 }
 
-fn betrieb(d: &Dienst, daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -> String {
-    let z = d.sperre();
-    let original = quelle(&verlauf::pfad(&d.wurzel), "Dienstverlauf", luecken);
-    let mut verlauf = verlauf::lies_zeitraum(&original, zeitraum.von, zeitraum.bis);
-    if let Some(lauf) = z.laufend.as_ref().filter(|a| zeitraum.enthaelt(a.start)) {
-        verlauf.auftraege.retain(|a| a.kennung != lauf.kennung);
-        verlauf.auftraege.insert(0, lauf.clone());
-    }
-    let laufend = z.laufend.as_ref().map(|a| a.kennung.clone());
-    drop(z);
-    let mut aus = "# Betrieb und Abrufe\n\n## Dienstverlauf\n".to_owned();
-    let lauftage: BTreeSet<_> = verlauf
-        .auftraege
-        .iter()
-        .flat_map(|lauf| [Some(lauf.start), lauf.ende])
-        .flatten()
-        .filter_map(|zeit| zeit.in_frankfurt().map(|(tag, ..)| tag))
-        .collect();
-    if let Some(erstes) = lauftage.first().filter(|erstes| **erstes > zeitraum.von) {
-        let _ = writeln!(
-            luecken,
-            "- Dienstverlauf vor {} nicht belegt. Ältere Einträge können gekürzt sein.",
-            datum_text(*erstes)
-        );
-    }
-    for tag in zeitraum.tage().filter(|tag| !lauftage.contains(tag)) {
-        let _ = writeln!(
-            aus,
-            "- {}: kein Lauf im verfügbaren Verlauf belegt.",
-            datum_text(tag)
-        );
-    }
-    for lauf in verlauf.auftraege {
-        let status = if laufend.as_ref() == Some(&lauf.kennung) {
-            "läuft gerade"
-        } else {
-            match (lauf.frueher, lauf.erfolg) {
-                (crate::werkbank::Frueher::Unterbrochen, _) => "unterbrochen",
-                (_, Some(true)) => "erfolgreich",
-                (_, Some(false)) => "Fehler",
-                _ => "Ergebnis unbekannt",
-            }
-        };
-        let ende = lauf.ende.map_or_else(|| "offen".into(), zeit_text);
-        let _ = writeln!(
-            aus,
-            "- {} bis {ende} · {} · {:?} · {status} · {}",
-            zeit_text(lauf.start),
-            lauf.art.name(),
-            lauf.anlass,
-            lauf.kennung
-        );
-    }
-    let _ = writeln!(
-        aus,
-        "\nUnlesbare Verlaufszeilen: {}. Der Dienst kann ältere Einträge bereits gekürzt haben.",
-        verlauf.unlesbar
-    );
+fn anbieterprotokoll(daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -> String {
+    let mut aus = String::new();
     let text = quelle(
         &daten.join(depot_lage::anbieter::DATEI),
         "Anbieterprotokoll",
@@ -794,6 +739,7 @@ fn programmstand(version: Option<&str>) -> String {
 
 struct Journalpaket {
     pruefbericht: String,
+    ablauf: String,
     kurz: String,
     depotdetails: String,
     orders: String,
@@ -862,6 +808,7 @@ fn journalpaket(
     tag: Datum,
     zeitraum: Zeitraum,
     sperren: &str,
+    ablauf: &ablauf::Ablauf,
     luecken: &mut String,
 ) -> Result<Journalpaket, JournalFehler> {
     match Journal::pruefe_lesend_mit_eintraegen(
@@ -873,11 +820,12 @@ fn journalpaket(
             let orders = orders::bericht(stand, eintraege, &buch, zeitraum);
             let historie = historie::bericht(zeitraum, Some(stand), luecken);
             let (ki, gespraechsbelege) = ki(daten, zeitraum, Some(stand), luecken);
-            let pruefbericht = pruefbericht::bericht(Some(stand), zeitraum)
+            let pruefbericht = pruefbericht::bericht(Some(stand), zeitraum, ablauf.ampel())
                 + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
                 + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege);
             Journalpaket {
                 pruefbericht,
+                ablauf: ablauf.bericht(Some(stand)),
                 kurz,
                 depotdetails,
                 orders,
@@ -895,7 +843,8 @@ fn journalpaket(
                 "- Journalstand nicht bestätigt. Order-, Depot- und Kostenzahlen fehlen.\n",
             );
             Ok(Journalpaket {
-                pruefbericht: pruefbericht::bericht(None, zeitraum),
+                pruefbericht: pruefbericht::bericht(None, zeitraum, ablauf.ampel()),
+                ablauf: ablauf.bericht(None),
                 kurz: "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n".into(),
                 depotdetails: String::new(),
                 orders: "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
@@ -957,11 +906,13 @@ pub(crate) fn exportieren(
         Err(grund) => return seiten::fehler(409, grund),
     };
     let mut luecken = String::new();
-    let betrieb = betrieb(d, &daten, zeitraum, &mut luecken);
+    let ablauf = ablauf::Ablauf::laden(d, zeitraum, jetzt, &mut luecken);
+    let anbieter = anbieterprotokoll(&daten, zeitraum, &mut luecken);
     let konfiguration = konfiguration(d, u, &daten);
     let sperren = sperrentext(&daten);
     let Ok(Journalpaket {
         pruefbericht,
+        ablauf: zeitstrahl,
         kurz,
         depotdetails,
         orders,
@@ -969,7 +920,15 @@ pub(crate) fn exportieren(
         ki,
         historie,
         journal,
-    }) = journalpaket(&daten, jetzt, tag, zeitraum, &sperren, &mut luecken)
+    }) = journalpaket(
+        &daten,
+        jetzt,
+        tag,
+        zeitraum,
+        &sperren,
+        &ablauf,
+        &mut luecken,
+    )
     else {
         return seiten::fehler(
             409,
@@ -999,7 +958,7 @@ pub(crate) fn exportieren(
             "04_orders_und_depot.md",
             format!("# Papierorders und Depot\n{orders}"),
         ),
-        ("05_betrieb_und_fehler.md", betrieb),
+        ("05_betrieb_und_fehler.md", zeitstrahl + &anbieter),
         ("06_konfiguration.md", konfiguration),
         ("07_version.md", programmstand(d.version.as_deref())),
         ("ausfuehrungen.csv", ausfuehrungen),
@@ -1230,9 +1189,18 @@ mod tests {
 
     #[test]
     fn verlauf_exportiert_mehr_als_die_live_anzeige() -> Result<(), String> {
+        use crate::verlauf;
         let tag = Datum::neu(2026, 11, 12).ok_or("Datum")?;
         let zeit = Zeitpunkt::frankfurt(tag, 8, 0, 0).ok_or("Zeit")?;
-        let mut text = String::new();
+        let grenzdatum = tag.plus_tage(-62).ok_or("Grenzdatum")?;
+        let davor = tag.plus_tage(-63).ok_or("Älterer Tag")?;
+        let grenzzeit = Zeitpunkt::frankfurt(grenzdatum, 8, 0, 0).ok_or("Grenzzeit")?;
+        let altzeit = Zeitpunkt::frankfurt(davor, 8, 0, 0).ok_or("Ältere Zeit")?;
+        let mut text = format!(
+            "verlauf-v1;start;201-1;termine;hand;{}\nverlauf-v1;start;202-1;termine;hand;{}\n",
+            altzeit.sekunden(),
+            grenzzeit.sekunden()
+        );
         for nummer in 1..=25 {
             writeln!(
                 text,
@@ -1241,8 +1209,29 @@ mod tests {
             )
             .map_err(|e| e.to_string())?;
         }
-        assert_eq!(verlauf::lies(&text).auftraege.len(), 20);
-        assert_eq!(verlauf::lies_zeitraum(&text, tag, tag).auftraege.len(), 25);
+        let ordner = std::env::temp_dir().join(format!("depot-verlauf-{}", crate::neues_token()));
+        fs::create_dir_all(ordner.join("daten")).map_err(|e| e.to_string())?;
+        let pfad = verlauf::pfad(&ordner);
+        fs::write(&pfad, text).map_err(|e| e.to_string())?;
+        let live = verlauf::laden(&ordner)?;
+        let archiv = fs::read_to_string(&pfad).map_err(|e| e.to_string())?;
+        fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
+        assert_eq!(live.auftraege.len(), 20);
+        assert!(
+            verlauf::lies_zeitraum(&archiv, davor, davor)
+                .auftraege
+                .is_empty()
+        );
+        assert_eq!(
+            verlauf::lies_zeitraum(&archiv, grenzdatum, grenzdatum)
+                .auftraege
+                .len(),
+            1
+        );
+        assert_eq!(
+            verlauf::lies_zeitraum(&archiv, tag, tag).auftraege.len(),
+            25
+        );
         Ok(())
     }
 }

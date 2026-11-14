@@ -220,14 +220,26 @@ fn lies_bis(text: &str, max: usize) -> Geladen {
     }
 }
 
-/// Laedt den Verlauf und schreibt die Datei gekuerzt neu (nur die gezeigten Auftraege, je mit
-/// ihrem Ende, falls bekannt). Ein Schreibfehler aendert nichts an der Anzeige.
+/// Lädt den Live-Verlauf und verdichtet die Datei für mehrwöchige Exporte.
+/// Die letzten 20 Aufträge bleiben auch nach längerer Betriebspause verfügbar.
 pub fn laden(wurzel: &Path) -> Result<Geladen, String> {
     let p = pfad(wurzel);
     let Some(text) = lies_falls_da(&p)? else {
         return Ok(Geladen::default());
     };
-    let g = lies(&text);
+    let mut g = lies_bis(&text, usize::MAX);
+    let tag = |a: &Auftrag| a.ende.unwrap_or(a.start).frankfurt_tag();
+    let grenze = g
+        .auftraege
+        .iter()
+        .filter_map(tag)
+        .max()
+        .and_then(|neu| neu.plus_tage(-62));
+    let mut position = 0_usize;
+    g.auftraege.retain(|a| {
+        position = position.saturating_add(1);
+        position <= VERLAUF || grenze.zip(tag(a)).is_none_or(|(von, tag)| tag >= von)
+    });
     let mut neu = String::new();
     for a in g.auftraege.iter().rev() {
         let z = if a.frueher == Frueher::Unterbrochen {
@@ -241,6 +253,7 @@ pub fn laden(wurzel: &Path) -> Result<Geladen, String> {
     if let Err(e) = schreibe_ganz(&p, &neu) {
         eprintln!("[Dienst] Verlauf nicht gekürzt: {e}");
     }
+    g.auftraege.truncate(VERLAUF);
     Ok(g)
 }
 
