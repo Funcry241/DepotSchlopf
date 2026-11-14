@@ -17,6 +17,7 @@ use crate::{Dienst, Umwelt, gespraeche, http, protokoll::Schutz, schluessel, sei
 
 mod historie;
 mod journal;
+mod pruefbericht;
 mod schutz;
 
 const MIB: u64 = 1024 * 1024;
@@ -36,7 +37,9 @@ struct Zeitraum {
 impl Zeitraum {
     fn aus_formular(heute: Datum, felder: &[(String, String)]) -> Result<Self, &'static str> {
         let feld = |name| http::feld(felder, name);
-        let (von, bis) = match feld("zeitraum") {
+        let wahl = feld("zeitraum")
+            .or_else(|| (feld("von").is_none() && feld("bis").is_none()).then_some("woche"));
+        let (von, bis) = match wahl {
             Some("heute") => (Some(heute), Some(heute)),
             Some("gestern") => (heute.plus_tage(-1), heute.plus_tage(-1)),
             Some("woche") => (
@@ -56,7 +59,6 @@ impl Zeitraum {
                 feld("von").and_then(Datum::lies),
                 feld("bis").and_then(Datum::lies),
             ),
-            None if feld("von").is_none() && feld("bis").is_none() => (Some(heute), Some(heute)),
             _ => return Err("Wähle einen Zeitraum für den Analyse-Export."),
         };
         let (Some(von), Some(bis)) = (von, bis) else {
@@ -112,7 +114,7 @@ pub(crate) fn formular(d: &Dienst, heute: Option<Datum>) -> String {
     format!(
         "<form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
          <input type=\"hidden\" name=\"ki_texte\" value=\"ja\">\
-         <button type=\"submit\" name=\"zeitraum\" value=\"heute\">Heute exportieren</button>\
+         <button type=\"submit\" name=\"zeitraum\" value=\"woche\">Diese Woche exportieren</button>\
          </form><details id=\"analyse-zeitraum\"><summary>Zeitraum exportieren</summary>\
          <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
          <p><label><input type=\"checkbox\" name=\"ki_texte\" value=\"ja\" checked> Fragen und Systemtexte im Gesprächsbericht aufnehmen</label></p>\
@@ -743,6 +745,9 @@ fn archiv<'a>(
         );
         zip.datei_gepackt(name, text.as_bytes())
     };
+    let mut bereinigt = Vec::new();
+    let mut zeilen_verdeckt = 0_usize;
+    let mut groesse = 0_usize;
     for (name, text) in dateien {
         let jsonl = Path::new(name)
             .extension()
@@ -751,12 +756,32 @@ fn archiv<'a>(
         if schutz.text(&text, jsonl).1 != 0 {
             return Err("Musterprüfung des Exports fehlgeschlagen.".into());
         }
+        groesse = groesse.saturating_add(text.len());
+        if groesse > ZIP_MAX {
+            return Err("Analyse überschreitet die Größenbegrenzung.".into());
+        }
+        zeilen_verdeckt = zeilen_verdeckt.saturating_add(zeilen);
         let _ = writeln!(bericht, "- {name}: {zeilen} Zeilen geschwärzt.");
-        schreibe(name, &text)?;
+        bereinigt.push((name, text));
     }
     let (mut liesmich, zeilen) = schutz.text(liesmich, false);
+    zeilen_verdeckt = zeilen_verdeckt.saturating_add(zeilen);
     let _ = writeln!(bericht, "- LIESMICH.md: {zeilen} Zeilen geschwärzt.");
     liesmich.push_str(&bericht);
+    for (name, mut text) in bereinigt {
+        if name == "PRUEFBERICHT.md" && zeilen_verdeckt != 0 {
+            text.push_str("\n## Durch Schwärzung fehlende Belege\n\n");
+            let _ = writeln!(
+                text,
+                "Gelb: {zeilen_verdeckt} Zeilen fehlen durch Schwärzung."
+            );
+            text.push_str(&bericht);
+            if schutz.text(&text, false).1 != 0 {
+                return Err("Musterprüfung des Prüfberichts fehlgeschlagen.".into());
+            }
+        }
+        schreibe(name, &text)?;
+    }
     if schutz.text(&liesmich, false).1 != 0 {
         return Err("Musterprüfung des Schwärzungsberichts fehlgeschlagen.".into());
     }
@@ -788,6 +813,7 @@ struct Exportoptionen {
 }
 
 struct Journalpaket {
+    pruefbericht: String,
     kurz: String,
     depotdetails: String,
     orders: String,
@@ -861,6 +887,7 @@ fn journalpaket(
         |stand, eintraege, _| {
             let (kurz, depotdetails, orders) = depot(stand, jetzt, tag, sperren, zeitraum);
             Journalpaket {
+                pruefbericht: pruefbericht::bericht(Some(stand), zeitraum),
                 kurz,
                 depotdetails,
                 orders,
@@ -878,6 +905,7 @@ fn journalpaket(
                 "- Journalstand nicht bestätigt. Order-, Depot- und Kostenzahlen fehlen.\n",
             );
             Ok(Journalpaket {
+                pruefbericht: pruefbericht::bericht(None, zeitraum),
                 kurz: "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n".into(),
                 depotdetails: String::new(),
                 orders: "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
@@ -946,6 +974,7 @@ pub(crate) fn exportieren(
     let konfiguration = konfiguration(d, u, &daten);
     let sperren = sperrentext(&daten);
     let Ok(Journalpaket {
+        pruefbericht,
         kurz,
         depotdetails,
         orders,
@@ -1001,7 +1030,8 @@ pub(crate) fn exportieren(
         zeitraum,
         jetzt,
         &liesmich,
-        dateien.iter().map(|(name, text)| (*name, text.as_str())),
+        std::iter::once(("PRUEFBERICHT.md", pruefbericht.as_str()))
+            .chain(dateien.iter().map(|(name, text)| (*name, text.as_str()))),
     )
 }
 

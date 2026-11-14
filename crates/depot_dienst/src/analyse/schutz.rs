@@ -32,7 +32,7 @@ impl<'a> Exportschutz<'a> {
         let klein = text.to_lowercase();
         let woerter = klein.split(|c: char| !c.is_alphanumeric() && !matches!(c, '-' | '_' | '.'));
         let pfad = text.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '(' | '[' | '`' | '=' | ';'))
-            .any(|wort| wort.starts_with('/') || wort.starts_with('\\')
+            .any(|wort| (wort.starts_with('/') && wort.len() > 1) || wort.starts_with('\\')
                 || matches!(wort.as_bytes().get(..3), Some([a, b':', b'\\' | b'/']) if a.is_ascii_alphabetic()));
         pfad || text.chars().any(|c| c.is_control() && c != '\t')
             || text.contains('@')
@@ -57,6 +57,23 @@ impl<'a> Exportschutz<'a> {
             || gruppierte_bankdaten(&klein)
     }
 
+    fn json_personenbezogen(&self, wert: &json::Json) -> bool {
+        let pruefe = |text: &str| {
+            json::alle_texte(text).iter().any(|text| {
+                text.split(['\r', '\n'])
+                    .any(|zeile| self.personenbezogen(zeile))
+            })
+        };
+        match wert {
+            json::Json::Text(text) => pruefe(text),
+            json::Json::Liste(werte) => werte.iter().any(|wert| self.json_personenbezogen(wert)),
+            json::Json::Objekt(felder) => felder
+                .iter()
+                .any(|(name, wert)| pruefe(name) || self.json_personenbezogen(wert)),
+            _ => false,
+        }
+    }
+
     pub(super) fn text(&self, text: &str, jsonl: bool) -> (String, usize) {
         let mut aus = String::with_capacity(text.len());
         let mut anzahl = 0_usize;
@@ -65,11 +82,22 @@ impl<'a> Exportschutz<'a> {
                 || zeile.strip_suffix('\n').map_or((zeile, ""), |z| (z, "\n")),
                 |z| (z, "\r\n"),
             );
-            let persoenlich = self.personenbezogen(inhalt)
-                || (inhalt.contains('\\')
-                    && json::alle_texte(inhalt)
-                        .iter()
-                        .any(|s| self.personenbezogen(s)));
+            let json = inhalt.find('{').and_then(|i| {
+                let (vorlauf, objekt) = inhalt.split_at_checked(i)?;
+                Some((vorlauf, json::lies(objekt).ok()?))
+            });
+            let persoenlich = json.map_or_else(
+                || {
+                    self.personenbezogen(inhalt)
+                        || (inhalt.contains('\\')
+                            && json::alle_texte(inhalt)
+                                .iter()
+                                .any(|text| self.personenbezogen(text)))
+                },
+                |(vorlauf, objekt)| {
+                    self.personenbezogen(vorlauf) || self.json_personenbezogen(&objekt)
+                },
+            );
             if persoenlich || self.schluessel.bereinige(inhalt) != inhalt {
                 anzahl = anzahl.saturating_add(1);
                 aus.push_str(if jsonl {
@@ -168,6 +196,34 @@ fn bankdaten(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_mit_zeilenumbruch_bleibt_sichtbar() {
+        let schluessel = Schutz::default();
+        let schutz = Exportschutz::neu(&schluessel, None);
+        for text in [
+            r#"{"frage":"A\nWert SAP"}"#,
+            r#"    belegt;{"frage":"A\nWert SAP"}"#,
+        ] {
+            assert_eq!(schutz.text(text, false), (text.into(), 0));
+        }
+    }
+
+    #[test]
+    fn json_mit_pfad_wird_geschwaerzt() {
+        let schluessel = Schutz::default();
+        let schutz = Exportschutz::neu(&schluessel, None);
+        let text = r#"    belegt;{"frage":"A\nC:\\Users\\Test"}"#;
+        assert_eq!(schutz.text(text, false).1, 1);
+    }
+
+    #[test]
+    fn bestandskopf_bleibt_sichtbar() {
+        let schluessel = Schutz::default();
+        let schutz = Exportschutz::neu(&schluessel, None);
+        let text = "| Wert | ISIN | Kauf / Verkauf | Kurs / EUR |";
+        assert_eq!(schutz.text(text, false), (text.into(), 0));
+    }
 
     #[test]
     fn schwaerzt_rohtext_und_kodierte_gespraeche() {
