@@ -19,7 +19,7 @@ pub(super) fn bericht(
     let mut aus = String::from(
         "\n## Im Zeitraum belegte Orderbewegungen\n\nDie Auswahl nutzt Versand, Frist, Ausführung und datierte Journalbewegungen. Der angezeigte Zustand gilt zum Exportzeitpunkt. Die Frist ist der vorgesehene Börsenschluss. Ausführungszeilen zeigen die gesamte belegte Orderhistorie, auch außerhalb des gewählten Zeitraums. Netto bezeichnet den Geldabfluss beim Kauf und den Geldzufluss beim Verkauf nach Gebühren. Ein Geld-Brief-Spread ist im Papierjournal nicht belegt.\n",
     );
-    let (bewegungen, undatiert) = journalbewegungen(eintraege, zeitraum);
+    let (bewegungen, mut undatiert) = journalbewegungen(eintraege, zeitraum);
     let gruende = verfallsgruende(stand, zeitraum);
     let mut anzahl = 0_usize;
     for z in buch {
@@ -37,6 +37,7 @@ pub(super) fn bericht(
         {
             continue;
         }
+        undatiert.remove(&z.nr);
         anzahl = anzahl.saturating_add(1);
         schreibe_order(&mut aus, z, order, gruende.get(&z.nr).copied());
     }
@@ -217,6 +218,105 @@ mod tests {
         let (belegt, offen) = journalbewegungen(&eintraege, zeitraum);
         assert_eq!(belegt, [1, 3].into());
         assert_eq!(offen, [4].into());
+        Ok(())
+    }
+
+    #[test]
+    fn bericht_zeigt_frist_verfallsbelege_und_netto() -> Result<(), String> {
+        let von = Datum::neu(2030, 1, 8).ok_or("Tag")?;
+        let zeitraum = Zeitraum { von, bis: von };
+        let zeit = depot_kern::Zeitpunkt::lies("2030-01-08T16:30:00Z").ok_or("Frist")?;
+        let isin = depot_kern::Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let zeile = OrderZeile {
+            nr: 1,
+            topf: depot_kern::TopfId::A,
+            isin,
+            richtung: Richtung::Kauf,
+            stueck: 2,
+            versand: None,
+            frist: Some(zeit),
+            zustand: AuftragsZustand::Verfallen,
+            bezug: None,
+            limit: Cent(1_000),
+            limit_bp: None,
+            fuellpreis: None,
+            fuellpreis_bp: None,
+            schluss: None,
+            schluss_bp: None,
+        };
+        let eintraege = [
+            (Art::Topf, "A;100000;"),
+            (Art::Auftrag, "1;A;DE0007164600;Kauf;2;1000;Umschichtung"),
+            (Art::Zustand, "1;gesendet"),
+            (Art::Zustand, "1;angenommen"),
+            (Art::Zustand, "1;verfallen"),
+            (Art::Auftrag, "2;A;DE0007164600;Kauf;1;1000;Umschichtung"),
+            (
+                Art::Begruendung,
+                "2030-01-08;Simulation;Topf A: Auftrag 1 verfällt: Beispiel-Freitext",
+            ),
+        ];
+        let ordner = std::env::temp_dir().join(format!("depot-order-{}", crate::neues_token()));
+        std::fs::create_dir(&ordner).map_err(|e| e.to_string())?;
+        let pfad = ordner.join("journal.txt");
+        let bytes = depot_journal::inhalt_fuer(&eintraege);
+        let vermerk = depot_journal::vermerk_fuer(&bytes, 0).ok_or("Vermerk")?;
+        std::fs::write(&pfad, bytes).map_err(|e| e.to_string())?;
+        std::fs::write(pfad.with_extension("vermerk"), vermerk).map_err(|e| e.to_string())?;
+        let mut journal = depot_journal::Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+        let andere = OrderZeile {
+            nr: 2,
+            frist: None,
+            ..zeile.clone()
+        };
+        let buch = [zeile.clone(), andere];
+        let text = bericht(journal.stand(), journal.eintraege(), &buch, zeitraum);
+        assert!(text.contains("### Order #1"));
+        assert!(!text.contains("### Order #2"));
+        assert!(text.contains("Verfallsgrund nicht im Zeitraum belegt"));
+        assert!(!text.contains("Beispiel-Freitext"));
+        assert!(!text.contains("Bewegungen, deren Zeitraum offen bleibt: #1"));
+        let folgetag = von.plus_tage(1).ok_or("Folgetag")?;
+        let text = bericht(
+            journal.stand(),
+            journal.eintraege(),
+            &buch,
+            Zeitraum {
+                von: folgetag,
+                bis: folgetag,
+            },
+        );
+        assert!(text.contains("Keine datierte Orderbewegung im Zeitraum belegt."));
+        journal
+            .begruende(
+                von,
+                "Simulation",
+                "Topf A: Auftrag 1 verfällt: Kurs ausserhalb des Limits",
+            )
+            .map_err(|e| format!("{e:?}"))?;
+        let text = bericht(journal.stand(), journal.eintraege(), &buch, zeitraum);
+        assert!(text.contains("Verfallsgrund am 2030-01-08 belegt: Kurs außerhalb des Limits."));
+        let mut auftrag = journal.stand().auftrag(1).ok_or("Order")?.clone();
+        auftrag.ausfuehrungen.push(Ausfuehrung {
+            stueck: 2,
+            kurs: Cent(1_000),
+            gebuehr: Cent(150),
+            kurszeit: Some(zeit),
+        });
+        for (richtung, betrag) in [(Richtung::Kauf, "-21,50 €"), (Richtung::Verkauf, "18,50 €")]
+        {
+            let mut text = String::new();
+            let z = OrderZeile {
+                richtung,
+                ..zeile.clone()
+            };
+            schreibe_order(&mut text, &z, &auftrag, None);
+            assert!(text.contains(&format!(
+                "2 Stück zu 10,00 € · Gebühren 1,50 € · Netto-Zahlungsbetrag {betrag}"
+            )));
+        }
+        drop(journal);
+        std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
         Ok(())
     }
 

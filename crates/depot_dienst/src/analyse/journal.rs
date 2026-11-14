@@ -65,7 +65,7 @@ pub(super) fn orderdatum(art: Art, text: &str, abrechnungstag: Option<Datum>) ->
 pub(super) fn auszug(zeitraum: Zeitraum, stand: &Stand, eintraege: &[(Art, String)]) -> Auszug {
     let mut aus = Auszug {
         bericht: String::from(
-            "\n## Weitere bestätigte Journaleinträge\n\nBelege von externen Quellen sind nach ihrem Abrufdatum eingeordnet. Ausführungen ohne eigene Zeitangabe verwenden den belegten Abrechnungstag. Zeilennummern beziehen sich auf das Originaljournal.\n",
+            "\n## Weitere bestätigte Journaleinträge\n\nBelege von externen Quellen sind nach ihrem Abrufdatum eingeordnet. Ausführungen mit Kurszeit stehen beim Frankfurter Kurstag, auch bei späterer Abrechnung. Ausführungen ohne Kurszeit verwenden den belegten Abrechnungstag. Zeilennummern beziehen sich auf das Originaljournal.\n",
         ),
     };
     let mut undatiert = 0_usize;
