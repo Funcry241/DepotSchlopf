@@ -1,7 +1,7 @@
 klasse: Funktion
-zweck: Belegte Orderbewegungen und Nettobeträge im Wochenexport auswerten
+zweck: Täglichen Betriebsablauf mit Plan, Laufbelegen und Journalabschluss im Analyse-Export zeigen
 pfade:
 crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/journal.rs
-crates/depot_dienst/src/analyse/orders.rs
+crates/depot_dienst/src/analyse/ablauf.rs
 crates/depot_dienst/src/analyse/pruefbericht.rs
+crates/depot_dienst/src/verlauf.rs
