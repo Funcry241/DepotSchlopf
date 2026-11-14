@@ -379,6 +379,7 @@ mod tests {
             kurstage: Vec::new(),
             kursbezug: std::collections::BTreeMap::new(),
             ersatz: Vec::new(),
+            topfwerte: std::collections::BTreeMap::new(),
         };
         zahlen_je_tag(&[punkt], &mut html);
         assert!(html.contains("nicht bewertbar: Kurs fehlt für &lt;Siemens&gt;"));

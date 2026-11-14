@@ -62,7 +62,7 @@ pub(super) fn bericht(stand: &Stand, zeitraum: Zeitraum, werte: &BTreeMap<Datum,
     } else {
         text.push_str("\nVergleichsdepot im Zeitraum nicht belegt.\n");
     }
-    text.push_str("\nMesslatte: Auswertung folgt mit #233.\n");
+    text.push_str("\nDie Messlatte steht in der Depotansicht.\n");
     verkaeufe(
         &mut text,
         &depot_lage::handelsergebnis::verkaeufe(stand),
@@ -94,16 +94,15 @@ fn verkaeufe(
             "Verkäufe ohne belegtes Ausführungsdatum fehlen in der Zeitraum-Auswertung.\n\n",
         );
     }
-    let mut anzahl = 0_u32;
-    let mut gewinne = 0_u32;
     let mut tabelle = String::new();
-    for v in verkaeufe {
-        let Some(tag) = v
-            .tag
-            .filter(|tag| (zeitraum.von..=zeitraum.bis).contains(tag))
-        else {
-            continue;
-        };
+    let im_zeitraum = || {
+        verkaeufe.iter().filter(|v| {
+            v.tag
+                .is_some_and(|tag| (zeitraum.von..=zeitraum.bis).contains(&tag))
+        })
+    };
+    for v in im_zeitraum() {
+        let Some(tag) = v.tag else { continue };
         let _ = writeln!(
             tabelle,
             "| {tag} | {} | {:?} | {} | {} |",
@@ -112,10 +111,6 @@ fn verkaeufe(
             v.isin,
             v.netto.map_or_else(|| "–".into(), |wert| wert.to_string())
         );
-        if let Some(netto) = v.netto {
-            anzahl = anzahl.saturating_add(1);
-            gewinne = gewinne.saturating_add(u32::from(netto > Cent::NULL));
-        }
     }
     if tabelle.is_empty() {
         text.push_str(
@@ -127,14 +122,17 @@ fn verkaeufe(
         );
         text.push_str(&tabelle);
     }
-    let quote = i64::from(gewinne)
-        .checked_mul(10_000)
-        .and_then(|n| n.checked_div(i64::from(anzahl)));
-    let _ = writeln!(
-        text,
-        "\nTrefferquote unter Verkäufen mit belegtem Einstand: {} ({gewinne} von {anzahl} mit Gewinn).",
-        prozent(quote)
-    );
+    if let Some(bilanz) = depot_lage::handelsergebnis::bilanz(im_zeitraum()) {
+        let _ = writeln!(
+            text,
+            "\nTrefferquote unter Verkäufen mit belegtem Einstand: {} ({} von {} mit Gewinn).",
+            prozent(bilanz.trefferquote()),
+            bilanz.gewinne,
+            bilanz.abgeschlossen
+        );
+    } else {
+        text.push_str("\nTrefferquote unter Verkäufen mit belegtem Einstand: nicht belegt.\n");
+    }
 }
 
 #[cfg(test)]
