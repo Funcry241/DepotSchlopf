@@ -1,6 +1,6 @@
-klasse: KodexAenderung
-zweck: Die Messlatte ab ihrer Einführung gegen Änderungen ohne Grenzfreigabe schützen
+klasse: Funktion
+zweck: Bekannte TARGET-Feiertage aus dem NYSE-Kursverlauf auslassen
 pfade:
-crates/depot_kodex/src/festschreibung.rs
-kodex/festschreibung.txt
-kodex/freigabe.txt
+crates/depot_kern/src/boerse.rs
+crates/depot_sim/src/kursverlauf.rs
+crates/depot_sim/tests/papiertag.rs

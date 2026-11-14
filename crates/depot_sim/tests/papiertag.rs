@@ -178,6 +178,66 @@ fn verlauf_21_tage() -> Result<(), String> {
     Ok(())
 }
 
+fn nyse_verlaufsprobe(
+    fehlender_tag: Option<Datum>,
+) -> Result<depot_sim::kursverlauf::Verlauf, String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let isin = vorbedingung(Isin::neu("US46625H1005"), "JPM")?;
+    let bis = some(Datum::neu(2026, 4, 7), "Dienstag nach Ostern")?;
+    let montag = some(Datum::neu(2026, 4, 6), "Ostermontag")?;
+    let abruf = some(Zeitpunkt::frankfurt(bis, 22, 30, 0), "Abruf")?;
+    let boerse = depot_kern::Boerse::Nyse;
+    let mut datum = bis;
+    let mut nr = 0;
+    while nr < 21_u8 {
+        if datum != montag {
+            if fehlender_tag != Some(datum) {
+                let schluss = some(boerse.schluss(datum), "NYSE-Schluss")?;
+                let preis = if datum == bis { 10_100 } else { 10_000 };
+                let kurs = vorbedingung(
+                    Kurs::neu(Cent(preis), "EUR", datum, schluss, Herkunft::Quelle),
+                    "Kurs",
+                )?;
+                let beleg = vorbedingung(
+                    KursBeleg::neu("tiingo", abruf, b"Schlusskurs", isin.clone(), kurs),
+                    "Beleg",
+                )?;
+                vorbedingung(j.belege_kurs(&beleg), "Kurs schreiben")?;
+            }
+            nr = nr.saturating_add(1);
+        }
+        datum = some(boerse.bezugstag(datum), "Handelstag")?;
+    }
+    Ok(depot_sim::kursverlauf::kursverlauf(
+        j.stand(),
+        &isin,
+        bis,
+        abruf,
+    ))
+}
+
+#[test]
+fn verlauf_ueber_ostermontag() -> Result<(), String> {
+    use depot_sim::kursverlauf::Verlauf;
+    let verlauf = nyse_verlaufsprobe(None)?;
+    assert!(
+        matches!(verlauf, Verlauf::Da { t1_bp: 100, .. }),
+        "{verlauf:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn verlauf_echte_luecke() -> Result<(), String> {
+    let dienstag = some(Datum::neu(2026, 3, 31), "Dienstag")?;
+    assert_eq!(
+        nyse_verlaufsprobe(Some(dienstag))?,
+        depot_sim::kursverlauf::Verlauf::ZuWenig
+    );
+    Ok(())
+}
+
 #[test]
 fn zu_wenig_verlauf() -> Result<(), String> {
     use depot_sim::kursverlauf::{Verlauf, kursverlauf};
