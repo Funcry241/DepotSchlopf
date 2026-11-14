@@ -1,5 +1,6 @@
 //! Fehlerbelege aus typisierten Quellen. Diagnosefreitext bleibt lokal.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -8,12 +9,13 @@ use depot_kern::{Datum, Zeitpunkt};
 use depot_lage::anbieter::{self, Eintrag, Ergebnis, Wer};
 use depot_lage::zeit_text;
 
-use crate::werkbank::{Anlass, Art, Frueher};
+use crate::werkbank::{Anlass, Art, Auftrag, Frueher};
 
 use super::{Zeitraum, ablauf::Ablauf, textdatei};
 
 pub(super) struct Belege {
     ereignisse: Vec<Ereignis>,
+    aufrufzahlen: BTreeMap<Wer, (usize, usize)>,
     anbieter_unlesbar: Option<usize>,
     dienst_luecken: bool,
     ki_sperre: bool,
@@ -51,8 +53,17 @@ impl Belege {
             }
         };
         aufrufe.retain(|e| zeitraum.enthaelt(e.zeit));
-        let mut ereignisse: Vec<_> = aufrufe.iter().filter_map(anbieterfehler).collect();
-        ereignisse.extend(dienstfehler(ablauf, zeitraum));
+        let mut aufrufzahlen = BTreeMap::<Wer, (usize, usize)>::new();
+        let mut ereignisse = Vec::new();
+        for aufruf in aufrufe.iter().filter(|e| e.ergebnis != Ergebnis::Neu) {
+            let (gesamt, auffaellig) = aufrufzahlen.entry(aufruf.wer).or_default();
+            *gesamt = gesamt.saturating_add(1);
+            if let Some(e) = anbieterfehler(aufruf) {
+                *auffaellig = auffaellig.saturating_add(1);
+                ereignisse.push(e);
+            }
+        }
+        ereignisse.extend(dienstfehler(ablauf.laeufe(), zeitraum));
 
         if let Some(zeit) = kurssperre::letzter_fehlalarm(daten).filter(|z| zeitraum.enthaelt(*z)) {
             ereignisse.push(Ereignis {
@@ -67,8 +78,9 @@ impl Belege {
         ereignisse.sort_by_key(|e| e.zeit);
         Self {
             ereignisse,
+            aufrufzahlen,
             anbieter_unlesbar,
-            dienst_luecken: ablauf.ampel().starts_with("Rot"),
+            dienst_luecken: ablauf.hat_luecken(),
             ki_sperre: daten.join("ki.halt").exists(),
             kurssperre: daten.join(kurssperre::KURSSPERRE).exists(),
         }
@@ -91,7 +103,8 @@ impl Belege {
             "\n## Fehler und Warnungen\n\n",
             "Die Tabelle enthält datierte Anbieter- und Dienstbelege. Fehlt ein Nachweis über Ursache ",
             "oder Folge, bleibt die Lücke offen. Freie Diagnosemeldungen werden nicht exportiert. ",
-            "Ein späterer erfolgreicher Anbieteraufruf belegt allein keine Wiederholung derselben Anfrage.\n\n",
+            "Ein späterer erfolgreicher Anbieteraufruf belegt allein keine Wiederholung derselben Anfrage. ",
+            "Von automatisch als Fehlalarm aufgehobenen Kurssperren zeigt der Export den letzten Vermerk, wenn er im Zeitraum liegt.\n\n",
             "| Zeit | Ort | Stufe | Ursache | Reaktion oder Folge | Beleg |\n",
             "|---|---|---|---|---|---|\n",
         ));
@@ -109,6 +122,16 @@ impl Belege {
         }
         if self.ereignisse.is_empty() {
             aus.push_str("| – | – | – | Kein Ereignis aus diesen Quellen belegt | – | – |\n");
+        }
+        if !self.aufrufzahlen.is_empty() {
+            aus.push_str("\n### Anbieteraufrufe im Zeitraum\n\n");
+            for (&wer, &(gesamt, auffaellig)) in &self.aufrufzahlen {
+                let _ = writeln!(
+                    aus,
+                    "- {}: {gesamt} Aufrufbelege, davon {auffaellig} Fehler oder Warnungen.",
+                    wer.anzeigename()
+                );
+            }
         }
         if let Some(n) = self.anbieter_unlesbar {
             let _ = writeln!(aus, "\nUnlesbare Anbieterzeilen: {n}.");
@@ -210,8 +233,8 @@ fn anbieterfehler(e: &Eintrag) -> Option<Ereignis> {
     })
 }
 
-fn dienstfehler(ablauf: &Ablauf, zeitraum: Zeitraum) -> impl Iterator<Item = Ereignis> + '_ {
-    ablauf.laeufe().iter().filter_map(move |lauf| {
+fn dienstfehler(laeufe: &[Auftrag], zeitraum: Zeitraum) -> impl Iterator<Item = Ereignis> + '_ {
+    laeufe.iter().filter_map(move |lauf| {
         let (zeit, ursache, folge) = match (lauf.art, lauf.frueher, lauf.erfolg) {
             (Art::PapierAusgelassen, _, _) => (
                 lauf.start,
@@ -236,8 +259,7 @@ fn dienstfehler(ablauf: &Ablauf, zeitraum: Zeitraum) -> impl Iterator<Item = Ere
         let mut reaktion = folge.to_owned();
         if lauf.anlass == Anlass::Zeitplan
             && matches!(lauf.art, Art::KurseVon(_))
-            && let Some(versuch) = ablauf
-                .laeufe()
+            && let Some(versuch) = laeufe
                 .iter()
                 .filter(|neu| {
                     neu.art == lauf.art
@@ -324,6 +346,96 @@ mod tests {
     use crate::Dienst;
     use std::fs;
     #[test]
+    fn fehlerampel_zeigt_anbieterluecken_bei_bestaetigtem_journal() {
+        for anbieter_unlesbar in [None, Some(1)] {
+            let belege = Belege {
+                ereignisse: Vec::new(),
+                aufrufzahlen: BTreeMap::new(),
+                anbieter_unlesbar,
+                dienst_luecken: false,
+                ki_sperre: false,
+                kurssperre: false,
+            };
+            assert_eq!(belege.ampel(true), "Rot (Beleglücken)");
+        }
+    }
+
+    #[test]
+    fn journal_zeigt_schutzmassnahmen_am_belegten_tag() -> Result<(), String> {
+        let tag = Datum::neu(2030, 1, 10).ok_or("Datum")?;
+        let zeitraum = Zeitraum { von: tag, bis: tag };
+        let journal = [
+            (Journalart::PapierHalt, "2030-01-10;notbremse".into()),
+            (Journalart::PapierHalt, "2030-01-10;gesamtverlust".into()),
+            (Journalart::NotbremseFreigabe, "2030-01-10;500000".into()),
+            (
+                Journalart::PapierFreigabe,
+                "2030-01-09;500000;einrichtung;dialog;2030-01-09T23:30:00Z".into(),
+            ),
+            (Journalart::PapierHalt, "2030-01-09;notbremse".into()),
+        ];
+        let mut aus = String::new();
+        journalbelege(&mut aus, &journal, zeitraum);
+        assert!(aus.contains("Notbremse aktiviert. Schutzverkäufe laufen weiter."));
+        assert!(aus.contains("Gesamtverlustgrenze erreicht. Neue Käufe gesperrt."));
+        assert!(aus.contains("Notbremse beim Tagesabschluss zurückgesetzt."));
+        assert!(aus.contains("10.01.2030 00:30 MEZ · Einrichtung · Papier-Gesamtverlustsperre"));
+        assert_eq!(aus.lines().count(), 4);
+        let mut aus = String::new();
+        journalbelege(
+            &mut aus,
+            &[(Journalart::Abschluss, "2030-01-10;500000".into())],
+            zeitraum,
+        );
+        assert!(aus.contains("Keine datierte Schutzmaßnahme"));
+        Ok(())
+    }
+
+    #[test]
+    fn dienstwarnungen_unterscheiden_ausfall_unterbrechung_und_wiederholung() -> Result<(), String>
+    {
+        let tag = Datum::neu(2030, 1, 10).ok_or("Datum")?;
+        let danach = tag.plus_tage(1).ok_or("Folgetag")?;
+        let zeit = |tag, h| {
+            Zeitpunkt::frankfurt(tag, h, 0, 0)
+                .map(Zeitpunkt::sekunden)
+                .ok_or("Zeit")
+        };
+        let text = format!(
+            concat!(
+                "verlauf-v1;start;301-1;kurse_xetra;zeitplan;{}\n",
+                "verlauf-v1;ende;301-2;papier_ausgelassen;zeitplan;{};{};fehler\n",
+                "verlauf-v1;start;301-3;kurse_xetra;hand;{}\n",
+                "verlauf-v1;start;301-4;kurse_xetra;zeitplan;{}\n",
+            ),
+            zeit(tag, 7)?,
+            zeit(tag, 18)?,
+            zeit(tag, 18)?,
+            zeit(tag, 8)?,
+            zeit(danach, 8)?,
+        );
+        let verlauf = crate::verlauf::lies_zeitraum(&text, tag, danach);
+        let zeitraum = Zeitraum {
+            von: tag,
+            bis: danach,
+        };
+        let ereignisse = dienstfehler(&verlauf.auftraege, zeitraum).collect::<Vec<_>>();
+        let unterbrochen = ereignisse
+            .iter()
+            .find(|e| e.beleg.contains("301-1"))
+            .ok_or("Unterbrechung")?;
+        assert_eq!(unterbrochen.reaktion, "Lauf unterbrochen");
+        assert!(unterbrochen.beleg.contains("Uhrzeit der Startvormerkung"));
+        let ausgelassen = ereignisse
+            .iter()
+            .find(|e| e.beleg.contains("301-2"))
+            .ok_or("Ausfall")?;
+        assert_eq!(ausgelassen.stufe, "Warnung");
+        assert_eq!(ausgelassen.reaktion, "Papiertag ausgelassen");
+        Ok(())
+    }
+
+    #[test]
     fn bericht_belegt_fehler_pausen_und_erneuten_abruf() -> Result<(), String> {
         use depot_lage::anbieter::{self, Eintrag, Ergebnis, Wer};
 
@@ -398,6 +510,7 @@ mod tests {
         assert!(archiv.contains("KI pausiert bis 10.01.2030 08:00 MEZ"));
         assert!(archiv.contains("Weiterer automatischer Abruf um 10.01.2030 08:00 MEZ (111-2)"));
         assert!(archiv.contains("- KI-Sperre: an."));
+        assert!(archiv.contains("Maus (GPT): 2 Aufrufbelege, davon 1 Fehler oder Warnungen."));
         for ausgeschlossen in ["Privater-Diagnosetext", "HTTP 503", "HTTP 200"] {
             assert!(!archiv.contains(ausgeschlossen));
         }
