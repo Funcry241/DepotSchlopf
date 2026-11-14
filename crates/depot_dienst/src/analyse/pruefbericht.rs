@@ -72,7 +72,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
         ),
         (
             "Orders",
-            "04_orders_und_depot.md und ausfuehrungen.csv enthalten bekannte Orders und Füllungen.",
+            "04_orders_und_depot.md zeigt Limit, Versand, Frist, Verfallsgrund und Ausführungen mit Gebühren und Netto. Ein Geld-Brief-Spread ist nicht belegt.",
         ),
         (
             "Depot und Leistung",

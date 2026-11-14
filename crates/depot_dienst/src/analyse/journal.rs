@@ -44,16 +44,28 @@ fn datum(art: Art, text: &str, abrechnungstag: Option<Datum>, stand: &Stand) -> 
             let sekunden = obj.feld("zeit").or_else(|| obj.feld("start"))?.ganz()?;
             frankfurt(Zeitpunkt::aus_sekunden(sekunden)?)
         }
-        Art::Zustand if feld(1) == Some("gesendet") && feld(2).is_some() => frankfurt(zeit(2)?),
-        Art::Topf | Art::Auftrag | Art::Zustand => abrechnungstag,
+        Art::Auftrag | Art::Zustand => orderdatum(art, text, abrechnungstag),
+        Art::Topf => abrechnungstag,
         Art::Format | Art::KiGrenzen => None,
     }
+}
+
+pub(super) fn orderdatum(art: Art, text: &str, abrechnungstag: Option<Datum>) -> Option<Datum> {
+    let mut felder = text.split(';').skip(1);
+    let zeit = match (art, felder.next()) {
+        (Art::Zustand, Some("gesendet")) => felder.next(),
+        (Art::Zustand, Some("ausfuehrung")) => felder.nth(3),
+        _ => None,
+    };
+    zeit.and_then(Zeitpunkt::lies)
+        .and_then(Zeitpunkt::frankfurt_tag)
+        .or(abrechnungstag)
 }
 
 pub(super) fn auszug(zeitraum: Zeitraum, stand: &Stand, eintraege: &[(Art, String)]) -> Auszug {
     let mut aus = Auszug {
         bericht: String::from(
-            "\n## Weitere bestätigte Journaleinträge\n\nBelege von externen Quellen sind nach ihrem Abrufdatum eingeordnet. Ausführungen ohne eigene Zeitangabe verwenden den belegten Abrechnungstag. Zeilennummern beziehen sich auf das Originaljournal.\n",
+            "\n## Weitere bestätigte Journaleinträge\n\nBelege von externen Quellen sind nach ihrem Abrufdatum eingeordnet. Ausführungen mit Kurszeit stehen beim Frankfurter Kurstag, auch bei späterer Abrechnung. Ausführungen ohne Kurszeit verwenden den belegten Abrechnungstag. Zeilennummern beziehen sich auf das Originaljournal.\n",
         ),
     };
     let mut undatiert = 0_usize;

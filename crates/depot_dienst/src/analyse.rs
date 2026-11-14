@@ -20,6 +20,7 @@ mod historie;
 mod journal;
 mod ki_kosten;
 mod leistung;
+mod orders;
 mod pruefbericht;
 mod schutz;
 
@@ -322,17 +323,10 @@ pub(crate) fn letzter_boersenschluss(jetzt: Zeitpunkt, tag: Datum) -> Option<Dat
         .max()
 }
 
-fn depot(
-    stand: &Stand,
-    jetzt: Zeitpunkt,
-    tag: Datum,
-    sperren: &str,
-    zeitraum: Zeitraum,
-) -> (String, String, String) {
+fn depot(stand: &Stand, jetzt: Zeitpunkt, tag: Datum, sperren: &str) -> (String, String) {
     let Ok(werte) = depot_kern::liste::beobachtungsliste() else {
         return (
             "Depotstand nicht verfügbar: Beobachtungsliste unlesbar.\n".into(),
-            String::new(),
             String::new(),
         );
     };
@@ -404,7 +398,7 @@ fn depot(
         .map_or_else(|| "aus".into(), depot_journal::PapierHalt::meldung);
     let _ = writeln!(kurz, "- Notbremse: {notbremse}{sperren}");
     let details = depotdetails(stand, &lage, &werte);
-    (kurz, details, orderbewegungen(stand, &werte, zeitraum))
+    (kurz, details)
 }
 
 fn depotdetails(
@@ -467,47 +461,6 @@ fn depotdetails(
             );
         }
     }
-    details
-}
-
-fn orderbewegungen(stand: &Stand, werte: &[depot_kern::liste::Wert], zeitraum: Zeitraum) -> String {
-    let mut details = String::new();
-    details.push_str("\n## Im Zeitraum belegte Orderbewegungen\n");
-    for a in stand.auftraege() {
-        let versand = a.versand.filter(|z| zeitraum.enthaelt(*z));
-        let fuellungen = || {
-            a.ausfuehrungen
-                .iter()
-                .filter(|f| f.kurszeit.is_some_and(|z| zeitraum.enthaelt(z)))
-        };
-        if versand.is_some() || fuellungen().next().is_some() {
-            let order = depot_lage::auftrag_zeile(a, werte);
-            let _ = writeln!(
-                details,
-                "- #{} · {} · {} · {} Stück · Limit {} · aktueller Zustand: {}",
-                order.nr,
-                order.name,
-                order.richtung,
-                order.stueck,
-                geld(Some(order.limit)),
-                order.zustand
-            );
-            if let Some(zeit) = versand {
-                let _ = writeln!(details, "  - Versand: {}", zeit_text(zeit));
-            }
-            for f in fuellungen() {
-                let _ = writeln!(
-                    details,
-                    "  - {} · {} Stück zu {} · Gebühr {}",
-                    f.kurszeit.map_or_else(|| "nicht belegt".into(), zeit_text),
-                    f.stueck,
-                    geld(Some(f.kurs)),
-                    geld(Some(f.gebuehr))
-                );
-            }
-        }
-    }
-    details.push_str("\nDie Tagesliste verwendet belegte Versand- und Kurszeitpunkte. Bewegungen ohne Zeitbeleg lassen sich keinem Tag zuordnen.\n");
     details
 }
 
@@ -850,8 +803,12 @@ struct Journalpaket {
     journal: journal::Auszug,
 }
 
-fn ausfuehrungen_csv(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
-    use depot_lage::ausfuehrung::{Richtung, ausfuehrungsbuch};
+fn ausfuehrungen_csv(
+    stand: Option<&Stand>,
+    buch: &[depot_lage::ausfuehrung::OrderZeile],
+    zeitraum: Zeitraum,
+) -> String {
+    use depot_lage::ausfuehrung::Richtung;
     let mut csv = String::from(
         "Nr;Topf;ISIN;Richtung;Stück;Versand UTC;Frist UTC;Zustand;Bezug EUR;Limit EUR;Limit bp;Füllpreis EUR;Füllpreis bp;Schluss EUR;Schluss bp\n",
     );
@@ -861,7 +818,7 @@ fn ausfuehrungen_csv(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
     };
     let bp = |wert: Option<i64>| wert.map_or_else(String::new, |wert| wert.to_string());
     let zeit = |wert: Option<Zeitpunkt>| wert.map_or_else(String::new, |wert| wert.to_string());
-    for z in ausfuehrungsbuch(stand) {
+    for z in buch {
         let fuellung = stand.auftrag(z.nr).is_some_and(|a| {
             a.ausfuehrungen
                 .iter()
@@ -911,7 +868,9 @@ fn journalpaket(
         &daten.join("journal.txt"),
         JOURNAL_MAX,
         |stand, eintraege, _| {
-            let (kurz, depotdetails, orders) = depot(stand, jetzt, tag, sperren, zeitraum);
+            let (kurz, depotdetails) = depot(stand, jetzt, tag, sperren);
+            let buch = depot_lage::ausfuehrung::ausfuehrungsbuch(stand);
+            let orders = orders::bericht(stand, eintraege, &buch, zeitraum);
             let historie = historie::bericht(zeitraum, Some(stand), luecken);
             let (ki, gespraechsbelege) = ki(daten, zeitraum, Some(stand), luecken);
             let pruefbericht = pruefbericht::bericht(Some(stand), zeitraum)
@@ -922,7 +881,7 @@ fn journalpaket(
                 kurz,
                 depotdetails,
                 orders,
-                ausfuehrungen: ausfuehrungen_csv(Some(stand), zeitraum),
+                ausfuehrungen: ausfuehrungen_csv(Some(stand), &buch, zeitraum),
                 ki,
                 historie,
                 journal: journal::auszug(zeitraum, stand, eintraege),
@@ -940,7 +899,7 @@ fn journalpaket(
                 kurz: "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n".into(),
                 depotdetails: String::new(),
                 orders: "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
-                ausfuehrungen: ausfuehrungen_csv(None, zeitraum),
+                ausfuehrungen: ausfuehrungen_csv(None, &[], zeitraum),
                 ki: ki(daten, zeitraum, None, luecken).0,
                 historie: historie::bericht(zeitraum, None, luecken),
                 journal: journal::Auszug::default(),
@@ -1134,10 +1093,10 @@ mod tests {
     fn export_csv() -> Result<(), String> {
         let tag = Datum::neu(2026, 11, 10).ok_or("Datum")?;
         let zeitraum = Zeitraum { von: tag, bis: tag };
-        let csv = ausfuehrungen_csv(Some(&Stand::default()), zeitraum);
+        let csv = ausfuehrungen_csv(Some(&Stand::default()), &[], zeitraum);
         assert!(csv.starts_with("Nr;Topf;ISIN;Richtung;Stück;"));
         assert!(csv.contains("Füllpreis EUR;Füllpreis bp;Schluss EUR;Schluss bp\n"));
-        assert_eq!(csv, ausfuehrungen_csv(None, zeitraum));
+        assert_eq!(csv, ausfuehrungen_csv(None, &[], zeitraum));
         Ok(())
     }
 
