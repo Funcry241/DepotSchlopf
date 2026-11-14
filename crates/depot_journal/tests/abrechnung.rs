@@ -263,3 +263,73 @@ fn billige_zusatzfragen_verbrauchen_nicht_die_aufrufe_der_restlichen_erstmeinung
     assert_eq!(buch.stand().ki().buchungen().len(), 690);
     Ok(())
 }
+
+#[test]
+fn aufruf_ohne_buchung_abgelehnt() -> Result<(), String> {
+    let pfad = ort()?;
+    let text = format!(
+        "0;anthropic;modell;{};-;-;-;-;nicht_gesendet",
+        "a".repeat(64)
+    );
+    schreibe(&pfad, &[(Art::KiAufruf, &text)])?;
+    assert!(
+        matches!(Journal::oeffnen(&pfad), Err(JournalFehler::Halt(text)) if text.contains("0 ohne Buchung"))
+    );
+    Ok(())
+}
+
+#[test]
+fn fremdschreiber_abgelehnt() -> Result<(), String> {
+    let pfad = ort()?;
+    Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+    let mut j = offen(&pfad)?;
+    assert!(matches!(
+        j.anhaengen(Art::KiAufruf, "fremd"),
+        Err(JournalFehler::Abgelehnt(_))
+    ));
+    Ok(())
+}
+
+#[test]
+fn beginnt_keinen_tag() -> Result<(), String> {
+    aufrufprobe(None)
+}
+
+#[test]
+#[ignore = "Erzeugt die Gegenprobe für einen unveränderten Checkout vor P10"]
+fn alter_stand_lehnt_aufruf_ab() -> Result<(), String> {
+    let ziel = std::env::var_os("DEPOTSCHLOPF_P10_PROBE").ok_or("Pfad für Journalprobe fehlt")?;
+    aufrufprobe(Some(std::path::Path::new(&ziel)))
+}
+
+fn aufrufprobe(kopie: Option<&std::path::Path>) -> Result<(), String> {
+    let pfad = ort()?;
+    Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+    let mut j = offen(&pfad)?;
+    let e = j
+        .reserviere(BeraterId::Dachs, tag(8)?, 1)
+        .map_err(|e| format!("{e:?}"))?;
+    let aufruf = depot_journal::KiAufruf {
+        nr: e.buchungsnummer(),
+        anbieter: "anthropic".into(),
+        modell: "modell".into(),
+        vorlage: "a".repeat(64),
+        frage: None,
+        antwort: None,
+        token_ein: None,
+        token_aus: None,
+        ergebnis: depot_journal::KiAufrufErgebnis::NichtGesendet,
+    };
+    let vorher = j.stand().seit_abschluss();
+    j.belege_ki_aufruf(&aufruf).map_err(|e| format!("{e:?}"))?;
+    assert_eq!(j.stand().seit_abschluss(), vorher);
+    assert!(j.belege_ki_aufruf(&aufruf).is_err());
+    drop(j);
+    assert_eq!(offen(&pfad)?.stand().ki().aufruf(aufruf.nr), Some(&aufruf));
+    if let Some(ziel) = kopie {
+        fs::copy(&pfad, ziel.join("journal.txt")).map_err(|e| e.to_string())?;
+        fs::copy(pfad.with_extension("vermerk"), ziel.join("journal.vermerk"))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}

@@ -753,6 +753,19 @@ fn markt_offener_orders(
     Ok(())
 }
 
+pub(crate) fn belege_ki(
+    j: &mut Journal,
+    berater: &mut dyn Berater,
+) -> Result<(), depot_journal::JournalFehler> {
+    if let Some(aufruf) = berater.aufruf() {
+        j.belege_ki_aufruf(&aufruf)?;
+    }
+    if let Some(abrechnung) = berater.abrechnung() {
+        j.rechne_ki_ab(&abrechnung)?;
+    }
+    Ok(())
+}
+
 /// Fragt einen Berater, wenn der Kostenschutz es erlaubt. `None` heisst: nicht gefragt; der
 /// Grund steht im Journal.
 fn erlaubnis(
@@ -816,9 +829,7 @@ fn frage(
         )?;
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag", frager)? {
         let mut antwort = frager.vorschlagen_mit_bilanz(e, lage, &prognosebilanz(j.stand()));
-        if let Some(a) = frager.abrechnung() {
-            j.rechne_ki_ab(&a).map_err(journal)?;
-        }
+        belege_ki(j, frager).map_err(journal)?;
         verwertbar = antwort.verwertbar;
         let wie = if antwort.verwertbar {
             if z.uhr.is_some()
@@ -1019,9 +1030,7 @@ fn zweite_meinung(
         )?
     {
         let urteil = pruefer.pruefen_mit_bilanz(e, &lage, &v, &prognosebilanz(j.stand()));
-        if let Some(a) = pruefer.abrechnung() {
-            j.rechne_ki_ab(&a).map_err(journal)?;
-        }
+        belege_ki(j, pruefer).map_err(journal)?;
         let wort = match (urteil.verwertbar, urteil.zustimmung) {
             (true, true) => ZUSTIMMUNG,
             (true, false) => VETO,

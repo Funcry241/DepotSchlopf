@@ -949,8 +949,29 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
         .filter(|(_, _, t)| t.contains("Cent reserviert"))
         .count();
     assert_eq!(mit_kosten, 5, "jede Antwort mit Kosten im Journal");
+    pruefe_aufrufe_vor_abrechnung(j)?;
     pruefe_weltprognosen(j)?;
     assert!(!sperre.exists());
+    Ok(())
+}
+
+fn pruefe_aufrufe_vor_abrechnung(j: &Journal) -> Result<(), String> {
+    use depot_journal::Art;
+    for (nr, _) in j.stand().ki().buchungen().iter().enumerate() {
+        assert!(j.stand().ki().aufruf(nr).is_some());
+        let praefix = format!("{nr};");
+        let beleg = j
+            .eintraege()
+            .iter()
+            .position(|(art, text)| *art == Art::KiAufruf && text.starts_with(&praefix))
+            .ok_or("Aufrufbeleg")?;
+        let abrechnung = j
+            .eintraege()
+            .iter()
+            .position(|(art, text)| *art == Art::KiAbrechnung && text.starts_with(&praefix))
+            .ok_or("Abrechnung")?;
+        assert!(beleg < abrechnung);
+    }
     Ok(())
 }
 
@@ -1062,6 +1083,14 @@ fn reservierung_ist_eine_gesicherte_obergrenze() -> Result<(), String> {
     assert!(!u.zustimmung);
     assert!(u.begruendung.contains("nicht gesendet"), "{u:?}");
     assert!(maus.netz().gesendet.is_empty(), "nichts gesendet");
+    let aufruf = some(maus.aufruf(), "Aufrufbeleg für zu große Eingabe")?;
+    assert_eq!(
+        aufruf.ergebnis,
+        depot_journal::KiAufrufErgebnis::NichtGesendet
+    );
+    assert!(aufruf.frage.is_none() && aufruf.antwort.is_none());
+    schreibe_beleg_und_abrechnung(&mut ort.journal, &mut maus, &aufruf)?;
+
     assert!(!ort.sperre().exists());
 
     // Meldet der Anbieter mehr Eingabe-Token als erlaubt, sperrt der Berater, auch wenn die
@@ -1414,6 +1443,14 @@ fn verbindung_nach_dem_absenden_gekappt_sperrt_ohne_zweiten_versand() -> Result<
     let text = vorbedingung(fs::read_to_string(ort.sperre()), "Sperrdatei")?;
     assert!(text.contains("nach dem Absenden abgebrochen"), "{text}");
     assert!(text.contains("kann angekommen sein"), "{text}");
+    let aufruf = some(dachs.aufruf(), "Aufrufbeleg nach Versandabbruch")?;
+    assert_eq!(
+        aufruf.ergebnis,
+        depot_journal::KiAufrufErgebnis::Unbrauchbar
+    );
+    assert!(aufruf.frage.is_some() && aufruf.antwort.is_none());
+    vorbedingung(ort.journal.belege_ki_aufruf(&aufruf), "Aufruf belegen")?;
+    assert!(dachs.abrechnung().is_none());
     // Auch der andere Berater ist gesperrt.
     let maus = berater(&ort, BeraterId::Maus, Attrappe::default())?;
     assert!(!maus.angebunden());
@@ -1736,5 +1773,141 @@ fn gespraechsfehler_aendert_keinen_erfolgreichen_aufruf() -> Result<(), String> 
     assert!(a.verwertbar && a.vorschlag.is_some());
     assert!(dachs.abrechnung().is_some());
     assert!(!ort.sperre().exists());
+    Ok(())
+}
+
+#[test]
+fn frage_hash_passt_zur_rohdatei() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(claude(VORSCHLAG, 1000, 300, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let erlaubt = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let nr = erlaubt.buchungsnummer();
+    let _ = mit_lage(|l| dachs.vorschlagen(erlaubt, l))?;
+    let a = some(dachs.aufruf(), "Aufrufbeleg")?;
+    assert_eq!((a.token_ein, a.token_aus), (Some(1000), Some(300)));
+    let frage = some(a.frage.as_deref(), "Frage")?;
+    let gesendet = some(dachs.netz().gesendet.first(), "Anfrage")?;
+    let datei = ort.dir.join("roh/ki").join(format!("{frage}.txt"));
+    let bytes = vorbedingung(fs::read(datei), "Rohdatei")?;
+    assert_eq!(bytes, gesendet.2.as_bytes());
+    assert_eq!(depot_kern::abdruck::sha256_hex(&bytes), frage);
+    vorbedingung(ort.journal.belege_ki_aufruf(&a), "Beleg schreiben")?;
+    assert_eq!(ort.journal.stand().ki().aufruf(nr), Some(&a));
+    assert!(ort.journal.belege_ki_aufruf(&a).is_err());
+    Ok(())
+}
+
+#[test]
+fn geheim_keine_rohdatei() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    let text = format!(r#"{{"einschaetzung":"{SCHLUESSEL}","ziele":null}}"#);
+    netz.antworten.push_back(claude(&text, 1000, 300, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let _ = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    let a = some(dachs.aufruf(), "Aufrufbeleg")?;
+    assert_eq!(a.ergebnis, depot_journal::KiAufrufErgebnis::Unbrauchbar);
+    assert!(!ort.dir.join("roh/ki").exists());
+    Ok(())
+}
+
+#[test]
+fn nicht_gesendet_ohne_schluessel() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut dachs = KiBerater::neu(
+        BeraterId::Dachs,
+        None,
+        Attrappe::default(),
+        universum()?,
+        ort.sperre(),
+    );
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let _ = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    let a = some(dachs.aufruf(), "Beleg")?;
+    assert_eq!(a.ergebnis, depot_journal::KiAufrufErgebnis::NichtGesendet);
+    assert!(a.frage.is_none() && a.antwort.is_none());
+    assert!(dachs.netz().gesendet.is_empty());
+    schreibe_beleg_und_abrechnung(&mut ort.journal, &mut dachs, &a)?;
+    Ok(())
+}
+
+#[test]
+fn http_429_abgelehnt_mit_hash() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    let body = "Rate limit";
+    netz.antworten.push_back(abgelehnt(429, body, None));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let _ = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    let a = some(dachs.aufruf(), "Beleg")?;
+    assert_eq!(a.ergebnis, depot_journal::KiAufrufErgebnis::Abgelehnt);
+    assert_eq!(
+        a.antwort,
+        Some(depot_kern::abdruck::sha256_hex(body.as_bytes()))
+    );
+    schreibe_beleg_und_abrechnung(&mut ort.journal, &mut dachs, &a)?;
+    Ok(())
+}
+
+fn schreibe_beleg_und_abrechnung(
+    journal: &mut Journal,
+    berater: &mut dyn Berater,
+    aufruf: &depot_journal::KiAufruf,
+) -> Result<(), String> {
+    vorbedingung(journal.belege_ki_aufruf(aufruf), "Aufruf belegen")?;
+    let abrechnung = some(berater.abrechnung(), "Abrechnung")?;
+    vorbedingung(journal.rechne_ki_ab(&abrechnung), "Abrechnung belegen")?;
+    pruefe_aufrufe_vor_abrechnung(journal)
+}
+
+#[test]
+fn vorbereitung_belegt_beide_aufrufe() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let zeit = samstagsuhr().ok_or("Zeit")?;
+    let meldung = depot_journal::NachrichtBeleg::neu(
+        "rss-test",
+        zeit,
+        b"Quelle",
+        zeit,
+        "Politisches Ereignis",
+    )?;
+    vorbedingung(ort.journal.belege_nachricht(&meldung), "Nachricht")?;
+    let text = r#"{"einschaetzung":"Ausblick","ziele":null}"#;
+    let mut dachs_netz = Attrappe::default();
+    dachs_netz.antworten.push_back(claude(text, 1000, 300, 0));
+    let mut maus_netz = Attrappe::default();
+    maus_netz.antworten.push_back(gpt(text, 1000, 300));
+    let mut dachs = berater(&ort, BeraterId::Dachs, dachs_netz)?.fuer_vorbereitung(zeit);
+    let mut maus = berater(&ort, BeraterId::Maus, maus_netz)?.fuer_vorbereitung(zeit);
+    depot_sim::vorbereitung::vorbereiten(
+        &mut ort.journal,
+        zeit,
+        &universum()?,
+        &mut dachs,
+        &mut maus,
+        || Some(zeit),
+    )?;
+    assert_eq!(ort.journal.stand().ki().buchungen().len(), 2);
+    pruefe_aufrufe_vor_abrechnung(&ort.journal)
+}
+
+#[test]
+fn rohdatei_schreibfehler_kein_halt() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    vorbedingung(
+        fs::write(ort.dir.join("roh"), b"kein Ordner"),
+        "Schreibfehler vorbereiten",
+    )?;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(claude(VORSCHLAG, 1000, 300, 0));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let e = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let antwort = mit_lage(|l| dachs.vorschlagen(e, l))?;
+    assert!(antwort.verwertbar);
+    assert!(dachs.aufruf().is_some());
     Ok(())
 }

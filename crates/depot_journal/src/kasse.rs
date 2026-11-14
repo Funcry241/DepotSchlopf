@@ -177,12 +177,29 @@ pub struct KiStand {
     buchungen: Vec<Buchung>,
     obergrenzen: Vec<Cent>,
     abgerechnet: std::collections::BTreeSet<usize>,
+    aufrufe: std::collections::BTreeMap<usize, crate::KiAufruf>,
     zwecke: Vec<KiZweck>,
 }
 
 impl KiStand {
     pub fn buchungen(&self) -> &[Buchung] {
         &self.buchungen
+    }
+
+    pub fn aufruf(&self, nr: usize) -> Option<&crate::KiAufruf> {
+        self.aufrufe.get(&nr)
+    }
+
+    pub(crate) fn belege_aufruf(&mut self, inhalt: &str) -> Result<(), String> {
+        let a = crate::KiAufruf::lies(inhalt).ok_or("KI-Aufruf unlesbar")?;
+        if self.buchungen.get(a.nr).is_none() {
+            return Err(format!("KI-Aufruf {} ohne Buchung", a.nr));
+        }
+        if self.aufrufe.contains_key(&a.nr) {
+            return Err(format!("KI-Aufruf {} doppelt", a.nr));
+        }
+        self.aufrufe.insert(a.nr, a);
+        Ok(())
     }
 
     pub(crate) fn rechne_ab(&mut self, inhalt: &str) -> Result<(), String> {
