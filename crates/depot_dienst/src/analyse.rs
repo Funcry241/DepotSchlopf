@@ -17,6 +17,7 @@ use crate::{Dienst, Umwelt, gespraeche, http, protokoll::Schutz, schluessel, sei
 
 mod historie;
 mod journal;
+mod ki_kosten;
 mod leistung;
 mod pruefbericht;
 mod schutz;
@@ -640,13 +641,27 @@ fn ki_laeufe(aus: &mut String, tag: Datum, stand: Option<&Stand>, eintraege: &[G
     }
 }
 
-fn ki(daten: &Path, zeitraum: Zeitraum, stand: Option<&Stand>, luecken: &mut String) -> String {
+fn ki(
+    daten: &Path,
+    zeitraum: Zeitraum,
+    stand: Option<&Stand>,
+    luecken: &mut String,
+) -> (String, ki_kosten::Gespraechsbelege) {
     let mut aus = "# KI-Gespräche\n".to_owned();
     let mut lesebudget = KI_LESEN_MAX;
+    let mut belege = ki_kosten::Gespraechsbelege::default();
     for tag in zeitraum.tage() {
-        ki_tag(&mut aus, daten, tag, stand, &mut lesebudget, luecken);
+        ki_tag(
+            &mut aus,
+            daten,
+            tag,
+            stand,
+            &mut lesebudget,
+            luecken,
+            &mut belege,
+        );
     }
-    aus
+    (aus, belege)
 }
 
 fn ki_tag(
@@ -656,14 +671,17 @@ fn ki_tag(
     stand: Option<&Stand>,
     lesebudget: &mut u64,
     luecken: &mut String,
+    belege: &mut ki_kosten::Gespraechsbelege,
 ) {
     let datum = datum_text(tag);
     let _ = writeln!(aus, "\n## {datum}");
     let gespr = depot_lage::gespraeche::lesen_begrenzt(daten, tag, lesebudget);
     if let Ok(Some((eintraege, fehler))) = gespr {
+        belege.erfasse(&eintraege, fehler);
         ki_laeufe(aus, tag, stand, &eintraege);
         let _ = writeln!(aus, "\nUnlesbare Gesprächszeilen: {fehler}.");
     } else {
+        belege.fehlender_tag();
         let grund = if gespr.is_err() {
             "Tagesdatei unlesbar oder oberhalb der Lesegrenze."
         } else {
@@ -893,15 +911,17 @@ fn journalpaket(
         |stand, eintraege, _| {
             let (kurz, depotdetails, orders) = depot(stand, jetzt, tag, sperren, zeitraum);
             let historie = historie::bericht(zeitraum, Some(stand), luecken);
+            let (ki, gespraechsbelege) = ki(daten, zeitraum, Some(stand), luecken);
             let pruefbericht = pruefbericht::bericht(Some(stand), zeitraum)
-                + &leistung::bericht(stand, zeitraum, &historie.depotwerte);
+                + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
+                + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege);
             Journalpaket {
                 pruefbericht,
                 kurz,
                 depotdetails,
                 orders,
                 ausfuehrungen: ausfuehrungen_csv(Some(stand), zeitraum),
-                ki: ki(daten, zeitraum, Some(stand), luecken),
+                ki,
                 historie,
                 journal: journal::auszug(zeitraum, stand, eintraege),
             }
@@ -919,7 +939,7 @@ fn journalpaket(
                 depotdetails: String::new(),
                 orders: "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
                 ausfuehrungen: ausfuehrungen_csv(None, zeitraum),
-                ki: ki(daten, zeitraum, None, luecken),
+                ki: ki(daten, zeitraum, None, luecken).0,
                 historie: historie::bericht(zeitraum, None, luecken),
                 journal: journal::Auszug::default(),
             })
