@@ -383,6 +383,30 @@ mod tests {
     use crate::Dienst;
     use std::fs;
     #[test]
+    fn gemini_netzfehler_aus_beiden_quellen_erscheint_einmal() -> Result<(), String> {
+        let tag = Datum::neu(2030, 1, 10).ok_or("Tag")?;
+        let zeit = Zeitpunkt::frankfurt(tag, 8, 0, 0).ok_or("Zeit")?;
+        let eintrag = Eintrag::neu(zeit, Wer::Gemini, Ergebnis::Netz, None);
+        let belege = Belege {
+            ereignisse: vec![anbieterfehler(&eintrag).ok_or("Netzfehler fehlt")?],
+            aufrufzahlen: BTreeMap::from([(Wer::Gemini, (1, 1))]),
+            anbieter_unlesbar: Some(0),
+            dienst_luecken: false,
+            ki_sperre: false,
+            kurssperre: false,
+        };
+        let bericht = belege.bericht(
+            Some(&[]),
+            Zeitraum { von: tag, bis: tag },
+            &BTreeSet::from([zeit]),
+        );
+        assert_eq!(bericht.matches(GEMINI_NETZ).count(), 1);
+        assert!(bericht.contains("Gemini: 1 Aufrufbelege, davon 1 Fehler oder Warnungen."));
+        assert!(!bericht.contains("Zusätzliche Gemini-Netzfehler"));
+        Ok(())
+    }
+
+    #[test]
     fn fehlerampel_zeigt_anbieterluecken_bei_bestaetigtem_journal() {
         for anbieter_unlesbar in [None, Some(1)] {
             let belege = Belege {

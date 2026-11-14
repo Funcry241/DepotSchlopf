@@ -272,27 +272,38 @@ fn verhaeltnis(
         text.push_str("\nKI-Kosten im Verhältnis zum Ertrag: nicht belegbar. Zwei belegte Tageswerte fehlen.\n");
         return;
     };
-    let kosten = stand
-        .ki()
-        .buchungen()
-        .iter()
-        .enumerate()
-        .filter(|(nr, b)| {
-            b.datum > *anfang
-                && b.datum <= *ende
-                && stand
-                    .ki()
-                    .buchungsbeleg(*nr)
-                    .is_some_and(|(_, abgerechnet)| abgerechnet)
-        })
-        .try_fold(Cent::NULL, |summe, (_, b)| summe.checked_add(b.reserviert));
+    let mut summe = Tagessumme::default();
+    for (nr, b) in stand.ki().buchungen().iter().enumerate() {
+        if b.datum > *anfang
+            && b.datum <= *ende
+            && let Some((_, abgerechnet)) = stand.ki().buchungsbeleg(nr)
+        {
+            summe.buche(b.reserviert, abgerechnet);
+        }
+    }
     let ertrag = schluss.checked_sub(*start);
-    let anteil = kosten.zip(ertrag).and_then(|(k, e)| anteil_bp(k, e));
+    let anteil = summe
+        .kosten
+        .zip(ertrag)
+        .and_then(|(k, e)| anteil_bp(k, e, false));
     let quote = anteil.map_or_else(|| "–".into(), |bp| prozent(Some(bp)));
+    let obergrenze = summe
+        .kosten
+        .zip(summe.reserviert)
+        .and_then(|(kosten, reserviert)| kosten.checked_add(reserviert))
+        .zip(ertrag)
+        .and_then(|(kosten, ertrag)| anteil_bp(kosten, ertrag, true));
+    let zusatz = match obergrenze {
+        Some(bp) if summe.offen > 0 => format!(
+            " (höchstens {} einschließlich offener Reservierungen)",
+            prozent(Some(bp))
+        ),
+        _ => String::new(),
+    };
     let _ = writeln!(
         text,
-        "\nKI-Kosten im Verhältnis zum Ertrag: {quote}. Von Abschluss {anfang} bis Abschluss {ende}: {} abgerechnete KI-Kosten und {} Depotwertänderung vor KI-Kosten. Die Kosten umfassen Buchungstage nach dem ersten bis einschließlich dem letzten Abschluss. Eine Quote gibt es bei positiver Depotwertänderung.",
-        geld(kosten),
+        "\nKI-Kosten im Verhältnis zum Ertrag: {quote}{zusatz}. Von Abschluss {anfang} bis Abschluss {ende}: {} abgerechnete KI-Kosten und {} Depotwertänderung vor KI-Kosten. Die Kosten umfassen Buchungstage nach dem ersten bis einschließlich dem letzten Abschluss. Eine Quote gibt es bei positiver Depotwertänderung.",
+        geld(summe.kosten),
         geld(ertrag)
     );
     if !zeitraum
@@ -304,14 +315,15 @@ fn verhaeltnis(
     }
 }
 
-fn anteil_bp(kosten: Cent, ertrag: Cent) -> Option<i64> {
+fn anteil_bp(kosten: Cent, ertrag: Cent, aufrunden: bool) -> Option<i64> {
     if ertrag <= Cent::NULL {
         return None;
     }
-    let anteil = i128::from(kosten.0)
-        .checked_mul(i128::from(depot_kern::BP_GANZ))?
-        .checked_div(i128::from(ertrag.0))?;
-    i64::try_from(anteil).ok()
+    let zaehler = i128::from(kosten.0).checked_mul(i128::from(depot_kern::BP_GANZ))?;
+    let nenner = i128::from(ertrag.0);
+    let anteil = zaehler.checked_div(nenner)?;
+    let rest = zaehler.checked_rem(nenner)?;
+    i64::try_from(anteil.checked_add(i128::from(aufrunden && rest > 0))?).ok()
 }
 
 #[cfg(test)]
@@ -386,6 +398,10 @@ mod tests {
         )));
         assert!(text.contains("| 0 | 0,00 € | abgerechnet |"));
         assert!(text.contains(&format!("| 1 | {betrag} | offen | 12 | 3 |")));
+        assert!(text.contains(&format!(
+            "0,00 % (höchstens {} einschließlich offener Reservierungen)",
+            prozent(betrag.0.checked_mul(100))
+        )));
         assert!(text.contains("0,00 € abgerechnete KI-Kosten und 1,00 € Depotwertänderung"));
         assert!(!text.contains("9,99 €"));
         assert!(text.contains(&format!(
@@ -405,7 +421,8 @@ mod tests {
             bericht(journal.stand(), zeitraum, &werte_ein_tag, &belege)
                 .contains("nicht belegbar. Zwei belegte Tageswerte fehlen.")
         );
-        assert_eq!(anteil_bp(Cent(50), Cent(100)), Some(5_000));
+        assert_eq!(anteil_bp(Cent(50), Cent(100), false), Some(5_000));
+        assert_eq!(anteil_bp(Cent(1), Cent(3), true), Some(3_334));
         belege.erfasse(&[gespr], 0);
         let text = bericht(journal.stand(), zeitraum, &werte, &belege);
         assert!(text.contains(&format!(
