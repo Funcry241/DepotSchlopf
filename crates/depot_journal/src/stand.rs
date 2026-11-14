@@ -96,6 +96,7 @@ pub enum Art {
     /// aus `depot_ki` (K13-02).
     Ki,
     KiAbrechnung,
+    KiAufruf,
     /// Der Abdruck der KI-Grenzen, unter denen die folgenden Buchungen entstehen.
     KiGrenzen,
     /// `datum;wer;text`: warum etwas geschieht oder nicht geschieht. `wer` ist ein Berater
@@ -136,6 +137,7 @@ impl Art {
             Art::Zustand => "zustand",
             Art::Ki => "ki",
             Art::KiAbrechnung => "ki-abrechnung",
+            Art::KiAufruf => "ki-aufruf",
             Art::KiGrenzen => "ki-grenzen",
             Art::Begruendung => "begruendung",
             Art::Abschluss => "abschluss",
@@ -163,6 +165,7 @@ impl Art {
             Art::Zustand,
             Art::Ki,
             Art::KiAbrechnung,
+            Art::KiAufruf,
             Art::KiGrenzen,
             Art::Begruendung,
             Art::Abschluss,
@@ -628,6 +631,7 @@ impl Stand {
             }
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
             Art::Ki => self.ki.buche(inhalt)?,
+            Art::KiAufruf => return self.ki.belege_aufruf(inhalt),
             Art::KiAbrechnung => {
                 self.ki.rechne_ab(inhalt)?;
                 return Ok(());

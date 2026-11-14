@@ -23,6 +23,7 @@ pub mod anbieter;
 pub mod frage;
 mod gemini_netz;
 pub use depot_kern::json;
+mod aufrufspur;
 pub mod ki;
 pub mod netz;
 pub mod schluessel;

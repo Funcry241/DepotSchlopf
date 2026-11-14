@@ -27,13 +27,14 @@ use std::time::Duration;
 
 use depot_journal::anbieter::{self, Eintrag, Ergebnis as Ausgang, Kosten};
 use depot_journal::{
-    AufrufErlaubnis, KiZweck,
+    AufrufErlaubnis, KiAufruf, KiAufrufErgebnis, KiZweck,
     gespraeche::{self, Gespraech},
 };
 use depot_kern::{BeraterId, Cent, Grenzen, Universum, Vorschlag, Zeitpunkt};
 use depot_sim::{Antwort, Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Urteil};
 
 use crate::anbieter::{Anbieter, Verbrauch};
+use crate::aufrufspur::{self, Spur};
 use crate::frage::{self, sauber};
 use crate::netz::{Netz, NetzFehler};
 use crate::schluessel::Schluessel;
@@ -67,6 +68,7 @@ pub struct KiBerater<N: Netz> {
     schlafe: fn(Duration),
     vorbereitung: Option<Zeitpunkt>,
     abrechnung: Option<depot_journal::KiAbrechnung>,
+    aufruf: Option<KiAufruf>,
     technischer_ausfall: bool,
     mindesteinsatz_grund: Option<(depot_kern::Datum, String)>,
     mindesteinsatz_bp: Option<i64>,
@@ -116,6 +118,7 @@ impl<N: Netz> KiBerater<N> {
             schlafe: std::thread::sleep,
             vorbereitung: None,
             abrechnung: None,
+            aufruf: None,
             technischer_ausfall: false,
             mindesteinsatz_grund: None,
             mindesteinsatz_bp: None,
@@ -499,7 +502,19 @@ impl<N: Netz> KiBerater<N> {
             eintrag.buchung = Some(erlaubnis.buchungsnummer());
         }
         let mut geheim = false;
-        let aus = self.fragen_intern(erlaubnis, system, frage, &mut e, &mut geheim);
+        let mut spur = Spur::default();
+        let aus = self.fragen_intern(erlaubnis, system, frage, &mut e, &mut geheim, &mut spur);
+        let sensibel = |text: &str| self.geheim_im_gespraech(text);
+        geheim |= sensibel(system)
+            || sensibel(frage)
+            || spur
+                .antwort
+                .as_ref()
+                .is_some_and(|text| aufrufspur::enthaelt_geheimnis(text, &sensibel));
+        if geheim && spur.ergebnis == KiAufrufErgebnis::Beantwortet {
+            spur.ergebnis = KiAufrufErgebnis::Unbrauchbar;
+        }
+        self.aufruf = Some(self.aufruf_belegen(erlaubnis, system, &spur, geheim));
         if let Some(mut e) = e {
             e.system = Some(system.into());
             e.frage = Some(frage.into());
@@ -507,6 +522,64 @@ impl<N: Netz> KiBerater<N> {
             self.notiere_gespraech(e, geheim);
         }
         aus
+    }
+
+    fn aufruf_belegen(
+        &self,
+        erlaubnis: &AufrufErlaubnis,
+        system: &str,
+        spur: &Spur,
+        geheim: bool,
+    ) -> KiAufruf {
+        let sha = depot_kern::abdruck::sha256_hex;
+        let modell = spur
+            .antwort
+            .as_deref()
+            .and_then(|bytes| {
+                let body = std::str::from_utf8(bytes).ok()?;
+                crate::json::lies(body)
+                    .ok()?
+                    .feld("model")?
+                    .text()
+                    .map(str::to_owned)
+            })
+            .filter(|m| {
+                !m.is_empty()
+                    && m.len() <= 128
+                    && !m.contains(';')
+                    && !m.chars().any(char::is_control)
+                    && !self.geheim_im_gespraech(m)
+            })
+            .unwrap_or_else(|| format!("{}?", self.anbieter.modell()));
+        let vorlage = sha(system.as_bytes());
+        let frage = spur.frage.as_ref().map(|f| sha(f.as_bytes()));
+        let antwort = spur.antwort.as_deref().map(sha);
+        let ordner = self.sperre.parent().map(|daten| daten.join("roh/ki"));
+        if !geheim && let Some(ordner) = ordner {
+            let ablegen = |ort: &std::path::Path, hash, bytes| {
+                if let Err(fehler) = aufrufspur::ablege(ort, hash, bytes) {
+                    self.hinweis(&format!("KI-Rohtext fehlt: {fehler}"));
+                }
+            };
+            ablegen(&ordner.join("vorlage"), &vorlage, system.as_bytes());
+            if let Some((hash, text)) = frage.as_deref().zip(spur.frage.as_deref()) {
+                ablegen(&ordner, hash, text.as_bytes());
+            }
+            if let Some((hash, bytes)) = antwort.as_deref().zip(spur.antwort.as_deref()) {
+                ablegen(&ordner, hash, bytes);
+            }
+        }
+        KiAufruf {
+            nr: erlaubnis.buchungsnummer(),
+            anbieter: self.anbieter.dienst().into(),
+            modell,
+            vorlage,
+            frage,
+            antwort,
+            token_ein: spur.verbrauch.map(|v| v.token_ein),
+            token_aus: spur.verbrauch.map(|v| v.token_aus),
+            ergebnis: spur.ergebnis,
+        }
     }
 
     fn erfasse_http(&self, e: &mut Gespraech, antwort: &crate::netz::Rueckmeldung) -> bool {
@@ -587,6 +660,7 @@ impl<N: Netz> KiBerater<N> {
         frage: &str,
         e: &mut Option<Gespraech>,
         geheim: &mut bool,
+        spur: &mut Spur,
     ) -> Ergebnis {
         self.abrechnung = None;
         self.technischer_ausfall = false;
@@ -621,8 +695,19 @@ impl<N: Netz> KiBerater<N> {
             Ok(a) => a,
             Err((status, meldung)) => {
                 self.technischer_ausfall = status == Some(Ausgang::Netz);
+                if status == Some(Ausgang::Unklar) {
+                    spur.frage = Some(inhalt);
+                    spur.ergebnis = KiAufrufErgebnis::Unbrauchbar;
+                }
                 return self.versandfehler(erlaubnis, e, status, meldung);
             }
+        };
+        spur.frage = Some(inhalt);
+        spur.antwort = Some(antwort.inhalt.clone());
+        spur.ergebnis = if antwort.status == 200 {
+            KiAufrufErgebnis::Unbrauchbar
+        } else {
+            KiAufrufErgebnis::Abgelehnt
         };
         if let Some(e) = e {
             *geheim = self.erfasse_http(e, &antwort);
@@ -633,11 +718,25 @@ impl<N: Netz> KiBerater<N> {
             let grund = self.ablehnung(&antwort, reserviert);
             return self.ohne_kosten(erlaubnis, e, grund);
         }
+        self.verarbeite_antwort(erlaubnis, e, spur, &antwort, *geheim)
+    }
+
+    fn verarbeite_antwort(
+        &mut self,
+        erlaubnis: &AufrufErlaubnis,
+        e: &mut Option<Gespraech>,
+        spur: &mut Spur,
+        antwort: &crate::netz::Rueckmeldung,
+        geheim_im_gespraech: bool,
+    ) -> Ergebnis {
+        let deckel = *erlaubnis.deckel();
+        let reserviert = erlaubnis.buchung().reserviert;
         // Geheimnisschutz fuer jede Antwort, nicht nur fuer Fehler: Gibt der Anbieter den
         // Schluessel zurueck, wird kein Text davon verwendet. Geprueft wird hier roh und unten
         // am fertigen Ergebnis (`ohne_geheimnis`), denn JSON kann ihn verschluesselt enthalten.
         // Der Verbrauch wird trotzdem gelesen und geprueft: Kostenschutz geht vor.
-        let geheim = self.enthaelt_schluessel(&String::from_utf8_lossy(&antwort.inhalt));
+        let geheim = geheim_im_gespraech
+            || self.enthaelt_schluessel(&String::from_utf8_lossy(&antwort.inhalt));
         let gelesen = match self.anbieter.lies(&antwort.inhalt) {
             Ok(g) => g,
             Err(e) => {
@@ -661,6 +760,7 @@ impl<N: Netz> KiBerater<N> {
             }
         };
         let v = gelesen.verbrauch;
+        spur.verbrauch = Some(v);
         let ist = deckel.kosten_ist(v.token_ein, v.token_aus);
         let kosten = kostenzeile(ist.map(|c| c.0), reserviert.0, v);
         let ueber = ueberschreitung(ist, reserviert, v, &deckel);
@@ -692,6 +792,9 @@ impl<N: Netz> KiBerater<N> {
             };
         }
         self.technischer_ausfall = gelesen.text.is_err();
+        if gelesen.text.is_ok() {
+            spur.ergebnis = KiAufrufErgebnis::Beantwortet;
+        }
         Ergebnis {
             text: gelesen.text.map_err(|e| self.bereinigt(&e)),
             kosten,
@@ -837,6 +940,9 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a
             }
         }
+    }
+    fn aufruf(&mut self) -> Option<KiAufruf> {
+        self.aufruf.take()
     }
     fn abrechnung(&mut self) -> Option<depot_journal::KiAbrechnung> {
         self.abrechnung.take()
