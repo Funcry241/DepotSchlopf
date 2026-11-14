@@ -39,7 +39,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
             "- Belegte Tagesabschlüsse: {abschluesse} bei {handelstage} Kalendertagen mit Börsenhandel im Zeitraum.\n- KI-Buchungen: {buchungen}.\n- Orderversand: {versendet}. Zeitlich zugeordnete Ausführungen: {fuellungen}.\n"
         );
         if versendet == 0 && handelstage != 0 {
-            text.push_str("**Auffällig:** Im Zeitraum ist kein Orderversand belegt. Die Ampel zum Nicht-Handeln zeigt, wie weit die Ursachen belegt sind.\n\n");
+            text.push_str("**Auffällig:** Im Zeitraum ist kein Orderversand belegt. Die Ursachen sind noch nicht ausgewertet.\n\n");
         }
     } else {
         text.push_str(
@@ -81,10 +81,11 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
             "Die Auswertung späterer Kurse steht noch aus.",
         ),
     ] {
-        let ampel = if stand.is_none() && !matches!(frage, "Ablauf" | "Fehler") {
-            "Rot"
-        } else {
-            "Gelb"
+        let ampel = match frage {
+            "Nicht-Handeln" | "Nachher-Blick" => "Rot (noch nicht ausgewertet)",
+            "Ablauf" | "Fehler" => "Gelb",
+            _ if stand.is_none() => "Rot",
+            _ => "Gelb",
         };
         let _ = writeln!(text, "| {frage} | {ampel} | {belege} |");
     }
@@ -100,8 +101,44 @@ mod tests {
         let tag = depot_kern::Datum::neu(2026, 11, 12).ok_or("Datum")?;
         let text = bericht(None, Zeitraum { von: tag, bis: tag });
         assert!(text.contains("Journal nicht bestätigt"));
-        assert!(text.contains("| Nicht-Handeln | Rot |"));
+        assert!(text.contains("| Orders | Rot |"));
         assert!(!text.contains("KI-Buchungen: 0"));
+        Ok(())
+    }
+
+    #[test]
+    fn pruefbericht_meldet_kein_orderversand() -> Result<(), String> {
+        use depot_journal::Journal;
+        use depot_kern::{BeraterId, Datum};
+
+        let ordner =
+            std::env::temp_dir().join(format!("depot-pruefbericht-{}", crate::neues_token()));
+        std::fs::create_dir(&ordner).map_err(|e| e.to_string())?;
+        let pfad = ordner.join("journal.txt");
+        let journalfehler = |e| format!("{e:?}");
+        let von = Datum::neu(2026, 11, 2).ok_or("Beginn der Woche")?;
+        let bis = Datum::neu(2026, 11, 6).ok_or("Ende des Prüfzeitraums")?;
+        let davor = Datum::neu(2026, 10, 30).ok_or("Tag vor dem Prüfzeitraum")?;
+
+        Journal::einrichten(&pfad).map_err(journalfehler)?;
+        let mut journal = Journal::oeffnen(&pfad).map_err(journalfehler)?;
+        for datum in [davor, von] {
+            journal
+                .reserviere(BeraterId::Dachs, datum, 1)
+                .map_err(|e| format!("{e:?}"))?;
+        }
+        drop(journal);
+        let text =
+            Journal::pruefe_lesend(&pfad, |stand| bericht(Some(stand), Zeitraum { von, bis }))
+                .map_err(journalfehler)?;
+        std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
+
+        assert!(text.contains("**Auffällig:** Im Zeitraum ist kein Orderversand belegt."));
+        assert!(text.contains("KI-Buchungen: 1."));
+        assert!(text.contains("Orderversand: 0."));
+        assert!(text.contains("| Nicht-Handeln | Rot (noch nicht ausgewertet) |"));
+        assert!(text.contains("| Nachher-Blick | Rot (noch nicht ausgewertet) |"));
+        assert!(text.contains("| Orders | Gelb |"));
         Ok(())
     }
 }
