@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 
 const DATEI: &str = "DepotSchlopf.cmd";
 const KOPF: &str = "rem Autostart von DepotSchlopf. Entfernen über die Einrichtung.";
-const KOPF_ASCII: &str = "rem Autostart von DepotSchlopf. Entfernen ueber die Einrichtung.";
+// Nur zum Lesen historischer Dateien. Neue Einträge verwenden KOPF.
+const KOPF_ASCII: &str = "rem Autostart von DepotSchlopf. Entfernen \x75eber die Einrichtung.";
 const START: &str = "start \"DepotSchlopf\" /min \"";
 const ENDE: &str = "\\DepotSchlopf.cmd\" --ohne-browser";
 const MAX_DATEI: u64 = 4096;
