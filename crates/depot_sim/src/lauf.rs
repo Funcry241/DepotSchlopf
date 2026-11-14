@@ -36,7 +36,7 @@ use depot_kern::{
 use depot_ki::Sperre;
 use depot_regelwerk::{
     DatenFehler, Eingabe, GenehmigterAuftrag, Richtung, WaechterBefund, entscheide_ersatzkauf,
-    entscheide_mit_kaufbudget, notbremse_auftraege, pruefe_kurse, waechter,
+    entscheide_mit_kaufbudget, notbremse_auftraege, pruefe_kurse, stopp_auftraege, waechter,
 };
 
 use crate::abdruck;
@@ -359,6 +359,63 @@ pub(crate) fn kontowaechter(
     Err(halt(format!("Kontowächter: {abweichungen:?}")))
 }
 
+fn fuehre_schutzstopps_aus(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    konto: &mut dyn Broker,
+) -> Result<BTreeSet<TopfId>, LaufFehler> {
+    let mut ausgeloest = BTreeSet::new();
+    if !j
+        .stand()
+        .wissensstichtag(z.tag.datum)
+        .is_some_and(depot_kern::liste::morgenlauf)
+    {
+        return Ok(ausgeloest);
+    }
+    let toepfe: Vec<_> = j.stand().toepfe().values().cloned().collect();
+    for topf in &toepfe {
+        let stopps = topf
+            .positionen()
+            .keys()
+            .filter(|isin| !z.gesperrt.contains(*isin))
+            .filter(|isin| {
+                depot_kern::liste::boerse_von(isin).is_some_and(|b| b.handelstag(z.tag.datum))
+            })
+            .filter(|isin| {
+                !j.stand()
+                    .offene_auftraege()
+                    .any(|a| a.beleg.topf == topf.id() && &a.beleg.isin == *isin)
+            })
+            .filter_map(|isin| Some((isin.clone(), j.stand().stoppkurs(topf.id(), isin)?)))
+            .collect();
+        let auftraege = stopp_auftraege(
+            z.grenzen,
+            topf,
+            &z.tag.kurse,
+            &stopps,
+            &mut j.kennungsvergabe(),
+        )
+        .ok_or_else(|| rechnung("Schutz-Stopp"))?;
+        if !auftraege.is_empty() {
+            ausgeloest.insert(topf.id());
+        }
+        for auftrag in &auftraege {
+            begruende(
+                j,
+                z.tag,
+                REGELWERK,
+                &format!(
+                    "{}: Schutz-Stopp für {} ausgelöst",
+                    topf_name(topf.id()),
+                    auftrag.auftrag().isin
+                ),
+            )?;
+        }
+        fuehre_aus(j, z, topf.id(), &auftraege, None, konto)?;
+    }
+    Ok(ausgeloest)
+}
+
 pub(crate) struct Beteiligte<'a, 'b, 'c> {
     pub(crate) dachs: &'a mut dyn Berater,
     pub(crate) maus: &'b mut dyn Berater,
@@ -452,16 +509,7 @@ pub(crate) fn ein_tag(
             return Err(halt(format!("Wächter: {befund:?}")));
         }
         WaechterBefund::Tagesverlust { .. } | WaechterBefund::Unplausibel => {
-            if z.uhr.is_some() {
-                stoppe_kaeufe(jr, tag, &mut *beteiligte.konto)?;
-            }
-            begruende(
-                jr,
-                tag,
-                WAECHTER,
-                &format!("{befund:?}: Halt bis zur Freigabe, der Tag bleibt offen"),
-            )?;
-            return Err(halt(format!("Wächter: {befund:?}")));
+            return halte_mit_schutzstopps(jr, z, &mut *beteiligte.konto, befund);
         }
     }
     if z.uhr.is_some() {
@@ -470,12 +518,13 @@ pub(crate) fn ein_tag(
             return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto, true);
         }
     }
+    let gestoppt = fuehre_schutzstopps_aus(jr, z, &mut *beteiligte.konto)?;
     // Fuer den Hoechststand zaehlt der aufgerundete Wert (siehe `depotwert`).
     let heute = depotwert(jr.stand().toepfe().values(), z.bewertung, Rundung::Auf)
         .ok_or_else(|| rechnung("Depotwert"))?;
     let b = beteiligte;
-    let topf_a = frage_topf(jr, z, TopfId::A, b.dachs)?;
-    let topf_b = frage_topf(jr, z, TopfId::B, b.maus)?;
+    let topf_a = frage_topf(jr, z, TopfId::A, b.dachs, &gestoppt)?;
+    let topf_b = frage_topf(jr, z, TopfId::B, b.maus, &gestoppt)?;
     let erste = [topf_a.clone(), topf_b.clone()];
     let topf_a = zweite_meinung(jr, z, topf_a, b.maus)?;
     let topf_b = zweite_meinung(jr, z, topf_b, b.dachs)?;
@@ -494,6 +543,25 @@ pub(crate) fn ein_tag(
     jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
     Ok(hoch)
+}
+
+fn halte_mit_schutzstopps(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    konto: &mut dyn Broker,
+    befund: WaechterBefund,
+) -> Result<Cent, LaufFehler> {
+    if z.uhr.is_some() {
+        stoppe_kaeufe(j, z.tag, konto)?;
+        fuehre_schutzstopps_aus(j, z, konto)?;
+    }
+    begruende(
+        j,
+        z.tag,
+        WAECHTER,
+        &format!("{befund:?}: Halt bis zur Freigabe, der Tag bleibt offen"),
+    )?;
+    Err(halt(format!("Wächter: {befund:?}")))
 }
 
 /// Auch ein langer Dialog darf die bestehende Datenfrische nicht verlängern.
@@ -959,6 +1027,7 @@ fn frage_topf(
     z: &Zyklus<'_>,
     id: TopfId,
     frager: &mut dyn Berater,
+    gestoppt: &BTreeSet<TopfId>,
 ) -> Result<TopfAntwort, LaufFehler> {
     let tag = z.tag;
     let topf = j
@@ -1001,6 +1070,9 @@ fn frage_topf(
             AUFTRAGSSTELLE,
             &format!("{t}: wartet auf offenen Auftrag {nr}"),
         )?;
+        (None, false)
+    } else if gestoppt.contains(&id) {
+        // Auch nach abgewiesenem Schutzverkauf keine neuen Käufe für diesen Topf.
         (None, false)
     } else {
         frage(j, z, id, frager, &lage)?
@@ -1248,6 +1320,10 @@ fn topf_zyklus(
                     verwendet,
                 } => format!(
                     "{t}: {isin}: Limitabstand {gefragt} bp außerhalb des Rahmens, {verwendet} bp verwendet"
+                ),
+                depot_regelwerk::Befund::StoppFehlt { isin, gefragt } => gefragt.map_or_else(
+                    || format!("{t}: {isin}: kein Schutz-Stopp im Kaufvorschlag"),
+                    |bp| format!("{t}: {isin}: Schutz-Stopp mit {bp} bp nicht übernommen"),
                 ),
                 _ => format!("{t}: {b:?}"),
             }

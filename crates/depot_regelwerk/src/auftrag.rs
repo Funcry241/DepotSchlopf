@@ -76,6 +76,8 @@ pub enum Anlass {
     Abbau,
     /// Zwingend: Notbremse.
     Notbremse,
+    /// Zwingend: Der Schlusskurs erreicht den Schutz-Stopp.
+    Stopp,
 }
 
 impl Anlass {
@@ -109,6 +111,7 @@ pub struct GenehmigterAuftrag {
     auftrag: Auftrag,
     beleg: RegelBeleg,
     _siegel: siegel::Siegel,
+    stopp_bp: Option<i64>,
 }
 
 impl GenehmigterAuftrag {
@@ -117,7 +120,16 @@ impl GenehmigterAuftrag {
             auftrag,
             beleg,
             _siegel: siegel::Siegel::neu(),
+            stopp_bp: None,
         }
+    }
+
+    pub(crate) fn setze_stopp(&mut self, stopp_bp: Option<i64>) {
+        self.stopp_bp = stopp_bp;
+    }
+
+    pub fn stopp_bp(&self) -> Option<i64> {
+        self.stopp_bp
     }
 
     pub fn auftrag(&self) -> &Auftrag {

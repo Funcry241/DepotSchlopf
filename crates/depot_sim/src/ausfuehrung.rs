@@ -194,6 +194,7 @@ mod tests {
                     Cent(9_900)
                 },
                 anlass: Anlass::Umschichtung,
+                stopp_bp: None,
             },
             zustand,
             ausfuehrungen: if zustand == AuftragsZustand::Gefuellt {

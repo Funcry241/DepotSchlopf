@@ -630,7 +630,7 @@ impl Journal {
             Art::Auftrag => Err(JournalFehler::Abgelehnt(
                 "Aufträge entstehen nur über reserviere_auftrag".into(),
             )),
-            Art::Zustand => Err(JournalFehler::Abgelehnt(
+            Art::Zustand | Art::Stopp => Err(JournalFehler::Abgelehnt(
                 "Auftragszustände entstehen nur über melde und gleiche_ab".into(),
             )),
             Art::Weltprognose => Err(JournalFehler::Abgelehnt(
@@ -925,7 +925,14 @@ impl Journal {
 
     /// Schreibt den naechsten Zustand eines Auftrags.
     pub(crate) fn schreibe_meldung(&mut self, nr: u64, m: &Meldung) -> Result<(), JournalFehler> {
-        self.schreibe_eintrag(Art::Zustand, &meldung_text(nr, m))
+        match self
+            .stand()
+            .stoppmeldung(nr, m)
+            .map_err(JournalFehler::Abgelehnt)?
+        {
+            Some(text) => self.schreibe_eintrag(Art::Stopp, &text),
+            None => self.schreibe_eintrag(Art::Zustand, &meldung_text(nr, m)),
+        }
     }
 
     /// Verwaltungsbeleg für das Quellenkontingent; keine Beobachtung eines Papiertags.

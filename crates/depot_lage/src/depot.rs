@@ -19,6 +19,8 @@ pub struct Position {
     pub einstand: Option<Cent>,
     pub gv: Option<Cent>,
     pub gv_bp: Option<i64>,
+    pub stoppkurs: Option<Cent>,
+    pub stoppabstand: Option<Cent>,
 }
 
 /// Ein Topf.
@@ -158,6 +160,11 @@ fn topf_lage(s: &Stand, t: &Topf, kurse: Option<&depot_kern::Kurse>, werte: &[We
                 name: name(werte, isin.als_str()),
                 stueck: *stueck,
                 kurs,
+                stoppkurs: s.stoppkurs(t.id(), isin),
+                stoppabstand: kurs
+                    .and_then(|k| k.mal_stueck(1, Rundung::Ab))
+                    .zip(s.stoppkurs(t.id(), isin))
+                    .and_then(|(k, stopp)| k.checked_sub(stopp)),
                 wert,
                 einstand,
                 gv: wert
@@ -273,6 +280,7 @@ pub fn auftrag_zeile(a: &depot_journal::AuftragsLage, werte: &[Wert]) -> Auftrag
             Anlass::AusstiegPositivliste => "Ausstieg Positivliste",
             Anlass::Abbau => "Abbau",
             Anlass::Notbremse => "Notbremse",
+            Anlass::Stopp => "Schutz-Stopp",
         },
         zustand: zustand_text(a.zustand).into(),
     }

@@ -44,13 +44,14 @@ fn datum(art: Art, text: &str, abrechnungstag: Option<Datum>, stand: &Stand) -> 
             let sekunden = obj.feld("zeit").or_else(|| obj.feld("start"))?.ganz()?;
             frankfurt(Zeitpunkt::aus_sekunden(sekunden)?)
         }
-        Art::Auftrag | Art::Zustand => orderdatum(art, text, abrechnungstag),
+        Art::Auftrag | Art::Zustand | Art::Stopp => orderdatum(art, text, abrechnungstag),
         Art::Topf => abrechnungstag,
         Art::Format | Art::KiGrenzen => None,
     }
 }
 
 pub(super) fn orderdatum(art: Art, text: &str, abrechnungstag: Option<Datum>) -> Option<Datum> {
+    let (art, text) = ordermeldung(art, text)?;
     let mut felder = text.split(';').skip(1);
     let zeit = match (art, felder.next()) {
         (Art::Zustand, Some("gesendet")) => felder.next(),
@@ -110,6 +111,14 @@ pub(super) fn auszug(zeitraum: Zeitraum, stand: &Stand, eintraege: &[(Art, Strin
         );
     }
     aus
+}
+
+pub(super) fn ordermeldung(art: Art, text: &str) -> Option<(Art, &str)> {
+    if art == Art::Stopp {
+        Some((Art::Zustand, text.splitn(4, ';').nth(3)?))
+    } else {
+        Some((art, text))
+    }
 }
 
 #[cfg(test)]
