@@ -1,6 +1,8 @@
 klasse: Funktion
-zweck: Belegte Entscheidungen mit Kursen an drei späteren Handelstagen vergleichen
+zweck: Befunde aus dem echten Wochenexport bei Fehlern, Kosten und Prognosen beheben
 pfade:
 crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/nachher.rs
-crates/depot_dienst/src/analyse/pruefbericht.rs
+crates/depot_dienst/src/analyse/fehler.rs
+crates/depot_dienst/src/analyse/ki_kosten.rs
+crates/depot_journal/src/stand.rs
+crates/depot_sim/src/lauf.rs

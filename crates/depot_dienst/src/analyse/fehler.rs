@@ -1,6 +1,6 @@
 //! Fehlerbelege aus typisierten Quellen. Diagnosefreitext bleibt lokal.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -98,6 +98,7 @@ impl Belege {
         &self,
         journal: Option<&[(Journalart, String)]>,
         zeitraum: Zeitraum,
+        gemini_netzfehler: &BTreeSet<Zeitpunkt>,
     ) -> String {
         let mut aus = String::from(concat!(
             "\n## Fehler und Warnungen\n\n",
@@ -108,7 +109,32 @@ impl Belege {
             "| Zeit | Ort | Stufe | Ursache | Reaktion oder Folge | Beleg |\n",
             "|---|---|---|---|---|---|\n",
         ));
-        for e in &self.ereignisse {
+        let neue_netzfehler: Vec<_> = gemini_netzfehler
+            .iter()
+            .copied()
+            .filter(|zeit| zeitraum.enthaelt(*zeit))
+            .filter(|zeit| {
+                !self.ereignisse.iter().any(|e| {
+                    e.zeit == *zeit
+                        && e.ort == Wer::Gemini.anzeigename()
+                        && e.ursache == GEMINI_NETZ
+                })
+            })
+            .map(|zeit| Ereignis {
+                zeit,
+                ort: Wer::Gemini.anzeigename(),
+                stufe: "Warnung",
+                ursache: GEMINI_NETZ,
+                reaktion: "Versandstatus und weiterer Versuch nicht belegt".into(),
+                beleg: "KI-Gespräch".into(),
+            })
+            .collect();
+        let mut ereignisse: Vec<_> = self.ereignisse.iter().chain(&neue_netzfehler).collect();
+        ereignisse.sort_by_key(|e| e.zeit);
+        if ereignisse.is_empty() {
+            aus.push_str("| – | – | – | Kein Ereignis aus diesen Quellen belegt | – | – |\n");
+        }
+        for e in ereignisse {
             let _ = writeln!(
                 aus,
                 "| {} | {} | {} | {} | {} | {} |",
@@ -120,8 +146,12 @@ impl Belege {
                 e.beleg
             );
         }
-        if self.ereignisse.is_empty() {
-            aus.push_str("| – | – | – | Kein Ereignis aus diesen Quellen belegt | – | – |\n");
+        if !neue_netzfehler.is_empty() {
+            let _ = writeln!(
+                aus,
+                "\nZusätzliche Gemini-Netzfehler aus den KI-Gesprächen: {}. Die folgenden Aufrufzahlen stammen aus dem Anbieterprotokoll.",
+                neue_netzfehler.len()
+            );
         }
         if !self.aufrufzahlen.is_empty() {
             aus.push_str("\n### Anbieteraufrufe im Zeitraum\n\n");
@@ -155,6 +185,8 @@ impl Belege {
         aus
     }
 }
+
+const GEMINI_NETZ: &str = "Keine Gemini-Antwort erhalten";
 
 fn anbieterfehler(e: &Eintrag) -> Option<Ereignis> {
     let ki_berater = matches!(e.wer, Wer::Dachs | Wer::Maus);
@@ -195,6 +227,11 @@ fn anbieterfehler(e: &Eintrag) -> Option<Ereignis> {
             "Fehler",
             "Anbieterfehler, genaue Ursache nicht belegt",
             "Weitere Reaktion nicht belegt".into(),
+        ),
+        Ergebnis::Netz if e.wer == Wer::Gemini => (
+            "Warnung",
+            GEMINI_NETZ,
+            "Versandstatus und weiterer Versuch nicht belegt".into(),
         ),
         Ergebnis::Netz => (
             "Warnung",
@@ -345,6 +382,30 @@ mod tests {
     use super::*;
     use crate::Dienst;
     use std::fs;
+    #[test]
+    fn gemini_netzfehler_aus_beiden_quellen_erscheint_einmal() -> Result<(), String> {
+        let tag = Datum::neu(2030, 1, 10).ok_or("Tag")?;
+        let zeit = Zeitpunkt::frankfurt(tag, 8, 0, 0).ok_or("Zeit")?;
+        let eintrag = Eintrag::neu(zeit, Wer::Gemini, Ergebnis::Netz, None);
+        let belege = Belege {
+            ereignisse: vec![anbieterfehler(&eintrag).ok_or("Netzfehler fehlt")?],
+            aufrufzahlen: BTreeMap::from([(Wer::Gemini, (1, 1))]),
+            anbieter_unlesbar: Some(0),
+            dienst_luecken: false,
+            ki_sperre: false,
+            kurssperre: false,
+        };
+        let bericht = belege.bericht(
+            Some(&[]),
+            Zeitraum { von: tag, bis: tag },
+            &BTreeSet::from([zeit]),
+        );
+        assert_eq!(bericht.matches(GEMINI_NETZ).count(), 1);
+        assert!(bericht.contains("Gemini: 1 Aufrufbelege, davon 1 Fehler oder Warnungen."));
+        assert!(!bericht.contains("Zusätzliche Gemini-Netzfehler"));
+        Ok(())
+    }
+
     #[test]
     fn fehlerampel_zeigt_anbieterluecken_bei_bestaetigtem_journal() {
         for anbieter_unlesbar in [None, Some(1)] {
@@ -499,7 +560,7 @@ mod tests {
         let mut luecken = String::new();
         let ablauf = Ablauf::laden(&dienst, zeitraum, donnerstag(12, 0)?, &mut luecken);
         let belege = Belege::laden(&daten, &ablauf, zeitraum, &mut luecken);
-        let archiv = belege.bericht(Some(&[]), zeitraum);
+        let archiv = belege.bericht(Some(&[]), zeitraum, &BTreeSet::from([fehlzeit]));
         assert_eq!(belege.ampel(true), "Gelb (Belege teilweise verfügbar)");
         assert_eq!(belege.ampel(false), "Rot (Beleglücken)");
         fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
@@ -509,6 +570,7 @@ mod tests {
         assert!(archiv.contains("Dachs (Claude) | Warnung | Anbieterlimit erreicht"));
         assert!(archiv.contains("KI pausiert bis 10.01.2030 08:00 MEZ"));
         assert!(archiv.contains("Weiterer automatischer Abruf um 10.01.2030 08:00 MEZ (111-2)"));
+        assert!(archiv.contains("Gemini | Warnung | Keine Gemini-Antwort erhalten | Versandstatus und weiterer Versuch nicht belegt | KI-Gespräch"));
         assert!(archiv.contains("- KI-Sperre: an."));
         assert!(archiv.contains("Maus (GPT): 2 Aufrufbelege, davon 1 Fehler oder Warnungen."));
         for ausgeschlossen in ["Privater-Diagnosetext", "HTTP 503", "HTTP 200"] {

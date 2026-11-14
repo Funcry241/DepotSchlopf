@@ -13,6 +13,7 @@ use super::{Zeitraum, geld, prozent};
 pub(super) struct Gespraechsbelege {
     buchungen: BTreeMap<usize, Option<Aufruf>>,
     gemini: BTreeMap<Datum, Tokenbelege>,
+    pub(super) gemini_netzfehler: BTreeSet<depot_kern::Zeitpunkt>,
     fragen: usize,
     doppelte_urls: usize,
     fehlende_tage: usize,
@@ -62,6 +63,9 @@ impl Gespraechsbelege {
                 self.doppelte_urls = self.doppelte_urls.saturating_add(doppelte_urls(frage));
             }
             if e.wer == "gemini" && e.ergebnis != "uebersprungen" {
+                if e.ergebnis == "netz" && e.http.is_none() {
+                    self.gemini_netzfehler.insert(e.zeit);
+                }
                 self.gemini
                     .entry(tag)
                     .or_default()
@@ -124,6 +128,7 @@ fn token(wert: Option<u64>) -> String {
 
 struct Tagessumme {
     kosten: Option<Cent>,
+    reserviert: Option<Cent>,
     offen: usize,
     token: Tokenbelege,
 }
@@ -132,9 +137,22 @@ impl Default for Tagessumme {
     fn default() -> Self {
         Self {
             kosten: Some(Cent::NULL),
+            reserviert: Some(Cent::NULL),
             offen: 0,
             token: Tokenbelege::default(),
         }
+    }
+}
+
+impl Tagessumme {
+    fn buche(&mut self, betrag: Cent, abgerechnet: bool) {
+        let summe = if abgerechnet {
+            &mut self.kosten
+        } else {
+            self.offen = self.offen.saturating_add(1);
+            &mut self.reserviert
+        };
+        *summe = summe.and_then(|wert| wert.checked_add(betrag));
     }
 }
 
@@ -145,11 +163,11 @@ pub(super) fn bericht(
     belege: &Gespraechsbelege,
 ) -> String {
     let mut text = String::from(
-        "\n## KI-Kosten\n\nBeträge stammen aus dem Journal. Offene Reservierungen zählen mit ihrer Höchstsumme. Die Tokenzahlen summieren nur eindeutig zugeordnete Belege.\n\n",
+        "\n## KI-Kosten\n\nBeträge stammen aus dem Journal. Offene Reservierungen stehen mit ihrer Höchstsumme separat. Die Tokenzahlen summieren nur eindeutig zugeordnete Belege.\n\n",
     );
     let mut je_tag = BTreeMap::<(Datum, &str), Tagessumme>::new();
     let mut aufrufe = String::new();
-    let mut gesamt = Some(Cent::NULL);
+    let mut gesamt = Tagessumme::default();
     for (nr, b) in stand
         .ki()
         .buchungen()
@@ -172,9 +190,8 @@ pub(super) fn bericht(
         let ein = aufruf.and_then(|a| a.ein);
         let aus = aufruf.and_then(|a| a.aus);
         let summe = je_tag.entry((b.datum, wer)).or_default();
-        summe.kosten = summe.kosten.and_then(|k| k.checked_add(b.reserviert));
-        gesamt = gesamt.and_then(|k| k.checked_add(b.reserviert));
-        summe.offen = summe.offen.saturating_add(usize::from(!abgerechnet));
+        summe.buche(b.reserviert, abgerechnet);
+        gesamt.buche(b.reserviert, abgerechnet);
         summe.token.erfasse(ein, aus);
         let status = if abgerechnet { "abgerechnet" } else { "offen" };
         let _ = writeln!(
@@ -188,14 +205,21 @@ pub(super) fn bericht(
             token(aus)
         );
     }
-    let _ = writeln!(text, "**Im Zeitraum gebucht: {}.**\n", geld(gesamt));
+    let _ = writeln!(
+        text,
+        "**Im Zeitraum abgerechnet: {}. Offene Reservierungen: {} ({} Buchungen).**\n",
+        geld(gesamt.kosten),
+        geld(gesamt.reserviert),
+        gesamt.offen
+    );
     if !je_tag.is_empty() || !belege.gemini.is_empty() {
-        text.push_str("| Tag | KI | Gebucht | Offene Reservierungen | Aufrufe mit vollständigem Tokenbeleg | Token ein | Token aus |\n|---|---|---:|---:|---|---:|---:|\n");
+        text.push_str("| Tag | KI | Abgerechnet | Offen reserviert | Aufrufe mit vollständigem Tokenbeleg | Token ein | Token aus |\n|---|---|---:|---:|---|---:|---:|\n");
         for ((tag, wer), s) in je_tag {
             let _ = writeln!(
                 text,
-                "| {tag} | {wer} | {} | {} | {} von {} | {} | {} |",
+                "| {tag} | {wer} | {} | {} ({}) | {} von {} | {} | {} |",
                 geld(s.kosten),
+                geld(s.reserviert),
                 s.offen,
                 s.token.vollstaendig,
                 s.token.anzahl,
@@ -230,7 +254,7 @@ pub(super) fn bericht(
             belege.fehlende_tage, belege.unlesbare_zeilen
         );
     }
-    verhaeltnis(&mut text, stand, zeitraum, depotwerte, gesamt);
+    verhaeltnis(&mut text, stand, zeitraum, depotwerte);
     text
 }
 
@@ -239,7 +263,6 @@ fn verhaeltnis(
     stand: &Stand,
     zeitraum: Zeitraum,
     depotwerte: &BTreeMap<Datum, Cent>,
-    gesamt: Option<Cent>,
 ) {
     let Some(((anfang, start), (ende, schluss))) = depotwerte
         .first_key_value()
@@ -249,21 +272,39 @@ fn verhaeltnis(
         text.push_str("\nKI-Kosten im Verhältnis zum Ertrag: nicht belegbar. Zwei belegte Tageswerte fehlen.\n");
         return;
     };
-    let kosten = stand
-        .ki()
-        .buchungen()
-        .iter()
-        .filter(|b| b.datum > *anfang && b.datum <= *ende)
-        .try_fold(Cent::NULL, |summe, b| summe.checked_add(b.reserviert));
+    let mut summe = Tagessumme::default();
+    for (nr, b) in stand.ki().buchungen().iter().enumerate() {
+        if b.datum > *anfang
+            && b.datum <= *ende
+            && let Some((_, abgerechnet)) = stand.ki().buchungsbeleg(nr)
+        {
+            summe.buche(b.reserviert, abgerechnet);
+        }
+    }
     let ertrag = schluss.checked_sub(*start);
-    let anteil = kosten.zip(ertrag).and_then(|(k, e)| anteil_bp(k, e));
+    let anteil = summe
+        .kosten
+        .zip(ertrag)
+        .and_then(|(k, e)| anteil_bp(k, e, false));
     let quote = anteil.map_or_else(|| "–".into(), |bp| prozent(Some(bp)));
+    let obergrenze = summe
+        .kosten
+        .zip(summe.reserviert)
+        .and_then(|(kosten, reserviert)| kosten.checked_add(reserviert))
+        .zip(ertrag)
+        .and_then(|(kosten, ertrag)| anteil_bp(kosten, ertrag, true));
+    let zusatz = match obergrenze {
+        Some(bp) if summe.offen > 0 => format!(
+            " (höchstens {} einschließlich offener Reservierungen)",
+            prozent(Some(bp))
+        ),
+        _ => String::new(),
+    };
     let _ = writeln!(
         text,
-        "\nKI-Kosten im Verhältnis zum Ertrag: {quote}. Von Abschluss {anfang} bis Abschluss {ende}: {} gebuchte KI-Kosten und {} Depotwertänderung vor KI-Kosten. Die Kosten umfassen Buchungstage nach dem ersten bis einschließlich dem letzten Abschluss. Eine Quote gibt es bei positiver Depotwertänderung. Gesamtkosten im gewählten Exportzeitraum: {}.",
-        geld(kosten),
-        geld(ertrag),
-        geld(gesamt)
+        "\nKI-Kosten im Verhältnis zum Ertrag: {quote}{zusatz}. Von Abschluss {anfang} bis Abschluss {ende}: {} abgerechnete KI-Kosten und {} Depotwertänderung vor KI-Kosten. Die Kosten umfassen Buchungstage nach dem ersten bis einschließlich dem letzten Abschluss. Eine Quote gibt es bei positiver Depotwertänderung.",
+        geld(summe.kosten),
+        geld(ertrag)
     );
     if !zeitraum
         .tage()
@@ -274,14 +315,15 @@ fn verhaeltnis(
     }
 }
 
-fn anteil_bp(kosten: Cent, ertrag: Cent) -> Option<i64> {
+fn anteil_bp(kosten: Cent, ertrag: Cent, aufrunden: bool) -> Option<i64> {
     if ertrag <= Cent::NULL {
         return None;
     }
-    let anteil = i128::from(kosten.0)
-        .checked_mul(i128::from(depot_kern::BP_GANZ))?
-        .checked_div(i128::from(ertrag.0))?;
-    i64::try_from(anteil).ok()
+    let zaehler = i128::from(kosten.0).checked_mul(i128::from(depot_kern::BP_GANZ))?;
+    let nenner = i128::from(ertrag.0);
+    let anteil = zaehler.checked_div(nenner)?;
+    let rest = zaehler.checked_rem(nenner)?;
+    i64::try_from(anteil.checked_add(i128::from(aufrunden && rest > 0))?).ok()
 }
 
 #[cfg(test)]
@@ -350,15 +392,21 @@ mod tests {
         };
         belege.erfasse(&[gespr.clone(), gemini, uebersprungen], 0);
         let text = bericht(journal.stand(), zeitraum, &werte, &belege);
-        assert!(text.contains("| Dachs | 0,00 € | 0 | 0 von 1 | – | – |"));
-        assert!(text.contains(&format!("| Maus | {betrag} | 1 | 1 von 1 | 12 | 3 |")));
+        assert!(text.contains("| Dachs | 0,00 € | 0,00 € (0) | 0 von 1 | – | – |"));
+        assert!(text.contains(&format!(
+            "| Maus | 0,00 € | {betrag} (1) | 1 von 1 | 12 | 3 |"
+        )));
         assert!(text.contains("| 0 | 0,00 € | abgerechnet |"));
         assert!(text.contains(&format!("| 1 | {betrag} | offen | 12 | 3 |")));
         assert!(text.contains(&format!(
-            "{betrag} gebuchte KI-Kosten und 1,00 € Depotwertänderung"
+            "0,00 % (höchstens {} einschließlich offener Reservierungen)",
+            prozent(betrag.0.checked_mul(100))
         )));
+        assert!(text.contains("0,00 € abgerechnete KI-Kosten und 1,00 € Depotwertänderung"));
         assert!(!text.contains("9,99 €"));
-        assert!(text.contains(&format!("Im Zeitraum gebucht: {betrag}.")));
+        assert!(text.contains(&format!(
+            "Im Zeitraum abgerechnet: 0,00 €. Offene Reservierungen: {betrag} (1 Buchungen)."
+        )));
         assert!(!text.contains(&format!("| {danach} |")));
         assert!(text.contains("| Gemini | nicht im Journal gebucht | – | 1 von 1 | 7 | 2 |"));
         for endwert in [Cent(100_000), Cent(99_999)] {
@@ -373,10 +421,13 @@ mod tests {
             bericht(journal.stand(), zeitraum, &werte_ein_tag, &belege)
                 .contains("nicht belegbar. Zwei belegte Tageswerte fehlen.")
         );
-        assert_eq!(anteil_bp(Cent(50), Cent(100)), Some(5_000));
+        assert_eq!(anteil_bp(Cent(50), Cent(100), false), Some(5_000));
+        assert_eq!(anteil_bp(Cent(1), Cent(3), true), Some(3_334));
         belege.erfasse(&[gespr], 0);
         let text = bericht(journal.stand(), zeitraum, &werte, &belege);
-        assert!(text.contains(&format!("| Maus | {betrag} | 1 | 0 von 1 | – | – |")));
+        assert!(text.contains(&format!(
+            "| Maus | 0,00 € | {betrag} (1) | 0 von 1 | – | – |"
+        )));
         drop(journal);
         std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
         Ok(())
