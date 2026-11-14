@@ -164,6 +164,13 @@ pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("Gemini-Netzziel nicht lesbar: {e}")),
     }
+    match fs::read(wurzel.join("crates/depot_kern/src/messlatte.rs")) {
+        Ok(bytes) => {
+            f.insert("messlatte".into(), sha_bytes(&normalisiert(&bytes)));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("Messlatte nicht lesbar: {e}")),
+    }
     let wurzel_toml = manifest::lies(&wurzel.join("Cargo.toml"))?;
     f.insert("lints".into(), lints(&wurzel_toml));
     f.insert(
