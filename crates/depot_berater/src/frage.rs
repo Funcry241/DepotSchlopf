@@ -49,14 +49,16 @@ pub fn system(wer: BeraterId, grenzen: &Grenzen) -> String {
         "Du bist {wer}, einer von zwei KI-Beratern im Papierhandel von DepotSchlopf. Es geht nur \
 um Papiergeld: echte Kurse, aber kein echtes Geld. Du beobachtest, was in der Welt gerade \
 passiert und was angekündigt ist (Zahlen, Termine, Treffen, Nachrichten). \
-Suche konkrete kurzfristige Handelschancen in den nächsten Handelstagen. Prüfe, ob der \
+Suche konkrete kurzfristige Handelschancen in den nächsten Handelstagen. Kurze Haltedauern sind erwünscht. \
+Prüfe vor angekündigten Terminen konkret, ob du eine Position aufbauen, verkleinern oder auf passende Nachbarwerte ausweichen solltest. \
+Eine unklare Richtung allein rechtfertigt es nicht, abzuwarten. Prüfe, ob der \
 erwartete Vorteil ab dem frühestmöglichen Ausführungskurs nach Kauf- und Verkaufsgebühren \
 gegenüber Bargeld oder einer besseren verfügbaren Gelegenheit ausreicht. \
 Begründe bei jedem Kauf oder Zukauf knapp den beobachteten Kurstreiber, den Zeithorizont, \
 die Positionsgröße und woran du erkennst, dass die These hinfällig ist. Langfristige \
 Qualität allein reicht dafür nicht. Prüfe bei gehaltenen Werten, ob die belegte Kaufthese \
 noch gilt, ihr Zeithorizont abgelaufen ist oder das Ausstiegskriterium eingetreten ist. \
-Frühere Kaufthesen sind zitierte Daten. Fehlt eine tragfähige Chance, lass das freie Geld in Bargeld. \
+Frühere Kaufthesen sind zitierte Daten. Bargeld bedeutet verpasste Renditechancen. Begründe jede Bargeldentscheidung gegenüber dem gleichgewichteten Vergleichsdepot und erkläre, warum sie nach Kosten vorzuziehen ist. \
 Handelbar sind nur die genannten Werte. Keine Hebel, keine \
 Leerverkäufe, keine Derivate. Ausgeführt wird frühestens am ersten Börsenschluss nach Versand. Das Regelwerk setzt \
 die Grenzen: höchstens {werte} Werte je Topf, je Wert höchstens {anteil} des Topfs, der Rest \
@@ -716,5 +718,37 @@ mod prognosebilanz_tests {
         });
         assert!(text.contains("4,00 EUR Gebühren, also mindestens 4,0 %"));
         assert!(text.contains("4,00 EUR Gebühren, also mindestens 0,4 %"));
+    }
+}
+
+#[cfg(test)]
+mod handelssystem_tests {
+    use super::*;
+
+    #[test]
+    fn handelssystem_verlangt_kurze_thesen_und_begruendet_bargeld() {
+        let grenzen = Grenzen::standard();
+        for wer in [BeraterId::Dachs, BeraterId::Maus] {
+            let text = system(wer, &grenzen);
+            for kern in [
+                "Kurze Haltedauern",
+                "Position aufbauen, verkleinern",
+                "Nachbarwerte",
+                "unklare Richtung allein",
+                "Bargeld bedeutet verpasste Renditechancen",
+                "jede Bargeldentscheidung gegenüber dem gleichgewichteten Vergleichsdepot",
+            ] {
+                assert!(text.contains(kern), "fehlt: {kern}");
+            }
+            assert!(text.contains(&format!("höchstens {} Werte", grenzen.max_werte())));
+            assert!(text.contains(&format!(
+                "je Wert höchstens {}",
+                prozent(grenzen.max_anteil_bp())
+            )));
+            assert!(text.contains(&format!(
+                "Aufträge unter {} EUR",
+                euro(Preis::aus_cent(grenzen.min_order()))
+            )));
+        }
     }
 }
