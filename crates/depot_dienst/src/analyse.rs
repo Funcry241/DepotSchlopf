@@ -22,6 +22,7 @@ mod historie;
 mod journal;
 mod ki_kosten;
 mod leistung;
+mod nachher;
 mod orders;
 mod pruefbericht;
 mod schutz;
@@ -789,13 +790,16 @@ fn journalpaket(
             let orders = orders::bericht(stand, eintraege, &buch, zeitraum);
             let historie = historie::bericht(zeitraum, Some(stand), luecken);
             let (ki, gespraechsbelege) = ki(daten, zeitraum, Some(stand), luecken);
+            let nachher = nachher::auswertung(stand, &buch, zeitraum, jetzt);
             let pruefbericht = pruefbericht::bericht(
                 Some(stand),
                 zeitraum,
                 betrieb.ablauf.ampel(),
                 betrieb.fehler.ampel(true),
+                nachher.ampel(),
             ) + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
-                + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege);
+                + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege)
+                + &nachher.bericht;
             Journalpaket {
                 pruefbericht,
                 betrieb: betrieb.ablauf.bericht(Some(stand))
@@ -822,6 +826,7 @@ fn journalpaket(
                     zeitraum,
                     betrieb.ablauf.ampel(),
                     betrieb.fehler.ampel(false),
+                    "Rot (Journal fehlt)",
                 ),
                 betrieb: betrieb.ablauf.bericht(None) + &betrieb.fehler.bericht(None, zeitraum),
                 kurz: "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n".into(),

@@ -1,7 +1,6 @@
 klasse: Funktion
-zweck: Belegte Fehler, Warnungen und Reaktionen im Analyse-Export sichtbar machen
+zweck: Belegte Entscheidungen mit Kursen an drei späteren Handelstagen vergleichen
 pfade:
 crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/ablauf.rs
-crates/depot_dienst/src/analyse/fehler.rs
+crates/depot_dienst/src/analyse/nachher.rs
 crates/depot_dienst/src/analyse/pruefbericht.rs
