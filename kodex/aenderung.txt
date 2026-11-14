@@ -1,17 +1,7 @@
 klasse: Funktion
-zweck: Dateiersatz bei kurzzeitigen Windows-Dateisperren wiederholen
+zweck: Beratung nach höchstens zwei Abstimmungsrunden abschließen
 pfade:
-crates/depot_dienst/src/programmstand.rs
-crates/depot_dienst/src/werkbank.rs
-crates/depot_journal/src/datei.rs
-crates/depot_journal/src/dateiersatz.rs
-crates/depot_journal/src/kurssperre.rs
-crates/depot_journal/src/lib.rs
-crates/depot_lage/src/main.rs
-crates/depot_lauf/src/dateiersatz.rs
-crates/depot_lauf/src/export.rs
-crates/depot_lauf/src/main.rs
-crates/depot_lauf/src/sicherung.rs
-crates/depot_lauf/src/update.rs
-crates/depot_lauf/src/updatedaten.rs
-crates/depot_sim/src/papierdatei.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/tests/invarianten.rs
+crates/depot_sim/tests/papiertag.rs
+docs/ARCHITEKTUR.md

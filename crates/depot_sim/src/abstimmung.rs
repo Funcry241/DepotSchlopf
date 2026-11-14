@@ -5,6 +5,8 @@ use depot_journal::{Journal, KiZweck};
 use depot_kern::{BeraterId, Vorschlag};
 use depot_ki::Sperre;
 
+pub(crate) const ABSTIMMUNG_RUNDEN: u32 = 2;
+
 #[derive(Clone, Debug)]
 pub struct AbstimmungsStand {
     pub runde: u32,
@@ -199,7 +201,9 @@ pub(crate) fn berate(
     );
     let (mut va, mut vb) = (ea.vorschlag.clone(), eb.vorschlag.clone());
     let (mut letzte_a, mut letzte_b) = (String::new(), String::new());
-    let max = depot_ki::KiGrenzen::standard().aufrufe_je_zyklus();
+    let max = depot_ki::KiGrenzen::standard()
+        .aufrufe_je_zyklus()
+        .min(ABSTIMMUNG_RUNDEN);
     for runde in 1..=max {
         if !crate::lauf::beratungszeit(zyklus) || !dachs.angebunden() || !maus.angebunden() {
             break;

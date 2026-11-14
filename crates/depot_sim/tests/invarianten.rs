@@ -190,7 +190,7 @@ fn modell(runden: &[(Zug, Zug)]) -> ([Stand; 2], Vec<Stand>, Vec<Stand>) {
         (Schritt::Unverwertbar, false),
         (Schritt::Unverwertbar, false),
     );
-    for &((sa, za), (sb, zb)) in runden.iter().chain(std::iter::once(&ende)) {
+    for &((sa, za), (sb, zb)) in runden.iter().chain(std::iter::once(&ende)).take(2) {
         let [va, vb] = gezeigt;
         sieht_a.push(vb);
         let Some(na) = antwort(sa, va) else { break };
