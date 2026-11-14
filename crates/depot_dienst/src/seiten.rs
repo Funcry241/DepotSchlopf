@@ -39,7 +39,7 @@ button:focus-visible,a.aktion:focus-visible{outline:3px solid var(--text);outlin
 button.primaer,a.primaer,form.ungespeichert:valid button[data-speichern-hervorheben]:not(:disabled){background:#005c97;color:#fff;border:2px solid #005c97;font-weight:700}\
 button.primaer:disabled{background:var(--flaeche);color:var(--leise);border-color:var(--linie)}\
 button.laeuft{border:2px solid var(--offen);color:var(--offen)}\
-#betriebsleiste{position:sticky;top:0;z-index:1;background:var(--grund);padding:4px 0}\
+#betriebsleiste{position:sticky;top:0;z-index:2;background:var(--grund);padding:4px 0}\
 .betrieb{border:2px solid var(--linie);border-radius:8px;padding:10px 14px;margin:0}\
 .betrieb.aktiv{border-color:var(--offen)}.betrieb p{margin:4px 0}\
 .betrieb progress{width:90px;max-width:30%;vertical-align:middle;margin-right:8px}\
@@ -2491,3 +2491,28 @@ pub const APP_JS: &str = r#""use strict";
   starte();
 })();
 "#;
+
+#[cfg(test)]
+mod speicherleiste_tests {
+    use super::STIL_DIENST;
+
+    #[test]
+    fn betriebsleiste_liegt_ueber_speicherkaestchen_und_unter_halt() -> Result<(), &'static str> {
+        let z_index = |selektor: &str| -> Option<u8> {
+            let regel = STIL_DIENST.split_once(selektor)?.1.split_once('}')?.0;
+            regel
+                .split_once("z-index:")?
+                .1
+                .split(';')
+                .next()?
+                .parse()
+                .ok()
+        };
+        let leiste = z_index("#betriebsleiste{").ok_or("Betriebsleiste")?;
+        let speichern = z_index(".speicher-aktionen{").ok_or("Speicherkästchen")?;
+        let halt = z_index(".banner{").ok_or("Halt-Banner")?;
+        assert_eq!(leiste, 2);
+        assert!(speichern < leiste && leiste < halt);
+        Ok(())
+    }
+}
