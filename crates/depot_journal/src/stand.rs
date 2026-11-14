@@ -92,6 +92,8 @@ pub enum Art {
     /// `nr;meldung`: der naechste Zustand eines Auftrags (R37, Kap. 10). Eine Ausfuehrung
     /// steht als `nr;ausfuehrung;stueck;kurs;gebuehr` und bucht sie im Topf.
     Zustand,
+    /// Ausführung eines Kaufs mit gleichzeitig belegtem Schutz-Stopp.
+    Stopp,
     /// `berater;datum;zyklus;cent`: eine Buchung des KI-Kassenbuchs, geprueft nach den Regeln
     /// aus `depot_ki` (K13-02).
     Ki,
@@ -135,6 +137,7 @@ impl Art {
             Art::Vorbereitung => "vorbereitung",
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
+            Art::Stopp => "stopp",
             Art::Ki => "ki",
             Art::KiAbrechnung => "ki-abrechnung",
             Art::KiAufruf => "ki-aufruf",
@@ -163,6 +166,7 @@ impl Art {
             Art::Vorbereitung,
             Art::Auftrag,
             Art::Zustand,
+            Art::Stopp,
             Art::Ki,
             Art::KiAbrechnung,
             Art::KiAufruf,
@@ -192,6 +196,7 @@ pub struct AuftragsBeleg {
     pub stueck: u64,
     pub limit: Cent,
     pub anlass: Anlass,
+    pub stopp_bp: Option<i64>,
 }
 
 /// Ein Tagesabschluss.
@@ -225,6 +230,7 @@ pub struct Stand {
     format: u8,
     toepfe: BTreeMap<TopfId, Topf>,
     startgeld: BTreeMap<TopfId, Option<Cent>>,
+    stopps: BTreeMap<(TopfId, Isin), Cent>,
     auftraege: Vec<AuftragsLage>,
     ausfuehrungsfolge: Vec<(usize, usize)>,
     beobachtungen: Vec<(Datum, String)>,
@@ -292,6 +298,36 @@ impl Stand {
     /// Bargeld bei der ersten Buchung des Topfs, sofern diese ohne Positionen war.
     pub fn startgeld_je_topf(&self, topf: TopfId) -> Option<Cent> {
         self.startgeld.get(&topf).copied().flatten()
+    }
+
+    /// Schutz-Stopp aus der letzten belegten Kaufausführung dieser Position.
+    pub fn stoppkurs(&self, topf: TopfId, isin: &Isin) -> Option<Cent> {
+        self.stopps.get(&(topf, isin.clone())).copied()
+    }
+
+    pub(crate) fn stoppmeldung(&self, nr: u64, m: &Meldung) -> Result<Option<String>, String> {
+        let Meldung::Ausfuehrung(a) = m else {
+            return Ok(None);
+        };
+        let Some(lage) = self.auftrag(nr) else {
+            return Ok(None);
+        };
+        let b = &lage.beleg;
+        let Some(bp) = b.stopp_bp else {
+            return Ok(None);
+        };
+        let kurs = a
+            .kurs
+            .anteil_bp_auf(depot_kern::BP_GANZ.checked_sub(bp).ok_or("Stoppabstand")?)
+            .filter(|kurs| kurs.0 > 0)
+            .ok_or("Stoppkurs nicht berechenbar")?;
+        Ok(Some(format!(
+            "{};{};{};{}",
+            topf_name(b.topf),
+            b.isin,
+            kurs.0,
+            meldung_text(nr, m)
+        )))
     }
 
     /// Die Werte, die irgendein Topf haelt. Ihre Kurse sind Pflicht (`waehle_tageswerte`).
@@ -576,6 +612,8 @@ impl Stand {
                 self.startgeld
                     .entry(t.id())
                     .or_insert_with(|| t.positionen().is_empty().then(|| t.bargeld()));
+                self.stopps
+                    .retain(|(id, isin), _| *id != t.id() || t.stueck(isin) > 0);
                 self.toepfe.insert(t.id(), t);
             }
             // Belege von aussen beginnen keinen Tag: Der Sammler schreibt sie vor dem Papiertag
@@ -607,37 +645,8 @@ impl Stand {
             }
             Art::Weltprognose => self.belege_weltprognose(inhalt)?,
             Art::Aufloesung => return self.loese_auf(inhalt),
-            Art::Auftrag => {
-                let b = lies_auftrag(inhalt).ok_or("Auftrag unlesbar")?;
-                kanonisch(&auftrag_text(&b), inhalt)?;
-                let nr = b.nr;
-                if nr <= self.letzte_kennung {
-                    return Err(format!(
-                        "Auftragskennung {nr} nicht größer als die letzte ({})",
-                        self.letzte_kennung
-                    ));
-                }
-                if self.format == FORMAT_ALT {
-                    // Format 1: Das Ergebnis steht im naechsten Topf; der Auftrag bindet nichts.
-                    self.letzte_kennung = nr;
-                    self.auftraege.push(AuftragsLage::alt(b));
-                    self.seit_abschluss = self.seit_abschluss.saturating_add(1);
-                    return Ok(());
-                }
-                let topf = self
-                    .toepfe
-                    .get(&b.topf)
-                    .ok_or_else(|| format!("Auftrag {nr}: Topf {:?} fehlt", b.topf))?;
-                let neu = AuftragsLage::reserviert(b);
-                self.pruefe_deckung(topf, Some(&neu), Cent::NULL)?;
-                self.letzte_kennung = nr;
-                self.auftraege.push(neu);
-            }
-            Art::Zustand => {
-                let (nr, m) = lies_meldung(inhalt).ok_or("Zustand unlesbar")?;
-                kanonisch(&meldung_text(nr, &m), inhalt)?;
-                self.melde(nr, &m)?;
-            }
+            Art::Auftrag => self.belege_auftrag(inhalt)?,
+            Art::Zustand | Art::Stopp => self.belege_meldung(art, inhalt)?,
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
             Art::Ki => self.ki.buche(inhalt)?,
             Art::KiAufruf => return self.ki.belege_aufruf(inhalt),
@@ -666,6 +675,56 @@ impl Stand {
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
         Ok(())
+    }
+
+    fn belege_auftrag(&mut self, inhalt: &str) -> Result<(), String> {
+        let b = lies_auftrag(inhalt).ok_or("Auftrag unlesbar")?;
+        kanonisch(&auftrag_text(&b), inhalt)?;
+        let nr = b.nr;
+        if nr <= self.letzte_kennung {
+            return Err(format!(
+                "Auftragskennung {nr} nicht größer als die letzte ({})",
+                self.letzte_kennung
+            ));
+        }
+        if self.format == FORMAT_ALT {
+            // Format 1: Das Ergebnis steht im naechsten Topf; der Auftrag bindet nichts.
+            self.letzte_kennung = nr;
+            self.auftraege.push(AuftragsLage::alt(b));
+            return Ok(());
+        }
+        let topf = self
+            .toepfe
+            .get(&b.topf)
+            .ok_or_else(|| format!("Auftrag {nr}: Topf {:?} fehlt", b.topf))?;
+        let neu = AuftragsLage::reserviert(b);
+        self.pruefe_deckung(topf, Some(&neu), Cent::NULL)?;
+        self.letzte_kennung = nr;
+        self.auftraege.push(neu);
+        Ok(())
+    }
+
+    fn belege_meldung(&mut self, art: Art, inhalt: &str) -> Result<(), String> {
+        let (meldung, stopp) = if art == Art::Stopp {
+            let felder: Vec<_> = inhalt.splitn(4, ';').collect();
+            let [_, _, kurs, meldung] = felder.as_slice() else {
+                return Err("Stoppbeleg unlesbar".into());
+            };
+            (
+                *meldung,
+                Some(Cent(kurs.parse().map_err(|_| "Stoppkurs unlesbar")?)),
+            )
+        } else {
+            (inhalt, None)
+        };
+        let (nr, m) = lies_meldung(meldung).ok_or("Zustand unlesbar")?;
+        let soll = self.stoppmeldung(nr, &m)?;
+        match (soll, stopp) {
+            (Some(text), Some(_)) => kanonisch(&text, inhalt)?,
+            (None, None) => kanonisch(&meldung_text(nr, &m), inhalt)?,
+            _ => return Err("Stoppbeleg passt nicht zur Ausführung".into()),
+        }
+        self.melde(nr, &m, stopp)
     }
 
     fn stelle_format_um(&mut self, inhalt: &str) -> Result<(), String> {
@@ -1001,7 +1060,7 @@ impl Stand {
 
     /// Wendet die Meldung zu einem Auftrag an: naechster Zustand und bei einer Ausfuehrung die
     /// Buchung im Topf. Ein Fehler laesst den Stand unveraendert.
-    fn melde(&mut self, nr: u64, m: &Meldung) -> Result<(), String> {
+    fn melde(&mut self, nr: u64, m: &Meldung, stopp: Option<Cent>) -> Result<(), String> {
         let index = self
             .auftraege
             .iter()
@@ -1034,6 +1093,12 @@ impl Stand {
         if matches!(m, Meldung::Ausfuehrung(_)) {
             self.ausfuehrungsfolge
                 .push((index, alt.ausfuehrungen.len()));
+            let beleg = &neu.beleg;
+            if let Some(kurs) = stopp {
+                self.stopps.insert((beleg.topf, beleg.isin.clone()), kurs);
+            } else if beleg.richtung == Richtung::Kauf || topf.stueck(&beleg.isin) == 0 {
+                self.stopps.remove(&(beleg.topf, beleg.isin.clone()));
+            }
         }
         self.toepfe.insert(topf.id(), topf);
         if let Some(platz) = self.auftraege.get_mut(index) {
@@ -1336,6 +1401,7 @@ fn anlass_name(a: Anlass) -> &'static str {
         Anlass::AusstiegPositivliste => "AusstiegPositivliste",
         Anlass::Abbau => "Abbau",
         Anlass::Notbremse => "Notbremse",
+        Anlass::Stopp => "Stopp",
     }
 }
 
@@ -1349,11 +1415,12 @@ pub(crate) fn beleg_text(topf: TopfId, g: &GenehmigterAuftrag) -> String {
         stueck: a.stueck,
         limit: a.limit,
         anlass: g.beleg().anlass,
+        stopp_bp: g.stopp_bp(),
     })
 }
 
 pub(crate) fn auftrag_text(b: &AuftragsBeleg) -> String {
-    format!(
+    let text = format!(
         "{};{};{};{};{};{};{}",
         b.nr,
         topf_name(b.topf),
@@ -1362,12 +1429,17 @@ pub(crate) fn auftrag_text(b: &AuftragsBeleg) -> String {
         b.stueck,
         b.limit.0,
         anlass_name(b.anlass)
-    )
+    );
+    if let Some(bp) = b.stopp_bp {
+        format!("{text};{bp}")
+    } else {
+        text
+    }
 }
 
 fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
     let teile: Vec<&str> = inhalt.split(';').collect();
-    let [nr, topf, isin, richtung, stueck, limit, anlass] = teile.as_slice() else {
+    let [nr, topf, isin, richtung, stueck, limit, anlass, rest @ ..] = teile.as_slice() else {
         return None;
     };
     let richtung = [Richtung::Kauf, Richtung::Verkauf]
@@ -1378,12 +1450,24 @@ fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
         Anlass::AusstiegPositivliste,
         Anlass::Abbau,
         Anlass::Notbremse,
+        Anlass::Stopp,
     ]
     .into_iter()
     .find(|a| anlass_name(*a) == *anlass)?;
     let stueck: u64 = stueck.parse().ok()?;
     let limit = Cent(limit.parse().ok()?);
     if stueck == 0 || limit.0 <= 0 {
+        return None;
+    }
+    let stopp_bp = match rest {
+        [] => None,
+        [bp] if richtung == Richtung::Kauf => {
+            let bp: i64 = bp.parse().ok()?;
+            (1..depot_kern::BP_GANZ).contains(&bp).then_some(bp)?.into()
+        }
+        _ => return None,
+    };
+    if anlass == Anlass::Stopp && richtung != Richtung::Verkauf {
         return None;
     }
     Some(AuftragsBeleg {
@@ -1394,6 +1478,7 @@ fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
         stueck,
         limit,
         anlass,
+        stopp_bp,
     })
 }
 

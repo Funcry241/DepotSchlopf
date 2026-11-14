@@ -145,7 +145,7 @@ fn positionen(d: &DepotLage, bar: Option<Cent>, text: &mut String) {
             "<tr><td title=\"{}\">{}</td><td>{}</td><td>{}</td><td>{kurs}</td>\
             <td>{}</td><td>{}</td><td>{einstand}</td><td>{gv}</td></tr>",
             maskiere(&p.isin),
-            maskiere(&p.name),
+            format_args!("{}{}", maskiere(&p.name), depot_lage::html::stopp_text(p)),
             topf(id),
             p.stueck,
             geld(p.wert),
@@ -329,6 +329,8 @@ mod tests {
                     einstand: None,
                     gv: None,
                     gv_bp: None,
+                    stoppkurs: None,
+                    stoppabstand: None,
                 }],
             }],
             gesamt: None,

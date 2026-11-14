@@ -23,6 +23,17 @@ pub fn maskiere(text: &str) -> String {
     aus
 }
 
+/// Zeigt den belegten Stoppkurs und die Differenz zum letzten Schluss.
+pub fn stopp_text(p: &crate::Position) -> String {
+    p.stoppkurs.map_or_else(String::new, |kurs| {
+        let abstand = p.stoppabstand.map_or_else(
+            || "Schluss fehlt".into(),
+            |abstand| format!("Abstand zum Schluss {abstand}"),
+        );
+        format!("<br><small>Schutz-Stopp {kurs} · {abstand}</small>")
+    })
+}
+
 fn geld(c: Option<Cent>) -> String {
     c.map_or_else(|| "–".into(), euro)
 }
@@ -419,7 +430,7 @@ fn depot(l: &Lagebild, s: &mut String) {
                 let _ = write!(
                     s,
                     "<tr><td></td><td>{}</td><td class=\"z\">{}</td><td class=\"z\">{}</td></tr>",
-                    maskiere(&p.name),
+                    format_args!("{}{}", maskiere(&p.name), stopp_text(p)),
                     p.stueck,
                     geld(p.wert)
                 );

@@ -356,6 +356,14 @@ fn befund_2_a09_reservierung_bindet_stueck_je_topf() -> Result<(), String> {
 
 /// Ein genehmigter Kauf aus dem Regelwerk: Dachs will 25 % des Werts in Topf A mit 10.000 €.
 fn kauf() -> Result<GenehmigterAuftrag, String> {
+    kauf_mit_stopp(0, Cent(10_000), None)
+}
+
+fn kauf_mit_stopp(
+    nach: u64,
+    preis: Cent,
+    stopp: Option<i64>,
+) -> Result<GenehmigterAuftrag, String> {
     let w = wert()?;
     let universum = Universum::neu(vec![Instrument {
         isin: w.clone(),
@@ -365,13 +373,14 @@ fn kauf() -> Result<GenehmigterAuftrag, String> {
     let tag = vorbedingung(Datum::neu(2026, 11, 2).ok_or(()), "Datum")?;
     let zeit = Zeitpunkt::neu(tag, 10, 0, 0).ok_or("Vorbedingung: Zeit")?;
     let kurs = vorbedingung(
-        Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Simulation),
+        Kurs::neu(preis, "EUR", tag, zeit, Herkunft::Simulation),
         "Kurs",
     )?;
     let kurse = vorbedingung(Kurse::neu(zeit, vec![(w.clone(), kurs)]), "Kurse")?;
     let topf = vorbedingung(Topf::neu(TopfId::A, Cent(1_000_000)), "Topf")?;
     let vorschlag = Vorschlag {
         limit_bp: std::collections::BTreeMap::new(),
+        stopp_bp: stopp.map(|bp| (w.clone(), bp)).into_iter().collect(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(w.clone(), 2_500)].into_iter().collect(),
         begruendung: [(w, "erfunden".to_string())].into_iter().collect(),
@@ -386,7 +395,7 @@ fn kauf() -> Result<GenehmigterAuftrag, String> {
             vorschlag: Some(&vorschlag),
             halt: false,
         },
-        &mut Kennungsvergabe::nach(0),
+        &mut Kennungsvergabe::nach(nach),
     );
     match ent.kaeufe.as_slice() {
         [k] if k.auftrag().richtung == Richtung::Kauf && ent.verkaeufe.is_empty() => Ok(k.clone()),
@@ -812,5 +821,74 @@ fn papierabrechnung_verlangt_einen_nachweis_auch_ohne_verkaeufe() -> Result<(), 
     );
     konto.auszug.abrechnungen = Some(BTreeMap::new());
     assert!(vorbedingung(j.gleiche_ab(&konto), "Abgleich mit Nachweis")?.is_empty());
+    Ok(())
+}
+
+#[test]
+fn schutzstopp_ist_atomar_und_ueberlebt_neustart() -> Result<(), String> {
+    let p = neuer_pfad()?;
+    vorbedingung(Journal::einrichten(&p), "Einrichtung")?;
+    let id = TopfId::A;
+    let isin = wert()?;
+    let g = Grenzen::standard();
+    let mut j = oeffnen(&p)?;
+    vorbedingung(
+        j.setze_topf(&vorbedingung(Topf::neu(id, Cent(1_000_000)), "Topf")?),
+        "Topf",
+    )?;
+    assert!(j.anhaengen(Art::Stopp, "").is_err());
+
+    for (nr, bp, erwartet) in [(1, 500, Cent(11_728)), (2, 800, Cent(11_358))] {
+        let kauf = kauf_mit_stopp(j.stand().letzte_kennung(), Cent(12_345), Some(bp))?;
+        vorbedingung(j.reserviere_auftrag(&g, id, &kauf), "Kauf")?;
+        vorbedingung(j.melde(nr, &Meldung::Gesendet), "Versand")?;
+        vorbedingung(j.melde(nr, &Meldung::Angenommen), "Annahme")?;
+        assert_ne!(j.stand().stoppkurs(id, &isin), Some(erwartet));
+        drop(j);
+        j = oeffnen(&p)?;
+        let aus = Ausfuehrung {
+            stueck: kauf.auftrag().stueck,
+            kurs: Cent(12_345),
+            gebuehr: Cent(150),
+            kurszeit: None,
+        };
+        vorbedingung(j.melde(nr, &Meldung::Ausfuehrung(aus)), "Ausführung")?;
+        assert!(
+            j.eintraege()
+                .last()
+                .is_some_and(|(art, _)| *art == Art::Stopp)
+        );
+        assert_eq!(j.stand().stoppkurs(id, &isin), Some(erwartet));
+        drop(j);
+        j = oeffnen(&p)?;
+        assert_eq!(j.stand().stoppkurs(id, &isin), Some(erwartet));
+    }
+
+    let stueck = j.stand().toepfe().get(&id).ok_or("Topf")?.stueck(&isin);
+    vorbedingung(
+        j.reserviere_auftrag(&g, id, &verkauf(3, stueck)?),
+        "Verkauf",
+    )?;
+    vorbedingung(j.melde(3, &Meldung::Gesendet), "Versand")?;
+    vorbedingung(j.melde(3, &Meldung::Angenommen), "Annahme")?;
+    let aus = Ausfuehrung {
+        stueck,
+        kurs: Cent(10_000),
+        gebuehr: Cent(150),
+        kurszeit: None,
+    };
+    vorbedingung(j.melde(3, &Meldung::Ausfuehrung(aus)), "Ausführung")?;
+    assert_eq!(j.stand().stoppkurs(id, &isin), None);
+    drop(j);
+    assert_eq!(oeffnen(&p)?.stand().stoppkurs(id, &isin), None);
+    Ok(())
+}
+
+#[test]
+fn ungueltige_stoppabstaende_werden_nicht_reserviert() -> Result<(), String> {
+    for bp in [150, 2_500] {
+        let kauf = kauf_mit_stopp(0, Cent(10_000), Some(bp))?;
+        assert_eq!(kauf.stopp_bp(), None);
+    }
     Ok(())
 }

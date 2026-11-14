@@ -65,11 +65,14 @@ fn journalbewegungen(
         match art {
             Art::Abrechnungstag => abrechnungstag = Datum::lies(text),
             Art::Abschluss | Art::NotbremseFreigabe => abrechnungstag = None,
-            Art::Auftrag | Art::Zustand => {
+            Art::Auftrag | Art::Zustand | Art::Stopp => {
+                let Some((art, text)) = super::journal::ordermeldung(*art, text) else {
+                    continue;
+                };
                 let Some(nr) = text.split(';').next().and_then(|nr| nr.parse().ok()) else {
                     continue;
                 };
-                let datum = super::journal::orderdatum(*art, text, abrechnungstag);
+                let datum = super::journal::orderdatum(art, text, abrechnungstag);
                 match datum {
                     Some(tag) if (zeitraum.von..=zeitraum.bis).contains(&tag) => {
                         im_zeitraum.insert(nr);

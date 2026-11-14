@@ -79,6 +79,7 @@ versiegelt! {
         tagesverlust_bp: i64,
         /// Rueckgang vom Hoechststand, ab dem die Notbremse alles verkauft.
         notbremse_bp: i64,
+        stopp_min_bp: i64,
         /// Gesamtverlust vom historischen Hoechststand, der die Papierfreigabe sperrt.
         papier_gesamtverlust_bp: i64,
         /// Ausdrueckliche Papierfreigabe beginnt eine neue Gesamtverlustmessung.
@@ -113,6 +114,7 @@ impl Grenzen {
             max_kurssprung_bp: 1_500,
             tagesverlust_bp: 500,
             notbremse_bp: 2_000,
+            stopp_min_bp: 200,
             papier_gesamtverlust_bp: 3_000,
             papier_freigabe_neue_messung: true,
             etf_freigegeben: true,

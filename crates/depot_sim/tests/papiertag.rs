@@ -546,6 +546,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
             einschaetzung: "SAP".into(),
             vorschlag: Some(Vorschlag {
                 limit_bp: std::collections::BTreeMap::new(),
+                stopp_bp: std::collections::BTreeMap::new(),
                 berater: BeraterId::Dachs,
                 zielgewichte_bp: [(sap.clone(), 2_000)].into_iter().collect(),
                 begruendung: [(sap.clone(), "beobachtet".to_string())]
@@ -693,6 +694,7 @@ fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), 
                     einschaetzung: "SAP".into(),
                     vorschlag: Some(Vorschlag {
                         limit_bp: std::collections::BTreeMap::new(),
+                        stopp_bp: std::collections::BTreeMap::new(),
                         berater: wer,
                         zielgewichte_bp: [(sap.clone(), 2_000)].into_iter().collect(),
                         begruendung: [(sap.clone(), "beobachtet".to_string())]
@@ -1175,6 +1177,7 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
     let liquid = vorbedingung(Topf::neu(TopfId::A, Cent(499_725)), "Liquid")?;
     let vorschlag = Vorschlag {
         limit_bp: std::collections::BTreeMap::new(),
+        stopp_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(isin.clone(), 2_000)].into_iter().collect(),
         begruendung: [(isin, "beobachtet".into())].into_iter().collect(),
@@ -1771,6 +1774,7 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
             einschaetzung: format!("Unabhängige Erstmeinung {wer:?}"),
             vorschlag: Some(Vorschlag {
                 limit_bp: std::collections::BTreeMap::new(),
+                stopp_bp: std::collections::BTreeMap::new(),
                 berater: wer,
                 zielgewichte_bp: [(sap.clone(), 2000)].into_iter().collect(),
                 begruendung: [(sap, "Belegte Lage".into())].into_iter().collect(),
@@ -3012,5 +3016,93 @@ fn zeile_markiert() -> Result<(), String> {
     let jetzt = belege_schlagzeilen(&mut j, 1, 0)?;
     let welt = depot_sim::weltlage_am(j.stand(), tag(5)?, jetzt);
     assert!(welt.iter().any(|n| n.ends_with("[betrifft: SAP]")));
+    Ok(())
+}
+
+#[test]
+fn morgens_loest_der_schutzstopp_ohne_zweitmeinung_aus() -> Result<(), String> {
+    use depot_regelwerk::Anlass;
+
+    let ort = Ort::neu()?;
+    let isin = sap()?;
+    let montag = tag(9)?;
+    let dienstag = tag(10)?;
+    let mittwoch = tag(11)?;
+    let morgen = |datum| some(Zeitpunkt::frankfurt(datum, 7, 30, 0), "Morgen");
+    let mut j = ort.oeffnen()?;
+    let mut k = konto(&ort, &j)?;
+    belege_morgen(&mut j, 6, morgen(montag)?)?;
+    let (mut dachs, mut maus) = kaeufer(montag, &isin);
+    let vorschlag = some(
+        dachs
+            .antworten
+            .get_mut(&montag)
+            .and_then(|a| a.vorschlag.as_mut()),
+        "Vorschlag",
+    )?;
+    vorschlag.stopp_bp.insert(isin.clone(), 500);
+    vorbedingung(
+        papiertag(
+            &mut j,
+            montag,
+            &universum()?,
+            &start()?,
+            &mut dachs,
+            &mut maus,
+            &mut k,
+        ),
+        "Montag",
+    )?;
+
+    belege_morgen(&mut j, 9, morgen(dienstag)?)?;
+    vorbedingung(
+        papiertag(
+            &mut j,
+            dienstag,
+            &universum()?,
+            &start()?,
+            &mut Stumm,
+            &mut Stumm,
+            &mut k,
+        ),
+        "Dienstag",
+    )?;
+    assert_eq!(j.stand().stoppkurs(TopfId::A, &isin), Some(Cent(21_860)));
+    let gehalten = some(j.stand().toepfe().get(&TopfId::A), "Topf")?.stueck(&isin);
+    assert!(gehalten > 0);
+
+    belege_sperrprobe(
+        &mut j,
+        &isin,
+        &[(9, 23_010), (10, 21_860)],
+        morgen(mittwoch)?,
+    )?;
+    belege_sperrprobe(
+        &mut j,
+        &allianz()?,
+        &[(9, 23_010), (10, 23_010)],
+        morgen(mittwoch)?,
+    )?;
+    vorbedingung(
+        papiertag(
+            &mut j,
+            mittwoch,
+            &universum()?,
+            &start()?,
+            &mut Stumm,
+            &mut Stumm,
+            &mut k,
+        ),
+        "Mittwoch",
+    )?;
+    let order = some(
+        j.stand()
+            .offene_auftraege()
+            .find(|l| l.beleg.anlass == Anlass::Stopp),
+        "Schutz-Stopp",
+    )?;
+    assert_eq!(order.beleg.isin, isin);
+    assert_eq!(order.beleg.stueck, gehalten);
+    assert_eq!(order.versand, Some(morgen(mittwoch)?));
     Ok(())
 }

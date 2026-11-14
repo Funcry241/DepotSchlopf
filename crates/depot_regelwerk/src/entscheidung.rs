@@ -81,6 +81,10 @@ pub enum Befund {
     KaufgrenzeGekuerzt(Isin),
     /// Kein Kauf eines neuen Werts, weil sonst zu viele Werte gehalten wuerden.
     PositionsgrenzeErreicht(Isin),
+    StoppFehlt {
+        isin: Isin,
+        gefragt: Option<i64>,
+    },
     LimitabstandAusserhalb {
         isin: Isin,
         gefragt: i64,
@@ -229,6 +233,35 @@ fn leistbare_stueck(g: &Grenzen, limit: Cent, gewuenscht: u64, budget: Cent) -> 
     })
 }
 
+/// Ganze Positionen, deren belegter Schluss den Schutz-Stopp erreicht hat.
+pub fn stopp_auftraege(
+    g: &Grenzen,
+    topf: &Topf,
+    kurse: &Kurse,
+    stopps: &BTreeMap<Isin, Cent>,
+    vergabe: &mut Kennungsvergabe,
+) -> Option<Vec<GenehmigterAuftrag>> {
+    let mut kandidaten = Vec::new();
+    for (isin, stopp) in stopps {
+        let Some(kurs) = frischer_kurs(g, kurse, isin) else {
+            continue;
+        };
+        let stueck = topf.stueck(isin);
+        if stueck > 0 && kurs <= Preis::aus_cent(*stopp)? {
+            kandidaten.push(Kandidat {
+                isin: isin.clone(),
+                richtung: Richtung::Verkauf,
+                stueck,
+                kurs,
+                komplett: true,
+                limit_bp: None,
+                anlass: Anlass::Stopp,
+            });
+        }
+    }
+    Some(genehmige(g, &kandidaten, &[], vergabe)?.verkaeufe)
+}
+
 pub fn entscheide(e: &Eingabe<'_>, vergabe: &mut Kennungsvergabe) -> Entscheidung {
     entscheide_intern(e, vergabe, None, false)
 }
@@ -265,6 +298,20 @@ fn entscheide_intern(
     let Some(mut ent) = genehmige(e.grenzen, &verkaeufe, &kaeufe, vergabe) else {
         return Entscheidung::nur(Befund::Rechenfehler);
     };
+    for kauf in &mut ent.kaeufe {
+        let isin = &kauf.auftrag().isin;
+        let gefragt = e.vorschlag.and_then(|v| v.stopp_bp.get(isin).copied());
+        let stopp = gefragt.filter(|bp| {
+            !ersatzkauf && (e.grenzen.stopp_min_bp()..=e.grenzen.notbremse_bp()).contains(bp)
+        });
+        if stopp.is_none() {
+            befunde.push(Befund::StoppFehlt {
+                isin: isin.clone(),
+                gefragt,
+            });
+        }
+        kauf.setze_stopp(stopp);
+    }
     ent.befunde = befunde;
     ent
 }
@@ -1040,6 +1087,7 @@ mod grenzrahmen_tests {
             zielgewichte_bp: [(isin.clone(), 4000)].into_iter().collect(),
             begruendung: BTreeMap::new(),
             limit_bp: [(isin, abstand)].into_iter().collect(),
+            stopp_bp: std::collections::BTreeMap::new(),
         };
         Ok(entscheide_mit_kaufbudget(
             &Eingabe {
@@ -1083,6 +1131,44 @@ mod grenzrahmen_tests {
                 .first()
                 .map(|a| (a.auftrag().limit, a.auftrag().stueck)),
             Some((Cent(10_300), 9))
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod stopp_tests {
+    use super::*;
+    use depot_kern::{Datum, Kurs, Zeitpunkt};
+
+    #[test]
+    fn stopp_gilt_am_schluss_und_fuer_kleine_positionen() -> Result<(), String> {
+        let g = Grenzen::standard();
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 5).ok_or("Tag")?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let topf = &mut Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+        topf.setze_bestand(isin.clone(), 1);
+        let stopps = [(isin.clone(), Cent(6_000))].into_iter().collect();
+        for (preis, ausgeloest) in [(5_999, true), (6_000, true), (6_001, false)] {
+            let kurs = Kurs::neu(Cent(preis), "EUR", tag, zeit, Herkunft::Simulation)
+                .map_err(|e| format!("{e:?}"))?;
+            let kurse =
+                Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| format!("{e:?}"))?;
+            let orders = stopp_auftraege(&g, topf, &kurse, &stopps, &mut Kennungsvergabe::nach(0))
+                .ok_or("Aufträge")?;
+            assert_eq!(orders.len(), usize::from(ausgeloest));
+            if let [a] = orders.as_slice() {
+                assert_eq!(a.auftrag().stueck, 1);
+                assert_eq!(a.auftrag().richtung, Richtung::Verkauf);
+                assert_eq!(a.beleg().anlass, Anlass::Stopp);
+                assert!(a.beleg().anlass.zwingend());
+            }
+        }
+        let leer = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
+        assert!(
+            stopp_auftraege(&g, topf, &leer, &stopps, &mut Kennungsvergabe::nach(0))
+                .is_some_and(|orders| orders.is_empty())
         );
         Ok(())
     }

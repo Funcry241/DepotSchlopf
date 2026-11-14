@@ -28,6 +28,6 @@ pub use auftrag::{
 pub use daten::{DatenFehler, Tageswerte, pruefe_kurse, waehle_morgenwerte, waehle_tageswerte};
 pub use entscheidung::{
     Befund, Eingabe, Entscheidung, VerwerfGrund, entscheide, entscheide_ersatzkauf,
-    entscheide_mit_kaufbudget,
+    entscheide_mit_kaufbudget, stopp_auftraege,
 };
 pub use waechter::{WaechterBefund, notbremse_auftraege, waechter};

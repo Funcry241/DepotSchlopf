@@ -171,6 +171,7 @@ fn gleiche_ziele(a: Option<&Vorschlag>, b: Option<&Vorschlag>) -> bool {
             a.berater == b.berater
                 && a.zielgewichte_bp == b.zielgewichte_bp
                 && a.limit_bp == b.limit_bp
+                && a.stopp_bp == b.stopp_bp
         }
         (None, None) => true,
         _ => false,
@@ -297,6 +298,7 @@ mod tests {
         topf.setze_bestand(sap.clone(), 10);
         let mut neu = Vorschlag {
             limit_bp: std::collections::BTreeMap::new(),
+            stopp_bp: std::collections::BTreeMap::new(),
             berater: BeraterId::Dachs,
             zielgewichte_bp: std::collections::BTreeMap::new(),
             begruendung: std::collections::BTreeMap::new(),
