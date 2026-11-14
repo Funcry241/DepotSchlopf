@@ -371,6 +371,7 @@ fn kauf() -> Result<GenehmigterAuftrag, String> {
     let kurse = vorbedingung(Kurse::neu(zeit, vec![(w.clone(), kurs)]), "Kurse")?;
     let topf = vorbedingung(Topf::neu(TopfId::A, Cent(1_000_000)), "Topf")?;
     let vorschlag = Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(w.clone(), 2_500)].into_iter().collect(),
         begruendung: [(w, "erfunden".to_string())].into_iter().collect(),

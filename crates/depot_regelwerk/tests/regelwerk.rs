@@ -109,6 +109,7 @@ fn topf_neu(id: TopfId, bargeld: Cent) -> Topf {
 
 fn vorschlag(gewichte: &[(usize, i64)]) -> Vorschlag {
     Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: gewichte.iter().map(|(i, g)| (isin(*i), *g)).collect(),
         begruendung: BTreeMap::new(),

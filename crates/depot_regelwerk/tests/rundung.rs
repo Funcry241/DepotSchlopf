@@ -72,6 +72,7 @@ fn topf(bargeld: i64, bestand: &[(&str, u64)]) -> Topf {
 
 fn lauf(topf: &Topf, kurse: &Kurse, ziele: &[(&str, i64)]) -> Entscheidung {
     let v = Vorschlag {
+        limit_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: ziele.iter().map(|(i, g)| (isin(i), *g)).collect(),
         begruendung: BTreeMap::new(),
