@@ -142,10 +142,10 @@ fn entscheidungsbelege(
         } else if grund.starts_with("Abstimmung Runde ") && (wer == "Dachs" || wer == "Maus") {
             let topf = if wer == "Dachs" { TopfId::A } else { TopfId::B };
             let eintrag = tage.entry((*tag, topf)).or_default();
-            if let Some(text) = grund.strip_prefix("Abstimmung Runde 1: ") {
-                eintrag.runde_eins.push(text);
-            } else if let Some(text) = grund.strip_prefix("Abstimmung Runde 2: ") {
-                eintrag.runde_zwei.push(text);
+            if grund.starts_with("Abstimmung Runde 1: ") {
+                eintrag.runde_eins.push(grund);
+            } else if grund.starts_with("Abstimmung Runde 2: ") {
+                eintrag.runde_zwei.push(grund);
             }
             continue;
         } else {
@@ -154,7 +154,9 @@ fn entscheidungsbelege(
         let eintrag = tage.entry((*tag, topf)).or_default();
         if grund.starts_with("Antwort verworfen, kein Urteil:") {
             eintrag.zweitmeinung_ausgefallen = true;
-            eintrag.zweitmeinung.push(grund);
+            eintrag
+                .zweitmeinung
+                .push("Zweitmeinung ausgefallen. Grund im Journal.");
         } else if grund.starts_with("Zustimmung:") || grund.starts_with("Veto:") {
             eintrag.zweitmeinung.push(grund);
         } else if wer == "Regelwerk" {
@@ -290,7 +292,7 @@ mod tests {
                     ("Regelwerk", "Topf A: KeinVorschlag"),
                     (
                         "Maus",
-                        "Topf B: Antwort verworfen: Testanbieter: simuliertes HTTP 429",
+                        "Topf B: Antwort verworfen: Erfundener Erstmeinungsfehler",
                     ),
                     ("Regelwerk", "Topf B: KeinVorschlag"),
                 ]
@@ -338,6 +340,8 @@ mod tests {
         let journal = Journal::oeffnen(&pfad).map_err(fehler)?;
         let text = bericht(Some(journal.stand()), Zeitraum { von, bis });
         pruefe_entscheidungen(&text)?;
+        assert!(text.contains("Zweitmeinung ausgefallen. Grund im Journal."));
+        assert!(!text.contains("Testanbieter: simuliertes HTTP 429"));
         let mit_luecke = bericht(Some(journal.stand()), Zeitraum { von: tag(4)?, bis });
         drop(journal);
         std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
@@ -395,14 +399,18 @@ mod tests {
             entscheidungen
                 .lines()
                 .any(|zeile| zeile.starts_with("| 2030-01-08 | A |")
-                    && zeile.contains("Erfundene Erstabwägung. | Grund: Beispielentscheidung:")
+                    && zeile.contains(
+                        "Erfundene Erstabwägung. | Abstimmung Runde 2: Grund: Beispielentscheidung:"
+                    )
                     && zeile.ends_with("Kein datierter Versand belegt |"))
         );
         assert!(
             entscheidungen
                 .lines()
                 .any(|zeile| zeile.starts_with("| 2030-01-08 | B |")
-                    && zeile.contains("| Kein Beleg | Grund: Beispielentscheidung:"))
+                    && zeile.contains(
+                        "| Kein Beleg | Abstimmung Runde 2: Grund: Beispielentscheidung:"
+                    ))
         );
         assert!(
             entscheidungen

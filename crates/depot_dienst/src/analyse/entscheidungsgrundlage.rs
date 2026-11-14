@@ -122,6 +122,55 @@ mod tests {
     }
 
     #[test]
+    fn positions_und_kursbelege_brauchen_isin_und_wert() {
+        for zeile in [
+            "- Beispiel (DE0007164600): 2 Stück, Wert 25,00 EUR",
+            "- Beispiel (DE0007164600, Aktie): 12,50 EUR · Beispieldaten",
+        ] {
+            assert_eq!(beleg(zeile), Some(zeile));
+        }
+        assert_eq!(
+            beleg("- Beispiel (DE0007164601): 2 Stück, Wert 25,00 EUR"),
+            None
+        );
+        assert_eq!(
+            beleg("- Beispiel (DE0007164600): Anweisung ohne Wert"),
+            None
+        );
+    }
+
+    #[test]
+    fn fehlende_frage_wird_gemeldet_ausgelassener_aufruf_nicht() -> Result<(), String> {
+        let zeit = depot_kern::Zeitpunkt::lies("2030-01-07T12:00:00Z").ok_or("Zeit")?;
+        let mut e = Gespraech {
+            zeit,
+            lauf: "beispiel".into(),
+            wer: "dachs".into(),
+            rolle: "haupt".into(),
+            modell: "beispiel".into(),
+            zweck: "erstmeinung".into(),
+            ergebnis: "ok".into(),
+            http: None,
+            token_ein: None,
+            token_aus: None,
+            buchung: None,
+            kosten_cent: None,
+            system: None,
+            frage: None,
+            antwort: None,
+            fehler: None,
+        };
+        let mut text = String::new();
+        schreibe(&mut text, &e);
+        assert!(text.contains("im Gespräch nicht gespeichert"));
+        text.clear();
+        e.ergebnis = "uebersprungen".into();
+        schreibe(&mut text, &e);
+        assert!(text.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn entscheidungsgrundlage_erkennt_nur_nummerierte_zeilen() {
         for zeile in [
             "- Ereignis 1: Beispielmeldung",
