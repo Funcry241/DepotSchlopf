@@ -237,9 +237,9 @@ pub fn sichern_nach(
     let ziel = wurzel.join(&name);
     let staging = wurzel.join(format!("{name}.tmp"));
     privat_anlegen(&staging).map_err(|e| format!("Sicherungsordner: {e}"))?;
-    if let Err(e) = kopiere(stand, &staging)
-        .and_then(|()| fs::rename(&staging, &ziel).map_err(|e| format!("Sicherung ablegen: {e}")))
-    {
+    if let Err(e) = kopiere(stand, &staging).and_then(|()| {
+        crate::dateiersatz::ersetze(&staging, &ziel).map_err(|e| format!("Sicherung ablegen: {e}"))
+    }) {
         let _ = fs::remove_dir_all(&staging);
         return Err(e);
     }

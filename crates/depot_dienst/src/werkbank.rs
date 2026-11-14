@@ -554,7 +554,8 @@ pub fn schreibe_ganz(pfad: &Path, text: &str) -> Result<(), String> {
             f.sync_all()
         })
         .map_err(|e| format!("{}: {e}", neben.display()))?;
-    fs::rename(&neben, pfad).map_err(|e| format!("{}: {e}", pfad.display()))
+    depot_journal::dateiersatz::ersetze(&neben, pfad)
+        .map_err(|e| format!("{}: {e}", pfad.display()))
 }
 
 /// Liest eine Datei. `Ok(None)` nur, wenn sie fehlt; jeder andere Fehler ist ein Fehler.

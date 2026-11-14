@@ -395,7 +395,7 @@ pub fn schreibe(wurzel: &Path, lauf: &Lauf) -> Result<PathBuf, String> {
     let ziel = wurzel.join(EXPORT);
     let tmp = wurzel.join(format!("{EXPORT}.tmp"));
     fs::write(&tmp, &bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    fs::rename(&tmp, &ziel).map_err(|e| format!("{}: {e}", ziel.display()))?;
+    crate::dateiersatz::ersetze(&tmp, &ziel).map_err(|e| format!("{}: {e}", ziel.display()))?;
     Ok(ziel)
 }
 

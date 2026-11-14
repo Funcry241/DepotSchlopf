@@ -51,7 +51,8 @@ fn schreibe(pfad: &Path, text: &str) -> Result<(), String> {
             f.sync_all()
         })
         .map_err(|e| format!("{}: {e}", neben.display()))?;
-    fs::rename(&neben, pfad).map_err(|e| format!("{}: {e}", pfad.display()))
+    depot_journal::dateiersatz::ersetze(&neben, pfad)
+        .map_err(|e| format!("{}: {e}", pfad.display()))
 }
 
 fn lauf(wurzel: &Path) -> Result<PathBuf, String> {

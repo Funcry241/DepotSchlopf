@@ -274,7 +274,8 @@ fn kopiere(baum: &str, von: &Path, ziel: &Path) -> Result<Stand, String> {
     };
     schreibe_ganz(&neu.join("stand.txt"), &stand.als_text())?;
     let _ = fs::remove_dir_all(ziel);
-    fs::rename(&neu, ziel).map_err(|e| format!("{}: {e}", ziel.display()))?;
+    depot_journal::dateiersatz::ersetze(&neu, ziel)
+        .map_err(|e| format!("{}: {e}", ziel.display()))?;
     Ok(stand)
 }
 

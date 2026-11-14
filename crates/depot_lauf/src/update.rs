@@ -192,7 +192,7 @@ fn offen_schreiben(wurzel: &Path, text: &str) -> Result<(), String> {
             f.sync_all()
         })
         .map_err(|e| format!("{}: {e}", neben.display()))?;
-    fs::rename(&neben, &p).map_err(|e| format!("{}: {e}", p.display()))
+    crate::dateiersatz::ersetze(&neben, &p).map_err(|e| format!("{}: {e}", p.display()))
 }
 
 /// Haelt fest, dass dieser Baum das ganze Gate bestanden hat: `daten/geprueft.txt`, eine Zeile
