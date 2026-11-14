@@ -3950,6 +3950,41 @@ fn automatisch_aufgehobene_kurssperre_erzeugt_einen_hinweis() -> Result<(), Stri
 }
 
 #[test]
+fn formular_ohne_rohdaten() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let html = get(&d, "/", donnerstag(12, 0)?);
+    assert!(html.contains("action=\"/export\""));
+    assert!(!html.contains("name=\"rohdaten\""));
+    Ok(())
+}
+
+#[test]
+fn export_enthaelt_nie_rohdaten() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    depot_journal::Journal::einrichten(&daten.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
+    fs::create_dir_all(daten.join("gespraeche")).map_err(|e| e.to_string())?;
+    fs::write(daten.join("gespraeche/2026-11-05.jsonl"), "{}\n").map_err(|e| e.to_string())?;
+    let d = dienst(wurzel, true);
+    let post = formular_post("/export", &format!("t={TOKEN}&zeitraum=woche&rohdaten=ja"));
+    let antwort = behandle(&d, &Attrappe::default(), &post, donnerstag(12, 0)?);
+    assert_eq!(status(&antwort)?, 200);
+    let archiv = text(&antwort);
+    assert!(archiv.contains("MANIFEST.txt") && archiv.contains("03_journal.md"));
+    for muster in [
+        "rohdaten/",
+        "protokolle/",
+        ".jsonl",
+        ".log",
+        "journal.txt",
+        "anbieter.txt",
+    ] {
+        assert!(!archiv.contains(muster), "{muster}");
+    }
+    Ok(())
+}
+
+#[test]
 fn heute_exportieren_liefert_zip_ohne_schreibzugriff() -> Result<(), String> {
     let wurzel = ordner()?;
     let d = dienst(wurzel.clone(), true);

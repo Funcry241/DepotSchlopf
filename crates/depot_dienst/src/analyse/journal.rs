@@ -12,7 +12,6 @@ const TEXTGRENZE: usize = 6 * 1024 * 1024;
 #[derive(Default)]
 pub(super) struct Auszug {
     pub(super) bericht: String,
-    pub(super) original: String,
 }
 
 fn datum(art: Art, text: &str, abrechnungstag: Option<Datum>, stand: &Stand) -> Option<Datum> {
@@ -51,24 +50,15 @@ fn datum(art: Art, text: &str, abrechnungstag: Option<Datum>, stand: &Stand) -> 
     }
 }
 
-pub(super) fn auszug(
-    zeitraum: Zeitraum,
-    stand: &Stand,
-    eintraege: &[(Art, String)],
-    original: &str,
-    mit_rohdaten: bool,
-) -> Auszug {
+pub(super) fn auszug(zeitraum: Zeitraum, stand: &Stand, eintraege: &[(Art, String)]) -> Auszug {
     let mut aus = Auszug {
         bericht: String::from(
             "\n## Weitere bestätigte Journaleinträge\n\nBelege von externen Quellen sind nach ihrem Abrufdatum eingeordnet. Ausführungen ohne eigene Zeitangabe verwenden den belegten Abrechnungstag. Zeilennummern beziehen sich auf das Originaljournal.\n",
         ),
-        original: String::new(),
     };
     let mut undatiert = 0_usize;
     let mut abrechnungstag = None;
-    for (index, ((art, text), originalzeile)) in
-        eintraege.iter().zip(original.lines().skip(1)).enumerate()
-    {
+    for (index, (art, text)) in eintraege.iter().enumerate() {
         if *art == Art::Abrechnungstag {
             abrechnungstag = Datum::lies(text);
         }
@@ -88,8 +78,6 @@ pub(super) fn auszug(
             .len()
             .saturating_add(text.len().saturating_add(150))
             > TEXTGRENZE
-            || (mit_rohdaten
-                && aus.original.len().saturating_add(originalzeile.len()) >= TEXTGRENZE)
         {
             aus.bericht
                 .push_str("\nWeitere Einträge fehlen wegen der Größenbegrenzung.\n");
@@ -102,9 +90,6 @@ pub(super) fn auszug(
             art.name(),
             index.saturating_add(2)
         );
-        if mit_rohdaten {
-            let _ = writeln!(aus.original, "{originalzeile}");
-        }
     }
     if undatiert != 0 {
         let _ = writeln!(
@@ -118,7 +103,6 @@ pub(super) fn auszug(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use depot_journal::inhalt_fuer;
 
     #[test]
     fn ordnet_abrufe_und_buchungen_ihrem_belegten_tag_zu() -> Result<(), String> {
@@ -142,8 +126,7 @@ mod tests {
             .iter()
             .map(|(art, text)| (*art, (*text).to_owned()))
             .collect();
-        let original = String::from_utf8(inhalt_fuer(&werte)).map_err(|e| e.to_string())?;
-        let aus = auszug(zeitraum, &Stand::default(), &eintraege, &original, true);
+        let aus = auszug(zeitraum, &Stand::default(), &eintraege);
         assert!(aus.bericht.contains("Nachricht ab Mitternacht"));
         assert!(aus.bericht.contains("Journalzeile 3"));
         assert!(aus.bericht.contains("A;12345;"));
@@ -152,19 +135,8 @@ mod tests {
                 .contains("belegbares Datum im geprüften Journal: 1")
         );
         assert!(!aus.bericht.contains("A;99999;"));
-        assert!(!aus.original.contains("vor Mitternacht"));
-        assert!(!aus.original.contains("Nächster Tag"));
-        assert!(
-            aus.original
-                .lines()
-                .all(|zeile| original.lines().any(|z| z == zeile))
-        );
-        assert_eq!(aus.original.lines().count(), 3);
-        assert!(
-            auszug(zeitraum, &Stand::default(), &eintraege, &original, false)
-                .original
-                .is_empty()
-        );
+        assert!(!aus.bericht.contains("vor Mitternacht"));
+        assert!(!aus.bericht.contains("Nächster Tag"));
         Ok(())
     }
 }

@@ -17,7 +17,6 @@ use crate::{Dienst, Umwelt, gespraeche, http, protokoll::Schutz, schluessel, sei
 
 mod historie;
 mod journal;
-mod rohdaten;
 mod schutz;
 
 const MIB: u64 = 1024 * 1024;
@@ -117,7 +116,6 @@ pub(crate) fn formular(d: &Dienst, heute: Option<Datum>) -> String {
          </form><details id=\"analyse-zeitraum\"><summary>Zeitraum exportieren</summary>\
          <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
          <p><label><input type=\"checkbox\" name=\"ki_texte\" value=\"ja\" checked> Fragen und Systemtexte im Gesprächsbericht aufnehmen</label></p>\
-         <p><label><input type=\"checkbox\" name=\"rohdaten\" value=\"ja\"> Geschwärzte Rohdaten und Laufprotokolle beilegen</label></p>\
          <button type=\"submit\" name=\"zeitraum\" value=\"heute\" formnovalidate>Heute</button> \
          <button type=\"submit\" name=\"zeitraum\" value=\"gestern\" formnovalidate>Gestern</button> \
          <button type=\"submit\" name=\"zeitraum\" value=\"handelstage\" formnovalidate>Letzte 5 Handelstage</button> \
@@ -180,13 +178,7 @@ fn quelle(pfad: &Path, name: &str, luecken: &mut String) -> String {
     }
 }
 
-struct Betrieb {
-    bericht: String,
-    verlauf: String,
-    anbieter: String,
-}
-
-fn betrieb(d: &Dienst, daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -> Betrieb {
+fn betrieb(d: &Dienst, daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -> String {
     let z = d.sperre();
     let original = quelle(&verlauf::pfad(&d.wurzel), "Dienstverlauf", luecken);
     let mut verlauf = verlauf::lies_zeitraum(&original, zeitraum.von, zeitraum.bis);
@@ -255,11 +247,7 @@ fn betrieb(d: &Dienst, daten: &Path, zeitraum: Zeitraum, luecken: &mut String) -
         );
     }
     let _ = writeln!(aus, "\nUnlesbare Anbieterzeilen: {unlesbar}.");
-    Betrieb {
-        bericht: aus,
-        verlauf: original,
-        anbieter: text,
-    }
+    aus
 }
 
 fn konfiguration(d: &Dienst, u: &dyn Umwelt, daten: &Path) -> String {
@@ -796,7 +784,6 @@ fn programmstand(version: Option<&str>) -> String {
 }
 
 struct Exportoptionen {
-    rohdaten: bool,
     ki_texte: bool,
 }
 
@@ -871,7 +858,7 @@ fn journalpaket(
     match Journal::pruefe_lesend_mit_eintraegen(
         &daten.join("journal.txt"),
         JOURNAL_MAX,
-        |stand, eintraege, original| {
+        |stand, eintraege, _| {
             let (kurz, depotdetails, orders) = depot(stand, jetzt, tag, sperren, zeitraum);
             Journalpaket {
                 kurz,
@@ -880,7 +867,7 @@ fn journalpaket(
                 ausfuehrungen: ausfuehrungen_csv(Some(stand), zeitraum),
                 ki: ki(daten, zeitraum, Some(stand), optionen.ki_texte, luecken),
                 historie: historie::bericht(zeitraum, Some(stand), luecken),
-                journal: journal::auszug(zeitraum, stand, eintraege, original, optionen.rohdaten),
+                journal: journal::auszug(zeitraum, stand, eintraege),
             }
         },
     ) {
@@ -952,7 +939,6 @@ pub(crate) fn exportieren(
         Err(grund) => return seiten::fehler(409, grund),
     };
     let optionen = Exportoptionen {
-        rohdaten: http::feld(felder, "rohdaten") == Some("ja"),
         ki_texte: http::feld(felder, "ki_texte") == Some("ja"),
     };
     let mut luecken = String::new();
@@ -982,24 +968,12 @@ pub(crate) fn exportieren(
             "Journal gerade in Benutzung. Bitte gleich noch einmal.",
         );
     };
-    let mut roh = rohdaten::Rohdaten::default();
-    let roh_hinweis = if optionen.rohdaten {
-        roh.datei(
-            "rohdaten/journal.txt".into(),
-            journal.original,
-            &mut luecken,
-        );
-        roh.sammeln(&d.wurzel, &betrieb, zeitraum, &mut luecken);
-        "Die Rohdaten enthalten ausgewählte Originalzeilen und geschwärzte Laufprotokolle. Der Journal-Auszug enthält weder Kopf noch lückenlose Prüfkette. Die KI-Abrechnung steht im Journal."
-    } else {
-        "Rohdaten und Laufprotokolle wurden nicht ausgewählt."
-    };
     let datum = zeitraum.titel();
     let liesmich = format!(
         "# DepotSchlopf · Analyse-Export {datum}\n\n## Aktueller Depotstand\n{kurz}\n\
          ## Datenbasis\nPapiergeld. Die Zeiten sind Frankfurter Ortszeit. \
          Depotstand und Konfiguration beziehen sich auf den Exportzeitpunkt.\n\
-         {roh_hinweis}\n\
+         Rohdaten und Laufprotokolle sind nie enthalten.\n\
          Alpha-Vantage- und Tiingo-Schlüssel ohne festes Präfix erkennt der Export am hinterlegten Wert.\n\
          ## Lücken\n{luecken}"
     );
@@ -1017,18 +991,17 @@ pub(crate) fn exportieren(
             "04_orders_und_depot.md",
             format!("# Papierorders und Depot\n{orders}"),
         ),
-        ("05_betrieb_und_fehler.md", betrieb.bericht),
+        ("05_betrieb_und_fehler.md", betrieb),
         ("06_konfiguration.md", konfiguration),
         ("07_version.md", programmstand(d.version.as_deref())),
         ("ausfuehrungen.csv", ausfuehrungen),
     ];
-    let dateien = mit_rohdaten(&dateien, &roh);
     zip_antwort(
         &schutz::Exportschutz::neu(&schutz, sec_kontakt.as_deref()),
         zeitraum,
         jetzt,
         &liesmich,
-        dateien,
+        dateien.iter().map(|(name, text)| (*name, text.as_str())),
     )
 }
 
@@ -1046,20 +1019,6 @@ fn zip_antwort<'a>(
             "Export nicht verfügbar. Die Größen- oder Musterprüfung ist fehlgeschlagen.",
         ),
     }
-}
-
-fn mit_rohdaten<'a>(
-    dateien: &'a [(&'a str, String)],
-    roh: &'a rohdaten::Rohdaten,
-) -> impl Iterator<Item = (&'a str, &'a str)> {
-    dateien
-        .iter()
-        .map(|(name, text)| (*name, text.as_str()))
-        .chain(
-            roh.dateien
-                .iter()
-                .map(|(name, text)| (name.as_str(), text.as_str())),
-        )
 }
 
 #[cfg(test)]
