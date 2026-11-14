@@ -1192,7 +1192,15 @@ mod tests {
         use crate::verlauf;
         let tag = Datum::neu(2026, 11, 12).ok_or("Datum")?;
         let zeit = Zeitpunkt::frankfurt(tag, 8, 0, 0).ok_or("Zeit")?;
-        let mut text = String::new();
+        let grenzdatum = tag.plus_tage(-62).ok_or("Grenzdatum")?;
+        let davor = tag.plus_tage(-63).ok_or("Älterer Tag")?;
+        let grenzzeit = Zeitpunkt::frankfurt(grenzdatum, 8, 0, 0).ok_or("Grenzzeit")?;
+        let altzeit = Zeitpunkt::frankfurt(davor, 8, 0, 0).ok_or("Ältere Zeit")?;
+        let mut text = format!(
+            "verlauf-v1;start;201-1;termine;hand;{}\nverlauf-v1;start;202-1;termine;hand;{}\n",
+            altzeit.sekunden(),
+            grenzzeit.sekunden()
+        );
         for nummer in 1..=25 {
             writeln!(
                 text,
@@ -1209,6 +1217,17 @@ mod tests {
         let archiv = fs::read_to_string(&pfad).map_err(|e| e.to_string())?;
         fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
         assert_eq!(live.auftraege.len(), 20);
+        assert!(
+            verlauf::lies_zeitraum(&archiv, davor, davor)
+                .auftraege
+                .is_empty()
+        );
+        assert_eq!(
+            verlauf::lies_zeitraum(&archiv, grenzdatum, grenzdatum)
+                .auftraege
+                .len(),
+            1
+        );
         assert_eq!(
             verlauf::lies_zeitraum(&archiv, tag, tag).auftraege.len(),
             25

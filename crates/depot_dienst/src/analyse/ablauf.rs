@@ -12,12 +12,13 @@ use crate::verlauf::{self, Geladen};
 use crate::werkbank::{Anlass, Art, Frueher};
 use crate::zeitplan::{self, AbrufAusgang, Erledigt, Zeitplan};
 
-use super::{Zeitraum, quelle};
+use super::{Zeitraum, textdatei};
 
 pub(super) struct Ablauf {
     zeitraum: Zeitraum,
     jetzt: Zeitpunkt,
     verlauf: Geladen,
+    verlauf_verfuegbar: bool,
     laufend: Option<String>,
     plan: Zeitplan,
     automatik: &'static str,
@@ -33,8 +34,16 @@ impl Ablauf {
         luecken: &mut String,
     ) -> Self {
         let zustand = dienst.sperre();
-        let original = quelle(&verlauf::pfad(&dienst.wurzel), "Dienstverlauf", luecken);
-        let mut verlauf = verlauf::lies_zeitraum(&original, zeitraum.von, zeitraum.bis);
+        let original = textdatei(&verlauf::pfad(&dienst.wurzel));
+        let verlauf_verfuegbar = original.is_ok();
+        let mut verlauf = match original {
+            Ok(Some(original)) => verlauf::lies_zeitraum(&original, zeitraum.von, zeitraum.bis),
+            Ok(None) => Geladen::default(),
+            Err(grund) => {
+                let _ = writeln!(luecken, "- Dienstverlauf: {grund}.");
+                Geladen::default()
+            }
+        };
         let laufend = zustand
             .laufend
             .as_ref()
@@ -47,6 +56,7 @@ impl Ablauf {
             zeitraum,
             jetzt,
             verlauf,
+            verlauf_verfuegbar,
             laufend: laufend.map(|a| a.kennung.clone()),
             plan: zustand.zeitplan,
             automatik: zustand.automatik_status(),
@@ -56,8 +66,8 @@ impl Ablauf {
     }
 
     pub(super) fn ampel(&self) -> &'static str {
-        if self.verlauf.auftraege.is_empty() {
-            "Rot (Dienstverlauf fehlt)"
+        if !self.verlauf_verfuegbar {
+            "Rot (Dienstverlauf nicht lesbar)"
         } else if self.verlauf.unlesbar > 0
             || self.zeitraum.tage().any(|tag| {
                 zeitplan::handelstag(tag)
@@ -71,14 +81,17 @@ impl Ablauf {
         {
             "Rot (Beleglücken)"
         } else {
-            "Gelb (historische Planung unbelegt)"
+            "Gelb"
         }
     }
 
     pub(super) fn bericht(&self, stand: Option<&Stand>) -> String {
-        let mut text = String::from(
-            "# Betrieb und Abrufe\n\n## Zeitstrahl je Tag\n\n             Zeiten in Frankfurter Ortszeit. Die Sollzeiten zeigen den Zeitplan zum Exportzeitpunkt.              Historische Sollzeiten und Schalterstellungen wurden nicht aufgezeichnet.              Fehlende Einträge können aus früheren Kürzungen stammen.\n",
-        );
+        let mut text = String::from(concat!(
+            "# Betrieb und Abrufe\n\n## Zeitstrahl je Tag\n\n",
+            "Zeiten in Frankfurter Ortszeit. Die Sollzeiten zeigen den Zeitplan zum Exportzeitpunkt. ",
+            "Historische Sollzeiten und Schalterstellungen wurden nicht aufgezeichnet. ",
+            "Fehlende Einträge können aus früheren Kürzungen stammen.\n",
+        ));
         let _ = writeln!(
             text,
             "\nAutomatik beim Export: **{}**. Unlesbare Verlaufszeilen: {}.",
@@ -140,6 +153,13 @@ impl Ablauf {
                     "- Soll nach Kursabrufen bei ausreichenden Kursbelegen · Papiertag.\n",
                 );
             }
+        }
+        if self.automatik != "an" {
+            let _ = writeln!(
+                text,
+                "- Automatik {}. Für heute gilt kein automatischer Sollplan.",
+                self.automatik
+            );
         }
         for &boerse in &self.boersen {
             if self.erledigt.kurse_von(boerse) != Some(tag) {
@@ -260,6 +280,7 @@ mod tests {
             },
             jetzt: zeit(heute, 8, 5)?,
             verlauf: verlauf::lies_zeitraum(&text, gestern, heute),
+            verlauf_verfuegbar: true,
             laufend: Some("10-2".into()),
             plan: Zeitplan {
                 an: true,
@@ -273,6 +294,7 @@ mod tests {
         let (_, heute) = bericht
             .split_once("### 2030-01-10")
             .ok_or("Tagesabschnitt fehlt")?;
+        assert!(!bericht.contains("  Zeiten"));
         assert!(bericht.contains("Historischer Sollplan nicht belegt."));
         assert!(bericht.contains("Papiertag ausgelassen: vor Börsenschluss nicht gestartet"));
         assert!(heute.contains("Soll 07:20 · Termine abrufen · Sollzeit erreicht"));
@@ -282,7 +304,41 @@ mod tests {
         );
         assert!(heute.contains("08:00 MEZ · Kurse Xetra abrufen · automatisch · Start, läuft beim Export · Wiederholung nach fehlgeschlagenem Abruf"));
         assert!(heute.find("07:31 MEZ") < heute.find("08:00 MEZ"));
-        assert_eq!(ablauf.ampel(), "Gelb (historische Planung unbelegt)");
+        assert_eq!(ablauf.ampel(), "Gelb");
+        Ok(())
+    }
+
+    fn ohne_laeufe(tag: Datum) -> Result<Ablauf, String> {
+        Ok(Ablauf {
+            zeitraum: Zeitraum { von: tag, bis: tag },
+            jetzt: Zeitpunkt::frankfurt(tag, 18, 0, 0).ok_or("Zeit")?,
+            verlauf: Geladen::default(),
+            verlauf_verfuegbar: true,
+            laufend: None,
+            plan: Zeitplan::default(),
+            automatik: "aus",
+            erledigt: Erledigt::default(),
+            boersen: Boerse::ALLE.to_vec(),
+        })
+    }
+
+    #[test]
+    fn ablaufampel_unterscheidet_luecken_vom_laufenden_tag() -> Result<(), String> {
+        let tag = Datum::neu(2030, 1, 10).ok_or("Datum")?;
+        let mut ablauf = ohne_laeufe(tag)?;
+        assert_eq!(ablauf.ampel(), "Gelb");
+        assert!(
+            ablauf
+                .bericht(None)
+                .contains("Automatik aus. Für heute gilt kein automatischer Sollplan.")
+        );
+
+        ablauf.zeitraum.von = tag.plus_tage(-1).ok_or("Vortag")?;
+        assert_eq!(ablauf.ampel(), "Rot (Beleglücken)");
+
+        ablauf.zeitraum.von = tag;
+        ablauf.verlauf.unlesbar = 1;
+        assert_eq!(ablauf.ampel(), "Rot (Beleglücken)");
         Ok(())
     }
 
@@ -290,16 +346,7 @@ mod tests {
     fn luecke_im_verlauf_und_journalabschluss_bleiben_getrennt() -> Result<(), String> {
         use depot_journal::{Art, Journal};
         let tag = Datum::neu(2030, 1, 10).ok_or("Datum")?;
-        let ablauf = Ablauf {
-            zeitraum: Zeitraum { von: tag, bis: tag },
-            jetzt: Zeitpunkt::frankfurt(tag, 18, 0, 0).ok_or("Zeit")?,
-            verlauf: Geladen::default(),
-            laufend: None,
-            plan: Zeitplan::default(),
-            automatik: "aus",
-            erledigt: Erledigt::default(),
-            boersen: Boerse::ALLE.to_vec(),
-        };
+        let ablauf = ohne_laeufe(tag)?;
         let ordner = std::env::temp_dir().join(format!("depot-ablauf-{}", crate::neues_token()));
         std::fs::create_dir(&ordner).map_err(|e| e.to_string())?;
         let pfad = ordner.join("journal.txt");
@@ -315,7 +362,7 @@ mod tests {
         std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
         assert!(bericht.contains("Kein Laufereignis im verfügbaren Dienstverlauf belegt."));
         assert!(bericht.contains("Papiertag im Journal abgeschlossen."));
-        assert_eq!(ablauf.ampel(), "Rot (Dienstverlauf fehlt)");
+        assert_eq!(ablauf.ampel(), "Gelb");
         Ok(())
     }
 }
