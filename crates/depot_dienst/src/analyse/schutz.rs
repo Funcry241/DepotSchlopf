@@ -264,7 +264,7 @@ mod tests {
                 r#"{"text":"s\u006b-proj-ErfundenerTestwert"}"#.into(),
             ),
             (
-                "AQ.Erfundener_Gemini_Testwert".into(),
+                concat!("AQ.", "Erfundener_Gemini_Testwert").into(),
                 r#"{"text":"A\u0051.Erfundener_Gemini_Testwert"}"#.into(),
             ),
             (

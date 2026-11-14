@@ -256,7 +256,7 @@ mod tests {
             jetzt.as_nanos()
         );
         let eintrag = windows_eintrag(Wer::Gemini, &ziel)?;
-        let probe = "AQ.Nur_Ein_Erfundener_Testwert";
+        let probe = concat!("AQ.", "Nur_Ein_Erfundener_Testwert");
         let ergebnis = (|| -> Result<(), String> {
             gemini_ablegen(&eintrag, probe)?;
             let leser = windows_eintrag(Wer::Gemini, &ziel)?;
