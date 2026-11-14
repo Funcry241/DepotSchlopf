@@ -1369,12 +1369,9 @@ mod tests {
         // In dieser Probe fehlen der Kurs- und der Ereignisbeleg im Journal.
         belege_prognose(&mut j, &lage, BeraterId::Dachs, prognose)?;
         assert!(j.stand().weltprognosen().is_empty());
-        assert!(
-            j.stand()
-                .begruendungen()
-                .iter()
-                .any(|(_, _, t)| t.starts_with("Prognose verworfen:"))
-        );
+        assert!(j.stand().begruendungen().iter().any(|(_, _, t)| {
+            t.starts_with("Prognose verworfen: Weltprognose: Ereignisnummer und Ereignistext")
+        }));
         j.schliesse_ab(datum, Cent(500_000), &"a".repeat(64))
             .map_err(journal)?;
         assert_eq!(j.stand().seit_abschluss(), 0);

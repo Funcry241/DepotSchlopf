@@ -694,30 +694,46 @@ impl Stand {
 
     fn belege_weltprognose(&mut self, inhalt: &str) -> Result<(), String> {
         let b = PrognoseBeleg::lies(inhalt).ok_or("Weltprognose unlesbar")?;
-        if self.abrechnungstag != Some(b.datum)
-            || self.abschluss.as_ref().is_some_and(|a| a.datum >= b.datum)
-            || self
-                .weltprognosen
-                .iter()
-                .any(|alt| alt.datum == b.datum && alt.berater == b.berater)
-            || b.prognose
-                .ereignis_nr
-                .checked_sub(1)
-                .and_then(|nr| {
-                    self.beobachtungen
-                        .iter()
-                        .filter(|(tag, _)| *tag == b.datum)
-                        .nth(nr)
-                })
-                .is_none_or(|(_, e)| *e != b.ereignis)
-            || !self.kurse.iter().any(|k| {
-                k.isin() == &b.prognose.isin
-                    && k.kurs().handelstag() == b.datum
-                    && k.kurs().preis() == b.ausgangskurs
-                    && k.kurs().herkunft() == Herkunft::Quelle
-            })
+        if self.abrechnungstag != Some(b.datum) {
+            return Err(
+                "Weltprognose: Prognosetag stimmt nicht mit dem Abrechnungstag überein".into(),
+            );
+        }
+        if self.abschluss.as_ref().is_some_and(|a| a.datum >= b.datum) {
+            return Err("Weltprognose: Prognosetag ist bereits abgeschlossen".into());
+        }
+        if self
+            .weltprognosen
+            .iter()
+            .any(|alt| alt.datum == b.datum && alt.berater == b.berater)
         {
-            return Err("Weltprognose passt nicht zu Papiertag, Ereignis oder Ausgangskurs".into());
+            return Err(
+                "Weltprognose: Für diesen Berater und Tag liegt bereits ein Beleg vor".into(),
+            );
+        }
+        if b.prognose
+            .ereignis_nr
+            .checked_sub(1)
+            .and_then(|nr| {
+                self.beobachtungen
+                    .iter()
+                    .filter(|(tag, _)| *tag == b.datum)
+                    .nth(nr)
+            })
+            .is_none_or(|(_, e)| *e != b.ereignis)
+        {
+            return Err("Weltprognose: Ereignisnummer und Ereignistext passen nicht zum Journalbeleg des Prognosetags".into());
+        }
+        if !self.kurse.iter().any(|k| {
+            k.isin() == &b.prognose.isin
+                && k.kurs().handelstag() == b.datum
+                && k.kurs().preis() == b.ausgangskurs
+                && k.kurs().herkunft() == Herkunft::Quelle
+        }) {
+            return Err(
+                "Weltprognose: Kein Quellenkurs mit diesem Ausgangspreis am Prognosetag belegt"
+                    .into(),
+            );
         }
         self.weltprognosen.push(b);
         Ok(())

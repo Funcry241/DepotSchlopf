@@ -803,7 +803,11 @@ fn journalpaket(
             Journalpaket {
                 pruefbericht,
                 betrieb: betrieb.ablauf.bericht(Some(stand))
-                    + &betrieb.fehler.bericht(Some(eintraege), zeitraum),
+                    + &betrieb.fehler.bericht(
+                        Some(eintraege),
+                        zeitraum,
+                        &gespraechsbelege.gemini_netzfehler,
+                    ),
                 kurz,
                 depotdetails,
                 orders,
@@ -820,6 +824,7 @@ fn journalpaket(
             luecken.push_str(
                 "- Journalstand nicht bestätigt. Order-, Depot- und Kostenzahlen fehlen.\n",
             );
+            let (ki, gespraechsbelege) = ki(daten, zeitraum, None, luecken);
             Ok(Journalpaket {
                 pruefbericht: pruefbericht::bericht(
                     None,
@@ -828,12 +833,15 @@ fn journalpaket(
                     betrieb.fehler.ampel(false),
                     "Rot (Journal fehlt)",
                 ),
-                betrieb: betrieb.ablauf.bericht(None) + &betrieb.fehler.bericht(None, zeitraum),
+                betrieb: betrieb.ablauf.bericht(None)
+                    + &betrieb
+                        .fehler
+                        .bericht(None, zeitraum, &gespraechsbelege.gemini_netzfehler),
                 kurz: "Depotstand nicht verfügbar: Journal-Kette nicht bestätigt.\n".into(),
                 depotdetails: String::new(),
                 orders: "Unverifiziert: Journal-Kette nicht bestätigt.\n".into(),
                 ausfuehrungen: ausfuehrungen_csv(None, &[], zeitraum),
-                ki: ki(daten, zeitraum, None, luecken).0,
+                ki,
                 historie: historie::bericht(zeitraum, None, luecken),
                 journal: journal::Auszug::default(),
             })
