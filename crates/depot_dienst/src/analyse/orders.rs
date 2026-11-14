@@ -275,7 +275,7 @@ mod tests {
         assert!(!text.contains("### Order #2"));
         assert!(text.contains("Verfallsgrund nicht im Zeitraum belegt"));
         assert!(!text.contains("Beispiel-Freitext"));
-        assert!(!text.contains("Bewegungen, deren Zeitraum offen bleibt: #1"));
+        assert!(!text.contains("deren Zeitraum offen bleibt: #1"));
         let folgetag = von.plus_tage(1).ok_or("Folgetag")?;
         let text = bericht(
             journal.stand(),
