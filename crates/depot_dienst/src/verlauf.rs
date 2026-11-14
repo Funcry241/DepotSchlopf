@@ -235,9 +235,9 @@ pub fn laden(wurzel: &Path) -> Result<Geladen, String> {
         .filter_map(tag)
         .max()
         .and_then(|neu| neu.plus_tage(-62));
-    let mut position = 0;
+    let mut position = 0_usize;
     g.auftraege.retain(|a| {
-        position += 1;
+        position = position.saturating_add(1);
         position <= VERLAUF || grenze.zip(tag(a)).is_none_or(|(von, tag)| tag >= von)
     });
     let mut neu = String::new();
