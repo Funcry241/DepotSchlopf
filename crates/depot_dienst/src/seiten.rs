@@ -554,16 +554,18 @@ pub fn rahmen(
         },
     );
     let otter_stil = if hier == "/" { otter::STIL } else { "" };
+    let herz = crate::schmuck::HERZ;
+    let herz_stil = crate::schmuck::STIL;
     let _ = write!(
         s,
         "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <title>DepotSchlopf</title><style>{STIL}{STIL_DIENST}{otter_stil}</style></head><body>\
+         <title>DepotSchlopf</title><style>{STIL}{STIL_DIENST}{otter_stil}{herz_stil}</style></head><body>\
          <div id=\"getrennt\" class=\"banner\" hidden>Verbindung zum Dienst getrennt, etwa \
          beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu. Wenn du das schwarze \
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div>\
          <p id=\"neuverbinden\" hidden><a id=\"neuverbinden-link\" class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
-         <nav aria-label=\"Hauptnavigation\"><h1>DepotSchlopf</h1>{}{}{}{}\
+         <nav aria-label=\"Hauptnavigation\"><h1>{herz}DepotSchlopf</h1>{}{}{}{}\
          <span class=\"leise\">Nur Papiergeld.</span>{version}</nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit DepotSchlopf läuft. \
          Du kannst es minimieren.</p>",
@@ -1283,9 +1285,10 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
     kurssperre: Option<&str>,
 ) -> String {
     let mut s = marke(start);
+    let ampel = crate::schmuck::ampel(z.gesamtstatus().as_ref(), kurssperre.is_some());
     let _ = write!(
         s,
-        "<span hidden data-otter=\"{}\"></span>",
+        "<span hidden data-otter=\"{}\" data-ampel=\"{ampel}\"></span>",
         otter::pose(z, kurssperre.is_some())
     );
     if let Some(a) = &z.laufend {
@@ -2357,6 +2360,24 @@ pub const APP_JS: &str = r#""use strict";
   }, true);
   // Eine Verbindungsprüfung gilt für jede Seite, auch Bestätigung und Protokoll.
   var banner = document.getElementById("getrennt");
+  var herz = document.getElementById("herz");
+  var ampel = "offen";
+  var herzVerbindung = null;
+  function zeigeHerz() {
+    if (!herz) { return; }
+    var zustand = herzVerbindung || ampel;
+    var text = zustand === "gut" ? "Alles läuft" : zustand === "halt" ? "Eingriff nötig" : "Wartet";
+    herz.setAttribute("data-zustand", zustand);
+    herz.setAttribute("aria-label", text);
+    herz.setAttribute("title", text);
+  }
+  function merkeAmpel() {
+    var marke = document.querySelector('#betriebsleiste [data-ampel]');
+    var zustand = marke && marke.getAttribute("data-ampel");
+    ampel = zustand === "gut" || zustand === "halt" ? zustand : "offen";
+    zeigeHerz();
+  }
+  merkeAmpel();
   var marke = document.querySelector("[data-start]");
   var start = marke ? marke.getAttribute("data-start") : null;
   var neuladen = false;
@@ -2397,7 +2418,10 @@ pub const APP_JS: &str = r#""use strict";
   }
   function zeigeUpdateWartezeit() {
     var jetzt = Date.now();
-    if (jetzt - updateWartetSeit < updateFrist) {
+    var wartet = jetzt - updateWartetSeit < updateFrist;
+    herzVerbindung = wartet ? "offen" : "halt";
+    zeigeHerz();
+    if (wartet) {
       banner.setAttribute("data-update-wartet", "");
       banner.textContent = "Die neue Version startet gerade. Du musst nichts tun. Die Seite lädt sich von selbst neu.";
     } else {
@@ -2427,6 +2451,8 @@ pub const APP_JS: &str = r#""use strict";
       if (t.indexOf('data-update-laeuft="nein"') !== -1) {
         updateErwartetSeit = null;
       }
+      herzVerbindung = null;
+      zeigeHerz();
       var updateBestaetigt = updateWartetSeit !== null;
       updateWartetSeit = null;
       banner.removeAttribute("data-update-wartet");
@@ -2453,6 +2479,8 @@ pub const APP_JS: &str = r#""use strict";
       }
       if (updateWartetSeit !== null) { zeigeUpdateWartezeit(); return; }
       banner.removeAttribute("data-update-wartet");
+      herzVerbindung = "halt";
+      zeigeHerz();
       banner.textContent = "Verbindung zu DepotSchlopf unterbrochen. Die Seite versucht es automatisch erneut. Lass das DepotSchlopf-Fenster offen.";
       banner.hidden = false;
     } finally {
@@ -2497,6 +2525,7 @@ pub const APP_JS: &str = r#""use strict";
             });
           });
           ziel.innerHTML = t;
+          if (url === "/teil/kopf") { merkeAmpel(); }
           zuletzt = t;
           ziel.querySelectorAll("details[id]").forEach(function (d) {
             var vorher = protokolle.get(d.id);
@@ -2537,6 +2566,15 @@ pub const APP_JS: &str = r#""use strict";
 #[cfg(test)]
 mod speicherleiste_tests {
     use super::STIL_DIENST;
+
+    #[test]
+    fn herz_steht_ausserhalb_der_aktualisierten_betriebsleiste() {
+        let seite = super::rahmen("/", None, None, "", None, "", ("", ""));
+        let nav = seite.split_once("</nav>").map_or("", |(nav, _)| nav);
+        assert!(nav.contains("id=\"herz\""));
+        assert!(!nav.contains("id=\"betriebsleiste\""));
+        assert_eq!(seite.matches("id=\"herz\"").count(), 1);
+    }
 
     #[test]
     fn betriebsleiste_liegt_ueber_speicherkaestchen_und_unter_halt() -> Result<(), &'static str> {

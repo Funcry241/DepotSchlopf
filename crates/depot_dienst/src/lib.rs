@@ -35,6 +35,7 @@ pub mod programmstand;
 pub mod protokoll;
 pub mod rueckfall;
 pub mod schluessel;
+mod schmuck;
 pub mod seiten;
 mod sicherung;
 pub mod verlauf;
