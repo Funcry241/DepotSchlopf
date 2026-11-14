@@ -889,6 +889,7 @@ pub(crate) struct TopfAntwort {
     pub(crate) topf: Topf,
     pub(crate) vorschlag: Option<Vorschlag>,
     pub(crate) erste_verwertbar: bool,
+    zweitmeinung_ausgefallen: bool,
 }
 
 fn prognosebilanz(stand: &depot_journal::Stand) -> Vec<(BeraterId, depot_journal::Auswertung)> {
@@ -965,6 +966,7 @@ fn frage_topf(
         topf,
         vorschlag,
         erste_verwertbar,
+        zweitmeinung_ausgefallen: false,
     })
 }
 
@@ -979,6 +981,7 @@ fn zweite_meinung(
         topf,
         mut vorschlag,
         erste_verwertbar,
+        mut zweitmeinung_ausgefallen,
     } = antwort;
     let (tag, zyklus) = (z.tag, z.nr);
     let id = topf.id();
@@ -1033,6 +1036,7 @@ fn zweite_meinung(
             name(zweiter),
             &format!("{t}: {wort}: {}", urteil.begruendung),
         )?;
+        zweitmeinung_ausgefallen = !urteil.verwertbar;
         if urteil.verwertbar && urteil.zustimmung {
             vorschlag = Some(v);
         }
@@ -1041,6 +1045,7 @@ fn zweite_meinung(
         topf,
         vorschlag,
         erste_verwertbar,
+        zweitmeinung_ausgefallen,
     })
 }
 
@@ -1051,7 +1056,10 @@ fn topf_zyklus(
     konto: &mut dyn Broker,
 ) -> Result<(), LaufFehler> {
     let TopfAntwort {
-        topf, vorschlag, ..
+        topf,
+        vorschlag,
+        zweitmeinung_ausgefallen,
+        ..
     } = antwort;
     let tag = z.tag;
     let id = topf.id();
@@ -1070,7 +1078,13 @@ fn topf_zyklus(
         kaufbudget(j, z.grenzen, id)?,
     );
     for b in &ent.befunde {
-        begruende(j, tag, REGELWERK, &format!("{t}: {b:?}"))?;
+        let grund =
+            if zweitmeinung_ausgefallen && matches!(b, depot_regelwerk::Befund::KeinVorschlag) {
+                format!("{t}: ZweitmeinungAusgefallen")
+            } else {
+                format!("{t}: {b:?}")
+            };
+        begruende(j, tag, REGELWERK, &grund)?;
     }
     if ent.verkaeufe.is_empty() {
         return fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto);
