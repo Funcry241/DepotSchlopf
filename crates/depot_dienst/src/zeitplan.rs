@@ -3,8 +3,7 @@
 //!
 //! **Morgenlauf:** Die Börsen werden ab 07:30 Uhr nacheinander abgerufen, sofern mindestens
 //! eine davon an diesem Tag handelt. Danach folgt bis zum ersten Handelsschluss der Papiertag. Jede Börse
-//! hat ihren eigenen Bezugstag. Explizit abweichende alte Abendzeiten behalten die
-//! Abrufreihenfolge nach Börsenschluss.
+//! hat ihren eigenen Bezugstag. Alte Abendzeiten halten Kursabruf und Papiertag an.
 //!
 //! **Einmal je Tag:** Was der Zeitplan an einem Tag gestartet hat, steht in
 //! `daten/dienst_erledigt.txt`, bevor der Auftrag beginnt. Ein Neustart des Dienstes startet es
@@ -14,10 +13,6 @@
 use depot_kern::{Boerse, Datum, Zeitpunkt};
 
 use crate::werkbank::Art;
-
-/// So viele Minuten nach ihrem Schluss wird eine Boerse ausser Xetra abgerufen: wie Xetra mit
-/// 17:45 Uhr nach 17:35 Uhr, gut innerhalb des Hoechstalters von 20 Minuten.
-pub const NACHLAUF_MIN: i64 = 10;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VorbereitungsPlan {
@@ -86,7 +81,8 @@ impl Default for Zeitplan {
 }
 
 const KOPF: &str = "zeitplan-v1";
-const KOPF_ERLEDIGT: &str = "erledigt-v3";
+const KOPF_ERLEDIGT: &str = "erledigt-v4";
+const KOPF_ERLEDIGT_V3: &str = "erledigt-v3";
 /// Die fruehere Form ohne `kurse_ok` und `papier`.
 const KOPF_ERLEDIGT_V2: &str = "erledigt-v2";
 /// Die fruehere Form ohne Abruf je Boerse; `kurse` war der Abruf von Xetra.
@@ -120,17 +116,6 @@ pub fn uhrzeit_text((h, m): (u8, u8)) -> String {
 }
 
 impl Zeitplan {
-    pub(crate) fn migriere_morgen(&mut self) -> bool {
-        if !matches!(self.kurse, (17, 45 | 52)) {
-            return false;
-        }
-        self.kurse = (7, 30);
-        if self.termine >= (7, 30) {
-            self.termine = (7, 20);
-        }
-        true
-    }
-
     pub fn als_text(&self) -> String {
         let basis = format!(
             "{KOPF}\nan={}\ntermine={}\nkurse={}\npapier_danach={}\n",
@@ -203,21 +188,102 @@ impl Zeitplan {
     }
 }
 
-/// Was der Zeitplan an welchem Tag schon gestartet hat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AbrufAusgang {
+    Laeuft,
+    Ok,
+    Voruebergehend,
+    Fehler,
+    Abgebrochen,
+}
+
+impl AbrufAusgang {
+    pub(crate) fn aus_exitcode(code: Option<i32>) -> Self {
+        match code {
+            Some(0) => Self::Ok,
+            Some(3) => Self::Voruebergehend,
+            None => Self::Abgebrochen,
+            Some(_) => Self::Fehler,
+        }
+    }
+
+    fn text(self) -> &'static str {
+        match self {
+            Self::Laeuft => "laeuft",
+            Self::Ok => "ok",
+            Self::Voruebergehend => "voruebergehend",
+            Self::Fehler => "fehler",
+            Self::Abgebrochen => "abgebrochen",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Abruf {
+    pub anker: Zeitpunkt,
+    pub versuche: u8,
+    pub ausgang: AbrufAusgang,
+}
+
+impl Abruf {
+    fn lies(text: &str) -> Option<Self> {
+        let [anker, versuche, ausgang] = text.split(';').collect::<Vec<_>>().try_into().ok()?;
+        let versuche = versuche.parse().ok()?;
+        if !(1..=3).contains(&versuche) {
+            return None;
+        }
+        let ausgang = [
+            AbrufAusgang::Laeuft,
+            AbrufAusgang::Ok,
+            AbrufAusgang::Voruebergehend,
+            AbrufAusgang::Fehler,
+            AbrufAusgang::Abgebrochen,
+        ]
+        .into_iter()
+        .find(|a| a.text() == ausgang)?;
+        Some(Self {
+            anker: Zeitpunkt::aus_sekunden(anker.parse().ok()?)?,
+            versuche,
+            ausgang,
+        })
+    }
+
+    fn text(self) -> String {
+        format!(
+            "{};{};{}",
+            self.anker.sekunden(),
+            self.versuche,
+            self.ausgang.text()
+        )
+    }
+
+    fn wiederholung(self, schluss: Zeitpunkt) -> Option<Zeitpunkt> {
+        if !matches!(
+            self.ausgang,
+            AbrufAusgang::Voruebergehend | AbrufAusgang::Abgebrochen
+        ) {
+            return None;
+        }
+        let pause = match self.versuche {
+            1 => 30 * 60,
+            2 => 90 * 60,
+            _ => return None,
+        };
+        let termin = Zeitpunkt::aus_sekunden(self.anker.sekunden().checked_add(pause)?)?;
+        let frist = Zeitpunkt::aus_sekunden(schluss.sekunden().checked_sub(30 * 60)?)?;
+        (termin < frist).then_some(termin)
+    }
+}
+
+/// Der dauerhaft vermerkte Stand des Zeitplans.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Erledigt {
     pub termine: Option<Datum>,
-    /// Abruf der Xetra-Kurse.
     pub kurse: Option<Datum>,
-    /// Abruf der NYSE-Kurse.
     pub kurse_nyse: Option<Datum>,
-    /// Der Tag, an dem zuletzt ein Kursabruf des Zeitplans erfolgreich endete. Steht hier
-    /// heute und sind alle Abrufe des Tages gestartet, folgt der Papiertag, auch nach einem
-    /// Neustart des Dienstes.
-    pub kurse_ok: Option<Datum>,
-    /// Der Tag, fuer den der Zeitplan den Papiertag gestartet hat. Ein angefangener Papiertag
-    /// startet so nie ein zweites Mal von selbst.
     pub papier: Option<Datum>,
+    pub xetra_abruf: Option<Abruf>,
+    pub nyse_abruf: Option<Abruf>,
 }
 
 fn datum_feld(d: Option<Datum>) -> String {
@@ -227,35 +293,39 @@ fn datum_feld(d: Option<Datum>) -> String {
 impl Erledigt {
     pub fn als_text(&self) -> String {
         format!(
-            "{KOPF_ERLEDIGT}\ntermine={}\nkurse={}\nkurse_nyse={}\nkurse_ok={}\npapier={}\n",
+            "{KOPF_ERLEDIGT}\ntermine={}\nkurse={}\nkurse_nyse={}\npapier={}\nxetra_abruf={}\nnyse_abruf={}\n",
             datum_feld(self.termine),
             datum_feld(self.kurse),
             datum_feld(self.kurse_nyse),
-            datum_feld(self.kurse_ok),
-            datum_feld(self.papier)
+            datum_feld(self.papier),
+            self.xetra_abruf.map(Abruf::text).unwrap_or_default(),
+            self.nyse_abruf.map(Abruf::text).unwrap_or_default()
         )
     }
 
-    /// Liest genau die eigene Form, auch die frueheren: ohne `kurse_nyse` (`erledigt-v1`), ohne
-    /// `kurse_ok` und `papier` (`erledigt-v2`). Aus einer frueheren Form folgt heute kein
-    /// Papiertag von selbst: Ob ein Abruf erfolgreich war, stand dort nicht.
+    /// Liest die eigene Form und die älteren Vermerke. Ein alter globaler Erfolg gilt
+    /// als kein Erfolgsbeleg für eine einzelne Börse.
     ///
     /// # Errors
-    /// Jede Abweichung.
-    pub fn lies(text: &str) -> Result<Erledigt, String> {
-        let mut z = text.lines();
-        let form = match z.next() {
-            Some(KOPF_ERLEDIGT) => 3,
+    /// Der Vermerk weicht von seiner kanonischen Form ab.
+    pub fn lies(text: &str) -> Result<Self, String> {
+        let mut zeilen = text.lines();
+        let form = match zeilen.next() {
+            Some(KOPF_ERLEDIGT) => 4,
+            Some(KOPF_ERLEDIGT_V3) => 3,
             Some(KOPF_ERLEDIGT_V2) => 2,
             Some(KOPF_ERLEDIGT_V1) => 1,
             _ => return Err("Erledigt: Kopfzeile fehlt".into()),
         };
-        let mut datum = |name: &str| -> Result<Option<Datum>, String> {
-            let w = z
+        let mut feld = |name: &str| {
+            zeilen
                 .next()
                 .and_then(|l| l.strip_prefix(name))
-                .and_then(|r| r.strip_prefix('='))
-                .ok_or_else(|| format!("Erledigt: {name} erwartet"))?;
+                .and_then(|l| l.strip_prefix('='))
+                .ok_or_else(|| format!("Erledigt: {name} erwartet"))
+        };
+        let mut datum = |name| {
+            let w = feld(name)?;
             if w.is_empty() {
                 Ok(None)
             } else {
@@ -271,17 +341,34 @@ impl Erledigt {
         } else {
             None
         };
-        let (kurse_ok, papier) = if form >= 3 {
-            (datum("kurse_ok")?, datum("papier")?)
+        let alt_ok = if form == 3 { datum("kurse_ok")? } else { None };
+        let papier = if form >= 3 { datum("papier")? } else { None };
+        let mut abruf = |name, tag| {
+            let w = feld(name)?;
+            if w.is_empty() {
+                Ok(None)
+            } else {
+                Abruf::lies(w)
+                    .filter(|a| a.anker.frankfurt_tag() == tag && tag.is_some())
+                    .map(Some)
+                    .ok_or_else(|| format!("Erledigt: {name} unlesbar"))
+            }
+        };
+        let (xetra_abruf, nyse_abruf) = if form == 4 {
+            (
+                abruf("xetra_abruf", kurse)?,
+                abruf("nyse_abruf", kurse_nyse)?,
+            )
         } else {
             (None, None)
         };
-        let e = Erledigt {
+        let e = Self {
             termine,
             kurse,
             kurse_nyse,
-            kurse_ok,
             papier,
+            xetra_abruf,
+            nyse_abruf,
         };
         let eigen = match form {
             1 => format!(
@@ -295,6 +382,14 @@ impl Erledigt {
                 datum_feld(kurse),
                 datum_feld(kurse_nyse)
             ),
+            3 => format!(
+                "{KOPF_ERLEDIGT_V3}\ntermine={}\nkurse={}\nkurse_nyse={}\nkurse_ok={}\npapier={}\n",
+                datum_feld(termine),
+                datum_feld(kurse),
+                datum_feld(kurse_nyse),
+                datum_feld(alt_ok),
+                datum_feld(papier)
+            ),
             _ => e.als_text(),
         };
         if eigen != text {
@@ -303,11 +398,47 @@ impl Erledigt {
         Ok(e)
     }
 
-    /// Der Tag, an dem der Abruf dieser Boerse zuletzt gestartet wurde.
     pub fn kurse_von(&self, b: Boerse) -> Option<Datum> {
         match b {
             Boerse::Xetra => self.kurse,
             Boerse::Nyse => self.kurse_nyse,
+        }
+    }
+
+    pub fn abruf(&self, b: Boerse) -> Option<Abruf> {
+        match b {
+            Boerse::Xetra => self.xetra_abruf,
+            Boerse::Nyse => self.nyse_abruf,
+        }
+    }
+
+    pub fn erfolgreich(&self, b: Boerse, tag: Datum) -> bool {
+        self.kurse_von(b) == Some(tag)
+            && self.abruf(b).is_some_and(|a| a.ausgang == AbrufAusgang::Ok)
+    }
+
+    fn abruf_mut(&mut self, b: Boerse) -> &mut Option<Abruf> {
+        match b {
+            Boerse::Xetra => &mut self.xetra_abruf,
+            Boerse::Nyse => &mut self.nyse_abruf,
+        }
+    }
+
+    pub(crate) fn abruf_start(&mut self, b: Boerse, tag: Datum, jetzt: Zeitpunkt) {
+        let vorher = self
+            .abruf(b)
+            .filter(|a| a.anker.frankfurt_tag() == Some(tag));
+        self.setze(Art::KurseVon(b), tag);
+        *self.abruf_mut(b) = Some(Abruf {
+            anker: vorher.map_or(jetzt, |a| a.anker),
+            versuche: vorher.map_or(1, |a| a.versuche.saturating_add(1)),
+            ausgang: AbrufAusgang::Laeuft,
+        });
+    }
+
+    pub(crate) fn abruf_ende(&mut self, b: Boerse, ausgang: AbrufAusgang) {
+        if let Some(a) = self.abruf_mut(b).as_mut() {
+            a.ausgang = ausgang;
         }
     }
 
@@ -317,16 +448,7 @@ impl Erledigt {
             Art::KurseVon(Boerse::Xetra) => self.kurse = Some(tag),
             Art::KurseVon(Boerse::Nyse) => self.kurse_nyse = Some(tag),
             Art::Papier => self.papier = Some(tag),
-            Art::Einrichten
-            | Art::Kurse
-            | Art::Kursdiagnose
-            | Art::Nachrichten
-            | Art::Gemini
-            | Art::Vorbereiten
-            | Art::Sicherung
-            | Art::PapierAusgelassen
-            | Art::UpdatePruefen
-            | Art::Update => {}
+            _ => {}
         }
     }
 }
@@ -335,11 +457,6 @@ impl Erledigt {
 /// An Wochenenden und Feiertagen aller Boersen der Liste laeuft nichts, und nichts ist verpasst.
 pub fn handelstag(d: Datum) -> bool {
     depot_kern::liste::handelstag(d)
-}
-
-/// Frankfurter Ortszeit eines Zeitpunkts, Tag und Stunde:Minute.
-fn in_frankfurt(z: depot_kern::Zeitpunkt) -> Option<(Datum, (u8, u8))> {
-    depot_lage::ortszeit(z).map(|(d, h, m, _, _)| (d, (h, m)))
 }
 
 // Zeitpläne aus dem Morgenfenster von #140 behalten ihre Bedeutung; die Laufzeitgrenze
@@ -360,37 +477,16 @@ pub(crate) fn morgen_abgelaufen(
             .is_some_and(|(jetzt, schluss)| jetzt >= schluss)
 }
 
-/// Die Kursabrufe eines Tages: je Boerse aus `boersen`, die an diesem Tag handelt, ihre Uhrzeit
-/// in Frankfurt, frueheste zuerst. Xetra zur Uhrzeit `kurse` des Plans, jede andere
-/// `NACHLAUF_MIN` Minuten nach ihrem Schluss an diesem Tag. Faellt der Abruf nicht auf denselben
-/// Tag in Frankfurt, entfaellt er (bei den Boersen der Liste kommt das nicht vor).
+/// Kursabrufe für die Börsen mit Bezugstag, sobald wenigstens eine Börse handelt.
 pub fn abrufe_fuer(plan: &Zeitplan, tag: Datum, boersen: &[Boerse]) -> Vec<(Boerse, (u8, u8))> {
-    if morgenplan(plan) {
-        if !boersen.iter().any(|b| b.handelstag(tag)) {
-            return Vec::new();
-        }
-        return boersen
-            .iter()
-            .filter(|b| b.bezugstag(tag).is_some())
-            .map(|b| (*b, plan.kurse))
-            .collect();
+    if !morgenplan(plan) || !boersen.iter().any(|b| b.handelstag(tag)) {
+        return Vec::new();
     }
-    let mut a: Vec<(Boerse, (u8, u8))> = boersen
+    boersen
         .iter()
-        .filter(|b| b.handelstag(tag))
-        .filter_map(|&b| {
-            if b == Boerse::Xetra {
-                return Some((b, plan.kurse));
-            }
-            let nach = NACHLAUF_MIN.checked_mul(60)?;
-            let zeit =
-                depot_kern::Zeitpunkt::aus_sekunden(b.schluss(tag)?.sekunden().checked_add(nach)?)?;
-            let (d, u) = in_frankfurt(zeit)?;
-            (d == tag).then_some((b, u))
-        })
-        .collect();
-    a.sort_by_key(|(b, u)| (*u, *b));
-    a
+        .filter(|b| b.bezugstag(tag).is_some())
+        .map(|b| (*b, plan.kurse))
+        .collect()
 }
 
 /// Die Kursabrufe eines Tages fuer die Boersen der Liste.
@@ -418,13 +514,24 @@ pub fn faellig_fuer(
     zeit: (u8, u8),
     boersen: &[Boerse],
 ) -> Option<Art> {
+    faellig_mit_bestand(plan, erledigt, tag, zeit, boersen, boersen)
+}
+
+pub(crate) fn faellig_mit_bestand(
+    plan: &Zeitplan,
+    erledigt: &Erledigt,
+    tag: Datum,
+    zeit: (u8, u8),
+    boersen: &[Boerse],
+    bestand: &[Boerse],
+) -> Option<Art> {
     if !plan.an || !boersen.iter().any(|b| b.handelstag(tag)) {
         return None;
     }
     if zeit >= plan.termine && erledigt.termine != Some(tag) {
         return Some(Art::Termine);
     }
-    if morgen_abgelaufen(plan, tag, zeit, boersen) {
+    if !morgenplan(plan) || morgen_abgelaufen(plan, tag, zeit, boersen) {
         return None;
     }
     let abrufe = abrufe_fuer(plan, tag, boersen);
@@ -434,25 +541,28 @@ pub fn faellig_fuer(
     {
         return Some(Art::KurseVon(*b));
     }
-    papier_faellig(plan.papier_danach, erledigt, tag, &abrufe).then_some(Art::Papier)
-}
-
-/// Der Papiertag ist faellig, wenn er eingestellt ist, alle Abrufe des Tages gestartet sind,
-/// einer davon heute erfolgreich war und der Zeitplan ihn heute noch nicht gestartet hat. Das
-/// gilt auch nach einem Neustart des Dienstes: Ein nicht begonnener Papiertag wird mit den
-/// Kursen von heute nachgeholt, ein begonnener nie ein zweites Mal gestartet.
-fn papier_faellig(
-    papier_danach: bool,
-    erledigt: &Erledigt,
-    tag: Datum,
-    abrufe: &[(Boerse, (u8, u8))],
-) -> bool {
-    papier_danach
-        && erledigt.kurse_ok == Some(tag)
+    let jetzt = Zeitpunkt::frankfurt(tag, zeit.0, zeit.1, 0)?;
+    let schluss = depot_kern::liste::erster_schluss(tag, boersen)?;
+    let frist = Zeitpunkt::aus_sekunden(schluss.sekunden().checked_sub(30 * 60)?)?;
+    if jetzt < frist
+        && let Some((b, _)) = abrufe.iter().find(|(b, _)| {
+            erledigt.kurse_von(*b) == Some(tag)
+                && erledigt
+                    .abruf(*b)
+                    .and_then(|a| a.wiederholung(schluss))
+                    .is_some_and(|t| t <= jetzt)
+        })
+    {
+        return Some(Art::KurseVon(*b));
+    }
+    (plan.papier_danach
         && erledigt.papier != Some(tag)
         && abrufe
             .iter()
             .all(|(b, _)| erledigt.kurse_von(*b) == Some(tag))
+        && abrufe.iter().any(|(b, _)| erledigt.erfolgreich(*b, tag))
+        && bestand.iter().all(|b| erledigt.erfolgreich(*b, tag)))
+    .then_some(Art::Papier)
 }
 
 fn tag_danach(d: Datum) -> Option<Datum> {
@@ -511,4 +621,115 @@ pub(crate) fn geplante_abrufe(
     );
     kandidaten.sort_by_key(|(u, _, _)| *u);
     kandidaten
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn donnerstag() -> Result<Datum, String> {
+        Datum::neu(2026, 11, 5).ok_or_else(|| "Donnerstag fehlt".into())
+    }
+
+    fn zustand(tag: Datum, ausgang: AbrufAusgang) -> Result<Erledigt, String> {
+        let anker = Zeitpunkt::frankfurt(tag, 7, 30, 0).ok_or("Anker fehlt")?;
+        let mut e = Erledigt {
+            termine: Some(tag),
+            ..Erledigt::default()
+        };
+        e.abruf_start(Boerse::Xetra, tag, anker);
+        e.abruf_ende(Boerse::Xetra, ausgang);
+        Ok(e)
+    }
+
+    fn geplant(e: &Erledigt, tag: Datum, zeit: (u8, u8)) -> Option<Art> {
+        let plan = Zeitplan {
+            an: true,
+            ..Zeitplan::default()
+        };
+        faellig_fuer(&plan, e, tag, zeit, &[Boerse::Xetra])
+    }
+
+    #[test]
+    fn neustart_zaehlt_versuche_weiter() -> Result<(), String> {
+        let tag = donnerstag()?;
+        let e = zustand(tag, AbrufAusgang::Voruebergehend)?;
+        let mut e = Erledigt::lies(&e.als_text())?;
+        assert_eq!(geplant(&e, tag, (7, 59)), None);
+        assert_eq!(geplant(&e, tag, (8, 0)), Some(Art::KurseVon(Boerse::Xetra)));
+        e.abruf_start(
+            Boerse::Xetra,
+            tag,
+            Zeitpunkt::frankfurt(tag, 8, 15, 0).ok_or("Start fehlt")?,
+        );
+        e.abruf_ende(Boerse::Xetra, AbrufAusgang::Voruebergehend);
+        let mut e = Erledigt::lies(&e.als_text())?;
+        assert_eq!(geplant(&e, tag, (8, 59)), None);
+        assert_eq!(geplant(&e, tag, (9, 0)), Some(Art::KurseVon(Boerse::Xetra)));
+        assert_eq!(geplant(&e, tag, (17, 5)), None);
+        e.abruf_start(
+            Boerse::Xetra,
+            tag,
+            Zeitpunkt::frankfurt(tag, 9, 0, 0).ok_or("Zuletzt fehlt")?,
+        );
+        e.abruf_ende(Boerse::Xetra, AbrufAusgang::Voruebergehend);
+        assert_eq!(geplant(&e, tag, (9, 1)), None);
+        Ok(())
+    }
+
+    #[test]
+    fn abbruch_ohne_code_wiederholt() -> Result<(), String> {
+        let tag = donnerstag()?;
+        let e = zustand(tag, AbrufAusgang::aus_exitcode(None))?;
+        assert_eq!(
+            geplant(&e, tag, (8, 25)),
+            Some(Art::KurseVon(Boerse::Xetra))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn exit_1_keine_wiederholung() -> Result<(), String> {
+        let tag = donnerstag()?;
+        let e = zustand(tag, AbrufAusgang::aus_exitcode(Some(1)))?;
+        assert_eq!(geplant(&e, tag, (9, 0)), None);
+        Ok(())
+    }
+
+    #[test]
+    fn erfolg_nur_beim_bestand_erforderlich() -> Result<(), String> {
+        let tag = donnerstag()?;
+        let mut e = zustand(tag, AbrufAusgang::Ok)?;
+        e.abruf_start(
+            Boerse::Nyse,
+            tag,
+            Zeitpunkt::frankfurt(tag, 7, 31, 0).ok_or("NYSE fehlt")?,
+        );
+        e.abruf_ende(Boerse::Nyse, AbrufAusgang::Fehler);
+        let plan = Zeitplan {
+            an: true,
+            ..Zeitplan::default()
+        };
+        assert_eq!(
+            faellig_mit_bestand(&plan, &e, tag, (7, 35), &Boerse::ALLE, &[Boerse::Xetra]),
+            Some(Art::Papier)
+        );
+        assert_eq!(
+            faellig_mit_bestand(&plan, &e, tag, (7, 35), &Boerse::ALLE, &[Boerse::Nyse]),
+            None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn erledigt_v3_lesbar() -> Result<(), String> {
+        let tag = donnerstag()?;
+        let text = format!(
+            "erledigt-v3\ntermine={tag}\nkurse={tag}\nkurse_nyse={tag}\nkurse_ok={tag}\npapier={tag}\n"
+        );
+        let e = Erledigt::lies(&text)?;
+        assert_eq!(e.papier, Some(tag));
+        assert!(Boerse::ALLE.iter().all(|b| !e.erfolgreich(*b, tag)));
+        Ok(())
+    }
 }

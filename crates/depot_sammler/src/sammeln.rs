@@ -68,6 +68,8 @@ pub enum Ergebnis {
     },
     /// Nichts belegt. Die Meldung ist vom Schluessel bereinigt.
     Fehler(String),
+    /// Ein vorübergehender Verbindungsfehler der Quelle.
+    Verbindung(String),
     /// Nicht abgerufen, mit Grund: Der Schluessel seiner Quelle fehlt, oder er notiert nicht in
     /// Euro und die Referenzkurse fehlen. Zaehlt fuer keine Quelle im Anbieterprotokoll.
     Uebersprungen(String),
@@ -106,6 +108,23 @@ impl Bericht {
             self.sperrquelle = Some(crate::diagnose::sperrquelle(Anbieter::fuer(wert.boerse)));
         }
         self.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+    }
+
+    /// Sind ausschließlich vorübergehende Verbindungsfehler aufgetreten?
+    pub fn nur_verbindungsfehler(&self) -> bool {
+        self.verbindung.is_some()
+            && self.abbruch.is_none()
+            && !self.sicherheitsabbruch
+            && self.werte.iter().all(|(_, e)| match e {
+                Ergebnis::Fehler(_) => false,
+                Ergebnis::Uebersprungen(grund) => {
+                    grund.starts_with("Verbindung zu ")
+                        || self.verbindung.as_ref().is_some_and(|a| {
+                            grund.starts_with("Abruf: ") && grund.ends_with(a.fehler())
+                        })
+                }
+                _ => true,
+            })
     }
 
     /// Sind die Kurse dieses Laufs verwendbar? Nie nach einem Sicherheitsabbruch. Sonst nur, wenn
@@ -181,7 +200,7 @@ pub fn einordnen(b: &Bericht, quelle: Anbieter) -> Option<depot_journal::anbiete
     let fehler: Vec<String> = eigene
         .iter()
         .filter_map(|e| match e {
-            Ergebnis::Fehler(t) => Some(t.to_ascii_lowercase()),
+            Ergebnis::Fehler(t) | Ergebnis::Verbindung(t) => Some(t.to_ascii_lowercase()),
             _ => None,
         })
         .collect();
@@ -620,7 +639,9 @@ pub fn sammle(
                     if bericht.verbindung.is_none() {
                         bericht.verbindung = Some(ausfall);
                     }
-                    bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
+                    bericht
+                        .werte
+                        .push((wert.clone(), Ergebnis::Verbindung(text)));
                     continue;
                 }
             };

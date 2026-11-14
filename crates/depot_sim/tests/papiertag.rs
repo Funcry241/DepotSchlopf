@@ -2493,6 +2493,26 @@ fn journal_liest_nachgeholte_ausfuehrung(kopie: Option<&std::path::Path>) -> Res
 }
 
 #[test]
+fn alter_vermerk_unlesbar_kein_zweiter_papiertag() -> Result<(), String> {
+    use depot_sim::papiertag::{Tageslage, tageslage};
+    let ort = Ort::neu()?;
+    let datum = tag(13)?;
+    let mut j = ort.oeffnen()?;
+    vorbedingung(
+        j.schliesse_ab(datum, Cent(500_000), &"a".repeat(64)),
+        "Tagesabschluss",
+    )?;
+    drop(j);
+    let j = ort.oeffnen()?;
+    // Beim Rückweg kann der Dienst den Tagesvermerk verlieren. Der Lauf liest
+    // den Abschluss aus dem Journal und lässt den Tag weiterhin geschlossen.
+    assert!(
+        matches!(vorbedingung(tageslage(j.stand(), datum), "Tageslage")?, Tageslage::Abgeschlossen(d) if d == datum)
+    );
+    Ok(())
+}
+
+#[test]
 #[ignore = "Erzeugt die Gegenprobe für einen unveränderten Checkout vor P7"]
 fn alter_stand_lehnt_nachholung_ab() -> Result<(), String> {
     let ziel = std::env::var_os("DEPOTSCHLOPF_P7_PROBE").ok_or("Pfad für Journalprobe fehlt")?;

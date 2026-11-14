@@ -101,6 +101,7 @@ fn programm(wurzel: &Path, paket: &str, args: &[String]) -> ExitCode {
         .args(args);
     match c.status() {
         Ok(s) if s.success() => ExitCode::SUCCESS,
+        Ok(s) if paket == "depot_sammler" && s.code() == Some(3) => ExitCode::from(3),
         Ok(_) => ExitCode::FAILURE,
         Err(e) => {
             eprintln!("[DepotSchlopf] FEHLER: cargo nicht startbar: {e}");

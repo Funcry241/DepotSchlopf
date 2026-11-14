@@ -19,7 +19,7 @@ use depot_kern::{Boerse, Datum, Zeitpunkt};
 use depot_lage::{Betrieb, Lagebild, SchluesselStand, TagStand, ortszeit};
 
 use crate::hinweis::Gedaechtnis;
-use crate::zeitplan::{Erledigt, Zeitplan, faellig_fuer};
+use crate::zeitplan::{AbrufAusgang, Erledigt, Zeitplan, faellig_mit_bestand};
 
 /// Was ein Auftrag tut.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -455,9 +455,13 @@ impl Laufprozess {
 pub fn cargo_starter() -> Starter {
     Box::new(|art: Art, wurzel: &Path| {
         let mut c = Command::new("cargo");
+        let (paket, argumente) = match art {
+            Art::KurseVon(_) => ("depot_sammler", art.argumente()),
+            _ => ("depot_lauf", art.argumente()),
+        };
         c.current_dir(wurzel)
-            .args(["run", "--quiet", "-p", "depot_lauf", "--"])
-            .args(art.argumente());
+            .args(["run", "--quiet", "-p", paket, "--"])
+            .args(argumente);
         c
     })
 }
@@ -469,22 +473,7 @@ fn zeitplan_pfad(wurzel: &Path) -> PathBuf {
 fn lade_zeitplan(wurzel: &Path) -> (Zeitplan, Option<String>) {
     match lies_falls_da(&zeitplan_pfad(wurzel)) {
         Ok(Some(t)) => match Zeitplan::lies(&t) {
-            Ok(mut z) => {
-                let fehler = if z.migriere_morgen() {
-                    match schreibe_ganz(&zeitplan_pfad(wurzel), &z.als_text()) {
-                        Ok(()) => {
-                            eprintln!(
-                                "[Dienst] Zeitplan auf Morgenlauf umgestellt. Kurse ab 07:30 Uhr."
-                            );
-                            None
-                        }
-                        Err(e) => Some(format!("Morgenzeitplan nicht gespeichert: {e}")),
-                    }
-                } else {
-                    None
-                };
-                (z, fehler)
-            }
+            Ok(z) => (z, None),
             Err(e) => (Zeitplan::default(), Some(e)),
         },
         Ok(None) => (Zeitplan::default(), None),
@@ -619,7 +608,7 @@ impl Dienst {
         // jede fremde Form halten den Zeitplan an (K29-01): Eine ausgeschaltete Automatik darf
         // nicht wieder angehen, ein erledigter Abruf nicht noch einmal starten.
         let (zeitplan, zeitplan_fehler) = lade_zeitplan(&wurzel);
-        let (erledigt, erledigt_fehler) = match lies_falls_da(&erledigt_pfad(&wurzel)) {
+        let (mut erledigt, mut erledigt_fehler) = match lies_falls_da(&erledigt_pfad(&wurzel)) {
             Ok(Some(t)) => match Erledigt::lies(&t) {
                 Ok(e) => (e, None),
                 Err(e) => (Erledigt::default(), Some(e)),
@@ -627,6 +616,20 @@ impl Dienst {
             Ok(None) => (Erledigt::default(), None),
             Err(e) => (Erledigt::default(), Some(e)),
         };
+        let mut unterbrochen = false;
+        for b in Boerse::ALLE {
+            if erledigt
+                .abruf(b)
+                .is_some_and(|a| a.ausgang == AbrufAusgang::Laeuft)
+            {
+                erledigt.abruf_ende(b, AbrufAusgang::Abgebrochen);
+                unterbrochen = true;
+            }
+        }
+        if unterbrochen && let Err(e) = schreibe_ganz(&erledigt_pfad(&wurzel), &erledigt.als_text())
+        {
+            erledigt_fehler = Some(e);
+        }
         let zeitplan = Zeitplan {
             an: zeitplan.an && zeitplan_fehler.is_none() && erledigt_fehler.is_none(),
             ..zeitplan
@@ -1041,12 +1044,7 @@ impl Dienst {
                     return Some((nr, kind));
                 }
                 Err(e) => {
-                    auftrag.protokoll.push(format!("Start fehlgeschlagen: {e}"));
-                    auftrag.ende = Some(jetzt);
-                    auftrag.erfolg = Some(false);
-                    self.protokoll_beenden(&mut z, &mut auftrag);
-                    ende_vermerken(&self.wurzel, &mut z, &auftrag);
-                    ablegen(&mut z, auftrag);
+                    self.startfehler_vermerken(&mut z, auftrag, jetzt, &e);
                 }
             }
             return None;
@@ -1072,6 +1070,24 @@ impl Dienst {
             self.hinweise_pruefen(jetzt);
         }
         None
+    }
+
+    fn startfehler_vermerken(
+        &self,
+        z: &mut Zustand,
+        mut auftrag: Auftrag,
+        jetzt: Zeitpunkt,
+        fehler: &std::io::Error,
+    ) {
+        self.kursausgang_vermerken(z, &auftrag, AbrufAusgang::Fehler);
+        auftrag
+            .protokoll
+            .push(format!("Start fehlgeschlagen: {fehler}"));
+        auftrag.ende = Some(jetzt);
+        auftrag.erfolg = Some(false);
+        self.protokoll_beenden(z, &mut auftrag);
+        ende_vermerken(&self.wurzel, z, &auftrag);
+        ablegen(z, auftrag);
     }
 
     fn gemini_vorschalten(
@@ -1193,7 +1209,7 @@ impl Dienst {
             let _ = einreihen(z, Art::Sicherung, Anlass::Zeitplan, None);
             return;
         }
-        let Some(art) = faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen) else {
+        let Some(art) = zeitplan_faellig(z, tag, (h, m)) else {
             if z.laufend.is_none() && z.warteschlange.is_empty() && vorbereitung_faellig(z, jetzt) {
                 let _ = einreihen(z, Art::Vorbereiten, Anlass::Zeitplan, None);
                 return;
@@ -1226,7 +1242,10 @@ impl Dienst {
         crate::protokoll::zeilen(BufReader::new(ausgabe), |t| {
             self.protokolliere(nr, &t, uhr());
         });
-        let erfolg = kind.wait().is_ok_and(|s| s.success());
+        let ausgang = kind.wait().map_or(AbrufAusgang::Abgebrochen, |s| {
+            AbrufAusgang::aus_exitcode(s.code())
+        });
+        let erfolg = ausgang == AbrufAusgang::Ok;
         let mut z = self.sperre();
         let Some(mut a) = z.laufend.take() else {
             return;
@@ -1235,8 +1254,9 @@ impl Dienst {
         a.erfolg = Some(erfolg);
         let ende = a.ende;
         let nachrichten_lauf = (erfolg && a.art == Art::Nachrichten).then_some(a.anlass);
-        if erfolg {
-            self.kurse_ok_vermerken(&mut z, &a);
+        self.kursausgang_vermerken(&mut z, &a, ausgang);
+        if matches!(a.art, Art::KurseVon(_)) && ausgang == AbrufAusgang::Voruebergehend {
+            a.hinweis = Some("Kursabruf vorübergehend fehlgeschlagen.".into());
         }
         let eingespielt =
             erfolg && a.art == Art::Update && crate::rueckfall::offen_pfad(&self.wurzel).exists();
@@ -1291,7 +1311,11 @@ impl Dienst {
     ) -> Result<(), String> {
         let (tag, ..) = ortszeit(jetzt).ok_or("Uhr liefert keinen Tag")?;
         let mut neu = z.erledigt;
-        neu.setze(art, tag);
+        if let Art::KurseVon(b) = art {
+            neu.abruf_start(b, tag, jetzt);
+        } else {
+            neu.setze(art, tag);
+        }
         match schreibe_ganz(&erledigt_pfad(&self.wurzel), &neu.als_text()) {
             Ok(()) => {
                 z.erledigt = neu;
@@ -1305,26 +1329,20 @@ impl Dienst {
         }
     }
 
-    /// Nach einem erfolgreichen Kursabruf des Zeitplans: Sein Tag zaehlt dauerhaft als Tag mit
-    /// Kursen (`Erledigt::kurse_ok`). So folgt der Papiertag auch nach einem Neustart. Der Tag
-    /// ist der, an dem der Zeitplan den Abruf gestartet hat.
-    fn kurse_ok_vermerken(&self, z: &mut Zustand, a: &Auftrag) {
+    fn kursausgang_vermerken(&self, z: &mut Zustand, a: &Auftrag, ausgang: AbrufAusgang) {
         let Art::KurseVon(boerse) = a.art else {
             return;
         };
         if a.anlass != Anlass::Zeitplan || z.erledigt_fehler.is_some() {
             return;
         }
-        let Some(tag) = z.erledigt.kurse_von(boerse) else {
-            return;
-        };
         let mut neu = z.erledigt;
-        neu.kurse_ok = Some(tag);
+        neu.abruf_ende(boerse, ausgang);
         match schreibe_ganz(&erledigt_pfad(&self.wurzel), &neu.als_text()) {
             Ok(()) => z.erledigt = neu,
             Err(e) => {
                 z.zeitplan.an = false;
-                z.zeitplan_fehler = Some(format!("Zeitplan angehalten: {e}"));
+                z.erledigt_fehler = Some(format!("Zeitplan angehalten: {e}"));
             }
         }
     }
@@ -1464,7 +1482,7 @@ pub fn nach_neustart(z: &Zustand, tag: Datum) -> Option<(bool, String)> {
         .filter(|a| a.anlass == Anlass::Zeitplan)
         .map(|a| if a.ende.is_none() { None } else { a.erfolg })
         .or_else(|| {
-            (z.erledigt.kurse_ok == Some(tag)
+            (z.boersen.iter().any(|b| z.erledigt.erfolgreich(*b, tag))
                 && z.warteschlange
                     .iter()
                     .any(|a| a.art == Art::Papier && a.anlass == Anlass::Zeitplan))
@@ -1506,15 +1524,32 @@ pub fn nach_neustart(z: &Zustand, tag: Datum) -> Option<(bool, String)> {
                 .into(),
         ));
     }
-    if frueher(&kurse, Frueher::Unterbrochen)
-        && !dieser_start(&kurse)
-        && z.erledigt.kurse_ok != Some(tag)
-    {
+    let unterbrochen: Vec<_> = z
+        .boersen
+        .iter()
+        .filter_map(|&b| {
+            let art = |art| art == Art::KurseVon(b);
+            let abgebrochen = z.erledigt.kurse_von(b) == Some(tag)
+                && z.erledigt
+                    .abruf(b)
+                    .is_some_and(|a| a.ausgang == AbrufAusgang::Abgebrochen);
+            (abgebrochen && frueher(&art, Frueher::Unterbrochen) && !dieser_start(&art)).then(
+                || {
+                    format!(
+                        "{}-Abruf unterbrochen.",
+                        if b == Boerse::Xetra { "Xetra" } else { "NYSE" }
+                    )
+                },
+            )
+        })
+        .collect();
+    if !unterbrochen.is_empty() {
         return Some((
-            true,
-            "Der Kursabruf lief, als DepotSchlopf endete. Ohne Kurse von heute folgt heute kein \
-             Papiertag von selbst. Der aktuelle Zeitplan steht unter Tätigkeit."
-                .into(),
+            false,
+            format!(
+                "{} Der Zeitplan prüft, ob ein weiterer Versuch möglich ist.",
+                unterbrochen.join(" ")
+            ),
         ));
     }
     None
@@ -1551,16 +1586,34 @@ fn vorbereitung_faellig(z: &Zustand, jetzt: Zeitpunkt) -> bool {
         })
 }
 
+fn zeitplan_faellig(z: &Zustand, tag: Datum, zeit: (u8, u8)) -> Option<Art> {
+    let depot = z.lage.as_ref().and_then(|l| l.bild.depot.as_ref());
+    let bestand: Vec<_> = depot
+        .into_iter()
+        .flat_map(|d| &d.toepfe)
+        .flat_map(|t| &t.positionen)
+        .filter_map(|p| depot_kern::Isin::neu(&p.isin).ok())
+        .filter_map(|isin| depot_kern::liste::boerse_von(&isin))
+        .collect();
+    let pflicht = if depot.is_some() {
+        &bestand
+    } else {
+        &z.boersen
+    };
+    let art = faellig_mit_bestand(&z.zeitplan, &z.erledigt, tag, zeit, &z.boersen, pflicht)?;
+    if art == Art::Papier && depot.is_some_and(|d| d.letzter_abschluss.is_some_and(|d| d >= tag)) {
+        return None;
+    }
+    Some(art)
+}
+
 fn zeitplan_auftrag_erlaubt(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> bool {
     if !z.zeitplan.an || z.erledigt_fehler.is_some() || z.zeitplan_fehler.is_some() {
         return false;
     }
     match art {
-        Art::Termine | Art::KurseVon(_) | Art::Papier => {
-            ortszeit(jetzt).is_some_and(|(tag, h, m, _, _)| {
-                faellig_fuer(&z.zeitplan, &z.erledigt, tag, (h, m), &z.boersen) == Some(art)
-            })
-        }
+        Art::Termine | Art::KurseVon(_) | Art::Papier => ortszeit(jetzt)
+            .is_some_and(|(tag, h, m, _, _)| zeitplan_faellig(z, tag, (h, m)) == Some(art)),
         Art::Nachrichten => rss_zeitplan_an(z, jetzt),
         Art::Gemini | Art::Sicherung => true,
         Art::Vorbereiten => vorbereitung_faellig(z, jetzt),

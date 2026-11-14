@@ -98,10 +98,10 @@ fn leeres_lagebild() -> Lagerechner {
 }
 
 /// Schaltet den Zeitplan ein, wie es der Mensch in der Einrichtung tut (ab Werk ist er aus).
-fn abendplan() -> Zeitplan {
+fn morgenplan_test() -> Zeitplan {
     Zeitplan {
-        termine: (17, 40),
-        kurse: (17, 45),
+        termine: (7, 20),
+        kurse: (7, 30),
         ..Zeitplan::default()
     }
 }
@@ -109,8 +109,8 @@ fn abendplan() -> Zeitplan {
 fn eingeschaltet(wurzel: PathBuf) -> Result<PathBuf, String> {
     let p = Zeitplan {
         an: true,
-        kurse: (17, 44),
-        ..abendplan()
+        kurse: (7, 30),
+        ..morgenplan_test()
     };
     fs::write(wurzel.join("daten").join("zeitplan.txt"), p.als_text())
         .map_err(|e| format!("Vorbedingung Zeitplan: {e}"))?;
@@ -519,14 +519,14 @@ fn zeitplan_text_streng() -> Result<(), String> {
 fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
     let p = Zeitplan {
         an: true,
-        ..abendplan()
+        ..morgenplan_test()
     };
     let do_ = some(Datum::neu(2026, 11, 5), "Donnerstag")?;
     let sa = some(Datum::neu(2026, 11, 7), "Samstag")?;
     let mo = some(Datum::neu(2026, 11, 9), "Montag")?;
     let leer = Erledigt::default();
-    assert_eq!(faellig_x(p, &leer, do_, (17, 39)), None);
-    assert_eq!(faellig_x(p, &leer, do_, (17, 40)), Some(Art::Termine));
+    assert_eq!(faellig_x(p, &leer, do_, (7, 19)), None);
+    assert_eq!(faellig_x(p, &leer, do_, (7, 20)), Some(Art::Termine));
     assert_eq!(faellig_x(p, &leer, do_, (23, 0)), Some(Art::Termine));
     let termine = Erledigt {
         termine: Some(do_),
@@ -534,9 +534,9 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
         kurse_nyse: None,
         ..Erledigt::default()
     };
-    assert_eq!(faellig_x(p, &termine, do_, (17, 44)), None);
+    assert_eq!(faellig_x(p, &termine, do_, (7, 29)), None);
     assert_eq!(
-        faellig_x(p, &termine, do_, (17, 45)),
+        faellig_x(p, &termine, do_, (7, 30)),
         Some(Art::KurseVon(Boerse::Xetra))
     );
     let beide = Erledigt {
@@ -555,7 +555,7 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
         Some((
             Art::Termine,
             some(Datum::neu(2026, 11, 6), "Freitag")?,
-            (17, 40)
+            (7, 20)
         ))
     );
     let freitag_fertig = Erledigt {
@@ -570,7 +570,7 @@ fn zeitplan_faellig_einmal_je_handelstag() -> Result<(), String> {
             &freitag_fertig,
             some(Datum::neu(2026, 11, 6), "Freitag")?
         ),
-        Some((Art::Termine, mo, (17, 40)))
+        Some((Art::Termine, mo, (7, 20)))
     );
     Ok(())
 }
@@ -585,7 +585,7 @@ fn zeitplan_der_liste_ruft_xetra_und_nyse_ab() -> Result<(), String> {
     );
     let p = Zeitplan {
         an: true,
-        ..abendplan()
+        ..morgenplan_test()
     };
     let do_ = some(Datum::neu(2026, 11, 5), "Donnerstag")?;
     let xetra = Erledigt {
@@ -593,14 +593,14 @@ fn zeitplan_der_liste_ruft_xetra_und_nyse_ab() -> Result<(), String> {
         kurse: Some(do_),
         ..Erledigt::default()
     };
-    assert_eq!(faellig(&p, &xetra, do_, (22, 9)), None);
+    assert_eq!(faellig(&p, &xetra, do_, (7, 29)), None);
     assert_eq!(
-        faellig(&p, &xetra, do_, (22, 10)),
+        faellig(&p, &xetra, do_, (7, 30)),
         Some(Art::KurseVon(Boerse::Nyse))
     );
     assert_eq!(
         naechster(&p, &xetra, do_),
-        Some((Art::KurseVon(Boerse::Nyse), do_, (22, 10)))
+        Some((Art::KurseVon(Boerse::Nyse), do_, (7, 30)))
     );
     let alle = Erledigt {
         kurse_nyse: Some(do_),
@@ -616,7 +616,7 @@ fn zeitplan_der_liste_ruft_xetra_und_nyse_ab() -> Result<(), String> {
 fn zeitplan_ruht_an_boersenfeiertagen() -> Result<(), String> {
     let p = Zeitplan {
         an: true,
-        ..abendplan()
+        ..morgenplan_test()
     };
     let leer = Erledigt::default();
     let heiligabend = some(Datum::neu(2026, 12, 24), "Heiligabend")?;
@@ -635,7 +635,7 @@ fn zeitplan_ruht_an_boersenfeiertagen() -> Result<(), String> {
         Some((
             Art::Termine,
             some(Datum::neu(2026, 12, 28), "28.12.")?,
-            (17, 40)
+            (7, 20)
         ))
     );
     Ok(())
@@ -681,27 +681,26 @@ fn zeitplan_startet_termine_kurse_und_danach_papier() -> Result<(), String> {
     let wurzel = eingeschaltet(ordner()?)?;
     let d = dienst(wurzel.clone(), true);
     d.sperre().boersen = vec![Boerse::Xetra];
-    // 17:46: beide faellig, Termine zuerst.
-    let t = donnerstag(17, 46)?;
+    // 07:31: beide faellig, Termine zuerst.
+    let t = donnerstag(7, 31)?;
     let (nr, kind) = some(d.schritt(t), "Termine")?;
     assert_eq!(
         d.sperre().laufend.as_ref().map(|a| (a.art, a.anlass)),
         Some((Art::Termine, Anlass::Zeitplan))
     );
-    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 31).ok());
     let (nr, kind) = some(d.schritt(t), "Kurse")?;
-    d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 32).ok());
     assert_eq!(wartend(&d), vec![(Art::Papier, Anlass::Zeitplan)]);
     let (nr, kind) = some(d.schritt(t), "Papier")?;
-    d.verfolge(nr, kind, || donnerstag(17, 48).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 33).ok());
     assert!(d.schritt(t).is_none(), "heute nichts mehr");
     // Ein Neustart startet heute nichts noch einmal.
     let erledigt = fs::read_to_string(wurzel.join("daten").join("dienst_erledigt.txt"))
         .map_err(|e| format!("Erledigt fehlt: {e}"))?;
-    assert_eq!(
-        erledigt,
-        "erledigt-v3\ntermine=2026-11-05\nkurse=2026-11-05\nkurse_nyse=\nkurse_ok=2026-11-05\npapier=2026-11-05\n"
-    );
+    let gelesen = Erledigt::lies(&erledigt)?;
+    assert_eq!(gelesen.papier, t.frankfurt_tag());
+    assert!(gelesen.erfolgreich(Boerse::Xetra, some(t.frankfurt_tag(), "Tag")?));
     let neu = dienst(wurzel, true);
     assert!(neu.schritt(donnerstag(20, 0)?).is_none());
     assert!(wartend(&neu).is_empty());
@@ -711,11 +710,12 @@ fn zeitplan_startet_termine_kurse_und_danach_papier() -> Result<(), String> {
 #[test]
 fn kein_papiertag_nach_gescheitertem_kursabruf() -> Result<(), String> {
     let d = dienst(eingeschaltet(ordner()?)?, false);
-    let t = donnerstag(17, 46)?;
+    d.sperre().boersen = vec![Boerse::Xetra];
+    let t = donnerstag(7, 31)?;
     let (nr, kind) = some(d.schritt(t), "Termine")?;
-    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 31).ok());
     let (nr, kind) = some(d.schritt(t), "Kurse")?;
-    d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 32).ok());
     assert!(wartend(&d).is_empty());
     let z = d.sperre();
     assert_eq!(
@@ -824,13 +824,13 @@ fn zeitplan_ueber_die_seite_speichern_und_aktivieren() -> Result<(), String> {
     assert_eq!(d.sperre().zeitplan, Zeitplan::default());
     let a = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&aktion=speichern&termine=08%3A00&kurse=18%3A05"),
+        &format!("t={TOKEN}&aktion=speichern&termine=08%3A00&kurse=08%3A05"),
     );
     assert!(text(&behandle(&d, &umw, &a, t)).contains("m=zeitplan#zeitplan"));
     let erwartet = Zeitplan {
         an: false,
         termine: (8, 0),
-        kurse: (18, 5),
+        kurse: (8, 5),
         papier_danach: false,
         nachrichten_an: false,
         vorbereitung: depot_dienst::zeitplan::VorbereitungsPlan::Aus,
@@ -1251,7 +1251,7 @@ fn get(d: &Dienst, ziel: &str, t: Zeitpunkt) -> String {
 #[test]
 fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), String> {
     let d = dienst(ordner()?, false);
-    let t = donnerstag(17, 39)?;
+    let t = donnerstag(7, 19)?;
     let tag = some(t.datum(), "Tag des Zeitplans")?;
     let html = get(&d, "/teil/live", t);
     assert!(!html.contains("<h2>Zeitstrahl</h2><p>Zeitplan aus"));
@@ -1260,36 +1260,37 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
         let mut z = d.sperre();
         z.boersen = vec![Boerse::Xetra, Boerse::Nyse];
         z.zeitplan.an = true;
-        z.zeitplan.termine = (17, 40);
-        z.zeitplan.kurse = (17, 51);
+        z.zeitplan.termine = (7, 20);
+        z.zeitplan.kurse = (7, 30);
         z.zeitplan.papier_danach = true;
         z.zeitplan.nachrichten_an = true;
     }
     let html = get(&d, "/teil/live", t);
-    let termine = some(html.find("<b>17:40 Uhr</b> · Termine"), "Terminabruf")?;
-    let xetra = some(html.find("<b>17:51 Uhr</b> · Kurse Xetra"), "Xetra-Abruf")?;
-    let nyse = some(html.find("<b>22:10 Uhr</b> · Kurse US-Börsen"), "US-Abruf")?;
+    let termine = some(html.find("<b>07:20 Uhr</b> · Termine"), "Terminabruf")?;
+    let xetra = some(html.find("<b>07:30 Uhr</b> · Kurse Xetra"), "Xetra-Abruf")?;
+    let nyse = some(html.find("<b>07:30 Uhr</b> · Kurse US-Börsen"), "US-Abruf")?;
     assert!(termine < xetra && xetra < nyse);
     assert!(html.contains("Kurse Xetra abrufen · ohne KI"));
     assert!(html.contains(&format!("Dachs ({})", depot_kern::modelle::MODELL_DACHS)));
     assert!(html.contains(&format!("Maus ({})", depot_kern::modelle::MODELL_MAUS)));
-    assert!(html.contains("nach dem letzten Kursabruf, wenn mindestens einer erfolgreich war"));
+    assert!(
+        html.contains("nach dem letzten Kursabruf, wenn Kurse für alle gehaltenen Werte vorliegen")
+    );
     assert!(html.contains("täglich von 08:00 bis vor 23:00 Uhr"));
     assert!(!html.contains("danach optional kostenlose Gemini-Zuarbeit"));
     let schalter = depot_lage::gespraeche::gemini_pfad(&d.wurzel.join("daten"));
     fs::write(schalter, "gratisprojekt=ja\n").map_err(|e| e.to_string())?;
     assert!(get(&d, "/teil/live", t).contains("danach optional kostenlose Gemini-Zuarbeit"));
-    assert!(get(&d, "/einrichtung", t).contains("Beim Abendplan wird jede andere Börse"));
 
     {
         let mut z = d.sperre();
         z.erledigt.kurse = Some(tag);
         z.erledigt.kurse_nyse = Some(tag);
     }
-    let html = get(&d, "/teil/live", donnerstag(22, 20)?);
+    let html = get(&d, "/teil/live", donnerstag(8, 0)?);
     assert!(html.contains("entfällt: kein erfolgreicher Kursabruf"));
     d.sperre().erledigt.termine = Some(tag);
-    let html = get(&d, "/teil/live", donnerstag(22, 20)?);
+    let html = get(&d, "/teil/live", donnerstag(8, 0)?);
     assert!(html.contains("Nächster Börsentag · Fr 06.11.2026"));
     d.sperre().zeitplan.kurse = (7, 30);
     let einrichtung = get(&d, "/einrichtung", t);
@@ -1468,7 +1469,7 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
     // Uhrzeiten aendern ohne Einschalten geht immer.
     let aus = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&aktion=speichern&termine=08%3A15&kurse=18%3A05"),
+        &format!("t={TOKEN}&aktion=speichern&termine=08%3A15&kurse=08%3A05"),
     );
     assert!(text(&behandle(&d, &umw, &aus, t)).contains("m=zeitplan#"));
     // Mit fertiger Einrichtung geht das Einschalten.
@@ -1490,7 +1491,7 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
     let plan = fertig.sperre().zeitplan;
     assert!(!plan.an);
     assert_eq!(plan.termine, (8, 15));
-    assert_eq!(plan.kurse, (18, 5));
+    assert_eq!(plan.kurse, (8, 5));
     Ok(())
 }
 
@@ -1512,7 +1513,7 @@ fn zeitplanformular_bewahrt_entwurf_bei_schalterwechsel_im_anderen_tab() -> Resu
     let speichern = |stand| {
         let post = formular_post(
             "/zeitplan",
-            &format!("t={TOKEN}&aktion=speichern&planstand={stand}&termine=08%3A15&kurse=18%3A05"),
+            &format!("t={TOKEN}&aktion=speichern&planstand={stand}&termine=08%3A15&kurse=08%3A05"),
         );
         text(&behandle(&d, &umw, &post, t))
     };
@@ -1523,12 +1524,12 @@ fn zeitplanformular_bewahrt_entwurf_bei_schalterwechsel_im_anderen_tab() -> Resu
     assert!(seite.contains("name=\"planstand\" value=\"an\""));
     assert!(seite.contains("Der Zeitplan bleibt eingeschaltet."));
     assert!(!seite.contains("Nur speichern"));
-    assert!(seite.contains("value=\"18:05\""));
+    assert!(seite.contains("value=\"08:05\""));
     assert!(seite.contains("Deine Eingaben stehen als Entwurf"));
     assert!(speichern("an").contains("m=zeitplan#"));
     let nachher = d.sperre().zeitplan;
     assert!(nachher.an);
-    assert_eq!(nachher.kurse, (18, 5));
+    assert_eq!(nachher.kurse, (8, 5));
     Ok(())
 }
 
@@ -1554,12 +1555,12 @@ fn speichern_und_einschalten_uebernimmt_genau_die_ausgefuellten_werte() -> Resul
             t,
         ))
     };
-    let r = sende("termine=08%3A15&kurse=18%3A05&nachrichten_an=ja");
+    let r = sende("termine=08%3A15&kurse=08%3A05&nachrichten_an=ja");
     assert!(r.contains("m=zeitplan_gespeichert_an"), "{r}");
     let plan = d.sperre().zeitplan;
     assert!(plan.an && plan.nachrichten_an);
     assert_eq!(plan.termine, (8, 15));
-    assert_eq!(plan.kurse, (18, 5));
+    assert_eq!(plan.kurse, (8, 5));
     assert_eq!(
         Zeitplan::lies(
             &fs::read_to_string(w.join("daten/zeitplan.txt")).map_err(|e| e.to_string())?
@@ -1587,14 +1588,14 @@ fn kombiniertes_einschalten_bleibt_bei_fehlender_einrichtung_ohne_wirkung() -> R
     assert!(d.schritt(jetzt).is_none());
     let formular = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&aktion=speichern_an&termine=08%3A15&kurse=18%3A05"),
+        &format!("t={TOKEN}&aktion=speichern_an&termine=08%3A15&kurse=08%3A05"),
     );
     let antwort = text(&behandle(&d, &Attrappe::default(), &formular, jetzt));
     assert!(antwort.contains("m=zeitplan_einrichtung"));
     assert!(!d.sperre().zeitplan.an);
     assert!(!wurzel.join("daten/zeitplan.txt").exists());
     let html = get(&d, &ort(&antwort), jetzt);
-    assert!(html.contains("value=\"18:05\""));
+    assert!(html.contains("value=\"08:05\""));
     assert!(html.contains("disabled>Speichern und Zeitplan einschalten"));
     assert!(html.contains("Du kannst die Einstellungen schon speichern."));
     assert!(!html.contains("wähle unten <b>Speichern und Zeitplan einschalten</b>"));
@@ -2119,77 +2120,22 @@ fn nach_einem_ausfall_sagt_der_zeitplan_wie_es_weitergeht() -> Result<(), String
     Ok(())
 }
 
-/// Kurse je Boerse: Xetra zur eingestellten Uhrzeit, die NYSE zehn Minuten nach ihrem eigenen
-/// Schluss in Frankfurter Zeit, mit Sommerzeit und verkuerzten Tagen. An einem Tag, an dem nur
-/// eine Boerse handelt, nur diese. Der letzte Abruf des Tages bestimmt den Papiertag.
 #[test]
-fn kurse_je_boerse_nach_ihrem_schluss() -> Result<(), String> {
+fn kurse_je_boerse_morgens_auch_am_feiertag_einer_boerse() -> Result<(), String> {
     let p = Zeitplan {
         an: true,
-        ..abendplan()
+        ..morgenplan_test()
     };
     let beide = [Boerse::Xetra, Boerse::Nyse];
-    let tag = |m, t| some(Datum::neu(2026, m, t), "Datum");
-    // Donnerstag, 05.11.: beide offen, NYSE 16:00 New York = 22:00 Frankfurt.
-    let do_ = tag(11, 5)?;
-    assert_eq!(
-        abrufe_fuer(&p, do_, &beide),
-        vec![(Boerse::Xetra, (17, 45)), (Boerse::Nyse, (22, 10))]
-    );
-    // 29.10.: Frankfurt schon Winterzeit, New York noch Sommerzeit: 21:00 + 10 Minuten.
-    assert_eq!(
-        abrufe_fuer(&p, tag(10, 29)?, &beide),
-        vec![(Boerse::Xetra, (17, 45)), (Boerse::Nyse, (21, 10))]
-    );
-    // 27.11., Tag nach Thanksgiving: NYSE schliesst um 13:00 New York = 19:00 Frankfurt.
-    assert_eq!(
-        abrufe_fuer(&p, tag(11, 27)?, &beide),
-        vec![(Boerse::Xetra, (17, 45)), (Boerse::Nyse, (19, 10))]
-    );
-    // 26.11., Thanksgiving: nur Xetra. 24.12.: nur die NYSE (bis 13:00 New York).
-    assert_eq!(
-        abrufe_fuer(&p, tag(11, 26)?, &beide),
-        vec![(Boerse::Xetra, (17, 45))]
-    );
-    assert_eq!(
-        abrufe_fuer(&p, tag(12, 24)?, &beide),
-        vec![(Boerse::Nyse, (19, 10))]
-    );
-    assert!(letzter_abruf_fuer(&p, do_, Boerse::Nyse, &beide));
-    assert!(!letzter_abruf_fuer(&p, do_, Boerse::Xetra, &beide));
-    assert!(letzter_abruf_fuer(&p, tag(11, 26)?, Boerse::Xetra, &beide));
-
-    // Faellig: Termine, dann Xetra, dann NYSE, je einmal.
-    let mut e = Erledigt::default();
-    assert_eq!(
-        faellig_fuer(&p, &e, do_, (17, 45), &beide),
-        Some(Art::Termine)
-    );
-    e.setze(Art::Termine, do_);
-    assert_eq!(
-        faellig_fuer(&p, &e, do_, (17, 45), &beide),
-        Some(Art::KurseVon(Boerse::Xetra))
-    );
-    e.setze(Art::KurseVon(Boerse::Xetra), do_);
-    assert_eq!(faellig_fuer(&p, &e, do_, (22, 9), &beide), None);
-    assert_eq!(
-        naechster_fuer(&p, &e, do_, &beide),
-        Some((Art::KurseVon(Boerse::Nyse), do_, (22, 10)))
-    );
-    assert_eq!(
-        faellig_fuer(&p, &e, do_, (22, 10), &beide),
-        Some(Art::KurseVon(Boerse::Nyse))
-    );
-    e.setze(Art::KurseVon(Boerse::Nyse), do_);
-    assert_eq!(faellig_fuer(&p, &e, do_, (23, 59), &beide), None);
-    assert_eq!(e.kurse_nyse, Some(do_));
-    // Heiligabend handelt nur die NYSE: der Zeitplan laeuft, aber nur fuer sie.
-    let mut h = Erledigt::default();
-    h.setze(Art::Termine, tag(12, 24)?);
-    assert_eq!(
-        faellig_fuer(&p, &h, tag(12, 24)?, (19, 10), &beide),
-        Some(Art::KurseVon(Boerse::Nyse))
-    );
+    for (monat, tag) in [(11, 5), (11, 26), (12, 24)] {
+        let d = some(Datum::neu(2026, monat, tag), "Datum")?;
+        assert_eq!(
+            abrufe_fuer(&p, d, &beide),
+            vec![(Boerse::Xetra, (7, 30)), (Boerse::Nyse, (7, 30))]
+        );
+        assert!(letzter_abruf_fuer(&p, d, Boerse::Nyse, &beide));
+        assert!(!letzter_abruf_fuer(&p, d, Boerse::Xetra, &beide));
+    }
     Ok(())
 }
 
@@ -2210,13 +2156,13 @@ fn erledigt_frueherer_form() -> Result<(), String> {
     );
     assert_eq!(
         alt.als_text(),
-        "erledigt-v3\ntermine=2026-11-05\nkurse=2026-11-05\nkurse_nyse=\nkurse_ok=\npapier=\n"
+        "erledigt-v4\ntermine=2026-11-05\nkurse=2026-11-05\nkurse_nyse=\npapier=\nxetra_abruf=\nnyse_abruf=\n"
     );
     assert!(Erledigt::lies("erledigt-v1\ntermine=\nkurse=\nkurse_nyse=\n").is_err());
     assert!(Erledigt::lies("erledigt-v2\ntermine=\nkurse=\n").is_err());
     // Aus der Form ohne Erfolg folgt kein Papiertag: kurse_ok bleibt leer.
     let v2 = Erledigt::lies("erledigt-v2\ntermine=\nkurse=2026-11-05\nkurse_nyse=\n")?;
-    assert_eq!(v2.kurse_ok, None);
+    assert!(!v2.erfolgreich(Boerse::Xetra, tag));
     assert!(Erledigt::lies("erledigt-v3\ntermine=\nkurse=\nkurse_nyse=\nkurse_ok=\n").is_err());
     Ok(())
 }
@@ -2228,8 +2174,8 @@ fn erledigt_frueherer_form() -> Result<(), String> {
 fn papiertag_nach_dem_letzten_abruf_des_tages() -> Result<(), String> {
     for (xetra_ok, nyse_ok, zeitplan_an, papier) in [
         (true, true, true, true),
-        (false, true, true, true),
-        (true, false, true, true),
+        (false, true, true, false),
+        (true, false, true, false),
         (false, false, true, false),
         (true, true, false, false),
     ] {
@@ -2246,20 +2192,16 @@ fn papiertag_nach_dem_letzten_abruf_des_tages() -> Result<(), String> {
             leeres_lagebild(),
         ));
         d.sperre().boersen = vec![Boerse::Xetra, Boerse::Nyse];
-        let (nr, kind) = some(d.schritt(donnerstag(17, 46)?), "Termine")?;
-        d.verfolge(nr, kind, || donnerstag(17, 46).ok());
-        let (nr, kind) = some(d.schritt(donnerstag(17, 46)?), "Xetra")?;
+        let (nr, kind) = some(d.schritt(donnerstag(7, 31)?), "Termine")?;
+        d.verfolge(nr, kind, || donnerstag(7, 31).ok());
+        let (nr, kind) = some(d.schritt(donnerstag(7, 31)?), "Xetra")?;
         assert_eq!(
             d.sperre().laufend.as_ref().map(|a| a.art),
             Some(Art::KurseVon(Boerse::Xetra))
         );
-        d.verfolge(nr, kind, || donnerstag(17, 47).ok());
-        assert!(wartend(&d).is_empty(), "nach Xetra noch kein Papiertag");
-        assert!(
-            d.schritt(donnerstag(22, 9)?).is_none(),
-            "NYSE erst um 22:10"
-        );
-        let (nr, kind) = some(d.schritt(donnerstag(22, 10)?), "NYSE")?;
+        d.verfolge(nr, kind, || donnerstag(7, 32).ok());
+        assert!(!wartend(&d).iter().any(|(art, _)| *art == Art::Papier));
+        let (nr, kind) = some(d.schritt(donnerstag(7, 32)?), "NYSE")?;
         assert_eq!(
             d.sperre().laufend.as_ref().map(|a| a.art),
             Some(Art::KurseVon(Boerse::Nyse))
@@ -2271,7 +2213,7 @@ fn papiertag_nach_dem_letzten_abruf_des_tages() -> Result<(), String> {
             })
             .map_err(|e| format!("Zeitplan ausschalten: {e:?}"))?;
         }
-        d.verfolge(nr, kind, || donnerstag(22, 11).ok());
+        d.verfolge(nr, kind, || donnerstag(7, 33).ok());
         let erwartet = if papier {
             vec![(Art::Papier, Anlass::Zeitplan)]
         } else {
@@ -2292,8 +2234,8 @@ fn nur_xetra(wurzel: PathBuf) -> Arc<Dienst> {
 
 #[test]
 fn zeitplan_holt_kursabruf_und_papiertag_nach_update_probe_nach() -> Result<(), String> {
-    let faellig = donnerstag(17, 45)?;
-    let spaeter = donnerstag(17, 47)?;
+    let faellig = donnerstag(7, 30)?;
+    let spaeter = donnerstag(7, 32)?;
     let tag = some(faellig.datum(), "Handelstag")?;
     for (kurs_vorher, erwartet) in [
         (None, Art::KurseVon(Boerse::Xetra)),
@@ -2303,7 +2245,11 @@ fn zeitplan_holt_kursabruf_und_papiertag_nach_update_probe_nach() -> Result<(), 
         let erledigt = Erledigt {
             termine: Some(tag),
             kurse: kurs_vorher,
-            kurse_ok: kurs_vorher,
+            xetra_abruf: kurs_vorher.map(|_| depot_dienst::zeitplan::Abruf {
+                anker: faellig,
+                versuche: 1,
+                ausgang: depot_dienst::zeitplan::AbrufAusgang::Ok,
+            }),
             ..Erledigt::default()
         };
         let datei = wurzel.join("daten/dienst_erledigt.txt");
@@ -2325,7 +2271,7 @@ fn zeitplan_holt_kursabruf_und_papiertag_nach_update_probe_nach() -> Result<(), 
             d.sperre().laufend.as_ref().map(|a| (a.art, a.anlass)),
             Some((erwartet, Anlass::Zeitplan))
         );
-        d.verfolge(nr, kind, || donnerstag(17, 48).ok());
+        d.verfolge(nr, kind, || donnerstag(7, 33).ok());
     }
     Ok(())
 }
@@ -2343,18 +2289,18 @@ fn neustart_satz(d: &Dienst, t: Zeitpunkt) -> Option<String> {
 #[test]
 fn neustart_zwischen_kursabruf_und_papiertag_holt_ihn_nach() -> Result<(), String> {
     let wurzel = eingeschaltet(ordner()?)?;
-    let t = donnerstag(17, 46)?;
+    let t = donnerstag(7, 31)?;
     {
         let d = nur_xetra(wurzel.clone());
         let (nr, kind) = some(d.schritt(t), "Termine")?;
-        d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+        d.verfolge(nr, kind, || donnerstag(7, 31).ok());
         let (nr, kind) = some(d.schritt(t), "Kurse")?;
-        d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+        d.verfolge(nr, kind, || donnerstag(7, 32).ok());
         assert_eq!(wartend(&d), vec![(Art::Papier, Anlass::Zeitplan)]);
         assert_eq!(neustart_satz(&d, t), None, "kein Neustart");
         // Hier endet der Dienst, bevor der Papiertag beginnt.
     }
-    let spaeter = donnerstag(18, 20)?;
+    let spaeter = donnerstag(8, 20)?;
     let d = nur_xetra(wurzel.clone());
     let (nr, kind) = some(d.schritt(spaeter), "Papiertag nachgeholt")?;
     assert_eq!(
@@ -2364,7 +2310,7 @@ fn neustart_zwischen_kursabruf_und_papiertag_holt_ihn_nach() -> Result<(), Strin
     let satz = some(neustart_satz(&d, spaeter), "Satz")?;
     assert!(satz.contains("holt DepotSchlopf den Papiertag"), "{satz}");
     assert!(satz.contains("Du musst nichts tun"), "{satz}");
-    d.verfolge(nr, kind, || donnerstag(18, 21).ok());
+    d.verfolge(nr, kind, || donnerstag(8, 21).ok());
     let satz = some(neustart_satz(&d, spaeter), "Satz")?;
     assert!(satz.contains("nachgeholt"), "{satz}");
     assert!(d.schritt(spaeter).is_none(), "heute nichts mehr");
@@ -2380,13 +2326,13 @@ fn neustart_zwischen_kursabruf_und_papiertag_holt_ihn_nach() -> Result<(), Strin
 #[test]
 fn neustart_waehrend_des_papiertags_startet_ihn_nicht_neu() -> Result<(), String> {
     let wurzel = eingeschaltet(ordner()?)?;
-    let t = donnerstag(17, 46)?;
+    let t = donnerstag(7, 31)?;
     {
         let d = nur_xetra(wurzel.clone());
         let (nr, kind) = some(d.schritt(t), "Termine")?;
-        d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+        d.verfolge(nr, kind, || donnerstag(7, 31).ok());
         let (nr, kind) = some(d.schritt(t), "Kurse")?;
-        d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+        d.verfolge(nr, kind, || donnerstag(7, 32).ok());
         let (_, mut kind) = some(d.schritt(t), "Papier")?;
         let _ = kind.wait();
         // Der Dienst endet, waehrend der Papiertag laeuft: Sein Ende steht nie im Verlauf.
@@ -2407,11 +2353,11 @@ fn neustart_waehrend_des_papiertags_startet_ihn_nicht_neu() -> Result<(), String
 #[test]
 fn neustart_waehrend_des_kursabrufs_ohne_papiertag() -> Result<(), String> {
     let wurzel = eingeschaltet(ordner()?)?;
-    let t = donnerstag(17, 46)?;
+    let t = donnerstag(7, 31)?;
     {
         let d = nur_xetra(wurzel.clone());
         let (nr, kind) = some(d.schritt(t), "Termine")?;
-        d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+        d.verfolge(nr, kind, || donnerstag(7, 31).ok());
         let (_, mut kind) = some(d.schritt(t), "Kurse")?;
         let _ = kind.wait();
     }
@@ -2420,23 +2366,22 @@ fn neustart_waehrend_des_kursabrufs_ohne_papiertag() -> Result<(), String> {
     assert!(d.schritt(spaeter).is_none());
     assert!(wartend(&d).is_empty());
     let satz = some(neustart_satz(&d, spaeter), "Satz")?;
-    assert!(satz.contains("Der Kursabruf lief"), "{satz}");
-    assert!(satz.contains("kein Papiertag"), "{satz}");
+    assert!(satz.contains("Xetra-Abruf unterbrochen"), "{satz}");
     Ok(())
 }
 
 #[test]
 fn wartender_papiertag_startet_bei_ausgeschaltetem_zeitplan_nicht() -> Result<(), String> {
     let d = nur_xetra(eingeschaltet(ordner()?)?);
-    let t = donnerstag(17, 46)?;
+    let t = donnerstag(7, 31)?;
     let (nr, kind) = some(d.schritt(t), "Termine")?;
-    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 31).ok());
     let (nr, kind) = some(d.schritt(t), "Kurse")?;
-    d.verfolge(nr, kind, || donnerstag(17, 47).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 32).ok());
     assert_eq!(wartend(&d), vec![(Art::Papier, Anlass::Zeitplan)]);
     d.setze_zeitplan(Zeitplan::default())
         .map_err(|e| format!("Zeitplan ausschalten: {e:?}"))?;
-    assert!(d.schritt(donnerstag(17, 48)?).is_none());
+    assert!(d.schritt(donnerstag(7, 33)?).is_none());
     assert!(wartend(&d).is_empty());
     assert_eq!(d.sperre().erledigt.papier, None);
     Ok(())
@@ -2453,7 +2398,7 @@ fn ausschalten_entfernt_wartenden_abruf_und_wiedereinschalten_holt_ihn_einmal_na
         lagebild_mit_schluesseln(true),
     ));
     d.sperre().boersen = vec![Boerse::Xetra];
-    let t = donnerstag(17, 46)?;
+    let t = donnerstag(7, 31)?;
     let tag = some(t.datum(), "Handelstag")?;
     let (nr, kind) = some(d.schritt(t), "Terminabruf")?;
     assert!(d.schritt(t).is_none());
@@ -2471,9 +2416,9 @@ fn ausschalten_entfernt_wartenden_abruf_und_wiedereinschalten_holt_ihn_einmal_na
         d.sperre().laufend.as_ref().map(|a| a.art),
         Some(Art::Termine)
     );
-    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 31).ok());
     let (nr, kind) = some(d.schritt(t), "manuelle Schlagzeilen")?;
-    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 31).ok());
     assert!(d.schritt(t).is_none());
     assert_eq!(d.sperre().erledigt.kurse, None);
 
@@ -2481,7 +2426,7 @@ fn ausschalten_entfernt_wartenden_abruf_und_wiedereinschalten_holt_ihn_einmal_na
     assert!(text(&behandle(&d, &Attrappe::default(), &an, t)).contains("m=zeitplan_an"));
     let (nr, kind) = some(d.schritt(t), "nachgeholter Kursabruf")?;
     assert_eq!(d.sperre().erledigt.kurse, Some(tag));
-    d.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    d.verfolge(nr, kind, || donnerstag(7, 31).ok());
     let live = get(&d, "/", t);
     assert!(
         live.contains("Als Nächstes: Papiertag (Zeitplan)"),
@@ -2503,7 +2448,7 @@ fn ausschalten_entfernt_wartenden_abruf_und_wiedereinschalten_holt_ihn_einmal_na
         neu.sperre().laufend.as_ref().map(|a| a.art),
         Some(Art::Papier)
     );
-    neu.verfolge(nr, kind, || donnerstag(17, 46).ok());
+    neu.verfolge(nr, kind, || donnerstag(7, 31).ok());
     assert!(neu.schritt(t).is_none());
     Ok(())
 }
@@ -2827,7 +2772,7 @@ fn vorbereiten_braucht_bestaetigung_und_automatik_braucht_schlagzeilen() -> Resu
     assert!(wartend(&d).is_empty());
     let plan = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&aktion=speichern&termine=17%3A40&kurse=17%3A45&vorbereitung_an=ja"),
+        &format!("t={TOKEN}&aktion=speichern&termine=17%3A40&kurse=07%3A30&vorbereitung_an=ja"),
     );
     let antwort = text(&behandle(&d, &Attrappe::default(), &plan, t));
     assert!(antwort.contains("m=vorbereitung_quellen"));
@@ -2945,14 +2890,14 @@ fn rss_checkbox_bleibt_bei_fehlern_erhalten_und_wird_dauerhaft_gespeichert() -> 
     let t = donnerstag(12, 0)?;
     let falsch = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&aktion=speichern&termine=kaputt&kurse=17%3A45&nachrichten_an=ja"),
+        &format!("t={TOKEN}&aktion=speichern&termine=kaputt&kurse=07%3A30&nachrichten_an=ja"),
     );
     let antwort = text(&behandle(&d, &u, &falsch, t));
     assert!(antwort.contains("nachrichten_an=ja"), "{antwort}");
     assert!(!d.sperre().zeitplan.nachrichten_an);
     let richtig = formular_post(
         "/zeitplan",
-        &format!("t={TOKEN}&aktion=speichern&termine=17%3A40&kurse=17%3A45&nachrichten_an=ja"),
+        &format!("t={TOKEN}&aktion=speichern&termine=17%3A40&kurse=07%3A30&nachrichten_an=ja"),
     );
     assert!(text(&behandle(&d, &u, &richtig, t)).contains("m=zeitplan#zeitplan"));
     assert!(d.sperre().zeitplan.nachrichten_an);
@@ -3275,37 +3220,68 @@ fn zeitplan_ohne_hinweisfeld_heisst_an() -> Result<(), String> {
 }
 
 #[test]
-fn alter_standardplan_wird_einmal_auf_den_morgen_umgestellt() -> Result<(), String> {
+fn z6_gespeicherter_plan_2210_angehalten() -> Result<(), String> {
     let wurzel = ordner()?;
     let pfad = wurzel.join("daten/zeitplan.txt");
     let alt = Zeitplan {
         an: true,
-        kurse: (17, 52),
-        ..abendplan()
+        kurse: (22, 10),
+        ..morgenplan_test()
     };
     fs::write(&pfad, alt.als_text()).map_err(|e| e.to_string())?;
     let d = dienst(wurzel.clone(), true);
-    let plan = d.sperre().zeitplan;
-    assert!(plan.an);
-    assert_eq!((plan.termine, plan.kurse), ((7, 20), (7, 30)));
+    assert_eq!(d.sperre().zeitplan, alt);
+    let jetzt = donnerstag(22, 10)?;
+    let tag = some(jetzt.frankfurt_tag(), "Tag")?;
+    let beide = Boerse::ALLE;
     assert_eq!(
-        fs::read_to_string(&pfad).map_err(|e| e.to_string())?,
-        plan.als_text()
+        faellig_fuer(&alt, &Erledigt::default(), tag, (22, 10), &beide),
+        Some(Art::Termine)
     );
-    assert_eq!(dienst(wurzel, true).sperre().zeitplan, plan);
-    let tag = some(donnerstag(7, 30)?.datum(), "Tag")?;
-    let beide = [Boerse::Xetra, Boerse::Nyse];
+    let erledigt = Erledigt {
+        termine: Some(tag),
+        ..Erledigt::default()
+    };
+    assert_eq!(faellig_fuer(&alt, &erledigt, tag, (22, 10), &beide), None);
+    assert!(get(&d, "/teil/live", jetzt).contains("Kursabruf 22:10 liegt außerhalb 07:00–08:30"));
+    Ok(())
+}
+
+#[test]
+fn z6_abendplan_sichert_weiter() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let abend = Zeitplan {
+        an: true,
+        kurse: (22, 10),
+        ..morgenplan_test()
+    };
+    fs::write(wurzel.join("daten/zeitplan.txt"), abend.als_text()).map_err(|e| e.to_string())?;
+    let ziel = if cfg!(windows) {
+        r"E:\"
+    } else {
+        "/DepotSicherung"
+    };
+    fs::write(wurzel.join("daten/sicherung_ziel.txt"), ziel).map_err(|e| e.to_string())?;
+    let d = dienst(wurzel, true);
+    assert!(d.schritt(donnerstag(23, 30)?).is_some());
     assert_eq!(
-        abrufe_fuer(&plan, tag, &beide),
-        vec![(Boerse::Xetra, (7, 30)), (Boerse::Nyse, (7, 30))]
+        d.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Sicherung)
     );
-    let mut erledigt = Erledigt::default();
-    erledigt.setze(Art::Termine, tag);
-    assert_eq!(
-        faellig_fuer(&plan, &erledigt, tag, (10, 15), &beide),
-        Some(Art::KurseVon(Boerse::Xetra))
+    Ok(())
+}
+
+#[test]
+fn z6_formular_lehnt_0900_ab() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let vorher = d.sperre().zeitplan;
+    let a = formular_post(
+        "/zeitplan",
+        &format!("t={TOKEN}&aktion=speichern&termine=07%3A20&kurse=09%3A00"),
     );
-    assert_eq!(faellig_fuer(&plan, &erledigt, tag, (17, 35), &beide), None);
+    let antwort = text(&behandle(&d, &Attrappe::default(), &a, donnerstag(8, 0)?));
+    assert!(antwort.contains("m=zeitplan_kursfenster"));
+    assert_eq!(d.sperre().zeitplan, vorher);
     Ok(())
 }
 
