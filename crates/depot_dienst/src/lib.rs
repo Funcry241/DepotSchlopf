@@ -724,6 +724,11 @@ fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
                     "/einrichtung?m=zeitplan_ungueltig{entwurf}#zeitplan"
                 ));
             };
+            if !zeitplan::morgenplan(&plan) {
+                return http::umleitung(&format!(
+                    "/einrichtung?m=zeitplan_kursfenster{entwurf}#zeitplan"
+                ));
+            }
             if plan.vorbereitung.aktiv() && !plan.nachrichten_an {
                 return http::umleitung(&format!(
                     "/einrichtung?m=vorbereitung_quellen{entwurf}#zeitplan"

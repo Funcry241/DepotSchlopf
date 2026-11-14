@@ -288,17 +288,26 @@ fn kurse(wurzel: &Path, journal_pfad: &Path, boerse: Option<Boerse>) -> ExitCode
     }
     // Erfolg nur mit verwendbaren Kursen: Ein spaeterer Lauf darf sich auf den Ausgang
     // verlassen (K19-02).
-    if verwendbar {
+    let code = kurs_exitcode(&bericht);
+    if code == 0 {
         println!("[Sammler] Kurse verwendbar.");
-        ExitCode::SUCCESS
     } else if bericht.abbruch.is_some() || bericht.verbindung.is_some() {
         println!("[Sammler] Kurse nicht verwendbar: Der Kursabruf wurde vorzeitig beendet.");
-        ExitCode::FAILURE
     } else {
         println!(
             "[Sammler] FEHLER: Kurse nicht verwendbar. Die Kursprüfung hat den Abruf nicht freigegeben."
         );
-        ExitCode::FAILURE
+    }
+    ExitCode::from(code)
+}
+
+fn kurs_exitcode(bericht: &depot_sammler::Bericht) -> u8 {
+    if bericht.verwendbar() {
+        0
+    } else if bericht.nur_verbindungsfehler() {
+        3
+    } else {
+        1
     }
 }
 
@@ -355,7 +364,7 @@ fn zeige_werte(werte: &[(depot_sammler::Wert, Ergebnis)]) {
                 tag_preis(*heute),
                 tag_preis(*vortag)
             ),
-            Ergebnis::Fehler(t) => {
+            Ergebnis::Fehler(t) | Ergebnis::Verbindung(t) => {
                 println!("  {:<20} {}  FEHLER: {t}", w.name, w.isin);
             }
             Ergebnis::Uebersprungen(t) => {
@@ -658,6 +667,73 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn einordnen_verbindung_ist_netz() -> Result<(), String> {
+        use depot_journal::anbieter::Ergebnis as E;
+        let wert = beobachtungsliste()?
+            .into_iter()
+            .next()
+            .ok_or("Wert fehlt")?;
+        let quelle = Anbieter::fuer(wert.boerse);
+        let mut b = depot_sammler::Bericht {
+            werte: vec![(
+                wert.clone(),
+                Ergebnis::Verbindung("Abruf: Verbindung weg".into()),
+            )],
+            handelstag: None,
+            abbruch: None,
+            sicherheitsabbruch: false,
+            sperrquelle: None,
+            pruefung: Vec::new(),
+            ausgelassen: Vec::new(),
+            verbindung: None,
+        };
+        assert_eq!(depot_sammler::einordnen(&b, quelle), Some(E::Netz));
+        b.werte
+            .push((wert.clone(), Ergebnis::Fehler("Daten unlesbar".into())));
+        assert_eq!(depot_sammler::einordnen(&b, quelle), Some(E::Fehler));
+        b.werte.push((
+            wert,
+            Ergebnis::Belegt {
+                heute: None,
+                vortag: None,
+                rohdatei: PathBuf::new(),
+            },
+        ));
+        assert_eq!(depot_sammler::einordnen(&b, quelle), Some(E::Ok));
+        Ok(())
+    }
+
+    #[test]
+    fn exitcode_3_nur_bei_verbindung() -> Result<(), String> {
+        let wert = beobachtungsliste()?
+            .into_iter()
+            .next()
+            .ok_or("Wert fehlt")?;
+        let mut b = depot_sammler::Bericht {
+            werte: vec![(wert.clone(), Ergebnis::Verbindung("Verbindung weg".into()))],
+            handelstag: None,
+            abbruch: None,
+            sicherheitsabbruch: false,
+            sperrquelle: None,
+            pruefung: Vec::new(),
+            ausgelassen: Vec::new(),
+            verbindung: Some(netz::Ausfall::KeineVersucheMehr {
+                versuche: 4,
+                fehler: "Verbindung weg".into(),
+            }),
+        };
+        assert_eq!(kurs_exitcode(&b), 3);
+        for text in ["HTTP 429", "Tageskontingent reicht nicht"] {
+            b.werte.push((wert.clone(), Ergebnis::Fehler(text.into())));
+            assert_eq!(kurs_exitcode(&b), 1);
+            b.werte.pop();
+        }
+        b.handelstag = Datum::neu(2026, 11, 5);
+        assert_eq!(kurs_exitcode(&b), 0);
+        Ok(())
+    }
 
     #[test]
     fn boersenabruf_meldet_erwarteten_und_belegten_handelstag() -> Result<(), String> {

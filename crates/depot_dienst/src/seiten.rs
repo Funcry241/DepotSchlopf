@@ -312,6 +312,7 @@ fn einstellungs_meldung(code: &str) -> Option<(&'static str, &'static str)> {
             "offen",
             "Der Zeitplan wurde inzwischen ein- oder ausgeschaltet. Deine Eingaben stehen als Entwurf im Formular. Prüfe den aktuellen Stand und wähle erneut, wie du speichern möchtest.",
         ),
+        "zeitplan_kursfenster" => ("halt", "Kursabruf nur zwischen 07:00 und 08:30"),
         "zeitplan_ungueltig" => (
             "halt",
             "Zeitplan nicht gespeichert: Uhrzeit im Format hh:mm. Die übrigen Eingaben stehen \
@@ -481,6 +482,7 @@ pub fn meldungs_aktion(abfrage: &str) -> (&'static str, &'static str) {
         | "zeitplan_gespeichert_an"
         | "zeitplan_aus"
         | "zeitplan_ungueltig"
+        | "zeitplan_kursfenster"
         | "zeitplan_schalter_geaendert"
         | "zeitplan_fehler"
         | "vorbereitung_quellen" => ("/einrichtung#zeitplan", "Zeitplan und Eingaben ansehen"),
@@ -699,11 +701,21 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
                 && z.zeitplan.papier_danach
                 && crate::zeitplan::letzter_abruf_fuer(&z.zeitplan, d, b, &z.boersen)
             {
-                t.push_str(", danach Papiertag bei mindestens einem erfolgreichen Kursabruf");
+                t.push_str(
+                    ", danach Papiertag bei erfolgreichen Abrufen für alle gehaltenen Werte",
+                );
             }
             t
         }
         None => "Kein Lauf in den nächsten Tagen geplant.".into(),
+    };
+    let boersenlauf = if crate::zeitplan::morgenplan(&z.zeitplan) {
+        boersenlauf
+    } else {
+        format!(
+            "Kursabruf {} liegt außerhalb 07:00–08:30. Kursabruf und Papiertag sind angehalten, bis eine Zeit im Fenster gespeichert ist. {boersenlauf}",
+            uhrzeit_text(z.zeitplan.kurse)
+        )
     };
     if z.zeitplan.nachrichten_an {
         format!("{boersenlauf} · Schlagzeilen täglich {ZEITFENSTER}, frühestens alle 90 Minuten.")
@@ -836,7 +848,7 @@ fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool, ki: &Auf
     if z.zeitplan.papier_danach {
         let ersatz = if z.erledigt.papier == Some(tag) {
             ("leise", "gestartet, Ergebnis unbekannt")
-        } else if z.erledigt.kurse_ok != Some(tag)
+        } else if !z.boersen.iter().any(|b| z.erledigt.erfolgreich(*b, tag))
             && abrufe
                 .iter()
                 .filter(|(_, art, _)| matches!(art, Art::KurseVon(_)))
@@ -846,7 +858,7 @@ fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool, ki: &Auf
         } else {
             (
                 "leise",
-                "nach dem letzten Kursabruf, wenn mindestens einer erfolgreich war",
+                "nach dem letzten Kursabruf, wenn Kurse für alle gehaltenen Werte vorliegen",
             )
         };
         let (klasse, stand) = zeitstrahl_stand(z, tag, heute, Art::Papier).unwrap_or(ersatz);
@@ -1869,7 +1881,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
     let kurse_hinweis = if crate::zeitplan::morgenplan(p) {
         "Im Morgenlauf gilt der letzte abgeschlossene Handelstag je Börse."
     } else {
-        "Beim Abendplan wird jede andere Börse der Liste zehn Minuten nach ihrem eigenen Schluss abgerufen."
+        "Kursabruf und Papiertag sind angehalten. Speichere eine Kursabrufzeit zwischen 07:00 und 08:30."
     };
     let speichern_hervorheben = if p.an || !gesperrt.is_empty() {
         " data-speichern-hervorheben"
