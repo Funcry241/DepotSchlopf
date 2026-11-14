@@ -84,6 +84,9 @@ pub trait Berater {
     ) -> crate::abstimmung::AbstimmungsAntwort {
         crate::abstimmung::AbstimmungsAntwort::unverwertbar()
     }
+    fn aufruf(&mut self) -> Option<depot_journal::KiAufruf> {
+        None
+    }
     /// Einmalig abholen und vor einer weiteren Anfrage dauerhaft im Journal abrechnen.
     fn abrechnung(&mut self) -> Option<depot_journal::KiAbrechnung> {
         None

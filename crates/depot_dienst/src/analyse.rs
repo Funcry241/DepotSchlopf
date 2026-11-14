@@ -715,9 +715,55 @@ fn ki_tag(
                 .try_fold(Cent::NULL, |summe, b| summe.checked_add(b.reserviert));
             let _ = writeln!(aus, "- {wer:?}: {}", geld(summe));
         }
+        ki_hashbelege(aus, daten, tag, s);
         aus.push_str("\nOffene Reservierungen zählen mit ihrem gebuchten Betrag. Anbieterfehler allein ändern die Buchung nicht.\n");
     } else {
         aus.push_str("\nJournalbuchungen unverifiziert.\n");
+    }
+}
+
+fn ki_hashbelege(aus: &mut String, daten: &Path, tag: Datum, stand: &Stand) {
+    let mut zeilen = stand
+        .ki()
+        .buchungen()
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.datum == tag)
+        .peekable();
+    if zeilen.peek().is_none() {
+        return;
+    }
+    aus.push_str("\n### Aufrufbelege\n");
+    let roh = daten.join("roh/ki");
+    for (nr, buchung) in zeilen {
+        if let Some(beleg) = stand.ki().aufruf(nr) {
+            let kurz: String = beleg.vorlage.chars().take(8).collect();
+            let fehlt = [
+                Some(roh.join("vorlage").join(format!("{}.txt", beleg.vorlage))),
+                beleg
+                    .frage
+                    .as_ref()
+                    .map(|sha| roh.join(format!("{sha}.txt"))),
+                beleg
+                    .antwort
+                    .as_ref()
+                    .map(|sha| roh.join(format!("{sha}.txt"))),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|p| !p.is_file());
+            let _ = writeln!(
+                aus,
+                "- Buchung {nr} ({:?}): Modell {}, Vorlage `{kurz}`, Frage `{}`, Antwort `{}`{}",
+                buchung.berater,
+                feste_kennung(&beleg.modell),
+                beleg.frage.as_deref().unwrap_or("–"),
+                beleg.antwort.as_deref().unwrap_or("–"),
+                if fehlt { " · Rohtext fehlt" } else { "" }
+            );
+        } else {
+            let _ = writeln!(aus, "- Buchung {nr} ({:?}): ohne Abdruck", buchung.berater);
+        }
     }
 }
 

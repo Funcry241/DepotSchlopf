@@ -31,7 +31,7 @@ fn datum(art: Art, text: &str, abrechnungstag: Option<Datum>, stand: &Stand) -> 
         | Art::PapierHalt
         | Art::Wissensstichtag => tag(0),
         Art::Ki => tag(1),
-        Art::KiAbrechnung => stand
+        Art::KiAbrechnung | Art::KiAufruf => stand
             .ki()
             .buchungen()
             .get(feld(0)?.parse::<usize>().ok()?)

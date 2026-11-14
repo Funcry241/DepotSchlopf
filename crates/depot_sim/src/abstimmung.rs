@@ -122,9 +122,7 @@ fn frage(
         ereignisse: &zyklus.tag.ereignisse,
     };
     let erste = zweite.abstimmen(erlaubnis, &lage, dialog);
-    if let Some(abrechnung) = zweite.abrechnung() {
-        buch.rechne_ki_ab(&abrechnung).map_err(journal)?;
-    }
+    crate::lauf::belege_ki(buch, zweite).map_err(journal)?;
     let vorschlag = erste.eigene.vorschlag.as_ref();
     let geaendert = !gleiche_ziele(vorschlag, dialog.eigener_vorschlag.as_ref());
     let runde = dialog.runde;
