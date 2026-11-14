@@ -23,6 +23,10 @@
 )]
 
 mod abdruck;
+mod ausgelassen;
+
+pub use depot_regelwerk::entscheidung::ist_gewicht_bp;
+
 pub mod abstimmung;
 pub mod ausfuehrung;
 pub mod kursverlauf;

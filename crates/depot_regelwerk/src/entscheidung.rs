@@ -732,6 +732,18 @@ fn kaufe(
     Some(())
 }
 
+/// Gewicht einer Position mit derselben Bewertung und Rundung wie bei der Orderentscheidung.
+pub fn ist_gewicht_bp(topf: &Topf, kurse: &Kurse, isin: &Isin) -> Option<i64> {
+    gewicht_bp(
+        kurse.kurs(isin)?.mal_stueck_exakt(topf.stueck(isin))?,
+        topf.wert_exakt(kurse)?,
+    )
+}
+
+fn gewicht_bp(wert: Preis, topfwert: Preis) -> Option<i64> {
+    wert.in_bp_von(topfwert)
+}
+
 fn sammle_kandidaten(
     e: &Eingabe<'_>,
     ziele: &BTreeMap<Isin, i64>,
@@ -751,7 +763,7 @@ fn sammle_kandidaten(
         let ziel_bp = ziele.get(isin).copied().unwrap_or(0);
         let ist_wert = kurs.mal_stueck_exakt(gehalten)?;
         let ziel_wert = exakt(topfwert.mal_bp(ziel_bp, Rundung::Ab)?)?;
-        let ist_bp = ist_wert.in_bp_von(topfwert)?;
+        let ist_bp = gewicht_bp(ist_wert, topfwert)?;
         let abweichung = ziel_bp.checked_sub(ist_bp)?;
         if abweichung.checked_abs()? < g.min_aenderung_bp() {
             if abweichung != 0 {
@@ -831,6 +843,55 @@ fn begrenze_umschlag(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gewicht_wie_regelwerk() -> Result<(), String> {
+        use depot_kern::{Datum, Instrument, InstrumentArt, Kurs, Zeitpunkt};
+        let tag = Datum::neu(2026, 11, 10).ok_or("Tag")?;
+        let zeit = Zeitpunkt::frankfurt(tag, 17, 35, 0).ok_or("Zeit")?;
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let universum = Universum::neu(vec![Instrument {
+            isin: isin.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        }]);
+        for geld in [0, 10_000, 500_000] {
+            for preis in [100, 999, 10_091] {
+                for stueck in [1, 3, 143] {
+                    let mut topf =
+                        Topf::neu(TopfId::A, Cent(geld)).map_err(|e| format!("{e:?}"))?;
+                    topf.setze_bestand(isin.clone(), stueck);
+                    let kurs = Kurs::neu(Cent(preis), "EUR", tag, zeit, Herkunft::Simulation)
+                        .map_err(|e| format!("{e:?}"))?;
+                    let kurse = Kurse::neu(zeit, vec![(isin.clone(), kurs)])
+                        .map_err(|e| format!("{e:?}"))?;
+                    let gewicht = ist_gewicht_bp(&topf, &kurse, &isin).ok_or("Gewicht")?;
+                    let e = Eingabe {
+                        grenzen: &Grenzen::standard(),
+                        universum: &universum,
+                        topf: &topf,
+                        kurse: &kurse,
+                        vorschlag: None,
+                        halt: false,
+                    };
+                    let mut befunde = Vec::new();
+                    let kandidaten = sammle_kandidaten(
+                        &e,
+                        &BTreeMap::from([(isin.clone(), gewicht)]),
+                        topf.wert_exakt(&kurse).ok_or("Topfwert")?,
+                        &BTreeSet::new(),
+                        &mut befunde,
+                    )
+                    .ok_or("Kandidaten")?;
+                    assert!(
+                        kandidaten.is_empty() && befunde.is_empty(),
+                        "{preis} {stueck} {geld}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn groesste_passende_findet_den_rand() {

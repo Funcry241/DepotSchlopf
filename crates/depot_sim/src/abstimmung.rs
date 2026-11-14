@@ -121,17 +121,26 @@ fn frage(
         positionskaeufe: &positionskaeufe,
         ereignisse: &zyklus.tag.ereignisse,
     };
-    let erste = zweite.abstimmen(erlaubnis, &lage, dialog);
+    let mut erste = zweite.abstimmen(erlaubnis, &lage, dialog);
     if let Some(abrechnung) = zweite.abrechnung() {
         buch.rechne_ki_ab(&abrechnung).map_err(journal)?;
     }
-    let vorschlag = erste.eigene.vorschlag.as_ref();
-    let geaendert = !gleiche_ziele(vorschlag, dialog.eigener_vorschlag.as_ref());
-    let runde = dialog.runde;
     let wer = match topf.topf.id().berater() {
         BeraterId::Dachs => "Dachs",
         BeraterId::Maus => "Maus",
     };
+    if erste.eigene.verwertbar {
+        crate::ausgelassen::belege_ausgelassene(
+            buch,
+            zyklus,
+            &lage,
+            &mut erste.eigene.vorschlag,
+            wer,
+        )?;
+    }
+    let vorschlag = erste.eigene.vorschlag.as_ref();
+    let geaendert = !gleiche_ziele(vorschlag, dialog.eigener_vorschlag.as_ref());
+    let runde = dialog.runde;
     let text = format!(
         "Abstimmung Runde {runde}: verwertbar={}; Änderung={geaendert}; Ziele={:?}; Zustimmung zum fremden Stand={}; Grund: {}",
         erste.eigene.verwertbar,
@@ -263,4 +272,35 @@ pub(crate) fn berate(
         }
     }
     Ok(gueltig)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use depot_kern::{Cent, Datum, Herkunft, Isin, Kurs, Kurse, Topf, TopfId, Zeitpunkt};
+
+    #[test]
+    fn abstimmung_ausgelassen_gleich() -> Result<(), String> {
+        let tag = Datum::neu(2026, 11, 10).ok_or("Datum")?;
+        let zeit = Zeitpunkt::neu(tag, 17, 35, 0).ok_or("Zeit")?;
+        let sap = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let kurs = Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Simulation)
+            .map_err(|e| format!("{e:?}"))?;
+        let kurse = Kurse::neu(zeit, vec![(sap.clone(), kurs)]).map_err(|e| format!("{e:?}"))?;
+        let mut topf = Topf::neu(TopfId::A, Cent(400_000)).map_err(|e| format!("{e:?}"))?;
+        topf.setze_bestand(sap.clone(), 10);
+        let mut neu = Vorschlag {
+            berater: BeraterId::Dachs,
+            zielgewichte_bp: std::collections::BTreeMap::new(),
+            begruendung: std::collections::BTreeMap::new(),
+        };
+        let mut alt = neu.clone();
+        alt.zielgewichte_bp.insert(sap.clone(), 2_000);
+        assert_eq!(
+            crate::ausgelassen::ergaenze_ausgelassene(&topf, &kurse, &mut neu),
+            [sap]
+        );
+        assert!(gleiche_ziele(Some(&alt), Some(&neu)));
+        Ok(())
+    }
 }
