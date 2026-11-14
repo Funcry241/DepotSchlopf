@@ -31,6 +31,7 @@ pub mod depotverlauf;
 pub mod diagramm;
 pub mod handelsergebnis;
 pub mod html;
+pub mod messlatte;
 pub mod tage;
 pub mod vergleich;
 mod zugang;
@@ -226,6 +227,7 @@ pub struct Lagebild {
     /// Auswertung der aufgelösten Prognosen je Berater und gesamt (#114). Ein Hinweis, nie
     /// eine Regel.
     pub prognosen: Vec<(String, String)>,
+    pub messlatte: Vec<messlatte::MesslatteTopf>,
 }
 
 /// Je Berater und gesamt: wie viele Prognosen eingetroffen sind, gegen „steigt immer“.
@@ -945,6 +947,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut vorbereitung = None;
     let mut fruehere_vorbereitung = Vec::new();
     let mut prognosen = Vec::new();
+    let mut messlatte = Vec::new();
     match (u.journal, heute, &werte) {
         (Zugang::Offen(s), Some(heute), Ok(werte)) => {
             prognosen = prognose_auswertung(s);
@@ -958,7 +961,11 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
                 .map(|b| mit_verbrauch(ki_budget(s.ki().buchungen(), b, heute), &u.anbieter, heute))
                 .collect();
             punkte.extend(budget.iter().filter_map(budget_punkt));
-            depot_lage = Some(depot::depot_lage(s, werte));
+            let depot = depot::depot_lage(s, werte);
+            if let Some(vergleich) = &depot.vergleich {
+                messlatte = messlatte::auswerten(s, werte, vergleich, &u.anbieter, heute);
+            }
+            depot_lage = Some(depot);
             tage = tage::tage(s, &als_universum(werte), &u.anbieter, heute);
             gespraech = s
                 .begruendungen()
@@ -1023,6 +1030,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         vorbereitung,
         fruehere_vorbereitung,
         prognosen,
+        messlatte,
     }
 }
 

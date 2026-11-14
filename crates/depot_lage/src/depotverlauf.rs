@@ -17,6 +17,7 @@ pub struct Tagespunkt {
     pub kurstage: Vec<Datum>,
     pub kursbezug: BTreeMap<Isin, Datum>,
     pub ersatz: Vec<Isin>,
+    pub topfwerte: BTreeMap<TopfId, Cent>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,6 +106,7 @@ pub fn depotverlauf(stand: &Stand, werte: &[Wert]) -> Vec<Tagespunkt> {
                 punkt.grund = Some("Kursprüfung am Tag fehlgeschlagen".into());
                 punkt.kurstage.clear();
                 punkt.kursbezug.clear();
+                punkt.topfwerte.clear();
             }
             punkt
         })
@@ -131,6 +133,7 @@ fn punkt(
         kurstage: Vec::new(),
         kursbezug: BTreeMap::new(),
         ersatz: ersatz.iter().cloned().collect(),
+        topfwerte: BTreeMap::new(),
     };
     let Some(bargeld) = bargeld else {
         punkt.grund = Some("Rechenfehler beim Bargeld".into());
@@ -194,9 +197,21 @@ fn punkt(
     punkt.kurstage.sort_unstable();
     punkt.kurstage.dedup();
 
-    punkt.gesamt = toepfe.values().try_fold(Cent::NULL, |summe, topf| {
-        summe.checked_add(topf.wert_gerundet(&kurse, Rundung::Ab)?)
-    });
+    punkt.topfwerte = toepfe
+        .iter()
+        .filter_map(|(&id, topf)| {
+            topf.wert_gerundet(&kurse, Rundung::Ab)
+                .map(|wert| (id, wert))
+        })
+        .collect();
+    punkt.gesamt = (punkt.topfwerte.len() == toepfe.len())
+        .then(|| {
+            punkt
+                .topfwerte
+                .values()
+                .try_fold(Cent::NULL, |summe, &wert| summe.checked_add(wert))
+        })
+        .flatten();
     punkt.wertpapiere = punkt.gesamt.and_then(|wert| wert.checked_sub(bargeld));
     if punkt.wertpapiere.is_none() {
         punkt.gesamt = None;

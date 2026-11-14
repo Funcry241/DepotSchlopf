@@ -83,7 +83,7 @@ pub(super) fn bericht(
         ),
         (
             "Depot und Leistung",
-            "Tageswerte, Vergleich und realisierte Ergebnisse stehen im Abschnitt Depot und Leistung. Die Messlatte steht aus.",
+            "Tageswerte, Vergleich und realisierte Ergebnisse stehen im Abschnitt Depot und Leistung. Die Messlatte steht in der Depotansicht.",
         ),
         (
             "Kosten",
