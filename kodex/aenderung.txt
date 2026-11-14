@@ -1,13 +1,14 @@
-klasse: Funktion
-zweck: Papier-Ersatzkäufe bei technisch ausgefallener Zweitmeinung mit halben Zielgewichten begrenzen
+klasse: FestschreibungAenderung
+zweck: Papier-Mindesteinsatz mit budgetierter Begründungspflicht belegen
 pfade:
+crates/depot_berater/src/frage.rs
 crates/depot_berater/src/ki.rs
-crates/depot_berater/tests/berater.rs
-crates/depot_regelwerk/src/entscheidung.rs
-crates/depot_regelwerk/src/lib.rs
-crates/depot_regelwerk/tests/regelwerk.rs
-crates/depot_sim/src/abstimmung.rs
+crates/depot_dienst/src/analyse/pruefbericht.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_kern/src/grenzen.rs
 crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/papierlauf.rs
+crates/depot_sim/src/papiertag.rs
 crates/depot_sim/src/szenario.rs
-crates/depot_sim/tests/papiertag.rs
-docs/befunde/simulation.md
+kodex/festschreibung.txt
+kodex/freigabe.txt

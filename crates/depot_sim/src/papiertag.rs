@@ -571,7 +571,12 @@ pub fn papiertag(
     maus: &mut dyn Berater,
     konto: &mut dyn Broker,
 ) -> Result<Ausgang, LaufFehler> {
-    let mut beteiligte = Beteiligte { dachs, maus, konto };
+    let mut beteiligte = Beteiligte {
+        dachs,
+        maus,
+        konto,
+        mindesteinsatz_bp: 0,
+    };
     papiertag_mit_uhr(j, heute, universum, start, &mut beteiligte, None)
 }
 

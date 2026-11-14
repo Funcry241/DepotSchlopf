@@ -134,10 +134,14 @@ pub fn papier(
         let sekunden = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
         Zeitpunkt::aus_sekunden(i64::try_from(sekunden).ok()?)
     };
+    let mindesteinsatz_bp = depot_kern::Grenzen::papier_mindesteinsatz(&wurzel.join("daten"))?;
+    dachs.setze_mindesteinsatz(mindesteinsatz_bp);
+    maus.setze_mindesteinsatz(mindesteinsatz_bp);
     let mut beteiligte = Beteiligte {
         dachs,
         maus,
         konto: &mut konto,
+        mindesteinsatz_bp,
     };
     let ausgang = papiertag_mit_uhr(
         &mut j,

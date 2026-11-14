@@ -370,6 +370,7 @@ pub fn vorschlag_frage(
 verkauft. gewicht_bp in Basispunkten (10000 = 100 %), Summe höchstens 10000, der Rest ist \
 Bargeld. Für Käufe und Zukäufe enthält \"begruendung\" den Kurstreiber, den Zeithorizont, \
 die Positionsgröße und das Ausstiegskriterium. Willst du Bargeld behalten oder sonst nichts ändern, setze \"ziele\": null. Nur wenn du den gesamten Bestand ausdrücklich verkaufen willst, setze \"ziele\": [] und nenne den Grund in \"verkaufsgrund\".\n\
+Wenn du den in der Frage genannten Mindesteinsatz unterschreitest, nenne den Grund im JSON-Feld \"unter_mindesteinsatz\".\n\
 Zusätzlich kannst du getrennt vom Handel eine nachprüfbare Weltprognose abgeben. Füge dazu \n\
 das Feld \"prognose\": {{\"ereignis_nr\": 1, \"isin\": \"...\", \"richtung\": \"steigt\", \n\
 \"handelstage\": 3, \"begruendung\": \"konkrete Wirkung\", \"widerlegung\": \"was würde dich widerlegen?\"}} hinzu. \n\
@@ -377,6 +378,16 @@ Wähle genau ein nummeriertes Ereignis und einen Wert mit Kurs. Richtung ist \"s
 Horizont 1 bis 20 Handelstage, Texte je ein kurzer Satz. Wenn keine These tragfähig ist, setze \"prognose\": null.",
         lage_text(lage, universum, bilanz)
     )
+}
+
+pub fn lies_mindesteinsatz(text: &str) -> Option<String> {
+    let objekt = erstes_objekt(text).ok()?;
+    if objekt.doppelte_felder() {
+        return None;
+    }
+    text_feld(&objekt, "unter_mindesteinsatz")
+        .ok()
+        .filter(|grund| !grund.trim().is_empty())
 }
 
 /// Die Frage nach der Zweitmeinung zu einem Vorschlag des anderen Beraters.
