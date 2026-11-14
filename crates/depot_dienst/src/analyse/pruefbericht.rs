@@ -17,6 +17,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
         .count();
     let mut nichthandeln = String::new();
     let mut vollstaendig = false;
+    let mut entscheidungen = String::new();
     if let Some(stand) = stand {
         let abschluesse = stand
             .tagesschluesse()
@@ -45,7 +46,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
         if versendet == 0 && handelstage != 0 {
             text.push_str("**Auffällig:** Im Zeitraum ist kein Orderversand belegt. Gründe und Beleglücken stehen unter Nicht-Handeln.\n\n");
         }
-        (nichthandeln, vollstaendig) = nicht_handeln(stand, zeitraum);
+        (nichthandeln, vollstaendig, entscheidungen) = entscheidungsbericht(stand, zeitraum);
     } else {
         text.push_str(
             "**Rot: Journal nicht bestätigt.** Kennzahlen zu Handel, Kosten und Depot fehlen.\n\n",
@@ -63,7 +64,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
         ),
         (
             "Entscheidungen",
-            "02_ki_gespraeche.md enthält die im Zeitraum belegten Gespräche.",
+            "Der Abschnitt Entscheidungen zeigt beide Runden und den Orderversand. Entscheidungsgrundlagen und Gemini-Beiträge stehen in 02_ki_gespraeche.md.",
         ),
         (
             "Nicht-Handeln",
@@ -89,6 +90,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
         let ampel = match frage {
             "Nicht-Handeln" if vollstaendig => "Grün",
             "Nicht-Handeln" => "Rot (Belege fehlen)",
+            "Entscheidungen" if stand.is_none() => "Rot (Journal fehlt)",
             "Nachher-Blick" => "Rot (noch nicht ausgewertet)",
             "Ablauf" | "Fehler" => "Gelb",
             _ if stand.is_none() => "Rot",
@@ -96,6 +98,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
         };
         let _ = writeln!(text, "| {frage} | {ampel} | {belege} |");
     }
+    text.push_str(&entscheidungen);
     text.push_str(&nichthandeln);
     text
 }
@@ -103,10 +106,12 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
 #[derive(Default)]
 struct Entscheidung<'a> {
     vorschlag: Vec<&'a str>,
-    abstimmung: Vec<&'a str>,
+    zweitmeinung: Vec<&'a str>,
+    runde_eins: Vec<&'a str>,
+    runde_zwei: Vec<&'a str>,
     regelwerk: Vec<&'a str>,
     zweitmeinung_ausgefallen: bool,
-    versendet: usize,
+    versendet: Vec<u64>,
 }
 
 fn zelle(belege: &[&str]) -> String {
@@ -121,7 +126,10 @@ fn zelle(belege: &[&str]) -> String {
         .replace('|', "&#124;")
 }
 
-fn nicht_handeln(stand: &Stand, zeitraum: Zeitraum) -> (String, bool) {
+fn entscheidungsbelege(
+    stand: &Stand,
+    zeitraum: Zeitraum,
+) -> BTreeMap<(Datum, TopfId), Entscheidung<'_>> {
     let mut tage = BTreeMap::<(Datum, TopfId), Entscheidung<'_>>::new();
     for (tag, wer, grund) in stand.begruendungen() {
         if !(zeitraum.von..=zeitraum.bis).contains(tag) {
@@ -133,7 +141,12 @@ fn nicht_handeln(stand: &Stand, zeitraum: Zeitraum) -> (String, bool) {
             (TopfId::B, grund)
         } else if grund.starts_with("Abstimmung Runde ") && (wer == "Dachs" || wer == "Maus") {
             let topf = if wer == "Dachs" { TopfId::A } else { TopfId::B };
-            tage.entry((*tag, topf)).or_default().abstimmung.push(grund);
+            let eintrag = tage.entry((*tag, topf)).or_default();
+            if grund.starts_with("Abstimmung Runde 1: ") {
+                eintrag.runde_eins.push(grund);
+            } else if grund.starts_with("Abstimmung Runde 2: ") {
+                eintrag.runde_zwei.push(grund);
+            }
             continue;
         } else {
             continue;
@@ -142,10 +155,14 @@ fn nicht_handeln(stand: &Stand, zeitraum: Zeitraum) -> (String, bool) {
         if grund.starts_with("Antwort verworfen, kein Urteil:") {
             eintrag.zweitmeinung_ausgefallen = true;
             eintrag
-                .abstimmung
+                .zweitmeinung
                 .push("Zweitmeinung ausgefallen. Grund im Journal.");
+        } else if grund.starts_with("Antwort verworfen:") {
+            eintrag
+                .vorschlag
+                .push("Erstmeinung verworfen. Grund im Journal.");
         } else if grund.starts_with("Zustimmung:") || grund.starts_with("Veto:") {
-            eintrag.abstimmung.push(grund);
+            eintrag.zweitmeinung.push(grund);
         } else if wer == "Regelwerk" {
             eintrag.regelwerk.push(grund);
         } else {
@@ -159,12 +176,20 @@ fn nicht_handeln(stand: &Stand, zeitraum: Zeitraum) -> (String, bool) {
             && (zeitraum.von..=zeitraum.bis).contains(&tag)
         {
             let eintrag = tage.entry((tag, auftrag.beleg.topf)).or_default();
-            eintrag.versendet = eintrag.versendet.saturating_add(1);
+            eintrag.versendet.push(auftrag.beleg.nr);
         }
     }
 
+    tage
+}
+
+fn entscheidungsbericht(stand: &Stand, zeitraum: Zeitraum) -> (String, bool, String) {
+    let mut tage = entscheidungsbelege(stand, zeitraum);
     let mut text = String::from(
         "\n## Nicht-Handeln\n\n| Tag | Topf | Vorschlag | Abstimmung | Regelwerk | Order |\n|---|---|---|---|---|---|\n",
+    );
+    let mut entscheidungen = String::from(
+        "\n## Entscheidungen\n\nDie Zweitmeinung und die beiden Abstimmungsrunden sind getrennt belegt. Die letzte Spalte nennt datierte Versandbelege. Ausführungen stehen unter Orders. Fehlende Runden bleiben als Beleglücke sichtbar.\n\n| Tag | Topf | Vorschlag | Zweitmeinung | Runde 1 | Runde 2 | Orderversand |\n|---|---|---|---|---|---|---|\n",
     );
     let mut vollstaendig = true;
     for tag in zeitraum.tage() {
@@ -182,25 +207,50 @@ fn nicht_handeln(stand: &Stand, zeitraum: Zeitraum) -> (String, bool) {
                 }
             }
             let abgeschlossen = stand.schlussbeleg(tag).is_some();
+            let abstimmung: Vec<_> = eintrag
+                .zweitmeinung
+                .iter()
+                .copied()
+                .chain(eintrag.runde_eins.iter().copied())
+                .chain(eintrag.runde_zwei.iter().copied())
+                .collect();
             let erklaert = !eintrag.vorschlag.is_empty()
-                && (!eintrag.abstimmung.is_empty() || !eintrag.regelwerk.is_empty())
+                && (!abstimmung.is_empty() || !eintrag.regelwerk.is_empty())
                 && abgeschlossen;
             vollstaendig &= erklaert;
-            let order = match (eintrag.versendet, abgeschlossen) {
+            let order = match (eintrag.versendet.len(), abgeschlossen) {
                 (0, true) => "Kein Versand".into(),
                 (0, false) => "Kein Versand belegt, Tagesabschluss fehlt".into(),
                 (n, _) => format!("{n} versendet"),
             };
+            let orderbelege = if eintrag.versendet.is_empty() {
+                "Kein datierter Versand belegt".into()
+            } else {
+                let nummern = eintrag
+                    .versendet
+                    .iter()
+                    .map(|nr| format!("#{nr}"))
+                    .collect::<Vec<_>>();
+                format!("Versendet: {}", nummern.join(", "))
+            };
+            let _ = writeln!(
+                entscheidungen,
+                "| {tag} | {name} | {} | {} | {} | {} | {orderbelege} |",
+                zelle(&eintrag.vorschlag),
+                zelle(&eintrag.zweitmeinung),
+                zelle(&eintrag.runde_eins),
+                zelle(&eintrag.runde_zwei)
+            );
             let _ = writeln!(
                 text,
                 "| {tag} | {name} | {} | {} | {} | {order} |",
                 zelle(&eintrag.vorschlag),
-                zelle(&eintrag.abstimmung),
+                zelle(&abstimmung),
                 zelle(&eintrag.regelwerk),
             );
         }
     }
-    (text, vollstaendig)
+    (text, vollstaendig, entscheidungen)
 }
 
 #[cfg(test)]
@@ -271,6 +321,15 @@ mod tests {
                     ),
                 ]
             };
+            if t != von {
+                journal
+                    .begruende(
+                        t,
+                        "Dachs",
+                        "Abstimmung Runde 1: Grund: Erfundene Erstabwägung.",
+                    )
+                    .map_err(fehler)?;
+            }
             for (wer, grund) in gruende {
                 journal.begruende(t, wer, grund).map_err(fehler)?;
             }
@@ -278,7 +337,16 @@ mod tests {
                 .schliesse_ab(t, Cent(500_000), &"0".repeat(64))
                 .map_err(fehler)?;
         }
+        let (bytes, vermerk) = journal_mit_versand(&journal)?;
+        drop(journal);
+        std::fs::write(&pfad, bytes).map_err(|e| e.to_string())?;
+        std::fs::write(pfad.with_extension("vermerk"), vermerk).map_err(|e| e.to_string())?;
+        let journal = Journal::oeffnen(&pfad).map_err(fehler)?;
         let text = bericht(Some(journal.stand()), Zeitraum { von, bis });
+        pruefe_entscheidungen(&text)?;
+        assert!(text.contains("Zweitmeinung ausgefallen. Grund im Journal."));
+        assert!(text.contains("Erstmeinung verworfen. Grund im Journal."));
+        assert!(!text.contains("Testanbieter: simuliertes HTTP 429"));
         let mit_luecke = bericht(Some(journal.stand()), Zeitraum { von: tag(4)?, bis });
         drop(journal);
         std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
@@ -290,15 +358,71 @@ mod tests {
                 && zeile.contains("35 %")
                 && zeile.contains("ZweitmeinungAusgefallen | Kein Versand")
         }));
-        for t in [tag(8)?, bis] {
-            for topf in ["A", "B"] {
-                assert!(text.lines().any(|zeile| {
-                    zeile.starts_with(&format!("| {t} | {topf} |"))
-                        && zeile.contains("Bargeld behalten")
-                        && zeile.ends_with("| Kein Versand |")
-                }));
-            }
+        for (t, topf) in [(tag(8)?, "A"), (tag(8)?, "B"), (bis, "B")] {
+            assert!(text.lines().any(|zeile| {
+                zeile.starts_with(&format!("| {t} | {topf} |"))
+                    && zeile.contains("Bargeld behalten")
+                    && zeile.ends_with("| Kein Versand |")
+            }));
         }
+        Ok(())
+    }
+
+    fn journal_mit_versand(journal: &depot_journal::Journal) -> Result<(Vec<u8>, String), String> {
+        // Eine spätere Ausführung ist hier nicht belegt; Versand ist ein eigener Nachweis.
+        let eintraege = [
+            (depot_journal::Art::Topf, "A;500000;"),
+            (
+                depot_journal::Art::Auftrag,
+                "1;A;DE0007164600;Kauf;1;1000;Umschichtung",
+            ),
+            (
+                depot_journal::Art::Zustand,
+                "1;gesendet;2030-01-09T10:00:00Z;2030-01-09T16:30:00Z",
+            ),
+        ];
+        let mut testjournal: Vec<_> = journal
+            .eintraege()
+            .iter()
+            .map(|(art, text)| (*art, text.as_str()))
+            .collect();
+        testjournal.extend(eintraege);
+        let bytes = depot_journal::inhalt_fuer(&testjournal);
+        let vermerk = depot_journal::vermerk_fuer(&bytes, 0).ok_or("Testvermerk")?;
+        Ok((bytes, vermerk))
+    }
+
+    fn pruefe_entscheidungen(text: &str) -> Result<(), String> {
+        let entscheidungen = text
+            .split_once("## Entscheidungen")
+            .ok_or("Entscheidungen fehlen")?
+            .1
+            .split_once("## Nicht-Handeln")
+            .ok_or("Abschnittsgrenze fehlt")?
+            .0;
+        assert!(
+            entscheidungen
+                .lines()
+                .any(|zeile| zeile.starts_with("| 2030-01-08 | A |")
+                    && zeile.contains(
+                        "Erfundene Erstabwägung. | Abstimmung Runde 2: Grund: Beispielentscheidung:"
+                    )
+                    && zeile.ends_with("Kein datierter Versand belegt |"))
+        );
+        assert!(
+            entscheidungen
+                .lines()
+                .any(|zeile| zeile.starts_with("| 2030-01-08 | B |")
+                    && zeile.contains(
+                        "| Kein Beleg | Abstimmung Runde 2: Grund: Beispielentscheidung:"
+                    ))
+        );
+        assert!(
+            entscheidungen
+                .lines()
+                .any(|zeile| zeile.starts_with("| 2030-01-09 | A |")
+                    && zeile.ends_with("| Versendet: #1 |"))
+        );
         Ok(())
     }
 

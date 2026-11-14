@@ -1,7 +1,6 @@
 klasse: Funktion
-zweck: Gebuchte KI-Kosten und belegte Token im Prüfbericht auswerten
+zweck: Entscheidungen und Gesprächsbelege für den Wochenprüfbericht auswerten
 pfade:
 crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/ki_kosten.rs
+crates/depot_dienst/src/analyse/entscheidungsgrundlage.rs
 crates/depot_dienst/src/analyse/pruefbericht.rs
-crates/depot_journal/src/kasse.rs
