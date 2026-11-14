@@ -47,6 +47,17 @@ pub use depot::{
 pub fn depotstand(stand: &Stand, werte: &[Wert]) -> DepotLage {
     depot::depot_lage(stand, werte)
 }
+/// Summe der vor dem ersten Handel belegten Einlagen; bei unvollständigen Altständen gilt
+/// je eingerichtetem Topf das reguläre Papier-Startgeld.
+pub fn startgeld(stand: &Stand) -> Option<Cent> {
+    let summe = stand.toepfe().keys().try_fold(Cent::NULL, |summe, id| {
+        summe.checked_add(stand.startgeld_je_topf(*id)?)
+    });
+    summe.or_else(|| {
+        depot_sim::papierlauf::START_JE_TOPF.mal_stueck(u64::try_from(stand.toepfe().len()).ok()?)
+    })
+}
+
 pub use depot_sim::papierlauf::{
     PapierFreigabeAngebot, PapierFreigabeFehler, papier_freigabe_angebot, papier_freigeben,
     papier_mindesteinsatz,
@@ -61,7 +72,7 @@ pub use zugang::{
 use depot_journal::Stand;
 use depot_journal::anbieter::{Eintrag, Wer};
 use depot_kern::liste::{self, Wert, als_universum, beobachtungsliste};
-use depot_kern::{BeraterId, Datum, Grenzen, Zeitpunkt};
+use depot_kern::{BeraterId, Cent, Datum, Grenzen, Zeitpunkt};
 use depot_ki::KiGrenzen;
 use depot_regelwerk::{waehle_morgenwerte, waehle_tageswerte};
 use depot_sim::{LaufFehler, Tageslage, kurse_von_heute, morgenkurse, tageskurse, tageslage};

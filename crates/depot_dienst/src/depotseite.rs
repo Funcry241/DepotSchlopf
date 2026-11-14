@@ -42,7 +42,7 @@ fn anteil(wert: Option<Cent>, gesamt: Option<Cent>) -> String {
     )
 }
 
-fn kennzahlen(d: &DepotLage, jetzt: Zeitpunkt, text: &mut String) {
+fn kennzahlen(d: &DepotLage, jetzt: Zeitpunkt, startgeld: Option<Cent>, text: &mut String) {
     let tag = match d.tagesergebnis {
         Tagesergebnis::OhneKurstag => "Kursdatum fehlt".into(),
         Tagesergebnis::OhneVortag => "noch kein Vortag".into(),
@@ -54,11 +54,7 @@ fn kennzahlen(d: &DepotLage, jetzt: Zeitpunkt, text: &mut String) {
             bp.map_or_else(|| "–".into(), prozent)
         ),
     };
-    let basis = d
-        .vergleich
-        .as_ref()
-        .and_then(|v| v.startgeld.checked_add(v.startgeld));
-    let seit_start = d.gesamt.zip(basis).map_or_else(
+    let seit_start = d.gesamt.zip(startgeld).map_or_else(
         || "–".into(),
         |(wert, start)| {
             format!(
@@ -253,8 +249,12 @@ fn entwicklung(
     text.push_str(
         "<p>Linien: Gesamt (durchgezogen) · Wertpapiere (gestrichelt) · Bargeld (gepunktet)",
     );
-    if startgeld.is_some() {
-        text.push_str(" · Startgeld (dünn gestrichelt)");
+    if let Some(startgeld) = startgeld {
+        let _ = write!(
+            text,
+            " · Startgeld {} (dünn gestrichelt)",
+            geld(Some(startgeld))
+        );
     } else {
         text.push_str(" · Startgeld nicht belegbar");
     }
@@ -290,23 +290,14 @@ pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> String {
             return;
         };
         let lage = depot_lage::depotstand(stand, &werte);
-        kennzahlen(&lage, jetzt, &mut text);
+        let startgeld = depot_lage::startgeld(stand);
+        kennzahlen(&lage, jetzt, startgeld, &mut text);
         let bar = cash(&lage, &mut text);
         positionen(&lage, bar, &mut text);
         orders(stand, &werte, &mut text);
         depot_lage::html::ausfuehrungsbilanz(&lage, &mut text);
         let verlauf = depotverlauf(stand, &werte);
         let ab = jetzt.frankfurt_tag().and_then(|heute| zeitraum.ab(heute));
-        let startgeld = verlauf.first().and_then(|punkt| {
-            punkt.gesamt.or_else(|| {
-                let (_, toepfe) = stand.tagesschluesse().first()?;
-                toepfe
-                    .values()
-                    .all(|topf| topf.positionen().is_empty())
-                    .then_some(punkt.bargeld)
-                    .flatten()
-            })
-        });
         entwicklung(im_zeitraum(&verlauf, ab), startgeld, zeitraum, &mut text);
         text.push_str("<p class=\"leise\">Nur Papiergeld. Werte zum abgerundeten Cent, Einstand aufgerundet.</p>");
     });
