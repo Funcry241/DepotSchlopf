@@ -372,8 +372,30 @@ pub fn nachrichtenbelege_am(
         })
         .collect();
     aus.sort_by(|a, b| b.zeit().cmp(&a.zeit()).then_with(|| a.text().cmp(b.text())));
-    aus.truncate(MAX_NACHRICHTEN_LAGE);
-    aus
+    let werte = depot_kern::liste::beobachtungsliste().unwrap_or_default();
+    let bestand = stand.gehalten();
+    let mut sortiert: Vec<_> = aus
+        .into_iter()
+        .map(|n| {
+            (
+                crate::nachrichtenbezug::bezug(n.text(), &werte).rang(&bestand),
+                n,
+            )
+        })
+        .collect();
+    sortiert.sort_by_key(|(rang, _)| *rang);
+    let mut priorisiert = 0_usize;
+    sortiert
+        .into_iter()
+        .filter_map(|(rang, n)| {
+            if rang == 3 {
+                return Some(n);
+            }
+            priorisiert = priorisiert.saturating_add(1);
+            (priorisiert <= 20).then_some(n)
+        })
+        .take(MAX_NACHRICHTEN_LAGE)
+        .collect()
 }
 
 pub fn nachricht_text(n: &NachrichtBeleg) -> Option<String> {
@@ -381,10 +403,12 @@ pub fn nachricht_text(n: &NachrichtBeleg) -> Option<String> {
 }
 
 pub fn nachricht_anzeige(zeit: Zeitpunkt, quelle: &str, text: &str) -> Option<String> {
+    let werte = depot_kern::liste::beobachtungsliste().unwrap_or_default();
+    let markierung = crate::nachrichtenbezug::bezug(text, &werte).markierung();
     let (h, m, _) = zeit.uhrzeit()?;
     let d = zeit.datum()?;
     Some(format!(
-        "Nachricht {} {h:02}:{m:02} UTC ({quelle}): {text}",
+        "Nachricht {} {h:02}:{m:02} UTC ({quelle}): {text}{markierung}",
         datum_text(d)
     ))
 }
