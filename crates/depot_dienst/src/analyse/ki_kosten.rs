@@ -70,6 +70,8 @@ impl Gespraechsbelege {
             let (Some(nr), Some(wer)) = (e.buchung, berater(&e.wer)) else {
                 continue;
             };
+            // Echte Transportwiederholungen erfolgen innerhalb von fragen() und erzeugen
+            // gemeinsam einen Gesprächseintrag. Zwei Zeilen derselben Buchung sind mehrdeutig.
             self.buchungen
                 .entry(nr)
                 .and_modify(|beleg| *beleg = None)
@@ -228,7 +230,7 @@ pub(super) fn bericht(
             belege.fehlende_tage, belege.unlesbare_zeilen
         );
     }
-    verhaeltnis(&mut text, stand, zeitraum, depotwerte);
+    verhaeltnis(&mut text, stand, zeitraum, depotwerte, gesamt);
     text
 }
 
@@ -237,6 +239,7 @@ fn verhaeltnis(
     stand: &Stand,
     zeitraum: Zeitraum,
     depotwerte: &BTreeMap<Datum, Cent>,
+    gesamt: Option<Cent>,
 ) {
     let Some(((anfang, start), (ende, schluss))) = depotwerte
         .first_key_value()
@@ -253,16 +256,14 @@ fn verhaeltnis(
         .filter(|b| b.datum > *anfang && b.datum <= *ende)
         .try_fold(Cent::NULL, |summe, b| summe.checked_add(b.reserviert));
     let ertrag = schluss.checked_sub(*start);
-    let anteil = kosten
-        .zip(ertrag)
-        .filter(|(_, e)| *e > Cent::NULL)
-        .and_then(|(k, e)| depot_lage::vergleich::rendite_bp(e, k)?.checked_add(10_000));
+    let anteil = kosten.zip(ertrag).and_then(|(k, e)| anteil_bp(k, e));
+    let quote = anteil.map_or_else(|| "–".into(), |bp| prozent(Some(bp)));
     let _ = writeln!(
         text,
-        "\nKI-Kosten im Verhältnis zum Ertrag: {}. Von Abschluss {anfang} bis Abschluss {ende}: {} gebuchte KI-Kosten und {} Depotwertänderung vor KI-Kosten. Die Kosten umfassen Buchungstage nach dem ersten bis einschließlich dem letzten Abschluss. Eine Quote gibt es bei positiver Depotwertänderung.",
-        prozent(anteil),
+        "\nKI-Kosten im Verhältnis zum Ertrag: {quote}. Von Abschluss {anfang} bis Abschluss {ende}: {} gebuchte KI-Kosten und {} Depotwertänderung vor KI-Kosten. Die Kosten umfassen Buchungstage nach dem ersten bis einschließlich dem letzten Abschluss. Eine Quote gibt es bei positiver Depotwertänderung. Gesamtkosten im gewählten Exportzeitraum: {}.",
         geld(kosten),
-        geld(ertrag)
+        geld(ertrag),
+        geld(gesamt)
     );
     if !zeitraum
         .tage()
@@ -271,6 +272,16 @@ fn verhaeltnis(
     {
         text.push_str("Tageswerte innerhalb dieses Abschnitts fehlen.\n");
     }
+}
+
+fn anteil_bp(kosten: Cent, ertrag: Cent) -> Option<i64> {
+    if ertrag <= Cent::NULL {
+        return None;
+    }
+    let anteil = i128::from(kosten.0)
+        .checked_mul(i128::from(depot_kern::BP_GANZ))?
+        .checked_div(i128::from(ertrag.0))?;
+    i64::try_from(anteil).ok()
 }
 
 #[cfg(test)]
@@ -299,6 +310,11 @@ mod tests {
             .reserviere_fuer(BeraterId::Maus, bis, 2, KiZweck::Erstmeinung)
             .map_err(|e| format!("{e:?}"))?;
         let betrag = zweite.buchung().reserviert;
+        let danach = bis.plus_tage(1).ok_or("Tag außerhalb")?;
+        let ausserhalb = journal
+            .reserviere(BeraterId::Dachs, danach, 3)
+            .map_err(|e| format!("{e:?}"))?;
+        assert!(ausserhalb.buchung().reserviert > Cent::NULL);
         let gespr = Gespraech {
             zeit: Zeitpunkt::neu(bis, 12, 0, 0).ok_or("Zeit")?,
             lauf: "beispiel".into(),
@@ -320,7 +336,19 @@ mod tests {
         let werte = [(von, Cent(100_000)), (bis, Cent(100_100))].into();
         let zeitraum = Zeitraum { von, bis };
         let mut belege = Gespraechsbelege::default();
-        belege.erfasse(std::slice::from_ref(&gespr), 0);
+        let gemini = Gespraech {
+            wer: "gemini".into(),
+            buchung: None,
+            token_ein: Some(7),
+            token_aus: Some(2),
+            ..gespr.clone()
+        };
+        let uebersprungen = Gespraech {
+            ergebnis: "uebersprungen".into(),
+            token_ein: Some(100),
+            ..gemini.clone()
+        };
+        belege.erfasse(&[gespr.clone(), gemini, uebersprungen], 0);
         let text = bericht(journal.stand(), zeitraum, &werte, &belege);
         assert!(text.contains("| Dachs | 0,00 € | 0 | 0 von 1 | – | – |"));
         assert!(text.contains(&format!("| Maus | {betrag} | 1 | 1 von 1 | 12 | 3 |")));
@@ -330,6 +358,22 @@ mod tests {
             "{betrag} gebuchte KI-Kosten und 1,00 € Depotwertänderung"
         )));
         assert!(!text.contains("9,99 €"));
+        assert!(text.contains(&format!("Im Zeitraum gebucht: {betrag}.")));
+        assert!(!text.contains(&format!("| {danach} |")));
+        assert!(text.contains("| Gemini | nicht im Journal gebucht | – | 1 von 1 | 7 | 2 |"));
+        for endwert in [Cent(100_000), Cent(99_999)] {
+            let werte = [(von, Cent(100_000)), (bis, endwert)].into();
+            assert!(
+                bericht(journal.stand(), zeitraum, &werte, &belege)
+                    .contains("KI-Kosten im Verhältnis zum Ertrag: –.")
+            );
+        }
+        let werte_ein_tag = [(von, Cent(100_000))].into();
+        assert!(
+            bericht(journal.stand(), zeitraum, &werte_ein_tag, &belege)
+                .contains("nicht belegbar. Zwei belegte Tageswerte fehlen.")
+        );
+        assert_eq!(anteil_bp(Cent(50), Cent(100)), Some(5_000));
         belege.erfasse(&[gespr], 0);
         let text = bericht(journal.stand(), zeitraum, &werte, &belege);
         assert!(text.contains(&format!("| Maus | {betrag} | 1 | 0 von 1 | – | – |")));
