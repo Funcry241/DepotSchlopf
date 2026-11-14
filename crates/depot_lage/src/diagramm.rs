@@ -265,6 +265,7 @@ mod tests {
                     kurstage: Vec::new(),
                     kursbezug: std::collections::BTreeMap::new(),
                     ersatz: Vec::new(),
+                    topfwerte: std::collections::BTreeMap::new(),
                 })
             })
             .collect()

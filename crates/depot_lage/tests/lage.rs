@@ -1927,6 +1927,7 @@ fn depotverlauf_250_tage() -> Result<(), String> {
             )?;
         }
         if nr != 0 {
+            vorbedingung(j.begruende(datum, "Papiertag", "Start"), "Start")?;
             vorbedingung(
                 j.schliesse_ab(datum, Cent(560_000), &"2".repeat(64)),
                 "Abschluss",
@@ -1939,6 +1940,137 @@ fn depotverlauf_250_tage() -> Result<(), String> {
     println!("250 Abschlüsse × 23 Werte: {:?}", start.elapsed());
     assert_eq!(punkte.len(), 250);
     assert!(punkte.iter().all(|p| p.gesamt == Some(Cent(560_000))));
+    let zeit = some(Zeitpunkt::frankfurt(datum, 7, 40, 0), "Lagezeit")?;
+    let start = std::time::Instant::now();
+    let bild = lagebild(&umgebung(zeit, Zugang::Offen(j.stand())));
+    let dauer = start.elapsed();
+    assert!(bild.messlatte.iter().any(|m| m.tage == 250));
+    println!("250 Abschlüsse: Lagebild inklusive Messlatte {dauer:?}");
+    if !cfg!(debug_assertions) {
+        assert!(dauer < std::time::Duration::from_millis(200), "{dauer:?}");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn nichts_wird_gesperrt() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let _ = Papierdatei::oeffnen(&ort.konto, false, &start()?)?;
+    let mut j = ort.oeffnen()?;
+    for topf in start()? {
+        vorbedingung(j.setze_topf(&topf), "Startbestand")?;
+    }
+    for t in [10, 12] {
+        belege_alle(&mut j, t)?;
+        let datum = tag(t)?;
+        vorbedingung(j.begruende(datum, "Papiertag", "Start"), "Start")?;
+        vorbedingung(
+            j.schliesse_ab(datum, Cent(1_000_000), &"a".repeat(64)),
+            "Abschluss",
+        )?;
+    }
+    let vorher = j.bestaetigt();
+    let bild = lagebild(&umgebung(abends(13)?, Zugang::Offen(j.stand())));
+    assert_eq!(bild.messlatte.len(), 2);
+    assert!(
+        bild.messlatte
+            .iter()
+            .all(|m| m.ergebnis == depot_kern::messlatte::Ergebnis::Verfehlt)
+    );
+    assert_eq!(j.bestaetigt(), vorher);
+    belege_alle(&mut j, 13)?;
+    drop(j);
+    assert!(matches!(
+        stummer_tag(&ort, 13)?,
+        Ausgang::Abgeschlossen { .. }
+    ));
+    Ok(())
+}
+
+#[test]
+fn geschlossen_zaehlt_nicht() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    for topf in start()? {
+        vorbedingung(j.setze_topf(&topf), "Startbestand")?;
+    }
+    belege_alle(&mut j, 13)?;
+    let freitag = tag(13)?;
+    vorbedingung(j.begruende(freitag, "Papiertag", "Start"), "Start")?;
+    vorbedingung(
+        j.schliesse_ab(freitag, Cent(1_000_000), &"a".repeat(64)),
+        "Abschluss",
+    )?;
+    let montag = abends(16)?;
+    let bild = lagebild(&umgebung(montag, Zugang::Offen(j.stand())));
+    assert_eq!(bild.messlatte.len(), 2);
+    assert!(
+        bild.messlatte
+            .iter()
+            .all(|m| m.tage == 1 && m.ausfall_bp == Some(0))
+    );
+    Ok(())
+}
+
+#[test]
+fn angefangen_ist_ausfall() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    for topf in start()? {
+        vorbedingung(j.setze_topf(&topf), "Startbestand")?;
+    }
+    belege_alle(&mut j, 12)?;
+    let donnerstag = tag(12)?;
+    vorbedingung(j.begruende(donnerstag, "Papiertag", "Start"), "Start")?;
+    vorbedingung(
+        j.schliesse_ab(donnerstag, Cent(1_000_000), &"a".repeat(64)),
+        "Abschluss",
+    )?;
+    vorbedingung(j.begruende(tag(13)?, "Papiertag", "Start"), "Start")?;
+    let bild = lagebild(&umgebung(abends(13)?, Zugang::Offen(j.stand())));
+    assert_eq!(bild.messlatte.len(), 2);
+    assert!(
+        bild.messlatte
+            .iter()
+            .all(|m| m.tage == 1 && m.ausfall_bp == Some(5_000))
+    );
+    Ok(())
+}
+
+#[test]
+fn mitternacht_frankfurt() -> Result<(), String> {
+    use depot_lage::tage::TagStand;
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let vortag = tag(12)?;
+    let heute = tag(13)?;
+    for topf in start()? {
+        vorbedingung(j.setze_topf(&topf), "Startbestand")?;
+    }
+    belege_alle(&mut j, 12)?;
+    vorbedingung(j.begruende(vortag, "Papiertag", "Start"), "Start")?;
+    vorbedingung(
+        j.schliesse_ab(vortag, Cent(1_000_000), &"a".repeat(64)),
+        "Abschluss",
+    )?;
+    let zeit = some(Zeitpunkt::frankfurt(heute, 0, 30, 0), "Mitternacht")?;
+    let bild = lagebild(&umgebung(zeit, Zugang::Offen(j.stand())));
+    assert!(
+        bild.tage
+            .iter()
+            .any(|t| t.datum == heute && t.stand == TagStand::Offen)
+    );
+    assert!(
+        bild.tage
+            .iter()
+            .any(|t| t.datum == vortag && t.stand == TagStand::Abgeschlossen)
+    );
+    assert!(
+        bild.messlatte
+            .iter()
+            .all(|m| m.tage == 1 && m.ausfall_bp == Some(0))
+    );
     Ok(())
 }
 

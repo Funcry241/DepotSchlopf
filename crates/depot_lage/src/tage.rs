@@ -279,6 +279,16 @@ pub fn tage(
     protokoll: &[Eintrag],
     heute: Datum,
 ) -> Vec<TagErgebnis> {
+    tage_bis(stand, universum, protokoll, heute, TAGE_MAX)
+}
+
+pub(crate) fn tage_bis(
+    stand: &Stand,
+    universum: &Universum,
+    protokoll: &[Eintrag],
+    heute: Datum,
+    max: usize,
+) -> Vec<TagErgebnis> {
     let begr = stand.begruendungen();
     let gelaufen: BTreeSet<Datum> = begr
         .iter()
@@ -290,7 +300,7 @@ pub fn tage(
     };
     let mut tage = Vec::new();
     let mut d = heute;
-    while d >= erster && tage.len() < TAGE_MAX {
+    while d >= erster && tage.len() < max {
         if werktag(d) {
             tage.push(match liste::feiertag(d) {
                 Some(grund) => TagErgebnis {

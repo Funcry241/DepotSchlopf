@@ -185,6 +185,12 @@ impl KiStand {
         &self.buchungen
     }
 
+    pub fn abgerechnete_buchungen(&self) -> impl Iterator<Item = &Buchung> {
+        self.abgerechnet
+            .iter()
+            .filter_map(|&nr| self.buchungen.get(nr))
+    }
+
     pub(crate) fn rechne_ab(&mut self, inhalt: &str) -> Result<(), String> {
         let a = crate::ki_abrechnung::KiAbrechnung::lies(inhalt).ok_or("KI-Abrechnung unlesbar")?;
         if self.abgerechnet.contains(&a.nr) || self.obergrenzen.get(a.nr) != Some(&a.reserviert) {
