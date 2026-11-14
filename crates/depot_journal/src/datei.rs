@@ -624,9 +624,9 @@ impl Journal {
             Art::Vorbereitung => Err(JournalFehler::Abgelehnt(
                 "Vorbereitung nur über ihre geprüften Methoden".into(),
             )),
-            Art::Ki | Art::KiAbrechnung | Art::KiGrenzen => Err(JournalFehler::Abgelehnt(
-                "KI-Einträge entstehen nur über reserviere".into(),
-            )),
+            Art::Ki | Art::KiAbrechnung | Art::KiAufruf | Art::KiGrenzen => Err(
+                JournalFehler::Abgelehnt("KI-Einträge entstehen nur über reserviere".into()),
+            ),
             Art::Auftrag => Err(JournalFehler::Abgelehnt(
                 "Aufträge entstehen nur über reserviere_auftrag".into(),
             )),
@@ -1001,6 +1001,11 @@ impl Journal {
     ) -> Result<(), JournalFehler> {
         let e = crate::vorbereitung::Eintrag::Antwort { start, antwort };
         self.schreibe_eintrag(Art::Vorbereitung, &e.text())
+    }
+
+    /// Verankert Modell, Vorlage und Rohdaten-Abdrücke im Journal.
+    pub fn belege_ki_aufruf(&mut self, aufruf: &crate::KiAufruf) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::KiAufruf, &aufruf.text())
     }
 
     /// Bestätigt Minderkosten einer passenden Reservierung; bei Schreibfehlern bleiben die Höchstkosten gebucht.

@@ -10,6 +10,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Hinzugefügt
 
+- KI-Aufrufe erhalten einen Journalbeleg für Modell, Vorlage und die Abdrücke von Anfrage und Antwort (#113). Zulässige Rohtexte speichert DepotSchlopf lokal. Vor dem Update eine geprüfte Sicherung anlegen. Nach dem ersten Eintrag `ki-aufruf` kann ein älterer Stand das Journal nicht mehr öffnen.
+
 - Geprüfte Sicherungen auf einen vorhandenen Zielordner, täglich ab 23:30 und jederzeit von Hand (#123).
 
 - Berechnung des historischen Papierdepotwerts je belegtem Tagesabschluss mit Angabe der Kurstage, Ersatzbewertungen und fehlenden Kursen (#192).
