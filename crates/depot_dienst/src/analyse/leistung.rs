@@ -177,14 +177,14 @@ mod tests {
             &mut text,
             &[
                 verkauf(1, davor, Some(Cent(-10))),
-                verkauf(2, tag, Some(Cent(20))),
+                verkauf(2, tag, Some(Cent(208))),
                 verkauf(3, tag, None),
                 verkauf(4, danach, Some(Cent(-30))),
             ],
             Zeitraum { von: tag, bis: tag },
         );
         assert!(!text.contains("| 1 | A |"));
-        assert!(text.contains("| 2 | A |"));
+        assert!(text.contains("| 2 | A | DE0007164600 | 2,08 € |"));
         assert!(text.contains("| 3 | A | DE0007164600 | – |"));
         assert!(!text.contains("| 4 | A |"));
         assert!(text.contains("100,00 % (1 von 1 mit Gewinn)"));
