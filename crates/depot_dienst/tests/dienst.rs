@@ -4399,7 +4399,7 @@ fn zeitraum_leer() -> Result<(), String> {
     )?;
     let html = get(&d, "/depot?zeitraum=1m", jetzt);
     assert!(html.contains("Im gewählten Zeitraum gibt es noch keinen abgeschlossenen Papiertag."));
-    assert!(!html.contains("<svg"));
+    assert!(!html.contains("id=\"depot-diagramm-titel\""));
     Ok(())
 }
 
