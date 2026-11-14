@@ -48,6 +48,7 @@ pub fn depotstand(stand: &Stand, werte: &[Wert]) -> DepotLage {
 }
 pub use depot_sim::papierlauf::{
     PapierFreigabeAngebot, PapierFreigabeFehler, papier_freigabe_angebot, papier_freigeben,
+    papier_mindesteinsatz,
 };
 pub use depot_sim::vorbereitung::tag_jetzt as vorbereitungstag;
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};

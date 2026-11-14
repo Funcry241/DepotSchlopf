@@ -63,6 +63,8 @@ versiegelt! {
         max_orders_je_topf: usize,
         /// Kleinste erlaubte Order (Ausnahme: kompletter Verkauf einer Position).
         min_order: Cent,
+        /// Papier-Mindesteinsatz mit Begründungspflicht, keine Kaufvorgabe.
+        mindesteinsatz_bp: i64,
         /// Umschichten erst ab dieser Aenderung des Gewichts.
         min_aenderung_bp: i64,
         /// Hoechstens dieser Anteil des Topfes wird je Zyklus umgeschichtet.
@@ -100,6 +102,7 @@ impl Grenzen {
             max_werte: 4,
             max_orders_je_topf: 4,
             min_order: Cent(10_000),
+            mindesteinsatz_bp: 3_000,
             min_aenderung_bp: 500,
             max_umschlag_bp: 10_000,
             limit_abstand_bp: 100,

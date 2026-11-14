@@ -73,6 +73,22 @@ pub struct Urteil {
 /// Ein Berater. Jede Frage kostet eine `AufrufErlaubnis`; die gibt es nur, wenn das Journal die
 /// Hoechstkosten vorher gebucht hat (R8). Der Berater verbraucht sie.
 pub trait Berater {
+    fn setze_mindesteinsatz(&mut self, _bp: i64) {}
+
+    fn mindesteinsatz_begruendung(&mut self, _tag: Datum) -> Option<String> {
+        None
+    }
+
+    fn frage_mindesteinsatz(
+        &mut self,
+        _erlaubnis: AufrufErlaubnis,
+        _tag: Datum,
+        _einsatz_bp: i64,
+        _minimum_bp: i64,
+    ) -> Option<String> {
+        None
+    }
+
     fn zweitmeinung_technisch_ausgefallen(&self) -> bool {
         false
     }

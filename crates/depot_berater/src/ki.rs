@@ -68,6 +68,8 @@ pub struct KiBerater<N: Netz> {
     vorbereitung: Option<Zeitpunkt>,
     abrechnung: Option<depot_journal::KiAbrechnung>,
     technischer_ausfall: bool,
+    mindesteinsatz_grund: Option<(depot_kern::Datum, String)>,
+    mindesteinsatz_bp: Option<i64>,
 }
 
 impl<N: Netz> fmt::Debug for KiBerater<N> {
@@ -115,6 +117,8 @@ impl<N: Netz> KiBerater<N> {
             vorbereitung: None,
             abrechnung: None,
             technischer_ausfall: false,
+            mindesteinsatz_grund: None,
+            mindesteinsatz_bp: None,
         }
     }
 
@@ -768,6 +772,36 @@ impl<N: Netz> KiBerater<N> {
 }
 
 impl<N: Netz> Berater for KiBerater<N> {
+    fn setze_mindesteinsatz(&mut self, bp: i64) {
+        self.mindesteinsatz_bp = Some(bp);
+    }
+
+    fn mindesteinsatz_begruendung(&mut self, tag: depot_kern::Datum) -> Option<String> {
+        self.mindesteinsatz_grund
+            .take()
+            .filter(|(datum, _)| *datum == tag)
+            .map(|(_, grund)| grund)
+    }
+
+    fn frage_mindesteinsatz(
+        &mut self,
+        erlaubnis: AufrufErlaubnis,
+        tag: depot_kern::Datum,
+        einsatz_bp: i64,
+        minimum_bp: i64,
+    ) -> Option<String> {
+        let system = "Begründe die vorhandene Papier-Handelsentscheidung kurz sachlich auf Deutsch. Liefere ausschließlich ein JSON-Objekt mit dem Feld unter_mindesteinsatz. Schlage keine neuen Orders vor.";
+        let frage = format!(
+            "Am {tag} sind durch Bestand und genehmigte Aufträge {einsatz_bp} bp investiert. Der Mindesteinsatz beträgt {minimum_bp} bp. Warum bleibt der Topf darunter?"
+        );
+        let antwort = self
+            .fragen(&erlaubnis, system, &frage, KiZweck::Abstimmung)
+            .text
+            .ok()?;
+        let grund = frage::lies_mindesteinsatz(&antwort)?;
+        (!self.enthaelt_schluessel(&grund)).then_some(grund)
+    }
+
     fn kann_abstimmen(&self) -> bool {
         true
     }
@@ -780,6 +814,7 @@ impl<N: Netz> Berater for KiBerater<N> {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::abstimmungs_frage(lage, &self.universum, stand);
         let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
+        self.mindesteinsatz_grund = None;
         let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Abstimmung);
         match e
             .text
@@ -853,7 +888,16 @@ impl<N: Netz> Berater for KiBerater<N> {
             || frage::vorschlag_frage(lage, &self.universum, bilanz),
             |zeit| frage::vorbereitung_frage(lage, &self.universum, zeit),
         );
+        let f = if let Some(bp) = self
+            .mindesteinsatz_bp
+            .filter(|_| self.vorbereitung.is_none())
+        {
+            format!("{f}\nDer Papier-Mindesteinsatz für diesen Topf beträgt {bp} Basispunkte.")
+        } else {
+            f
+        };
         let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
+        self.mindesteinsatz_grund = None;
         let e = self.fragen(
             &erlaubnis,
             &system,
@@ -864,6 +908,12 @@ impl<N: Netz> Berater for KiBerater<N> {
                 KiZweck::Erstmeinung
             },
         );
+        let mindesteinsatz_grund = e
+            .text
+            .as_ref()
+            .ok()
+            .and_then(|text| frage::lies_mindesteinsatz(text))
+            .filter(|grund| !self.enthaelt_schluessel(grund));
         match e
             .text
             .and_then(|t| {
@@ -878,6 +928,7 @@ impl<N: Netz> Berater for KiBerater<N> {
                 }
             }) {
             Ok(mut a) => {
+                self.mindesteinsatz_grund = mindesteinsatz_grund.map(|grund| (lage.datum, grund));
                 a.prognose = a.prognose.filter(|p| {
                     if self.vorbereitung.is_some() {
                         frage::prognose_ereignis_sichtbar(p, lage, &f)

@@ -58,6 +58,7 @@ pub(super) fn bericht(
             "**Rot: Journal nicht bestätigt.** Kennzahlen zu Handel, Kosten und Depot fehlen.\n\n",
         );
     }
+    let pflichtgrund_fehlt = pflichtgrund_fehlt(stand, zeitraum);
     text.push_str("| Prüffrage | Ampel | Belege und Grenzen |\n|---|---|---|\n");
     for (frage, belege) in [
         (
@@ -96,6 +97,7 @@ pub(super) fn bericht(
         let ampel = match frage {
             "Nicht-Handeln" if vollstaendig => "Grün",
             "Nicht-Handeln" => "Rot (Belege fehlen)",
+            "Entscheidungen" if pflichtgrund_fehlt => "Rot (Begründung zum Mindesteinsatz fehlt)",
             "Entscheidungen" if stand.is_none() => "Rot (Journal fehlt)",
             "Nachher-Blick" => nachher,
             "Ablauf" => ablauf,
@@ -108,6 +110,18 @@ pub(super) fn bericht(
     text.push_str(&entscheidungen);
     text.push_str(&nichthandeln);
     text
+}
+
+fn pflichtgrund_fehlt(stand: Option<&Stand>, zeitraum: Zeitraum) -> bool {
+    stand.is_some_and(|stand| {
+        stand.begruendungen().iter().any(|(tag, wer, grund)| {
+            (zeitraum.von..=zeitraum.bis).contains(tag)
+                && wer == "Regelwerk"
+                && grund.split_once(": ").is_some_and(|(_, grund)| {
+                    grund.starts_with("unter_mindesteinsatz ") && grund.ends_with(" · fehlt")
+                })
+        })
+    })
 }
 
 #[derive(Default)]

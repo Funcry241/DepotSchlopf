@@ -289,7 +289,12 @@ pub fn lauf(
         depotwert(s.start.iter(), &s.vorlauf, Rundung::Auf).ok_or_else(|| rechnung("Startwert"))?
     };
     let mut vortag = &s.vorlauf;
-    let mut beteiligte = Beteiligte { dachs, maus, konto };
+    let mut beteiligte = Beteiligte {
+        dachs,
+        maus,
+        konto,
+        mindesteinsatz_bp: 0,
+    };
     for (i, (tag, abdruck)) in s.tage.iter().zip(&abdruecke).enumerate() {
         let nr = u32::try_from(i)
             .ok()
@@ -358,6 +363,7 @@ pub(crate) struct Beteiligte<'a, 'b, 'c> {
     pub(crate) dachs: &'a mut dyn Berater,
     pub(crate) maus: &'b mut dyn Berater,
     pub(crate) konto: &'c mut dyn Broker,
+    pub(crate) mindesteinsatz_bp: i64,
 }
 
 /// Was fuer einen Tag fest ist.
@@ -479,7 +485,7 @@ pub(crate) fn ein_tag(
             antwort.verwerfe_ersatzkauf();
         }
     }
-    beide_topfzyklen(jr, z, antworten, &mut *b.konto)?;
+    beide_topfzyklen(jr, z, antworten, b)?;
     let hoch = if z.gesperrt.is_empty() {
         hoch.max(heute)
     } else {
@@ -517,7 +523,7 @@ fn beide_topfzyklen(
     j: &mut Journal,
     z: &Zyklus<'_>,
     antworten: [TopfAntwort; 2],
-    konto: &mut dyn Broker,
+    beteiligte: &mut Beteiligte<'_, '_, '_>,
 ) -> Result<(), LaufFehler> {
     if !beratungszeit(z) {
         return begruende(
@@ -527,9 +533,20 @@ fn beide_topfzyklen(
             "Beratung beendet: Datenfrische abgelaufen oder Uhr unklar. Keine neuen Aufträge.",
         );
     }
-    for antwort in antworten {
-        topf_zyklus(j, z, antwort, konto)?;
-    }
+    let gesperrt = beteiligte.dachs.kostensperre() || beteiligte.maus.kostensperre();
+    let [a, b] = antworten;
+    let minimum = if gesperrt {
+        0
+    } else {
+        beteiligte.mindesteinsatz_bp
+    };
+    topf_zyklus(j, z, a, beteiligte.konto, beteiligte.dachs, minimum)?;
+    let minimum = if beteiligte.dachs.kostensperre() || beteiligte.maus.kostensperre() {
+        0
+    } else {
+        minimum
+    };
+    topf_zyklus(j, z, b, beteiligte.konto, beteiligte.maus, minimum)?;
     Ok(())
 }
 
@@ -1069,11 +1086,85 @@ fn zweite_meinung(
     })
 }
 
+fn geplanter_einsatz(
+    topf: &Topf,
+    kurse: &Kurse,
+    plan: &depot_regelwerk::Entscheidung,
+) -> Option<i64> {
+    let gesamt = topf.wert_exakt(kurse)?;
+    let bargeld = depot_kern::Preis::aus_cent(topf.bargeld())?;
+    let mut eingesetzt = gesamt.checked_sub(bargeld)?;
+    for auftrag in plan.verkaeufe.iter().chain(&plan.kaeufe) {
+        let a = auftrag.auftrag();
+        let wert = kurse.kurs(&a.isin)?.mal_stueck_exakt(a.stueck)?;
+        eingesetzt = match a.richtung {
+            Richtung::Kauf => eingesetzt.checked_add(wert)?,
+            Richtung::Verkauf => eingesetzt.checked_sub(wert)?,
+        };
+    }
+    eingesetzt.in_bp_von(gesamt)
+}
+
+fn mindesteinsatz(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    topf: &Topf,
+    plan: &depot_regelwerk::Entscheidung,
+    berater: &mut dyn Berater,
+    minimum_bp: i64,
+) -> Result<bool, LaufFehler> {
+    if minimum_bp == 0
+        || !z.gesperrt.is_empty()
+        || !z.vollstaendige_kurse
+        || !depot_kern::liste::handelstag(z.tag.datum)
+    {
+        return Ok(false);
+    }
+    let Some(einsatz_bp) =
+        geplanter_einsatz(topf, &z.tag.kurse, plan).filter(|bp| *bp < minimum_bp)
+    else {
+        return Ok(false);
+    };
+    let wer = topf.id().berater();
+    let mut grund = berater.mindesteinsatz_begruendung(z.tag.datum);
+    let mut nachgefragt = false;
+    if grund.is_none() && berater.angebunden() {
+        match j.reserviere_fuer(wer, z.tag.datum, z.nr, depot_journal::KiZweck::Abstimmung) {
+            Ok(erlaubnis) => {
+                nachgefragt = true;
+                grund =
+                    berater.frage_mindesteinsatz(erlaubnis, z.tag.datum, einsatz_bp, minimum_bp);
+                if let Some(a) = berater.abrechnung() {
+                    j.rechne_ki_ab(&a).map_err(journal)?;
+                }
+            }
+            Err(Sperre::Kassenbuch(e)) => return Err(halt(format!("Kassenbuch: {e}"))),
+            Err(_) => {}
+        }
+    }
+    let status = grund.map_or_else(
+        || "fehlt".into(),
+        |grund| format!("begründet: {}", sauber(&grund)),
+    );
+    begruende(
+        j,
+        z.tag,
+        REGELWERK,
+        &format!(
+            "{}: unter_mindesteinsatz {einsatz_bp} von {minimum_bp} bp · {status}",
+            topf_name(topf.id())
+        ),
+    )?;
+    Ok(nachgefragt)
+}
+
 fn topf_zyklus(
     j: &mut Journal,
     z: &Zyklus<'_>,
     antwort: TopfAntwort,
     konto: &mut dyn Broker,
+    berater: &mut dyn Berater,
+    minimum_bp: i64,
 ) -> Result<(), LaufFehler> {
     let TopfAntwort {
         topf,
@@ -1103,6 +1194,31 @@ fn topf_zyklus(
         &mut vergabe,
         kaufbudget(j, z.grenzen, id)?,
     );
+    let nachgefragt = mindesteinsatz(j, z, &topf, &ent, berater, minimum_bp)?;
+    // Auch die budgetierte Nachfrage darf die Frische der Kaufkurse nicht verlängern.
+    if nachgefragt && !beratungszeit(z) {
+        return begruende(
+            j,
+            tag,
+            DATEN,
+            "Keine neuen Aufträge: Kursfrist nach Mindesteinsatz-Nachfrage abgelaufen.",
+        );
+    }
+    if nachgefragt && berater.kostensperre() {
+        let zwingend: Vec<_> = ent
+            .verkaeufe
+            .iter()
+            .filter(|a| a.beleg().anlass.zwingend())
+            .cloned()
+            .collect();
+        fuehre_aus(j, z, id, &zwingend, None, konto)?;
+        return begruende(
+            j,
+            tag,
+            KOSTENSCHUTZ,
+            "Keine neuen Aufträge: Kostensperre nach Mindesteinsatz-Nachfrage.",
+        );
+    }
     if ersatzkauf {
         begruende(
             j,
@@ -1320,6 +1436,103 @@ fn protokolliere_ausfuehrungen(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mindesteinsatz_fragt_einmal_und_vermerkt_fehlenden_grund() -> Result<(), LaufFehler> {
+        struct Nachfrage(usize);
+        impl Berater for Nachfrage {
+            fn vorschlagen(
+                &mut self,
+                _: depot_journal::AufrufErlaubnis,
+                _: &Lage<'_>,
+            ) -> crate::Antwort {
+                unreachable!("nur Nachfrage")
+            }
+            fn pruefen(
+                &mut self,
+                _: depot_journal::AufrufErlaubnis,
+                _: &Lage<'_>,
+                _: &Vorschlag,
+            ) -> crate::Urteil {
+                unreachable!("nur Nachfrage")
+            }
+            fn frage_mindesteinsatz(
+                &mut self,
+                _: depot_journal::AufrufErlaubnis,
+                _: depot_kern::Datum,
+                _: i64,
+                _: i64,
+            ) -> Option<String> {
+                self.0 = self.0.saturating_add(1);
+                None
+            }
+        }
+        let ordner =
+            std::env::temp_dir().join(format!("depot-mindesteinsatz-{}", std::process::id()));
+        std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(journal)?;
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        let datum = depot_kern::Datum::neu(2030, 1, 10).ok_or_else(|| halt("Datum"))?;
+        let zeit = Zeitpunkt::neu(datum, 12, 0, 0).ok_or_else(|| halt("Zeit"))?;
+        let kursliste = Kurse::neu(zeit, vec![]).map_err(|e| halt(format!("{e:?}")))?;
+        let tag = Tag {
+            datum,
+            kurse: kursliste,
+            ereignisse: Vec::new(),
+        };
+        let z = Zyklus {
+            grenzen: &Grenzen::standard(),
+            universum: &Universum::default(),
+            tag: &tag,
+            vortag: &tag.kurse,
+            nr: 1,
+            abdruck: "Probe",
+            uhr: None,
+            vollstaendige_kurse: true,
+            gesperrt: &BTreeSet::new(),
+            bewertung: &tag.kurse,
+        };
+        let mut berater = Nachfrage(0);
+        let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| halt(format!("{e:?}")))?;
+        let erster = j
+            .reserviere(BeraterId::Dachs, datum, 1)
+            .map_err(|e| halt(format!("{e:?}")))?;
+        j.rechne_ki_ab(&erster.abrechnung(0, 0).ok_or_else(|| halt("Abrechnung"))?)
+            .map_err(journal)?;
+        let plan = depot_regelwerk::Entscheidung::default();
+        assert!(!mindesteinsatz(&mut j, &z, &topf, &plan, &mut berater, 0)?);
+        let gesperrt = Zyklus {
+            vollstaendige_kurse: false,
+            ..z
+        };
+        assert!(!mindesteinsatz(
+            &mut j,
+            &gesperrt,
+            &topf,
+            &plan,
+            &mut berater,
+            3_000
+        )?);
+        assert!(mindesteinsatz(
+            &mut j,
+            &z,
+            &topf,
+            &plan,
+            &mut berater,
+            3_000
+        )?);
+        assert_eq!(berater.0, 1);
+        assert!(
+            j.stand().begruendungen().iter().any(|(_, _, text)| {
+                text == "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt"
+            })
+        );
+        assert_eq!(j.stand().ki().buchungen().len(), 2);
+        drop(j);
+        std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
+        Ok(())
+    }
 
     #[test]
     fn laengerer_dialog_verlaengert_die_kursfrist_nicht() -> Result<(), LaufFehler> {

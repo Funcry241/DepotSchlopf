@@ -323,6 +323,7 @@ fn einrichtungsseite(
         &sicherung::ziel(&d.wurzel),
         &sicherungsinfo(d, jetzt),
     ));
+    zusatz.push_str(&mindesteinsatz_formular(d));
     let zustand = d.sperre();
     let gespeichert = seiten::Einrichtung {
         zeitplan_gespeichert: match datei {
@@ -558,6 +559,22 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             http::umleitung(&format!("/einrichtung?m={meldung}{ziel}"))
         }
         "/zeitplan" => zeitplan_aendern(d, &f),
+        "/mindesteinsatz" => {
+            let Some(bp) = feld(&f, "bp")
+                .and_then(|s| s.parse::<u32>().ok())
+                .filter(|bp| *bp <= 10_000)
+            else {
+                return seiten::fehler(400, "Mindesteinsatz: 0 bis 10000 Basispunkte eingeben.");
+            };
+            let _zustand = d.sperre();
+            match werkbank::schreibe_ganz(
+                &d.wurzel.join("daten/mindesteinsatz.txt"),
+                &format!("{bp}\n"),
+            ) {
+                Ok(()) => http::umleitung("/einrichtung#mindesteinsatz"),
+                Err(_) => seiten::fehler(409, "Mindesteinsatz konnte nicht gespeichert werden."),
+            }
+        }
         "/sicherung-ziel" => sicherung_einstellen(d, u, &f, jetzt),
         "/kostenschutz" => kostenschutz_aufheben(d, u, &f, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, u, &f, Sperre::Kurse),
@@ -626,6 +643,19 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, seite.as_bytes())
+}
+
+fn mindesteinsatz_formular(d: &Dienst) -> String {
+    let mindesteinsatz = depot_lage::papier_mindesteinsatz(&d.wurzel.join("daten"))
+        .map(|bp| format!("{bp}"))
+        .unwrap_or_default();
+    format!(
+        r#"<section id="mindesteinsatz"><h2>Papier-Mindesteinsatz</h2>
+          <form method="post" action="/mindesteinsatz"><input type="hidden" name="t" value="{}">
+          <label>Mindesteinsatz in Basispunkten <input type="number" name="bp" min="0" max="10000" value="{mindesteinsatz}" required></label>
+          <button type="submit">Speichern</button></form><p>3.000 bp entsprechen 30 %. Darunter ist eine Begründung erforderlich.</p></section>"#,
+        depot_lage::html::maskiere(&d.token)
+    )
 }
 
 fn sicherung_einstellen(
