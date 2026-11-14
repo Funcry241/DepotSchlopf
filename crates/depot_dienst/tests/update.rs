@@ -964,10 +964,11 @@ const reply=t=>Promise.resolve({ok:true,text:()=>Promise.resolve(t)});
 const health=(start='alt',bereit=true)=>`<span data-start="${start}"></span><span data-bereit="${bereit?'ja':'nein'}"></span>`;
 function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt',urls=['/teil/status','/teil/update','/teil/journal'],forms=[],confirm=()=>false}={}) {
   let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={},docEvents={};
-  const banner={hidden:true,textContent:''}, reconnect={hidden:true}, reconnectLink={href:'/einrichtung'};
+  const attributes=new Set();
+  const banner={hidden:true,textContent:'',setAttribute:n=>attributes.add(n),removeAttribute:n=>attributes.delete(n),hasAttribute:n=>attributes.has(n)}, reconnect={hidden:true}, reconnectLink={href:'/einrichtung'};
   const elements=Array.from({length:parts},(_,i)=>({innerHTML:'alt',getAttribute:()=>urls[i],querySelectorAll:()=>[]}));
   const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:id==='neuverbinden-link'?reconnectLink:banner,querySelector:()=>known?{getAttribute:()=>known}:null,querySelectorAll:s=>s==='[data-teil]'?elements:s==='form[data-aenderungen]'?forms:[]};
-  vm.runInNewContext(script,{document,navigator:{},URL,AbortController,Set,
+  vm.runInNewContext(script,{document,navigator:{},URL,AbortController,Set,Date:{now:()=>now},
     window:{confirm,addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
     setTimeout:(f,delay)=>{const id=++nr;timers.set(id,{f,at:now+delay});return id},clearTimeout:id=>timers.delete(id),
     fetch:(url,options)=>{requests.push({url,options});return response(url,options)}
@@ -1060,7 +1061,15 @@ test('neuer Dienst in Probe wird erst nach Bestätigung geladen',async()=>{
   let bereit=false;const b=browser({parts:3,response:u=>reply(u==='/teil/status'?health('neu',bereit):health('neu'))});
   await b.advance(4000);assert.equal(b.navigations.length,0);assert.equal(b.banner.hidden,false);
   assert.ok(b.elements.every(e=>e.innerHTML==='alt'));
-  bereit=true;await b.advance(2000);assert.deepEqual(b.navigations,['/einrichtung#update']);
+  assert.equal(b.banner.hasAttribute('data-update-wartet'),true);
+  assert.match(b.banner.textContent,/nichts tun/);
+  await b.advance(174000);
+  assert.equal(b.banner.hasAttribute('data-update-wartet'),true);
+  await b.advance(2000);
+  assert.equal(b.banner.hasAttribute('data-update-wartet'),false);
+  assert.match(b.banner.textContent,/starte DepotSchlopf.cmd erneut/);
+  assert.deepEqual(b.navigations,[]);
+  bereit=true;await b.advance(4000);assert.deepEqual(b.navigations,['/einrichtung#update']);
 });
 test('abgewiesene Verbindung erholt sich und erkennt auch den Rückfall',async()=>{
   let offline=true;const b=browser({response:()=>offline?Promise.reject(Error('offline')):reply(health('rueckfall'))});

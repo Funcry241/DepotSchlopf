@@ -1,4 +1,5 @@
 klasse: Funktion
-zweck: Betriebsleiste vor Speicherkästchen zeichnen
+zweck: Neustart nach Updates bis zum Fristablauf neutral anzeigen
 pfade:
 crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/update.rs
