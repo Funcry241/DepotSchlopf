@@ -1820,26 +1820,52 @@ fn abstimmung_kann_die_zweitmeinung_auch_widerrufen() -> Result<(), String> {
     Ok(())
 }
 #[test]
-fn endlose_meinungsaenderungen_enden_an_der_tagesgrenze() -> Result<(), String> {
+fn hoechstens_zwei_runden() -> Result<(), String> {
     let folge: Vec<_> = (0..100).map(|n| Some(1000_i64.saturating_add(n))).collect();
     let mut a = diskutant(BeraterId::Dachs, folge.clone(), false)?;
     let mut b = diskutant(BeraterId::Maus, folge, false)?;
     let (_ort, j) = dialoglauf(&mut a, &mut b)?;
-    assert_eq!(a.gesehen.len(), 28);
-    assert_eq!(b.gesehen.len(), 28);
-    for wer in [BeraterId::Dachs, BeraterId::Maus] {
-        assert_eq!(
-            j.stand()
-                .ki()
-                .buchungen()
-                .iter()
-                .filter(|b| b.berater == wer)
-                .count(),
-            30
-        );
-    }
+    assert_eq!(a.gesehen.len(), 2);
+    assert_eq!(b.gesehen.len(), 2);
+    assert_eq!(j.stand().ki().buchungen().len(), 8);
     assert!(j.stand().auftraege().is_empty());
     Ok(())
+}
+
+#[test]
+fn einig_nach_runde_1() -> Result<(), String> {
+    let mut a = diskutant(BeraterId::Dachs, vec![Some(2000), Some(1000)], false)?;
+    let mut b = diskutant(BeraterId::Maus, vec![Some(2000), Some(1000)], false)?;
+    let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+    assert_eq!(a.gesehen.len(), 1);
+    assert_eq!(b.gesehen.len(), 1);
+    assert_eq!(j.stand().auftraege().len(), 2);
+    Ok(())
+}
+
+#[test]
+fn uneinig_nach_runde_2_kein_auftrag() -> Result<(), String> {
+    let mut a = diskutant(
+        BeraterId::Dachs,
+        vec![Some(1000), Some(1500), Some(1500)],
+        false,
+    )?;
+    let mut b = diskutant(BeraterId::Maus, vec![Some(2000), Some(2000)], false)?;
+    let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+    assert_eq!(a.gesehen.len(), 2);
+    assert_eq!(b.gesehen.len(), 2);
+    assert!(
+        j.stand()
+            .auftraege()
+            .iter()
+            .all(|a| a.beleg.topf != TopfId::A)
+    );
+    Ok(())
+}
+
+#[test]
+fn budget_grenze_unveraendert() {
+    assert_eq!(depot_ki::KiGrenzen::standard().aufrufe_je_zyklus(), 30);
 }
 
 #[test]
