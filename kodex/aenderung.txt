@@ -1,6 +1,8 @@
-klasse: KodexAenderung
-zweck: Die Messlatte ab ihrer Einführung gegen Änderungen ohne Grenzfreigabe schützen
+klasse: Funktion
+zweck: Analyse-Export auf aufbereitete Belege begrenzen
 pfade:
-crates/depot_kodex/src/festschreibung.rs
-kodex/festschreibung.txt
-kodex/freigabe.txt
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/analyse/journal.rs
+crates/depot_dienst/src/analyse/rohdaten.rs
+crates/depot_dienst/src/verlauf.rs
+crates/depot_dienst/tests/dienst.rs

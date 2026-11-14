@@ -159,16 +159,6 @@ pub(crate) fn lies_zeitraum(text: &str, von: depot_kern::Datum, bis: depot_kern:
     gelesen
 }
 
-pub(crate) fn zeile_im_zeitraum(z: &str, von: depot_kern::Datum, bis: depot_kern::Datum) -> bool {
-    lies_zeile(z).is_some_and(|z| {
-        [Some(z.start), z.ende.and_then(|(ende, _)| ende)]
-            .into_iter()
-            .flatten()
-            .filter_map(Zeitpunkt::in_frankfurt)
-            .any(|(tag, ..)| (von..=bis).contains(&tag))
-    })
-}
-
 fn lies_bis(text: &str, max: usize) -> Geladen {
     let mut zeilen: Vec<Zeile> = Vec::new();
     let mut positionen = std::collections::BTreeMap::new();
