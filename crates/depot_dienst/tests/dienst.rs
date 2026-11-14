@@ -3985,6 +3985,34 @@ fn export_enthaelt_nie_rohdaten() -> Result<(), String> {
 }
 
 #[test]
+fn pruefbericht_steht_zuerst_und_standard_ist_diese_woche() -> Result<(), String> {
+    let wurzel = ordner()?;
+    depot_journal::Journal::einrichten(&wurzel.join("daten/journal.txt"))
+        .map_err(|e| format!("{e:?}"))?;
+    let d = dienst(wurzel, true);
+    let zeit = donnerstag(12, 0)?;
+    let html = get(&d, "/", zeit);
+    assert!(html.contains("Diese Woche exportieren"));
+    let antwort = behandle(
+        &d,
+        &Attrappe::default(),
+        &formular_post("/export", &format!("t={TOKEN}")),
+        zeit,
+    );
+    assert_eq!(status(&antwort)?, 200);
+    let antwort = text(&antwort);
+    let (_, zip) = antwort.split_once("\r\n\r\n").ok_or("ZIP fehlt")?;
+    assert!(zip.starts_with("PK"));
+    assert!(antwort.contains("DepotSchlopf_Analyse_2026-11-02_bis_2026-11-05.zip"));
+    assert!(
+        zip.find("PRUEFBERICHT.md")
+            .zip(zip.find("01_ueberblick.md"))
+            .is_some_and(|(bericht, ueberblick)| bericht < ueberblick)
+    );
+    Ok(())
+}
+
+#[test]
 fn heute_exportieren_liefert_zip_ohne_schreibzugriff() -> Result<(), String> {
     let wurzel = ordner()?;
     let d = dienst(wurzel.clone(), true);
@@ -4009,7 +4037,7 @@ fn heute_exportieren_liefert_zip_ohne_schreibzugriff() -> Result<(), String> {
     assert!(fest.contains("action=\"/export\" data-download"));
     let teil = anfrage("GET", "/teil/live", &[("Host", HOST)], "");
     assert!(!text(&behandle(&d, &umwelt, &teil, jetzt)).contains("action=\"/export\""));
-    let post = formular_post("/export", &format!("t={TOKEN}"));
+    let post = formular_post("/export", &format!("t={TOKEN}&zeitraum=heute"));
     let lesen = behandle(&d, &umwelt, &post, jetzt);
     assert_eq!(status(&lesen)?, 200);
     let antwort = text(&lesen);
@@ -4439,7 +4467,7 @@ fn export_schwaerzt_sec_kontakt_ohne_at() -> Result<(), String> {
     drop(buch);
     let kontakt = daten.join("sec_kontakt.txt");
     let d = dienst(wurzel, true);
-    let post = formular_post("/export", &format!("t={TOKEN}"));
+    let post = formular_post("/export", &format!("t={TOKEN}&zeitraum=heute"));
     let umwelt = Attrappe::default();
     let ohne = behandle(&d, &umwelt, &post, jetzt);
     fs::write(&kontakt, "  Testperson Beispiel  \r\n").map_err(|e| e.to_string())?;
@@ -4455,7 +4483,7 @@ fn export_ohne_zip_bei_unlesbarem_sec_kontakt() -> Result<(), String> {
     let wurzel = ordner()?;
     fs::create_dir(wurzel.join("daten/sec_kontakt.txt")).map_err(|e| e.to_string())?;
     let d = dienst(wurzel, true);
-    let post = formular_post("/export", &format!("t={TOKEN}"));
+    let post = formular_post("/export", &format!("t={TOKEN}&zeitraum=heute"));
     let antwort = behandle(&d, &Attrappe::default(), &post, donnerstag(12, 0)?);
     assert_eq!(status(&antwort)?, 409);
     let antwort = text(&antwort);

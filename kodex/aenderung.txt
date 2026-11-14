@@ -1,8 +1,7 @@
 klasse: Funktion
-zweck: Analyse-Export auf aufbereitete Belege begrenzen
+zweck: Prüfbericht im Wochenexport und präzise JSON-Schwärzung
 pfade:
 crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/journal.rs
-crates/depot_dienst/src/analyse/rohdaten.rs
-crates/depot_dienst/src/verlauf.rs
+crates/depot_dienst/src/analyse/pruefbericht.rs
+crates/depot_dienst/src/analyse/schutz.rs
 crates/depot_dienst/tests/dienst.rs
