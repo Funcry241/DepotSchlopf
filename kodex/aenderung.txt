@@ -1,4 +1,5 @@
 klasse: Funktion
-zweck: Fehlende Auswertungen im Prüfbericht rot kennzeichnen
+zweck: Vollständige Prompts aus dem Analyse-Export entfernen
 pfade:
-crates/depot_dienst/src/analyse/pruefbericht.rs
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/tests/dienst.rs
