@@ -185,7 +185,14 @@ fn topf_zeile(
 
 /// Der Vergleich aus dem Journal; `None` vor dem ersten abgeschlossenen Papiertag.
 pub(crate) fn vergleich_lage(s: &Stand, werte: &[Wert]) -> Option<VergleichLage> {
+    vergleich_bis(s, werte, None)
+}
+
+/// Vergleich seit dem ersten Papiertag, höchstens bis zum angegebenen Abschlussdatum.
+pub fn vergleich_bis(s: &Stand, werte: &[Wert], bis: Option<Datum>) -> Option<VergleichLage> {
     let schluesse = s.tagesschluesse();
+    let anzahl = schluesse.partition_point(|(tag, _)| bis.is_none_or(|bis| *tag <= bis));
+    let schluesse = schluesse.get(..anzahl)?;
     let (start, _) = schluesse.first()?;
     let (bewertet, toepfe) = schluesse.last()?;
     let universum = als_universum(werte);

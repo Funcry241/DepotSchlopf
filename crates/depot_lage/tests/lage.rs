@@ -1366,6 +1366,34 @@ fn verkaufsbuch(menge: u64) -> Result<Ort, String> {
 }
 
 #[test]
+fn verkaufsnetto_enthaelt_anteiligen_einstand_und_beide_gebuehren() -> Result<(), String> {
+    use depot_journal::Art::{Auftrag, Zustand};
+    let ort = kaufbuch(
+        7,
+        1_000,
+        &[
+            (Auftrag, "2;A;DE0007164600;Verkauf;2;1000;Notbremse"),
+            (Zustand, "2;gesendet"),
+            (Zustand, "2;angenommen"),
+            (Zustand, "2;ausfuehrung;1;1200;70"),
+            (Zustand, "2;ausfuehrung;1;1200;80"),
+            (Auftrag, "3;A;DE0007164600;Verkauf;2;1000;Notbremse"),
+            (Zustand, "3;gesendet"),
+            (Zustand, "3;angenommen"),
+            (Zustand, "3;ausfuehrung;1;1200;70"),
+        ],
+    )?;
+    let journal = ort.oeffnen()?;
+    let verkaeufe = depot_lage::handelsergebnis::verkaeufe(journal.stand());
+    assert_eq!(verkaeufe.len(), 1, "offene Order fehlt");
+    let verkauf = some(verkaeufe.first(), "Verkauf")?;
+    assert_eq!(verkauf.nr, 2);
+    assert_eq!(verkauf.netto, Some(Cent(208)));
+    assert_eq!(verkauf.tag, None);
+    Ok(())
+}
+
+#[test]
 fn einstand_teilverkauf_rundet_auf() -> Result<(), String> {
     let depot = depot_vom(&verkaufsbuch(2)?)?;
     let p = some(topf_a(&depot)?.positionen.first(), "Position")?;

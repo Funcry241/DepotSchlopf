@@ -17,6 +17,7 @@ use crate::{Dienst, Umwelt, gespraeche, http, protokoll::Schutz, schluessel, sei
 
 mod historie;
 mod journal;
+mod leistung;
 mod pruefbericht;
 mod schutz;
 
@@ -891,14 +892,17 @@ fn journalpaket(
         JOURNAL_MAX,
         |stand, eintraege, _| {
             let (kurz, depotdetails, orders) = depot(stand, jetzt, tag, sperren, zeitraum);
+            let historie = historie::bericht(zeitraum, Some(stand), luecken);
+            let pruefbericht = pruefbericht::bericht(Some(stand), zeitraum)
+                + &leistung::bericht(stand, zeitraum, &historie.depotwerte);
             Journalpaket {
-                pruefbericht: pruefbericht::bericht(Some(stand), zeitraum),
+                pruefbericht,
                 kurz,
                 depotdetails,
                 orders,
                 ausfuehrungen: ausfuehrungen_csv(Some(stand), zeitraum),
                 ki: ki(daten, zeitraum, Some(stand), luecken),
-                historie: historie::bericht(zeitraum, Some(stand), luecken),
+                historie,
                 journal: journal::auszug(zeitraum, stand, eintraege),
             }
         },

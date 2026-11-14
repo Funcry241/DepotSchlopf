@@ -90,32 +90,56 @@ pub(crate) fn name(werte: &[Wert], isin: &str) -> String {
         .map_or_else(|| isin.to_string(), |w| w.name.clone())
 }
 
+#[derive(Default)]
+pub(crate) struct Einstand {
+    pub(crate) stueck: u64,
+    pub(crate) kosten: Cent,
+}
+
+impl Einstand {
+    /// Bucht eine Ausführung und liefert für Verkäufe den Nettoertrag nach Einstand und Gebühren.
+    pub(crate) fn buche(
+        &mut self,
+        richtung: Richtung,
+        a: &depot_journal::Ausfuehrung,
+    ) -> Option<Cent> {
+        let verbindlich = a.kurs.mal_stueck(a.stueck)?;
+        match richtung {
+            Richtung::Kauf => {
+                self.stueck = self.stueck.checked_add(a.stueck)?;
+                self.kosten = self
+                    .kosten
+                    .checked_add(verbindlich)?
+                    .checked_add(a.gebuehr)?;
+                Some(Cent::NULL)
+            }
+            Richtung::Verkauf => {
+                let rest = self.stueck.checked_sub(a.stueck)?;
+                let stueck_vorher = i128::from(self.stueck);
+                let zaehler = i128::from(self.kosten.0).checked_mul(i128::from(rest))?;
+                let ab = zaehler.checked_div(stueck_vorher)?;
+                let auf = i128::from(zaehler.checked_rem(stueck_vorher)? != 0);
+                let restkosten = Cent(i64::try_from(ab.checked_add(auf)?).ok()?);
+                let netto = verbindlich
+                    .checked_sub(a.gebuehr)?
+                    .checked_sub(self.kosten.checked_sub(restkosten)?)?;
+                self.kosten = restkosten;
+                self.stueck = rest;
+                Some(netto)
+            }
+        }
+    }
+}
+
 fn einstand(s: &Stand, topf: TopfId, isin: &Isin, gehalten: u64) -> Option<Cent> {
-    let mut stueck = 0_u64;
-    let mut kosten = Cent::NULL;
+    let mut einstand = Einstand::default();
     for (auftrag, a) in s
         .ausfuehrungsfolge()
         .filter(|(b, _)| b.topf == topf && &b.isin == isin)
     {
-        match auftrag.richtung {
-            Richtung::Kauf => {
-                stueck = stueck.checked_add(a.stueck)?;
-                kosten = kosten
-                    .checked_add(a.kurs.mal_stueck(a.stueck)?)?
-                    .checked_add(a.gebuehr)?;
-            }
-            Richtung::Verkauf => {
-                let rest = stueck.checked_sub(a.stueck)?;
-                let stueck_vorher = i128::from(stueck);
-                let zaehler = i128::from(kosten.0).checked_mul(i128::from(rest))?;
-                let ab = zaehler.checked_div(stueck_vorher)?;
-                let auf = i128::from(zaehler.checked_rem(stueck_vorher)? != 0);
-                kosten = Cent(i64::try_from(ab.checked_add(auf)?).ok()?);
-                stueck = rest;
-            }
-        }
+        einstand.buche(auftrag.richtung, a)?;
     }
-    (stueck == gehalten).then_some(kosten)
+    (einstand.stueck == gehalten).then_some(einstand.kosten)
 }
 
 fn topf_lage(s: &Stand, t: &Topf, kurse: Option<&depot_kern::Kurse>, werte: &[Wert]) -> TopfLage {

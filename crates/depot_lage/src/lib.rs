@@ -29,6 +29,7 @@ mod budget;
 mod depot;
 pub mod depotverlauf;
 pub mod diagramm;
+pub mod handelsergebnis;
 pub mod html;
 pub mod tage;
 pub mod vergleich;
