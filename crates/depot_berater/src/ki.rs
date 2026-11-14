@@ -922,8 +922,9 @@ impl<N: Netz> Berater for KiBerater<N> {
         match e
             .text
             .and_then(|t| {
-                frage::pruefe_verkaufsgrund(&t, lage)?;
-                frage::lies_abstimmung(&t, self.wer, &self.universum)
+                let mut antwort = frage::lies_abstimmung(&t, self.wer, &self.universum)?;
+                frage::belege_gesamtverkauf(&t, lage, &mut antwort.eigene)?;
+                Ok(antwort)
             })
             .and_then(|mut a| {
                 a.eigene = self.ohne_geheimnis_antwort(a.eigene)?;
@@ -1023,8 +1024,9 @@ impl<N: Netz> Berater for KiBerater<N> {
         match e
             .text
             .and_then(|t| {
-                frage::pruefe_verkaufsgrund(&t, lage)?;
-                frage::lies_vorschlag(&t, self.wer, &self.universum)
+                let mut antwort = frage::lies_vorschlag(&t, self.wer, &self.universum)?;
+                frage::belege_gesamtverkauf(&t, lage, &mut antwort)?;
+                Ok(antwort)
             })
             .and_then(|a| {
                 if self.vorbereitung.is_some() && a.vorschlag.is_some() {

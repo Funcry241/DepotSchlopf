@@ -1,20 +1,11 @@
 klasse: Funktion
-zweck: KI-Aufrufe vor ihrer Abrechnung im Journal belegen
+zweck: Topfgewichte zeigen und ausgelassenen Bestand erhalten
 pfade:
-CHANGELOG.md
-crates/depot_berater/src/aufrufspur.rs
+crates/depot_berater/src/frage.rs
 crates/depot_berater/src/ki.rs
-crates/depot_berater/src/lib.rs
-crates/depot_berater/tests/berater.rs
-crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/journal.rs
-crates/depot_journal/src/datei.rs
-crates/depot_journal/src/kasse.rs
-crates/depot_journal/src/ki_aufruf.rs
-crates/depot_journal/src/lib.rs
-crates/depot_journal/src/stand.rs
-crates/depot_journal/tests/abrechnung.rs
+crates/depot_regelwerk/src/entscheidung.rs
 crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/src/ausgelassen.rs
 crates/depot_sim/src/lauf.rs
-crates/depot_sim/src/szenario.rs
-crates/depot_sim/src/vorbereitung.rs
+crates/depot_sim/src/lib.rs
+docs/befunde/ungeplante-papierorders.md
