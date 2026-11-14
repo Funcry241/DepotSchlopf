@@ -434,6 +434,7 @@ fn depot(l: &Lagebild, s: &mut String) {
     }
     if let Some(v) = &d.vergleich {
         vergleich(v, s);
+        messlatte(&l.messlatte, s);
     }
     ausfuehrungsbilanz(d, s);
     if !d.auftraege.is_empty() {
@@ -475,6 +476,56 @@ pub fn prozent(bp: i64) -> String {
         betrag.checked_div(100).unwrap_or(0),
         betrag.checked_rem(100).unwrap_or(0)
     )
+}
+
+fn messlatte(t: &[crate::messlatte::MesslatteTopf], s: &mut String) {
+    use depot_kern::messlatte::{Ergebnis, MINDEST_TAGE};
+    if t.is_empty() {
+        return;
+    }
+    s.push_str("<h2>Trägt das System?</h2><ul>");
+    let bp = |v: Option<i64>| v.map_or_else(|| "nicht bewertbar".into(), |bp| format!("{bp} bp"));
+    for v in t {
+        let ergebnis = match v.ergebnis {
+            Ergebnis::Traegt => "trägt",
+            Ergebnis::NochNicht => "noch nicht",
+            Ergebnis::Verfehlt => "verfehlt",
+            Ergebnis::NichtBewertbar => "nicht bewertbar",
+        };
+        let _ = write!(
+            s,
+            "<li>{}: {ergebnis}. {} von {MINDEST_TAGE} Tagen, Vorsprung {}, größter Rückgang {}, Ausfall {}.</li>",
+            topf_text(v.topf),
+            v.tage,
+            bp(v.vorsprung_bp),
+            bp(v.rueckgang_bp),
+            bp(v.ausfall_bp)
+        );
+        if let Some(b) = v.netto {
+            let _ = write!(
+                s,
+                "<li>{}: {} abgeschlossene Trades. Ø netto {}, Trefferquote {} %, Ø Gewinn {}, Ø Verlust {}.</li>",
+                topf_text(v.topf),
+                b.abgeschlossen,
+                geld(crate::nettotrade::Bilanz::durchschnitt(
+                    b.netto,
+                    b.abgeschlossen
+                )),
+                b.trefferquote().unwrap_or_default(),
+                geld(crate::nettotrade::Bilanz::durchschnitt(
+                    b.gewinn_summe,
+                    b.gewinne
+                )),
+                geld(crate::nettotrade::Bilanz::durchschnitt(
+                    b.verlust_summe,
+                    b.verluste
+                ))
+            );
+        }
+    }
+    s.push_str(
+        "</ul><p>Die Messlatte ist festgeschrieben. Über Echtgeld entscheidet Wolfgang.</p>",
+    );
 }
 
 fn vergleich(v: &crate::vergleich::VergleichLage, s: &mut String) {

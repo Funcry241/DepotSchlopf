@@ -33,6 +33,7 @@ pub mod instrument;
 pub mod json;
 pub mod kurs;
 pub mod liste;
+pub mod messlatte;
 pub mod modelle;
 pub mod preis;
 pub mod quelle;
