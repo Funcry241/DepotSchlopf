@@ -79,7 +79,7 @@ pub(super) fn bericht(stand: Option<&Stand>, zeitraum: Zeitraum) -> String {
         ),
         (
             "Kosten",
-            "02_ki_gespraeche.md und 03_journal.md enthalten KI-Buchungen und verfügbare Abrechnungen.",
+            "Die Auswertung darunter zeigt gebuchte Kosten, Token und Lücken in den Belegen.",
         ),
         (
             "Nachher-Blick",

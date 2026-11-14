@@ -185,6 +185,11 @@ impl KiStand {
         &self.buchungen
     }
 
+    /// Belegter Zweck und Abrechnungsstatus zu einer Buchungsnummer.
+    pub fn buchungsbeleg(&self, nr: usize) -> Option<(KiZweck, bool)> {
+        Some((*self.zwecke.get(nr)?, self.abgerechnet.contains(&nr)))
+    }
+
     pub(crate) fn rechne_ab(&mut self, inhalt: &str) -> Result<(), String> {
         let a = crate::ki_abrechnung::KiAbrechnung::lies(inhalt).ok_or("KI-Abrechnung unlesbar")?;
         if self.abgerechnet.contains(&a.nr) || self.obergrenzen.get(a.nr) != Some(&a.reserviert) {
