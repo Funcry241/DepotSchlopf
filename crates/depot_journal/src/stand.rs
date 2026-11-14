@@ -224,6 +224,7 @@ pub const FORMAT: u8 = 2;
 pub struct Stand {
     format: u8,
     toepfe: BTreeMap<TopfId, Topf>,
+    startgeld: BTreeMap<TopfId, Option<Cent>>,
     auftraege: Vec<AuftragsLage>,
     ausfuehrungsfolge: Vec<(usize, usize)>,
     beobachtungen: Vec<(Datum, String)>,
@@ -286,6 +287,11 @@ impl Stand {
     /// Der zuletzt belegte Stand je Topf des Papierdepots.
     pub fn toepfe(&self) -> &BTreeMap<TopfId, Topf> {
         &self.toepfe
+    }
+
+    /// Bargeld bei der ersten Buchung des Topfs, sofern diese ohne Positionen war.
+    pub fn startgeld_je_topf(&self, topf: TopfId) -> Option<Cent> {
+        self.startgeld.get(&topf).copied().flatten()
     }
 
     /// Die Werte, die irgendein Topf haelt. Ihre Kurse sind Pflicht (`waehle_tageswerte`).
@@ -567,6 +573,9 @@ impl Stand {
                 let t = lies_topf(inhalt).ok_or("Topf unlesbar")?;
                 kanonisch(&topf_text(&t), inhalt)?;
                 self.pruefe_deckung(&t, None, Cent::NULL)?;
+                self.startgeld
+                    .entry(t.id())
+                    .or_insert_with(|| t.positionen().is_empty().then(|| t.bargeld()));
                 self.toepfe.insert(t.id(), t);
             }
             // Belege von aussen beginnen keinen Tag: Der Sammler schreibt sie vor dem Papiertag

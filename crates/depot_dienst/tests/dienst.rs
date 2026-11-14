@@ -4495,3 +4495,44 @@ fn export_ohne_zip_bei_unlesbarem_sec_kontakt() -> Result<(), String> {
     assert!(!antwort.contains("application/zip"));
     Ok(())
 }
+
+#[test]
+fn startgeld_gleich_fuer_kennzahl_und_diagramm() -> Result<(), String> {
+    use depot_journal::{Journal, KursBeleg};
+    use depot_kern::{Cent, Herkunft, Isin, Kurs, Topf, TopfId};
+
+    let wurzel = ordner()?;
+    let pfad = wurzel.join("daten/journal.txt");
+    Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+    let mut j = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+    for (id, geld) in [(TopfId::A, Cent(600_000)), (TopfId::B, Cent(400_000))] {
+        let topf = Topf::neu(id, geld).map_err(|e| format!("{e:?}"))?;
+        j.setze_topf(&topf).map_err(|e| format!("{e:?}"))?;
+    }
+    // Der erste abgeschlossene Stand enthält bereits eine Minderung von 1,50 €.
+    let mut a = Topf::neu(TopfId::A, Cent(589_850)).map_err(|e| format!("{e:?}"))?;
+    let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+    a.setze_bestand(isin.clone(), 1);
+    j.setze_topf(&a).map_err(|e| format!("{e:?}"))?;
+    let jetzt = donnerstag(18, 0)?;
+    let tag = some(jetzt.frankfurt_tag(), "Kurstag")?;
+    for datum in [some(Boerse::Xetra.bezugstag(tag), "Vortag")?, tag] {
+        let schluss = some(Boerse::Xetra.schluss(datum), "Schluss")?;
+        let kurs = Kurs::neu(Cent(10_000), "EUR", datum, schluss, Herkunft::Quelle)
+            .map_err(|e| format!("{e:?}"))?;
+        let beleg = KursBeleg::neu("alphavantage", jetzt, b"Startgeldprobe", isin.clone(), kurs)
+            .map_err(|e| format!("{e:?}"))?;
+        j.belege_kurs(&beleg).map_err(|e| format!("{e:?}"))?;
+    }
+    j.schliesse_ab(tag, Cent(1_000_000), &"a".repeat(64))
+        .map_err(|e| format!("{e:?}"))?;
+    drop(j);
+    let html = get(&dienst(wurzel, true), "/depot", jetzt);
+    assert!(html.contains("Seit Start -1,50 €"));
+    assert!(
+        html.contains("Startgeld 10.000,00 € (dünn gestrichelt)"),
+        "{html}"
+    );
+    assert!(html.contains("stroke-dasharray=\"8 5\""), "{html}");
+    Ok(())
+}
