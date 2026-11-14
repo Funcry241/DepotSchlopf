@@ -1,7 +1,4 @@
 klasse: Funktion
-zweck: Prüfbericht im Wochenexport und präzise JSON-Schwärzung
+zweck: Fehlende Auswertungen im Prüfbericht rot kennzeichnen
 pfade:
-crates/depot_dienst/src/analyse.rs
 crates/depot_dienst/src/analyse/pruefbericht.rs
-crates/depot_dienst/src/analyse/schutz.rs
-crates/depot_dienst/tests/dienst.rs
