@@ -1,24 +1,6 @@
-klasse: FestschreibungAenderung
-zweck: Bestätigte Xetra-Splits im Papierdepot wertneutral und nachholbar umbuchen
+klasse: Funktion
+zweck: Simulationskosten im Journal für einen Rückfall lesbar machen
 pfade:
-crates/depot_dienst/src/analyse/journal.rs
-crates/depot_dienst/src/lib.rs
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/src/splitverdacht.rs
 crates/depot_journal/src/datei.rs
-crates/depot_journal/src/kapitalmassnahme.rs
-crates/depot_journal/src/lib.rs
-crates/depot_journal/src/splitverdacht.rs
+crates/depot_journal/src/kasse.rs
 crates/depot_journal/src/stand.rs
-crates/depot_lage/src/depot.rs
-crates/depot_lage/src/handelsergebnis.rs
-crates/depot_lage/src/lib.rs
-crates/depot_sim/src/lib.rs
-crates/depot_sim/src/papier.rs
-crates/depot_sim/src/papierdatei.rs
-crates/depot_sim/src/papiertag.rs
-crates/depot_sim/src/splitumbuchung.rs
-crates/depot_sim/tests/papiertag.rs
-docs/befunde/boersen.md
-kodex/festschreibung.txt
-kodex/freigabe.txt

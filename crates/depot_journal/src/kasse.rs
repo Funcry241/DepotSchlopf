@@ -135,6 +135,7 @@ pub enum KiZweck {
     Zweitmeinung,
     Abstimmung,
     Vorbereitung,
+    Simulation,
 }
 impl KiZweck {
     pub fn text(self) -> &'static str {
@@ -143,6 +144,7 @@ impl KiZweck {
             Self::Zweitmeinung => "zweitmeinung",
             Self::Abstimmung => "abstimmung",
             Self::Vorbereitung => "vorbereitung",
+            Self::Simulation => "simulation",
         }
     }
     fn lies(s: &str) -> Option<Self> {
@@ -151,6 +153,7 @@ impl KiZweck {
             Self::Zweitmeinung,
             Self::Abstimmung,
             Self::Vorbereitung,
+            Self::Simulation,
         ]
         .into_iter()
         .find(|z| z.text() == s)
@@ -235,16 +238,29 @@ impl KiStand {
     }
 
     /// Prueft eine Buchung nach den Regeln ihres Abschnitts und zaehlt sie.
-    pub(crate) fn buche(&mut self, inhalt: &str) -> Result<(), String> {
+    pub(crate) fn buche(&mut self, inhalt: &str) -> Result<KiZweck, String> {
+        // Die Simulation hat keinen Handelsbeginn. Ihr Grenzabdruck und ihre Buchung
+        // gehören in denselben Eintrag, auch bei der ersten Buchung überhaupt.
+        if let Some((buchung, abdruck)) = inhalt.rsplit_once(";simulation;") {
+            let mut neu = self.clone();
+            neu.abdruck(abdruck)?;
+            neu.buche_fuer(buchung, KiZweck::Simulation)?;
+            *self = neu;
+            return Ok(KiZweck::Simulation);
+        }
         let (text, zweck) = inhalt
             .rsplit_once(';')
             .and_then(|(t, z)| KiZweck::lies(z).map(|z| (t, z)))
             .unwrap_or((inhalt, KiZweck::Erstmeinung));
+        if zweck == KiZweck::Simulation {
+            return Err("Simulationsbuchung ohne Grenzabdruck".into());
+        }
         let b = lies_buchung(text).ok_or("Buchung unlesbar")?;
         if buchung_fuer(&b, zweck) != inhalt {
             return Err("Buchung nicht in kanonischer Form".into());
         }
-        self.buche_fuer(text, zweck)
+        self.buche_fuer(text, zweck)?;
+        Ok(zweck)
     }
 
     pub(crate) fn buche_fuer(&mut self, inhalt: &str, zweck: KiZweck) -> Result<(), String> {
@@ -310,7 +326,7 @@ pub(crate) fn naechste_fuer(
         zyklus,
     )?;
     if zweck != KiZweck::Erstmeinung {
-        pruefe_zusatzreserve(stand, berater, datum, reserviert)?;
+        pruefe_zusatzreserve(stand, berater, datum, reserviert, zweck)?;
     }
     Ok((
         Buchung {
@@ -329,6 +345,7 @@ fn pruefe_zusatzreserve(
     berater: BeraterId,
     datum: Datum,
     reserviert: Cent,
+    zweck: KiZweck,
 ) -> Result<(), depot_ki::Sperre> {
     let g = KiGrenzen::standard();
     let gebucht = stand
@@ -341,8 +358,23 @@ fn pruefe_zusatzreserve(
         })
         .try_fold(Cent::NULL, |s, b| s.checked_add(b.reserviert))
         .ok_or(depot_ki::Sperre::Rechenfehler)?;
-    let tage = depot_ki::handelstage_rest(datum)
-        .saturating_sub(u32::from(depot_kern::liste::handelstag(datum)));
+    let ist_handelstag = depot_kern::liste::handelstag(datum);
+    let simulation = zweck == KiZweck::Simulation;
+    let tage =
+        depot_ki::handelstage_rest(datum).saturating_sub(u32::from(ist_handelstag && !simulation));
+    if simulation && ist_handelstag {
+        // Zwei Fachfragen, zwei Abstimmungsrunden und die Nachfrage zum Mindesteinsatz.
+        let handelsaufrufe = 5;
+        let heute = stand
+            .buchungen
+            .iter()
+            .filter(|b| b.berater == berater && b.datum == datum)
+            .count();
+        let heute = u32::try_from(heute).map_err(|_| depot_ki::Sperre::Rechenfehler)?;
+        if heute.saturating_add(1) > g.aufrufe_je_zyklus().saturating_sub(handelsaufrufe) {
+            return Err(depot_ki::Sperre::ErstmeinungReserviert);
+        }
+    }
     let monat_aufrufe = stand
         .buchungen
         .iter()

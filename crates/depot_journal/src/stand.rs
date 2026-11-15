@@ -761,7 +761,11 @@ impl Stand {
             Art::Auftrag => self.belege_auftrag(inhalt)?,
             Art::Zustand | Art::Stopp => self.belege_meldung(art, inhalt)?,
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
-            Art::Ki => self.ki.buche(inhalt)?,
+            Art::Ki => {
+                if self.ki.buche(inhalt)? == crate::KiZweck::Simulation {
+                    return Ok(());
+                }
+            }
             Art::KiAufruf => return self.ki.belege_aufruf(inhalt),
             Art::KiAbrechnung => {
                 self.ki.rechne_ab(inhalt)?;
