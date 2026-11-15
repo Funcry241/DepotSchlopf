@@ -252,7 +252,7 @@ fn kaufanlaesse(zahlen_je_topf: &Handelszahlen<'_>, werte: &[Wert], id: &str, te
     let _ = write!(
         text,
         r#"<details id="handelsdetails-{id}"><summary>Kaufanlässe und Verkäufe</summary>
-        <div class="breit"><table><tr><th>Kaufanlass</th><th>Verkäufe auswertbar</th>
+        <div class="breit"><table><tr><th>Kaufanlass oder Stärkerang</th><th>Verkäufe auswertbar</th>
         <th>Ergebnis netto</th><th>Trefferquote</th><th>Ø Gewinn</th><th>Ø Verlust</th>
         <th>Ø Abstand zum Korb in Prozentpunkten (Anzahl)</th></tr><tr><th>Alle</th>"#
     );
@@ -282,6 +282,29 @@ fn kaufanlaesse(zahlen_je_topf: &Handelszahlen<'_>, werte: &[Wert], id: &str, te
             text,
         );
         text.push_str("</tr>");
+    }
+    for (titel, von, bis) in [
+        ("Stärkerang 1–10", 1, 10),
+        ("Stärkerang ab 11", 11, usize::MAX),
+    ] {
+        let gruppe: Vec<_> = daten
+            .iter()
+            .copied()
+            .filter(|v| {
+                v.staerkerang
+                    .is_some_and(|rang| (von..=bis).contains(&rang))
+            })
+            .collect();
+        if !gruppe.is_empty() {
+            let _ = write!(text, "<tr><th>{titel}</th>");
+            zahlen(
+                gruppe.len(),
+                bilanz(gruppe.iter().copied()),
+                abstand(&gruppe, &zahlen_je_topf.korbrenditen),
+                text,
+            );
+            text.push_str("</tr>");
+        }
     }
     text.push_str("</table></div>");
     details(daten, werte, &zahlen_je_topf.korbrenditen, text);

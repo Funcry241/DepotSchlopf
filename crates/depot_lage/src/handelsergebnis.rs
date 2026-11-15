@@ -18,12 +18,14 @@ pub struct Verkauf {
     /// Ein Vergleich ist nur bei Ausführungen am selben Ausstiegstag möglich.
     pub ausstieg: Option<Datum>,
     pub anlass: Option<&'static str>,
+    pub staerkerang: Option<usize>,
 }
 
 #[derive(Clone, Copy, Default)]
 struct Kaufbezug {
     tag: Option<Datum>,
     anlass: Option<&'static str>,
+    staerkerang: Option<usize>,
 }
 
 impl Kaufbezug {
@@ -31,6 +33,9 @@ impl Kaufbezug {
         Self {
             tag: self.tag.filter(|tag| Some(*tag) == anderer.tag),
             anlass: self.anlass.filter(|anlass| Some(*anlass) == anderer.anlass),
+            staerkerang: self
+                .staerkerang
+                .filter(|rang| Some(*rang) == anderer.staerkerang),
         }
     }
 }
@@ -57,6 +62,21 @@ impl Default for Erloes {
     }
 }
 
+fn staerkerang(stand: &Stand) -> BTreeMap<u64, usize> {
+    stand
+        .begruendungen()
+        .iter()
+        .filter_map(|(_, wer, text)| {
+            if wer != depot_sim::relative_staerke::RANG_BELEG {
+                return None;
+            }
+            let (nr, rang) = text.split_once(' ')?;
+            let rang = rang.parse::<usize>().ok().filter(|n| *n > 0)?;
+            Some((nr.parse::<u64>().ok()?, rang))
+        })
+        .collect()
+}
+
 /// Ein Verkaufsauftrag zählt einmal, auch bei mehreren Füllungen. Ein stornierter oder
 /// verfallener Rest ändert das Ergebnis des bereits ausgeführten Teils nicht.
 pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
@@ -71,6 +91,7 @@ pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
             Some((nr.parse::<u64>().ok()?, depot_sim::kaufanlass(these)))
         })
         .collect::<BTreeMap<_, _>>();
+    let staerkerang = staerkerang(stand);
     let mut positionen = BTreeMap::<(TopfId, &Isin), Option<Position>>::new();
     let mut erloese = BTreeMap::<u64, Erloes>::new();
     for schritt in stand.bewertungsfolge() {
@@ -97,6 +118,7 @@ pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
                 let kauf = Kaufbezug {
                     tag: ausfuehrung.kurszeit.and_then(Zeitpunkt::frankfurt_tag),
                     anlass: anlaesse.get(&auftrag.nr).copied().flatten(),
+                    staerkerang: staerkerang.get(&auftrag.nr).copied(),
                 };
                 p.kauf = if schon_gehalten {
                     p.kauf.gemeinsam(kauf)
@@ -151,6 +173,7 @@ pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
                 einstieg: erloes.kauf.tag,
                 ausstieg: tag.filter(|tag| tage().all(|t| t == Some(*tag))),
                 anlass: erloes.kauf.anlass,
+                staerkerang: erloes.kauf.staerkerang,
             })
         })
         .collect()

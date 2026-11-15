@@ -1054,6 +1054,8 @@ fn frage_topf(
     let t = topf_name(id);
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
+    let relative_staerke =
+        crate::relative_staerke::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let mut lage = Lage {
         anlass: None,
         datum: tag.datum,
@@ -1062,6 +1064,7 @@ fn frage_topf(
         kurse: &tag.kurse,
         verlauf: &verlauf,
         kaufbilanz: crate::ausfuehrung::kaufbilanz(j.stand(), topf.id(), tag.datum),
+        relative_staerke: &relative_staerke,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -1154,6 +1157,8 @@ fn zweite_meinung(
     let t = topf_name(id);
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
+    let relative_staerke =
+        crate::relative_staerke::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let lage = Lage {
         anlass: None,
         datum: tag.datum,
@@ -1162,6 +1167,7 @@ fn zweite_meinung(
         kurse: &tag.kurse,
         verlauf: &verlauf,
         kaufbilanz: crate::ausfuehrung::kaufbilanz(j.stand(), topf.id(), tag.datum),
+        relative_staerke: &relative_staerke,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -1450,6 +1456,20 @@ fn belege_kauf(
             })
             .unwrap_or_else(|| "Kostenhürde nicht berechenbar. Spread nicht belegt.".into());
         begruende(j, tag, "Kostenhürde", &format!("Auftrag {nr}: {huerde}"))?;
+        let ranking =
+            crate::relative_staerke::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
+        if let Some(rang) = ranking
+            .iter()
+            .position(|(isin, _)| *isin == a.isin)
+            .and_then(|index| index.checked_add(1))
+        {
+            begruende(
+                j,
+                tag,
+                crate::relative_staerke::RANG_BELEG,
+                &format!("{nr} {rang}"),
+            )?;
+        }
     }
     if let Some(these) = vorschlag
         .and_then(|v| v.begruendung.get(&a.isin))
@@ -1876,6 +1896,7 @@ mod tests {
             kurse: &kurse,
             verlauf: &[],
             kaufbilanz: crate::ausfuehrung::Kennzahlen::default(),
+            relative_staerke: &[],
             positionskaeufe: &[],
             ereignisse: &["Meldung".into()],
         };

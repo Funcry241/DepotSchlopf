@@ -42,6 +42,7 @@ pub struct Lage<'a> {
     pub verlauf: &'a [(Isin, crate::kursverlauf::Verlauf)],
     pub kaufbilanz: crate::ausfuehrung::Kennzahlen,
     pub ereignisse: &'a [String],
+    pub relative_staerke: &'a [(Isin, i64)],
     pub positionskaeufe: &'a [crate::Positionskauf],
 }
 

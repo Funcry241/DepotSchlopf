@@ -1376,6 +1376,7 @@ fn verkaufsnetto_enthaelt_anteiligen_einstand_und_beide_gebuehren() -> Result<()
                 Begruendung,
                 "2026-11-06;Kaufthese;1 [Zahlen] Ergebnis über Erwartung",
             ),
+            (Begruendung, "2026-11-06;Kursstärke;1 3"),
             (Auftrag, "2;A;DE0007164600;Verkauf;2;1000;Notbremse"),
             (Zustand, "2;gesendet"),
             (Zustand, "2;angenommen"),
@@ -1395,6 +1396,7 @@ fn verkaufsnetto_enthaelt_anteiligen_einstand_und_beide_gebuehren() -> Result<()
     assert_eq!(verkauf.netto, Some(Cent(208)));
     assert_eq!(verkauf.einstand, Some(Cent(2042)));
     assert_eq!(verkauf.anlass, Some("Zahlen"));
+    assert_eq!(verkauf.staerkerang, Some(3));
     assert_eq!(verkauf.einstieg, None);
     assert_eq!(verkauf.tag, None);
     Ok(())

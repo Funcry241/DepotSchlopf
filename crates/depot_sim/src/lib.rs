@@ -38,11 +38,14 @@ pub mod papierdatei;
 pub mod papierlauf;
 pub mod papiertag;
 mod positionskauf;
+pub mod relative_staerke;
 pub mod schlopfmodell;
 pub mod splitumbuchung;
 pub mod szenario;
 pub mod vorschau;
-pub use positionskauf::{KAUFTHESE, Positionskauf, kaufanlass};
+pub use positionskauf::{
+    Ausstiegsplan, KAUFTHESE, Positionskauf, kaufanlass, lies as positionskaeufe,
+};
 pub mod vorbereitung;
 
 pub use lauf::{Gefragt, LaufFehler, gefragt, lauf};

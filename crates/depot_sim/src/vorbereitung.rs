@@ -142,6 +142,7 @@ pub fn vorbereiten<'a>(
                             kurse: &kurse,
                             verlauf: &[],
                             kaufbilanz: crate::ausfuehrung::Kennzahlen::default(),
+                            relative_staerke: &[],
                             positionskaeufe: &[],
                             ereignisse: &ereignisse,
                         },
