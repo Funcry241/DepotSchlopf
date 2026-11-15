@@ -24,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use depot_berater::{Anbieter, Https, KiBerater, SPERRDATEI, Schluessel};
 use depot_kern::liste::{als_universum, beobachtungsliste};
 use depot_kern::{BeraterId, Datum, Zeitpunkt};
-use depot_sim::papierlauf::papier;
+use depot_sim::papierlauf::papier_starten;
 
 fn wurzel() -> Option<PathBuf> {
     let start = std::env::current_dir().ok()?;
@@ -66,7 +66,7 @@ fn laufkennung() -> String {
         })
 }
 
-fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
+fn lauf(wurzel: &Path, vorbereitung: bool, automatisch: bool) -> Result<(), String> {
     let werte = beobachtungsliste()?;
     let universum = als_universum(&werte);
     let heute = heute().ok_or("Uhr liefert kein Datum")?;
@@ -120,7 +120,14 @@ fn lauf(wurzel: &Path, vorbereitung: bool) -> Result<(), String> {
             eprintln!("[Papier] {name} pausiert ({p}): wird nicht gefragt, nichts reserviert.");
         }
     }
-    let ergebnis = papier(wurzel, heute, &universum, &mut dachs, &mut maus);
+    let ergebnis = papier_starten(
+        wurzel,
+        heute,
+        &universum,
+        &mut dachs,
+        &mut maus,
+        automatisch,
+    );
     if dachs.gesperrt() || maus.gesperrt() {
         eprintln!(
             "[Papier] KIs gesperrt am Kostenschutz: {}. Prüfen, dann löschen.",
@@ -155,11 +162,12 @@ fn main() -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
-    if args.as_slice() != ["papier"] && args.as_slice() != ["vorbereiten"] {
+    let automatisch = args.as_slice() == ["papier", "--auto"];
+    if !automatisch && args.as_slice() != ["papier"] && args.as_slice() != ["vorbereiten"] {
         eprintln!("[Papier] Aufruf: run.cmd papier oder run.cmd vorbereiten");
         return ExitCode::from(2);
     }
-    match lauf(&wurzel, args.as_slice() == ["vorbereiten"]) {
+    match lauf(&wurzel, args.as_slice() == ["vorbereiten"], automatisch) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("[Papier] HALT: {e}");

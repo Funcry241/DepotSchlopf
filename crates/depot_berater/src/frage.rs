@@ -224,6 +224,9 @@ fn positionen_text(
 fn lage_text(lage: &Lage<'_>, universum: &Universum, bilanz: &[(BeraterId, Auswertung)]) -> String {
     let mut t = String::new();
     let _ = writeln!(t, "Datum: {}", lage.datum);
+    if let Some(anlass) = lage.anlass {
+        let _ = writeln!(t, "{}{anlass}", depot_sim::anlass::ANLASS);
+    }
     let _ = writeln!(
         t,
         "Topf {:?}: Bargeld {} EUR, davon für Käufe frei {} EUR",
@@ -671,6 +674,7 @@ mod prognosebilanz_tests {
         let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
         let topf = Topf::neu(TopfId::A, Cent(100_000)).map_err(|e| format!("{e:?}"))?;
         let lage = Lage {
+            anlass: None,
             datum,
             topf: &topf,
             kaufbar: topf.bargeld(),
@@ -702,6 +706,7 @@ mod prognosebilanz_tests {
         let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
         topf.setze_bestand(isin.clone(), 1);
         let lage = Lage {
+            anlass: None,
             datum,
             topf: &topf,
             kaufbar: Cent(500_000),
@@ -739,6 +744,7 @@ mod prognosebilanz_tests {
         let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
         let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
         let lage = Lage {
+            anlass: None,
             datum,
             topf: &topf,
             kaufbar: topf.bargeld(),
@@ -798,6 +804,7 @@ mod handelssystem_tests {
         let mut topf = Topf::neu(TopfId::A, Cent(383_000)).map_err(|e| format!("{e:?}"))?;
         topf.setze_bestand(isin, 10);
         let lage = Lage {
+            anlass: None,
             datum,
             topf: &topf,
             kaufbar: topf.bargeld(),

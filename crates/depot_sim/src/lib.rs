@@ -28,6 +28,7 @@ mod ausgelassen;
 pub use depot_regelwerk::entscheidung::ist_gewicht_bp;
 
 pub mod abstimmung;
+pub mod anlass;
 pub mod ausfuehrung;
 pub mod kursverlauf;
 pub mod lauf;

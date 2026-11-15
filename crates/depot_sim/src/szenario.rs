@@ -35,6 +35,7 @@ pub struct Szenario {
 pub struct Lage<'a> {
     pub datum: Datum,
     pub topf: &'a Topf,
+    pub anlass: Option<&'a str>,
     /// Bargeld nach Abzug offener Käufe und noch nicht abgerechneter Erlöse.
     pub kaufbar: Cent,
     pub kurse: &'a Kurse,

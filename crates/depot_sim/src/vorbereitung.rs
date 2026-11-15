@@ -135,6 +135,7 @@ pub fn vorbereiten<'a>(
                     let antwort = b.vorschlagen(
                         erlaubnis,
                         &Lage {
+                            anlass: None,
                             datum: fuer,
                             topf: &topf,
                             kaufbar: Cent::NULL,
