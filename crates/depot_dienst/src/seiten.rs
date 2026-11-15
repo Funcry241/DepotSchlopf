@@ -1451,6 +1451,15 @@ pub(crate) fn live_mit_ki(
     s.push_str(&zeitstrahl(z, heute, ki));
     s.push_str(&taetigkeit(z, heute, ki));
     s.push_str(&gesamtstatus_teil(token, z, false));
+    if z.laufend.is_none()
+        && !z.lage_veraltet
+        && let Some(diagnose) = z
+            .lage
+            .as_ref()
+            .and_then(|lage| lage.bild.wiederanlauf.as_ref())
+    {
+        diagnose.html(&mut s);
+    }
     s.push_str(&update_hinweis(z));
     s.push_str("<section id=\"ki-simulation\"><h2>KI-Simulation</h2>");
     s.push_str(&auftrag_knopf(

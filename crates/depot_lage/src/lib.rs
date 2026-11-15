@@ -36,6 +36,7 @@ pub mod html;
 pub mod messlatte;
 pub mod tage;
 pub mod vergleich;
+pub mod wiederanlauf;
 mod zugang;
 
 pub use betrieb::{AnbieterHinweis, Betrieb, SchluesselStand};
@@ -70,8 +71,8 @@ pub use depot_sim::vorbereitung::tag_jetzt as vorbereitungstag;
 pub use depot_sim::vorschau::hoechstkosten as simulationskosten;
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
 pub use zugang::{
-    DatenprobeFehler, PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien,
-    update_datenprobe,
+    DatenprobeFehler, PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal,
+    mit_journal_und_eintraegen, sperrdateien, update_datenprobe,
 };
 
 use depot_journal::Stand;
@@ -228,6 +229,7 @@ pub struct Lagebild {
     pub punkte: Vec<Punkt>,
     pub budget: Vec<KiBudget>,
     pub gemini_budget: Option<GeminiBudget>,
+    pub wiederanlauf: Option<wiederanlauf::Diagnose>,
     pub depot: Option<DepotLage>,
     /// Neueste zuerst.
     pub gespraech: Vec<Beitrag>,
@@ -1059,6 +1061,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         punkte,
         budget,
         gemini_budget: None,
+        wiederanlauf: None,
         depot: depot_lage,
         gespraech,
         beratungsanlaesse,
