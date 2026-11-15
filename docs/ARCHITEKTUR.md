@@ -104,6 +104,8 @@ Der Code kennt keine Überweisungen, keine Ein- und Auszahlungen und keine Ände
 10. **Schreiben:** Die Auftragsstelle sendet die genehmigten Aufträge nach dem festen Verfahren an IBKR (R34).
 11. **Abgleichen:** Jede Antwort des Brokers ändert den Zustand des Auftrags im Journal. Nach jeder Ausführung gleicht der Kontowächter mit dem Broker ab.
 
+**Anlass im Papierlauf:** Der automatische Papiertag entscheidet je Topf, ob er eine Erstmeinung braucht. Auslöser sind eine neue zugeordnete Meldung, ein relevanter Termin heute oder am nächsten Handelstag, eine belegte Kursbewegung, die Nähe zum Schutz-Stopp oder ein Pflichtblick nach fünf Handelstagen. Ein Handstart fragt wie gewohnt. Am Ruhetag entfallen die Erstmeinung und die dazugehörige Zweitmeinung und Abstimmung. Der Papiertag führt den Abgleich und zwingende Aufträge weiterhin aus. Journal und Live zeigen den Anlass oder den Ruhetag.
+
 ## 5 Bereiche
 
 Ein Bereich ist ein virtueller Teil desselben IBKR-Kontos mit eigenem Geld, eigenen Regeln und eigenem Budget. Die KI sieht und verwaltet nur ihren Bereich. Geld wandert zwischen Bereichen nur durch einen Befehl von Wolfgang, der im Journal steht.

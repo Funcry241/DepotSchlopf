@@ -82,6 +82,41 @@ fn berechne(stand: &Stand, isin: &Isin, bis: Datum, wissen: Zeitpunkt) -> Option
     })
 }
 
+/// Kurzfristige Veränderung, auch bei weniger als 21 belegten Börsentagen.
+pub(crate) fn kurzbewegung(
+    stand: &Stand,
+    isin: &Isin,
+    kurs: &depot_kern::Kurs,
+    wissen: Zeitpunkt,
+    tage: u8,
+) -> Option<i64> {
+    let boerse = depot_kern::liste::boerse_von(isin)?;
+    let fremdwaehrung = boerse.waehrung() == "USD";
+    let mut bis = kurs.handelstag();
+    if fremdwaehrung && depot_kern::boerse::target_geschlossen(bis) {
+        return None;
+    }
+    for _ in 0..tage {
+        bis = boerse.bezugstag(bis)?;
+        while fremdwaehrung && depot_kern::boerse::target_geschlossen(bis) {
+            bis = boerse.bezugstag(bis)?;
+        }
+    }
+    let basis = stand
+        .kurse()
+        .iter()
+        .filter(|b| {
+            b.isin() == isin
+                && b.abruf() <= wissen
+                && b.kurs().handelstag() == bis
+                && b.kurs().herkunft() == Herkunft::Quelle
+        })
+        .max_by_key(|b| b.abruf())?
+        .kurs()
+        .preis();
+    kurs.preis().checked_sub(basis)?.in_bp_von(basis)
+}
+
 pub(crate) fn fuer_lage(
     stand: &Stand,
     kurse: &depot_kern::Kurse,

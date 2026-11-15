@@ -46,6 +46,7 @@ fn eingefrorene_vorbereitung_entspricht_auch_bei_langen_texten_der_gesendeten_au
     let topf = Topf::neu(TopfId::A, Cent(0)).map_err(|e| format!("{e:?}"))?;
     let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
     let lage = Lage {
+        anlass: None,
         datum: Datum::neu(2026, 11, 9).ok_or("Datum")?,
         topf: &topf,
         kaufbar: topf.bargeld(),
@@ -90,6 +91,7 @@ fn vorbereitungsclient_akzeptiert_these_ohne_kurs_aber_keine_handelsziele() -> R
     let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
     let ereignisse = vec!["Nachricht Politisches Ereignis".into()];
     let lage = Lage {
+        anlass: None,
         datum: montag,
         topf: &topf,
         kaufbar: topf.bargeld(),
@@ -318,6 +320,7 @@ fn mit_lage<T>(f: impl FnOnce(&Lage<'_>) -> T) -> Result<T, String> {
     let kurse = kurse()?;
     let ereignisse = vec!["SAP: Quartalszahlen am 06.11.".to_string()];
     let lage = Lage {
+        anlass: None,
         datum: tag()?,
         topf: &topf,
         kaufbar: topf.bargeld(),
@@ -1571,6 +1574,7 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
         })
         .collect();
     let lage = Lage {
+        anlass: None,
         datum: d,
         topf: &topf,
         kaufbar: topf.bargeld(),
@@ -1793,6 +1797,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
     let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
     let kurse = kurse()?;
     let lage = Lage {
+        anlass: None,
         datum: tag()?,
         topf: &topf,
         kaufbar: Cent(45_000),

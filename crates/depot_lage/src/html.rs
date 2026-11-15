@@ -348,6 +348,9 @@ fn budget(l: &Lagebild, s: &mut String) {
 
 /// Je Handelstag: lief der Papiertag, und wer von Dachs und Maus hat beigetragen.
 fn tage(l: &Lagebild, s: &mut String) {
+    for (id, text) in &l.beratungsanlaesse {
+        let _ = write!(s, "<p>{}: {}</p>", topf_text(*id), maskiere(text));
+    }
     if l.tage.is_empty() {
         return;
     }

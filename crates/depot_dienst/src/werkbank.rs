@@ -1147,7 +1147,10 @@ impl Dienst {
         let (ausgabe, schreiber) = pipe()?;
         let kind = (self.starter)(art, &self.wurzel)
             .args(update_commit)
-            .args((art == Art::Sicherung && anlass == Anlass::Zeitplan).then_some("--auto"))
+            .args(
+                (matches!(art, Art::Sicherung | Art::Papier) && anlass == Anlass::Zeitplan)
+                    .then_some("--auto"),
+            )
             .args(gemini_vorrang.then_some("papiertag"))
             .env(depot_lage::gespraeche::LAUF_ENV, kennung)
             .stdin(Stdio::null())

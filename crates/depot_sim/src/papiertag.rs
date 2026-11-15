@@ -576,6 +576,7 @@ pub fn papiertag(
         maus,
         konto,
         mindesteinsatz_bp: 0,
+        anlass_pruefen: false,
     };
     papiertag_mit_uhr(j, heute, universum, start, &mut beteiligte, None)
 }
@@ -811,6 +812,7 @@ pub(crate) fn papiertag_mit_uhr(
         None => Some(tag.kurse.stand()),
     };
     let z = Zyklus {
+        anlass_pruefen: beteiligte.anlass_pruefen,
         grenzen: &grenzen,
         universum: &wahl.universum,
         tag: &tag,

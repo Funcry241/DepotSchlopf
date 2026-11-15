@@ -112,6 +112,7 @@ fn frage(
         zyklus.tag.datum,
     );
     let lage = Lage {
+        anlass: None,
         datum: zyklus.tag.datum,
         topf: &topf.topf,
         kaufbar,
@@ -204,7 +205,10 @@ pub(crate) fn berate(
         return Ok(gueltig);
     }
     let [ea, eb] = erste;
-    if !ea.erste_verwertbar || !eb.erste_verwertbar {
+    if [ea.erstmeinung, eb.erstmeinung]
+        .iter()
+        .any(|e| *e != crate::lauf::Erstmeinung::Verwertbar)
+    {
         return Ok(gueltig);
     }
     let (da, db) = (

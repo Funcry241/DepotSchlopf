@@ -233,6 +233,7 @@ pub struct Lagebild {
     pub schluessel: Vec<(Wer, SchluesselStand)>,
     /// Die letzten Handelstage seit dem ersten Papiertag, neueste zuerst.
     pub tage: Vec<TagErgebnis>,
+    beratungsanlaesse: Vec<(depot_kern::TopfId, String)>,
     pub vorbereitung: Option<depot_journal::Vorbereitung>,
     pub(crate) fruehere_vorbereitung: Vec<FruehereVorbereitung>,
     /// Auswertung der aufgelösten Prognosen je Berater und gesamt (#114). Ein Hinweis, nie
@@ -944,6 +945,25 @@ fn fruehere_einschaetzungen(
     aus
 }
 
+fn beratungsanlass_am(stand: &Stand, heute: Datum) -> Vec<(depot_kern::TopfId, String)> {
+    use depot_kern::TopfId;
+    use depot_sim::anlass::{ANLASS, RUHETAG};
+    [TopfId::A, TopfId::B]
+        .into_iter()
+        .filter_map(|id| {
+            let prefix = format!("Topf {id:?}: ");
+            let anlass = stand
+                .begruendungen()
+                .iter()
+                .rev()
+                .filter(|(datum, wer, _)| *datum == heute && wer == "Simulation")
+                .filter_map(|(_, _, text)| text.strip_prefix(&prefix))
+                .find(|text| *text == RUHETAG || text.starts_with(ANLASS))?;
+            Some((id, anlass.to_owned()))
+        })
+        .collect()
+}
+
 /// Rechnet das Lagebild.
 pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut punkte = vec![journal_punkt(u.journal)];
@@ -954,6 +974,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut budget = Vec::new();
     let mut depot_lage = None;
     let mut gespraech = Vec::new();
+    let mut beratungsanlaesse = Vec::new();
     let mut tage = Vec::new();
     let mut vorbereitung = None;
     let mut fruehere_vorbereitung = Vec::new();
@@ -978,6 +999,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
             }
             depot_lage = Some(depot);
             tage = tage::tage(s, &als_universum(werte), &u.anbieter, heute);
+            beratungsanlaesse = beratungsanlass_am(s, heute);
             gespraech = s
                 .begruendungen()
                 .iter()
@@ -1034,6 +1056,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         gemini_budget: None,
         depot: depot_lage,
         gespraech,
+        beratungsanlaesse,
         grenzen: grenzwerte(),
         betrieb,
         schluessel,

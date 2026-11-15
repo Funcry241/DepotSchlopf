@@ -294,6 +294,7 @@ pub fn lauf(
         maus,
         konto,
         mindesteinsatz_bp: 0,
+        anlass_pruefen: false,
     };
     for (i, (tag, abdruck)) in s.tage.iter().zip(&abdruecke).enumerate() {
         let nr = u32::try_from(i)
@@ -303,6 +304,7 @@ pub fn lauf(
         let fehler = pruefe_kurse(&grenzen, &s.universum, tag.datum, &tag.kurse, vortag);
         if fertig.is_none_or(|(index, _)| i > index) {
             let z = Zyklus {
+                anlass_pruefen: false,
                 grenzen: &grenzen,
                 universum: &s.universum,
                 tag,
@@ -421,10 +423,12 @@ pub(crate) struct Beteiligte<'a, 'b, 'c> {
     pub(crate) maus: &'b mut dyn Berater,
     pub(crate) konto: &'c mut dyn Broker,
     pub(crate) mindesteinsatz_bp: i64,
+    pub(crate) anlass_pruefen: bool,
 }
 
 /// Was fuer einen Tag fest ist.
 pub(crate) struct Zyklus<'a> {
+    pub(crate) anlass_pruefen: bool,
     pub(crate) grenzen: &'a Grenzen,
     /// Was gehandelt werden darf (Positivliste).
     pub(crate) universum: &'a Universum,
@@ -985,11 +989,18 @@ fn belege_prognose(
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Erstmeinung {
+    Ruhetag,
+    Unverwertbar,
+    Verwertbar,
+}
+
 #[derive(Clone)]
 pub(crate) struct TopfAntwort {
     pub(crate) topf: Topf,
     pub(crate) vorschlag: Option<Vorschlag>,
-    pub(crate) erste_verwertbar: bool,
+    pub(crate) erstmeinung: Erstmeinung,
     zweitmeinung_ausgefallen: bool,
     ersatzkauf: bool,
 }
@@ -1039,7 +1050,8 @@ fn frage_topf(
     let t = topf_name(id);
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
-    let lage = Lage {
+    let mut lage = Lage {
+        anlass: None,
         datum: tag.datum,
         topf: &topf,
         kaufbar: kaufbudget(j, z.grenzen, id)?,
@@ -1055,14 +1067,14 @@ fn frage_topf(
         .find(|l| l.versand.is_some() && l.beleg.topf == id)
         .map(|l| l.beleg.nr);
     let gesperrt = z.gesperrt.iter().find(|isin| topf.stueck(isin) != 0);
-    let (vorschlag, erste_verwertbar) = if let Some(isin) = gesperrt {
+    let (vorschlag, erstmeinung) = if let Some(isin) = gesperrt {
         begruende(
             j,
             tag,
             AUFTRAGSSTELLE,
             &format!("{t}: {isin} heute gesperrt; keine freiwilligen Aufträge, KI nicht gefragt."),
         )?;
-        (None, false)
+        (None, Erstmeinung::Unverwertbar)
     } else if let Some(nr) = wartet {
         begruende(
             j,
@@ -1070,17 +1082,49 @@ fn frage_topf(
             AUFTRAGSSTELLE,
             &format!("{t}: wartet auf offenen Auftrag {nr}"),
         )?;
-        (None, false)
+        (None, Erstmeinung::Unverwertbar)
     } else if gestoppt.contains(&id) {
         // Auch nach abgewiesenem Schutzverkauf keine neuen Käufe für diesen Topf.
-        (None, false)
+        (None, Erstmeinung::Unverwertbar)
     } else {
-        frage(j, z, id, frager, &lage)?
+        let anlass = if z.anlass_pruefen {
+            crate::anlass::anlass(j.stand(), z.universum, &lage)
+        } else if z.uhr.is_some() {
+            Some("Papiertag von Hand".into())
+        } else {
+            None
+        };
+        if z.anlass_pruefen && anlass.is_none() {
+            begruende(
+                j,
+                tag,
+                SIMULATION,
+                &format!("{t}: {}", crate::anlass::RUHETAG),
+            )?;
+            (None, Erstmeinung::Ruhetag)
+        } else {
+            if let Some(grund) = &anlass {
+                begruende(
+                    j,
+                    tag,
+                    SIMULATION,
+                    &format!("{t}: {}{grund}", crate::anlass::ANLASS),
+                )?;
+            }
+            lage.anlass = anlass.as_deref();
+            let (vorschlag, verwertbar) = frage(j, z, id, frager, &lage)?;
+            let erstmeinung = if verwertbar {
+                Erstmeinung::Verwertbar
+            } else {
+                Erstmeinung::Unverwertbar
+            };
+            (vorschlag, erstmeinung)
+        }
     };
     Ok(TopfAntwort {
         topf,
         vorschlag,
-        erste_verwertbar,
+        erstmeinung,
         zweitmeinung_ausgefallen: false,
         ersatzkauf: false,
     })
@@ -1096,7 +1140,7 @@ fn zweite_meinung(
     let TopfAntwort {
         topf,
         mut vorschlag,
-        erste_verwertbar,
+        erstmeinung,
         mut zweitmeinung_ausgefallen,
         mut ersatzkauf,
     } = antwort;
@@ -1107,6 +1151,7 @@ fn zweite_meinung(
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let lage = Lage {
+        anlass: None,
         datum: tag.datum,
         topf: &topf,
         kaufbar: kaufbudget(j, z.grenzen, id)?,
@@ -1162,7 +1207,7 @@ fn zweite_meinung(
     Ok(TopfAntwort {
         topf,
         vorschlag,
-        erste_verwertbar,
+        erstmeinung,
         zweitmeinung_ausgefallen,
         ersatzkauf,
     })
@@ -1253,6 +1298,7 @@ fn topf_zyklus(
         ersatzkauf,
         ..
     } = antwort;
+    let ruhetag = antwort.erstmeinung == Erstmeinung::Ruhetag;
     let tag = z.tag;
     let id = topf.id();
     let t = topf_name(id);
@@ -1274,7 +1320,7 @@ fn topf_zyklus(
         &mut vergabe,
         kaufbudget(j, z.grenzen, id)?,
     );
-    let nachgefragt = mindesteinsatz(j, z, &topf, &ent, berater, minimum_bp)?;
+    let nachgefragt = !ruhetag && mindesteinsatz(j, z, &topf, &ent, berater, minimum_bp)?;
     // Auch die budgetierte Nachfrage darf die Frische der Kaufkurse nicht verlängern.
     if nachgefragt && !beratungszeit(z) {
         return begruende(
@@ -1307,7 +1353,40 @@ fn topf_zyklus(
             &format!("{t}: ZweitmeinungAusgefallen · Kaufzielgewichte × 0,5"),
         )?;
     }
+    belege_topfbefunde(j, tag, t, &ent, ruhetag, zweitmeinung_ausgefallen)?;
+    if ent.verkaeufe.is_empty() {
+        return fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto);
+    }
+    let alle = fuehre_aus(j, z, id, &ent.verkaeufe, None, konto);
+    // Positions- und Anteilsgrenzen können einen ausgeführten Verkauf voraussetzen.
+    // Der geplante Erlös steht für Käufe erst nach der Abrechnung zur Verfügung.
+    match alle {
+        Ok(()) if verkauft(j, &ent.verkaeufe) => {
+            fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto)
+        }
+        Ok(()) if ent.kaeufe.is_empty() => Ok(()),
+        Ok(()) => begruende(
+            j,
+            tag,
+            SIMULATION,
+            &format!("{t}: Käufe entfallen: nicht alle Verkäufe ausgeführt"),
+        ),
+        Err(e) => Err(e),
+    }
+}
+
+fn belege_topfbefunde(
+    j: &mut Journal,
+    tag: &Tag,
+    t: &str,
+    ent: &depot_regelwerk::Entscheidung,
+    ruhetag: bool,
+    zweitmeinung_ausgefallen: bool,
+) -> Result<(), LaufFehler> {
     for b in &ent.befunde {
+        if ruhetag && matches!(b, depot_regelwerk::Befund::KeinVorschlag) {
+            continue;
+        }
         let grund = if zweitmeinung_ausgefallen
             && matches!(b, depot_regelwerk::Befund::KeinVorschlag)
         {
@@ -1330,25 +1409,7 @@ fn topf_zyklus(
         };
         begruende(j, tag, REGELWERK, &grund)?;
     }
-    if ent.verkaeufe.is_empty() {
-        return fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto);
-    }
-    let alle = fuehre_aus(j, z, id, &ent.verkaeufe, None, konto);
-    // Positions- und Anteilsgrenzen können einen ausgeführten Verkauf voraussetzen.
-    // Der geplante Erlös steht für Käufe erst nach der Abrechnung zur Verfügung.
-    match alle {
-        Ok(()) if verkauft(j, &ent.verkaeufe) => {
-            fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto)
-        }
-        Ok(()) if ent.kaeufe.is_empty() => Ok(()),
-        Ok(()) => begruende(
-            j,
-            tag,
-            SIMULATION,
-            &format!("{t}: Käufe entfallen: nicht alle Verkäufe ausgeführt"),
-        ),
-        Err(e) => Err(e),
-    }
+    Ok(())
 }
 
 /// Sind alle diese Auftraege ganz ausgefuehrt?
@@ -1532,6 +1593,96 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ruhetag_spart_aufrufe_und_handstart_fragt() -> Result<(), LaufFehler> {
+        struct Probe(Option<String>);
+        impl Berater for Probe {
+            fn vorschlagen(
+                &mut self,
+                _: depot_journal::AufrufErlaubnis,
+                lage: &Lage<'_>,
+            ) -> crate::Antwort {
+                self.0 = lage.anlass.map(str::to_owned);
+                crate::Antwort {
+                    prognose: None,
+                    verwertbar: true,
+                    einschaetzung: "Bargeld".into(),
+                    vorschlag: None,
+                }
+            }
+            fn pruefen(
+                &mut self,
+                _: depot_journal::AufrufErlaubnis,
+                _: &Lage<'_>,
+                _: &Vorschlag,
+            ) -> crate::Urteil {
+                unreachable!("ohne Vorschlag gibt es nichts zu prüfen")
+            }
+        }
+        let ordner = std::env::temp_dir().join(format!("depot-ruhetag-{}", std::process::id()));
+        std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(journal)?;
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        let datum = depot_kern::Datum::neu(2030, 1, 10).ok_or_else(|| halt("Datum"))?;
+        let gestern = datum.plus_tage(-1).ok_or_else(|| halt("Vortag"))?;
+        let zeit = Zeitpunkt::neu(datum, 12, 0, 0).ok_or_else(|| halt("Zeit"))?;
+        let kurse = Kurse::neu(zeit, vec![]).map_err(|e| halt(format!("{e:?}")))?;
+        let tag = Tag {
+            datum,
+            kurse,
+            ereignisse: Vec::new(),
+        };
+        let topf = Topf::neu(TopfId::A, Cent(50_000)).map_err(|e| halt(format!("{e:?}")))?;
+        j.setze_topf(&topf).map_err(journal)?;
+        j.reserviere(BeraterId::Dachs, gestern, 1)
+            .map_err(|e| halt(format!("{e:?}")))?;
+        let uhr = || Some(zeit);
+        let grenzen = Grenzen::standard();
+        let z = Zyklus {
+            anlass_pruefen: true,
+            grenzen: &grenzen,
+            universum: &Universum::neu(vec![]),
+            tag: &tag,
+            vortag: &tag.kurse,
+            nr: 2,
+            abdruck: "Probe",
+            uhr: Some(&uhr),
+            vollstaendige_kurse: true,
+            gesperrt: &BTreeSet::new(),
+            bewertung: &tag.kurse,
+        };
+        let mut probe = Probe(None);
+        let antwort = frage_topf(&mut j, &z, TopfId::A, &mut probe, &BTreeSet::new())?;
+        assert!(antwort.erstmeinung == Erstmeinung::Ruhetag);
+        let mut konto =
+            crate::papier::Papierkonto::eroeffne(&[topf]).ok_or_else(|| halt("Papierkonto"))?;
+        topf_zyklus(&mut j, &z, antwort, &mut konto, &mut probe, 3_000)?;
+        assert_eq!(j.stand().ki().buchungen().len(), 1);
+        assert!(
+            j.stand()
+                .begruendungen()
+                .iter()
+                .any(|(_, _, t)| t == "Topf A: Ruhetag, kein Anlass")
+        );
+        assert!(
+            j.stand()
+                .begruendungen()
+                .iter()
+                .all(|(_, _, t)| !t.contains("KeinVorschlag"))
+        );
+        let hand = Zyklus {
+            anlass_pruefen: false,
+            ..z
+        };
+        frage_topf(&mut j, &hand, TopfId::A, &mut probe, &BTreeSet::new())?;
+        assert_eq!(probe.0.as_deref(), Some("Papiertag von Hand"));
+        assert_eq!(j.stand().ki().buchungen().len(), 2);
+        drop(j);
+        std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
+        Ok(())
+    }
+
+    #[test]
     fn mindesteinsatz_fragt_einmal_und_vermerkt_fehlenden_grund() -> Result<(), LaufFehler> {
         struct Nachfrage(usize);
         impl Berater for Nachfrage {
@@ -1576,6 +1727,7 @@ mod tests {
             ereignisse: Vec::new(),
         };
         let z = Zyklus {
+            anlass_pruefen: false,
             grenzen: &Grenzen::standard(),
             universum: &Universum::default(),
             tag: &tag,
@@ -1637,6 +1789,7 @@ mod tests {
         let uhr = || jetzt.get();
         let grenzen = Grenzen::standard();
         let zyklus = Zyklus {
+            anlass_pruefen: false,
             grenzen: &grenzen,
             universum: &szenario.universum,
             tag,
@@ -1690,6 +1843,7 @@ mod tests {
         let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| halt(format!("{e:?}")))?;
         j.beginne_abrechnung(datum).map_err(journal)?;
         let lage = Lage {
+            anlass: None,
             datum,
             topf: &topf,
             kaufbar: topf.bargeld(),

@@ -118,6 +118,18 @@ pub fn papier(
     dachs: &mut dyn Berater,
     maus: &mut dyn Berater,
 ) -> Result<Vec<String>, String> {
+    papier_starten(wurzel, heute, universum, dachs, maus, false)
+}
+
+/// Startet den Papiertag mit optionaler Anlassprüfung für automatische Läufe.
+pub fn papier_starten(
+    wurzel: &Path,
+    heute: Datum,
+    universum: &Universum,
+    dachs: &mut dyn Berater,
+    maus: &mut dyn Berater,
+    anlass_pruefen: bool,
+) -> Result<Vec<String>, String> {
     if wurzel
         .join("daten/update_offen.txt")
         .try_exists()
@@ -161,6 +173,7 @@ pub fn papier(
         maus,
         konto: &mut konto,
         mindesteinsatz_bp,
+        anlass_pruefen,
     };
     let ausgang = papiertag_mit_uhr(
         &mut j,
