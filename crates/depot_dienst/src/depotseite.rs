@@ -295,6 +295,7 @@ pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (String, bo
         let lage = depot_lage::depotstand(stand, &werte);
         let startgeld = depot_lage::startgeld(stand);
         kennzahlen(&lage, jetzt, startgeld, &mut text);
+        depot_lage::html::splitbewertung(&lage, &mut text);
         let bar = cash(&lage, &mut text);
         positionen(&lage, bar, &mut text);
         orders(stand, &werte, &mut text);
@@ -315,6 +316,7 @@ mod tests {
 
     fn lage() -> DepotLage {
         DepotLage {
+            splitgesperrt: Vec::new(),
             kurse_vom: None,
             toepfe: vec![TopfLage {
                 topf: TopfId::A,

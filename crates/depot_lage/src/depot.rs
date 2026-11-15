@@ -66,6 +66,7 @@ pub enum Tagesergebnis {
 pub struct DepotLage {
     /// Handelstag der Kurse, mit denen bewertet ist.
     pub kurse_vom: Option<Datum>,
+    pub splitgesperrt: Vec<(String, Option<Datum>)>,
     pub toepfe: Vec<TopfLage>,
     pub gesamt: Option<Cent>,
     pub tagesergebnis: Tagesergebnis,
@@ -218,10 +219,15 @@ fn tagesergebnis(
 
 pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
     let kurse = tageskurse(s, &als_universum(werte)).ok();
+    let split = depot_journal::splitverdacht::aktiv(s, None);
+    let gehalten = s.gehalten();
+    let bewertung = kurse.as_ref().and_then(|k| {
+        depot_journal::splitverdacht::ersetze_kurse(s, &k.heute, &split, &gehalten).ok()
+    });
     let toepfe: Vec<TopfLage> = s
         .toepfe()
         .values()
-        .map(|t| topf_lage(s, t, kurse.as_ref().map(|k| &k.heute), werte))
+        .map(|t| topf_lage(s, t, bewertung.as_ref(), werte))
         .collect();
     let gesamt = toepfe
         .iter()
@@ -251,8 +257,20 @@ pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
                 })
                 .collect()
         });
+    let splitgesperrt = split
+        .keys()
+        .filter(|isin| gehalten.contains(*isin))
+        .map(|isin| {
+            let datum = bewertung
+                .as_ref()
+                .and_then(|k| k.eintrag(isin))
+                .map(depot_kern::Kurs::handelstag);
+            (name(werte, isin.als_str()), datum)
+        })
+        .collect();
     DepotLage {
         kurse_vom,
+        splitgesperrt,
         tagesergebnis: tagesergebnis(s, werte, kurse_vom, gesamt),
         toepfe,
         gesamt,
@@ -307,7 +325,18 @@ pub fn zustand_text(zustand: AuftragsZustand) -> &'static str {
 pub fn letzter_tagesschluss(s: &Stand, werte: &[Wert], vor: Datum) -> Option<Cent> {
     let (tag, toepfe) = s.tagesschluesse().iter().rfind(|(tag, _)| *tag < vor)?;
     let kurse = depot_sim::tageskurse_am(s, &als_universum(werte), *tag).ok()?;
+    let split = s
+        .wissensstichtag(*tag)
+        .map_or_else(std::collections::BTreeMap::new, |zeit| {
+            depot_journal::splitverdacht::aktiv(s, Some(zeit))
+        });
+    let gehalten = toepfe
+        .values()
+        .flat_map(|topf| topf.positionen().keys().cloned())
+        .collect();
+    let bewertung =
+        depot_journal::splitverdacht::ersetze_kurse(s, &kurse.heute, &split, &gehalten).ok()?;
     toepfe.values().try_fold(Cent::NULL, |summe, topf| {
-        summe.checked_add(topf.wert_gerundet(&kurse.heute, Rundung::Ab)?)
+        summe.checked_add(topf.wert_gerundet(&bewertung, Rundung::Ab)?)
     })
 }

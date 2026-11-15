@@ -2163,6 +2163,73 @@ fn belege_sperrprobe(
 }
 
 #[test]
+fn xetra_splitverdacht_bleibt_nach_neustart_bei_plausiblem_folgekurs_gesperrt() -> Result<(), String>
+{
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let mut a = vorbedingung(Topf::neu(TopfId::A, Cent(300_000)), "Topf A")?;
+    let b = vorbedingung(Topf::neu(TopfId::B, Cent(400_000)), "Topf B")?;
+    a.setze_bestand(sap.clone(), 10);
+    let toepfe = [a, b];
+    let mut k = Papierdatei::oeffnen(&ort.konto, false, &toepfe)?;
+    let mut j = ort.oeffnen()?;
+    for topf in &toepfe {
+        vorbedingung(j.setze_topf(topf), "Topf belegen")?;
+    }
+    vorbedingung(
+        j.schliesse_ab(tag(6)?, Cent(1_100_000), &"a".repeat(64)),
+        "Abschluss",
+    )?;
+    let split_tag = tag(9)?;
+    let schluss = some(depot_kern::Boerse::Xetra.schluss(split_tag), "Schluss")?;
+    let abruf = some(Zeitpunkt::frankfurt(split_tag, 17, 39, 0), "Splitabruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(6, 40_000)], abruf)?;
+    let beleg = NachrichtBeleg::neu(
+        depot_kern::quelle::QUELLE_XETRA_SPLITVERDACHT,
+        abruf,
+        b"Test-CSV",
+        schluss,
+        &format!("Möglicher Split 4:1 bei SAP ({sap}) am {split_tag}. Schluss 100 EUR."),
+    )?;
+    vorbedingung(j.belege_nachricht(&beleg), "Splitverdacht")?;
+    belege_sperrprobe(&mut j, &sap, &[(9, 10_000)], abruf)?;
+    drop(j);
+    let mut j = ort.oeffnen()?;
+    let mittwoch = tag(11)?;
+    let morgen = some(Zeitpunkt::frankfurt(mittwoch, 7, 30, 0), "Morgen")?;
+    belege_sperrprobe(&mut j, &sap, &[(9, 10_000), (10, 10_000)], morgen)?;
+    belege_sperrprobe(&mut j, &allianz, &[(9, 35_000), (10, 35_000)], morgen)?;
+    let (mut dachs, mut maus) = kaeufer(mittwoch, &sap);
+    let aus = papiertag(
+        &mut j,
+        mittwoch,
+        &universum()?,
+        &toepfe,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    assert!(
+        matches!(
+            aus,
+            Ok(Ausgang::Abgeschlossen {
+                hoechststand: Cent(1_100_000),
+                ..
+            })
+        ),
+        "{aus:?}"
+    );
+    assert_eq!(dachs.aufrufe, 0);
+    assert_eq!(k.konto().sendungen(), 0);
+    assert!(j.stand().begruendungen().iter().any(|(tag, _, grund)| {
+        *tag == mittwoch
+            && grund == &format!("{}{sap} · Xetra-Splitverdacht", depot_sim::ERSATZKURS)
+    }));
+    assert!(depot_journal::splitverdacht::aktiv(j.stand(), None).contains_key(&sap));
+    Ok(())
+}
+
+#[test]
 fn gesperrt_ohne_vergleichskurs_haelt() -> Result<(), String> {
     let ort = Ort::neu()?;
     let sap = sap()?;
