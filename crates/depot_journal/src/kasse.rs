@@ -136,6 +136,7 @@ pub enum KiZweck {
     Abstimmung,
     Vorbereitung,
     Simulation,
+    Wochenrueckschau,
 }
 impl KiZweck {
     pub fn text(self) -> &'static str {
@@ -145,6 +146,7 @@ impl KiZweck {
             Self::Abstimmung => "abstimmung",
             Self::Vorbereitung => "vorbereitung",
             Self::Simulation => "simulation",
+            Self::Wochenrueckschau => "wochenrueckschau",
         }
     }
     fn lies(s: &str) -> Option<Self> {
@@ -154,13 +156,17 @@ impl KiZweck {
             Self::Abstimmung,
             Self::Vorbereitung,
             Self::Simulation,
+            Self::Wochenrueckschau,
         ]
         .into_iter()
         .find(|z| z.text() == s)
     }
+    pub(crate) fn ohne_handelsbeginn(self) -> bool {
+        matches!(self, Self::Simulation | Self::Wochenrueckschau)
+    }
     pub(crate) fn deckel(self, wer: BeraterId) -> KiDeckel {
         match self {
-            Self::Abstimmung | Self::Vorbereitung => KiDeckel::kurz(wer),
+            Self::Abstimmung | Self::Vorbereitung | Self::Wochenrueckschau => KiDeckel::kurz(wer),
             _ => KiDeckel::standard(wer),
         }
     }
@@ -241,18 +247,23 @@ impl KiStand {
     pub(crate) fn buche(&mut self, inhalt: &str) -> Result<KiZweck, String> {
         // Die Simulation hat keinen Handelsbeginn. Ihr Grenzabdruck und ihre Buchung
         // gehören in denselben Eintrag, auch bei der ersten Buchung überhaupt.
-        if let Some((buchung, abdruck)) = inhalt.rsplit_once(";simulation;") {
-            let mut neu = self.clone();
-            neu.abdruck(abdruck)?;
-            neu.buche_fuer(buchung, KiZweck::Simulation)?;
-            *self = neu;
-            return Ok(KiZweck::Simulation);
+        for (marke, zweck) in [
+            (";simulation;", KiZweck::Simulation),
+            (";wochenrueckschau;", KiZweck::Wochenrueckschau),
+        ] {
+            if let Some((buchung, abdruck)) = inhalt.rsplit_once(marke) {
+                let mut neu = self.clone();
+                neu.abdruck(abdruck)?;
+                neu.buche_fuer(buchung, zweck)?;
+                *self = neu;
+                return Ok(zweck);
+            }
         }
         let (text, zweck) = inhalt
             .rsplit_once(';')
             .and_then(|(t, z)| KiZweck::lies(z).map(|z| (t, z)))
             .unwrap_or((inhalt, KiZweck::Erstmeinung));
-        if zweck == KiZweck::Simulation {
+        if zweck.ohne_handelsbeginn() {
             return Err("Simulationsbuchung ohne Grenzabdruck".into());
         }
         let b = lies_buchung(text).ok_or("Buchung unlesbar")?;

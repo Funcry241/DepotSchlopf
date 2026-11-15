@@ -70,6 +70,7 @@ fn laufkennung() -> String {
 enum Modus {
     Papier { automatisch: bool },
     Vorbereitung,
+    Wochenrueckschau,
     Simulation,
 }
 
@@ -121,6 +122,10 @@ fn lauf(wurzel: &Path, modus: Modus) -> Result<(), String> {
             depot_sim::vorbereitung::lauf(wurzel, zeit, &universum, &mut dachs, &mut maus, jetzt)?;
         println!("[Vorbereitung] {text}");
         return Ok(());
+    }
+    if matches!(modus, Modus::Wochenrueckschau) {
+        let zeit = jetzt().ok_or("Uhr liefert keine Zeit")?;
+        return depot_sim::wochenrueckschau::lauf(wurzel, zeit, &mut dachs, &mut maus);
     }
     if matches!(modus, Modus::Simulation) {
         let zeit = jetzt().ok_or("Uhr liefert keine Zeit")?;
@@ -181,6 +186,8 @@ fn main() -> ExitCode {
     }
     let modus = if args.as_slice() == ["vorbereiten"] {
         Modus::Vorbereitung
+    } else if args.as_slice() == ["wochenrueckschau"] {
+        Modus::Wochenrueckschau
     } else if args.as_slice() == ["simulation"] {
         Modus::Simulation
     } else if args.as_slice() == ["papier"] || args.as_slice() == ["papier", "--auto"] {

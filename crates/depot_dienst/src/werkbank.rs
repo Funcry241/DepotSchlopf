@@ -37,6 +37,7 @@ pub enum Art {
     /// Interner Auftrag für die optionale Nachrichtensortierung.
     Gemini,
     Vorbereiten,
+    Wochenrueckschau,
     Simulation,
     Papier,
     Sicherung,
@@ -48,7 +49,7 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 13] = [
+const ALLE_ARTEN: [Art; 14] = [
     Art::Einrichten,
     Art::Kurse,
     Art::Kursdiagnose,
@@ -57,6 +58,7 @@ const ALLE_ARTEN: [Art; 13] = [
     Art::Termine,
     Art::Nachrichten,
     Art::Vorbereiten,
+    Art::Wochenrueckschau,
     Art::Simulation,
     Art::Papier,
     Art::Sicherung,
@@ -76,6 +78,7 @@ impl Art {
             Art::Nachrichten => "Schlagzeilen abrufen",
             Art::Gemini => "Gemini-Zuarbeit",
             Art::Vorbereiten => "Nächsten Handelstag vorbereiten",
+            Art::Wochenrueckschau => "KI-Wochenrückschau",
             Art::Simulation => "KI-Simulation starten",
             Art::Papier => "Papiertag",
             Art::Sicherung => "Daten sichern",
@@ -97,6 +100,7 @@ impl Art {
             Art::Nachrichten => "nachrichten",
             Art::Gemini => "gemini-vorlauf",
             Art::Vorbereiten => "vorbereiten",
+            Art::Wochenrueckschau => "wochenrueckschau",
             Art::Simulation => "simulation",
             Art::Papier => "papier",
             Art::Sicherung => "sicherung",
@@ -122,6 +126,7 @@ impl Art {
             Art::Nachrichten => &["nachrichten"],
             Art::Gemini => &["gemini-vorlauf"],
             Art::Vorbereiten => &["vorbereiten"],
+            Art::Wochenrueckschau => &["wochenrueckschau"],
             Art::Simulation => &["simulation"],
             Art::Papier => &["papier"],
             Art::Sicherung => &["sichern"],
@@ -1251,6 +1256,21 @@ impl Dienst {
             }
         {
             let _ = einreihen(z, Art::Sicherung, Anlass::Zeitplan, None);
+            return;
+        }
+        if tag.wochentag() == Some(6)
+            && h >= 23
+            && z.zeitplan.an
+            && z.laufend.is_none()
+            && z.warteschlange.is_empty()
+            && z.verlauf_fehler.is_none()
+            && z.verlauf_vermerkfehler.is_none()
+            && !z
+                .verlauf
+                .iter()
+                .any(|a| a.art == Art::Wochenrueckschau && a.start.frankfurt_tag() == Some(tag))
+        {
+            let _ = einreihen(z, Art::Wochenrueckschau, Anlass::Zeitplan, None);
             return;
         }
         let Some(art) = zeitplan_faellig(z, tag, (h, m)) else {

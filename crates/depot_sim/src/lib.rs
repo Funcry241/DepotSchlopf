@@ -30,6 +30,9 @@ pub use depot_regelwerk::entscheidung::ist_gewicht_bp;
 pub mod abstimmung;
 pub mod anlass;
 pub mod ausfuehrung;
+pub mod einstand;
+pub mod handelsergebnis;
+pub mod handelsvergleich;
 pub mod kursverlauf;
 pub mod lauf;
 mod nachrichtenbezug;
@@ -48,7 +51,9 @@ pub mod vorschau;
 pub use positionskauf::{
     Ausstiegsplan, KAUFTHESE, Kursziel, Positionskauf, kaufanlass, lies as positionskaeufe,
 };
+pub mod vergleichsrechnung;
 pub mod vorbereitung;
+pub mod wochenrueckschau;
 mod zahlenreaktion;
 
 pub use lauf::{Gefragt, LaufFehler, gefragt, lauf};

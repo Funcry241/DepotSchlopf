@@ -788,6 +788,7 @@ impl Journal {
             | Art::Termin
             | Art::Nachricht
             | Art::RssAbruf
+            | Art::Lehre
             | Art::Begruendung
             | Art::Abschluss => self.schreibe_eintrag(art, inhalt),
         }
@@ -871,6 +872,15 @@ impl Journal {
     ///
     /// # Errors
     /// Wie `anhaengen`; `Abgelehnt` auch bei leerem `wer` oder Text und bei `;` in `wer`.
+    pub fn belege_lehre(
+        &mut self,
+        datum: Datum,
+        wer: &str,
+        text: &str,
+    ) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::Lehre, &begruendung_text(datum, wer, text))
+    }
+
     pub fn begruende(&mut self, datum: Datum, wer: &str, text: &str) -> Result<(), JournalFehler> {
         if wer.contains(';') {
             return Err(JournalFehler::Abgelehnt("`;` in wer".into()));
@@ -1192,7 +1202,7 @@ impl Journal {
     ) -> Result<AufrufErlaubnis, Sperre> {
         let sperre = |e: JournalFehler| Sperre::Kassenbuch(format!("Journal: {e:?}"));
         let text = crate::kasse::buchung_fuer(&buchung, zweck);
-        if zweck == crate::KiZweck::Simulation {
+        if zweck.ohne_handelsbeginn() {
             self.schreibe_eintrag(Art::Ki, &format!("{text};{}", grenzabdruck()))
                 .map_err(sperre)?;
         } else {

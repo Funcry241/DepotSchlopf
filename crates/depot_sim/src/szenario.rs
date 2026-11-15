@@ -76,6 +76,14 @@ pub struct Urteil {
 /// Ein Berater. Jede Frage kostet eine `AufrufErlaubnis`; die gibt es nur, wenn das Journal die
 /// Hoechstkosten vorher gebucht hat (R8). Der Berater verbraucht sie.
 pub trait Berater {
+    fn wochenrat(
+        &mut self,
+        _erlaubnis: AufrufErlaubnis,
+        _frage: &str,
+    ) -> Result<Vec<String>, String> {
+        Err("Keine Rückschau angebunden".into())
+    }
+
     fn setze_schlopfmodell(&mut self, _stand: Option<crate::schlopfmodell::Beratung>) {}
 
     fn thesenpruefung(&mut self) -> Option<String> {

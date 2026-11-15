@@ -133,7 +133,7 @@ fn main() -> ExitCode {
     // Der Papiertag laeuft fuer sich: kein Netz, nur Papiergeld.
     if matches!(
         befehl.as_str(),
-        "papier" | "vorbereiten" | "simulation" | "gemini-vorlauf"
+        "papier" | "vorbereiten" | "simulation" | "gemini-vorlauf" | "wochenrueckschau"
     ) {
         return programm(&wurzel, "depot_berater", &args);
     }

@@ -23,6 +23,7 @@ fn datum(art: Art, text: &str, abrechnungstag: Option<Datum>, stand: &Stand) -> 
         Art::Beobachtung
         | Art::Weltprognose
         | Art::Aufloesung
+        | Art::Lehre
         | Art::Begruendung
         | Art::Abschluss
         | Art::NotbremseFreigabe

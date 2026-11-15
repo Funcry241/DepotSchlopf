@@ -107,6 +107,7 @@ pub enum Art {
     /// `datum;wer;text`: warum etwas geschieht oder nicht geschieht. `wer` ist ein Berater
     /// oder eine Stelle des Rahmens; die Kaufentscheidung begruenden die Berater selbst.
     Begruendung,
+    Lehre,
     /// `2`: Umstellung eines Journals im Format 1 auf Format 2 (K16-02). Nur einmal, nur ohne
     /// angefangenen Tag; danach gelten Auftragszustaende und Deckung.
     Format,
@@ -147,6 +148,7 @@ impl Art {
             Art::KiAufruf => "ki-aufruf",
             Art::KiGrenzen => "ki-grenzen",
             Art::Begruendung => "begruendung",
+            Art::Lehre => "lehre",
             Art::Abschluss => "abschluss",
             Art::Format => "format",
             Art::Abrechnungstag => "abrechnungstag",
@@ -177,6 +179,7 @@ impl Art {
             Art::KiAufruf,
             Art::KiGrenzen,
             Art::Begruendung,
+            Art::Lehre,
             Art::Abschluss,
             Art::Abrechnungstag,
             Art::NotbremseFreigabe,
@@ -250,6 +253,7 @@ pub struct Stand {
     letzte_kennung: u64,
     ki: KiStand,
     begruendungen: Vec<(Datum, String, String)>,
+    lehren: Vec<(Datum, String, String)>,
     abschluss: Option<Abschluss>,
     historischer_hoechststand: Option<Cent>,
     papier_halt: Option<PapierHalt>,
@@ -576,6 +580,10 @@ impl Stand {
     }
 
     /// Begruendungen: Datum, wer, Text.
+    pub fn lehren(&self) -> &[(Datum, String, String)] {
+        &self.lehren
+    }
+
     pub fn begruendungen(&self) -> &[(Datum, String, String)] {
         &self.begruendungen
     }
@@ -762,7 +770,7 @@ impl Stand {
             Art::Zustand | Art::Stopp => self.belege_meldung(art, inhalt)?,
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
             Art::Ki => {
-                if self.ki.buche(inhalt)? == crate::KiZweck::Simulation {
+                if self.ki.buche(inhalt)?.ohne_handelsbeginn() {
                     return Ok(());
                 }
             }
@@ -771,6 +779,7 @@ impl Stand {
                 self.ki.rechne_ab(inhalt)?;
                 return Ok(());
             }
+            Art::Lehre => return self.belege_lehre(inhalt),
             Art::Begruendung => {
                 let b = lies_begruendung(inhalt).ok_or("Begründung unlesbar")?;
                 kanonisch(&begruendung_text(b.0, &b.1, &b.2), inhalt)?;
@@ -791,6 +800,29 @@ impl Stand {
             }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    fn belege_lehre(&mut self, inhalt: &str) -> Result<(), String> {
+        let (datum, wer, text) = lies_begruendung(inhalt).ok_or("Lehre unlesbar")?;
+        kanonisch(&begruendung_text(datum, &wer, &text), inhalt)?;
+        if datum.wochentag() != Some(6)
+            || !matches!(wer.as_str(), "Dachs" | "Maus")
+            || text.len() > 3_200
+        {
+            return Err("Lehre ungültig".into());
+        }
+        let versuch = self
+            .lehren
+            .iter()
+            .rev()
+            .find(|(tag, ki, _)| *tag == datum && ki == &wer);
+        match (versuch, text.as_str()) {
+            (None, "begonnen") => (),
+            (Some((_, _, vorher)), _) if vorher == "begonnen" && text != "begonnen" => (),
+            _ => return Err("Rückschau fehlt oder wurde schon protokolliert".into()),
+        }
+        self.lehren.push((datum, wer, text));
         Ok(())
     }
 
