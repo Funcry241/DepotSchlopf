@@ -4688,6 +4688,41 @@ fn depot_mit_order() -> Result<Arc<Dienst>, String> {
 }
 
 #[test]
+fn handelsbilanz_zeigt_offenen_verlust_ohne_verkauf() -> Result<(), String> {
+    use depot_journal::Art::{Abrechnungstag, Abschluss, Auftrag, Kurs, Topf, Zustand};
+    let wurzel = ordner()?;
+    let abdruck = "a".repeat(64);
+    let kurs = format!(
+        "kursprobe;quelle;2026-11-06T17:00:00Z;{abdruck};DE0007164600;8000;2026-11-06T16:30:00Z"
+    );
+    let abschluss = format!("2026-11-06;500000;{abdruck}");
+    let journal = depot_journal::inhalt_fuer(&[
+        (Topf, "A;500000;"),
+        (Auftrag, "1;A;DE0007164600;Kauf;1;10000;Umschichtung"),
+        (Zustand, "1;gesendet"),
+        (Zustand, "1;angenommen"),
+        (Zustand, "1;ausfuehrung;1;10000;150"),
+        (Kurs, &kurs),
+        (Abrechnungstag, "2026-11-06"),
+        (Abschluss, &abschluss),
+    ]);
+    let vermerk = some(depot_journal::vermerk_fuer(&journal, 0), "Journalvermerk")?;
+    fs::write(wurzel.join("daten/journal.txt"), journal).map_err(|e| e.to_string())?;
+    fs::write(wurzel.join("daten/journal.vermerk"), vermerk).map_err(|e| e.to_string())?;
+    let d = dienst(wurzel, true);
+    let zeit = some(Zeitpunkt::lies("2026-11-06T18:00:00Z"), "Zeit")?;
+    let html = get(&d, "/depot?zeitraum=alles", zeit);
+    let (_, bilanz) = html
+        .split_once("id=\"handelsbilanz\"")
+        .ok_or("Handelsbilanz")?;
+    assert!(bilanz.contains("Keine abgeschlossenen Verkäufe"));
+    assert!(bilanz.contains("offen, bewertet zum letzten Schluss"));
+    assert!(bilanz.contains("Realisiert + offen: -23,00 €"), "{bilanz}");
+    assert!(bilanz.contains("Käufe nicht zugeordnet: 1"), "{bilanz}");
+    Ok(())
+}
+
+#[test]
 fn depot_ohne_technik() -> Result<(), String> {
     let d = depot_mit_order()?;
     let html = get(&d, "/depot", donnerstag(18, 0)?);
