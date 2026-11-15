@@ -4520,6 +4520,13 @@ fn depot_ohne_technik() -> Result<(), String> {
     let d = depot_mit_order()?;
     let html = get(&d, "/depot", donnerstag(18, 0)?);
     assert!(html.contains("liegt beim Papiermakler"), "{html}");
+    let (_, handelsbilanz) = html
+        .split_once("id=\"handelsbilanz\"")
+        .ok_or("Handelsbilanz")?;
+    assert!(handelsbilanz.contains("<h4>Dachs</h4>"));
+    assert!(handelsbilanz.contains("<h4>Maus</h4>"));
+    assert!(handelsbilanz.contains("Keine abgeschlossenen Verkäufe im Zeitraum."));
+
     for roh in [
         "Some(",
         "None",

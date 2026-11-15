@@ -4,7 +4,21 @@ use depot_journal::{Ausfuehrung, Stand};
 use depot_kern::{Isin, Topf};
 use depot_regelwerk::Richtung;
 
-pub(crate) const KAUFTHESE: &str = "Kaufthese";
+pub const KAUFTHESE: &str = "Kaufthese";
+
+/// Kontrollierte Anlassmarke zu Beginn einer Kaufbegründung.
+pub fn kaufanlass(text: &str) -> Option<&'static str> {
+    let (marke, _) = text.strip_prefix('[')?.split_once("] ")?;
+    [
+        "Zahlen",
+        "Notenbank",
+        "Meldung",
+        "Kursbewegung",
+        "Sonstiges",
+    ]
+    .into_iter()
+    .find(|anlass| *anlass == marke)
+}
 
 /// Letzte belegte Kaufausführung für eine gehaltene Position und die zugehörige These.
 #[derive(Clone, Debug)]

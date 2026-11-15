@@ -169,6 +169,10 @@ mod tests {
             isin: isin.clone(),
             tag: Some(tag),
             netto,
+            einstand: None,
+            einstieg: None,
+            ausstieg: None,
+            anlass: None,
         };
         let mut text = String::new();
         verkaeufe(

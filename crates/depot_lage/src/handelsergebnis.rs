@@ -13,38 +13,118 @@ pub struct Verkauf {
     pub isin: Isin,
     pub tag: Option<Datum>,
     pub netto: Option<Cent>,
+    pub einstand: Option<Cent>,
+    pub einstieg: Option<Datum>,
+    /// Ein Vergleich ist nur bei Ausführungen am selben Ausstiegstag möglich.
+    pub ausstieg: Option<Datum>,
+    pub anlass: Option<&'static str>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Kaufbezug {
+    tag: Option<Datum>,
+    anlass: Option<&'static str>,
+}
+
+impl Kaufbezug {
+    fn gemeinsam(self, anderer: Self) -> Self {
+        Self {
+            tag: self.tag.filter(|tag| Some(*tag) == anderer.tag),
+            anlass: self.anlass.filter(|anlass| Some(*anlass) == anderer.anlass),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Position {
+    einstand: crate::depot::Einstand,
+    kauf: Kaufbezug,
+}
+
+struct Erloes {
+    netto: Option<Cent>,
+    einstand: Option<Cent>,
+    kauf: Kaufbezug,
+}
+
+impl Default for Erloes {
+    fn default() -> Self {
+        Self {
+            netto: Some(Cent::NULL),
+            einstand: Some(Cent::NULL),
+            kauf: Kaufbezug::default(),
+        }
+    }
 }
 
 /// Ein Verkaufsauftrag zählt einmal, auch bei mehreren Füllungen. Ein stornierter oder
 /// verfallener Rest ändert das Ergebnis des bereits ausgeführten Teils nicht.
 pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
-    let mut einstaende = BTreeMap::<(TopfId, &Isin), Option<crate::depot::Einstand>>::new();
-    let mut netto = BTreeMap::<u64, Option<Cent>>::new();
+    let anlaesse = stand
+        .begruendungen()
+        .iter()
+        .filter_map(|(_, wer, text)| {
+            if wer != depot_sim::KAUFTHESE {
+                return None;
+            }
+            let (nr, these) = text.split_once(' ')?;
+            Some((nr.parse::<u64>().ok()?, depot_sim::kaufanlass(these)))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut positionen = BTreeMap::<(TopfId, &Isin), Option<Position>>::new();
+    let mut erloese = BTreeMap::<u64, Erloes>::new();
     for schritt in stand.bewertungsfolge() {
         let (auftrag, ausfuehrung) = match schritt {
             Bewertungsschritt::Ausfuehrung(auftrag, ausfuehrung) => (auftrag, ausfuehrung),
             Bewertungsschritt::Split(m) => {
-                if let Some(einstand) = einstaende.get_mut(&(m.topf, &m.isin)) {
-                    *einstand = einstand.take().and_then(|mut e: crate::depot::Einstand| {
-                        e.stueck = m.faktor.stueck(e.stueck)?;
-                        Some(e)
+                if let Some(position) = positionen.get_mut(&(m.topf, &m.isin)) {
+                    *position = position.take().and_then(|mut p| {
+                        p.einstand.stueck = m.faktor.stueck(p.einstand.stueck)?;
+                        Some(p)
                     });
                 }
                 continue;
             }
         };
-        let einstand = einstaende
+        let position = positionen
             .entry((auftrag.topf, &auftrag.isin))
-            .or_insert_with(|| Some(crate::depot::Einstand::default()));
-        let ergebnis = einstand
-            .as_mut()
-            .and_then(|e| e.buche(auftrag.richtung, ausfuehrung));
-        if ergebnis.is_none() {
-            *einstand = None;
+            .or_insert_with(|| Some(Position::default()));
+        let buchung = position.as_mut().and_then(|p| {
+            let vorher = p.einstand.kosten;
+            let schon_gehalten = p.einstand.stueck != 0;
+            let netto = p.einstand.buche(auftrag.richtung, ausfuehrung)?;
+            if auftrag.richtung == Richtung::Kauf {
+                let kauf = Kaufbezug {
+                    tag: ausfuehrung.kurszeit.and_then(Zeitpunkt::frankfurt_tag),
+                    anlass: anlaesse.get(&auftrag.nr).copied().flatten(),
+                };
+                p.kauf = if schon_gehalten {
+                    p.kauf.gemeinsam(kauf)
+                } else {
+                    kauf
+                };
+            }
+            Some((netto, vorher.checked_sub(p.einstand.kosten)?, p.kauf))
+        });
+        if buchung.is_none() {
+            *position = None;
         }
         if auftrag.richtung == Richtung::Verkauf {
-            let summe = netto.entry(auftrag.nr).or_insert(Some(Cent::NULL));
-            *summe = summe.zip(ergebnis).and_then(|(s, e)| s.checked_add(e));
+            let erloes = erloese.entry(auftrag.nr).or_insert_with(|| Erloes {
+                kauf: buchung.map_or_else(Kaufbezug::default, |(_, _, kauf)| kauf),
+                ..Erloes::default()
+            });
+            erloes.netto = erloes
+                .netto
+                .zip(buchung)
+                .and_then(|(s, (n, _, _))| s.checked_add(n));
+            erloes.einstand = erloes
+                .einstand
+                .zip(buchung)
+                .and_then(|(s, (_, e, _))| s.checked_add(e));
+            erloes.kauf = erloes
+                .kauf
+                .gemeinsam(buchung.map_or_else(Kaufbezug::default, |(_, _, k)| k));
         }
     }
     stand
@@ -52,11 +132,13 @@ pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
         .iter()
         .filter(|a| !a.zustand.offen())
         .filter_map(|a| {
-            let netto = netto.remove(&a.beleg.nr)?;
-            let tag = a
-                .ausfuehrungen
-                .iter()
-                .map(|f| f.kurszeit.and_then(Zeitpunkt::frankfurt_tag))
+            let erloes = erloese.remove(&a.beleg.nr)?;
+            let tage = || {
+                a.ausfuehrungen
+                    .iter()
+                    .map(|f| f.kurszeit.and_then(Zeitpunkt::frankfurt_tag))
+            };
+            let tag = tage()
                 .try_fold(None, |letzter, tag| Some(letzter.max(Some(tag?))))
                 .flatten();
             Some(Verkauf {
@@ -64,7 +146,11 @@ pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
                 topf: a.beleg.topf,
                 isin: a.beleg.isin.clone(),
                 tag,
-                netto,
+                netto: erloes.netto,
+                einstand: erloes.einstand,
+                einstieg: erloes.kauf.tag,
+                ausstieg: tag.filter(|tag| tage().all(|t| t == Some(*tag))),
+                anlass: erloes.kauf.anlass,
             })
         })
         .collect()
