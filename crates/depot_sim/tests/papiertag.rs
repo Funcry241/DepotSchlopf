@@ -2729,6 +2729,12 @@ fn journal_liest_nachgeholte_ausfuehrung(kopie: Option<&std::path::Path>) -> Res
     let erwartet = k.auszug();
     drop(j);
     let mut j = ort.oeffnen()?;
+    assert!(j.stand().begruendungen().iter().any(|(_, wer, text)| {
+        wer == "Kostenhürde"
+            && text.starts_with(&format!("Auftrag {nr}:"))
+            && text.contains("3,00 € Gebühren für Kauf und Verkauf")
+            && text.contains("Spread nicht belegt")
+    }));
     let order = some(j.stand().auftrag(nr), "Order nach Neustart")?;
     let aus = some(order.ausfuehrungen.first(), "Ausführung")?;
     assert_eq!(order.zustand, AuftragsZustand::Gefuellt);
