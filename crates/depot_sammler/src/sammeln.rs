@@ -862,9 +862,11 @@ fn abschliessen(
         }
         return Ok(bericht);
     }
-    if let Some(stand) = g.letzter_abruf {
-        pruefe(&mut bericht, journal, werte, stand, g.heute, g.vortag)?;
-    }
+    // Die Splitmeldung braucht den konkreten Kursbefund. Ein Fehler der Prüfung darf
+    // beim Belegen aber keinen Fehler des Journals verdecken.
+    let pruefung = g.letzter_abruf.map_or(Ok(()), |stand| {
+        pruefe(&mut bericht, journal, werte, stand, g.heute, g.vortag)
+    });
     for (datum, text) in &g.normalisierungen {
         journal
             .beobachte(*datum, text)
@@ -894,6 +896,7 @@ fn abschliessen(
             Sammelbeleg::Kapital(_) => {}
         }
     }
+    pruefung?;
     Ok(bericht)
 }
 
