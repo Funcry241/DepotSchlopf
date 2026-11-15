@@ -264,7 +264,7 @@ fn filter(
     }
     let _ = write!(
         s,
-        "<form method=\"get\" action=\"/gespraeche\"><label>Tag <input type=\"date\" name=\"tag\" value=\"{}\"></label>\
+        "<form method=\"get\" action=\"/gespraeche\"><div class=\"formularfelder\"><label>Tag <input type=\"date\" name=\"tag\" value=\"{}\"></label>\
          <label>KI <select name=\"wer\"><option value=\"\">Alle KIs</option>",
         datum.map_or_else(String::new, |d| d.to_string())
     );
@@ -277,7 +277,7 @@ fn filter(
             maskiere(titel)
         );
     }
-    s.push_str("</select></label>");
+    s.push_str("</select></label></div>");
     if !lauf.is_empty() {
         let _ = write!(
             s,
@@ -286,7 +286,10 @@ fn filter(
             maskiere(lauf)
         );
     }
-    s.push_str(" <button type=\"submit\">Filtern</button> <a href=\"/gespraeche\">Filter zurücksetzen</a></form>");
+    s.push_str(
+        "<div class=\"aktionszeile\"><button type=\"submit\">Filtern</button> \
+                <a href=\"/gespraeche\">Filter zurücksetzen</a></div></form>",
+    );
 }
 
 struct Tag {
