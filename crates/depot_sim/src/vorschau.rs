@@ -93,6 +93,12 @@ fn erste(
         einschaetzung: grund,
         vorschlag: None,
     });
+    if a.verwertbar
+        && let Some(pruefung) = b.thesenpruefung()
+        && let Some(text) = crate::schlopfmodell::pruefung_text(&pruefung)
+    {
+        ausgabe("Thesenprüfung", id, &text);
+    }
     let begruendung = if a.verwertbar {
         a.einschaetzung
     } else {
@@ -434,6 +440,7 @@ pub fn lauf(
         zeit,
         ereignisse.len()
     );
+    crate::schlopfmodell::vorbereiten(&daten, &mut j, zeit, fuer, dachs, maus);
     let mut ea = erste(&mut j, &budget, dachs, &lage_a)?;
     let mut eb = erste(&mut j, &budget, maus, &lage_b)?;
     zweitmeinung(&mut j, &budget, maus, &lage_a, &mut ea)?;

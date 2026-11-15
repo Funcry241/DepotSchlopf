@@ -121,6 +121,11 @@ pub fn papier(
     papier_starten(wurzel, heute, universum, dachs, maus, false)
 }
 
+fn uhr() -> Option<Zeitpunkt> {
+    let sekunden = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    Zeitpunkt::aus_sekunden(i64::try_from(sekunden).ok()?)
+}
+
 /// Startet den Papiertag mit optionaler Anlassprüfung für automatische Läufe.
 pub fn papier_starten(
     wurzel: &Path,
@@ -161,10 +166,6 @@ pub fn papier_starten(
     let depot = !j.stand().toepfe().is_empty();
     let mut konto =
         Papierdatei::oeffnen(&wurzel.join("daten").join("papierkonto.txt"), depot, &start)?;
-    let uhr = || {
-        let sekunden = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-        Zeitpunkt::aus_sekunden(i64::try_from(sekunden).ok()?)
-    };
     let mindesteinsatz_bp = papier_mindesteinsatz(&wurzel.join("daten"))?;
     dachs.setze_mindesteinsatz(mindesteinsatz_bp);
     maus.setze_mindesteinsatz(mindesteinsatz_bp);
@@ -175,6 +176,17 @@ pub fn papier_starten(
         mindesteinsatz_bp,
         anlass_pruefen,
     };
+    if let Some(zeit) = uhr() {
+        let stichtag = j.stand().wissensstichtag(heute).unwrap_or(zeit).min(zeit);
+        crate::schlopfmodell::vorbereiten(
+            &wurzel.join("daten"),
+            &mut j,
+            stichtag,
+            heute,
+            beteiligte.dachs,
+            beteiligte.maus,
+        );
+    }
     let ausgang = papiertag_mit_uhr(
         &mut j,
         heute,

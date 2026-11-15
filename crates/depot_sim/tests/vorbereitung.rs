@@ -354,9 +354,14 @@ struct VorschauModell {
     gesehen: Vec<String>,
     kurstag: Option<Datum>,
     ausfall: bool,
+    schlopfmodell: Option<String>,
 }
 
 impl Berater for VorschauModell {
+    fn setze_schlopfmodell(&mut self, modell: Option<depot_sim::schlopfmodell::Beratung>) {
+        self.schlopfmodell = modell.map(|m| m.frage());
+    }
+
     fn vorschlagen(&mut self, e: AufrufErlaubnis, l: &Lage<'_>) -> Antwort {
         assert_eq!(e.buchung().berater, self.wer);
         self.gesehen = l.ereignisse.to_vec();
@@ -426,6 +431,13 @@ fn wochenend_vorschau_bucht_nur_kosten_und_fragt_bei_bargeld_nicht_weiter() -> R
         }
         let depot_vorher = j.stand().toepfe().clone();
         nachricht(&mut j, sonntag, sonntag, "Neues Ereignis am Sonntag")?;
+        let beleg = u64::try_from(j.eintraege().len())
+            .map_err(|e| e.to_string())?
+            .saturating_add(1);
+        let (bytes, hash) = j.bestaetigt();
+        let daten = ort.0.join("daten");
+        fs::write(daten.join("neuroschlopf.txt"), "an\n").map_err(|e| e.to_string())?;
+        fs::write(daten.join("schlopfmodell.json"), format!("{{\"version\":1,\"beratungsstand\":{},\"journal\":{{\"bytes\":{bytes},\"hash\":\"{hash}\"}},\"quellen\":[{beleg}]}}", sonntag.sekunden())).map_err(|e| e.to_string())?;
         let spaeter = zeit(16)?;
         nachricht(&mut j, spaeter, spaeter, "Nach dem Start veröffentlicht")?;
         drop(j);
@@ -434,17 +446,26 @@ fn wochenend_vorschau_bucht_nur_kosten_und_fragt_bei_bargeld_nicht_weiter() -> R
             gesehen: Vec::new(),
             kurstag: None,
             ausfall: false,
+            schlopfmodell: None,
         };
         let mut maus = VorschauModell {
             wer: BeraterId::Maus,
             gesehen: Vec::new(),
             kurstag: None,
             ausfall,
+            schlopfmodell: None,
         };
         lauf(&ort.0, sonntag, &universum()?, &mut dachs, &mut maus)?;
         assert_eq!(dachs.kurstag, Some(freitag));
         assert_eq!(maus.kurstag, Some(freitag));
         assert_eq!(dachs.gesehen, maus.gesehen);
+        assert_eq!(dachs.schlopfmodell, maus.schlopfmodell);
+        assert!(
+            dachs
+                .schlopfmodell
+                .as_deref()
+                .is_some_and(|m| m.contains("Neues Ereignis am Sonntag"))
+        );
         assert!(
             maus.gesehen
                 .iter()

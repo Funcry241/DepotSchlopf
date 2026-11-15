@@ -38,6 +38,7 @@ pub mod papierdatei;
 pub mod papierlauf;
 pub mod papiertag;
 mod positionskauf;
+pub mod schlopfmodell;
 pub mod splitumbuchung;
 pub mod szenario;
 pub mod vorschau;

@@ -925,6 +925,10 @@ fn frage(
         belege_ki(j, frager).map_err(journal)?;
         verwertbar = antwort.verwertbar;
         let wie = if antwort.verwertbar {
+            if let Some(pruefung) = frager.thesenpruefung() {
+                crate::schlopfmodell::belege_pruefung(j, tag.datum, wer, &pruefung)
+                    .map_err(journal)?;
+            }
             if z.uhr.is_some()
                 && let Some(prognose) = antwort.prognose.take()
                 && z.universum.isins().contains(&prognose.isin)

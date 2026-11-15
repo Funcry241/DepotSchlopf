@@ -683,6 +683,45 @@ impl Journal {
         (self.laenge, self.kette.clone())
     }
 
+    /// Prüft, ob ein belegter Abschnitt noch zum geöffneten, bestätigten Journal gehört.
+    /// Für Zwischenspeicher genügt die Prüfsumme an der genauen Zeilengrenze.
+    pub fn hat_abschnitt(&mut self, ende: u64, hash: &str) -> bool {
+        if ende == self.laenge {
+            return self.kette == hash;
+        }
+        if ende == 0 || ende > self.laenge {
+            return false;
+        }
+        let ab = ende.saturating_sub(128 * 1024);
+        let Ok(position) = self.datei.stream_position() else {
+            return false;
+        };
+        let mut bytes = Vec::new();
+        let lesung = self.datei.seek(SeekFrom::Start(ab)).and_then(|_| {
+            (&self.datei)
+                .take(ende.saturating_sub(ab))
+                .read_to_end(&mut bytes)
+        });
+        let zurueck = self.datei.seek(SeekFrom::Start(position));
+        if lesung.is_err()
+            || zurueck.is_err()
+            || u64::try_from(bytes.len()).ok() != Some(ende.saturating_sub(ab))
+        {
+            return false;
+        }
+        let Some(zeile) = bytes
+            .strip_suffix(b"\n")
+            .and_then(|b| b.rsplit(|n| *n == b'\n').next())
+        else {
+            return false;
+        };
+        let mut teile = zeile.splitn(3, |n| *n == b';');
+        teile
+            .next()
+            .is_some_and(|n| !n.is_empty() && n.iter().all(u8::is_ascii_digit))
+            && teile.next() == Some(hash.as_bytes())
+    }
+
     /// Die Vergabe der Auftragskennungen hinter der letzten belegten Kennung (R24, 1·F09).
     /// Belegt werden kann nur eine groessere Kennung; zwei Vergaben fuer dieselben Nummern
     /// scheitern also spaetestens beim Belegen.
