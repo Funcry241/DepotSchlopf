@@ -1,17 +1,6 @@
-klasse: Funktion
-zweck: Xetra-Splitverdacht über Folgeläufe sperren und geprüfte Fehlalarme gezielt entwarnen
+klasse: KodexAenderung
+zweck: Einführung der rückwärtsinkompatiblen Journalart für Kapitalmaßnahmen an die Grenzfreigabe binden
 pfade:
-crates/depot_dienst/src/depotseite.rs
-crates/depot_dienst/src/lib.rs
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/src/splitverdacht.rs
-crates/depot_dienst/tests/dienst.rs
-crates/depot_journal/src/lib.rs
-crates/depot_journal/src/splitverdacht.rs
-crates/depot_lage/src/depot.rs
-crates/depot_lage/src/depotverlauf.rs
-crates/depot_lage/src/html.rs
-crates/depot_sammler/src/sammeln.rs
-crates/depot_sim/src/papiertag.rs
-crates/depot_sim/tests/papiertag.rs
-docs/befunde/boersen.md
+crates/depot_kodex/src/festschreibung.rs
+kodex/festschreibung.txt
+kodex/freigabe.txt

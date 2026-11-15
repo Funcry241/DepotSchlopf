@@ -133,6 +133,32 @@ fn kodex_hash(wurzel: &Path) -> Result<String, String> {
     Ok(sha(&text))
 }
 
+fn kapitalmassnahme(wurzel: &Path) -> Result<String, String> {
+    let text = lies(&wurzel.join("crates/depot_journal/src/stand.rs"))?;
+    kapitalmassnahme_name(&text)
+}
+
+fn kapitalmassnahme_name(text: &str) -> Result<String, String> {
+    let (_, art) = text.split_once("impl Art {").ok_or("Journalart fehlt")?;
+    let (namen, _) = art
+        .split_once("fn aus_name(")
+        .ok_or("Journalart-Leser fehlt")?;
+    let treffer: Vec<_> = namen
+        .lines()
+        .filter_map(|z| z.trim().strip_prefix("Art::Kapitalmassnahme => "))
+        .collect();
+    match treffer.as_slice() {
+        [] if !text.contains("    Kapitalmassnahme,") => Ok("nicht-vorhanden".into()),
+        [name] => name
+            .strip_prefix('"')
+            .and_then(|t| t.strip_suffix("\","))
+            .filter(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_lowercase() || b == b'-'))
+            .map(str::to_owned)
+            .ok_or_else(|| "Journalart Kapitalmaßnahme unlesbar".into()),
+        _ => Err("Journalart Kapitalmaßnahme nicht eindeutig".into()),
+    }
+}
+
 pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut f = BTreeMap::new();
     f.insert("kodex".into(), kodex_hash(wurzel)?);
@@ -147,6 +173,7 @@ pub fn berechne(wurzel: &Path) -> Result<BTreeMap<String, String>, String> {
         )),
     );
     f.insert("produktarten".into(), produktarten(wurzel)?);
+    f.insert("journal_kapitalmassnahme".into(), kapitalmassnahme(wurzel)?);
     // Vor der ersten RSS-Einrichtung gibt es keine Liste. Danach werden auch Entfernung
     // und jede Aenderung durch den Vergleich mit der Festschreibung erkannt.
     match fs::read(wurzel.join("crates/depot_sammler/src/rss_quellen.rs")) {
@@ -249,6 +276,22 @@ pub fn pruefe(wurzel: &Path, klasse: Klasse, diff: &BTreeSet<String>) -> Vec<Str
 mod tests {
     use super::*;
     use crate::toml;
+
+    #[test]
+    fn neue_und_umbenannte_kapitalmassnahme_aendern_die_festschreibung() -> Result<(), String> {
+        let alt = "enum Art {\n    Kurs,\n}\nimpl Art {\nArt::Kurs => \"kurs\",\nfn aus_name(";
+        let neu = "enum Art {\n    Kapitalmassnahme,\n}\nimpl Art {\nArt::Kapitalmassnahme => \"kapitalmassnahme\",\nfn aus_name(";
+        assert_eq!(kapitalmassnahme_name(alt)?, "nicht-vorhanden");
+        assert_eq!(kapitalmassnahme_name(neu)?, "kapitalmassnahme");
+        assert_eq!(
+            kapitalmassnahme_name(&neu.replace("kapitalmassnahme", "split"))?,
+            "split"
+        );
+        assert!(
+            kapitalmassnahme_name(&neu.replace("Art::Kapitalmassnahme", "Art::Sonstiges")).is_err()
+        );
+        Ok(())
+    }
 
     #[test]
     fn gelockerte_lints_fallen_auf() {
