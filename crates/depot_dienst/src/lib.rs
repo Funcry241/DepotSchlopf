@@ -52,8 +52,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use depot_kern::{BeraterId, Zeitpunkt};
 use depot_lage::betrieb::schluessel_stand;
 use depot_lage::{
-    Hinterlegt, Umgebung, anbieter, anbieterprotokoll, grenzwerte, ki_halt, lagebild, mit_journal,
-    ortszeit, sperrdateien,
+    Hinterlegt, Umgebung, anbieter, anbieterprotokoll, grenzwerte, ki_halt, lagebild, ortszeit,
+    sperrdateien,
 };
 
 use crate::http::{Anfrage, antwort, feld, formular, gleich, herkunft_erlaubt, host_erlaubt};
@@ -162,8 +162,8 @@ pub fn lagerechner(umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerechner {
         let daten = wurzel.join("daten");
         let sperren = sperrdateien(&daten);
         let (anbieter, anbieter_unlesbar) = anbieterprotokoll(&daten);
-        let mut bild = mit_journal(&daten, |journal| {
-            lagebild(&Umgebung {
+        let mut bild = depot_lage::mit_journal_und_eintraegen(&daten, |journal, eintraege| {
+            let mut bild = lagebild(&Umgebung {
                 jetzt,
                 journal,
                 kursquelle: umwelt.schluessel(Wer::Kursquelle),
@@ -182,7 +182,12 @@ pub fn lagerechner(umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerechner {
                 anbieter,
                 anbieter_unlesbar,
                 ki_halt: ki_halt(&daten),
-            })
+            });
+            if let depot_lage::Zugang::Offen(stand) = journal {
+                bild.wiederanlauf =
+                    depot_lage::wiederanlauf::Diagnose::lies(&daten, stand, eintraege);
+            }
+            bild
         });
         bild.gemini_budget = Some(gemini::budget(&daten, heute(jetzt)));
         bild

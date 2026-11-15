@@ -1950,6 +1950,78 @@ fn wiederanlauf_erhaelt_verlauf_vor_einer_abgerissenen_zeile() -> Result<(), Str
 }
 
 #[test]
+fn live_zeigt_wiederanlauf_aus_journal_und_papierkonto() -> Result<(), String> {
+    use depot_journal::Art::{Abrechnungstag, Abschluss, Auftrag, Topf, Zustand};
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let t = donnerstag(18, 0)?;
+    let abschluss = format!("2026-11-04;1000000;{}", "a".repeat(64));
+    let journal = depot_journal::inhalt_fuer(&[
+        (Topf, "A;500000;"),
+        (Topf, "B;500000;"),
+        (Abrechnungstag, "2026-11-04"),
+        (Abschluss, &abschluss),
+        (Abrechnungstag, "2026-11-05"),
+        (Auftrag, "1;A;DE0007164600;Kauf;1;10000;Umschichtung"),
+        (Zustand, "1;gesendet"),
+        (Zustand, "1;angenommen"),
+    ]);
+    let vermerk = some(depot_journal::vermerk_fuer(&journal, 0), "Vermerk")?;
+    fs::write(daten.join("journal.txt"), &journal).map_err(|e| e.to_string())?;
+    fs::write(daten.join("journal.vermerk"), &vermerk).map_err(|e| e.to_string())?;
+
+    let live = || {
+        let d = Dienst::neu(
+            wurzel.clone(),
+            TOKEN.into(),
+            echo_starter(true),
+            depot_dienst::lagerechner(Arc::new(Attrappe::default())),
+        );
+        assert!(d.schritt(t).is_none());
+        get(&d, "/teil/live", t)
+    };
+    assert!(live().contains("Papierkonto nicht prüfbar"));
+
+    let konto = daten.join("papierkonto.txt");
+    fs::write(
+        &konto,
+        concat!(
+            "papierkonto-v1\nbargeld;1000000\nsendungen;1\n",
+            "order;1;DE0007164600;kauf;1;10000;offen\n"
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    assert!(live().contains("Journal und Papierkonto stimmen in den geprüften Daten überein."));
+
+    let ausgefuehrt = concat!(
+        "papierkonto-v1\nbargeld;989850\nsendungen;1\n",
+        "bestand;DE0007164600;1\norder;1;DE0007164600;kauf;1;10000;gefuellt\n",
+        "ausfuehrung;1;1;10000;150\n"
+    );
+    fs::write(&konto, ausgefuehrt).map_err(|e| e.to_string())?;
+    let html = live();
+    assert!(html.contains("Papiertag ohne Abschluss"));
+    assert!(html.contains("Letzter bestätigter Abschluss: 04.11.2026"));
+    assert!(html.contains("liegt beim Papiermakler · 0 Stück ausgeführt"));
+    assert!(html.contains("ausgeführt · 1 Stück ausgeführt"));
+    assert!(html.contains("Journal und Papierkonto müssen abgeglichen werden."));
+    assert!(html.contains("Bestand DE0007164600: Journal 0 Stück, Papierkonto 1 Stück."));
+    assert_eq!(
+        fs::read(daten.join("journal.txt")).map_err(|e| e.to_string())?,
+        journal
+    );
+    assert_eq!(
+        fs::read_to_string(daten.join("journal.vermerk")).map_err(|e| e.to_string())?,
+        vermerk
+    );
+    assert_eq!(
+        fs::read_to_string(&konto).map_err(|e| e.to_string())?,
+        ausgefuehrt
+    );
+    Ok(())
+}
+
+#[test]
 fn verlauf_liest_streng() {
     let g = depot_dienst::verlauf::lies(
         "verlauf-v1;start;1-1;kurse;hand;1800000000\n\

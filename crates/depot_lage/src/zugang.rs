@@ -38,24 +38,33 @@ fn spur(pfad: &Path) -> Result<bool, String> {
 /// Oeffnet das Journal im Datenordner `daten` und ruft `f` mit dem Zugang auf. Das Journal ist
 /// nur waehrend `f` offen.
 pub fn mit_journal<R>(daten: &Path, f: impl FnOnce(Zugang<'_>) -> R) -> R {
+    mit_journal_und_eintraegen(daten, |zugang, _| f(zugang))
+}
+
+/// Nutzt denselben geöffneten Journalstand auch für die Diagnose der letzten Einträge.
+pub fn mit_journal_und_eintraegen<R>(
+    daten: &Path,
+    f: impl FnOnce(Zugang<'_>, &[(depot_journal::Art, String)]) -> R,
+) -> R {
     let pfad = daten.join(JOURNAL);
     let eingerichtet = match Journal::eingerichtet(&pfad) {
         Ok(e) => e,
-        Err(e) => return f(Zugang::Fehler(&fehler_text(&e))),
+        Err(e) => return f(Zugang::Fehler(&fehler_text(&e)), &[]),
     };
     if !eingerichtet {
         return match spur(&daten.join(PAPIERKONTO)) {
-            Ok(false) => f(Zugang::NichtEingerichtet),
-            Ok(true) => f(Zugang::Fehler(
-                "Papierkonto ohne Journal und Vermerk: Datenbestand unvollständig",
-            )),
-            Err(t) => f(Zugang::Fehler(&t)),
+            Ok(false) => f(Zugang::NichtEingerichtet, &[]),
+            Ok(true) => f(
+                Zugang::Fehler("Papierkonto ohne Journal und Vermerk: Datenbestand unvollständig"),
+                &[],
+            ),
+            Err(t) => f(Zugang::Fehler(&t), &[]),
         };
     }
     match Journal::oeffnen(&pfad) {
-        Ok(j) => f(Zugang::Offen(j.stand())),
-        Err(JournalFehler::Belegt) => f(Zugang::Belegt),
-        Err(e) => f(Zugang::Fehler(&fehler_text(&e))),
+        Ok(j) => f(Zugang::Offen(j.stand()), j.eintraege()),
+        Err(JournalFehler::Belegt) => f(Zugang::Belegt, &[]),
+        Err(e) => f(Zugang::Fehler(&fehler_text(&e)), &[]),
     }
 }
 
@@ -114,8 +123,7 @@ pub fn update_datenprobe(daten: &Path) -> Result<(), DatenprobeFehler> {
             return Ok(());
         }
         // Nur lesen, selbst wenn das Konto nach der Existenzprüfung verschwindet.
-        let papier = fs::read_to_string(&konto).map_err(|e| format!("Papierkonto: {e}"))?;
-        let papier = depot_sim::Papierkonto::aus_text(&papier)?;
+        let papier = papierkonto_lesen(&konto)?;
         if !depot {
             let [a, b] = [TopfId::A, TopfId::B].map(|id| Topf::neu(id, START_JE_TOPF));
             let start = [
@@ -142,6 +150,15 @@ pub fn update_datenprobe(daten: &Path) -> Result<(), DatenprobeFehler> {
         e => fehler_text(&e).into(),
     })?
     .map_err(DatenprobeFehler::Fehler)
+}
+
+pub(crate) fn papierkonto_lesen(pfad: &Path) -> Result<depot_sim::Papierkonto, String> {
+    let meta = fs::symlink_metadata(pfad).map_err(|e| format!("Papierkonto: {e}"))?;
+    if !meta.is_file() {
+        return Err("Papierkonto ist keine reguläre Datei".into());
+    }
+    let text = fs::read_to_string(pfad).map_err(|e| format!("Papierkonto: {e}"))?;
+    depot_sim::Papierkonto::aus_text(&text)
 }
 
 /// Sperrdateien im Datenordner: `*.sperre` (abgebrochener Lauf) und `*.halt` (etwa
