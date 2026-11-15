@@ -42,6 +42,12 @@ pub(crate) const STIL: &str = "
 }
 @media(max-width:600px){.kopffigur svg{width:28px;height:28px}.kopffigur{min-width:38px}}
 @media(max-width:460px){.kopffiguren{display:none}}
+[data-wert]{font-variant-numeric:tabular-nums}
+[data-wert].steigt{--wertfarbe:var(--gut)}
+[data-wert].faellt{--wertfarbe:var(--halt)}
+[data-wert].steigt,[data-wert].faellt{animation:wert-hinweis 1.2s ease-out}
+@keyframes wert-hinweis{from{background:color-mix(in srgb,var(--wertfarbe) 20%,transparent)}to{background:transparent}}
+@media(prefers-reduced-motion:reduce){[data-wert].steigt,[data-wert].faellt{animation-timing-function:step-end}}
 @keyframes herz-puls{0%,72%,100%{transform:scale(1)} 36%{transform:scale(1.13)}}
 @media(prefers-reduced-motion:no-preference){
   #herz[data-zustand=gut] svg{animation:herz-puls 4s ease-in-out infinite}

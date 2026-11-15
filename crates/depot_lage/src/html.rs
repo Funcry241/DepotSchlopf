@@ -38,6 +38,21 @@ fn geld(c: Option<Cent>) -> String {
     c.map_or_else(|| "–".into(), euro)
 }
 
+/// Markiert einen belegten Geldbetrag für die Anzeige beim Auffrischen.
+pub fn geldwechsel(schluessel: &str, wert: Option<Cent>) -> String {
+    wert.map_or_else(
+        || "–".into(),
+        |cent| {
+            format!(
+                "<span data-schluessel=\"{}\" data-wert=\"{}\">{}</span>",
+                maskiere(schluessel),
+                cent.0,
+                euro(cent)
+            )
+        },
+    )
+}
+
 fn ampel_klasse(a: Ampel) -> &'static str {
     match a {
         Ampel::Gut => "gut",
@@ -267,6 +282,12 @@ fn budget(l: &Lagebild, s: &mut String) {
             BudgetStatus::Gesperrt(_) => "halt",
             _ => "offen",
         };
+        let wechsel = |feld, cent| {
+            geldwechsel(
+                &format!("budget-{}-{feld}", berater_text(b.berater)),
+                Some(cent),
+            )
+        };
         let unbekannt = if b.monat_unbekannt > 0 {
             format!(" · {} Aufrufe unbekannt", b.monat_unbekannt)
         } else {
@@ -282,19 +303,19 @@ fn budget(l: &Lagebild, s: &mut String) {
              <dt>Jahr</dt><dd>{} von {}</dd><dt>Je Aufruf</dt><dd>{}</dd></dl></article>",
             berater_text(b.berater),
             maskiere(&b.status.text()),
-            euro(b.monat_verbraucht),
+            wechsel("monat_verbraucht", b.monat_verbraucht),
             b.monat_abgerechnet,
-            euro(b.monat_gebucht),
+            wechsel("monat_gebucht", b.monat_gebucht),
             euro(b.monat_grenze),
             b.monat_aufrufe,
             b.monat_aufrufe_max,
-            euro(b.monat_rest),
+            wechsel("monat_rest", b.monat_rest),
             b.handelstage_rest,
-            euro(b.heute_gebucht),
+            wechsel("heute_gebucht", b.heute_gebucht),
             b.heute_aufrufe,
             b.heute_aufrufe_max,
-            euro(b.tagesrahmen),
-            euro(b.jahr_gebucht),
+            wechsel("tagesrahmen", b.tagesrahmen),
+            wechsel("jahr_gebucht", b.jahr_gebucht),
             euro(b.jahr_grenze),
             geld(b.je_aufruf),
         );
@@ -410,11 +431,20 @@ fn depot(l: &Lagebild, s: &mut String) {
             s,
             "<p>Gesamtwert <b>{}</b> · Höchststand {} · letzter Papiertag {} · bewertet mit \
              Schlusskursen vom {}</p>",
-            geld(d.gesamt),
-            geld(d.hoechststand),
+            geldwechsel("papier-gesamt", d.gesamt),
+            geldwechsel("papier-hoechststand", d.hoechststand),
             d.letzter_abschluss.map_or_else(|| "–".into(), datum_text),
             d.kurse_vom.map_or_else(|| "–".into(), datum_text)
         );
+        if let crate::Tagesergebnis::Belegt { tag, betrag, bp } = d.tagesergebnis {
+            let _ = write!(
+                s,
+                "<p>Wertänderung zum Vortag am {}: {} ({})</p>",
+                datum_text(tag),
+                geldwechsel("papier-tagesergebnis", Some(betrag)),
+                bp.map_or_else(|| "–".into(), prozent),
+            );
+        }
         s.push_str(
             "<div class=\"breit\"><table><tr><th>Topf</th><th>Position</th><th class=\"z\">Stück</th>\
              <th class=\"z\">Wert</th></tr>",
@@ -424,7 +454,7 @@ fn depot(l: &Lagebild, s: &mut String) {
                 s,
                 "<tr><td><b>{}</b></td><td>Bargeld</td><td></td><td class=\"z\">{}</td></tr>",
                 topf_text(t.topf),
-                euro(t.bargeld)
+                geldwechsel(&format!("papier-{:?}-bargeld", t.topf), Some(t.bargeld))
             );
             for p in &t.positionen {
                 let _ = write!(
@@ -432,13 +462,13 @@ fn depot(l: &Lagebild, s: &mut String) {
                     "<tr><td></td><td>{}</td><td class=\"z\">{}</td><td class=\"z\">{}</td></tr>",
                     format_args!("{}{}", maskiere(&p.name), stopp_text(p)),
                     p.stueck,
-                    geld(p.wert)
+                    geldwechsel(&format!("papier-{:?}-{}", t.topf, p.isin), p.wert)
                 );
             }
             let _ = write!(
                 s,
                 "<tr><td></td><td><i>zusammen</i></td><td></td><td class=\"z\"><i>{}</i></td></tr>",
-                geld(t.wert)
+                geldwechsel(&format!("papier-{:?}-gesamt", t.topf), t.wert)
             );
         }
         s.push_str("</table></div>");
@@ -675,4 +705,22 @@ pub fn seite(l: &Lagebild) -> String {
     s.push_str(&inhalt(l, &|_| None));
     s.push_str("</main></body></html>\n");
     s
+}
+
+#[cfg(test)]
+mod geld_tests {
+    use super::*;
+
+    #[test]
+    fn geldwechsel_markiert_cent_mit_stabilem_schluessel() {
+        assert_eq!(
+            geldwechsel("saldo", Some(Cent(1_234))),
+            "<span data-schluessel=\"saldo\" data-wert=\"1234\">12,34 €</span>"
+        );
+        assert!(
+            geldwechsel("saldo", Some(Cent(-800)))
+                .contains("data-schluessel=\"saldo\" data-wert=\"-800\"")
+        );
+        assert_eq!(geldwechsel("saldo", None), "–");
+    }
 }

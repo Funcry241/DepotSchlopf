@@ -4245,11 +4245,29 @@ fn depot_ohne_journal() -> Result<(), String> {
 }
 
 #[test]
-fn depot_kein_auffrischen() -> Result<(), String> {
+fn depot_aktualisiert_nur_einen_geaenderten_stand() -> Result<(), String> {
     let d = dienst(ordner()?, true);
-    let html = get(&d, "/depot", donnerstag(12, 0)?);
-    assert_eq!(html.matches("data-teil=").count(), 1);
-    assert!(html.contains("Seite neu laden für den neuesten Stand"));
+    let zeit = donnerstag(12, 0)?;
+    let html = get(&d, "/depot?zeitraum=1m", zeit);
+    assert!(html.contains("data-teil=\"/teil/depot?zeitraum=1m\""));
+    assert!(!html.contains("data-depot-stand"));
+
+    let bild = leeres_lagebild()(&d.wurzel, zeit);
+    {
+        let mut z = d.sperre();
+        z.lage = Some(depot_dienst::werkbank::Lage {
+            stand: zeit,
+            depot_version: 2,
+            bild,
+        });
+        z.lage_veraltet = false;
+    }
+    let gleich = get(&d, "/teil/depot?zeitraum=1m&stand=2", zeit);
+    assert!(gleich.ends_with("\r\n\r\n"), "{gleich}");
+    let neuer_stand = get(&d, "/teil/depot?zeitraum=1m&stand=1", zeit);
+    assert!(neuer_stand.contains("data-depot-stand=\"2\""));
+    assert!(neuer_stand.contains("Noch kein Depot"));
+    assert!(!neuer_stand.contains("<nav"));
     Ok(())
 }
 
@@ -4455,7 +4473,11 @@ fn live_zustand_in_worten() -> Result<(), String> {
             ki_halt: None,
         })
     });
-    d.sperre().lage = Some(depot_dienst::werkbank::Lage { stand: zeit, bild });
+    d.sperre().lage = Some(depot_dienst::werkbank::Lage {
+        stand: zeit,
+        depot_version: 1,
+        bild,
+    });
     let html = get(&d, "/teil/live", zeit);
     assert!(
         html.contains("liegt beim Papiermakler") && html.contains("Mehr zum Depot"),
@@ -4536,7 +4558,9 @@ fn startgeld_gleich_fuer_kennzahl_und_diagramm() -> Result<(), String> {
         .map_err(|e| format!("{e:?}"))?;
     drop(j);
     let html = get(&dienst(wurzel, true), "/depot", jetzt);
-    assert!(html.contains("Seit Start -1,50 €"));
+    assert!(html.contains(
+        "Seit Start <span data-schluessel=\"depot-start\" data-wert=\"-150\">-1,50 €</span>"
+    ));
     assert!(
         html.contains("Startgeld 10.000,00 € (dünn gestrichelt)"),
         "{html}"

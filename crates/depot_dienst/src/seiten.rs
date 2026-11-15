@@ -2410,6 +2410,7 @@ pub const APP_JS: &str = r#""use strict";
   var updateFrist = 180000;
   var pausiert = false;
   var generation = 0;
+  var geldVerbindung = 0;
   var timer = new Set();
   var anfragen = new Set();
   function planeAbruf(f, ms) {
@@ -2475,6 +2476,7 @@ pub const APP_JS: &str = r#""use strict";
       if (t.indexOf('data-update-laeuft="nein"') !== -1) {
         updateErwartetSeit = null;
       }
+      if (herzVerbindung) { geldVerbindung += 1; }
       herzVerbindung = null;
       zeigeHerz();
       var updateBestaetigt = updateWartetSeit !== null;
@@ -2523,19 +2525,54 @@ pub const APP_JS: &str = r#""use strict";
     d.dataset.konsoleGeoeffnet = "ja";
     konsolePosition(d, null);
   }, true);
+  function geldwerte(ziel) {
+    return ziel.querySelectorAll("[data-wert][data-schluessel]");
+  }
+  function geldwechsel(element, von, bis, bewegung) {
+    var endtext = element.textContent;
+    element.classList.add(bis > von ? "steigt" : "faellt");
+    if (bewegung.matches) { return; }
+    var format = new Intl.NumberFormat("de-DE", {style:"currency", currency:"EUR"});
+    var beginn = performance.now();
+    element.textContent = format.format(von / 100);
+    function schritt(jetzt) {
+      if (!element.isConnected) { return; }
+      var anteil = (jetzt - beginn) / 600;
+      if (anteil >= 1 || bewegung.matches) { element.textContent = endtext; return; }
+      element.textContent = format.format(Math.round(von + (bis - von) * anteil) / 100);
+      requestAnimationFrame(schritt);
+    }
+    requestAnimationFrame(schritt);
+  }
   var teile = Array.from(document.querySelectorAll("[data-teil]")).map(function (ziel) {
     var url = ziel.getAttribute("data-teil");
+    var depot = url.startsWith("/teil/depot?");
     var zuletzt = null;
+    var geldstand = null;
     return async function hole() {
       var g = generation;
       var fehler = false;
       try {
-        var t = await lade(url);
+        var abfrage = url;
+        if (depot) {
+          var stand = ziel.querySelector("[data-depot-stand]");
+          if (stand) { abfrage += "&stand=" + encodeURIComponent(stand.dataset.depotStand); }
+        }
+        var t = await lade(abfrage);
         if (g !== generation || pausiert || neuladen) { return; }
         var neu = kennung(t);
         // Der zentrale Verbindungstest wartet auf die Bestätigung und lädt genau einmal neu.
         if (start && neu && neu !== start) { return; }
-        if (t !== zuletzt) {
+        var geldKennung = generation + "/" + geldVerbindung;
+        var geldAnimation = geldstand === geldKennung && !herzVerbindung;
+        geldstand = herzVerbindung ? null : geldKennung;
+        if ((!depot || t) && t !== zuletzt) {
+          var werte = new Map();
+          if (geldAnimation) {
+            geldwerte(ziel).forEach(function (e) {
+              werte.set(e.dataset.schluessel, Number(e.dataset.wert));
+            });
+          }
           var protokolle = new Map();
           ziel.querySelectorAll("details[id]").forEach(function (d) {
             var pre = d.querySelector("pre.konsole");
@@ -2549,6 +2586,16 @@ pub const APP_JS: &str = r#""use strict";
             });
           });
           ziel.innerHTML = t;
+          if (werte.size) {
+            var bewegung = window.matchMedia("(prefers-reduced-motion: reduce)");
+            geldwerte(ziel).forEach(function (e) {
+              var von = werte.get(e.dataset.schluessel);
+              var bis = Number(e.dataset.wert);
+              if (Number.isSafeInteger(von) && Number.isSafeInteger(bis) && von !== bis) {
+                geldwechsel(e, von, bis, bewegung);
+              }
+            });
+          }
           if (url === "/teil/kopf") { merkeAmpel(); }
           zuletzt = t;
           ziel.querySelectorAll("details[id]").forEach(function (d) {
@@ -2558,7 +2605,7 @@ pub const APP_JS: &str = r#""use strict";
             konsolePosition(d, vorher && vorher.position);
           });
         }
-      } catch (_) { fehler = true; }
+      } catch (_) { fehler = true; geldstand = null; }
       finally { if (g === generation) { planeAbruf(hole, fehler ? 5000 : 2000); } }
     };
   });
