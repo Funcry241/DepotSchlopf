@@ -1431,6 +1431,40 @@ fn verkauft(j: &Journal, auftraege: &[GenehmigterAuftrag]) -> bool {
 /// unbekannt; geklaert wird nur ueber den Abgleich, nie durch einen zweiten Versand (R37).
 /// Danach laeuft der Markt, und der Kontowaechter gleicht ab: Jede Ausfuehrung steht im
 /// Journal, jede Abweichung haelt an.
+fn belege_kauf(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    a: &depot_regelwerk::Auftrag,
+    vorschlag: Option<&Vorschlag>,
+) -> Result<(), LaufFehler> {
+    let nr = a.kennung.nr();
+    let tag = z.tag;
+    // Erst nach der Reservierung und vor dem Versand dauerhaft belegen. In der
+    // Folgeberatung zählt diese These erst, sobald der Auftrag ausgeführt wurde.
+    if a.richtung == Richtung::Kauf {
+        let huerde = a
+            .limit
+            .mal_stueck(a.stueck)
+            .and_then(|volumen| {
+                crate::kostenhuerde::hinweis(volumen, z.grenzen.gebuehren().fuer(volumen)?)
+            })
+            .unwrap_or_else(|| "Kostenhürde nicht berechenbar. Spread nicht belegt.".into());
+        begruende(j, tag, "Kostenhürde", &format!("Auftrag {nr}: {huerde}"))?;
+    }
+    if let Some(these) = vorschlag
+        .and_then(|v| v.begruendung.get(&a.isin))
+        .filter(|text| !text.trim().is_empty())
+    {
+        begruende(
+            j,
+            tag,
+            crate::positionskauf::KAUFTHESE,
+            &format!("{nr} {these}"),
+        )?;
+    }
+    Ok(())
+}
+
 fn fuehre_aus(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -1476,19 +1510,7 @@ fn fuehre_aus(
             }
             Err(e) => return Err(journal(e)),
         }
-        // Erst nach der Reservierung und vor dem Versand dauerhaft belegen. In der
-        // Folgeberatung zählt diese These erst, sobald der Auftrag ausgeführt wurde.
-        if let Some(these) = vorschlag
-            .and_then(|v| v.begruendung.get(&a.auftrag().isin))
-            .filter(|text| !text.trim().is_empty())
-        {
-            begruende(
-                j,
-                tag,
-                crate::positionskauf::KAUFTHESE,
-                &format!("{nr} {these}"),
-            )?;
-        }
+        belege_kauf(j, z, a.auftrag(), vorschlag)?;
         let versand = z
             .uhr
             .map(|uhr| {

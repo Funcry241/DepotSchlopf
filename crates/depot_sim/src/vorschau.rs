@@ -318,16 +318,25 @@ fn plan(
             );
             continue;
         }
-        let gebuehr = a
-            .limit
-            .mal_stueck(a.stueck)
-            .and_then(|volumen| grenzen.gebuehren().fuer(volumen))
-            .map_or_else(|| "offen".into(), |c| c.to_string());
+        let volumen = a.limit.mal_stueck(a.stueck);
+        let gebuehr = volumen.and_then(|volumen| grenzen.gebuehren().fuer(volumen));
+        let huerde = if a.richtung == depot_regelwerk::Richtung::Kauf {
+            volumen
+                .zip(gebuehr)
+                .and_then(|(v, g)| crate::kostenhuerde::hinweis(v, g))
+                .map_or_else(
+                    || " · Kostenhürde nicht berechenbar".into(),
+                    |text| format!(" · {text}"),
+                )
+        } else {
+            String::new()
+        };
+        let gebuehr = gebuehr.map_or_else(|| "offen".into(), |c| c.to_string());
         ausgabe(
             "Vorschau",
             s.id,
             &format!(
-                "{:?} {} · {} Stück · Limit {} · geschätzte Gebühr {gebuehr} · Ausführung offen",
+                "{:?} {} · {} Stück · Limit {} · geschätzte Gebühr {gebuehr} · Ausführung offen{huerde}",
                 a.richtung, a.isin, a.stueck, a.limit
             ),
         );

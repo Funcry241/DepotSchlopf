@@ -408,9 +408,9 @@ fn frage_hinweis() -> Result<(), String> {
 fn schwelle_100() -> Result<(), String> {
     let universum = universum()?;
     let frage = mit_lage(|l| depot_berater::frage::vorschlag_frage(l, &universum, &[]))?;
-    assert!(
-        frage.contains("100,00 EUR kostet hin und zurück 3,00 EUR Gebühren, also mindestens 3,0 %")
-    );
+    assert!(frage.contains(
+        "100,00 € Ordervolumen: 3,00 € Gebühren für Kauf und Verkauf, mindestens 3,00 %"
+    ));
     Ok(())
 }
 
@@ -418,11 +418,9 @@ fn schwelle_100() -> Result<(), String> {
 fn schwelle_1000() -> Result<(), String> {
     let universum = universum()?;
     let frage = mit_lage(|l| depot_berater::frage::vorschlag_frage(l, &universum, &[]))?;
-    assert!(
-        frage.contains(
-            "1.000,00 EUR kostet hin und zurück 3,00 EUR Gebühren, also mindestens 0,3 %"
-        )
-    );
+    assert!(frage.contains(
+        "1.000,00 € Ordervolumen: 3,00 € Gebühren für Kauf und Verkauf, mindestens 0,30 %"
+    ));
     Ok(())
 }
 

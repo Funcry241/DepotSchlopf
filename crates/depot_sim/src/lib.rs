@@ -56,3 +56,4 @@ pub use papiertag::{
 pub use szenario::{
     Antwort, Berater, Drehbuch, KEINE_VERWERTBARE_ANTWORT, Lage, Stumm, Szenario, Tag, Urteil,
 };
+pub mod kostenhuerde;
