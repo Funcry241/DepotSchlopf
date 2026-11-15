@@ -2975,14 +2975,13 @@ fn kapitalmeldung_bleibt_ausserhalb_der_ki_weltlage() -> Result<(), String> {
     let ort = Ort::neu()?;
     let mut j = ort.oeffnen()?;
     let zeit = belege_schlagzeilen(&mut j, 1, 0)?;
-    let beleg = NachrichtBeleg::neu(
+    for quelle in [
         depot_kern::tiingo::QUELLE_KAPITAL,
-        zeit,
-        b"Testdaten",
-        zeit,
-        "SAP: Split-Faktor 4",
-    )?;
-    assert!(vorbedingung(j.belege_nachricht(&beleg), "Kapitalmeldung")?);
+        depot_kern::quelle::QUELLE_XETRA_SPLITVERDACHT,
+    ] {
+        let beleg = NachrichtBeleg::neu(quelle, zeit, b"Testdaten", zeit, quelle)?;
+        assert!(vorbedingung(j.belege_nachricht(&beleg), "Kapitalmeldung")?);
+    }
     assert_eq!(j.stand().seit_abschluss(), 0);
     let ereignisse = depot_sim::papiertag::weltbelege_am(j.stand(), tag(5)?, zeit);
     assert_eq!(ereignisse.len(), 1);

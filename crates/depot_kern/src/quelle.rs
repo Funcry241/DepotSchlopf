@@ -66,6 +66,17 @@ pub fn lies_preis(text: &str) -> Option<Preis> {
     Preis::lies_euro(text).filter(|p| p.fein() > 0)
 }
 
+/// Journalquelle für einen aus Xetra-Kursen abgeleiteten Splitverdacht.
+pub const QUELLE_XETRA_SPLITVERDACHT: &str = "xetra-splitverdacht";
+
+/// Technische Quellmeldungen bleiben außerhalb der KI-Handelsfragen.
+pub fn kapitalmeldung(quelle: &str) -> bool {
+    matches!(
+        quelle,
+        crate::tiingo::QUELLE_KAPITAL | QUELLE_XETRA_SPLITVERDACHT
+    )
+}
+
 /// Liest die Tageskurse eines Werts, alle Zeilen der Datei, aeltester Tag zuerst.
 ///
 /// Erwartet wird eine Kopfzeile mit Komma als Trenner, mit genau einer Datumsspalte (`date`

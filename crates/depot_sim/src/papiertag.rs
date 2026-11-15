@@ -365,7 +365,7 @@ pub fn nachrichtenbelege_am(
     let mut aus: Vec<&NachrichtBeleg> = stand
         .nachrichten()
         .iter()
-        .filter(|n| n.abruf() <= wissen_bis && n.quelle() != depot_kern::tiingo::QUELLE_KAPITAL)
+        .filter(|n| n.abruf() <= wissen_bis && !depot_kern::quelle::kapitalmeldung(n.quelle()))
         .filter(|n| {
             let s = n.zeit().sekunden();
             von.is_some_and(|von| s >= von) && bis.is_some_and(|bis| s < bis)
