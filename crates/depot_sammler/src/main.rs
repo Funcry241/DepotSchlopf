@@ -379,6 +379,9 @@ fn zeige_werte(werte: &[(depot_sammler::Wert, Ergebnis)]) {
 
 /// Was die Pruefung sagt, wie der Papiertag sie ansetzt.
 fn zeige_pruefung(bericht: &depot_sammler::Bericht) {
+    for text in &bericht.betriebshinweise {
+        println!("{}", hinweis::zeile(text));
+    }
     match bericht.handelstag {
         None => println!("[Sammler] Keine Schlusskurse belegt."),
         Some(t) if bericht.pruefung.is_empty() => {
@@ -688,6 +691,7 @@ mod tests {
             pruefung: Vec::new(),
             ausgelassen: Vec::new(),
             verbindung: None,
+            betriebshinweise: Vec::new(),
         };
         assert_eq!(depot_sammler::einordnen(&b, quelle), Some(E::Netz));
         b.werte
@@ -723,6 +727,7 @@ mod tests {
                 versuche: 4,
                 fehler: "Verbindung weg".into(),
             }),
+            betriebshinweise: Vec::new(),
         };
         assert_eq!(kurs_exitcode(&b), 3);
         for text in ["HTTP 429", "Tageskontingent reicht nicht"] {
@@ -760,6 +765,7 @@ mod tests {
             pruefung: vec![depot_regelwerk::DatenFehler::AbrufNichtAmHandelstag],
             ausgelassen: Vec::new(),
             verbindung: None,
+            betriebshinweise: Vec::new(),
         };
         let nach_schluss = Zeitpunkt::frankfurt(montag, 17, 51, 0).ok_or("Abrufzeit fehlt")?;
         assert_eq!(
