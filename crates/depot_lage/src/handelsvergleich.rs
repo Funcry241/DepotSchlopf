@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use depot_journal::Stand;
 use depot_journal::kapitalmassnahme::Splitfaktor;
 use depot_kern::liste::VERGLEICH_ISIN;
-use depot_kern::{Datum, Grenzen, Herkunft, Isin, Preis, Rundung};
+use depot_kern::{Cent, Datum, Grenzen, Herkunft, Isin, Preis, Rundung};
 use depot_sim::papierlauf::START_JE_TOPF;
 
 use crate::vergleich::{kaufe_gleich, rendite_bp};
@@ -78,12 +78,20 @@ impl Handelsvergleich {
         })
     }
 
-    pub fn rendite(&self, einstieg: Datum, ausstieg: Datum) -> Option<i64> {
+    pub fn rendite(&self, einstieg: Datum, ausstieg: Datum, grenzen: &Grenzen) -> Option<i64> {
+        let gebuehren = grenzen.gebuehren();
+        self.rendite_mit(einstieg, ausstieg, |v| gebuehren.fuer(v))
+    }
+
+    fn rendite_mit(
+        &self,
+        einstieg: Datum,
+        ausstieg: Datum,
+        gebuehren: impl Fn(Cent) -> Option<Cent>,
+    ) -> Option<i64> {
         if einstieg > ausstieg || self.werte.len() != VERGLEICH_ISIN.len() {
             return None;
         }
-        let grenzen = Grenzen::standard();
-        let gebuehren = grenzen.gebuehren();
         let kaufkurse: Vec<_> = self
             .werte
             .iter()
@@ -94,7 +102,7 @@ impl Handelsvergleich {
                 ))
             })
             .collect::<Option<_>>()?;
-        let korb = kaufe_gleich(START_JE_TOPF, &kaufkurse, |v| gebuehren.fuer(v))?;
+        let korb = kaufe_gleich(START_JE_TOPF, &kaufkurse, &gebuehren)?;
         if korb.stueck.is_empty() {
             return None;
         }
@@ -105,7 +113,7 @@ impl Handelsvergleich {
                 let kurs = self.kurse.get(&(ausstieg, isin.clone()))?;
                 let bestand = self.stueck_am_ausstieg(isin, *stueck, einstieg, ausstieg)?;
                 let volumen = kurs.mal_stueck(bestand, Rundung::Ab)?;
-                summe.checked_add(volumen.checked_sub(gebuehren.fuer(volumen)?)?)
+                summe.checked_add(volumen.checked_sub(gebuehren(volumen)?)?)
             })?;
         rendite_bp(START_JE_TOPF, erloes)
     }
@@ -114,7 +122,6 @@ impl Handelsvergleich {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use depot_kern::Cent;
 
     #[test]
     fn unveraenderte_kurse_mit_kauf_und_verkaufsgebuehren() -> Result<(), &'static str> {
@@ -141,8 +148,15 @@ mod tests {
             .ok_or("Gebühr")?;
         let erloes = START_JE_TOPF.checked_sub(gebuehr).ok_or("Erlös")?;
         assert_eq!(
-            vergleich.rendite(von, bis),
+            vergleich.rendite(von, bis, &Grenzen::standard()),
             rendite_bp(START_JE_TOPF, erloes)
+        );
+        let doppelte_gebuehren = erloes
+            .checked_sub(gebuehr)
+            .ok_or("Erlös mit höherer Gebühr")?;
+        assert_eq!(
+            vergleich.rendite_mit(von, bis, |_| Some(Cent(300))),
+            rendite_bp(START_JE_TOPF, doppelte_gebuehren),
         );
         let isin = vergleich.werte.first().ok_or("Vergleichswert")?.clone();
         let halbiert = Preis::aus_cent(Cent(5_000)).ok_or("Kurs nach Split")?;
@@ -152,14 +166,14 @@ mod tests {
             .splits
             .insert(isin.clone(), BTreeMap::from([(bis, Some(faktor))]));
         assert_eq!(
-            vergleich.rendite(von, bis),
+            vergleich.rendite(von, bis, &Grenzen::standard()),
             rendite_bp(START_JE_TOPF, erloes)
         );
         vergleich.splitverdachte.insert(isin, Some(bis));
-        assert_eq!(vergleich.rendite(von, bis), None);
+        assert_eq!(vergleich.rendite(von, bis, &Grenzen::standard()), None);
         vergleich.splitverdachte.clear();
         vergleich.kurse.retain(|(tag, _), _| *tag != bis);
-        assert_eq!(vergleich.rendite(von, bis), None);
+        assert_eq!(vergleich.rendite(von, bis, &Grenzen::standard()), None);
         Ok(())
     }
 }

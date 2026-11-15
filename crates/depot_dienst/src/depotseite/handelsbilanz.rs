@@ -5,8 +5,11 @@ use std::fmt::Write as _;
 
 use depot_journal::Stand;
 use depot_kern::liste::Wert;
-use depot_kern::{Datum, TopfId, Zeitpunkt};
-use depot_lage::handelsergebnis::{Bilanz, Verkauf, bilanz, verkaeufe};
+use depot_kern::{Cent, Datum, Grenzen, TopfId, Zeitpunkt};
+use depot_lage::handelsergebnis::{
+    Bilanz, OffenePosition, Verkauf, bilanz, handelspositionen, mehrertrag,
+    nicht_zugeordnete_kaeufe,
+};
 use depot_lage::handelsvergleich::Handelsvergleich;
 use depot_lage::vergleich::rendite_bp;
 use depot_lage::{
@@ -143,6 +146,7 @@ fn bargeld(
     id: TopfId,
     ab: Option<Datum>,
     vergleich: &Handelsvergleich,
+    grenzen: &Grenzen,
     text: &mut String,
 ) {
     let phasen = bargeldphasen(stand, id, ab);
@@ -154,8 +158,21 @@ fn bargeld(
         "<details><summary>Bargeldphasen am Tagesabschluss ({})</summary><ul>",
         phasen.len()
     );
+    let gesamt = verkettete_rendite(
+        phasen
+            .iter()
+            .filter(|(von, bis)| von < bis)
+            .map(|&(von, bis)| vergleich.rendite(von, bis, grenzen)),
+    );
+    let _ = write!(
+        text,
+        "<li>Verpasste Rendite durch Bargeld im Zeitraum: {}</li>",
+        quote(gesamt)
+    );
     for &(von, bis) in phasen.iter().rev().take(12) {
-        let korb = (von < bis).then(|| vergleich.rendite(von, bis)).flatten();
+        let korb = (von < bis)
+            .then(|| vergleich.rendite(von, bis, grenzen))
+            .flatten();
         let _ = write!(
             text,
             "<li>{} bis {} · Vergleichskorb nach Kauf- und Verkaufsgebühren {}</li>",
@@ -165,6 +182,22 @@ fn bargeld(
         );
     }
     text.push_str("</ul></details>");
+}
+
+fn verkettete_rendite(mut renditen: impl Iterator<Item = Option<i64>>) -> Option<i64> {
+    let faktor = i128::from(renditen.next()??).checked_add(10_000)?;
+    let skala = 100_000_000_i128;
+    let faktor = renditen.try_fold(faktor.checked_mul(skala)?, |summe, bp| {
+        summe
+            .checked_mul(i128::from(bp?).checked_add(10_000)?)?
+            .checked_div(10_000)
+    })?;
+    i64::try_from(
+        faktor
+            .checked_sub(10_000_i128.checked_mul(skala)?)?
+            .checked_div(skala)?,
+    )
+    .ok()
 }
 
 struct Handelszahlen<'a> {
@@ -181,6 +214,7 @@ impl<'a> Handelszahlen<'a> {
         verkaeufe: &'a [Verkauf],
         vergleich: &Handelsvergleich,
         ab: Option<Datum>,
+        grenzen: &Grenzen,
     ) -> Self {
         let mut daten: Vec<_> = verkaeufe
             .iter()
@@ -191,7 +225,7 @@ impl<'a> Handelszahlen<'a> {
             .iter()
             .filter_map(|v| {
                 let (von, bis) = v.einstieg.zip(v.ausstieg)?;
-                Some((v.nr, vergleich.rendite(von, bis)?))
+                Some((v.nr, vergleich.rendite(von, bis, grenzen)?))
             })
             .collect();
         Self {
@@ -353,11 +387,84 @@ fn karte(zahlen: &Handelszahlen<'_>, skala: u64, text: &mut String) -> &'static 
     id
 }
 
-pub(super) fn abschnitt(stand: &Stand, werte: &[Wert], ab: Option<Datum>, text: &mut String) {
-    let verkaeufe = verkaeufe(stand);
+fn offene_bilanz(
+    offen: &[OffenePosition],
+    zahlen: &Handelszahlen<'_>,
+    werte: &[Wert],
+    korb: &Handelsvergleich,
+    grenzen: &Grenzen,
+    text: &mut String,
+) {
+    let positionen: Vec<_> = offen.iter().filter(|p| p.topf == zahlen.topf).collect();
+    let korbrendite = |p: &OffenePosition| korb.rendite(p.einstieg?, p.bewertungstag?, grenzen);
+    let realisiert = zahlen
+        .verkaeufe
+        .iter()
+        .try_fold(Cent::NULL, |summe, v| summe.checked_add(v.netto?));
+    let offen_netto = positionen
+        .iter()
+        .try_fold(Cent::NULL, |summe, p| summe.checked_add(p.netto()?));
+    let euro_mehrertrag = zahlen
+        .verkaeufe
+        .iter()
+        .map(|v| mehrertrag(v.netto?, v.einstand?, *zahlen.korbrenditen.get(&v.nr)?))
+        .chain(
+            positionen
+                .iter()
+                .map(|p| mehrertrag(p.netto()?, p.einstand?, korbrendite(p)?)),
+        )
+        .try_fold(Cent::NULL, |summe, betrag| summe.checked_add(betrag?));
+    if zahlen.verkaeufe.is_empty() && positionen.is_empty() {
+        return;
+    }
+    let _ = write!(
+        text,
+        "<p>Realisiert + offen: {} · Mehrertrag zum Vergleichskorb: {}</p>",
+        geld(
+            realisiert
+                .zip(offen_netto)
+                .and_then(|(r, o)| r.checked_add(o))
+        ),
+        geld(euro_mehrertrag),
+    );
+    if positionen.is_empty() {
+        return;
+    }
+    text.push_str(r#"<details><summary>Positionen offen, bewertet zum letzten Schluss</summary><div class="breit"><table><tr><th>Wert</th><th>Schluss</th><th>Einstand inkl. Kaufgebühren</th><th>Wert nach rechnerischer Verkaufsgebühr</th><th>Ergebnis netto</th><th>Abstand zum Korb in Prozentpunkten</th></tr>"#);
+    for p in positionen {
+        let name = werte
+            .iter()
+            .find(|w| w.isin == p.isin)
+            .map_or_else(|| p.isin.als_str(), |w| w.name.as_str());
+        let abstand = p
+            .einstand
+            .zip(p.wert_netto)
+            .and_then(|(e, w)| rendite_bp(e, w)?.checked_sub(korbrendite(p)?));
+        let _ = write!(
+            text,
+            "<tr><th>{}</th><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            maskiere(name),
+            kalenderdatum(p.bewertungstag),
+            geld(p.einstand),
+            geld(p.wert_netto),
+            geld(p.netto()),
+            abstand.map_or_else(|| "–".into(), prozentpunkte)
+        );
+    }
+    text.push_str("</table></div></details>");
+}
+
+pub(super) fn abschnitt(
+    stand: &Stand,
+    werte: &[Wert],
+    ab: Option<Datum>,
+    grenzen: &Grenzen,
+    text: &mut String,
+) {
+    let (verkaeufe, offen) = handelspositionen(stand, grenzen);
     let vergleich = Handelsvergleich::neu(stand);
-    let toepfe =
-        [TopfId::A, TopfId::B].map(|id| Handelszahlen::neu(id, &verkaeufe, &vergleich, ab));
+    let toepfe = [TopfId::A, TopfId::B]
+        .map(|id| Handelszahlen::neu(id, &verkaeufe, &vergleich, ab, grenzen));
     let skala = toepfe
         .iter()
         .filter_map(|t| t.abstand.mittel)
@@ -372,8 +479,11 @@ pub(super) fn abschnitt(stand: &Stand, werte: &[Wert], ab: Option<Datum>, text: 
         <div class="handelskarten">"#);
     for zahlen in &toepfe {
         let id = karte(zahlen, skala, text);
+        offene_bilanz(&offen, zahlen, werte, &vergleich, grenzen, text);
+        let ohne_anlass = nicht_zugeordnete_kaeufe(stand, zahlen.topf, ab);
+        let _ = write!(text, "<p>Käufe nicht zugeordnet: {ohne_anlass}</p>");
         kaufanlaesse(zahlen, werte, id, text);
-        bargeld(stand, zahlen.topf, ab, &vergleich, text);
+        bargeld(stand, zahlen.topf, ab, &vergleich, grenzen, text);
         text.push_str("</article>");
     }
     text.push_str(r#"</div><details id="handelsbilanz-vergleich">
@@ -386,6 +496,25 @@ pub(super) fn abschnitt(stand: &Stand, werte: &[Wert], ab: Option<Datum>, text: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bargeldrenditen_werden_verkettet() {
+        assert_eq!(
+            verkettete_rendite([Some(100), Some(200)].into_iter()),
+            Some(302)
+        );
+        assert_eq!(verkettete_rendite([Some(100), None].into_iter()), None);
+    }
+
+    #[test]
+    fn geldgewichteter_mehrertrag_zaehlt_die_positionsgroesse() {
+        let klein = mehrertrag(Cent(1_000), Cent(10_000), 0);
+        let gross = mehrertrag(Cent(-2_000), Cent(200_000), 0);
+        assert_eq!(
+            klein.zip(gross).and_then(|(a, b)| a.checked_add(b)),
+            Some(Cent(-1_000))
+        );
+    }
 
     #[test]
     fn vergleichsbalken_zeigt_richtung_stichprobe_und_belegstatus() {
