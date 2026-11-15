@@ -1526,6 +1526,50 @@ fn verkauft(j: &Journal, auftraege: &[GenehmigterAuftrag]) -> bool {
     })
 }
 
+const ERWARTUNG: &str = "Erwartung";
+
+fn belege_erwartung(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    a: &depot_regelwerk::Auftrag,
+    v: &Vorschlag,
+) -> Result<(), LaufFehler> {
+    let nr = a.kennung.nr();
+    let Some(bp) = v.erwartung_bp.get(&a.isin) else {
+        return Ok(());
+    };
+    let Some(bp) = bp.filter(|bp| (0..=10_000).contains(bp)) else {
+        return begruende(
+            j,
+            z.tag,
+            ERWARTUNG,
+            &format!("Auftrag {nr}: unplausible Erwartung ignoriert"),
+        );
+    };
+    let frist = v
+        .begruendung
+        .get(&a.isin)
+        .and_then(|text| crate::Ausstiegsplan::lies(text))
+        .map_or_else(|| "-".to_owned(), |plan| plan.handelstage.to_string());
+    begruende(j, z.tag, ERWARTUNG, &format!("{nr} {bp} {frist}"))?;
+    let huerde = a.limit.mal_stueck(a.stueck).and_then(|volumen| {
+        crate::kostenhuerde::gesamt_bp(
+            volumen,
+            z.grenzen.gebuehren().fuer(volumen)?,
+            depot_kern::liste::boerse_von(&a.isin),
+        )
+    });
+    if let Some(huerde) = huerde.filter(|h| bp < *h) {
+        begruende(
+            j,
+            z.tag,
+            ERWARTUNG,
+            &format!("Auftrag {nr}: Erwartung unter Hürde ({bp} von {huerde} Basispunkten)"),
+        )?;
+    }
+    Ok(())
+}
+
 fn belege_kauf(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -1549,6 +1593,9 @@ fn belege_kauf(
             })
             .unwrap_or_else(|| "Kostenhürde nicht berechenbar. Spread nicht belegt.".into());
         begruende(j, tag, "Kostenhürde", &format!("Auftrag {nr}: {huerde}"))?;
+        if let Some(v) = vorschlag {
+            belege_erwartung(j, z, a, v)?;
+        }
         let lang =
             crate::relative_staerke::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
         let kurz = crate::relative_staerke::kurzrang(j.stand(), &tag.kurse, z.universum, tag.datum);

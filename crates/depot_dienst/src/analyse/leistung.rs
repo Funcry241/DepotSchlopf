@@ -175,6 +175,7 @@ mod tests {
             anlass: None,
             staerkerang: None,
             staerkerang20: None,
+            erwartung_bp: None,
         };
         let mut text = String::new();
         verkaeufe(

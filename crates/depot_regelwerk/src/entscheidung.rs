@@ -1110,6 +1110,7 @@ mod grenzrahmen_tests {
             art: InstrumentArt::Aktie,
         }]);
         let vorschlag = Vorschlag {
+            erwartung_bp: std::collections::BTreeMap::new(),
             berater: BeraterId::Dachs,
             zielgewichte_bp: [(isin.clone(), 4000)].into_iter().collect(),
             begruendung: BTreeMap::new(),

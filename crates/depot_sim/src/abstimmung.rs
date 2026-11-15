@@ -309,6 +309,7 @@ mod tests {
         let mut topf = Topf::neu(TopfId::A, Cent(400_000)).map_err(|e| format!("{e:?}"))?;
         topf.setze_bestand(sap.clone(), 10);
         let mut neu = Vorschlag {
+            erwartung_bp: std::collections::BTreeMap::new(),
             limit_bp: std::collections::BTreeMap::new(),
             stopp_bp: std::collections::BTreeMap::new(),
             berater: BeraterId::Dachs,

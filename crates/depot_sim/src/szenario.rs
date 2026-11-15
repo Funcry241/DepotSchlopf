@@ -277,6 +277,7 @@ fn kurse(datum: Datum, preise: &[(&Isin, i64)]) -> Option<Kurse> {
 
 fn vorschlag(berater: BeraterId, ziele: &[(&Isin, i64, &str)]) -> Vorschlag {
     Vorschlag {
+        erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
         stopp_bp: std::collections::BTreeMap::new(),
         berater,

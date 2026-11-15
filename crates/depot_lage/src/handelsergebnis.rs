@@ -20,6 +20,7 @@ pub struct Verkauf {
     pub anlass: Option<&'static str>,
     pub staerkerang: Option<usize>,
     pub staerkerang20: Option<usize>,
+    pub erwartung_bp: Option<i64>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -28,6 +29,7 @@ struct Kaufbezug {
     anlass: Option<&'static str>,
     staerkerang: Option<usize>,
     staerkerang20: Option<usize>,
+    erwartung_bp: Option<i64>,
 }
 
 impl Kaufbezug {
@@ -41,6 +43,9 @@ impl Kaufbezug {
             staerkerang20: self
                 .staerkerang20
                 .filter(|rang| Some(*rang) == anderer.staerkerang20),
+            erwartung_bp: self
+                .erwartung_bp
+                .filter(|bp| Some(*bp) == anderer.erwartung_bp),
         }
     }
 }
@@ -88,6 +93,30 @@ fn staerkerang(stand: &Stand, lang: bool) -> BTreeMap<u64, usize> {
         .collect()
 }
 
+fn erwartungen(stand: &Stand) -> BTreeMap<u64, i64> {
+    stand
+        .begruendungen()
+        .iter()
+        .filter_map(|(_, wer, text)| {
+            if wer != "Erwartung" {
+                return None;
+            }
+            let mut teile = text.split_ascii_whitespace();
+            let nr = teile.next()?.parse().ok()?;
+            let bp = teile
+                .next()?
+                .parse()
+                .ok()
+                .filter(|bp| (0..=10_000).contains(bp))?;
+            let frist = teile.next()?;
+            if frist != "-" {
+                frist.parse::<u16>().ok().filter(|tage| *tage > 0)?;
+            }
+            teile.next().is_none().then_some((nr, bp))
+        })
+        .collect()
+}
+
 type Positionen<'a> = BTreeMap<(TopfId, &'a Isin), Option<Position>>;
 
 fn anlaesse(stand: &Stand) -> BTreeMap<u64, Option<&'static str>> {
@@ -106,6 +135,7 @@ fn anlaesse(stand: &Stand) -> BTreeMap<u64, Option<&'static str>> {
 
 fn ausfuehrungen(stand: &Stand) -> (Positionen<'_>, BTreeMap<u64, Erloes>) {
     let anlaesse = anlaesse(stand);
+    let erwartungen = erwartungen(stand);
     let kurzrang = staerkerang(stand, false);
     let staerkerang = staerkerang(stand, true);
     let mut positionen = BTreeMap::<(TopfId, &Isin), Option<Position>>::new();
@@ -136,6 +166,7 @@ fn ausfuehrungen(stand: &Stand) -> (Positionen<'_>, BTreeMap<u64, Erloes>) {
                     anlass: anlaesse.get(&auftrag.nr).copied().flatten(),
                     staerkerang: staerkerang.get(&auftrag.nr).copied(),
                     staerkerang20: kurzrang.get(&auftrag.nr).copied(),
+                    erwartung_bp: erwartungen.get(&auftrag.nr).copied(),
                 };
                 p.kauf = if schon_gehalten {
                     p.kauf.gemeinsam(kauf)
@@ -202,6 +233,7 @@ fn verkaeufe_aus(stand: &Stand, mut erloese: BTreeMap<u64, Erloes>) -> Vec<Verka
                 anlass: erloes.kauf.anlass,
                 staerkerang: erloes.kauf.staerkerang,
                 staerkerang20: erloes.kauf.staerkerang20,
+                erwartung_bp: erloes.kauf.erwartung_bp,
             })
         })
         .collect()

@@ -72,6 +72,7 @@ fn topf(bargeld: i64, bestand: &[(&str, u64)]) -> Topf {
 
 fn lauf(topf: &Topf, kurse: &Kurse, ziele: &[(&str, i64)]) -> Entscheidung {
     let v = Vorschlag {
+        erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
         stopp_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,

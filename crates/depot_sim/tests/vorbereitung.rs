@@ -378,6 +378,7 @@ impl Berater for VorschauModell {
             }
             .into(),
             vorschlag: (!self.ausfall).then(|| Vorschlag {
+                erwartung_bp: std::collections::BTreeMap::new(),
                 berater: self.wer,
                 zielgewichte_bp: std::collections::BTreeMap::new(),
                 begruendung: std::collections::BTreeMap::new(),
