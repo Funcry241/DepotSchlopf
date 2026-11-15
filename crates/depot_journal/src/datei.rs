@@ -1069,12 +1069,17 @@ impl Journal {
         zweck: crate::KiZweck,
     ) -> Result<AufrufErlaubnis, Sperre> {
         let sperre = |e: JournalFehler| Sperre::Kassenbuch(format!("Journal: {e:?}"));
-        if !self.stand.ki().abdruck_aktuell() {
-            self.schreibe_eintrag(Art::KiGrenzen, &grenzabdruck())
+        let text = crate::kasse::buchung_fuer(&buchung, zweck);
+        if zweck == crate::KiZweck::Simulation {
+            self.schreibe_eintrag(Art::Ki, &format!("{text};{}", grenzabdruck()))
                 .map_err(sperre)?;
+        } else {
+            if !self.stand.ki().abdruck_aktuell() {
+                self.schreibe_eintrag(Art::KiGrenzen, &grenzabdruck())
+                    .map_err(sperre)?;
+            }
+            self.schreibe_eintrag(Art::Ki, &text).map_err(sperre)?;
         }
-        self.schreibe_eintrag(Art::Ki, &crate::kasse::buchung_fuer(&buchung, zweck))
-            .map_err(sperre)?;
         Ok(AufrufErlaubnis::neu(
             buchung,
             deckel,
