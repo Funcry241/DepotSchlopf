@@ -107,7 +107,13 @@ pub fn lesen(daten: &Path) -> Result<Datenstand, String> {
 pub fn lies_sicherung(daten: &Path) -> Result<Datenstand, String> {
     lies_auswahl(
         daten,
-        &["anbieter.txt", "zeitplan.txt", "kurse.halt", "gemini.txt"],
+        &[
+            "anbieter.txt",
+            "zeitplan.txt",
+            "dienst_erledigt.txt",
+            "kurse.halt",
+            "gemini.txt",
+        ],
     )
 }
 

@@ -38,6 +38,7 @@ run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesen
 run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)\n  \
 run.cmd lage             Lagebild nach daten/lage.html: Bereitschaft, KI-Budget, Depot, Gespräch\n  \
 run.cmd sichern          Daten am eingestellten Ziel sichern und prüfen\n  \
+run.cmd sicherungsprobe <Ordner>  Sicherung in einer temporären Kopie prüfen\n  \
 run.cmd update prüfen   neue Stände auf main nennen (git fetch, ändert nichts)\n  \
 run.cmd update           neuen Stand im Prüfordner mit dem Gate prüfen, nur dann vorwärts einspielen\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
@@ -143,6 +144,9 @@ fn main() -> ExitCode {
     // Das Update prueft den neuen Stand in einer eigenen Kopie und rueckt nur vorwaerts vor.
     if befehl == "sichern" {
         return sicherung::lauf(&wurzel, &optionen);
+    }
+    if befehl == "sicherungsprobe" {
+        return sicherung::probe(&wurzel, &optionen);
     }
     if befehl == "update" {
         return update::lauf(&wurzel, &optionen);
