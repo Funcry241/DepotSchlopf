@@ -113,6 +113,45 @@ pub fn depotverlauf(stand: &Stand, werte: &[Wert]) -> Vec<Tagespunkt> {
         .collect()
 }
 
+fn verlaufskurse(
+    stand: &Stand,
+    universum: &Universum,
+    werte: &[Wert],
+    tag: Datum,
+    gehalten: &BTreeSet<&Isin>,
+    ersatz: &BTreeSet<Isin>,
+) -> Result<depot_kern::Kurse, String> {
+    let kurse = tageskurse_am(stand, universum, tag).map_err(|LaufFehler::Halt(grund)| grund)?;
+    let split = stand
+        .wissensstichtag(tag)
+        .map_or_else(BTreeMap::new, |zeit| {
+            depot_journal::splitverdacht::aktiv(stand, Some(zeit))
+        });
+    let vortag = depot_journal::splitverdacht::ersetze_kurse(stand, &kurse.vortag, &split, ersatz)
+        .map_err(|_| "Ersatzbewertung nach Splitverdacht unlesbar".to_string())?;
+    let fehlt: Vec<_> = gehalten
+        .iter()
+        .filter(|isin| {
+            let beleg = if ersatz.contains(**isin) {
+                &vortag
+            } else {
+                &kurse.heute
+            };
+            beleg.kurs(isin).is_none()
+        })
+        .map(|isin| crate::depot::name(werte, isin.als_str()))
+        .collect();
+    if !fehlt.is_empty() {
+        return Err(format!("Kurs fehlte für {}", fehlt.join(", ")));
+    }
+    if ersatz.is_empty() {
+        Ok(kurse.heute)
+    } else {
+        depot_sim::bewertungskurse(&kurse.heute, &vortag, ersatz)
+            .map_err(|LaufFehler::Halt(grund)| grund)
+    }
+}
+
 fn punkt(
     stand: &Stand,
     universum: &Universum,
@@ -155,38 +194,11 @@ fn punkt(
         ));
         return punkt;
     }
-    let kurse = match tageskurse_am(stand, universum, tag) {
-        Ok(k) => k,
-        Err(LaufFehler::Halt(grund)) => {
+    let kurse = match verlaufskurse(stand, universum, werte, tag, &gehalten, ersatz) {
+        Ok(kurse) => kurse,
+        Err(grund) => {
             punkt.grund = Some(grund);
             return punkt;
-        }
-    };
-    let mut fehlt = Vec::new();
-    for isin in &gehalten {
-        let beleg = if ersatz.contains(*isin) {
-            &kurse.vortag
-        } else {
-            &kurse.heute
-        };
-        if beleg.kurs(isin).is_none() {
-            fehlt.push(crate::depot::name(werte, isin.als_str()));
-        }
-    }
-    if !fehlt.is_empty() {
-        punkt.grund = Some(format!("Kurs fehlte für {}", fehlt.join(", ")));
-        return punkt;
-    }
-
-    let kurse = if ersatz.is_empty() {
-        kurse.heute
-    } else {
-        match depot_sim::bewertungskurse(&kurse.heute, &kurse.vortag, ersatz) {
-            Ok(k) => k,
-            Err(LaufFehler::Halt(grund)) => {
-                punkt.grund = Some(grund);
-                return punkt;
-            }
         }
     };
     punkt.kursbezug = gehalten

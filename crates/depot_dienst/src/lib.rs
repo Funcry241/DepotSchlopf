@@ -38,6 +38,7 @@ pub mod schluessel;
 mod schmuck;
 pub mod seiten;
 mod sicherung;
+mod splitverdacht;
 pub mod verlauf;
 pub mod waechter;
 pub mod werkbank;
@@ -325,6 +326,7 @@ fn einrichtungsseite(
         &sicherungsinfo(d, jetzt),
     ));
     zusatz.push_str(&mindesteinsatz_formular(d));
+    zusatz.push_str(&splitverdacht::formular(d));
     let zustand = d.sperre();
     let gespeichert = seiten::Einrichtung {
         zeitplan_gespeichert: match datei {
@@ -611,6 +613,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/sicherung-ziel" => sicherung_einstellen(d, u, &f, jetzt),
         "/kostenschutz" => kostenschutz_aufheben(d, u, &f, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, u, &f, Sperre::Kurse),
+        "/splitverdacht" => splitverdacht::entwarnen(d, &f, jetzt),
         "/papierfreigabe" => papier_freigeben(d, u, &f),
         "/papierdialog-test" => papierdialog_testen(d, u),
         "/autostart" => {

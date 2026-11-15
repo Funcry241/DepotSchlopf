@@ -62,6 +62,7 @@ pub mod kursbeleg;
 pub mod kurssperre;
 pub mod nachrichtbeleg;
 pub mod rss_abruf;
+pub mod splitverdacht;
 pub use kasse::KiZweck;
 pub use ki_abrechnung::KiAbrechnung;
 pub mod aufloesung;

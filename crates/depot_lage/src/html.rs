@@ -418,6 +418,21 @@ pub fn ausfuehrungsbilanz(depot: &crate::DepotLage, text: &mut String) {
     text.push_str("</ul>");
 }
 
+/// Kennzeichnet die Kursbasis aktiver Splitverdachte.
+pub fn splitbewertung(depot: &crate::DepotLage, html: &mut String) {
+    for (name, datum) in &depot.splitgesperrt {
+        let kurs = datum.map_or_else(
+            || "Vergleichskurs fehlt".into(),
+            |tag| format!("Bewertung zum Schlusskurs vom {}", datum_text(tag)),
+        );
+        let _ = write!(
+            html,
+            "<p class=\"halt\">{}: Xetra-Splitverdacht · {kurs} ·             <a href=\"/einrichtung#splitverdacht\">Prüfen</a></p>",
+            maskiere(name)
+        );
+    }
+}
+
 fn depot(l: &Lagebild, s: &mut String) {
     let Some(d) = &l.depot else {
         return;
@@ -427,6 +442,7 @@ fn depot(l: &Lagebild, s: &mut String) {
          Orders warten auf einen geprüften Schlusskurs nach ihrem Versand. Ob eine echte \
          Order zu diesem Preis ausgeführt worden wäre, bleibt offen.</p>",
     );
+    splitbewertung(d, s);
     if d.toepfe.is_empty() {
         s.push_str("<p class=\"leise\">Noch kein Depot: Es entsteht mit dem ersten Papiertag.</p>");
     } else {

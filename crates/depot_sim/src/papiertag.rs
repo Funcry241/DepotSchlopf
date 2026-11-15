@@ -365,7 +365,11 @@ pub fn nachrichtenbelege_am(
     let mut aus: Vec<&NachrichtBeleg> = stand
         .nachrichten()
         .iter()
-        .filter(|n| n.abruf() <= wissen_bis && !depot_kern::quelle::kapitalmeldung(n.quelle()))
+        .filter(|n| {
+            n.abruf() <= wissen_bis
+                && !depot_kern::quelle::kapitalmeldung(n.quelle())
+                && n.quelle() != depot_journal::splitverdacht::ENTWARNUNG
+        })
         .filter(|n| {
             let s = n.zeit().sekunden();
             von.is_some_and(|von| s >= von) && bis.is_some_and(|bis| s < bis)
@@ -638,12 +642,13 @@ fn tagesauswahl(
     universum: &Universum,
     k: &Tageskurse,
     wissen_bis: Zeitpunkt,
+    split: &BTreeMap<Isin, &NachrichtBeleg>,
 ) -> Result<depot_regelwerk::Tageswerte, LaufFehler> {
     let morgens = depot_kern::liste::morgenlauf(wissen_bis);
     if morgens && !depot_kern::liste::handelstag(k.handelstag) {
         return Err(halt("Morgenlauf nur an einem Börsentag"));
     }
-    let wahl = if morgens {
+    let mut wahl = if morgens {
         waehle_morgenwerte(
             grenzen,
             universum,
@@ -662,6 +667,22 @@ fn tagesauswahl(
             &k.vortag,
         )
     };
+    if !split.is_empty() {
+        let betrifft_split = |f: &depot_regelwerk::DatenFehler| {
+            f.isin().is_some_and(|isin| split.contains_key(isin))
+        };
+        wahl.fehler.retain(|f| !betrifft_split(f));
+        wahl.gesperrt.retain(|f| !betrifft_split(f));
+        wahl.ausgelassen.retain(|f| !betrifft_split(f));
+        wahl.universum = Universum::neu(
+            wahl.universum
+                .instrumente()
+                .iter()
+                .filter(|i| !split.contains_key(&i.isin))
+                .cloned()
+                .collect(),
+        );
+    }
     if morgens && !wahl.fehler.is_empty() {
         return Err(halt(format!(
             "Morgenlauf: Abruf unbrauchbar: {:?}; ausgelassen: {:?}",
@@ -717,6 +738,61 @@ fn handelskurse(heute: &Kurse, gesperrt: &BTreeSet<Isin>) -> Result<Option<Kurse
         .map_err(|e| halt(format!("Handelskurse: {e:?}")))
 }
 
+fn splitbewertung(
+    stand: &Stand,
+    grenzen: &Grenzen,
+    universum: &Universum,
+    kurse: &Tageskurse,
+    wissen_bis: Zeitpunkt,
+) -> Result<(depot_regelwerk::Tageswerte, BTreeSet<Isin>, Kurse), LaufFehler> {
+    let split = depot_journal::splitverdacht::aktiv(stand, Some(wissen_bis));
+    let wahl = tagesauswahl(stand, grenzen, universum, kurse, wissen_bis, &split)?;
+    let gehalten = stand.gehalten();
+    let gesperrt = wahl
+        .gesperrt
+        .iter()
+        .filter_map(depot_regelwerk::DatenFehler::isin)
+        .cloned()
+        .chain(split.keys().filter(|i| gehalten.contains(*i)).cloned())
+        .collect();
+    let vortag = if split.is_empty() {
+        kurse.vortag.clone()
+    } else {
+        depot_journal::splitverdacht::ersetze_kurse(stand, &kurse.vortag, &split, &gehalten)
+            .map_err(|e| halt(format!("Split-Bewertung: {e:?}")))?
+    };
+    Ok((wahl, gesperrt, vortag))
+}
+
+fn belege_kursauswahl(
+    j: &mut Journal,
+    datum: Datum,
+    wahl: &depot_regelwerk::Tageswerte,
+    gesperrt: &BTreeSet<Isin>,
+) -> Result<(), LaufFehler> {
+    for f in &wahl.ausgelassen {
+        j.begruende(datum, AUSWAHL, &format!("heute nicht handelbar: {f:?}"))
+            .map_err(journal)?;
+    }
+    for fehler in &wahl.gesperrt {
+        if let Some(isin) = fehler.isin() {
+            j.begruende(datum, AUSWAHL, &format!("{ERSATZKURS}{isin} · {fehler:?}"))
+                .map_err(journal)?;
+        }
+    }
+    for isin in gesperrt {
+        if !wahl.gesperrt.iter().any(|f| f.isin() == Some(isin)) {
+            j.begruende(
+                datum,
+                AUSWAHL,
+                &format!("{ERSATZKURS}{isin} · Xetra-Splitverdacht"),
+            )
+            .map_err(journal)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn papiertag_mit_uhr(
     j: &mut Journal,
     heute: Datum,
@@ -743,14 +819,8 @@ pub(crate) fn papiertag_mit_uhr(
         return Ok(Ausgang::SchonAbgeschlossen(d));
     }
     let grenzen = Grenzen::standard();
-    let wahl = tagesauswahl(j.stand(), &grenzen, universum, &k, wissen_bis)?;
-    let gesperrt: BTreeSet<_> = wahl
-        .gesperrt
-        .iter()
-        .filter_map(depot_regelwerk::DatenFehler::isin)
-        .cloned()
-        .collect();
-    let bewertung = bewertungskurse(&k.heute, &k.vortag, &gesperrt)?;
+    let (wahl, gesperrt, vortag) = splitbewertung(j.stand(), &grenzen, universum, &k, wissen_bis)?;
+    let bewertung = bewertungskurse(&k.heute, &vortag, &gesperrt)?;
     let handelbar = handelskurse(&k.heute, &gesperrt)?;
     let letzter = j.stand().abschluss().cloned();
     j.stelle_um().map_err(journal)?;
@@ -782,20 +852,7 @@ pub(crate) fn papiertag_mit_uhr(
         ),
     )
     .map_err(journal)?;
-    for f in &wahl.ausgelassen {
-        j.begruende(tag.datum, AUSWAHL, &format!("heute nicht handelbar: {f:?}"))
-            .map_err(journal)?;
-    }
-    for fehler in &wahl.gesperrt {
-        if let Some(isin) = fehler.isin() {
-            j.begruende(
-                tag.datum,
-                AUSWAHL,
-                &format!("{ERSATZKURS}{isin} · {fehler:?}"),
-            )
-            .map_err(journal)?;
-        }
-    }
+    belege_kursauswahl(j, tag.datum, &wahl, &gesperrt)?;
     let ab = abdruck(
         letzter.as_ref().map(|a| a.abdruck.as_str()),
         &tag,
@@ -816,7 +873,7 @@ pub(crate) fn papiertag_mit_uhr(
         grenzen: &grenzen,
         universum: &wahl.universum,
         tag: &tag,
-        vortag: &k.vortag,
+        vortag: &vortag,
         nr,
         abdruck: &ab,
         uhr: Some(&belegte_zeit),

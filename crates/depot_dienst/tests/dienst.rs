@@ -327,6 +327,56 @@ fn fremder_host_wird_abgelehnt() -> Result<(), String> {
 }
 
 #[test]
+fn xetra_entwarnung_bezieht_sich_nur_auf_den_geprueften_verdacht() -> Result<(), String> {
+    use depot_journal::{Journal, NachrichtBeleg, splitverdacht};
+    let wurzel = ordner()?;
+    let pfad = wurzel.join("daten/journal.txt");
+    Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+    let t = donnerstag(12, 0)?;
+    let tag = some(t.frankfurt_tag(), "Tag")?;
+    let mut j = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+    let belege = [
+        format!("Möglicher Split 4:1 bei SAP (DE0007164600) am {tag}."),
+        format!("Möglicher Split 2:1 bei SAP (DE0007164600) am {tag}."),
+        format!("Möglicher Split 4:1 bei Allianz (DE0008404005) am {tag}."),
+    ]
+    .map(|text| {
+        NachrichtBeleg::neu(
+            depot_kern::quelle::QUELLE_XETRA_SPLITVERDACHT,
+            t,
+            b"Probe",
+            t,
+            &text,
+        )
+    });
+    let [sap, neuer_sap, allianz] = belege;
+    let sap = sap?;
+    for beleg in [&sap, &neuer_sap?, &allianz?] {
+        assert!(j.belege_nachricht(beleg).map_err(|e| format!("{e:?}"))?);
+    }
+    drop(j);
+    let d = dienst(wurzel, true);
+    let u = Attrappe::default();
+    let html = get(&d, "/einrichtung", t);
+    assert!(html.contains("Fehlalarm bestätigen") && html.contains(&splitverdacht::kennung(&sap)));
+    let paket = format!("t={TOKEN}&kennung={}", splitverdacht::kennung(&sap));
+    let post = |extra| formular_post("/splitverdacht", &format!("{paket}{extra}"));
+    assert_eq!(status(&behandle(&d, &u, &post(""), t))?, 400);
+    assert_eq!(status(&behandle(&d, &u, &post("&geprueft=ja"), t))?, 303);
+    assert_eq!(status(&behandle(&d, &u, &post("&geprueft=ja"), t))?, 409);
+    let repariert = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+    let offen = splitverdacht::aktiv(repariert.stand(), None);
+    assert_eq!(offen.len(), 2);
+    assert!(
+        offen
+            .values()
+            .any(|b| b.text().contains("Split 2:1 bei SAP"))
+    );
+    assert!(offen.values().any(|b| b.text().contains("bei Allianz")));
+    Ok(())
+}
+
+#[test]
 fn post_braucht_herkunft_formular_und_token() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let umw = Attrappe::default();

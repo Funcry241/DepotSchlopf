@@ -363,6 +363,7 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         return Some(m);
     }
     Some(match code {
+        "splitverdacht_entwarnt" => ("gut", "Geprüfter Fehlalarm im Journal belegt."),
         "sicherung_ziel" => ("gut", "Sicherungsziel gespeichert."),
         "sicherung_aus" => ("gut", "Sicherung ausgeschaltet."),
         "sicherung_start" => (

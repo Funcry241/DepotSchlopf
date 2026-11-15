@@ -772,10 +772,10 @@ pub fn sammle(
                 }
             };
         gelesen.normalisierungen.extend(notizen);
-        gelesen.belege(wert, abruf, &roh, &h, &v)?;
         gelesen
             .offen
             .extend(kapitalmeldungen.into_iter().map(Sammelbeleg::Kapital));
+        gelesen.belege(wert, abruf, &roh, &h, &v)?;
         let ergebnis = if fehlt_nyse_vergleich(wert, &h, &v) {
             Ergebnis::Fehler("Nicht belegt: kein NYSE-Vergleichskurs mit EZB-Referenzkurs".into())
         } else {
