@@ -903,12 +903,13 @@ fn frage(
     id: TopfId,
     frager: &mut dyn Berater,
     lage: &Lage<'_>,
-) -> Result<(Option<Vorschlag>, bool), LaufFehler> {
+) -> Result<(Option<Vorschlag>, bool, BTreeSet<Isin>), LaufFehler> {
     let (tag, zyklus) = (z.tag, z.nr);
     let wer = id.berater();
     let t = topf_name(id);
     let mut vorschlag: Option<Vorschlag> = None;
     let mut verwertbar = false;
+    let mut fristverkaeufe = BTreeSet::new();
     // Ein Berater ohne Anbindung wird nicht gefragt und kostet nichts: Fuer ihn wird keine
     // Erlaubnis reserviert. Ohne Vorschlag oder ohne Zweitmeinung gibt es keinen Auftrag.
     if !frager.angebunden() {
@@ -947,6 +948,9 @@ fn frage(
             name(wer),
             &format!("{t}: {wie}: {}", antwort.einschaetzung),
         )?;
+        if z.uhr.is_some() && verwertbar {
+            fristverkaeufe = pruefe_fristen(j, tag, lage, &antwort)?;
+        }
         crate::ausgelassen::belege_ausgelassene(j, z, lage, &mut antwort.vorschlag, name(wer))?;
         if let Some(v) = &antwort.vorschlag {
             for (isin, bp) in &v.zielgewichte_bp {
@@ -954,9 +958,50 @@ fn frage(
                 begruende(j, tag, name(wer), &format!("{t}: {isin} {bp} bp: {grund}"))?;
             }
         }
-        vorschlag = antwort.vorschlag;
+        if fristverkaeufe.is_empty() {
+            vorschlag = antwort.vorschlag;
+        }
     }
-    Ok((vorschlag, verwertbar))
+    Ok((vorschlag, verwertbar, fristverkaeufe))
+}
+
+fn pruefe_fristen(
+    j: &mut Journal,
+    tag: &Tag,
+    lage: &Lage<'_>,
+    antwort: &crate::Antwort,
+) -> Result<BTreeSet<Isin>, LaufFehler> {
+    let mut verkaeufe = BTreeSet::new();
+    for kauf in lage
+        .positionskaeufe
+        .iter()
+        .filter(|kauf| kauf.frist_abgelaufen(lage.datum))
+    {
+        let expliziter_verkauf = antwort
+            .vorschlag
+            .as_ref()
+            .and_then(|v| v.zielgewichte_bp.get(&kauf.isin))
+            == Some(&0);
+        let halten = antwort
+            .halten
+            .get(&kauf.isin)
+            .filter(|grund| !grund.trim().is_empty());
+        if let Some(grund) = halten.filter(|_| !expliziter_verkauf) {
+            begruende(
+                j,
+                tag,
+                "Haltefrist",
+                &format!(
+                    "{} hält {} weiter: {grund}",
+                    topf_name(lage.topf.id()),
+                    kauf.isin
+                ),
+            )?;
+        } else {
+            verkaeufe.insert(kauf.isin.clone());
+        }
+    }
+    Ok(verkaeufe)
 }
 
 fn belege_prognose(
@@ -1007,6 +1052,7 @@ pub(crate) struct TopfAntwort {
     pub(crate) erstmeinung: Erstmeinung,
     zweitmeinung_ausgefallen: bool,
     ersatzkauf: bool,
+    fristverkaeufe: BTreeSet<Isin>,
 }
 
 impl TopfAntwort {
@@ -1074,14 +1120,14 @@ fn frage_topf(
         .find(|l| l.versand.is_some() && l.beleg.topf == id)
         .map(|l| l.beleg.nr);
     let gesperrt = z.gesperrt.iter().find(|isin| topf.stueck(isin) != 0);
-    let (vorschlag, erstmeinung) = if let Some(isin) = gesperrt {
+    let (vorschlag, erstmeinung, fristverkaeufe) = if let Some(isin) = gesperrt {
         begruende(
             j,
             tag,
             AUFTRAGSSTELLE,
             &format!("{t}: {isin} heute gesperrt; keine freiwilligen Aufträge, KI nicht gefragt."),
         )?;
-        (None, Erstmeinung::Unverwertbar)
+        (None, Erstmeinung::Unverwertbar, BTreeSet::new())
     } else if let Some(nr) = wartet {
         begruende(
             j,
@@ -1089,10 +1135,10 @@ fn frage_topf(
             AUFTRAGSSTELLE,
             &format!("{t}: wartet auf offenen Auftrag {nr}"),
         )?;
-        (None, Erstmeinung::Unverwertbar)
+        (None, Erstmeinung::Unverwertbar, BTreeSet::new())
     } else if gestoppt.contains(&id) {
         // Auch nach abgewiesenem Schutzverkauf keine neuen Käufe für diesen Topf.
-        (None, Erstmeinung::Unverwertbar)
+        (None, Erstmeinung::Unverwertbar, BTreeSet::new())
     } else {
         let anlass = if z.anlass_pruefen {
             crate::anlass::anlass(j.stand(), z.universum, &lage)
@@ -1108,7 +1154,7 @@ fn frage_topf(
                 SIMULATION,
                 &format!("{t}: {}", crate::anlass::RUHETAG),
             )?;
-            (None, Erstmeinung::Ruhetag)
+            (None, Erstmeinung::Ruhetag, BTreeSet::new())
         } else {
             if let Some(grund) = &anlass {
                 begruende(
@@ -1119,13 +1165,13 @@ fn frage_topf(
                 )?;
             }
             lage.anlass = anlass.as_deref();
-            let (vorschlag, verwertbar) = frage(j, z, id, frager, &lage)?;
+            let (vorschlag, verwertbar, fristverkaeufe) = frage(j, z, id, frager, &lage)?;
             let erstmeinung = if verwertbar {
                 Erstmeinung::Verwertbar
             } else {
                 Erstmeinung::Unverwertbar
             };
-            (vorschlag, erstmeinung)
+            (vorschlag, erstmeinung, fristverkaeufe)
         }
     };
     Ok(TopfAntwort {
@@ -1134,6 +1180,7 @@ fn frage_topf(
         erstmeinung,
         zweitmeinung_ausgefallen: false,
         ersatzkauf: false,
+        fristverkaeufe,
     })
 }
 
@@ -1150,6 +1197,7 @@ fn zweite_meinung(
         erstmeinung,
         mut zweitmeinung_ausgefallen,
         mut ersatzkauf,
+        fristverkaeufe,
     } = antwort;
     let (tag, zyklus) = (z.tag, z.nr);
     let id = topf.id();
@@ -1220,6 +1268,7 @@ fn zweite_meinung(
         erstmeinung,
         zweitmeinung_ausgefallen,
         ersatzkauf,
+        fristverkaeufe,
     })
 }
 
@@ -1293,6 +1342,47 @@ fn mindesteinsatz(
     Ok(nachgefragt)
 }
 
+fn fuehre_fristverkaeufe_aus(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    topf: &Topf,
+    fristen: BTreeSet<Isin>,
+    konto: &mut dyn Broker,
+) -> Result<(), LaufFehler> {
+    let faellig = fristen
+        .into_iter()
+        .filter(|isin| {
+            !z.gesperrt.contains(isin)
+                && depot_kern::liste::boerse_von(isin).is_some_and(|b| b.handelstag(z.tag.datum))
+                && !j
+                    .stand()
+                    .offene_auftraege()
+                    .any(|a| a.beleg.isin == *isin && a.beleg.topf == topf.id())
+        })
+        .collect();
+    let orders = depot_regelwerk::frist_auftraege(
+        z.grenzen,
+        topf,
+        &z.tag.kurse,
+        &faellig,
+        &mut j.kennungsvergabe(),
+    )
+    .ok_or_else(|| rechnung("Fristverkauf"))?;
+    for order in &orders {
+        begruende(
+            j,
+            z.tag,
+            "Haltefrist",
+            &format!(
+                "{}: {} verkaufen. Haltefrist ohne neue Begründung.",
+                topf_name(topf.id()),
+                order.auftrag().isin
+            ),
+        )?;
+    }
+    fuehre_aus(j, z, topf.id(), &orders, None, konto)
+}
+
 fn topf_zyklus(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -1306,9 +1396,13 @@ fn topf_zyklus(
         vorschlag,
         zweitmeinung_ausgefallen,
         ersatzkauf,
+        fristverkaeufe,
         ..
     } = antwort;
     let ruhetag = antwort.erstmeinung == Erstmeinung::Ruhetag;
+    if !fristverkaeufe.is_empty() {
+        return fuehre_fristverkaeufe_aus(j, z, &topf, fristverkaeufe, konto);
+    }
     let tag = z.tag;
     let id = topf.id();
     let t = topf_name(id);
@@ -1455,25 +1549,40 @@ fn belege_kauf(
             })
             .unwrap_or_else(|| "Kostenhürde nicht berechenbar. Spread nicht belegt.".into());
         begruende(j, tag, "Kostenhürde", &format!("Auftrag {nr}: {huerde}"))?;
-        let ranking =
+        let lang =
             crate::relative_staerke::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
-        if let Some(rang) = ranking
-            .iter()
-            .position(|(isin, _)| *isin == a.isin)
-            .and_then(|index| index.checked_add(1))
-        {
-            begruende(
-                j,
-                tag,
-                crate::relative_staerke::RANG_BELEG,
-                &format!("{nr} {rang}"),
-            )?;
+        let kurz = crate::relative_staerke::kurzrang(j.stand(), &tag.kurse, z.universum, tag.datum);
+        for (name, liste, zusatz) in [
+            (crate::relative_staerke::RANG_BELEG, lang, " 120"),
+            (crate::relative_staerke::RANG20_BELEG, kurz, ""),
+        ] {
+            if let Some(rang) = liste
+                .iter()
+                .position(|(isin, _)| *isin == a.isin)
+                .and_then(|index| index.checked_add(1))
+            {
+                begruende(j, tag, name, &format!("{nr} {rang}{zusatz}"))?;
+            }
         }
     }
     if let Some(these) = vorschlag
         .and_then(|v| v.begruendung.get(&a.isin))
         .filter(|text| !text.trim().is_empty())
     {
+        if a.richtung == Richtung::Kauf
+            && crate::Ausstiegsplan::lies(these).is_some()
+            && j.stand()
+                .auftrag(nr)
+                .and_then(|o| j.stand().toepfe().get(&o.beleg.topf))
+                .is_some_and(|t| t.stueck(&a.isin) != 0)
+        {
+            begruende(
+                j,
+                tag,
+                "Haltefrist",
+                &format!("Auftrag {nr}: Frist durch Zukauf neu ab Ausführung."),
+            )?;
+        }
         let grund = kaufeinstieg(j, tag, a, these)?;
         begruende(
             j,
@@ -1742,6 +1851,7 @@ mod tests {
             ) -> crate::Antwort {
                 self.0 = lage.anlass.map(str::to_owned);
                 crate::Antwort {
+                    halten: std::collections::BTreeMap::new(),
                     prognose: None,
                     verwertbar: true,
                     einschaetzung: "Bargeld".into(),

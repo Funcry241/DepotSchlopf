@@ -6,8 +6,10 @@ use depot_journal::Stand;
 use depot_kern::liste::VERGLEICH_ISIN;
 use depot_kern::{Boerse, Datum, Herkunft, Isin, Kurse, Preis, Universum, Zeitpunkt};
 
-pub const HANDELSTAGE: u8 = 20;
+pub const HANDELSTAGE: u8 = 120;
+pub const AUSLASSEN: u8 = 20;
 pub const RANG_BELEG: &str = "Kursstärke";
+pub const RANG20_BELEG: &str = "Kursstärke20";
 
 fn gemeinsamer_tag(tag: Datum) -> bool {
     Boerse::Xetra.handelstag(tag)
@@ -15,19 +17,22 @@ fn gemeinsamer_tag(tag: Datum) -> bool {
         && !depot_kern::boerse::target_geschlossen(tag)
 }
 
-fn tage(bis: Datum) -> Option<(Datum, Datum)> {
+fn tage(bis: Datum, dauer: u8, auslassen: u8) -> Option<(Datum, Datum)> {
     let mut ende = bis;
     while !gemeinsamer_tag(ende) {
         ende = ende.plus_tage(-1)?;
     }
-    let mut start = ende;
-    for _ in 0..HANDELSTAGE {
-        start = start.plus_tage(-1)?;
-        while !gemeinsamer_tag(start) {
-            start = start.plus_tage(-1)?;
+    let zurueck = |mut tag: Datum, anzahl| {
+        for _ in 0..anzahl {
+            tag = tag.plus_tage(-1)?;
+            while !gemeinsamer_tag(tag) {
+                tag = tag.plus_tage(-1)?;
+            }
         }
-    }
-    Some((start, ende))
+        Some(tag)
+    };
+    let ende = zurueck(ende, auslassen)?;
+    Some((zurueck(ende, dauer)?, ende))
 }
 
 /// Rankt positive und negative Abstände gegen einen gleich gewichteten Kursertrag
@@ -38,6 +43,26 @@ pub(crate) fn fuer_lage(
     universum: &Universum,
     lauf_tag: Datum,
 ) -> Vec<(Isin, i64)> {
+    rangfolge(stand, kurse, universum, lauf_tag, HANDELSTAGE, AUSLASSEN)
+}
+
+pub(crate) fn kurzrang(
+    stand: &Stand,
+    kurse: &Kurse,
+    universum: &Universum,
+    lauf_tag: Datum,
+) -> Vec<(Isin, i64)> {
+    rangfolge(stand, kurse, universum, lauf_tag, AUSLASSEN, 0)
+}
+
+fn rangfolge(
+    stand: &Stand,
+    kurse: &Kurse,
+    universum: &Universum,
+    lauf_tag: Datum,
+    dauer: u8,
+    auslassen: u8,
+) -> Vec<(Isin, i64)> {
     let wissen = stand
         .wissensstichtag(lauf_tag)
         .unwrap_or_else(|| kurse.stand());
@@ -45,7 +70,7 @@ pub(crate) fn fuer_lage(
         .alle()
         .map(|(_, k)| k.handelstag())
         .max()
-        .and_then(tage)
+        .and_then(|tag| tage(tag, dauer, auslassen))
     else {
         return Vec::new();
     };
@@ -107,7 +132,7 @@ mod tests {
     #[test]
     fn rang_nutzt_gemeinsame_stichtage_und_blendet_unbelegte_werte_aus() -> Result<(), String> {
         let datum = Datum::neu(2026, 11, 13).ok_or("Datum")?;
-        let (von, bis) = tage(datum).ok_or("Zeitraum")?;
+        let (von, bis) = tage(datum, HANDELSTAGE, AUSLASSEN).ok_or("Zeitraum")?;
         let erst =
             Isin::neu(VERGLEICH_ISIN.first().ok_or("Korb")?).map_err(|e| format!("{e:?}"))?;
         let nvda = Isin::neu("US67066G1040").map_err(|e| format!("{e:?}"))?;
@@ -123,7 +148,8 @@ mod tests {
             let ab = Zeitpunkt::neu(von, 22, 0, 0).ok_or("Startzeit")?;
             let ende = Zeitpunkt::neu(bis, 22, 0, 0).ok_or("Endzeit")?;
             let mut aktuell = Vec::new();
-            for (tag, zeit) in [(von, ab), (bis, ende)] {
+            let heute = Zeitpunkt::neu(datum, 22, 0, 0).ok_or("Heute")?;
+            for (tag, zeit) in [(von, ab), (bis, ende), (datum, heute)] {
                 for roh_isin in VERGLEICH_ISIN.into_iter().chain(["US67066G1040"]) {
                     let isin = Isin::neu(roh_isin).map_err(|e| format!("{e:?}"))?;
                     if isin == nvda && tag == von {
@@ -131,6 +157,8 @@ mod tests {
                     }
                     let preis = if tag == bis && isin == erst {
                         12_000
+                    } else if tag == datum && isin == erst {
+                        9_000
                     } else {
                         10_000
                     };
@@ -144,14 +172,16 @@ mod tests {
                         kurs.clone(),
                     )?;
                     journal.belege_kurs(&beleg).map_err(|e| format!("{e:?}"))?;
-                    if tag == bis {
+                    if tag == datum {
                         aktuell.push((isin, kurs));
                     }
                 }
             }
-            let kurse = Kurse::neu(ende, aktuell).map_err(|e| format!("{e:?}"))?;
+            let kurse = Kurse::neu(heute, aktuell).map_err(|e| format!("{e:?}"))?;
             let rang = fuer_lage(journal.stand(), &kurse, &universum, datum);
-            assert_eq!(rang.first(), Some(&(erst, 1867)));
+            assert_eq!(rang.first(), Some(&(erst.clone(), 1867)));
+            let kurz = kurzrang(journal.stand(), &kurse, &universum, datum);
+            assert_eq!(kurz.last().map(|(isin, _)| isin), Some(&erst));
             assert!(!rang.iter().any(|(i, _)| *i == nvda));
             Ok(())
         })();

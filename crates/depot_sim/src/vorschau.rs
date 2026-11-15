@@ -88,6 +88,7 @@ fn erste(
     let id = lage.topf.id();
     let antwort = budget.frage(j, b, id, |b, e| b.vorschlagen(e, lage))?;
     let a = antwort.unwrap_or_else(|grund| Antwort {
+        halten: std::collections::BTreeMap::new(),
         prognose: None,
         verwertbar: false,
         einschaetzung: grund,

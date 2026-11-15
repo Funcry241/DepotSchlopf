@@ -317,16 +317,18 @@ fn kaufanlaesse(zahlen_je_topf: &Handelszahlen<'_>, werte: &[Wert], id: &str, te
         );
         text.push_str("</tr>");
     }
-    for (titel, von, bis) in [
-        ("Stärkerang 1–10", 1, 10),
-        ("Stärkerang ab 11", 11, usize::MAX),
+    for (titel, lang, von, bis) in [
+        ("Stärkerang 120 Tage, Rang 1–10", true, 1, 10),
+        ("Stärkerang 120 Tage, Rang ab 11", true, 11, usize::MAX),
+        ("Stärkerang 20 Tage, Rang 1–10", false, 1, 10),
+        ("Stärkerang 20 Tage, Rang ab 11", false, 11, usize::MAX),
     ] {
         let gruppe: Vec<_> = daten
             .iter()
             .copied()
             .filter(|v| {
-                v.staerkerang
-                    .is_some_and(|rang| (von..=bis).contains(&rang))
+                let rang = if lang { v.staerkerang } else { v.staerkerang20 };
+                rang.is_some_and(|rang| (von..=bis).contains(&rang))
             })
             .collect();
         if !gruppe.is_empty() {

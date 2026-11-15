@@ -25,6 +25,7 @@ impl AbstimmungsAntwort {
     pub fn unverwertbar() -> Self {
         Self {
             eigene: Antwort {
+                halten: std::collections::BTreeMap::new(),
                 prognose: None,
                 verwertbar: false,
                 einschaetzung: "Keine verwertbare Abstimmung".into(),

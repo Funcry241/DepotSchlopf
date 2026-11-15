@@ -288,6 +288,7 @@ impl depot_sim::Berater for Spieler {
         self.kosten = e.abrechnung(100, 100);
         AbstimmungsAntwort {
             eigene: Antwort {
+                halten: std::collections::BTreeMap::new(),
                 prognose: None,
                 verwertbar: true,
                 einschaetzung: format!("Runde {}: {schritt:?}", stand.runde),
@@ -303,6 +304,7 @@ fn spieler(wer: BeraterId, zuege: Vec<Zug>) -> Result<Spieler, String> {
     plan.antworten.insert(
         tag()?,
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             prognose: None,
             verwertbar: true,
             einschaetzung: format!("Erstmeinung {wer:?}"),

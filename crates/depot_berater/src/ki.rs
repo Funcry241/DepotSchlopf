@@ -1105,6 +1105,7 @@ impl<N: Netz> Berater for KiBerater<N> {
                 a
             }
             Err(grund) => Antwort {
+                halten: std::collections::BTreeMap::new(),
                 prognose: None,
                 verwertbar: false,
                 einschaetzung: format!(

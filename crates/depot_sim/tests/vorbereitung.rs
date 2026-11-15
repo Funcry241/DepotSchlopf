@@ -55,6 +55,7 @@ impl Berater for Modell {
             .borrow_mut()
             .push((self.wer, l.ereignisse.to_vec()));
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             verwertbar: true,
             vorschlag: None,
             einschaetzung: format!("{:?}-Erstmeinung <script>", self.wer),
@@ -367,6 +368,7 @@ impl Berater for VorschauModell {
         self.gesehen = l.ereignisse.to_vec();
         self.kurstag = l.kurse.alle().next().map(|(_, kurs)| kurs.handelstag());
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             prognose: None,
             verwertbar: !self.ausfall,
             einschaetzung: if self.ausfall {

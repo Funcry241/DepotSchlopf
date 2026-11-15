@@ -1519,6 +1519,7 @@ fn anlass_name(a: Anlass) -> &'static str {
         Anlass::Abbau => "Abbau",
         Anlass::Notbremse => "Notbremse",
         Anlass::Stopp => "Stopp",
+        Anlass::FristOhneBegruendung => "FristOhneBegruendung",
     }
 }
 
@@ -1568,6 +1569,7 @@ fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
         Anlass::Abbau,
         Anlass::Notbremse,
         Anlass::Stopp,
+        Anlass::FristOhneBegruendung,
     ]
     .into_iter()
     .find(|a| anlass_name(*a) == *anlass)?;
@@ -1584,7 +1586,9 @@ fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
         }
         _ => return None,
     };
-    if anlass == Anlass::Stopp && richtung != Richtung::Verkauf {
+    if matches!(anlass, Anlass::Stopp | Anlass::FristOhneBegruendung)
+        && richtung != Richtung::Verkauf
+    {
         return None;
     }
     Some(AuftragsBeleg {
