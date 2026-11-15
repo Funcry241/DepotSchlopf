@@ -21,16 +21,20 @@ pub fn berechne(volumen: Cent, gebuehr: Cent) -> Option<(Cent, i64)> {
     Some((summe, bp))
 }
 
+pub fn gesamt_bp(volumen: Cent, gebuehr: Cent, boerse: Option<Boerse>) -> Option<i64> {
+    let (_, gebuehren_bp) = berechne(volumen, gebuehr)?;
+    let spread_bp = boerse.map_or(0, spread_je_seite_bp).checked_mul(2)?;
+    gebuehren_bp.checked_add(spread_bp)
+}
+
 pub fn hinweis(volumen: Cent, gebuehr: Cent, boerse: Option<Boerse>) -> Option<String> {
-    let (summe, bp) = berechne(volumen, gebuehr)?;
-    let (bp, spread) = if let Some(boerse) = boerse {
+    let (summe, _) = berechne(volumen, gebuehr)?;
+    let bp = gesamt_bp(volumen, gebuehr, boerse)?;
+    let spread = if let Some(boerse) = boerse {
         let spread = spread_je_seite_bp(boerse).checked_mul(2)?;
-        (
-            bp.checked_add(spread)?,
-            format!("Modellspread für Kauf und Verkauf zusammen {spread} Basispunkte."),
-        )
+        format!("Modellspread für Kauf und Verkauf zusammen {spread} Basispunkte.")
     } else {
-        (bp, "Spread nicht belegt.".to_owned())
+        "Spread nicht belegt.".to_owned()
     };
     Some(format!(
         "Kostenhürde bei {volumen} Ordervolumen: {summe} Gebühren für Kauf und Verkauf, mindestens {},{:02} % Kursgewinn bei gleichem Volumen. {spread}",

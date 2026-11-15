@@ -524,6 +524,7 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
     ));
     let mut maus = berater(&ort, BeraterId::Maus, netz)?;
     let v = Vorschlag {
+        erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
         stopp_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
@@ -1096,6 +1097,7 @@ fn zurueckgegebener_schluessel_gelangt_nie_ins_ergebnis() -> Result<(), String> 
     ));
     let mut maus = berater(&ort, BeraterId::Maus, netz)?;
     let v = Vorschlag {
+        erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
         stopp_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
@@ -1126,6 +1128,7 @@ fn reservierung_ist_eine_gesicherte_obergrenze() -> Result<(), String> {
     let max = e.deckel().max_token_ein();
     let lang = "x".repeat(usize::try_from(max).map_err(|e| e.to_string())?);
     let v = Vorschlag {
+        erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
         stopp_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
@@ -1512,6 +1515,7 @@ fn verbindung_nach_dem_absenden_gekappt_sperrt_ohne_zweiten_versand() -> Result<
 
 fn grosse_lage_vorschlag(werte: &[depot_kern::liste::Wert], lang: &str) -> Vorschlag {
     Vorschlag {
+        erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
         stopp_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
@@ -1791,6 +1795,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
         runde: 1,
         eigener_vorschlag: None,
         fremder_vorschlag: Some(depot_kern::Vorschlag {
+            erwartung_bp: std::collections::BTreeMap::new(),
             limit_bp: std::collections::BTreeMap::new(),
             stopp_bp: std::collections::BTreeMap::new(),
             berater: BeraterId::Maus,

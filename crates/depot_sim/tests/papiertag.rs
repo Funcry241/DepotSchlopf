@@ -546,6 +546,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
             verwertbar: true,
             einschaetzung: "SAP".into(),
             vorschlag: Some(Vorschlag {
+                erwartung_bp: std::collections::BTreeMap::new(),
                 limit_bp: std::collections::BTreeMap::new(),
                 stopp_bp: std::collections::BTreeMap::new(),
                 berater: BeraterId::Dachs,
@@ -695,6 +696,7 @@ fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), 
                     verwertbar: true,
                     einschaetzung: "SAP".into(),
                     vorschlag: Some(Vorschlag {
+                        erwartung_bp: std::collections::BTreeMap::new(),
                         limit_bp: std::collections::BTreeMap::new(),
                         stopp_bp: std::collections::BTreeMap::new(),
                         berater: wer,
@@ -1179,6 +1181,7 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
 
     let liquid = vorbedingung(Topf::neu(TopfId::A, Cent(499_725)), "Liquid")?;
     let vorschlag = Vorschlag {
+        erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
         stopp_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
@@ -1778,6 +1781,7 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
             verwertbar: true,
             einschaetzung: format!("Unabhängige Erstmeinung {wer:?}"),
             vorschlag: Some(Vorschlag {
+                erwartung_bp: std::collections::BTreeMap::new(),
                 limit_bp: std::collections::BTreeMap::new(),
                 stopp_bp: std::collections::BTreeMap::new(),
                 berater: wer,
@@ -3513,6 +3517,70 @@ fn quartalssplit(j: &mut Journal, isin: &Isin, am: Zeitpunkt) -> Result<(), Stri
     )?;
     vorbedingung(j.belege_nachricht(&hinweis), "Split belegen")?;
 
+    Ok(())
+}
+
+#[test]
+fn kauf_erwartung_unter_huerde_und_unsinnige_erwartung_sind_keine_sperre() -> Result<(), String> {
+    for (angabe, vermerk) in [
+        (None, None),
+        (Some(None), Some("unplausible Erwartung")),
+        (Some(Some(200)), Some("Erwartung unter Hürde")),
+    ] {
+        let ort = Ort::neu()?;
+        let mut j = ort.oeffnen()?;
+        let isin = allianz()?;
+        let datum = tag(16)?;
+        let start = [TopfId::A, TopfId::B].map(|id| Topf::neu(id, Cent(55_000)));
+        let start = start
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("{e:?}"))?;
+        let mut konto = vorbedingung(Papierdatei::oeffnen(&ort.konto, false, &start), "Konto")?;
+        let (mut dachs, mut maus) = kaeufer(datum, &isin);
+        if let Some(angabe) = angabe {
+            let v = some(
+                dachs
+                    .antworten
+                    .get_mut(&datum)
+                    .and_then(|a| a.vorschlag.as_mut()),
+                "Vorschlag",
+            )?;
+            v.erwartung_bp.insert(isin.clone(), angabe);
+            v.begruendung
+                .insert(isin.clone(), "[Zahlen] [Ausstieg +800bp 10] Probe".into());
+        }
+        let abruf = some(Zeitpunkt::frankfurt(datum, 7, 30, 0), "Abruf")?;
+        belege_sperrprobe(&mut j, &sap()?, &[(12, 25_000), (13, 25_000)], abruf)?;
+        belege_sperrprobe(&mut j, &isin, &[(12, 5_150), (13, 5_150)], abruf)?;
+        vorbedingung(
+            papiertag(
+                &mut j,
+                datum,
+                &universum()?,
+                &start,
+                &mut dachs,
+                &mut maus,
+                &mut konto,
+            ),
+            "Kaufauftrag",
+        )?;
+        assert!(j.stand().offene_auftraege().next().is_some());
+        let erwartungen: Vec<_> = j
+            .stand()
+            .begruendungen()
+            .iter()
+            .filter(|(_, wer, _)| wer == "Erwartung")
+            .collect();
+        if let Some(teil) = vermerk {
+            assert!(
+                erwartungen.iter().any(|(_, _, text)| text.contains(teil)),
+                "{erwartungen:?}"
+            );
+        } else {
+            assert!(erwartungen.is_empty());
+        }
+    }
     Ok(())
 }
 

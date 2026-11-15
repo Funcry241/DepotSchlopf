@@ -389,6 +389,32 @@ fn karte(zahlen: &Handelszahlen<'_>, skala: u64, text: &mut String) -> &'static 
     id
 }
 
+fn erwartungsabgleich(zahlen: &Handelszahlen<'_>, text: &mut String) {
+    let paar: Vec<_> = zahlen
+        .verkaeufe
+        .iter()
+        .filter_map(|v| v.erwartung_bp.zip(rendite(v)))
+        .collect();
+    let mittel = |wert: fn(&(i64, i64)) -> i64| -> Option<i64> {
+        let summe = paar
+            .iter()
+            .try_fold(0_i64, |summe, x| summe.checked_add(wert(x)))?;
+        summe.checked_div(i64::try_from(paar.len()).ok()?)
+    };
+    if let Some((erwartet, erreicht)) = mittel(|p| p.0).zip(mittel(|p| p.1)) {
+        let abstand = erreicht
+            .checked_sub(erwartet)
+            .map_or_else(|| "–".into(), prozentpunkte);
+        let _ = write!(
+            text,
+            "<p>Kauferwartung · {} Verkäufe: Ø erwartet {} brutto · Ø erreicht {} netto · Differenz {abstand} Prozentpunkte</p>",
+            paar.len(),
+            prozent(erwartet),
+            prozent(erreicht)
+        );
+    }
+}
+
 fn offene_bilanz(
     offen: &[OffenePosition],
     zahlen: &Handelszahlen<'_>,
@@ -485,6 +511,7 @@ pub(super) fn abschnitt(
         let ohne_anlass = nicht_zugeordnete_kaeufe(stand, zahlen.topf, ab);
         let _ = write!(text, "<p>Käufe nicht zugeordnet: {ohne_anlass}</p>");
         kaufanlaesse(zahlen, werte, id, text);
+        erwartungsabgleich(zahlen, text);
         bargeld(stand, zahlen.topf, ab, &vergleich, grenzen, text);
         text.push_str("</article>");
     }

@@ -114,6 +114,8 @@ impl Topf {
 /// Nicht genannte Werte haben Ziel 0. Der Rest bis 100 % ist Bargeld.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Vorschlag {
+    /// Fehlender Eintrag: nicht genannt. Vorhandener leerer Eintrag: unplausible Angabe.
+    pub erwartung_bp: BTreeMap<Isin, Option<i64>>,
     pub berater: BeraterId,
     pub zielgewichte_bp: BTreeMap<Isin, i64>,
     pub limit_bp: BTreeMap<Isin, i64>,

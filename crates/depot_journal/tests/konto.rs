@@ -379,6 +379,7 @@ fn kauf_mit_stopp(
     let kurse = vorbedingung(Kurse::neu(zeit, vec![(w.clone(), kurs)]), "Kurse")?;
     let topf = vorbedingung(Topf::neu(TopfId::A, Cent(1_000_000)), "Topf")?;
     let vorschlag = Vorschlag {
+        erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
         stopp_bp: stopp.map(|bp| (w.clone(), bp)).into_iter().collect(),
         berater: BeraterId::Dachs,
