@@ -134,6 +134,17 @@ impl Konto for Papierdatei {
 }
 
 impl Broker for Papierdatei {
+    fn kapitalmassnahmen(
+        &mut self,
+        massnahmen: &[depot_journal::kapitalmassnahme::GebuchteKapitalmassnahme],
+    ) -> Result<(), String> {
+        let vorher = self.konto.clone();
+        if self.konto.hole_kapitalmassnahmen(massnahmen)? && !self.sichere(vorher) {
+            return Err("Papierkonto: Split-Umbuchung konnte nicht gesichert werden".into());
+        }
+        Ok(())
+    }
+
     fn sende(&mut self, auftrag: &GenehmigterAuftrag) -> Sendeantwort {
         let vorher = self.konto.clone();
         let antwort = self.konto.sende(auftrag);

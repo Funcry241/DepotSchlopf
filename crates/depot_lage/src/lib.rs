@@ -43,6 +43,8 @@ pub use depot::{
     letzter_tagesschluss, zustand_text,
 };
 
+pub use depot_sim::splitumbuchung::xetra_bestaetigen as xetra_split_bestaetigen;
+
 /// Derselbe Depotstand wie in Live, aus dem bereits geprüften Journal.
 pub fn depotstand(stand: &Stand, werte: &[Wert]) -> DepotLage {
     depot::depot_lage(stand, werte)

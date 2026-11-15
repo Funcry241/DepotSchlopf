@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use depot_journal::Stand;
+use depot_journal::{Stand, kapitalmassnahme::Bewertungsschritt};
 use depot_kern::{Cent, Datum, Isin, TopfId, Zeitpunkt};
 use depot_regelwerk::Richtung;
 
@@ -18,9 +18,21 @@ pub struct Verkauf {
 /// Ein Verkaufsauftrag zählt einmal, auch bei mehreren Füllungen. Ein stornierter oder
 /// verfallener Rest ändert das Ergebnis des bereits ausgeführten Teils nicht.
 pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
-    let mut einstaende = BTreeMap::new();
+    let mut einstaende = BTreeMap::<(TopfId, &Isin), Option<crate::depot::Einstand>>::new();
     let mut netto = BTreeMap::<u64, Option<Cent>>::new();
-    for (auftrag, ausfuehrung) in stand.ausfuehrungsfolge() {
+    for schritt in stand.bewertungsfolge() {
+        let (auftrag, ausfuehrung) = match schritt {
+            Bewertungsschritt::Ausfuehrung(auftrag, ausfuehrung) => (auftrag, ausfuehrung),
+            Bewertungsschritt::Split(m) => {
+                if let Some(einstand) = einstaende.get_mut(&(m.topf, &m.isin)) {
+                    *einstand = einstand.take().and_then(|mut e: crate::depot::Einstand| {
+                        e.stueck = m.faktor.stueck(e.stueck)?;
+                        Some(e)
+                    });
+                }
+                continue;
+            }
+        };
         let einstand = einstaende
             .entry((auftrag.topf, &auftrag.isin))
             .or_insert_with(|| Some(crate::depot::Einstand::default()));

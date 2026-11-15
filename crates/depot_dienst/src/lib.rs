@@ -613,7 +613,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/sicherung-ziel" => sicherung_einstellen(d, u, &f, jetzt),
         "/kostenschutz" => kostenschutz_aufheben(d, u, &f, Sperre::Kostenschutz),
         "/kurssperre" => kostenschutz_aufheben(d, u, &f, Sperre::Kurse),
-        "/splitverdacht" => splitverdacht::entwarnen(d, &f, jetzt),
+        "/splitverdacht" => splitverdacht::aktion(d, &f, jetzt),
         "/papierfreigabe" => papier_freigeben(d, u, &f),
         "/papierdialog-test" => papierdialog_testen(d, u),
         "/autostart" => {

@@ -51,6 +51,57 @@ pub fn entwarne(
     gesehen: &str,
     jetzt: Zeitpunkt,
 ) -> Result<bool, JournalFehler> {
+    if journal
+        .stand()
+        .kapitalmassnahmen()
+        .iter()
+        .any(|b| b.massnahme.quelle == gesehen)
+    {
+        return Ok(false);
+    }
+    schliesse(journal, gesehen, jetzt)
+}
+
+/// Schließt den Verdacht, nachdem der Papierbestand mit dem Journal übereinstimmt.
+pub fn schliesse_umbuchung(
+    journal: &mut Journal,
+    gesehen: &str,
+    jetzt: Zeitpunkt,
+    konto: &dyn crate::Konto,
+) -> Result<bool, JournalFehler> {
+    let Some((isin, _)) = aktiv(journal.stand(), None)
+        .into_iter()
+        .find(|(_, verdacht)| kennung(verdacht) == gesehen)
+    else {
+        return Ok(false);
+    };
+    let mut betroffen = false;
+    for topf in journal
+        .stand()
+        .toepfe()
+        .values()
+        .filter(|t| t.stueck(&isin) != 0)
+    {
+        betroffen = true;
+        if !journal.stand().kapitalmassnahmen().iter().any(|b| {
+            b.massnahme.topf == topf.id()
+                && b.massnahme.isin == isin
+                && b.massnahme.quelle == gesehen
+        }) {
+            return Ok(false);
+        }
+    }
+    if !betroffen || !journal.gleiche_ab(konto)?.is_empty() {
+        return Ok(false);
+    }
+    schliesse(journal, gesehen, jetzt)
+}
+
+fn schliesse(
+    journal: &mut Journal,
+    gesehen: &str,
+    jetzt: Zeitpunkt,
+) -> Result<bool, JournalFehler> {
     if !aktiv(journal.stand(), None)
         .values()
         .any(|b| kennung(b) == gesehen)

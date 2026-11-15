@@ -2162,6 +2162,127 @@ fn belege_sperrprobe(
     Ok(())
 }
 
+fn xetra_splitprobe() -> Result<(Ort, Journal, Papierdatei, Vec<Topf>, String), String> {
+    let ort = Ort::neu()?;
+    let mut toepfe = start()?;
+    let sap = sap()?;
+    some(toepfe.first_mut(), "Topf A")?.setze_bestand(sap.clone(), 10);
+    some(toepfe.get_mut(1), "Topf B")?.setze_bestand(sap.clone(), 5);
+    let konto = Papierdatei::oeffnen(&ort.konto, false, &toepfe)?;
+    let mut j = ort.oeffnen()?;
+    for topf in &toepfe {
+        vorbedingung(j.setze_topf(topf), "Bestand")?;
+    }
+    vorbedingung(
+        j.schliesse_ab(tag(6)?, Cent(1_600_000), &"a".repeat(64)),
+        "Abschluss",
+    )?;
+    let datum = tag(9)?;
+    let schluss = some(depot_kern::Boerse::Xetra.schluss(datum), "Schluss")?;
+    let abruf = some(Zeitpunkt::frankfurt(datum, 17, 39, 0), "Splitabruf")?;
+    belege_sperrprobe(&mut j, &sap, &[(6, 40_000), (9, 10_000)], abruf)?;
+    belege_sperrprobe(&mut j, &allianz()?, &[(6, 35_000), (9, 35_000)], abruf)?;
+    let beleg = NachrichtBeleg::neu(
+        depot_kern::quelle::QUELLE_XETRA_SPLITVERDACHT,
+        abruf,
+        b"Sperrprobe",
+        schluss,
+        &format!("Möglicher Split 4:1 bei SAP ({sap}) am {datum}. Schluss 100 EUR."),
+    )?;
+    vorbedingung(j.belege_nachricht(&beleg), "Splitverdacht")?;
+    Ok((
+        ort,
+        j,
+        konto,
+        toepfe,
+        depot_journal::splitverdacht::kennung(&beleg),
+    ))
+}
+
+#[test]
+fn xetra_umbuchung_aus_einrichtung_schliesst_erst_nach_kontoabgleich() -> Result<(), String> {
+    let (ort, j, k, _, kennung) = xetra_splitprobe()?;
+    drop(j);
+    drop(k);
+    let jetzt = some(Zeitpunkt::frankfurt(tag(9)?, 18, 0, 0), "Bestätigung")?;
+    assert!(
+        depot_sim::splitumbuchung::xetra_bestaetigen(&ort.dir, &"0".repeat(64), jetzt).is_err()
+    );
+    depot_sim::splitumbuchung::xetra_bestaetigen(&ort.dir, &kennung, jetzt)?;
+    let mut j = ort.oeffnen()?;
+    let k = konto(&ort, &j)?;
+    assert_eq!(j.stand().kapitalmassnahmen().len(), 2);
+    assert!(depot_journal::splitverdacht::aktiv(j.stand(), None).is_empty());
+    assert!(vorbedingung(j.gleiche_ab(&k), "Abgleich")?.is_empty());
+    assert_eq!(j.stand().historischer_hoechststand(), Some(Cent(1_600_000)));
+    Ok(())
+}
+
+#[test]
+fn xetra_umbuchung_holt_unterbrochene_buchung_nach_und_haelt_wert_gleich() -> Result<(), String> {
+    let (ort, mut j, altes_konto, toepfe, kennung) = xetra_splitprobe()?;
+    let split = some(
+        depot_journal::kapitalmassnahme::Kapitalmassnahme::xetra(j.stand(), TopfId::A, &kennung),
+        "Split",
+    )?;
+    // Nur die erste Journalbuchung ist bestätigt. Das Papierkonto ist noch vollständig alt.
+    vorbedingung(j.buche_kapitalmassnahmen(&[split]), "Erste Journalbuchung")?;
+    drop(j);
+    drop(altes_konto);
+    let mut j = ort.oeffnen()?;
+    let mut k = konto(&ort, &j)?;
+    let datum = tag(10)?;
+    let abruf = some(Zeitpunkt::frankfurt(datum, 7, 30, 0), "Abruf")?;
+    belege_sperrprobe(&mut j, &sap()?, &[(6, 40_000), (9, 10_000)], abruf)?;
+    belege_sperrprobe(&mut j, &allianz()?, &[(6, 35_000), (9, 35_000)], abruf)?;
+    let run = papiertag(
+        &mut j,
+        datum,
+        &universum()?,
+        &toepfe,
+        &mut Stumm,
+        &mut Stumm,
+        &mut k,
+    );
+    assert!(
+        matches!(
+            run,
+            Ok(Ausgang::Abgeschlossen {
+                hoechststand: Cent(1_600_000),
+                ..
+            })
+        ),
+        "{run:?}"
+    );
+    assert_eq!(j.stand().kapitalmassnahmen().len(), 2);
+    for (id, n) in [(TopfId::A, 40), (TopfId::B, 20)] {
+        assert_eq!(
+            some(j.stand().toepfe().get(&id), "Topf")?.stueck(&sap()?),
+            n
+        );
+    }
+    assert!(depot_journal::splitverdacht::aktiv(j.stand(), None).is_empty());
+    assert!(!j.stand().notbremse_aktiv());
+    drop(k);
+    let mut k = konto(&ort, &j)?;
+    let wiederholt = papiertag(
+        &mut j,
+        datum,
+        &universum()?,
+        &toepfe,
+        &mut Stumm,
+        &mut Stumm,
+        &mut k,
+    );
+    assert!(
+        matches!(wiederholt, Ok(Ausgang::SchonAbgeschlossen(_))),
+        "{wiederholt:?}"
+    );
+    assert_eq!(j.stand().kapitalmassnahmen().len(), 2);
+    assert!(vorbedingung(j.gleiche_ab(&k), "Abgleich")?.is_empty());
+    Ok(())
+}
+
 #[test]
 fn xetra_splitverdacht_bleibt_nach_neustart_bei_plausiblem_folgekurs_gesperrt() -> Result<(), String>
 {
