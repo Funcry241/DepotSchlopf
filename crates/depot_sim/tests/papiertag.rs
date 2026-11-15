@@ -3319,3 +3319,194 @@ fn morgens_loest_der_schutzstopp_ohne_zweitmeinung_aus() -> Result<(), String> {
     assert_eq!(order.versand, Some(morgen(mittwoch)?));
     Ok(())
 }
+
+fn quartalskurs(
+    j: &mut Journal,
+    isin: &Isin,
+    tag: Datum,
+    preis: i64,
+    abruf: Zeitpunkt,
+) -> Result<(), String> {
+    let boerse = some(depot_kern::liste::boerse_von(isin), "Börse")?;
+    let schluss = some(boerse.schluss(tag), "Börsenschluss")?;
+    let kurs = vorbedingung(
+        Kurs::neu(Cent(preis), "EUR", tag, schluss, Herkunft::Quelle),
+        "Kurs",
+    )?;
+    let beleg = vorbedingung(
+        KursBeleg::neu("tiingo", abruf, b"Kursprobe", isin.clone(), kurs),
+        "Kursbeleg",
+    )?;
+    vorbedingung(j.belege_kurs(&beleg), "Kurs belegen")?;
+    Ok(())
+}
+
+fn quartalstermin(
+    j: &mut Journal,
+    isin: &Isin,
+    tag: Datum,
+    abruf: Zeitpunkt,
+    zusatz: &str,
+) -> Result<(), String> {
+    use depot_kern::{Betroffen, Termin, Verlaesslichkeit, Zeitbezug};
+    let termin = vorbedingung(
+        Termin::neu(
+            "ergebnis-probe-2026-09-30",
+            &format!("Quartalszahlen{zusatz}"),
+            Zeitbezug::Tag(tag),
+            vec![Betroffen::Wert(isin.clone())],
+            Verlaesslichkeit::Angekuendigt,
+        ),
+        "Quartalstermin",
+    )?;
+    let beleg = vorbedingung(
+        depot_journal::TerminBeleg::neu(
+            depot_kern::termin::QUELLE_ERGEBNISSE,
+            Herkunft::Quelle,
+            abruf,
+            b"Terminprobe",
+            termin,
+        ),
+        "Terminbeleg",
+    )?;
+    vorbedingung(j.belege_termin(&beleg), "Termin belegen")?;
+    Ok(())
+}
+
+#[test]
+fn quartalsreaktion_nutzt_ersten_belegten_schluss_nach_veroeffentlichung() -> Result<(), String> {
+    use depot_kern::termin::{NACH_BOERSENSCHLUSS, VOR_BOERSENBEGINN};
+    for (zusatz, bericht, preis, korb, split, erwartet) in [
+        (
+            NACH_BOERSENSCHLUSS,
+            6,
+            10_500,
+            10_000,
+            false,
+            Some(("Zahlen-Überraschung", "+5,00")),
+        ),
+        (
+            VOR_BOERSENBEGINN,
+            9,
+            9_400,
+            10_000,
+            false,
+            Some(("Zahlen-Enttäuschung", "−6,00")),
+        ),
+        (VOR_BOERSENBEGINN, 9, 10_499, 10_000, false, None),
+        (VOR_BOERSENBEGINN, 9, 10_600, 10_200, false, None),
+        (
+            VOR_BOERSENBEGINN,
+            9,
+            10_600,
+            9_900,
+            false,
+            Some(("Zahlen-Überraschung", "+7,00")),
+        ),
+        (VOR_BOERSENBEGINN, 9, 5_000, 10_000, true, None),
+        ("", 9, 10_500, 10_000, false, None),
+    ] {
+        let isin = vorbedingung(Isin::neu("US67066G1040"), "ISIN")?;
+        let universum = Universum::neu(vec![Instrument {
+            isin: isin.clone(),
+            name: "Testwert".into(),
+            art: InstrumentArt::Aktie,
+        }]);
+        let ort = Ort::neu()?;
+        let mut j = ort.oeffnen()?;
+        let abruf = |tag| some(Zeitpunkt::neu(tag, 22, 0, 0), "Abrufzeit");
+        let dienstag = tag(10)?;
+        let wissen = some(Zeitpunkt::frankfurt(dienstag, 8, 0, 0), "Morgenlauf")?;
+        quartalstermin(&mut j, &isin, tag(bericht)?, abruf(tag(5)?)?, zusatz)?;
+        for (t, wert, korb) in [(tag(6)?, 10_000, 10_000), (tag(9)?, preis, korb)] {
+            quartalskurs(&mut j, &isin, t, wert, abruf(t)?)?;
+            for kennung in depot_kern::liste::VERGLEICH_ISIN {
+                let korb_isin = vorbedingung(Isin::neu(kennung), "Korb-ISIN")?;
+                quartalskurs(&mut j, &korb_isin, t, korb, abruf(t)?)?;
+            }
+        }
+        if split {
+            quartalssplit(&mut j, &isin, abruf(tag(9)?)?)?;
+        }
+        vorbedingung(j.belege_wissensstichtag(dienstag, wissen), "Wissensstand")?;
+        vorbedingung(
+            j.schliesse_ab(dienstag, Cent(500_000), &"a".repeat(64)),
+            "Abschluss",
+        )?;
+        drop(j);
+        let mut j = ort.oeffnen()?;
+        let reaktion = |j: &Journal, datum: Datum| -> Result<Option<String>, String> {
+            let stand = vorbedingung(
+                depot_sim::papiertag_wiederabspielen(j.stand(), &universum, datum),
+                "Wiederabspielen",
+            )?;
+            Ok(stand
+                .ereignisse
+                .into_iter()
+                .find(|e| e.starts_with("Zahlen-")))
+        };
+        let signal = reaktion(&j, dienstag)?;
+        assert_eq!(signal.is_some(), erwartet.is_some(), "{signal:?}");
+        if let (Some(signal), Some((art, prozent))) = (&signal, erwartet) {
+            assert!(signal.starts_with(art), "{signal}");
+            assert!(
+                signal.contains(&format!("{prozent} Prozentpunkte")),
+                "{signal}"
+            );
+            assert!(
+                signal.contains("2026-11-06 bis zum Schluss am 2026-11-09"),
+                "{signal}"
+            );
+        }
+        // Eine nach dem eingefrorenen Stichtag bekannt gewordene Terminänderung
+        // und Kurskorrektur dürfen die frühere Beratung nicht umschreiben.
+        quartalskurs(&mut j, &isin, tag(9)?, 11_000, abruf(dienstag)?)?;
+        assert_eq!(reaktion(&j, dienstag)?, signal);
+        if bericht == 6 {
+            pruefe_fenster_quartalszahlen(&mut j, &isin, reaktion)?;
+        }
+    }
+    Ok(())
+}
+
+fn pruefe_fenster_quartalszahlen(
+    j: &mut Journal,
+    isin: &Isin,
+    reaktion: impl Fn(&Journal, Datum) -> Result<Option<String>, String>,
+) -> Result<(), String> {
+    let abruf = |tag| some(Zeitpunkt::neu(tag, 22, 0, 0), "Abrufzeit");
+    for (letzter, start) in [(13, 16), (16, 17)] {
+        let letzter = tag(letzter)?;
+        let start = tag(start)?;
+        quartalskurs(j, isin, letzter, 11_550, abruf(letzter)?)?;
+        let wissen = some(Zeitpunkt::frankfurt(start, 8, 0, 0), "Morgenlauf")?;
+        vorbedingung(j.belege_wissensstichtag(start, wissen), "Wissensstand")?;
+        vorbedingung(
+            j.schliesse_ab(start, Cent(500_000), &"a".repeat(64)),
+            "Abschluss",
+        )?;
+        let belegt = reaktion(j, start)?;
+        if start == tag(16)? {
+            assert!(some(belegt, "Fünftes Signal")?.contains("seitdem +5,00 %"));
+        } else {
+            assert_eq!(belegt, None);
+        }
+    }
+    Ok(())
+}
+
+fn quartalssplit(j: &mut Journal, isin: &Isin, am: Zeitpunkt) -> Result<(), String> {
+    let hinweis = vorbedingung(
+        NachrichtBeleg::neu(
+            depot_kern::tiingo::QUELLE_KAPITAL,
+            am,
+            b"Splittest",
+            some(depot_kern::Boerse::Nyse.schluss(tag(9)?), "NYSE-Schluss")?,
+            &format!("Tiingo: Testwert ({isin}) · Split-Faktor 2 am 2026-11-09"),
+        ),
+        "Splitbeleg",
+    )?;
+    vorbedingung(j.belege_nachricht(&hinweis), "Split belegen")?;
+
+    Ok(())
+}
