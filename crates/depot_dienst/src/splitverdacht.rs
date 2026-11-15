@@ -27,13 +27,27 @@ pub(super) fn formular(dienst: &Dienst) -> String {
                 maskiere(&dienst.token),
                 splitverdacht::kennung(verdacht),
             );
+            let _ = write!(
+                html,
+                "<form method=\"post\" action=\"/splitverdacht\"><input type=\"hidden\" name=\"aktion\" value=\"umbuchen\">                 <input type=\"hidden\" name=\"t\" value=\"{}\">                 <input type=\"hidden\" name=\"kennung\" value=\"{}\">                 <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required>                  Ich habe den Split, das Datum und den angezeigten Faktor geprüft.</label>                  <button type=\"submit\">Bestätigten Split umbuchen</button></form>",
+                maskiere(&dienst.token),
+                splitverdacht::kennung(verdacht),
+            );
         }
         html.push_str("</section>");
         html
     })
 }
 
-pub(super) fn entwarnen(dienst: &Dienst, felder: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {
+pub(super) fn aktion(dienst: &Dienst, felder: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {
+    if http::feld(felder, "aktion") == Some("umbuchen") {
+        umbuchen(dienst, felder, jetzt)
+    } else {
+        entwarnen(dienst, felder, jetzt)
+    }
+}
+
+fn entwarnen(dienst: &Dienst, felder: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {
     if http::feld(felder, "geprueft") != Some("ja") {
         return seiten::fehler(400, "Bestätige zuerst den geprüften Fehlalarm.");
     }
@@ -60,5 +74,27 @@ pub(super) fn entwarnen(dienst: &Dienst, felder: &[(String, String)], jetzt: Zei
             "Der Splitverdacht ist inzwischen geändert oder aufgehoben.",
         ),
         Err(_) => seiten::fehler(409, "Die Entwarnung konnte nicht im Journal belegt werden."),
+    }
+}
+
+fn umbuchen(dienst: &Dienst, felder: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {
+    let Some(kennung) =
+        http::feld(felder, "kennung").filter(|_| http::feld(felder, "geprueft") == Some("ja"))
+    else {
+        return seiten::fehler(400, "Bestätige zuerst den geprüften Split.");
+    };
+    let mut zustand = dienst.sperre();
+    if zustand.laufend.is_some() || !zustand.warteschlange.is_empty() {
+        return seiten::fehler(
+            409,
+            "Warte, bis die laufenden und wartenden Aufträge beendet sind.",
+        );
+    }
+    let ergebnis =
+        depot_lage::xetra_split_bestaetigen(&dienst.wurzel.join("daten"), kennung, jetzt);
+    zustand.lage_veraltet = true;
+    match ergebnis {
+        Ok(()) => http::umleitung("/einrichtung?m=split_gebucht"),
+        Err(grund) => seiten::fehler(409, &grund),
     }
 }

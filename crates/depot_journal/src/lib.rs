@@ -57,6 +57,7 @@ pub mod kasse;
 mod ki_abrechnung;
 mod ki_aufruf;
 pub use ki_aufruf::{KiAufruf, KiAufrufErgebnis};
+pub mod kapitalmassnahme;
 pub mod konto;
 pub mod kursbeleg;
 pub mod kurssperre;

@@ -138,12 +138,20 @@ impl Einstand {
 }
 
 fn einstand(s: &Stand, topf: TopfId, isin: &Isin, gehalten: u64) -> Option<Cent> {
+    use depot_journal::kapitalmassnahme::Bewertungsschritt;
     let mut einstand = Einstand::default();
-    for (auftrag, a) in s
-        .ausfuehrungsfolge()
-        .filter(|(b, _)| b.topf == topf && &b.isin == isin)
-    {
-        einstand.buche(auftrag.richtung, a)?;
+    for schritt in s.bewertungsfolge() {
+        match schritt {
+            Bewertungsschritt::Ausfuehrung(auftrag, a)
+                if auftrag.topf == topf && &auftrag.isin == isin =>
+            {
+                einstand.buche(auftrag.richtung, a)?;
+            }
+            Bewertungsschritt::Split(m) if m.topf == topf && &m.isin == isin => {
+                einstand.stueck = m.faktor.stueck(einstand.stueck)?;
+            }
+            _ => {}
+        }
     }
     (einstand.stueck == gehalten).then_some(einstand.kosten)
 }
@@ -221,7 +229,12 @@ pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
     let kurse = tageskurse(s, &als_universum(werte)).ok();
     let split = depot_journal::splitverdacht::aktiv(s, None);
     let gehalten = s.gehalten();
-    let bewertung = kurse.as_ref().and_then(|k| {
+    let umbuchen_offen = s.kapitalmassnahmen().iter().any(|m| {
+        split
+            .get(&m.massnahme.isin)
+            .is_some_and(|b| depot_journal::splitverdacht::kennung(b) == m.massnahme.quelle)
+    });
+    let bewertung = kurse.as_ref().filter(|_| !umbuchen_offen).and_then(|k| {
         depot_journal::splitverdacht::ersetze_kurse(s, &k.heute, &split, &gehalten).ok()
     });
     let toepfe: Vec<TopfLage> = s

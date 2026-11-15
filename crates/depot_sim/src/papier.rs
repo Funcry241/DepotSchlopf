@@ -51,6 +51,17 @@ pub trait Broker: Konto {
     fn verfalle(&mut self, nummern: &std::collections::BTreeSet<u64>);
     /// Gibt faellige Verkaufserloese zum Kauf frei.
     fn rechne_ab(&mut self, _tag: Datum) {}
+    /// Holt belegte Split-Umbuchungen vor dem Abgleich nach.
+    fn kapitalmassnahmen(
+        &mut self,
+        massnahmen: &[depot_journal::kapitalmassnahme::GebuchteKapitalmassnahme],
+    ) -> Result<(), String> {
+        if massnahmen.is_empty() {
+            Ok(())
+        } else {
+            Err("Konto unterstützt keine Split-Umbuchungen".into())
+        }
+    }
     /// Eine Stoerung des Kontos: Sein Stand ist nicht gesichert. Dann haelt der Lauf an, bevor
     /// das Journal noch etwas vom Konto bestaetigt (K23-01).
     fn stoerung(&self) -> Option<String> {
@@ -80,6 +91,7 @@ struct PapierOrder {
 pub struct Papierkonto {
     bargeld: Cent,
     bestand: BTreeMap<Isin, u64>,
+    kapitalbelege: Vec<String>,
     orders: BTreeMap<u64, PapierOrder>,
     abrechnungen: Abrechnungen,
     abrechnungstag: Option<Datum>,
@@ -102,12 +114,49 @@ impl Papierkonto {
         Some(Papierkonto {
             bargeld,
             bestand,
+            kapitalbelege: Vec::new(),
             orders: BTreeMap::new(),
             abrechnungen: Abrechnungen::new(),
             abrechnungstag: None,
             gebuehren: Grenzen::standard().gebuehren(),
             sendungen: 0,
         })
+    }
+
+    pub(crate) fn hole_kapitalmassnahmen(
+        &mut self,
+        massnahmen: &[depot_journal::kapitalmassnahme::GebuchteKapitalmassnahme],
+    ) -> Result<bool, String> {
+        if self.kapitalbelege.len() > massnahmen.len()
+            || self
+                .kapitalbelege
+                .iter()
+                .zip(massnahmen)
+                .any(|(kennung, m)| *kennung != m.massnahme.kennung())
+        {
+            return Err("Papierkonto: Split-Belege passen nicht zum Journal".into());
+        }
+        let fehlend = massnahmen.iter().skip(self.kapitalbelege.len());
+        if fehlend.len() == 0 {
+            return Ok(false);
+        }
+        let mut bestand = self.bestand.clone();
+        let mut kennungen = Vec::new();
+        for m in fehlend {
+            let isin = &m.massnahme.isin;
+            if self.offen().any(|o| &o.auftrag.isin == isin)
+                || bestand.get(isin).copied() != Some(m.vorher_gesamt)
+            {
+                return Err(format!(
+                    "Papierkonto: Bestand oder offene Order verhindert Split für {isin}"
+                ));
+            }
+            bestand.insert(isin.clone(), m.danach_gesamt);
+            kennungen.push(m.massnahme.kennung());
+        }
+        self.bestand = bestand;
+        self.kapitalbelege.extend(kennungen);
+        Ok(true)
     }
 
     /// Wie oft gesendet wurde, auch abgelehnt.
@@ -318,6 +367,13 @@ impl Papierkonto {
 }
 
 impl Broker for Papierkonto {
+    fn kapitalmassnahmen(
+        &mut self,
+        massnahmen: &[depot_journal::kapitalmassnahme::GebuchteKapitalmassnahme],
+    ) -> Result<(), String> {
+        self.hole_kapitalmassnahmen(massnahmen).map(|_| ())
+    }
+
     fn sende(&mut self, g: &GenehmigterAuftrag) -> Sendeantwort {
         self.nehme_an(g, None)
     }
@@ -420,6 +476,9 @@ impl Papierkonto {
         for (isin, n) in &self.bestand {
             let _ = writeln!(t, "bestand;{isin};{n}");
         }
+        for kennung in &self.kapitalbelege {
+            let _ = writeln!(t, "kapitalmassnahme;{kennung}");
+        }
         for (nr, o) in &self.orders {
             let a = &o.auftrag;
             let _ = writeln!(
@@ -465,6 +524,7 @@ impl Papierkonto {
         let mut k = Papierkonto {
             bargeld: Cent::NULL,
             bestand: BTreeMap::new(),
+            kapitalbelege: Vec::new(),
             orders: BTreeMap::new(),
             abrechnungen: Abrechnungen::new(),
             abrechnungstag: None,
@@ -480,6 +540,15 @@ impl Papierkonto {
                 ["bestand", isin, n] => {
                     let isin = Isin::neu(isin).map_err(|_| fehler())?;
                     k.bestand.insert(isin, n.parse().map_err(|_| fehler())?);
+                }
+                ["kapitalmassnahme", kennung]
+                    if kennung.len() == 64
+                        && kennung
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                        && !k.kapitalbelege.iter().any(|b| b == kennung) =>
+                {
+                    k.kapitalbelege.push((*kennung).to_string());
                 }
                 ["order", nr, isin, r, stueck, limit, status] => {
                     let o = PapierOrder {

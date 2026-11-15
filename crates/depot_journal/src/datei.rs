@@ -633,6 +633,9 @@ impl Journal {
             Art::Zustand | Art::Stopp => Err(JournalFehler::Abgelehnt(
                 "Auftragszustände entstehen nur über melde und gleiche_ab".into(),
             )),
+            Art::Kapitalmassnahme => Err(JournalFehler::Abgelehnt(
+                "Kapitalmaßnahmen nur über buche_kapitalmassnahmen".into(),
+            )),
             Art::Weltprognose => Err(JournalFehler::Abgelehnt(
                 "Weltprognose nur über belege_weltprognose".into(),
             )),
@@ -714,6 +717,23 @@ impl Journal {
         schreibe_atomar(&self.vermerk, fertig.text().as_bytes())?;
         self.laenge = laenge;
         self.kette = k.to_string();
+        Ok(())
+    }
+
+    /// Prüft alle betroffenen Töpfe vor der ersten Buchung.
+    pub fn buche_kapitalmassnahmen(
+        &mut self,
+        massnahmen: &[crate::kapitalmassnahme::Kapitalmassnahme],
+    ) -> Result<(), JournalFehler> {
+        let mut stand = self.stand.clone();
+        for m in massnahmen {
+            stand
+                .anwenden(Art::Kapitalmassnahme, &m.text())
+                .map_err(JournalFehler::Abgelehnt)?;
+        }
+        for m in massnahmen {
+            self.schreibe_eintrag(Art::Kapitalmassnahme, &m.text())?;
+        }
         Ok(())
     }
 

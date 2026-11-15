@@ -12,6 +12,7 @@ use depot_regelwerk::{Anlass, GenehmigterAuftrag, Richtung};
 
 use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
 
+use crate::kapitalmassnahme::{Bewertungsschritt, GebuchteKapitalmassnahme, Kapitalmassnahme};
 use crate::kasse::KiStand;
 use crate::konto::{Abrechnungen, papier_valuta};
 use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
@@ -94,6 +95,8 @@ pub enum Art {
     Zustand,
     /// Ausführung eines Kaufs mit gleichzeitig belegtem Schutz-Stopp.
     Stopp,
+    /// Bestätigter, wertneutraler Split einer Papierposition.
+    Kapitalmassnahme,
     /// `berater;datum;zyklus;cent`: eine Buchung des KI-Kassenbuchs, geprueft nach den Regeln
     /// aus `depot_ki` (K13-02).
     Ki,
@@ -138,6 +141,7 @@ impl Art {
             Art::Auftrag => "auftrag",
             Art::Zustand => "zustand",
             Art::Stopp => "stopp",
+            Art::Kapitalmassnahme => "kapitalmassnahme",
             Art::Ki => "ki",
             Art::KiAbrechnung => "ki-abrechnung",
             Art::KiAufruf => "ki-aufruf",
@@ -167,6 +171,7 @@ impl Art {
             Art::Auftrag,
             Art::Zustand,
             Art::Stopp,
+            Art::Kapitalmassnahme,
             Art::Ki,
             Art::KiAbrechnung,
             Art::KiAufruf,
@@ -233,6 +238,7 @@ pub struct Stand {
     stopps: BTreeMap<(TopfId, Isin), Cent>,
     auftraege: Vec<AuftragsLage>,
     ausfuehrungsfolge: Vec<(usize, usize)>,
+    kapitalmassnahmen: Vec<GebuchteKapitalmassnahme>,
     beobachtungen: Vec<(Datum, String)>,
     rss_abrufe: BTreeMap<String, Zeitpunkt>,
     kurse: Vec<KursBeleg>,
@@ -351,6 +357,112 @@ impl Stand {
                 let lage = self.auftraege.get(*auftrag)?;
                 Some((&lage.beleg, lage.ausfuehrungen.get(*ausfuehrung)?))
             })
+    }
+
+    pub fn kapitalmassnahmen(&self) -> &[GebuchteKapitalmassnahme] {
+        &self.kapitalmassnahmen
+    }
+
+    /// Ausführungen und Splits in der Reihenfolge ihrer Buchung.
+    pub fn bewertungsfolge(&self) -> impl Iterator<Item = Bewertungsschritt<'_>> {
+        let mut ausfuehrungen = self.ausfuehrungsfolge();
+        let mut massnahmen = self.kapitalmassnahmen.iter().peekable();
+        let mut ausgefuehrt = 0_usize;
+        std::iter::from_fn(move || {
+            if massnahmen
+                .peek()
+                .is_some_and(|m| m.ausfuehrungen_vorher == ausgefuehrt)
+            {
+                return massnahmen
+                    .next()
+                    .map(|m| Bewertungsschritt::Split(&m.massnahme));
+            }
+            let (auftrag, ausfuehrung) = ausfuehrungen.next()?;
+            ausgefuehrt = ausgefuehrt.saturating_add(1);
+            Some(Bewertungsschritt::Ausfuehrung(auftrag, ausfuehrung))
+        })
+    }
+
+    pub(crate) fn pruefe_kapitalmassnahme(&self, m: &Kapitalmassnahme) -> Result<u64, String> {
+        if self.format != FORMAT || self.seit_abschluss != 0 {
+            return Err(
+                "Split nur nach einem abgeschlossenen Papiertag im aktuellen Journalformat".into(),
+            );
+        }
+        if Kapitalmassnahme::xetra(self, m.topf, &m.quelle).as_ref() != Some(m) {
+            return Err("Split stimmt nicht mit einem ungeklärten Xetra-Beleg überein".into());
+        }
+        if !self.kurse().iter().any(|b| {
+            b.isin() == &m.isin
+                && b.kurs().handelstag() == m.wirksam
+                && b.kurs().herkunft() == Herkunft::Quelle
+        }) {
+            return Err("Für den Splittag fehlt ein belegter Schlusskurs".into());
+        }
+        if self.kapitalmassnahmen.iter().any(|b| {
+            b.massnahme.topf == m.topf
+                && b.massnahme.isin == m.isin
+                && b.massnahme.wirksam == m.wirksam
+        }) {
+            return Err("Split für diesen Topf und Kurstag ist bereits gebucht".into());
+        }
+        if self.offene_auftraege().any(|a| a.beleg.isin == m.isin) {
+            return Err(
+                "Vor der Umbuchung müssen offene Aufträge für den Wert beendet sein".into(),
+            );
+        }
+        if self.ausfuehrungsfolge().any(|(a, f)| {
+            a.topf == m.topf
+                && a.isin == m.isin
+                && f.kurszeit
+                    .and_then(Zeitpunkt::frankfurt_tag)
+                    .is_none_or(|tag| tag >= m.wirksam)
+        }) {
+            return Err("Für diese Position ist eine Ausführung am oder nach dem Splittag belegt oder ihre Zeit fehlt".into());
+        }
+        let vorher = self.toepfe.get(&m.topf).map_or(0, |t| t.stueck(&m.isin));
+        m.faktor
+            .stueck(vorher)
+            .filter(|n| *n > 0)
+            .ok_or_else(|| "Split ergibt keinen ganzzahligen, positiven Papierbestand".into())
+    }
+
+    fn belege_kapitalmassnahme(&mut self, text: &str) -> Result<(), String> {
+        let m = Kapitalmassnahme::lies(text).ok_or("Kapitalmaßnahme unlesbar")?;
+        kanonisch(&m.text(), text)?;
+        let danach = self.pruefe_kapitalmassnahme(&m)?;
+        let mut topf = self.toepfe.get(&m.topf).cloned().ok_or("Topf fehlt")?;
+        let vorher_gesamt = self
+            .toepfe
+            .values()
+            .try_fold(0_u64, |summe, t| summe.checked_add(t.stueck(&m.isin)))
+            .ok_or("Papierbestand: Überlauf")?;
+        let danach_gesamt = vorher_gesamt
+            .checked_sub(topf.stueck(&m.isin))
+            .and_then(|rest| rest.checked_add(danach))
+            .ok_or("Papierbestand: Überlauf")?;
+        let stoppschluessel = (m.topf, m.isin.clone());
+        let stopp = self
+            .stopps
+            .get(&stoppschluessel)
+            .map(|kurs| {
+                m.faktor
+                    .stopp(*kurs)
+                    .ok_or("Schutz-Stopp nach dem Split unberechenbar")
+            })
+            .transpose()?;
+        topf.setze_bestand(m.isin.clone(), danach);
+        self.toepfe.insert(m.topf, topf);
+        if let Some(stopp) = stopp {
+            self.stopps.insert(stoppschluessel, stopp);
+        }
+        self.kapitalmassnahmen.push(GebuchteKapitalmassnahme {
+            massnahme: m,
+            vorher_gesamt,
+            danach_gesamt,
+            ausfuehrungen_vorher: self.ausfuehrungsfolge.len(),
+        });
+        Ok(())
     }
 
     /// Der Auftrag mit dieser Kennung.
@@ -600,6 +712,7 @@ impl Stand {
     /// Wendet einen Eintrag an. Ein Fehler laesst den Stand unveraendert.
     pub(crate) fn anwenden(&mut self, art: Art, inhalt: &str) -> Result<(), String> {
         match art {
+            Art::Kapitalmassnahme => return self.belege_kapitalmassnahme(inhalt),
             Art::Beobachtung => {
                 if self.belege_beobachtung(inhalt)? {
                     return Ok(());
@@ -1345,7 +1458,7 @@ pub(crate) fn topf_name(t: TopfId) -> &'static str {
     }
 }
 
-fn lies_topf_name(t: &str) -> Option<TopfId> {
+pub(crate) fn lies_topf_name(t: &str) -> Option<TopfId> {
     match t {
         "A" => Some(TopfId::A),
         "B" => Some(TopfId::B),
