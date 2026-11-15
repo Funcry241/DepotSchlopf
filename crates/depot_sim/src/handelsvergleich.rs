@@ -80,25 +80,53 @@ impl Handelsvergleich {
 
     pub fn rendite(&self, einstieg: Datum, ausstieg: Datum, grenzen: &Grenzen) -> Option<i64> {
         let gebuehren = grenzen.gebuehren();
-        self.rendite_mit(einstieg, ausstieg, |v| gebuehren.fuer(v))
+        self.rendite_mit(einstieg, ausstieg, false, |v| gebuehren.fuer(v))
+    }
+
+    pub fn rendite_mit_spread(
+        &self,
+        einstieg: Datum,
+        ausstieg: Datum,
+        grenzen: &Grenzen,
+    ) -> Option<i64> {
+        let gebuehren = grenzen.gebuehren();
+        self.rendite_mit(einstieg, ausstieg, true, |v| gebuehren.fuer(v))
     }
 
     fn rendite_mit(
         &self,
         einstieg: Datum,
         ausstieg: Datum,
+        modellspread: bool,
         gebuehren: impl Fn(Cent) -> Option<Cent>,
     ) -> Option<i64> {
         if einstieg > ausstieg || self.werte.len() != VERGLEICH_ISIN.len() {
             return None;
         }
+        let kurs_mit_spread = |isin, preis: Preis, kauf| {
+            if !modellspread {
+                return Some(preis);
+            }
+            let spread =
+                crate::kostenhuerde::spread_je_seite_bp(depot_kern::liste::boerse_von(isin)?);
+            let faktor = if kauf {
+                10_000_i64.checked_add(spread)?
+            } else {
+                10_000_i64.checked_sub(spread)?
+            };
+            Preis::aus_cent(preis.mal_bp(faktor, if kauf { Rundung::Auf } else { Rundung::Ab })?)
+        };
         let kaufkurse: Vec<_> = self
             .werte
             .iter()
             .map(|isin| {
                 Some((
                     isin.clone(),
-                    Some(*self.kurse.get(&(einstieg, isin.clone()))?),
+                    Some(kurs_mit_spread(
+                        isin,
+                        *self.kurse.get(&(einstieg, isin.clone()))?,
+                        true,
+                    )?),
                 ))
             })
             .collect::<Option<_>>()?;
@@ -110,7 +138,8 @@ impl Handelsvergleich {
             .stueck
             .iter()
             .try_fold(korb.bargeld, |summe, (isin, stueck)| {
-                let kurs = self.kurse.get(&(ausstieg, isin.clone()))?;
+                let kurs =
+                    kurs_mit_spread(isin, *self.kurse.get(&(ausstieg, isin.clone()))?, false)?;
                 let bestand = self.stueck_am_ausstieg(isin, *stueck, einstieg, ausstieg)?;
                 let volumen = kurs.mal_stueck(bestand, Rundung::Ab)?;
                 summe.checked_add(volumen.checked_sub(gebuehren(volumen)?)?)
@@ -155,7 +184,7 @@ mod tests {
             .checked_sub(gebuehr)
             .ok_or("Erlös mit höherer Gebühr")?;
         assert_eq!(
-            vergleich.rendite_mit(von, bis, |_| Some(Cent(300))),
+            vergleich.rendite_mit(von, bis, false, |_| Some(Cent(300))),
             rendite_bp(START_JE_TOPF, doppelte_gebuehren),
         );
         let isin = vergleich.werte.first().ok_or("Vergleichswert")?.clone();

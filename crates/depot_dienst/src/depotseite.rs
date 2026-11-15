@@ -1,7 +1,6 @@
 //! Lesbare Momentaufnahme des Papierdepots.
 
 use std::fmt::Write as _;
-use std::path::Path;
 
 use depot_kern::{Cent, Preis, TopfId, Zeitpunkt};
 use depot_lage::depotverlauf::{Tagespunkt, Zeitraum, depotverlauf, im_zeitraum};
@@ -269,12 +268,69 @@ fn entwicklung(
     text.push_str("</section>");
 }
 
-pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (String, bool) {
+fn reifeampel(
+    d: &crate::Dienst,
+    stand: &depot_journal::Stand,
+    werte: &[depot_kern::liste::Wert],
+    jetzt: Zeitpunkt,
+    text: &mut String,
+) {
+    let reife = depot_lage::reife::ermittle(stand, werte, &depot_kern::Grenzen::standard());
+    let pruefbericht = crate::analyse::reifebericht(d, stand, jetzt);
+    let paar = |werte: Option<(i64, i64)>| {
+        werte.map_or_else(
+            || "–".into(),
+            |(p, k)| format!("{} / Korb {}", prozent(p), prozent(k)),
+        )
+    };
+    text.push_str("<section id=\"papier-reife\"><h3>Papierhandels-Reife</h3><p>Reine Anzeige. Alle fünf Kriterien werden einzeln geprüft.</p><ul>");
+    for (titel, wert, erfuellt) in [
+        (
+            "40 abgeschlossene Börsentage",
+            format!("{} von 40", reife.handelstage),
+            Some(reife.genug_tage()),
+        ),
+        (
+            "30 abgeschlossene Trades",
+            format!("{} von 30", reife.trades),
+            Some(reife.genug_trades()),
+        ),
+        (
+            "Netto über dem Korb nach Gebühren, Modellspread und KI-Kosten",
+            paar(reife.netto_bp),
+            reife.netto_erfuellt(),
+        ),
+        (
+            "Größter Rückgang höchstens wie beim Korb",
+            paar(reife.rueckgang_bp),
+            reife.rueckgang_erfuellt(),
+        ),
+        (
+            "Prüfbericht ohne Rot im aktuellen Exportzeitraum",
+            String::new(),
+            pruefbericht,
+        ),
+    ] {
+        let (klasse, status) = match erfuellt {
+            Some(true) => ("gut", "Erfüllt"),
+            Some(false) => ("halt", "Offen"),
+            None => ("offen", "Nicht belegt"),
+        };
+        let _ = write!(
+            text,
+            "<li><strong class=\"{klasse}\">{status}</strong> · {titel} {wert}</li>"
+        );
+    }
+    text.push_str("</ul></section>");
+}
+
+pub fn inhalt(d: &crate::Dienst, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (String, bool) {
+    let daten = d.wurzel.join("daten");
     let mut text = format!(
         "<section><h2>Depot</h2><p class=\"leise\">Stand {}</p></section>",
         zeit_text(jetzt)
     );
-    let lesbar = depot_lage::mit_journal(daten, |zugang| {
+    let lesbar = depot_lage::mit_journal(&daten, |zugang| {
         let stand = match zugang {
             Zugang::Offen(stand) if !stand.toepfe().is_empty() => stand,
             Zugang::NichtEingerichtet | Zugang::Offen(_) => {
@@ -312,6 +368,7 @@ pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (String, bo
             &depot_kern::Grenzen::standard(),
             &mut text,
         );
+        reifeampel(d, stand, &werte, jetzt, &mut text);
         text.push_str("<p class=\"leise\">Nur Papiergeld. Werte zum abgerundeten Cent, Einstand aufgerundet.</p>");
         true
     });
