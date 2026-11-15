@@ -996,3 +996,71 @@ fn tiingo_kapitalmeldungen_hinweis_nur_im_bestand_und_einmal_je_beobachtung() ->
     }
     Ok(())
 }
+
+#[test]
+fn xetra_splitverdacht_nur_bei_gehaltenem_wert_mit_kurssprung() -> Result<(), String> {
+    let werte = nur(&werte()?, Boerse::Xetra);
+    let sap = werte.first().ok_or("SAP fehlt")?;
+    for (schluss, gehalten, erwartet) in [
+        ("24.9", true, Some("4:1")),
+        ("25.5", true, Some("4:1")),
+        ("25.500001", true, None),
+        ("60", true, None),
+        ("25", false, None),
+    ] {
+        let (journal, roh) = ordner()?;
+        if gehalten {
+            let mut j = vorbedingung(Journal::oeffnen(&journal), "Journal")?;
+            let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
+            topf.setze_bestand(sap.isin.clone(), 1);
+            vorbedingung(j.setze_topf(&topf), "Bestand")?;
+        }
+        let antwort = format!(
+            "timestamp,open,high,low,close,volume\n2026-11-04,{schluss},{schluss},{schluss},{schluss},10\n2026-11-03,100,100,100,100,10\n"
+        );
+        for minute in [35, 36] {
+            let mut netz = Erfunden::neu(&[("SAP.DEX", Ok(antwort.clone()))]);
+            let b = vorbedingung(
+                lauf(
+                    &journal,
+                    &roh,
+                    &mut netz,
+                    &zugang()?,
+                    vec![utc(11, 4, 16, minute)?],
+                    &werte,
+                )?,
+                "Kursabruf",
+            )?;
+            assert_eq!(
+                b.betriebshinweise.len(),
+                usize::from(erwartet.is_some() && minute == 35)
+            );
+            assert!(
+                b.pruefung.iter().chain(&b.ausgelassen).any(
+                    |f| matches!(f, DatenFehler::Kurssprung { isin, .. } if *isin == sap.isin)
+                )
+            );
+        }
+        let j = vorbedingung(Journal::oeffnen(&journal), "Journal erneut öffnen")?;
+        let belege = j.stand().nachrichten();
+        assert_eq!(belege.len(), usize::from(erwartet.is_some()));
+        if let Some(faktor) = erwartet {
+            let beleg = belege.first().ok_or("Splitverdacht fehlt")?;
+            assert_eq!(
+                beleg.quelle(),
+                depot_kern::quelle::QUELLE_XETRA_SPLITVERDACHT
+            );
+            assert!(
+                beleg
+                    .text()
+                    .contains(&format!("Möglicher Split {faktor} bei SAP"))
+            );
+            assert_eq!(
+                beleg.roh(),
+                depot_kern::abdruck::sha256_hex(antwort.as_bytes())
+            );
+        }
+        assert_eq!(j.stand().seit_abschluss(), usize::from(gehalten));
+    }
+    Ok(())
+}

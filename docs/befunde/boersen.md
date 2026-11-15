@@ -150,3 +150,7 @@ Nachweise: `diagnose`-Unit-Tests (fremder/JSON-kodierter Zugang, Antworttypen, K
 ### Tiingo-Meldungen zu Kapitalmaßnahmen
 
 Der bestehende Tageskursabruf liefert zusätzlich Eröffnung, Volumen, Bardividende und Split-Faktor. Bei fehlenden Zusatzfeldern bleibt die jeweilige Angabe unbekannt. Die Kursprüfung verwendet weiterhin die unbereinigten Schluss-, Hoch- und Tiefkurse. Für die beiden verwendeten Kurstage belegt der Sammler positive Dividenden und vom Normalwert 1 abweichende Split-Faktoren einmal je Meldung im Journal. Die Journalmeldungen tragen einen Abdruck der rohen Antwort und bleiben außerhalb der KI-Handelsfragen. Einen Split-Faktor zu einem gehaltenen Wert zeigt der Sammler zusätzlich als Betriebshinweis. Die Angaben stammen aus der [Tiingo-Dokumentation zum Tageskurs-Endpunkt](https://www.tiingo.com/documentation/end-of-day).
+
+### Xetra-Splitverdacht
+
+Wenn die Kursprüfung für einen gehaltenen Xetra-Wert einen Kurssprung meldet, prüft der Sammler, ob der aktuelle Schluss innerhalb von ±2 % um den rechnerischen Schluss nach einem Split 2:1, 3:1, 4:1, 5:1 oder 10:1 liegt. In diesem Fall belegt er den Verdacht einmal mit beiden Vergleichswerten und dem Abdruck der Rohantwort. Der Betriebshinweis nennt den vermuteten Faktor. Die bestehende Kursprüfung sperrt den Wert im aktuellen Lauf. Eine Sperre über Folgeläufe hinweg, ihre manuelle Aufhebung und die Bestandsumbuchung gehören zu den offenen Schritten von #207.

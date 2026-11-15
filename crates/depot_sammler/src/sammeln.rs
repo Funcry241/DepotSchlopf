@@ -411,6 +411,63 @@ fn abrufbar<'a>(
     }
 }
 
+/// Prüft ±2 % relativ zum rechnerischen Nach-Split-Kurs, ohne vorher zu runden.
+fn moeglicher_split(neu: Preis, alt: Preis) -> Option<u8> {
+    if neu.fein() <= 0 || alt.fein() <= 0 {
+        return None;
+    }
+    let alt = i128::from(alt.fein());
+    let neu = i128::from(neu.fein());
+    [2, 3, 4, 5, 10].into_iter().find(|faktor| {
+        neu.checked_mul(i128::from(*faktor))
+            .and_then(|wert| wert.checked_sub(alt))
+            .and_then(i128::checked_abs)
+            .and_then(|differenz| differenz.checked_mul(100))
+            .zip(alt.checked_mul(2))
+            .is_some_and(|(differenz, toleranz)| differenz <= toleranz)
+    })
+}
+
+fn xetra_splitverdacht(
+    wert: &Wert,
+    heute: &Kurse,
+    vortag: &Kurse,
+    abruf: Zeitpunkt,
+    roh: &[u8],
+) -> Result<Option<Kapitalmeldung>, SammelFehler> {
+    if wert.boerse != Boerse::Xetra {
+        return Ok(None);
+    }
+    let Some((neu, alt)) = heute.eintrag(&wert.isin).zip(vortag.eintrag(&wert.isin)) else {
+        return Ok(None);
+    };
+    let Some(faktor) = moeglicher_split(neu.preis(), alt.preis()) else {
+        return Ok(None);
+    };
+    let text = format!(
+        "Möglicher Split {faktor}:1 bei {} ({}) am {}. Schluss {} EUR, Vergleichsschluss {} EUR vom {}.",
+        wert.name,
+        wert.isin,
+        neu.handelstag(),
+        neu.preis().euro_text(),
+        alt.preis().euro_text(),
+        alt.handelstag(),
+    );
+    let beleg = NachrichtBeleg::neu(
+        depot_kern::quelle::QUELLE_XETRA_SPLITVERDACHT,
+        abruf,
+        roh,
+        neu.zeitpunkt(),
+        &text,
+    )
+    .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
+    Ok(Some(Kapitalmeldung {
+        isin: wert.isin.clone(),
+        beleg,
+        split: true,
+    }))
+}
+
 struct Kapitalmeldung {
     isin: depot_kern::Isin,
     beleg: NachrichtBeleg,
@@ -596,8 +653,9 @@ fn lies_wert(
                         .is_some_and(|kurs| kurs.handelstag() == *tag)
                 })
             });
-            let kapitalmeldungen =
+            let mut kapitalmeldungen =
                 kapitalmeldungen(wert, &marktdaten, [&heute, &vortag], abruf, &roh)?;
+            kapitalmeldungen.extend(xetra_splitverdacht(wert, &heute, &vortag, abruf, &roh)?);
             Schritt::Gelesen {
                 abruf,
                 roh,
@@ -804,6 +862,11 @@ fn abschliessen(
         }
         return Ok(bericht);
     }
+    // Die Splitmeldung braucht den konkreten Kursbefund. Ein Fehler der Prüfung darf
+    // beim Belegen aber keinen Fehler des Journals verdecken.
+    let pruefung = g.letzter_abruf.map_or(Ok(()), |stand| {
+        pruefe(&mut bericht, journal, werte, stand, g.heute, g.vortag)
+    });
     for (datum, text) in &g.normalisierungen {
         journal
             .beobachte(*datum, text)
@@ -816,6 +879,13 @@ fn abschliessen(
                 journal.belege_kurs(&b).map_err(SammelFehler::Journal)?;
             }
             Sammelbeleg::Kapital(m) if journal.stand().format() == depot_journal::FORMAT => {
+                if m.beleg.quelle() == depot_kern::quelle::QUELLE_XETRA_SPLITVERDACHT
+                    && !(gehalten.contains(&m.isin)
+                        && bericht.pruefung.iter().chain(&bericht.ausgelassen)
+                            .any(|f| matches!(f, DatenFehler::Kurssprung { isin, .. } if *isin == m.isin)))
+                {
+                    continue;
+                }
                 let neu = journal
                     .belege_nachricht(&m.beleg)
                     .map_err(SammelFehler::Journal)?;
@@ -826,9 +896,7 @@ fn abschliessen(
             Sammelbeleg::Kapital(_) => {}
         }
     }
-    if let Some(stand) = g.letzter_abruf {
-        pruefe(&mut bericht, journal, werte, stand, g.heute, g.vortag)?;
-    }
+    pruefung?;
     Ok(bericht)
 }
 

@@ -1,8 +1,7 @@
 klasse: Funktion
-zweck: Tiingo-Kapitalmeldungen aus dem vorhandenen Kursabruf belegen und anzeigen
+zweck: Splitverdacht bei gehaltenen Xetra-Werten als Betriebshinweis belegen
 pfade:
-crates/depot_kern/src/tiingo.rs
-crates/depot_sammler/src/main.rs
+crates/depot_kern/src/quelle.rs
 crates/depot_sammler/src/sammeln.rs
 crates/depot_sammler/tests/tiingo.rs
 crates/depot_sim/src/papiertag.rs
