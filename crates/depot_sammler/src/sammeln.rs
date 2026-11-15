@@ -36,7 +36,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use depot_journal::{Journal, JournalFehler, KursBeleg};
+use depot_journal::{Journal, JournalFehler, KursBeleg, NachrichtBeleg};
 use depot_kern::{
     Boerse, Datum, Devisen, Grenzen, Kurs, Kurse, Preis, Zeitpunkt, lies_tageskurse,
     schlusskurse_in_euro,
@@ -78,7 +78,7 @@ pub enum Ergebnis {
 }
 
 /// Der Bericht eines Laufs.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Bericht {
     pub werte: Vec<(Wert, Ergebnis)>,
     /// Warum der Lauf vor dem letzten Wert endete.
@@ -98,6 +98,8 @@ pub struct Bericht {
     /// Die Verbindung zu einer Quelle blieb trotz Wiederholung weg (die erste solche). Bei
     /// dieser Quelle wurde danach nichts mehr abgerufen, bei den anderen schon.
     pub verbindung: Option<Ausfall>,
+    /// Neu belegte Split-Faktoren zu gehaltenen Werten.
+    pub betriebshinweise: Vec<String>,
 }
 
 impl Bericht {
@@ -153,8 +155,7 @@ pub enum SammelFehler {
 
 /// Die Abrufadresse eines Werts bei seiner Quelle (`Anbieter::fuer`), als CSV:
 /// - Alpha Vantage: Tageskurse der letzten 100 Handelstage.
-/// - Tiingo: Tageskurse ab `ab` (bei `None` nur der letzte Tag), nur Datum, Schluss, Tief und
-///   Hoch. Das Kuerzel steht klein, eine Klasse mit Bindestrich (`BRK.B` wird `brk-b`).
+/// - Tiingo: Tageskurse ab `ab` (bei `None` nur der letzte Tag), mit unbereinigten Kursen, Volumen und Angaben zu Kapitalmaßnahmen. Das Kuerzel steht klein, eine Klasse mit Bindestrich (`BRK.B` wird `brk-b`).
 pub fn adresse(wert: &Wert, schluessel: &Schluessel, ab: Option<Datum>) -> String {
     match Anbieter::fuer(wert.boerse) {
         Anbieter::AlphaVantage => format!(
@@ -166,7 +167,7 @@ pub fn adresse(wert: &Wert, schluessel: &Schluessel, ab: Option<Datum>) -> Strin
             let kuerzel = wert.kuerzel.to_ascii_lowercase().replace('.', "-");
             let start = ab.map(|d| format!("startDate={d}&")).unwrap_or_default();
             format!(
-                "https://api.tiingo.com/tiingo/daily/{kuerzel}/prices?{start}format=csv&columns=date,close,high,low"
+                "https://api.tiingo.com/tiingo/daily/{kuerzel}/prices?{start}format=csv&columns=date,open,close,high,low,volume,divCash,splitFactor"
             )
         }
     }
@@ -410,6 +411,71 @@ fn abrufbar<'a>(
     }
 }
 
+struct Kapitalmeldung {
+    isin: depot_kern::Isin,
+    beleg: NachrichtBeleg,
+    split: bool,
+}
+
+fn kapitalmeldungen(
+    wert: &Wert,
+    daten: &[depot_kern::tiingo::Marktdaten],
+    schluss: [&Kurse; 2],
+    abruf: Zeitpunkt,
+    roh: &[u8],
+) -> Result<Vec<Kapitalmeldung>, SammelFehler> {
+    let mut meldungen = Vec::new();
+    for daten in daten {
+        let Some(kurs) = schluss
+            .iter()
+            .filter_map(|k| k.eintrag(&wert.isin))
+            .find(|kurs| kurs.handelstag() == daten.datum)
+        else {
+            continue;
+        };
+        let mut melde = |text: &str, split| {
+            // Der Kurstag ist bekannt, der Zeitpunkt der Veröffentlichung nicht. Für den
+            // datierten Beleg dient der Schluss dieses Kurstags als feste Zeitreferenz.
+            let beleg = NachrichtBeleg::neu(
+                depot_kern::tiingo::QUELLE_KAPITAL,
+                abruf,
+                roh,
+                kurs.zeitpunkt(),
+                text,
+            )
+            .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
+            meldungen.push(Kapitalmeldung {
+                isin: wert.isin.clone(),
+                beleg,
+                split,
+            });
+            Ok(())
+        };
+        if let Some(faktor) = daten.split_faktor.as_deref().filter(|f| *f != "1") {
+            melde(
+                &format!(
+                    "Tiingo: {} ({}) · Split-Faktor {faktor} am {}",
+                    wert.name, wert.isin, daten.datum
+                ),
+                true,
+            )?;
+        }
+        if let Some(dividende) = daten.dividende.filter(|p| p.fein() > 0) {
+            melde(
+                &format!(
+                    "Tiingo: {} ({}) · Dividende {} USD, ex {}",
+                    wert.name,
+                    wert.isin,
+                    dividende.euro_text(),
+                    daten.datum
+                ),
+                false,
+            )?;
+        }
+    }
+    Ok(meldungen)
+}
+
 /// Was der Abruf eines Werts ergeben hat.
 enum Schritt {
     /// Gelesen: Abrufzeit, rohe Antwort, Ablage und die Schlusskurse.
@@ -418,6 +484,7 @@ enum Schritt {
         roh: Vec<u8>,
         rohdatei: PathBuf,
         normalisierungen: Vec<(Datum, String)>,
+        kapitalmeldungen: Vec<Kapitalmeldung>,
         heute: Kurse,
         vortag: Kurse,
     },
@@ -498,6 +565,7 @@ fn lies_wert(
         });
     }
     let mut normalisierungen = Vec::new();
+    let mut marktdaten = Vec::new();
     let gelesen = String::from_utf8(roh.clone())
         .map_err(|_| "Antwort ist kein UTF-8".to_string())
         .and_then(|t| {
@@ -512,6 +580,7 @@ fn lies_wert(
                     wert.isin, depot_kern::abdruck::sha256_hex(&roh), r.zeile, r.feld, r.original, r.preis.fein()
                 )));
             }
+            marktdaten = gelesen.marktdaten;
             Ok(gelesen.kurse)
         })
         .and_then(|tage| {
@@ -527,11 +596,14 @@ fn lies_wert(
                         .is_some_and(|kurs| kurs.handelstag() == *tag)
                 })
             });
+            let kapitalmeldungen =
+                kapitalmeldungen(wert, &marktdaten, [&heute, &vortag], abruf, &roh)?;
             Schritt::Gelesen {
                 abruf,
                 roh,
                 rohdatei,
                 normalisierungen,
+                kapitalmeldungen,
                 heute,
                 vortag,
             }
@@ -556,16 +628,7 @@ pub fn sammle(
     pause: Duration,
     werte: &[Wert],
 ) -> Result<Bericht, SammelFehler> {
-    let mut bericht = Bericht {
-        werte: Vec::new(),
-        abbruch: None,
-        sicherheitsabbruch: false,
-        sperrquelle: None,
-        handelstag: None,
-        pruefung: Vec::new(),
-        ausgelassen: Vec::new(),
-        verbindung: None,
-    };
+    let mut bericht = Bericht::default();
     let mut gelesen = Gelesen::default();
 
     let vorbereitung = vorbereite(&mut bericht, netz, zugang, takt, ablage, werte)?;
@@ -579,7 +642,7 @@ pub fn sammle(
         .flatten();
     let mut alpha_limit = false;
     for wert in werte {
-        if bericht.abbruch.is_some() {
+        if bericht.abbruch.is_some() || (alpha_limit && wert.boerse == Boerse::Xetra) {
             bericht.werte.push((wert.clone(), Ergebnis::NichtAbgerufen));
             continue;
         }
@@ -589,10 +652,6 @@ pub fn sammle(
             bericht
                 .werte
                 .push((wert.clone(), Ergebnis::Uebersprungen(grund.clone())));
-            continue;
-        }
-        if alpha_limit && Anbieter::fuer(wert.boerse) == Anbieter::AlphaVantage {
-            bericht.werte.push((wert.clone(), Ergebnis::NichtAbgerufen));
             continue;
         }
         let schluessel = match abrufbar(zugang, &vorbereitung.referenz, wert, &weg) {
@@ -608,16 +667,25 @@ pub fn sammle(
             (takt.schlafe)(pause);
         }
         abgerufen = true;
-        let (abruf, roh, rohdatei, h, v, notizen) =
+        let (abruf, roh, rohdatei, h, v, notizen, kapitalmeldungen) =
             match lies_wert(netz, zugang, schluessel, wert, &vorbereitung, takt, ablage)? {
                 Schritt::Gelesen {
                     abruf,
                     roh,
                     rohdatei,
                     normalisierungen,
+                    kapitalmeldungen,
                     heute,
                     vortag,
-                } => (abruf, roh, rohdatei, heute, vortag, normalisierungen),
+                } => (
+                    abruf,
+                    roh,
+                    rohdatei,
+                    heute,
+                    vortag,
+                    normalisierungen,
+                    kapitalmeldungen,
+                ),
                 Schritt::Fehler(text) => {
                     bericht.werte.push((wert.clone(), Ergebnis::Fehler(text)));
                     continue;
@@ -647,6 +715,9 @@ pub fn sammle(
             };
         gelesen.normalisierungen.extend(notizen);
         gelesen.belege(wert, abruf, &roh, &h, &v)?;
+        gelesen
+            .offen
+            .extend(kapitalmeldungen.into_iter().map(Sammelbeleg::Kapital));
         let ergebnis = if fehlt_nyse_vergleich(wert, &h, &v) {
             Ergebnis::Fehler("Nicht belegt: kein NYSE-Vergleichskurs mit EZB-Referenzkurs".into())
         } else {
@@ -668,11 +739,16 @@ fn fehlt_nyse_vergleich(wert: &Wert, heute: &Kurse, vortag: &Kurse) -> bool {
         && vortag.eintrag(&wert.isin).is_none()
 }
 
+enum Sammelbeleg {
+    Kurs(KursBeleg),
+    Kapital(Kapitalmeldung),
+}
+
 /// Was ein Lauf gelesen, aber noch nicht belegt hat.
 #[derive(Default)]
 struct Gelesen {
     normalisierungen: Vec<(Datum, String)>,
-    offen: Vec<KursBeleg>,
+    offen: Vec<Sammelbeleg>,
     letzter_abruf: Option<Zeitpunkt>,
     heute: Vec<(depot_kern::Isin, Kurs, Zeitpunkt)>,
     vortag: Vec<(depot_kern::Isin, Kurs)>,
@@ -696,7 +772,7 @@ impl Gelesen {
         {
             let beleg = KursBeleg::neu(quelle, abruf, roh, wert.isin.clone(), kurs.clone())
                 .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
-            self.offen.push(beleg);
+            self.offen.push(Sammelbeleg::Kurs(beleg));
         }
         if let Some(k) = heute.eintrag(&wert.isin) {
             self.heute.push((wert.isin.clone(), k.clone(), abruf));
@@ -733,8 +809,22 @@ fn abschliessen(
             .beobachte(*datum, text)
             .map_err(SammelFehler::Journal)?;
     }
-    for beleg in &g.offen {
-        journal.belege_kurs(beleg).map_err(SammelFehler::Journal)?;
+    let gehalten = journal.stand().gehalten();
+    for beleg in g.offen {
+        match beleg {
+            Sammelbeleg::Kurs(b) => {
+                journal.belege_kurs(&b).map_err(SammelFehler::Journal)?;
+            }
+            Sammelbeleg::Kapital(m) if journal.stand().format() == depot_journal::FORMAT => {
+                let neu = journal
+                    .belege_nachricht(&m.beleg)
+                    .map_err(SammelFehler::Journal)?;
+                if neu && m.split && gehalten.contains(&m.isin) {
+                    bericht.betriebshinweise.push(m.beleg.text().to_owned());
+                }
+            }
+            Sammelbeleg::Kapital(_) => {}
+        }
     }
     if let Some(stand) = g.letzter_abruf {
         pruefe(&mut bericht, journal, werte, stand, g.heute, g.vortag)?;

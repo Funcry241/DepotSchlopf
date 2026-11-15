@@ -1,7 +1,7 @@
 //! Abruf je Boerse: Werte der NYSE von Tiingo mit eigenem Schluessel, in Euro umgerechnet mit
 //! den Referenzkursen der EZB desselben Tages. Die Antworten haben die Form der Quellen; die
-//! Kurse sind erfunden (D12). Die Form von Tiingo (`format=csv`, `columns=date,close,high,low`)
-//! ist aus der Dokumentation; der erste echte Lauf bestaetigt sie.
+//! Kurse sind erfunden (D12). Die CSV-Proben enthalten das alte und das erweiterte
+//! Spaltenformat. Ein echter Abruf bestätigt das erweiterte Format.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -73,7 +73,7 @@ fn nur(werte: &[Wert], b: Boerse) -> Vec<Wert> {
     werte.iter().filter(|w| w.boerse == b).cloned().collect()
 }
 
-/// Erfundene Kurse in der Form von Tiingo (`columns=date,close,high,low`), aeltester zuerst.
+/// Erfundene Tiingo-Kurse im älteren Vier-Spalten-Format, ältester Tag zuerst.
 const ROH_AAPL: &str =
     "date,close,high,low\n2026-11-03,250.0,252.0,248.0\n2026-11-04,224.48,226.0,223.1\n";
 const ROH_SAP: &str = "timestamp,open,high,low,close,volume\r\n\
@@ -234,7 +234,7 @@ fn abrufadresse_tiingo() -> Result<(), String> {
     let a = adresse(l.first().ok_or("Vorbedingung")?, &s, ab);
     assert_eq!(
         a,
-        "https://api.tiingo.com/tiingo/daily/aapl/prices?startDate=2026-10-21&format=csv&columns=date,close,high,low"
+        "https://api.tiingo.com/tiingo/daily/aapl/prices?startDate=2026-10-21&format=csv&columns=date,open,close,high,low,volume,divCash,splitFactor"
     );
     let b = adresse(l.get(1).ok_or("Vorbedingung")?, &s, ab);
     assert!(
@@ -672,7 +672,7 @@ fn normalisierung_steht_vor_dem_kurs_im_journal_und_nie_nach_sicherheitsabbruch(
     let alle = werte()?;
     let aapl = alle.get(1).ok_or("Apple fehlt")?.clone();
     let sap = alle.first().ok_or("SAP fehlt")?.clone();
-    let antwort = "date,close,high,low,adjClose\n2026-11-04,224.47999999999998,226,223.1,112.24\n2026-11-03,224.47999999999998,226,223.1,112.24\n2026-11-02,224.47999999999998,226,223.1,112.24\n";
+    let antwort = "date,close,high,low,adjClose,splitFactor\n2026-11-04,224.47999999999998,226,223.1,112.24,2\n2026-11-03,224.47999999999998,226,223.1,112.24,1\n2026-11-02,224.47999999999998,226,223.1,112.24,1\n";
     for abbrechen in [false, true] {
         let (journal, roh) = ordner()?;
         let mut netz = Erfunden::neu(&[
@@ -710,8 +710,10 @@ fn normalisierung_steht_vor_dem_kurs_im_journal_und_nie_nach_sicherheitsabbruch(
             assert!(b.sicherheitsabbruch);
             assert!(notiz.is_none());
             assert!(j.stand().kurse().is_empty());
+            assert!(j.stand().nachrichten().is_empty());
         } else {
             assert!(!b.sicherheitsabbruch);
+            assert_eq!(j.stand().nachrichten().len(), 1);
             let belege: Vec<_> = j
                 .eintraege()
                 .iter()
@@ -892,5 +894,105 @@ fn morgenlauf_gesperrter_wert_ist_verwendbar() -> Result<(), String> {
             .iter()
             .any(|b| b.isin().is_some_and(|i| i.als_str() == "DE0007164600"))
     );
+    Ok(())
+}
+
+#[test]
+fn tiingo_marktdaten_mit_und_ohne_zusatzspalten() -> Result<(), String> {
+    let zeilen = "date,open,close,high,low,volume,divCash,splitFactor\n\
+                   2026-11-03,249,250,252,248,123456,0.0,001.000\n\
+                   2026-11-04,224.1,224.48,226,223.1,654321,0.99,0.3333333333333333\n";
+    let voll = vorbedingung(
+        depot_kern::tiingo::lies_tageskurse(zeilen),
+        "Mit Zusatzspalten",
+    )?;
+    let alt = vorbedingung(depot_kern::tiingo::lies_tageskurse(ROH_AAPL), "Altes CSV")?;
+    assert_eq!(voll.kurse, alt.kurse);
+    let vorher = voll.marktdaten.first().ok_or("Erster Tag fehlt")?;
+    assert_eq!(vorher.split_faktor.as_deref(), Some("1"));
+    assert_eq!(vorher.dividende, Some(euro("0")?));
+    let aktuell = voll.marktdaten.last().ok_or("Zweiter Tag fehlt")?;
+    assert_eq!(aktuell.eroeffnung, Some(euro("224.1")?));
+    assert_eq!(aktuell.volumen, Some(654_321));
+    assert_eq!(aktuell.dividende, Some(euro("0.99")?));
+    assert_eq!(aktuell.split_faktor.as_deref(), Some("0.3333333333333333"));
+    assert!(
+        alt.marktdaten
+            .iter()
+            .all(|m| m.split_faktor.is_none() && m.dividende.is_none())
+    );
+    Ok(())
+}
+
+#[test]
+fn tiingo_kapitalmeldungen_hinweis_nur_im_bestand_und_einmal_je_beobachtung() -> Result<(), String>
+{
+    let werte = nur(&werte()?, Boerse::Nyse);
+    let aapl = werte.first().ok_or("Apple fehlt")?;
+    let antwort = "date,open,close,high,low,volume,divCash,splitFactor\n\
+                   2026-11-03,249,250,252,248,123456,0,1\n\
+                   2026-11-04,62,62.50,63,62,654321,0.99,4.0\n";
+    let referenz = ezb(&[("2026-11-04", "1.10"), ("2026-11-03", "1.10")]);
+    for gehalten in [false, true] {
+        let (journal, roh) = ordner()?;
+        if gehalten {
+            let mut j = vorbedingung(Journal::oeffnen(&journal), "Journal")?;
+            let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
+            topf.setze_bestand(aapl.isin.clone(), 1);
+            vorbedingung(j.setze_topf(&topf), "Bestand")?;
+        }
+        for minute in [5, 9] {
+            let mut netz =
+                Erfunden::neu(&[("ezb", Ok(referenz.clone())), ("aapl", Ok(antwort.into()))]);
+            let b = vorbedingung(
+                lauf(
+                    &journal,
+                    &roh,
+                    &mut netz,
+                    &zugang()?,
+                    vec![utc(11, 4, 21, minute)?, utc(11, 4, 21, minute)?],
+                    &werte,
+                )?,
+                "Kursabruf",
+            )?;
+            assert_eq!(
+                b.betriebshinweise.len(),
+                usize::from(gehalten && minute == 5)
+            );
+            assert_eq!(netz.abgerufen.len(), 2);
+        }
+        let j = vorbedingung(Journal::oeffnen(&journal), "Journal erneut öffnen")?;
+        let meldungen = j.stand().nachrichten();
+        assert_eq!(meldungen.len(), 2);
+        let erwartet = depot_kern::abdruck::sha256_hex(antwort.as_bytes());
+        assert!(meldungen.iter().all(|b| b.roh() == erwartet));
+        assert!(
+            meldungen
+                .iter()
+                .all(|b| b.quelle() == depot_kern::tiingo::QUELLE_KAPITAL)
+        );
+        assert_eq!(j.stand().seit_abschluss(), usize::from(gehalten));
+        assert_eq!(
+            meldungen
+                .iter()
+                .filter(|b| b.text().contains("Split-Faktor 4"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            meldungen
+                .iter()
+                .filter(|b| b.text().contains("Dividende 0,99 USD"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            j.stand()
+                .toepfe()
+                .get(&TopfId::A)
+                .map(|t| t.stueck(&aapl.isin)),
+            gehalten.then_some(1)
+        );
+    }
     Ok(())
 }

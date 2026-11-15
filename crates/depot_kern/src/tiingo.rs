@@ -3,6 +3,9 @@
 
 use crate::{Datum, Preis, QuellenFehler, Tageskurs};
 
+/// Journalquelle für Kapitalmaßnahmen aus einem Tiingo-Kursabruf.
+pub const QUELLE_KAPITAL: &str = "tiingo-kapital";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rundungsbeleg {
     pub datum: Datum,
@@ -12,10 +15,22 @@ pub struct Rundungsbeleg {
     pub preis: Preis,
 }
 
+/// Optionale Tiingo-Felder zum unbereinigten Tageskurs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Marktdaten {
+    pub datum: Datum,
+    pub eroeffnung: Option<Preis>,
+    pub volumen: Option<u64>,
+    pub dividende: Option<Preis>,
+    /// Positiver Dezimalfaktor mit ursprünglicher Genauigkeit.
+    pub split_faktor: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tageskurse {
     pub kurse: Vec<Tageskurs>,
     pub rundungen: Vec<Rundungsbeleg>,
+    pub marktdaten: Vec<Marktdaten>,
 }
 
 /// Rundet nur bei einer absoluten Abweichung von höchstens 0.000000001 Dollar.
@@ -49,6 +64,47 @@ fn normalisiere(text: &str) -> Option<Preis> {
     (preis.fein() > 0).then_some(preis)
 }
 
+fn split_faktor(text: &str) -> Option<String> {
+    let (ganz, bruch) = text.split_once('.').unwrap_or((text, ""));
+    if text.len() > 32
+        || ganz.is_empty()
+        || !ganz
+            .bytes()
+            .chain(bruch.bytes())
+            .all(|z| z.is_ascii_digit())
+        || !ganz.bytes().chain(bruch.bytes()).any(|z| z != b'0')
+    {
+        return None;
+    }
+    let ganz = ganz.trim_start_matches('0');
+    let ganz = if ganz.is_empty() { "0" } else { ganz };
+    let bruch = bruch.trim_end_matches('0');
+    Some(if bruch.is_empty() {
+        ganz.to_owned()
+    } else {
+        format!("{ganz}.{bruch}")
+    })
+}
+
+fn marktdaten(datum: Datum, felder: &[String], spalten: &[String]) -> Marktdaten {
+    let feld = |name| {
+        spalten
+            .iter()
+            .position(|s| s == name)
+            .and_then(|i| felder.get(i))
+            .map(String::as_str)
+    };
+    Marktdaten {
+        datum,
+        eroeffnung: feld("open").and_then(normalisiere),
+        volumen: feld("volume").and_then(|t| t.parse().ok()),
+        dividende: feld("divcash")
+            .and_then(Preis::lies_euro)
+            .filter(|p| p.fein() >= 0),
+        split_faktor: feld("splitfactor").and_then(split_faktor),
+    }
+}
+
 /// Normalisiert nur die drei unbereinigten Preisfelder. Angepasste Preise (`adjClose`)
 /// werden nicht gelesen. Die strengen Kalender-, Spalten- und Spannenprüfungen folgen danach.
 pub fn lies_tageskurse(text: &str) -> Result<Tageskurse, QuellenFehler> {
@@ -64,6 +120,7 @@ pub fn lies_tageskurse(text: &str) -> Result<Tageskurse, QuellenFehler> {
         .ok_or(QuellenFehler::Kopf)?;
     let mut ausgabe = format!("{kopf}\n");
     let mut rundungen = Vec::new();
+    let mut extras = Vec::new();
     for (i, zeile) in zeilen.enumerate() {
         let nr = i.saturating_add(2);
         if zeile.trim().is_empty() {
@@ -78,6 +135,7 @@ pub fn lies_tageskurse(text: &str) -> Result<Tageskurse, QuellenFehler> {
             .get(datum_spalte)
             .and_then(|s| Datum::lies(s))
             .ok_or(QuellenFehler::Datum(nr))?;
+        extras.push(marktdaten(datum, &felder, &spalten));
         for (feld, name) in felder.iter_mut().zip(&spalten) {
             if !matches!(name.as_str(), "close" | "high" | "low") {
                 continue;
@@ -102,5 +160,9 @@ pub fn lies_tageskurse(text: &str) -> Result<Tageskurse, QuellenFehler> {
         ausgabe.push('\n');
     }
     let kurse = crate::lies_tageskurse(&ausgabe)?;
-    Ok(Tageskurse { kurse, rundungen })
+    Ok(Tageskurse {
+        kurse,
+        rundungen,
+        marktdaten: extras,
+    })
 }
