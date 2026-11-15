@@ -36,7 +36,7 @@ run.cmd kurse einrichten Journal daten/journal.txt einmal anlegen\n  \
 run.cmd nachrichten      nur die Nachrichten holen und im Journal belegen (nur lesend)\n  \
 run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)\n  \
 run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)\n  \
-run.cmd lage             Lagebild nach daten/lage.html: Bereitschaft, KI-Budget, Depot, Gespräch\n  \
+run.cmd \"ruecktest\"       Schattenstrategien anhand des Journals rückwärts prüfen\n  run.cmd lage             Lagebild nach daten/lage.html: Bereitschaft, KI-Budget, Depot, Gespräch\n  \
 run.cmd sichern          Daten am eingestellten Ziel sichern und prüfen\n  \
 run.cmd sicherungsprobe <Ordner>  Sicherung in einer temporären Kopie prüfen\n  \
 run.cmd update prüfen   neue Stände auf main nennen (git fetch, ändert nichts)\n  \
@@ -136,6 +136,9 @@ fn main() -> ExitCode {
         "papier" | "vorbereiten" | "simulation" | "gemini-vorlauf"
     ) {
         return programm(&wurzel, "depot_berater", &args);
+    }
+    if befehl == "ruecktest" {
+        return programm(&wurzel, "depot_sim", &optionen);
     }
     // Das Lagebild liest nur und schreibt nur daten/lage.html: kein Netz, keine Schluessel.
     if befehl == "lage" {
