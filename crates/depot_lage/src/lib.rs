@@ -1114,3 +1114,5 @@ fn kostenschutz_punkt(inhalt: Option<&str>) -> Punkt {
         Some(Abhilfe::KostenschutzPruefen),
     )
 }
+
+pub use depot_sim::schatten;

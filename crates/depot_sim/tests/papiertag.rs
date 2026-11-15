@@ -3674,3 +3674,81 @@ fn fristverkauf_nur_bei_faelligkeit_und_ohne_haltebegruendung() -> Result<(), St
     }
     Ok(())
 }
+
+#[test]
+fn schattenzahlen_kauft_nach_positiver_reaktion_ohne_papierorder_aenderung() -> Result<(), String> {
+    use depot_sim::schatten::{Schattenstand, Variante};
+    let ort = Ort::neu()?;
+    let inhalt = depot_journal::inhalt_fuer(&[
+        (Art::Topf, "A;500000;"),
+        (Art::Auftrag, "1;A;DE0007164600;Kauf;1;10000;Umschichtung"),
+        (Art::Zustand, "1;gesendet"),
+        (Art::Zustand, "1;angenommen"),
+        (Art::Zustand, "1;ausfuehrung;1;10000;150"),
+    ]);
+    let vermerk = some(depot_journal::vermerk_fuer(&inhalt, 0), "Journalvermerk")?;
+    vorbedingung(fs::write(&ort.journal, &inhalt), "journal")?;
+    vorbedingung(
+        fs::write(ort.dir.join("journal.vermerk"), vermerk),
+        "Vermerk",
+    )?;
+    let mut j = ort.oeffnen()?;
+    let isin = vorbedingung(Isin::neu("US67066G1040"), "ISIN")?;
+    let universum = Universum::neu(vec![Instrument {
+        isin: isin.clone(),
+        name: "Zahlenprobe".into(),
+        art: InstrumentArt::Aktie,
+    }]);
+    let abruf = |datum| some(Zeitpunkt::neu(datum, 22, 0, 0), "Abruf");
+    let wissen = |datum| some(Zeitpunkt::frankfurt(datum, 8, 0, 0), "Morgenlauf");
+    quartalstermin(
+        &mut j,
+        &isin,
+        tag(9)?,
+        abruf(tag(5)?)?,
+        depot_kern::termin::VOR_BOERSENBEGINN,
+    )?;
+    for (tag_nr, preis) in [(6, 10_000), (9, 10_600), (10, 10_600), (24, 11_500)] {
+        let datum = tag(tag_nr)?;
+        quartalskurs(&mut j, &isin, datum, preis, abruf(datum)?)?;
+        if tag_nr <= 9 {
+            for kennung in depot_kern::liste::VERGLEICH_ISIN {
+                let ist = vorbedingung(Isin::neu(kennung), "Korb-ISIN")?;
+                quartalskurs(&mut j, &ist, datum, 10_000, abruf(datum)?)?;
+            }
+        }
+    }
+    let mut schatten = Schattenstand::default();
+    let vorher = j.stand().auftraege().to_vec();
+    assert_eq!(vorher.len(), 1);
+    let grenzen = depot_kern::Grenzen::standard();
+    for (tag_nr, trades) in [(10, 0), (11, 0), (25, 1)] {
+        let datum = tag(tag_nr)?;
+        let zeit = wissen(datum)?;
+        let kurse = vorbedingung(depot_sim::morgenkurse(j.stand(), &universum, zeit), "Kurse")?;
+        let lage = depot_sim::Tag {
+            datum,
+            kurse: kurse.heute,
+            ereignisse: Vec::new(),
+        };
+        schatten.fortschreiben(
+            j.stand(),
+            &grenzen,
+            &universum,
+            &lage,
+            zeit,
+            Variante::default(),
+        );
+        let [_, zahlen, _] = schatten.ergebnisse();
+        assert_eq!(zahlen.trades, trades);
+        assert_eq!(
+            Schattenstand::lies(&schatten.text()),
+            Some(schatten.clone())
+        );
+        if trades > 0 {
+            assert!(zahlen.netto.is_some_and(|netto| netto > Cent::NULL));
+        }
+    }
+    assert_eq!(j.stand().auftraege(), vorher.as_slice());
+    Ok(())
+}

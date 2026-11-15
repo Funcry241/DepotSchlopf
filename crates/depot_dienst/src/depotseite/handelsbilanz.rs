@@ -415,6 +415,27 @@ fn erwartungsabgleich(zahlen: &Handelszahlen<'_>, text: &mut String) {
     }
 }
 
+fn schattenbilanz(stand: &Stand, text: &mut String) {
+    let Some(schatten) = depot_lage::schatten::Schattenstand::letzter(stand, None) else {
+        return;
+    };
+    let ergebnisse = schatten.ergebnisse();
+    let korb = ergebnisse.last().and_then(|e| e.netto);
+    text.push_str("<h4>Schattenstrategien · nur gerechnet</h4><table><tr><th>Strategie</th><th>Ergebnis netto</th><th>Abgeschlossene Trades</th><th>Abstand zum Korb</th></tr>");
+    for e in ergebnisse {
+        let abstand = e.netto.zip(korb).and_then(|(n, k)| n.checked_sub(k));
+        let _ = write!(
+            text,
+            "<tr><th>{}</th><td>{}</td><td>{}</td><td>{}</td></tr>",
+            e.name,
+            geld(e.netto),
+            e.trades,
+            geld(abstand)
+        );
+    }
+    text.push_str("</table>");
+}
+
 fn offene_bilanz(
     offen: &[OffenePosition],
     zahlen: &Handelszahlen<'_>,
@@ -515,7 +536,9 @@ pub(super) fn abschnitt(
         bargeld(stand, zahlen.topf, ab, &vergleich, grenzen, text);
         text.push_str("</article>");
     }
-    text.push_str(r#"</div><details id="handelsbilanz-vergleich">
+    text.push_str("</div>");
+    schattenbilanz(stand, text);
+    text.push_str(r#"<details id="handelsbilanz-vergleich">
         <summary>So wird der Vergleich berechnet</summary><p>Der Vergleichskorb startet am belegten Einstiegstag
         mit dem üblichen Vergleichskapital. Die Rendite berücksichtigt Kaufgebühren und einen rechnerischen
         Verkauf zum Ausstiegstag. Mehrere Einstiegs- oder Ausstiegstage können den Vergleich offenlassen.

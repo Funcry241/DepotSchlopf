@@ -15,6 +15,7 @@ const SIGNAL_HANDELSTAGE: usize = 5;
 
 pub(crate) struct Reaktion {
     pub(crate) positiv: bool,
+    pub(crate) abstand_bp: i64,
     pub(crate) text: String,
 }
 
@@ -167,10 +168,12 @@ pub(crate) fn belege(stand: &Stand, kurse: &Kurse, wissen: Zeitpunkt) -> BTreeMa
                 "Zahlen-Enttäuschung (Bestand prüfen)".into()
             };
             let roh = mit_vorzeichen(roh);
+            let abstand_wert = abstand;
             let abstand = mit_vorzeichen(abstand);
             let seitdem = mit_vorzeichen(rendite(nachher, aktuell)?);
             Some((isin.clone(), Reaktion {
                 positiv,
+                abstand_bp: abstand_wert,
                 text: format!("{art} · {isin} · {roh} % in EUR vom Schluss am {von} bis zum Schluss am {bis} · {abstand} Prozentpunkte gegen den Korb · seitdem {seitdem} % in EUR bis {ende} · Kalender {kennung}"),
             }))
         })
