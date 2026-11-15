@@ -308,9 +308,11 @@ pub fn starter(stand: &Stand) -> Starter {
             | Art::Termine
             | Art::Nachrichten
             | Art::Einrichten => (&sammler, art.argumente()),
-            Art::Papier | Art::Vorbereiten | Art::Simulation | Art::Gemini => {
-                (&berater, art.argumente())
-            }
+            Art::Papier
+            | Art::Vorbereiten
+            | Art::Wochenrueckschau
+            | Art::Simulation
+            | Art::Gemini => (&berater, art.argumente()),
             Art::UpdatePruefen | Art::Update | Art::PapierAusgelassen | Art::Sicherung => {
                 return cargo(art, wurzel);
             }

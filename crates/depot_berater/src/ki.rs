@@ -1028,6 +1028,26 @@ impl<N: Netz> Berater for KiBerater<N> {
         self.thesenpruefung.take()
     }
 
+    fn wochenrat(
+        &mut self,
+        erlaubnis: AufrufErlaubnis,
+        frage: &str,
+    ) -> Result<Vec<String>, String> {
+        let system = "Du wertest ausschließlich deine Papierhandelsbilanz aus. Antworte mit höchstens fünf kurzen Lehren, je eine Zeile. Keine Handelsaufträge.";
+        let antwort = self
+            .fragen(&erlaubnis, system, frage, KiZweck::Wochenrueckschau)
+            .text?;
+        if self.geheim_im_gespraech(&antwort) {
+            return Err("Rückschau enthält vertrauliche Daten".into());
+        }
+        Ok(antwort
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .take(5)
+            .map(str::to_owned)
+            .collect())
+    }
+
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
         self.vorschlagen_mit_bilanz(erlaubnis, lage, &[])
     }

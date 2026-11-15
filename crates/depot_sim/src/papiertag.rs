@@ -298,6 +298,7 @@ pub fn weltbelege_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) ->
 /// Quellenbelege plus vorher fixierte Hypothesen; diese sind ausdruecklich keine Fakten.
 pub fn weltlage_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
     let mut aus = weltbelege_am(stand, handelstag, wissen_bis);
+    aus.extend(crate::wochenrueckschau::sichtbare_lehren(stand, handelstag));
     for p in stand
         .vorbereitungen()
         .iter()
