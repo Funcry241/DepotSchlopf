@@ -2022,6 +2022,62 @@ fn live_zeigt_wiederanlauf_aus_journal_und_papierkonto() -> Result<(), String> {
 }
 
 #[test]
+fn ausstiegsfrist_wird_aus_der_ausgefuehrten_order_nach_neustart_gelesen() -> Result<(), String> {
+    use depot_journal::Art::{
+        Abrechnungstag, Abschluss, Auftrag, Begruendung, Kurs, Topf, Zustand,
+    };
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let abschluss = format!("2026-11-05;1000000;{}", "a".repeat(64));
+    let kurs = format!(
+        "kursprobe;quelle;2026-11-05T17:00:00Z;{};DE0007164600;10000;2026-11-05T16:30:00Z",
+        "a".repeat(64)
+    );
+    let inhalt = depot_journal::inhalt_fuer(&[
+        (Topf, "A;500000;"),
+        (Topf, "B;500000;"),
+        (Abrechnungstag, "2026-11-05"),
+        (Kurs, &kurs),
+        (Auftrag, "1;A;DE0007164600;Kauf;1;10000;Umschichtung"),
+        (
+            Begruendung,
+            "2026-11-05;Kaufthese;1 [Zahlen] [Ausstieg 14500 1] Testthese",
+        ),
+        (
+            Zustand,
+            "1;gesendet;2026-11-05T08:00:00Z;2026-11-05T16:30:00Z",
+        ),
+        (Zustand, "1;angenommen"),
+        (Zustand, "1;ausfuehrung;1;10000;150;2026-11-05T16:30:00Z"),
+        (Abschluss, &abschluss),
+    ]);
+    let vermerk = some(depot_journal::vermerk_fuer(&inhalt, 0), "Vermerk")?;
+    fs::write(daten.join("journal.txt"), &inhalt).map_err(|e| e.to_string())?;
+    fs::write(daten.join("journal.vermerk"), &vermerk).map_err(|e| e.to_string())?;
+    depot_journal::Journal::oeffnen(&daten.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
+    for tag in [5, 6] {
+        let t = some(
+            Datum::neu(2026, 11, tag).and_then(|d| Zeitpunkt::frankfurt(d, 18, 0, 0)),
+            "Zeit",
+        )?;
+        let d = Dienst::neu(
+            wurzel.clone(),
+            TOKEN.into(),
+            echo_starter(true),
+            depot_dienst::lagerechner(Arc::new(Attrappe::default())),
+        );
+        assert!(d.schritt(t).is_none());
+        let html = get(&d, "/teil/live", t);
+        assert_eq!(html.contains("Ausstiegspläne zur Prüfung"), tag == 6);
+        if tag == 6 {
+            assert!(html.contains("Dachs · DE0007164600 · 1 von 1 Handelstagen"));
+            assert!(html.contains("Kursziel beim Kauf 145,00 €"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn verlauf_liest_streng() {
     let g = depot_dienst::verlauf::lies(
         "verlauf-v1;start;1-1;kurse;hand;1800000000\n\

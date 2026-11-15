@@ -111,6 +111,12 @@ fn frage(
         zyklus.universum,
         zyklus.tag.datum,
     );
+    let relative_staerke = crate::relative_staerke::fuer_lage(
+        buch.stand(),
+        &zyklus.tag.kurse,
+        zyklus.universum,
+        zyklus.tag.datum,
+    );
     let lage = Lage {
         anlass: None,
         datum: zyklus.tag.datum,
@@ -119,6 +125,7 @@ fn frage(
         kurse: &zyklus.tag.kurse,
         verlauf: &verlauf,
         kaufbilanz: crate::ausfuehrung::kaufbilanz(buch.stand(), topf.topf.id(), zyklus.tag.datum),
+        relative_staerke: &relative_staerke,
         positionskaeufe: &positionskaeufe,
         ereignisse: &zyklus.tag.ereignisse,
     };

@@ -695,11 +695,30 @@ pub fn inhalt(l: &Lagebild, knopf: Knopf<'_>) -> String {
 }
 
 /// Wie `inhalt`; ohne Gesamtstatus, wenn die Oberflaeche ihn selbst zeigt (mit dem Zeitplan).
+fn ausstiegsplaene(l: &Lagebild, s: &mut String) {
+    if l.ausstiegsplaene.is_empty() {
+        return;
+    }
+    s.push_str(r#"<section id="ausstiegsplaene"><h2>Ausstiegspläne zur Prüfung</h2>
+        <p>Die Frist dieser Kaufthesen ist abgelaufen. In der nächsten regulären Beratung wird geprüft, ob die Position weiter gehalten oder verkauft werden soll.</p><ul>"#);
+    for (topf, isin, plan, tage) in &l.ausstiegsplaene {
+        let _ = write!(
+            s,
+            "<li>{:?} · {isin} · {tage} von {} Handelstagen · Kursziel beim Kauf {}</li>",
+            topf.berater(),
+            plan.handelstage,
+            plan.kursziel,
+        );
+    }
+    s.push_str("</ul></section>");
+}
+
 pub fn inhalt_mit(l: &Lagebild, knopf: Knopf<'_>, mit_betrieb: bool) -> String {
     let mut s = String::with_capacity(16_384);
     if mit_betrieb {
         kopf(l, &mut s);
     }
+    ausstiegsplaene(l, &mut s);
     vorbereitung(l, knopf, &mut s);
     punkte(l, knopf, &mut s);
     tage(l, &mut s);

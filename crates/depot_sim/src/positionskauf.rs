@@ -1,7 +1,7 @@
 //! Kaufthesen kommen erst über ausgeführte Aufträge in die Folgeberatung.
 
 use depot_journal::{Ausfuehrung, Stand};
-use depot_kern::{Isin, Topf};
+use depot_kern::{Cent, Datum, Isin, Topf, Zeitpunkt};
 use depot_regelwerk::Richtung;
 
 pub const KAUFTHESE: &str = "Kaufthese";
@@ -28,7 +28,43 @@ pub struct Positionskauf {
     pub these: Option<String>,
 }
 
-pub(crate) fn lies(stand: &Stand, topf: &Topf) -> Vec<Positionskauf> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ausstiegsplan {
+    pub kursziel: Cent,
+    pub handelstage: u16,
+}
+
+impl Ausstiegsplan {
+    /// Versionsverträgliche Markierung direkt hinter dem Kaufanlass in der Kaufthese.
+    pub fn lies(these: &str) -> Option<Self> {
+        kaufanlass(these)?;
+        let (_, rest) = these.split_once("] ")?;
+        let (felder, _) = rest.strip_prefix("[Ausstieg ")?.split_once("] ")?;
+        let (ziel, frist) = felder.split_once(' ')?;
+        let kursziel = Cent(ziel.parse::<i64>().ok()?);
+        let handelstage = frist.parse::<u16>().ok()?;
+        (kursziel.0 > 0 && handelstage != 0).then_some(Self {
+            kursziel,
+            handelstage,
+        })
+    }
+}
+
+impl Positionskauf {
+    pub fn ausstiegsplan(&self) -> Option<Ausstiegsplan> {
+        Ausstiegsplan::lies(self.these.as_deref()?)
+    }
+
+    pub fn handelstage_seit_kauf(&self, bis: Datum) -> Option<u32> {
+        let kauf = self
+            .ausfuehrung
+            .kurszeit
+            .and_then(Zeitpunkt::frankfurt_tag)?;
+        crate::kursverlauf::haltedauer(&self.isin, kauf, bis)
+    }
+}
+
+pub fn lies(stand: &Stand, topf: &Topf) -> Vec<Positionskauf> {
     topf.positionen()
         .keys()
         .filter_map(|isin| {

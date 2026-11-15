@@ -225,6 +225,30 @@ fn tagesergebnis(
     Tagesergebnis::NichtBewertbar(tag)
 }
 
+pub(crate) fn faellige_ausstiegsplaene(
+    stand: &Stand,
+    heute: Datum,
+) -> Vec<(TopfId, Isin, depot_sim::Ausstiegsplan, u32)> {
+    stand
+        .toepfe()
+        .values()
+        .flat_map(|topf| {
+            depot_sim::positionskaeufe(stand, topf)
+                .into_iter()
+                .filter_map(move |kauf| {
+                    let plan = kauf.ausstiegsplan()?;
+                    let tage = kauf.handelstage_seit_kauf(heute)?;
+                    (tage >= u32::from(plan.handelstage)).then_some((
+                        topf.id(),
+                        kauf.isin,
+                        plan,
+                        tage,
+                    ))
+                })
+        })
+        .collect()
+}
+
 pub(crate) fn depot_lage(s: &Stand, werte: &[Wert]) -> DepotLage {
     let kurse = tageskurse(s, &als_universum(werte)).ok();
     let split = depot_journal::splitverdacht::aktiv(s, None);

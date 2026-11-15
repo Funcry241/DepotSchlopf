@@ -349,6 +349,7 @@ struct Markt<'a> {
     kurse: &'a Kurse,
     ereignisse: &'a [String],
     verlauf: &'a [(depot_kern::Isin, crate::kursverlauf::Verlauf)],
+    relative_staerke: &'a [(depot_kern::Isin, i64)],
 }
 
 impl Markt<'_> {
@@ -370,6 +371,7 @@ impl Markt<'_> {
             kurse: self.kurse,
             ereignisse: self.ereignisse,
             verlauf: self.verlauf,
+            relative_staerke: self.relative_staerke,
             positionskaeufe: positionen,
             anlass: Some(
                 "Manuelle Handelsvorschau auf belegten Schlusskursen. Keine Order und kein bekannter Ausführungskurs. Wer ausdrücklich alles in Bargeld halten will, gibt eine leere Zielliste an.",
@@ -431,12 +433,19 @@ pub fn lauf(
     let positionen_b = crate::positionskauf::lies(j.stand(), &b);
     let verlauf =
         crate::kursverlauf::fuer_lage(j.stand(), &kurslage.heute, universum, kurslage.handelstag);
+    let relative_staerke = crate::relative_staerke::fuer_lage(
+        j.stand(),
+        &kurslage.heute,
+        universum,
+        kurslage.handelstag,
+    );
     let markt = Markt {
         datum: fuer,
         grenzen: Grenzen::standard(),
         kurse: &kurslage.heute,
         ereignisse: &ereignisse,
         verlauf: &verlauf,
+        relative_staerke: &relative_staerke,
     };
     let lage_a = markt.lage(&j, &a, &positionen_a)?;
     let lage_b = markt.lage(&j, &b, &positionen_b)?;

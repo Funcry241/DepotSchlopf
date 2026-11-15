@@ -53,6 +53,7 @@ fn eingefrorene_vorbereitung_entspricht_auch_bei_langen_texten_der_gesendeten_au
         kurse: &kurse,
         verlauf: &[],
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
+        relative_staerke: &[],
         positionskaeufe: &[],
         ereignisse: &aus,
     };
@@ -98,6 +99,7 @@ fn vorbereitungsclient_akzeptiert_these_ohne_kurs_aber_keine_handelsziele() -> R
         kurse: &kurse,
         verlauf: &[],
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
+        relative_staerke: &[],
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -327,6 +329,7 @@ fn mit_lage<T>(f: impl FnOnce(&Lage<'_>) -> T) -> Result<T, String> {
         kurse: &kurse,
         verlauf: &[],
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
+        relative_staerke: &[],
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -450,6 +453,7 @@ fn gehalten_seit() -> Result<(), String> {
         depot_berater::frage::vorschlag_frage(
             &Lage {
                 topf: &topf,
+                relative_staerke: &[],
                 positionskaeufe: &kaufe,
                 ..*lage
             },
@@ -1571,6 +1575,7 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
             )
         })
         .collect();
+    let relative_staerke: Vec<_> = werte.iter().rev().map(|w| (w.isin.clone(), -125)).collect();
     let lage = Lage {
         anlass: None,
         datum: d,
@@ -1579,11 +1584,14 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
         kurse: &kurse,
         verlauf: &verlauf,
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
+        relative_staerke: &relative_staerke,
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
     let v = grosse_lage_vorschlag(&werte, &lang);
     let mit = depot_berater::frage::vorschlag_frage(&lage, &universum, &[]);
+    assert!(mit.contains("Rang 1, −1,2 Pp."));
+    assert!(mit.find("Rang 1,") < mit.find("Rang 2,"));
     let ohne = depot_berater::frage::vorschlag_frage(
         &Lage {
             verlauf: &[],
@@ -1802,6 +1810,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
         kurse: &kurse,
         verlauf: &[],
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
+        relative_staerke: &[],
         positionskaeufe: &[],
         ereignisse: &[],
     };

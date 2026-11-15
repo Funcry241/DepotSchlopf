@@ -231,6 +231,12 @@ pub struct Lagebild {
     pub gemini_budget: Option<GeminiBudget>,
     pub wiederanlauf: Option<wiederanlauf::Diagnose>,
     pub depot: Option<DepotLage>,
+    pub(crate) ausstiegsplaene: Vec<(
+        depot_kern::TopfId,
+        depot_kern::Isin,
+        depot_sim::Ausstiegsplan,
+        u32,
+    )>,
     /// Neueste zuerst.
     pub gespraech: Vec<Beitrag>,
     pub grenzen: Vec<Grenzwert>,
@@ -971,6 +977,22 @@ fn beratungsanlass_am(stand: &Stand, heute: Datum) -> Vec<(depot_kern::TopfId, S
         .collect()
 }
 
+fn ausstiegsplaene(
+    journal: Zugang<'_>,
+    heute: Option<Datum>,
+) -> Vec<(
+    depot_kern::TopfId,
+    depot_kern::Isin,
+    depot_sim::Ausstiegsplan,
+    u32,
+)> {
+    if let (Zugang::Offen(stand), Some(heute)) = (journal, heute) {
+        depot::faellige_ausstiegsplaene(stand, heute)
+    } else {
+        Vec::new()
+    }
+}
+
 /// Rechnet das Lagebild.
 pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
     let mut punkte = vec![journal_punkt(u.journal)];
@@ -1063,6 +1085,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         gemini_budget: None,
         wiederanlauf: None,
         depot: depot_lage,
+        ausstiegsplaene: ausstiegsplaene(u.journal, heute),
         gespraech,
         beratungsanlaesse,
         grenzen: grenzwerte(),
