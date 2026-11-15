@@ -29,31 +29,44 @@ fn prozentpunkte(bp: i64) -> String {
     prozent(bp).replace(" %", "")
 }
 
-fn zahlen(daten: &[&Verkauf], korbrenditen: &BTreeMap<u64, i64>, text: &mut String) {
-    let summe = bilanz(daten.iter().copied());
-    let n = summe.map_or(0, |b| b.abgeschlossen);
-    let _ = write!(
-        text,
-        "<td>{n} von {}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>",
-        daten.len(),
-        geld(summe.map(|b| b.netto)),
-        quote(summe.and_then(Bilanz::trefferquote)),
-        geld(summe.and_then(|b| Bilanz::durchschnitt(b.gewinn_summe, b.gewinne))),
-        geld(summe.and_then(|b| Bilanz::durchschnitt(b.verlust_summe, b.verluste))),
-    );
+#[derive(Clone, Copy)]
+struct Abstand {
+    mittel: Option<i64>,
+    anzahl: usize,
+}
+
+fn abstand(daten: &[&Verkauf], korbrenditen: &BTreeMap<u64, i64>) -> Abstand {
     let differenzen: Vec<_> = daten
         .iter()
         .filter_map(|v| rendite(v)?.checked_sub(*korbrenditen.get(&v.nr)?))
         .collect();
     let mittel = differenzen
         .iter()
-        .try_fold(0_i64, |s, d| s.checked_add(*d))
-        .and_then(|s| s.checked_div(i64::try_from(differenzen.len()).ok()?));
+        .try_fold(0_i128, |s, d| s.checked_add(i128::from(*d)))
+        .and_then(|s| s.checked_div(i128::try_from(differenzen.len()).ok()?))
+        .and_then(|s| i64::try_from(s).ok());
+    Abstand {
+        mittel,
+        anzahl: differenzen.len(),
+    }
+}
+
+fn zahlen(gesamt: usize, summe: Option<Bilanz>, abstand: Abstand, text: &mut String) {
+    let n = summe.map_or(0, |b| b.abgeschlossen);
+    let _ = write!(
+        text,
+        "<td>{n} von {}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>",
+        gesamt,
+        geld(summe.map(|b| b.netto)),
+        quote(summe.and_then(Bilanz::trefferquote)),
+        geld(summe.and_then(|b| Bilanz::durchschnitt(b.gewinn_summe, b.gewinne))),
+        geld(summe.and_then(|b| Bilanz::durchschnitt(b.verlust_summe, b.verluste))),
+    );
     let _ = write!(
         text,
         "<td>{} ({})</td>",
-        mittel.map_or_else(|| "–".into(), prozentpunkte),
-        differenzen.len()
+        abstand.mittel.map_or_else(|| "–".into(), prozentpunkte),
+        abstand.anzahl
     );
 }
 
@@ -77,7 +90,7 @@ fn details(
     if verkaeufe.is_empty() {
         return;
     }
-    text.push_str("<details><summary>Letzte abgeschlossene Verkaufsaufträge</summary><div class=\"breit\"><table>        <tr><th>Order</th><th>Wert</th><th>Anlass</th><th>Einstand inkl. Kaufgebühren</th>        <th>Einstieg</th><th>Letzte Ausführung</th><th>Kalendertage</th><th>Verkaufserlös netto</th><th>Ergebnis netto</th>        <th>Rendite netto</th><th>Korb netto</th><th>Differenz in Prozentpunkten</th></tr>");
+    text.push_str("<h5>Letzte abgeschlossene Verkaufsaufträge</h5><div class=\"breit\"><table>        <tr><th>Order</th><th>Wert</th><th>Anlass</th><th>Einstand inkl. Kaufgebühren</th>        <th>Einstieg</th><th>Letzte Ausführung</th><th>Kalendertage</th><th>Verkaufserlös netto</th><th>Ergebnis netto</th>        <th>Rendite netto</th><th>Korb netto</th><th>Differenz in Prozentpunkten</th></tr>");
     for v in verkaeufe.iter().rev().take(30) {
         let netto = rendite(v);
         let korb = korbrenditen.get(&v.nr).copied();
@@ -103,7 +116,7 @@ fn details(
             differenz.map_or_else(|| "–".into(), prozentpunkte),
         );
     }
-    text.push_str("</table></div></details>");
+    text.push_str("</table></div>");
 }
 
 fn bargeldphasen(stand: &Stand, id: TopfId, ab: Option<Datum>) -> Vec<(Datum, Datum)> {
@@ -154,50 +167,234 @@ fn bargeld(
     text.push_str("</ul></details>");
 }
 
+struct Handelszahlen<'a> {
+    topf: TopfId,
+    verkaeufe: Vec<&'a Verkauf>,
+    korbrenditen: BTreeMap<u64, i64>,
+    bilanz: Option<Bilanz>,
+    abstand: Abstand,
+}
+
+impl<'a> Handelszahlen<'a> {
+    fn neu(
+        topf: TopfId,
+        verkaeufe: &'a [Verkauf],
+        vergleich: &Handelsvergleich,
+        ab: Option<Datum>,
+    ) -> Self {
+        let mut daten: Vec<_> = verkaeufe
+            .iter()
+            .filter(|v| v.topf == topf && ab.is_none_or(|ab| v.tag.is_some_and(|tag| tag >= ab)))
+            .collect();
+        daten.sort_by_key(|v| (v.tag, v.nr));
+        let korbrenditen = daten
+            .iter()
+            .filter_map(|v| {
+                let (von, bis) = v.einstieg.zip(v.ausstieg)?;
+                Some((v.nr, vergleich.rendite(von, bis)?))
+            })
+            .collect();
+        Self {
+            topf,
+            bilanz: bilanz(daten.iter().copied()),
+            abstand: abstand(&daten, &korbrenditen),
+            verkaeufe: daten,
+            korbrenditen,
+        }
+    }
+}
+
+fn balkenlaenge(bp: i64, skala: u64) -> String {
+    let zehntel = u128::from(bp.unsigned_abs())
+        .saturating_mul(500)
+        .checked_div(u128::from(skala))
+        .unwrap_or(0)
+        .min(500);
+    format!("{}.{:01}%", zehntel.div_euclid(10), zehntel.rem_euclid(10))
+}
+
+fn korbabstand(abstand: Abstand, skala: u64, text: &mut String) {
+    text.push_str(
+        r#"<div class="handelskarte-vergleich"><span>Ø Abstand zum Vergleichskorb</span>"#,
+    );
+    if let Some(bp) = abstand.mittel {
+        let richtung = match bp.cmp(&0) {
+            std::cmp::Ordering::Greater => "plus",
+            std::cmp::Ordering::Less => "minus",
+            std::cmp::Ordering::Equal => "null",
+        };
+        let _ = write!(
+            text,
+            r#"<strong>{} Prozentpunkte</strong><div class="handelskarte-skala" aria-hidden="true">
+            <span data-richtung="{richtung}" style="--laenge:{}"></span></div><small>{} {}</small>"#,
+            prozentpunkte(bp),
+            balkenlaenge(bp, skala),
+            abstand.anzahl,
+            if abstand.anzahl == 1 {
+                "Verkauf im Vergleich"
+            } else {
+                "Verkäufe im Vergleich"
+            },
+        );
+    } else {
+        text.push_str(
+            r#"<strong class="leise">Nicht belegt</strong><small>0 auswertbare Vergleiche</small>"#,
+        );
+    }
+    text.push_str("</div>");
+}
+
+fn kaufanlaesse(zahlen_je_topf: &Handelszahlen<'_>, werte: &[Wert], id: &str, text: &mut String) {
+    let daten = &zahlen_je_topf.verkaeufe;
+    if daten.is_empty() {
+        return;
+    }
+    let _ = write!(
+        text,
+        r#"<details id="handelsdetails-{id}"><summary>Kaufanlässe und Verkäufe</summary>
+        <div class="breit"><table><tr><th>Kaufanlass</th><th>Verkäufe auswertbar</th>
+        <th>Ergebnis netto</th><th>Trefferquote</th><th>Ø Gewinn</th><th>Ø Verlust</th>
+        <th>Ø Abstand zum Korb in Prozentpunkten (Anzahl)</th></tr><tr><th>Alle</th>"#
+    );
+    zahlen(
+        daten.len(),
+        zahlen_je_topf.bilanz,
+        zahlen_je_topf.abstand,
+        text,
+    );
+    text.push_str("</tr>");
+    let anlaesse: BTreeSet<_> = daten.iter().map(|v| v.anlass).collect();
+    for anlass in anlaesse {
+        let gruppe: Vec<_> = daten
+            .iter()
+            .copied()
+            .filter(|v| v.anlass == anlass)
+            .collect();
+        let _ = write!(
+            text,
+            "<tr><th>{}</th>",
+            anlass.unwrap_or("nicht zugeordnet")
+        );
+        zahlen(
+            gruppe.len(),
+            bilanz(gruppe.iter().copied()),
+            abstand(&gruppe, &zahlen_je_topf.korbrenditen),
+            text,
+        );
+        text.push_str("</tr>");
+    }
+    text.push_str("</table></div>");
+    details(daten, werte, &zahlen_je_topf.korbrenditen, text);
+    text.push_str("</details>");
+}
+
+fn karte(zahlen: &Handelszahlen<'_>, skala: u64, text: &mut String) -> &'static str {
+    let (id, figur) = match zahlen.topf {
+        TopfId::A => ("dachs", crate::schmuck::DACHS_FIGUR),
+        TopfId::B => ("maus", crate::schmuck::MAUS_FIGUR),
+    };
+    let _ = write!(
+        text,
+        r#"<article class="handelskarte" data-berater="{id}" aria-labelledby="handelskarte-{id}">
+        <header><span class="handelskarte-figur">{figur}</span><h4 id="handelskarte-{id}">{}</h4></header>
+        <div class="handelskarte-netto"><span>Realisiert nach Handelsgebühren</span>"#,
+        topf(zahlen.topf)
+    );
+    if let Some(bilanz) = zahlen.bilanz {
+        let klasse = match bilanz.netto.0.cmp(&0) {
+            std::cmp::Ordering::Greater => "gut",
+            std::cmp::Ordering::Less => "halt",
+            std::cmp::Ordering::Equal => "",
+        };
+        let _ = write!(
+            text,
+            r#"<strong class="{klasse}">{}</strong><small>{} von {} Verkäufen auswertbar</small>"#,
+            geld(Some(bilanz.netto)),
+            bilanz.abgeschlossen,
+            zahlen.verkaeufe.len()
+        );
+    } else {
+        text.push_str(r#"<strong class="leise">–</strong>"#);
+        if zahlen.verkaeufe.is_empty() {
+            text.push_str("<small>Keine abgeschlossenen Verkäufe im Zeitraum.</small>");
+        } else {
+            let _ = write!(
+                text,
+                "<small>0 von {} Verkäufen auswertbar</small>",
+                zahlen.verkaeufe.len()
+            );
+        }
+    }
+    text.push_str("</div>");
+    korbabstand(zahlen.abstand, skala, text);
+    id
+}
+
 pub(super) fn abschnitt(stand: &Stand, werte: &[Wert], ab: Option<Datum>, text: &mut String) {
     let verkaeufe = verkaeufe(stand);
     let vergleich = Handelsvergleich::neu(stand);
-    text.push_str("<section id=\"handelsbilanz\"><h3>Handelsbilanz</h3>        <p>Zeitraum wie im Depotverlauf. Realisierte Ergebnisse nach gebuchten Handelsgebühren.         Spread und KI-Kosten sind hier nicht eingerechnet.</p>        <p>Der Vergleichskorb startet am belegten Einstiegstag mit dem üblichen Vergleichskapital.         Seine Rendite berücksichtigt Kaufgebühren und einen rechnerischen Verkauf zum Ausstiegstag.         Mehrere Einstiegs- oder Ausstiegstage können den Vergleich offenlassen.</p>");
-    for id in [TopfId::A, TopfId::B] {
-        let mut daten: Vec<_> = verkaeufe
-            .iter()
-            .filter(|v| v.topf == id && ab.is_none_or(|ab| v.tag.is_some_and(|tag| tag >= ab)))
-            .collect();
-        daten.sort_by_key(|v| (v.tag, v.nr));
-        let _ = write!(text, "<h4>{}</h4>", topf(id));
-        if daten.is_empty() {
-            text.push_str("<p>Keine abgeschlossenen Verkäufe im Zeitraum.</p>");
-        } else {
-            text.push_str("<div class=\"breit\"><table><tr><th>Kaufanlass</th><th>Verkäufe auswertbar</th>                <th>Ergebnis netto</th><th>Trefferquote</th><th>Ø Gewinn</th><th>Ø Verlust</th>\
-                <th>Ø Abstand zum Korb in Prozentpunkten (Anzahl)</th></tr>                <tr><th>Alle</th>");
-            let korbrenditen = daten
-                .iter()
-                .filter_map(|v| {
-                    let (von, bis) = v.einstieg.zip(v.ausstieg)?;
-                    Some((v.nr, vergleich.rendite(von, bis)?))
-                })
-                .collect();
-            zahlen(&daten, &korbrenditen, text);
-            text.push_str("</tr>");
-            let anlaesse: BTreeSet<_> = daten.iter().map(|v| v.anlass).collect();
-            for anlass in anlaesse {
-                let gruppe: Vec<_> = daten
-                    .iter()
-                    .copied()
-                    .filter(|v| v.anlass == anlass)
-                    .collect();
-                let _ = write!(
-                    text,
-                    "<tr><th>{}</th>",
-                    anlass.unwrap_or("nicht zugeordnet")
-                );
-                zahlen(&gruppe, &korbrenditen, text);
-                text.push_str("</tr>");
-            }
-            text.push_str("</table></div>");
-            details(&daten, werte, &korbrenditen, text);
-        }
-        bargeld(stand, id, ab, &vergleich, text);
+    let toepfe =
+        [TopfId::A, TopfId::B].map(|id| Handelszahlen::neu(id, &verkaeufe, &vergleich, ab));
+    let skala = toepfe
+        .iter()
+        .filter_map(|t| t.abstand.mittel)
+        .map(i64::unsigned_abs)
+        .max()
+        .unwrap_or(0)
+        .max(500)
+        .div_ceil(500)
+        .saturating_mul(500);
+    text.push_str(r#"<section id="handelsbilanz"><h3>Handelsbilanz</h3>
+        <p class="leise">Für den gewählten Depotzeitraum · Spread und KI-Kosten sind hier nicht eingerechnet.</p>
+        <div class="handelskarten">"#);
+    for zahlen in &toepfe {
+        let id = karte(zahlen, skala, text);
+        kaufanlaesse(zahlen, werte, id, text);
+        bargeld(stand, zahlen.topf, ab, &vergleich, text);
+        text.push_str("</article>");
     }
-    text.push_str("</section>");
+    text.push_str(r#"</div><details id="handelsbilanz-vergleich">
+        <summary>So wird der Vergleich berechnet</summary><p>Der Vergleichskorb startet am belegten Einstiegstag
+        mit dem üblichen Vergleichskapital. Die Rendite berücksichtigt Kaufgebühren und einen rechnerischen
+        Verkauf zum Ausstiegstag. Mehrere Einstiegs- oder Ausstiegstage können den Vergleich offenlassen.
+        Beide Balken nutzen dieselbe Skala. Die Mittellinie steht für 0 Prozentpunkte.</p></details></section>"#);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vergleichsbalken_zeigt_richtung_stichprobe_und_belegstatus() {
+        for (bp, richtung, anzahl, beschriftung) in [
+            (250, "plus", 2, "2 Verkäufe im Vergleich"),
+            (-250, "minus", 1, "1 Verkauf im Vergleich"),
+            (0, "null", 1, "1 Verkauf im Vergleich"),
+        ] {
+            let mut html = String::new();
+            korbabstand(
+                Abstand {
+                    mittel: Some(bp),
+                    anzahl,
+                },
+                500,
+                &mut html,
+            );
+            assert!(html.contains(&format!("data-richtung=\"{richtung}\"")));
+            assert!(html.contains(beschriftung));
+            let breite = if bp == 0 { "0.0%" } else { "25.0%" };
+            assert!(html.contains(&format!("--laenge:{breite}")));
+        }
+        let mut html = String::new();
+        korbabstand(
+            Abstand {
+                mittel: None,
+                anzahl: 0,
+            },
+            500,
+            &mut html,
+        );
+        assert!(html.contains("Nicht belegt"));
+        assert!(!html.contains("handelskarte-skala"));
+    }
 }

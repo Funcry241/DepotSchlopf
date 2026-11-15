@@ -4523,8 +4523,9 @@ fn depot_ohne_technik() -> Result<(), String> {
     let (_, handelsbilanz) = html
         .split_once("id=\"handelsbilanz\"")
         .ok_or("Handelsbilanz")?;
-    assert!(handelsbilanz.contains("<h4>Dachs</h4>"));
-    assert!(handelsbilanz.contains("<h4>Maus</h4>"));
+    assert!(handelsbilanz.contains("<h4 id=\"handelskarte-dachs\">Dachs</h4>"));
+    assert!(handelsbilanz.contains("<h4 id=\"handelskarte-maus\">Maus</h4>"));
+    assert!(!handelsbilanz.contains("class=\"handelskarte-skala\""));
     assert!(handelsbilanz.contains("Keine abgeschlossenen Verkäufe im Zeitraum."));
 
     for roh in [

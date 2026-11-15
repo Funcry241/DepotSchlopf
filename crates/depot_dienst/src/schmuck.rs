@@ -42,6 +42,27 @@ pub(crate) const STIL: &str = "
 }
 @media(max-width:600px){.kopffigur svg{width:28px;height:28px}.kopffigur{min-width:38px}}
 @media(max-width:460px){.kopffiguren{display:none}}
+.handelskarten{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:16px;align-items:start;margin-block:16px}
+.handelskarte{--figur-akzent:#877968;min-width:0;padding:clamp(14px,2.2vw,22px);
+  border:1px solid var(--linie);border-radius:14px;background:var(--flaeche);
+  background:color-mix(in srgb,var(--figur-akzent) 8%,var(--flaeche))}
+.handelskarte[data-berater=maus]{--figur-akzent:#a38aab}
+.handelskarte header{display:flex;align-items:center;gap:12px}
+.handelskarte h4{margin:0;font-size:1.125rem}
+.handelskarte-figur{display:grid;place-items:center;width:46px;height:46px;border-radius:50%;
+  background:color-mix(in srgb,var(--figur-akzent) 20%,var(--grund));color:var(--text)}
+.handelskarte-figur svg{width:32px;height:32px;fill:currentColor}
+.handelskarte-netto,.handelskarte-vergleich{display:grid;gap:3px;margin-top:14px}
+.handelskarte-netto>span,.handelskarte-vergleich>span,.handelskarte small{color:var(--leise)}
+.handelskarte-netto strong{font-size:clamp(1.45rem,3vw,2rem);line-height:1.2;font-variant-numeric:tabular-nums}
+.handelskarte-vergleich{border-top:1px solid var(--linie);padding-top:12px;min-height:6.5em}
+.handelskarte-skala{position:relative;height:8px;margin-block:6px;background:var(--grund);border-radius:8px}
+.handelskarte-skala::after{content:'';position:absolute;left:50%;top:-3px;bottom:-3px;
+  width:1px;background:var(--leise);transform:translateX(-50%)}
+.handelskarte-skala span{position:absolute;height:100%;width:var(--laenge);border-radius:8px}
+.handelskarte-skala [data-richtung=plus]{left:50%;background:var(--gut)}
+.handelskarte-skala [data-richtung=minus]{right:50%;background:var(--halt)}
+.handelskarte details{margin-top:12px}
 [data-wert]{font-variant-numeric:tabular-nums}
 [data-wert].steigt{--wertfarbe:var(--gut)}
 [data-wert].faellt{--wertfarbe:var(--halt)}
@@ -74,27 +95,35 @@ mod tests {
     }
 }
 
-pub(crate) const FIGUREN: &str = r#"<span id="kopffiguren" class="kopffiguren" data-denkt="niemand" data-otter="ruht">
-<span class="kopffigur berater" tabindex="0"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+pub(crate) const DACHS_FIGUR: &str = r#"<svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
 <path class="dachs-fell" d="M4 16 5 8 12 10Q18 5 24 10L31 8 32 16Q34 27 18 32 2 27 4 16"/>
 <path class="figur-hell" d="M16 10 9 15 12 27 18 31 24 27 27 15 20 10 18 18Z"/>
 <path d="M8 15 12 13 16 23 11 23Zm20 0-4-2-4 10 5 0ZM15 26h6l-3 3Z"/>
 <circle cx="12" cy="18" r="1" class="figur-hell"/><circle cx="24" cy="18" r="1" class="figur-hell"/>
 <path class="helfer-stern" d="m30 2 1.2 2.8 3 .2-2.3 2 .8 3-2.7-1.5L27.3 10l.8-3-2.3-2 3-.2Z"/>
-</svg><span>Dachs</span><span class="kopfblase" id="kopf-dachs">Heute noch nichts gesagt.</span></span>
-<span class="kopffigur berater" tabindex="0"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+</svg>"#;
+
+pub(crate) const MAUS_FIGUR: &str = r#"<svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
 <circle class="maus-fell" cx="8" cy="11" r="7"/><circle class="maus-fell" cx="28" cy="11" r="7"/>
 <circle class="figur-hell" cx="8" cy="11" r="4"/><circle class="figur-hell" cx="28" cy="11" r="4"/>
 <path class="maus-fell" d="M5 20Q5 11 18 11 31 11 31 20 31 26 18 33 5 26 5 20"/>
 <circle cx="12" cy="19" r="1.7"/><circle cx="24" cy="19" r="1.7"/><ellipse cx="18" cy="28" rx="3" ry="2"/>
-</svg><span>Maus</span><span class="kopfblase" id="kopf-maus">Heute noch nichts gesagt.</span></span>
+</svg>"#;
+
+pub(crate) fn figuren() -> String {
+    format!(
+        r#"<span id="kopffiguren" class="kopffiguren" data-denkt="niemand" data-otter="ruht">
+<span class="kopffigur berater" tabindex="0">{DACHS_FIGUR}<span>Dachs</span><span class="kopfblase" id="kopf-dachs">Heute noch nichts gesagt.</span></span>
+<span class="kopffigur berater" tabindex="0">{MAUS_FIGUR}<span>Maus</span><span class="kopfblase" id="kopf-maus">Heute noch nichts gesagt.</span></span>
 <span class="kopffigur" tabindex="0"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
 <circle class="otter-fell" cx="7" cy="11" r="4.5"/><circle class="otter-fell" cx="27" cy="11" r="4.5"/>
 <ellipse class="otter-fell" cx="17" cy="20" rx="13" ry="14"/>
 <ellipse class="figur-hell" cx="17" cy="26" rx="10" ry="6"/>
 <circle cx="11" cy="18" r="1.6"/><circle cx="23" cy="18" r="1.6"/><ellipse cx="17" cy="24" rx="3" ry="2"/>
 <path class="otter-pfote otter-fell" d="M24 31q0-4 4-8l1-10q1-3 4-2l1 11q0 9-10 9"/>
-</svg><span>Otter</span><span class="kopfblase" id="kopf-otter">Ich warte.</span></span></span>"#;
+</svg><span>Otter</span><span class="kopfblase" id="kopf-otter">Ich warte.</span></span></span>"#
+    )
+}
 
 pub(crate) fn aussagen(
     z: &crate::werkbank::Zustand,
@@ -200,10 +229,11 @@ mod figuren_tests {
         ] {
             assert_eq!(denkt(art), zustand);
         }
+        let figuren = figuren();
         for verboten in ["href", "url(", "http", "data:"] {
-            assert!(!FIGUREN.contains(verboten));
+            assert!(!figuren.contains(verboten));
         }
-        assert!(FIGUREN.len() < 6144);
+        assert!(figuren.len() < 6144);
     }
 
     #[test]

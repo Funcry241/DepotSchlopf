@@ -609,7 +609,7 @@ pub fn rahmen(
     let otter_stil = if hier == "/" { otter::STIL } else { "" };
     let herz = crate::schmuck::HERZ;
     let herz_stil = crate::schmuck::STIL;
-    let figuren = crate::schmuck::FIGUREN;
+    let figuren = crate::schmuck::figuren();
     let _ = write!(
         s,
         "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
