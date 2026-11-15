@@ -540,6 +540,10 @@ fn hinweis_gruende(z: &Zustand, jetzt: Zeitpunkt) -> Vec<String> {
 /// # Errors
 /// Jeder Schreibfehler.
 pub fn schreibe_ganz(pfad: &Path, text: &str) -> Result<(), String> {
+    schreibe_bytes(pfad, text.as_bytes())
+}
+
+pub(crate) fn schreibe_bytes(pfad: &Path, inhalt: &[u8]) -> Result<(), String> {
     if let Some(o) = pfad.parent() {
         fs::create_dir_all(o).map_err(|e| format!("{}: {e}", o.display()))?;
     }
@@ -550,7 +554,7 @@ pub fn schreibe_ganz(pfad: &Path, text: &str) -> Result<(), String> {
         .truncate(true)
         .open(&neben)
         .and_then(|mut f| {
-            f.write_all(text.as_bytes())?;
+            f.write_all(inhalt)?;
             f.sync_all()
         })
         .map_err(|e| format!("{}: {e}", neben.display()))?;
@@ -606,6 +610,31 @@ fn lade_protokoll(wurzel: &Path, a: &mut Auftrag, schutz: &crate::protokoll::Sch
     }
 }
 
+fn lade_verlauf(
+    wurzel: &Path,
+    protokoll_schutz: &crate::protokoll::Schutz,
+) -> (VecDeque<Auftrag>, Option<String>) {
+    let (mut verlauf, verlauf_hinweis): (VecDeque<Auftrag>, _) = match crate::verlauf::laden(wurzel) {
+        Ok(g) => (
+            g.auftraege.into_iter().collect(),
+            (g.unlesbar > 0).then(|| {
+                format!(
+                    "{} Zeilen in daten/dienst_verlauf.txt unlesbar. Der ursprüngliche Verlauf wurde vor der Bereinigung gesichert.",
+                    g.unlesbar
+                )
+            }),
+        ),
+        Err(e) => (
+            VecDeque::new(),
+            Some(format!("Verlauf früherer Starts: {e}")),
+        ),
+    };
+    for a in &mut verlauf {
+        lade_protokoll(wurzel, a, protokoll_schutz);
+    }
+    (verlauf, verlauf_hinweis)
+}
+
 impl Dienst {
     /// Laedt Zeitplan und Erledigt aus `daten/`. Ein unlesbarer Zeitplan schaltet den Zeitplan
     /// aus und wird gemeldet; nichts startet dann von selbst.
@@ -647,26 +676,13 @@ impl Dienst {
         };
         let start: String = crate::neues_token().chars().take(16).collect();
         let protokoll_schutz = crate::protokoll::Schutz::laden();
-        let (mut verlauf, verlauf_hinweis): (VecDeque<Auftrag>, _) = match crate::verlauf::laden(
-            &wurzel,
-        ) {
-            Ok(g) => (
-                g.auftraege.into_iter().collect(),
-                (g.unlesbar > 0).then(|| {
-                    format!(
-                        "{} Zeilen in daten/dienst_verlauf.txt unlesbar; sie fehlen im Verlauf.",
-                        g.unlesbar
-                    )
-                }),
-            ),
-            Err(e) => (
-                VecDeque::new(),
-                Some(format!("Verlauf früherer Starts: {e}")),
-            ),
-        };
-        for a in &mut verlauf {
-            lade_protokoll(&wurzel, a, &protokoll_schutz);
-        }
+        let (verlauf, verlauf_hinweis) = lade_verlauf(&wurzel, &protokoll_schutz);
+        let naechste_nr = verlauf
+            .iter()
+            .map(|a| a.nr)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
         let (update_ergebnisse, mut update_meldung) = match crate::aktualisierung::laden(&wurzel) {
             Ok(e) => {
                 let m = e.last().map(crate::aktualisierung::Ergebnis::meldung);
@@ -686,7 +702,7 @@ impl Dienst {
             start,
             version: None,
             zustand: Mutex::new(Zustand {
-                naechste_nr: 1,
+                naechste_nr,
                 laufend: None,
                 warteschlange: VecDeque::new(),
                 verlauf,

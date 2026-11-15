@@ -1906,6 +1906,50 @@ fn verlauf_uebersteht_neustart_und_zeigt_unterbrochenes() -> Result<(), String> 
 }
 
 #[test]
+fn wiederanlauf_erhaelt_verlauf_vor_einer_abgerissenen_zeile() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let t = donnerstag(12, 0)?;
+    let alt = format!("{}-7", t.sekunden());
+    let datei = depot_dienst::verlauf::pfad(&wurzel);
+    fs::create_dir_all(wurzel.join("daten")).map_err(|e| e.to_string())?;
+    let start = format!("verlauf-v1;start;{alt};termine;hand;{}\n", t.sekunden());
+    let mut original = start.as_bytes().to_vec();
+    original.extend_from_slice(b"verlauf-v1;ende;\xff");
+    fs::write(&datei, &original).map_err(|e| e.to_string())?;
+
+    assert!(depot_dienst::verlauf::vermerke(&wurzel, start.trim_end()).is_err());
+    assert_eq!(fs::read(&datei).map_err(|e| e.to_string())?, original);
+
+    let d = dienst(wurzel.clone(), true);
+    {
+        let z = d.sperre();
+        let lauf = some(z.verlauf.front(), "Alter Lauf fehlt")?;
+        assert_eq!(lauf.kennung, alt);
+        assert_eq!(lauf.frueher, Frueher::Unterbrochen);
+        assert!(
+            z.verlauf_hinweis
+                .as_deref()
+                .is_some_and(|h| h.contains("gesichert"))
+        );
+    }
+    let hash = depot_kern::abdruck::sha256_hex(&original);
+    let sicherung = datei.with_file_name(format!("dienst_verlauf-{hash}.quarantaene"));
+    assert_eq!(fs::read(sicherung).map_err(|e| e.to_string())?, original);
+
+    d.einreihen(Art::Kurse, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(t), "Auftrag nach dem Neustart")?;
+    assert_eq!(nr, 8);
+    d.verfolge(nr, kind, || donnerstag(12, 0).ok());
+    drop(d);
+    let d = dienst(wurzel, true);
+    let z = d.sperre();
+    assert_eq!(z.verlauf.len(), 2);
+    assert_eq!(z.naechste_nr, 9);
+    assert_eq!(z.verlauf.front().map(|a| a.frueher), Some(Frueher::Beendet));
+    Ok(())
+}
+
+#[test]
 fn verlauf_liest_streng() {
     let g = depot_dienst::verlauf::lies(
         "verlauf-v1;start;1-1;kurse;hand;1800000000\n\

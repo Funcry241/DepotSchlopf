@@ -10,13 +10,13 @@
 //! `verlauf-v1;start;<kennung>;<art>;<anlass>;<start>` und
 //! `verlauf-v1;ende;<kennung>;<art>;<anlass>;<start>;<ende|->;<ok|fehler>`.
 
-use std::fs::OpenOptions;
-use std::io::Write as _;
+use std::fs::{self, OpenOptions};
+use std::io::{ErrorKind, Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
 
 use depot_kern::Zeitpunkt;
 
-use crate::werkbank::{Anlass, Art, Auftrag, Frueher, VERLAUF, lies_falls_da, schreibe_ganz};
+use crate::werkbank::{Anlass, Art, Auftrag, Frueher, VERLAUF, schreibe_bytes, schreibe_ganz};
 
 const KOPF: &str = "verlauf-v1";
 
@@ -141,12 +141,12 @@ pub struct Geladen {
 
 /// Liest den Verlauf. Ein Start ohne Ende wird als unterbrochen gezeigt.
 pub fn lies(text: &str) -> Geladen {
-    lies_bis(text, VERLAUF)
+    lies_bis(text.as_bytes(), VERLAUF)
 }
 
 /// Liest den gewählten Zeitraum ohne die Kürzung der Live-Ansicht und ohne zu schreiben.
 pub(crate) fn lies_zeitraum(text: &str, von: depot_kern::Datum, bis: depot_kern::Datum) -> Geladen {
-    let mut gelesen = lies_bis(text, usize::MAX);
+    let mut gelesen = lies_bis(text.as_bytes(), usize::MAX);
     gelesen.auftraege.retain(|lauf| {
         lauf.start
             .in_frankfurt()
@@ -159,12 +159,19 @@ pub(crate) fn lies_zeitraum(text: &str, von: depot_kern::Datum, bis: depot_kern:
     gelesen
 }
 
-fn lies_bis(text: &str, max: usize) -> Geladen {
+fn lies_bis(text: &[u8], max: usize) -> Geladen {
     let mut zeilen: Vec<Zeile> = Vec::new();
     let mut positionen = std::collections::BTreeMap::new();
     let mut unlesbar = 0_usize;
-    for z in text.lines().filter(|z| !z.is_empty()) {
-        match lies_zeile(z) {
+    for z in text.split_inclusive(|&b| b == b'\n') {
+        let zeile = z
+            .strip_suffix(b"\n")
+            .and_then(|z| std::str::from_utf8(z).ok());
+        let zeile = zeile.map(|z| z.strip_suffix('\r').unwrap_or(z));
+        if zeile == Some("") {
+            continue;
+        }
+        match zeile.and_then(lies_zeile) {
             Some(neu) => match positionen
                 .get(&neu.kennung)
                 .and_then(|&i| zeilen.get_mut(i))
@@ -201,7 +208,7 @@ fn lies_bis(text: &str, max: usize) -> Geladen {
                 ),
             };
             Auftrag {
-                nr: 0,
+                nr: z.kennung.rsplit_once('-').and_then(|(_, nr)| nr.parse().ok()).unwrap_or(0),
                 kennung: z.kennung,
                 art: z.art,
                 anlass: z.anlass,
@@ -224,10 +231,17 @@ fn lies_bis(text: &str, max: usize) -> Geladen {
 /// Die letzten 20 Aufträge bleiben auch nach längerer Betriebspause verfügbar.
 pub fn laden(wurzel: &Path) -> Result<Geladen, String> {
     let p = pfad(wurzel);
-    let Some(text) = lies_falls_da(&p)? else {
-        return Ok(Geladen::default());
+    let text = match fs::read(&p) {
+        Ok(text) => text,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Geladen::default()),
+        Err(e) => return Err(format!("{}: {e}", p.display())),
     };
     let mut g = lies_bis(&text, usize::MAX);
+    if g.unlesbar != 0 {
+        let hash = depot_kern::abdruck::sha256_hex(&text);
+        let sicherung = p.with_file_name(format!("dienst_verlauf-{hash}.quarantaene"));
+        schreibe_bytes(&sicherung, &text)?;
+    }
     let tag = |a: &Auftrag| a.ende.unwrap_or(a.start).frankfurt_tag();
     let grenze = g
         .auftraege
@@ -266,9 +280,20 @@ pub fn vermerke(wurzel: &Path, zeile: &str) -> Result<(), String> {
     let p = pfad(wurzel);
     OpenOptions::new()
         .create(true)
+        .read(true)
         .append(true)
         .open(&p)
         .and_then(|mut f| {
+            if f.metadata()?.len() != 0 {
+                f.seek(SeekFrom::End(-1))?;
+                let mut ende = [0];
+                f.read_exact(&mut ende)?;
+                if ende != *b"\n" {
+                    return Err(std::io::Error::other(
+                        "Letzte Verlaufszeile unvollständig. Starte DepotSchlopf neu, um den Verlauf zu sichern und zu bereinigen.",
+                    ));
+                }
+            }
             writeln!(f, "{zeile}")?;
             f.sync_all()
         })
