@@ -1,14 +1,8 @@
 klasse: Funktion
-zweck: Belegte Kursreaktionen nach Quartalszahlen in Beratung und Handelsbilanz erfassen
+zweck: Modellierten Spread in die Kostenhürde einrechnen
 pfade:
 crates/depot_berater/src/frage.rs
-crates/depot_kern/src/termin.rs
-crates/depot_lage/tests/lage.rs
-crates/depot_sammler/src/ergebnisse.rs
+crates/depot_sim/src/kostenhuerde.rs
 crates/depot_sim/src/lauf.rs
-crates/depot_sim/src/lib.rs
-crates/depot_sim/src/papiertag.rs
-crates/depot_sim/src/positionskauf.rs
 crates/depot_sim/src/vorschau.rs
-crates/depot_sim/src/zahlenreaktion.rs
 crates/depot_sim/tests/papiertag.rs

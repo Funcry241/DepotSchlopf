@@ -2733,7 +2733,7 @@ fn journal_liest_nachgeholte_ausfuehrung(kopie: Option<&std::path::Path>) -> Res
         wer == "Kostenhürde"
             && text.starts_with(&format!("Auftrag {nr}:"))
             && text.contains("3,00 € Gebühren für Kauf und Verkauf")
-            && text.contains("Spread nicht belegt")
+            && text.contains("Modellspread für Kauf und Verkauf zusammen 10 Basispunkte")
     }));
     let order = some(j.stand().auftrag(nr), "Order nach Neustart")?;
     let aus = some(order.ausfuehrungen.first(), "Ausführung")?;

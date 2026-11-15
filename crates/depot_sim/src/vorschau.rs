@@ -323,7 +323,9 @@ fn plan(
         let huerde = if a.richtung == depot_regelwerk::Richtung::Kauf {
             volumen
                 .zip(gebuehr)
-                .and_then(|(v, g)| crate::kostenhuerde::hinweis(v, g))
+                .and_then(|(v, g)| {
+                    crate::kostenhuerde::hinweis(v, g, depot_kern::liste::boerse_von(&a.isin))
+                })
                 .map_or_else(
                     || " · Kostenhürde nicht berechenbar".into(),
                     |text| format!(" · {text}"),

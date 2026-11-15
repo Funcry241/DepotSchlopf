@@ -1,6 +1,14 @@
-//! Geschätzte Handelsgebühren für Kauf und Verkauf bei gleichem Ordervolumen.
+//! Kostenhürde bei gleichem Ordervolumen für Kauf und Verkauf.
 
-use depot_kern::Cent;
+use depot_kern::{Boerse, Cent};
+
+/// Modellabschlag je Seite nach P33. Ein am Markt beobachteter Spread ist nicht verfügbar.
+pub fn spread_je_seite_bp(boerse: Boerse) -> i64 {
+    match boerse {
+        Boerse::Xetra => 5,
+        Boerse::Nyse => 15,
+    }
+}
 
 pub fn berechne(volumen: Cent, gebuehr: Cent) -> Option<(Cent, i64)> {
     let summe = gebuehr.checked_add(gebuehr)?;
@@ -13,11 +21,34 @@ pub fn berechne(volumen: Cent, gebuehr: Cent) -> Option<(Cent, i64)> {
     Some((summe, bp))
 }
 
-pub fn hinweis(volumen: Cent, gebuehr: Cent) -> Option<String> {
+pub fn hinweis(volumen: Cent, gebuehr: Cent, boerse: Option<Boerse>) -> Option<String> {
     let (summe, bp) = berechne(volumen, gebuehr)?;
+    let (bp, spread) = if let Some(boerse) = boerse {
+        let spread = spread_je_seite_bp(boerse).checked_mul(2)?;
+        (
+            bp.checked_add(spread)?,
+            format!("Modellspread für Kauf und Verkauf zusammen {spread} Basispunkte."),
+        )
+    } else {
+        (bp, "Spread nicht belegt.".to_owned())
+    };
     Some(format!(
-        "Kostenhürde bei {volumen} Ordervolumen: {summe} Gebühren für Kauf und Verkauf, mindestens {},{:02} % Kursgewinn bei gleichem Volumen. Spread nicht belegt.",
+        "Kostenhürde bei {volumen} Ordervolumen: {summe} Gebühren für Kauf und Verkauf, mindestens {},{:02} % Kursgewinn bei gleichem Volumen. {spread}",
         bp.div_euclid(100),
         bp.rem_euclid(100)
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kostenhuerde_enthaelt_den_spread_beider_seiten() -> Result<(), &'static str> {
+        let text = hinweis(Cent(10_000), Cent(150), Some(Boerse::Xetra)).ok_or("Kostenhürde")?;
+        assert!(text.contains("mindestens 3,10 %"), "{text}");
+        assert!(text.contains("Modellspread für Kauf und Verkauf zusammen 10 Basispunkte"));
+        assert!(!text.contains("Spread nicht belegt"));
+        Ok(())
+    }
 }
