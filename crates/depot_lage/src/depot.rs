@@ -336,6 +336,7 @@ pub fn auftrag_zeile(a: &depot_journal::AuftragsLage, werte: &[Wert]) -> Auftrag
             Anlass::Abbau => "Abbau",
             Anlass::Notbremse => "Notbremse",
             Anlass::Stopp => "Schutz-Stopp",
+            Anlass::FristOhneBegruendung => "Haltefrist ohne neue Begründung",
         },
         zustand: zustand_text(a.zustand).into(),
     }

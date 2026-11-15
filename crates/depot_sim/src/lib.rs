@@ -44,7 +44,7 @@ pub mod splitumbuchung;
 pub mod szenario;
 pub mod vorschau;
 pub use positionskauf::{
-    Ausstiegsplan, KAUFTHESE, Positionskauf, kaufanlass, lies as positionskaeufe,
+    Ausstiegsplan, KAUFTHESE, Kursziel, Positionskauf, kaufanlass, lies as positionskaeufe,
 };
 pub mod vorbereitung;
 mod zahlenreaktion;

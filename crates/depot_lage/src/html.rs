@@ -694,7 +694,6 @@ pub fn inhalt(l: &Lagebild, knopf: Knopf<'_>) -> String {
     inhalt_mit(l, knopf, true)
 }
 
-/// Wie `inhalt`; ohne Gesamtstatus, wenn die Oberflaeche ihn selbst zeigt (mit dem Zeitplan).
 fn ausstiegsplaene(l: &Lagebild, s: &mut String) {
     if l.ausstiegsplaene.is_empty() {
         return;
@@ -713,6 +712,7 @@ fn ausstiegsplaene(l: &Lagebild, s: &mut String) {
     s.push_str("</ul></section>");
 }
 
+/// Wie `inhalt`; ohne Gesamtstatus, wenn die Oberflaeche ihn selbst zeigt (mit dem Zeitplan).
 pub fn inhalt_mit(l: &Lagebild, knopf: Knopf<'_>, mit_betrieb: bool) -> String {
     let mut s = String::with_capacity(16_384);
     if mit_betrieb {

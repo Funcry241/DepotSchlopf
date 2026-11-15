@@ -78,6 +78,8 @@ pub enum Anlass {
     Notbremse,
     /// Zwingend: Der Schlusskurs erreicht den Schutz-Stopp.
     Stopp,
+    /// Papierausstieg nach abgelaufener Frist und verwertbarer Antwort ohne Haltebegründung.
+    FristOhneBegruendung,
 }
 
 impl Anlass {

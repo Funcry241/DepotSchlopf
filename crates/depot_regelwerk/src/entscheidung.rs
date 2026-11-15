@@ -262,6 +262,33 @@ pub fn stopp_auftraege(
     Some(genehmige(g, &kandidaten, &[], vergabe)?.verkaeufe)
 }
 
+/// Ganze Positionen mit fälligem und nach Beratung unbegründetem Halten schließen.
+pub fn frist_auftraege(
+    g: &Grenzen,
+    topf: &Topf,
+    kurse: &Kurse,
+    faellig: &BTreeSet<Isin>,
+    vergabe: &mut Kennungsvergabe,
+) -> Option<Vec<GenehmigterAuftrag>> {
+    let kandidaten: Vec<_> = faellig
+        .iter()
+        .filter_map(|isin| {
+            let kurs = frischer_kurs(g, kurse, isin)?;
+            let stueck = topf.stueck(isin);
+            (stueck > 0).then(|| Kandidat {
+                isin: isin.clone(),
+                richtung: Richtung::Verkauf,
+                stueck,
+                kurs,
+                komplett: true,
+                limit_bp: None,
+                anlass: Anlass::FristOhneBegruendung,
+            })
+        })
+        .collect();
+    Some(genehmige(g, &kandidaten, &[], vergabe)?.verkaeufe)
+}
+
 pub fn entscheide(e: &Eingabe<'_>, vergabe: &mut Kennungsvergabe) -> Entscheidung {
     entscheide_intern(e, vergabe, None, false)
 }

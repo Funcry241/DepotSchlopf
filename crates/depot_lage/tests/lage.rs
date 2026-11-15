@@ -759,6 +759,7 @@ struct Antwortet;
 impl Berater for Antwortet {
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             prognose: None,
             verwertbar: true,
             einschaetzung: "Heute nichts kaufen.".into(),
@@ -786,6 +787,7 @@ struct Verwirft;
 impl Berater for Verwirft {
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             prognose: None,
             verwertbar: false,
             einschaetzung: "keine verwertbare Antwort: Limit".into(),
@@ -821,6 +823,7 @@ impl Berater for OhneSchluessel {
 
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             prognose: None,
             verwertbar: false,
             einschaetzung: "nicht angebunden".into(),
@@ -1396,7 +1399,8 @@ fn verkaufsnetto_enthaelt_anteiligen_einstand_und_beide_gebuehren() -> Result<()
     assert_eq!(verkauf.netto, Some(Cent(208)));
     assert_eq!(verkauf.einstand, Some(Cent(2042)));
     assert_eq!(verkauf.anlass, Some("Zahlen-Überraschung"));
-    assert_eq!(verkauf.staerkerang, Some(3));
+    assert_eq!(verkauf.staerkerang, None);
+    assert_eq!(verkauf.staerkerang20, Some(3));
     assert_eq!(verkauf.einstieg, None);
     assert_eq!(verkauf.tag, None);
     Ok(())

@@ -1,8 +1,25 @@
 klasse: Funktion
-zweck: Modellierten Spread in die Kostenhürde einrechnen
+zweck: Abgelaufene Kaufthesen prüfen und langfristige Kursstärke getrennt belegen
 pfade:
 crates/depot_berater/src/frage.rs
-crates/depot_sim/src/kostenhuerde.rs
+crates/depot_berater/src/ki.rs
+crates/depot_dienst/src/analyse/leistung.rs
+crates/depot_dienst/src/depotseite/handelsbilanz.rs
+crates/depot_journal/src/stand.rs
+crates/depot_lage/src/depot.rs
+crates/depot_lage/src/handelsergebnis.rs
+crates/depot_lage/src/html.rs
+crates/depot_lage/tests/lage.rs
+crates/depot_regelwerk/src/auftrag.rs
+crates/depot_regelwerk/src/entscheidung.rs
+crates/depot_regelwerk/src/lib.rs
+crates/depot_sim/src/abstimmung.rs
 crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/lib.rs
+crates/depot_sim/src/positionskauf.rs
+crates/depot_sim/src/relative_staerke.rs
+crates/depot_sim/src/szenario.rs
 crates/depot_sim/src/vorschau.rs
+crates/depot_sim/tests/invarianten.rs
 crates/depot_sim/tests/papiertag.rs
+crates/depot_sim/tests/vorbereitung.rs

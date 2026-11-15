@@ -19,6 +19,7 @@ pub struct Verkauf {
     pub ausstieg: Option<Datum>,
     pub anlass: Option<&'static str>,
     pub staerkerang: Option<usize>,
+    pub staerkerang20: Option<usize>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -26,6 +27,7 @@ struct Kaufbezug {
     tag: Option<Datum>,
     anlass: Option<&'static str>,
     staerkerang: Option<usize>,
+    staerkerang20: Option<usize>,
 }
 
 impl Kaufbezug {
@@ -36,6 +38,9 @@ impl Kaufbezug {
             staerkerang: self
                 .staerkerang
                 .filter(|rang| Some(*rang) == anderer.staerkerang),
+            staerkerang20: self
+                .staerkerang20
+                .filter(|rang| Some(*rang) == anderer.staerkerang20),
         }
     }
 }
@@ -62,17 +67,23 @@ impl Default for Erloes {
     }
 }
 
-fn staerkerang(stand: &Stand) -> BTreeMap<u64, usize> {
+fn staerkerang(stand: &Stand, lang: bool) -> BTreeMap<u64, usize> {
+    use depot_sim::relative_staerke::{RANG_BELEG, RANG20_BELEG};
     stand
         .begruendungen()
         .iter()
         .filter_map(|(_, wer, text)| {
-            if wer != depot_sim::relative_staerke::RANG_BELEG {
-                return None;
-            }
-            let (nr, rang) = text.split_once(' ')?;
-            let rang = rang.parse::<usize>().ok().filter(|n| *n > 0)?;
-            Some((nr.parse::<u64>().ok()?, rang))
+            let mut teile = text.split_ascii_whitespace();
+            let nr = teile.next()?.parse().ok()?;
+            let rang = teile.next()?.parse::<usize>().ok().filter(|n| *n > 0)?;
+            let dauer = teile.next();
+            let passt = if lang {
+                wer == RANG_BELEG && dauer == Some("120")
+            } else {
+                // Alte Journale führen den bisherigen 20-Tage-Rang unter Kursstärke.
+                (wer == RANG20_BELEG || wer == RANG_BELEG) && dauer.is_none()
+            };
+            (passt && teile.next().is_none()).then_some((nr, rang))
         })
         .collect()
 }
@@ -95,7 +106,8 @@ fn anlaesse(stand: &Stand) -> BTreeMap<u64, Option<&'static str>> {
 
 fn ausfuehrungen(stand: &Stand) -> (Positionen<'_>, BTreeMap<u64, Erloes>) {
     let anlaesse = anlaesse(stand);
-    let staerkerang = staerkerang(stand);
+    let kurzrang = staerkerang(stand, false);
+    let staerkerang = staerkerang(stand, true);
     let mut positionen = BTreeMap::<(TopfId, &Isin), Option<Position>>::new();
     let mut erloese = BTreeMap::<u64, Erloes>::new();
     for schritt in stand.bewertungsfolge() {
@@ -123,6 +135,7 @@ fn ausfuehrungen(stand: &Stand) -> (Positionen<'_>, BTreeMap<u64, Erloes>) {
                     tag: ausfuehrung.kurszeit.and_then(Zeitpunkt::frankfurt_tag),
                     anlass: anlaesse.get(&auftrag.nr).copied().flatten(),
                     staerkerang: staerkerang.get(&auftrag.nr).copied(),
+                    staerkerang20: kurzrang.get(&auftrag.nr).copied(),
                 };
                 p.kauf = if schon_gehalten {
                     p.kauf.gemeinsam(kauf)
@@ -188,6 +201,7 @@ fn verkaeufe_aus(stand: &Stand, mut erloese: BTreeMap<u64, Erloes>) -> Vec<Verka
                 ausstieg: tag.filter(|tag| tage().all(|t| t == Some(*tag))),
                 anlass: erloes.kauf.anlass,
                 staerkerang: erloes.kauf.staerkerang,
+                staerkerang20: erloes.kauf.staerkerang20,
             })
         })
         .collect()

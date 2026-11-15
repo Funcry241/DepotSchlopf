@@ -174,6 +174,7 @@ mod tests {
             ausstieg: None,
             anlass: None,
             staerkerang: None,
+            staerkerang20: None,
         };
         let mut text = String::new();
         verkaeufe(

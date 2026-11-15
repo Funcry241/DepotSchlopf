@@ -55,6 +55,7 @@ pub const KEINE_VERWERTBARE_ANTWORT: &str = "keine verwertbare Antwort";
 /// Vorschlag. Die Kaufentscheidung trifft der Berater; das Journal haelt seine Begruendung fest.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Antwort {
+    pub halten: BTreeMap<Isin, String>,
     pub prognose: Option<depot_journal::Weltprognose>,
     /// Die Antwort kam und ist verwertbar. Nur dann gilt sie im Journal als verwendet; eine
     /// verworfene (unlesbar, Fehler, Kosten) steht dort ausdruecklich als verworfen.
@@ -177,6 +178,7 @@ impl Berater for Stumm {
 
     fn vorschlagen(&mut self, _erlaubnis: AufrufErlaubnis, _lage: &Lage<'_>) -> Antwort {
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             prognose: None,
             verwertbar: false,
             einschaetzung: "nicht angebunden".into(),
@@ -220,6 +222,7 @@ impl Berater for Drehbuch {
             .get(&lage.datum)
             .cloned()
             .unwrap_or_else(|| Antwort {
+                halten: std::collections::BTreeMap::new(),
                 prognose: None,
                 verwertbar: true,
                 einschaetzung: "nichts Neues, keine Änderung".into(),
@@ -287,6 +290,7 @@ fn vorschlag(berater: BeraterId, ziele: &[(&Isin, i64, &str)]) -> Vorschlag {
 
 fn antwort(einschaetzung: &str, v: Option<Vorschlag>) -> Antwort {
     Antwort {
+        halten: std::collections::BTreeMap::new(),
         prognose: None,
         verwertbar: true,
         einschaetzung: einschaetzung.into(),

@@ -541,6 +541,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
     dachs.antworten.insert(
         d,
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             prognose: None,
             verwertbar: true,
             einschaetzung: "SAP".into(),
@@ -689,6 +690,7 @@ fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), 
             buch.antworten.insert(
                 d,
                 Antwort {
+                    halten: std::collections::BTreeMap::new(),
                     prognose: None,
                     verwertbar: true,
                     einschaetzung: "SAP".into(),
@@ -1030,6 +1032,7 @@ impl depot_sim::Berater for Leser {
     ) -> Antwort {
         self.gesehen.extend(lage.ereignisse.iter().cloned());
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             prognose: None,
             verwertbar: true,
             einschaetzung: "gelesen".into(),
@@ -1751,6 +1754,7 @@ impl depot_sim::Berater for Diskutant {
         }
         depot_sim::abstimmung::AbstimmungsAntwort {
             eigene: Antwort {
+                halten: std::collections::BTreeMap::new(),
                 prognose: None,
                 verwertbar: true,
                 einschaetzung: format!(
@@ -1769,6 +1773,7 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
     plan.antworten.insert(
         tag(5)?,
         Antwort {
+            halten: std::collections::BTreeMap::new(),
             prognose: None,
             verwertbar: true,
             einschaetzung: format!("Unabhängige Erstmeinung {wer:?}"),
@@ -3508,5 +3513,96 @@ fn quartalssplit(j: &mut Journal, isin: &Isin, am: Zeitpunkt) -> Result<(), Stri
     )?;
     vorbedingung(j.belege_nachricht(&hinweis), "Split belegen")?;
 
+    Ok(())
+}
+
+#[test]
+fn fristverkauf_nur_bei_faelligkeit_und_ohne_haltebegruendung() -> Result<(), String> {
+    use depot_regelwerk::Anlass;
+    for (dauer, grund, erwartet) in [
+        (1, None, true),
+        (1, Some("Ausblick laut Termin bestätigt"), false),
+        (2, None, false),
+    ] {
+        let ort = Ort::neu()?;
+        let mut j = ort.oeffnen()?;
+        let isin = allianz()?;
+        let mut konto = konto(&ort, &j)?;
+        let montag = tag(16)?;
+        let dienstag = tag(17)?;
+        let (mut dachs, mut maus) = kaeufer(montag, &isin);
+        let these = format!("[Zahlen] [Ausstieg +800bp {dauer}] Testthese");
+        some(
+            dachs
+                .antworten
+                .get_mut(&montag)
+                .and_then(|a| a.vorschlag.as_mut()),
+            "Kaufvorschlag",
+        )?
+        .begruendung
+        .insert(isin.clone(), these);
+        let abruf = some(Zeitpunkt::frankfurt(montag, 7, 30, 0), "Abruf")?;
+        belege_sperrprobe(&mut j, &sap()?, &[(12, 25_000), (13, 25_000)], abruf)?;
+        belege_sperrprobe(&mut j, &isin, &[(12, 5_000), (13, 5_000)], abruf)?;
+        vorbedingung(
+            papiertag(
+                &mut j,
+                montag,
+                &universum()?,
+                &start()?,
+                &mut dachs,
+                &mut maus,
+                &mut konto,
+            ),
+            "Kaufauftrag",
+        )?;
+        let abruf = some(Zeitpunkt::frankfurt(dienstag, 7, 30, 0), "Abruf")?;
+        belege_sperrprobe(&mut j, &sap()?, &[(13, 25_000), (16, 25_000)], abruf)?;
+        belege_sperrprobe(&mut j, &isin, &[(13, 5_000), (16, 5_000)], abruf)?;
+        dachs.antworten.insert(
+            dienstag,
+            Antwort {
+                halten: grund
+                    .into_iter()
+                    .map(|g| (isin.clone(), g.to_owned()))
+                    .collect(),
+                prognose: None,
+                verwertbar: true,
+                einschaetzung: "Bestand geprüft".into(),
+                vorschlag: None,
+            },
+        );
+        let aufrufe_maus = maus.aufrufe;
+        vorbedingung(
+            papiertag(
+                &mut j,
+                dienstag,
+                &universum()?,
+                &start()?,
+                &mut dachs,
+                &mut maus,
+                &mut konto,
+            ),
+            "Fristprüfung",
+        )?;
+        assert_eq!(
+            j.stand()
+                .offene_auftraege()
+                .any(|a| a.beleg.anlass == Anlass::FristOhneBegruendung),
+            erwartet,
+        );
+        assert_eq!(
+            maus.aufrufe,
+            aufrufe_maus.saturating_add(1),
+            "nur eigene Erstmeinung"
+        );
+        assert_eq!(
+            j.stand()
+                .begruendungen()
+                .iter()
+                .any(|(_, wer, text)| wer == "Haltefrist" && text.contains("weiter: Ausblick")),
+            grund.is_some()
+        );
+    }
     Ok(())
 }
