@@ -188,6 +188,78 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
     }
 }
 
+fn mit_probekopie(
+    quelle: &Path,
+    pruefe: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    if !quelle
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(depot_export::sicherung::sicherungsname)
+    {
+        return Err(
+            "Wähle einen fertigen Sicherungsordner mit einem Namen, der mit utc- beginnt.".into(),
+        );
+    }
+    let stand = lies_sicherung(quelle)?;
+    if !stand.contains_key("journal.txt") || !stand.contains_key("journal.vermerk") {
+        return Err("Sicherung unvollständig: Journal oder Bestätigungsvermerk fehlt.".into());
+    }
+    let probe = crate::updatedaten::Probe::neu(&std::env::temp_dir())?;
+    crate::updatedaten::kopiere(&stand, &probe.0)?;
+    pruefe(&probe.0)?;
+    println!(
+        "[Sicherungsprobe] {} Dateien übernommen. Journal und Papierkonto erfolgreich geprüft.",
+        stand.len()
+    );
+    for (datei, titel) in [
+        ("zeitplan.txt", "Zeitplan"),
+        ("dienst_erledigt.txt", "Bereits erledigte Läufe"),
+    ] {
+        let stand = if stand.contains_key(datei) {
+            "in der Kopie enthalten"
+        } else {
+            "fehlt in der Sicherung"
+        };
+        println!("[Sicherungsprobe] {titel}: {stand}.");
+    }
+    if stand.contains_key("zeitplan.txt") && !stand.contains_key("dienst_erledigt.txt") {
+        println!(
+            "[Sicherungsprobe] Prüfe vor dem Einschalten des Zeitplans, welche Läufe seit der Sicherung bereits erfolgt sind."
+        );
+    }
+    Ok(())
+}
+
+pub fn probe(wurzel: &Path, optionen: &[String]) -> ExitCode {
+    let [quelle] = optionen else {
+        eprintln!("Aufruf: run.cmd sicherungsprobe <Sicherungsordner>");
+        return ExitCode::FAILURE;
+    };
+    let ergebnis = mit_probekopie(Path::new(quelle), |daten| {
+        let pfad = daten
+            .to_str()
+            .ok_or("Pfad der Probekopie ist nicht lesbar.")?;
+        let aus = crate::programm(
+            wurzel,
+            "depot_lage",
+            &["--update-datenprobe".into(), pfad.into()],
+        );
+        if aus == ExitCode::SUCCESS {
+            Ok(())
+        } else {
+            Err("Datenprüfung fehlgeschlagen. Details stehen über dieser Meldung.".into())
+        }
+    });
+    match ergebnis {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("[Sicherungsprobe] {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,6 +336,56 @@ mod tests {
             );
         }
         assert_eq!(fs::read_dir(kopie).map_err(|e| e.to_string())?.count(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn prueft_aus_einer_isolierten_kopie_ohne_sicherungsquelle_zu_aendern() -> Result<(), String> {
+        let ort = Ort::neu()?;
+        let daten = ort.projekt().join("daten");
+        let inhalt: [(&str, &[u8]); 5] = [
+            ("journal.txt", b"Journal"),
+            ("journal.vermerk", b"Vermerk"),
+            ("papierkonto.txt", b"Papierkonto"),
+            ("zeitplan.txt", b"Zeitplan"),
+            ("dienst_erledigt.txt", b"erledigt-v4"),
+        ];
+        for (datei, bytes) in inhalt {
+            fs::write(daten.join(datei), bytes).map_err(|e| e.to_string())?;
+        }
+        sichern(&ort.projekt(), false)?;
+        let quelle = fs::read_dir(ort.0.join("ziel/DepotSchlopf"))
+            .map_err(|e| e.to_string())?
+            .next()
+            .ok_or("Sicherung fehlt")?
+            .map_err(|e| e.to_string())?
+            .path();
+        let mut kopie = None;
+        mit_probekopie(&quelle, |pfad| {
+            assert_ne!(pfad, quelle);
+            for (datei, bytes) in inhalt {
+                assert_eq!(
+                    fs::read(pfad.join(datei)).map_err(|e| e.to_string())?,
+                    bytes
+                );
+            }
+            fs::write(pfad.join("papierkonto.txt"), b"Probe").map_err(|e| e.to_string())?;
+            kopie = Some(pfad.to_path_buf());
+            Ok(())
+        })?;
+        assert!(kopie.is_some_and(|pfad| !pfad.exists()));
+        for (datei, bytes) in inhalt {
+            assert_eq!(
+                fs::read(quelle.join(datei)).map_err(|e| e.to_string())?,
+                bytes
+            );
+            assert_eq!(
+                fs::read(daten.join(datei)).map_err(|e| e.to_string())?,
+                bytes
+            );
+        }
+        fs::remove_file(quelle.join("journal.vermerk")).map_err(|e| e.to_string())?;
+        assert!(mit_probekopie(&quelle, |_| Ok(())).is_err());
         Ok(())
     }
 
