@@ -11,8 +11,7 @@
 //! Das braucht nur Git, keinen Code des neuen Stands: Der Waechter ist schon gebaut und laeuft.
 //! Steht der Projektordner weder auf `vorher` noch auf `neu`, faesst der Rueckfall nichts an.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -189,20 +188,30 @@ pub fn zuruecksetzen_mit_grund(wurzel: &Path, grund: &str) -> Result<Option<Stri
     };
     let ist = kopf(wurzel)?;
     let meldung = if ist == o.vorher {
-        // Vorruecken kam nie zustande: nichts zurueckzusetzen.
-        format!("Update auf {} war nicht eingespielt.", kurz(&o.neu))
+        let abgelehnt = crate::werkbank::lies_falls_da(&abgelehnt_pfad(wurzel))?
+            .is_some_and(|text| text.lines().any(|z| z.trim() == o.neu));
+        if abgelehnt {
+            format!(
+                "Rückfall von {} auf {} war bereits ausgeführt.",
+                kurz(&o.neu),
+                kurz(&o.vorher)
+            )
+        } else {
+            format!("Update auf {} war nicht eingespielt.", kurz(&o.neu))
+        }
     } else if ist == o.neu {
-        git(wurzel, &["reset", "--quiet", "--keep", &o.vorher])?;
         let p = abgelehnt_pfad(wurzel);
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&p)
-            .and_then(|mut f| {
-                writeln!(f, "{}", o.neu)?;
-                f.sync_all()
-            })
-            .map_err(|e| format!("{}: {e}", p.display()))?;
+        let mut text = crate::werkbank::lies_falls_da(&p)?.unwrap_or_default();
+        if !text.lines().any(|z| z.trim() == o.neu) {
+            if !text.is_empty() && !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push_str(&o.neu);
+            text.push('\n');
+            crate::werkbank::schreibe_ganz(&p, &text)?;
+        }
+        // Der Neustart nach einem Abbruch unmittelbar nach Git muss die Ablehnung kennen.
+        git(wurzel, &["reset", "--quiet", "--keep", &o.vorher])?;
         format!(
             "Update auf {} zurückgesetzt, wieder auf {}. Der Stand wird nicht noch einmal \
              eingespielt.",

@@ -495,6 +495,27 @@ fn rueckfall_setzt_auf_den_alten_stand_zurueck_und_lehnt_den_neuen_ab() -> Resul
 }
 
 #[test]
+fn wiederanlauf_nach_git_rueckfall_erhaelt_die_ablehnung() -> Result<(), String> {
+    let (w, vorher, neu) = zwei_staende()?;
+    offen_schreiben(&w, &vorher, &neu)?;
+    let abgelehnt = format!("{neu}\n");
+    fs::write(rueckfall::abgelehnt_pfad(&w), &abgelehnt).map_err(|e| e.to_string())?;
+
+    // Der Rechner ging nach Git und vor dem Löschen der offenen Markierung aus.
+    g(&w, &["reset", "--quiet", "--keep", &vorher])?;
+    let m = some(rueckfall::zuruecksetzen(&w)?, "Rückfallabschluss")?;
+    assert!(m.contains("war bereits ausgeführt"), "{m}");
+    assert_eq!(g(&w, &["rev-parse", "HEAD"])?, vorher);
+    assert!(!rueckfall::offen_pfad(&w).exists());
+    assert_eq!(
+        fs::read_to_string(rueckfall::abgelehnt_pfad(&w)).map_err(|e| e.to_string())?,
+        abgelehnt
+    );
+    assert_eq!(rueckfall::zuruecksetzen(&w)?, None);
+    Ok(())
+}
+
+#[test]
 fn rueckfall_faesst_fremde_staende_nicht_an() -> Result<(), String> {
     let (w, vorher, neu) = zwei_staende()?;
     // Projektordner steht weder vor noch nach dem Update: ein dritter Stand.
