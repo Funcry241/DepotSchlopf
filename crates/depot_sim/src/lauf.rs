@@ -544,9 +544,27 @@ pub(crate) fn ein_tag(
     } else {
         hoch
     };
+    belege_schatten(jr, z)?;
     jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
     Ok(hoch)
+}
+
+fn belege_schatten(j: &mut Journal, z: &Zyklus<'_>) -> Result<(), LaufFehler> {
+    let Some(wissen) = j.stand().wissensstichtag(z.tag.datum) else {
+        return Ok(());
+    };
+    let mut schatten =
+        crate::schatten::Schattenstand::letzter(j.stand(), Some(z.tag.datum)).unwrap_or_default();
+    schatten.fortschreiben(
+        j.stand(),
+        z.grenzen,
+        z.universum,
+        z.tag,
+        wissen,
+        crate::schatten::Variante::default(),
+    );
+    begruende(j, z.tag, crate::schatten::BELEG, &schatten.text())
 }
 
 fn halte_mit_schutzstopps(
@@ -1868,6 +1886,7 @@ mod tests {
         };
         let negativ = crate::zahlenreaktion::Reaktion {
             positiv: false,
+            abstand_bp: -600,
             text: "−6,00 %".to_owned(),
         };
         let rest = "[Ausstieg 14500 10] These";

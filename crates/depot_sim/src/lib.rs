@@ -39,6 +39,7 @@ pub mod papierlauf;
 pub mod papiertag;
 mod positionskauf;
 pub mod relative_staerke;
+pub mod schatten;
 pub mod schlopfmodell;
 pub mod splitumbuchung;
 pub mod szenario;
