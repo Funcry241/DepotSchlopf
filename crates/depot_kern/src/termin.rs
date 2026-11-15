@@ -21,6 +21,11 @@ use std::fmt;
 use crate::instrument::Isin;
 use crate::zeit::{Datum, Zeitpunkt};
 
+/// Quelle und Zeitangaben der belegten Quartalstermine.
+pub const QUELLE_ERGEBNISSE: &str = "alphavantage-ergebnisse";
+pub const VOR_BOERSENBEGINN: &str = ", vor Börsenbeginn";
+pub const NACH_BOERSENSCHLUSS: &str = ", nach Börsenschluss";
+
 /// Wie verlaesslich ein Eintrag ist (R39).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Verlaesslichkeit {

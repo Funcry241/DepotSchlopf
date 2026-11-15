@@ -553,10 +553,16 @@ pub fn papiertag_wiederabspielen(
         .wissensstichtag(tag)
         .ok_or_else(|| halt(format!("Kein belegter Wissensstichtag für {tag}")))?;
     let kurse = kurse_zum_start(stand, universum, tag, wissen_bis)?;
+    let ereignisse = crate::zahlenreaktion::ereignisse(
+        stand,
+        &kurse.heute,
+        wissen_bis,
+        weltlage_am(stand, tag, wissen_bis),
+    );
     Ok(Tag {
         datum: tag,
         kurse: kurse.heute,
-        ereignisse: weltlage_am(stand, tag, wissen_bis),
+        ereignisse,
     })
 }
 
@@ -842,10 +848,16 @@ pub(crate) fn papiertag_mit_uhr(
             .papier_waechterreferenz()
             .ok_or_else(|| halt("Töpfe ohne Abschluss im Journal"))?
     };
+    let ereignisse = crate::zahlenreaktion::ereignisse(
+        j.stand(),
+        &k.heute,
+        wissen_bis,
+        weltlage_am(j.stand(), k.handelstag, wissen_bis),
+    );
     let tag = Tag {
         datum: k.handelstag,
         kurse: k.heute,
-        ereignisse: weltlage_am(j.stand(), k.handelstag, wissen_bis),
+        ereignisse,
     };
     j.begruende(
         tag.datum,

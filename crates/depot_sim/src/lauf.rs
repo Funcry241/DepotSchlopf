@@ -1475,14 +1475,50 @@ fn belege_kauf(
         .and_then(|v| v.begruendung.get(&a.isin))
         .filter(|text| !text.trim().is_empty())
     {
+        let grund = kaufeinstieg(j, tag, a, these)?;
         begruende(
             j,
             tag,
             crate::positionskauf::KAUFTHESE,
-            &format!("{nr} {these}"),
+            &format!("{nr} {grund}"),
         )?;
     }
     Ok(())
+}
+
+/// Der besondere Kaufanlass zählt nur mit der zum Auftrag belegten Kursreaktion.
+fn kaufeinstieg(
+    j: &mut Journal,
+    tag: &Tag,
+    a: &depot_regelwerk::Auftrag,
+    these: &str,
+) -> Result<String, LaufFehler> {
+    let marke = crate::positionskauf::ZAHLEN_UEBERRASCHUNG;
+    let Some(rest) = these
+        .strip_prefix('[')
+        .and_then(|t| t.strip_prefix(marke))
+        .and_then(|t| t.strip_prefix("] "))
+    else {
+        return Ok(these.to_owned());
+    };
+    if a.richtung == Richtung::Kauf {
+        let wissen = j
+            .stand()
+            .wissensstichtag(tag.datum)
+            .unwrap_or_else(|| tag.kurse.stand());
+        if let Some(beleg) =
+            crate::zahlenreaktion::belege(j.stand(), &tag.kurse, wissen).get(&a.isin)
+        {
+            begruende(
+                j,
+                tag,
+                marke,
+                &format!("Auftrag {}: {beleg}", a.kennung.nr()),
+            )?;
+            return Ok(these.to_owned());
+        }
+    }
+    Ok(format!("[Zahlen] {rest}"))
 }
 
 fn fuehre_aus(

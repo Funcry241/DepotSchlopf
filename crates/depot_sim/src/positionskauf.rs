@@ -5,12 +5,14 @@ use depot_kern::{Cent, Datum, Isin, Topf, Zeitpunkt};
 use depot_regelwerk::Richtung;
 
 pub const KAUFTHESE: &str = "Kaufthese";
+pub(crate) const ZAHLEN_UEBERRASCHUNG: &str = "Zahlen-Überraschung";
 
 /// Kontrollierte Anlassmarke zu Beginn einer Kaufbegründung.
 pub fn kaufanlass(text: &str) -> Option<&'static str> {
     let (marke, _) = text.strip_prefix('[')?.split_once("] ")?;
     [
         "Zahlen",
+        ZAHLEN_UEBERRASCHUNG,
         "Notenbank",
         "Meldung",
         "Kursbewegung",

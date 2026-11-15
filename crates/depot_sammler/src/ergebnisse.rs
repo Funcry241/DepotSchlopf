@@ -29,8 +29,8 @@ use crate::netz::Netz;
 use crate::sammeln::{SammelFehler, lege_ab};
 use crate::schluessel::{Anbieter, Zugang};
 
-/// Name der Quelle im Journal.
-pub const QUELLE_ERGEBNISSE: &str = "alphavantage-ergebnisse";
+pub use depot_kern::termin::QUELLE_ERGEBNISSE;
+use depot_kern::termin::{NACH_BOERSENSCHLUSS, VOR_BOERSENBEGINN};
 /// Die Kopfzeile, genau so.
 pub const KOPF: &str = "symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay";
 
@@ -77,8 +77,8 @@ pub fn lies_kalender(csv: &str, werte: &[Wert]) -> Result<Vec<Termin>, KalenderF
         };
         let zusatz = match *tageszeit {
             "" => "",
-            "pre-market" => ", vor Börsenbeginn",
-            "post-market" => ", nach Börsenschluss",
+            "pre-market" => VOR_BOERSENBEGINN,
+            "post-market" => NACH_BOERSENSCHLUSS,
             _ => return Err(KalenderFehler::Zeile(nr)),
         };
         let Some(w) = werte

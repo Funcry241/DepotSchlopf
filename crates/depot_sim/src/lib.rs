@@ -47,6 +47,7 @@ pub use positionskauf::{
     Ausstiegsplan, KAUFTHESE, Positionskauf, kaufanlass, lies as positionskaeufe,
 };
 pub mod vorbereitung;
+mod zahlenreaktion;
 
 pub use lauf::{Gefragt, LaufFehler, gefragt, lauf};
 pub use papier::{Broker, Papierkonto, Sendeantwort};

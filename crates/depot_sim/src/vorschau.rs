@@ -413,8 +413,13 @@ pub fn lauf(
     };
     let kurslage = papiertag::tageskurse_bis(j.stand(), universum, Some(zeit))
         .map_err(|e| format!("{e:?}"))?;
-    let ereignisse =
-        vorbereitung::sichtbare_ereignisse(&papiertag::weltbelege_am(j.stand(), fuer, zeit));
+    let ereignisse = crate::zahlenreaktion::ereignisse(
+        j.stand(),
+        &kurslage.heute,
+        zeit,
+        papiertag::weltbelege_am(j.stand(), fuer, zeit),
+    );
+    let ereignisse = vorbereitung::sichtbare_ereignisse(&ereignisse);
     let budget = Budget {
         datum,
         zyklus: papiertag::tagnummer(datum).ok_or("Ungültiger Kostentag")?,
