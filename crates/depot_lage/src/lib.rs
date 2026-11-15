@@ -31,6 +31,7 @@ pub use depot_sim::schlopfmodell::letzte_pruefungen as schlopfmodell_pruefungen;
 pub mod depotverlauf;
 pub mod diagramm;
 pub mod handelsergebnis;
+pub mod handelsvergleich;
 pub mod html;
 pub mod messlatte;
 pub mod tage;

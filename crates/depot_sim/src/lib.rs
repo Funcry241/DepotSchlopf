@@ -42,7 +42,7 @@ pub mod schlopfmodell;
 pub mod splitumbuchung;
 pub mod szenario;
 pub mod vorschau;
-pub use positionskauf::Positionskauf;
+pub use positionskauf::{KAUFTHESE, Positionskauf, kaufanlass};
 pub mod vorbereitung;
 
 pub use lauf::{Gefragt, LaufFehler, gefragt, lauf};

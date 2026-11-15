@@ -1,10 +1,14 @@
 klasse: Funktion
-zweck: Gebührenhürde vor dem Kauf und im Journal zeigen
+zweck: Realisierte Handelsentscheidungen mit Gebühren je KI und Anlass auswerten
 pfade:
 crates/depot_berater/src/frage.rs
-crates/depot_berater/tests/berater.rs
-crates/depot_sim/src/kostenhuerde.rs
-crates/depot_sim/src/lauf.rs
+crates/depot_dienst/src/analyse/leistung.rs
+crates/depot_dienst/src/depotseite.rs
+crates/depot_dienst/src/depotseite/handelsbilanz.rs
+crates/depot_dienst/tests/dienst.rs
+crates/depot_lage/src/handelsergebnis.rs
+crates/depot_lage/src/handelsvergleich.rs
+crates/depot_lage/src/lib.rs
+crates/depot_lage/tests/lage.rs
 crates/depot_sim/src/lib.rs
-crates/depot_sim/src/vorschau.rs
-crates/depot_sim/tests/papiertag.rs
+crates/depot_sim/src/positionskauf.rs

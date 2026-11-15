@@ -1367,11 +1367,15 @@ fn verkaufsbuch(menge: u64) -> Result<Ort, String> {
 
 #[test]
 fn verkaufsnetto_enthaelt_anteiligen_einstand_und_beide_gebuehren() -> Result<(), String> {
-    use depot_journal::Art::{Auftrag, Zustand};
+    use depot_journal::Art::{Auftrag, Begruendung, Zustand};
     let ort = kaufbuch(
         7,
         1_000,
         &[
+            (
+                Begruendung,
+                "2026-11-06;Kaufthese;1 [Zahlen] Ergebnis über Erwartung",
+            ),
             (Auftrag, "2;A;DE0007164600;Verkauf;2;1000;Notbremse"),
             (Zustand, "2;gesendet"),
             (Zustand, "2;angenommen"),
@@ -1389,6 +1393,9 @@ fn verkaufsnetto_enthaelt_anteiligen_einstand_und_beide_gebuehren() -> Result<()
     let verkauf = some(verkaeufe.first(), "Verkauf")?;
     assert_eq!(verkauf.nr, 2);
     assert_eq!(verkauf.netto, Some(Cent(208)));
+    assert_eq!(verkauf.einstand, Some(Cent(2042)));
+    assert_eq!(verkauf.anlass, Some("Zahlen"));
+    assert_eq!(verkauf.einstieg, None);
     assert_eq!(verkauf.tag, None);
     Ok(())
 }

@@ -8,6 +8,8 @@ use depot_lage::depotverlauf::{Tagespunkt, Zeitraum, depotverlauf, im_zeitraum};
 use depot_lage::html::{geldwechsel, maskiere, prozent};
 use depot_lage::{DepotLage, Tagesergebnis, Zugang, datum_text, zeit_text};
 
+mod handelsbilanz;
+
 fn geld(wert: Option<Cent>) -> String {
     wert.and_then(Preis::aus_cent)
         .map_or_else(|| "–".into(), |p| format!("{} €", p.euro_text()))
@@ -303,6 +305,7 @@ pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (String, bo
         let verlauf = depotverlauf(stand, &werte);
         let ab = jetzt.frankfurt_tag().and_then(|heute| zeitraum.ab(heute));
         entwicklung(im_zeitraum(&verlauf, ab), startgeld, zeitraum, &mut text);
+        handelsbilanz::abschnitt(stand, &werte, ab, &mut text);
         text.push_str("<p class=\"leise\">Nur Papiergeld. Werte zum abgerundeten Cent, Einstand aufgerundet.</p>");
         true
     });
