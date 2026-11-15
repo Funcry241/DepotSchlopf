@@ -167,6 +167,7 @@ pub struct Auftrag {
 #[derive(Clone, Debug)]
 pub struct Lage {
     pub stand: Zeitpunkt,
+    pub depot_version: u64,
     pub bild: Lagebild,
 }
 
@@ -1061,15 +1062,28 @@ impl Dienst {
         if noetig {
             // Ohne Sperre rechnen: Die Oberflaeche bleibt bedienbar. Ein Auftrag startet nur hier
             // im Arbeiter, also nicht, solange das Lagebild das Journal liest.
-            let bild = (self.lagerechner)(&self.wurzel, jetzt);
-            {
-                let mut z = self.sperre();
-                z.lage = Some(Lage { stand: jetzt, bild });
-                z.lage_veraltet = false;
-            }
+            self.lagebild_erneuern(jetzt);
             self.hinweise_pruefen(jetzt);
         }
         None
+    }
+
+    fn lagebild_erneuern(&self, jetzt: Zeitpunkt) {
+        let bild = (self.lagerechner)(&self.wurzel, jetzt);
+        let mut z = self.sperre();
+        let depot_version = z.lage.as_ref().map_or(1, |alt| {
+            if alt.bild.depot == bild.depot {
+                alt.depot_version
+            } else {
+                alt.depot_version.saturating_add(1)
+            }
+        });
+        z.lage = Some(Lage {
+            stand: jetzt,
+            depot_version,
+            bild,
+        });
+        z.lage_veraltet = false;
     }
 
     fn startfehler_vermerken(

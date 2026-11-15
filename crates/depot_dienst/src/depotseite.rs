@@ -5,7 +5,7 @@ use std::path::Path;
 
 use depot_kern::{Cent, Preis, TopfId, Zeitpunkt};
 use depot_lage::depotverlauf::{Tagespunkt, Zeitraum, depotverlauf, im_zeitraum};
-use depot_lage::html::{maskiere, prozent};
+use depot_lage::html::{geldwechsel, maskiere, prozent};
 use depot_lage::{DepotLage, Tagesergebnis, Zugang, datum_text, zeit_text};
 
 fn geld(wert: Option<Cent>) -> String {
@@ -50,7 +50,7 @@ fn kennzahlen(d: &DepotLage, jetzt: Zeitpunkt, startgeld: Option<Cent>, text: &m
         Tagesergebnis::Belegt { tag, betrag, bp } => format!(
             "am {}: {} ({})",
             datum_text(tag),
-            geld(Some(betrag)),
+            geldwechsel("depot-tagesergebnis", Some(betrag)),
             bp.map_or_else(|| "–".into(), prozent)
         ),
     };
@@ -59,7 +59,7 @@ fn kennzahlen(d: &DepotLage, jetzt: Zeitpunkt, startgeld: Option<Cent>, text: &m
         |(wert, start)| {
             format!(
                 "{} ({})",
-                geld(wert.checked_sub(start)),
+                geldwechsel("depot-start", wert.checked_sub(start)),
                 depot_lage::vergleich::rendite_bp(start, wert).map_or_else(|| "–".into(), prozent)
             )
         },
@@ -82,7 +82,7 @@ fn kennzahlen(d: &DepotLage, jetzt: Zeitpunkt, startgeld: Option<Cent>, text: &m
         text,
         "<section><h2>Auf einen Blick</h2><p>Gesamtwert <strong class=\"gross\">{}</strong></p>\
         <p>Tagesergebnis {tag} · Seit Start {seit_start}</p><p class=\"leise\">{kurstag}</p></section>",
-        geld(d.gesamt)
+        geldwechsel("depot-gesamt", d.gesamt)
     );
 }
 
@@ -104,10 +104,13 @@ fn cash(d: &DepotLage, text: &mut String) -> Option<Cent> {
         "<section><h2>Cash-Konto</h2><dl><dt>Bargeld gesamt</dt><dd>{}</dd>\
         <dt>Frei für Käufe</dt><dd>{}</dd><dt>Vorgemerkt für offene Käufe</dt><dd>{}</dd>\
         <dt>Verkaufserlös noch nicht gutgeschrieben</dt><dd>{}{valuta}</dd></dl></section>",
-        geld(bar),
-        geld(summe(|topf| topf.frei)),
-        geld(summe(|topf| topf.vorgemerkt)),
-        geld(summe(|topf| topf.nicht_gutgeschrieben)),
+        geldwechsel("depot-bargeld", bar),
+        geldwechsel("depot-frei", summe(|topf| topf.frei)),
+        geldwechsel("depot-vorgemerkt", summe(|topf| topf.vorgemerkt)),
+        geldwechsel(
+            "depot-nicht-gutgeschrieben",
+            summe(|topf| topf.nicht_gutgeschrieben)
+        ),
     );
     bar
 }
@@ -188,7 +191,7 @@ fn orders(stand: &depot_journal::Stand, werte: &[depot_kern::liste::Wert], text:
 }
 
 fn zahlen_je_tag(punkte: &[Tagespunkt], text: &mut String) {
-    text.push_str("<details><summary>Zahlen je Tag</summary><div class=\"breit\"><table><thead><tr><th>Tag</th><th>Wertpapiere</th><th>Bargeld</th><th>Gesamt</th><th>Zum Vortag</th></tr></thead><tbody>");
+    text.push_str("<details id=\"depot-tageszahlen\"><summary>Zahlen je Tag</summary><div class=\"breit\"><table><thead><tr><th>Tag</th><th>Wertpapiere</th><th>Bargeld</th><th>Gesamt</th><th>Zum Vortag</th></tr></thead><tbody>");
     let mut vorher: Option<Cent> = None;
     for punkt in punkte {
         let gesamt = punkt.grund.as_ref().map_or_else(
@@ -264,30 +267,30 @@ fn entwicklung(
     text.push_str("</section>");
 }
 
-pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> String {
+pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (String, bool) {
     let mut text = format!(
-        "<section><h2>Depot</h2><p class=\"leise\">Stand {} · Seite neu laden für den neuesten Stand</p></section>",
+        "<section><h2>Depot</h2><p class=\"leise\">Stand {}</p></section>",
         zeit_text(jetzt)
     );
-    depot_lage::mit_journal(daten, |zugang| {
+    let lesbar = depot_lage::mit_journal(daten, |zugang| {
         let stand = match zugang {
             Zugang::Offen(stand) if !stand.toepfe().is_empty() => stand,
             Zugang::NichtEingerichtet | Zugang::Offen(_) => {
                 text.push_str("<p>Noch kein Depot: Es entsteht mit dem ersten Papiertag.</p>");
-                return;
+                return true;
             }
             Zugang::Belegt => {
                 text.push_str("<p class=\"offen\">Journal belegt. Lade die Seite erneut, sobald der Lauf beendet ist.</p>");
-                return;
+                return false;
             }
             Zugang::Fehler(grund) => {
                 let _ = write!(text, "<p class=\"halt\">Halt: {}</p>", maskiere(grund));
-                return;
+                return true;
             }
         };
         let Ok(werte) = depot_kern::liste::beobachtungsliste() else {
             text.push_str("<p class=\"halt\">Die Beobachtungsliste ist unlesbar.</p>");
-            return;
+            return true;
         };
         let lage = depot_lage::depotstand(stand, &werte);
         let startgeld = depot_lage::startgeld(stand);
@@ -300,8 +303,9 @@ pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> String {
         let ab = jetzt.frankfurt_tag().and_then(|heute| zeitraum.ab(heute));
         entwicklung(im_zeitraum(&verlauf, ab), startgeld, zeitraum, &mut text);
         text.push_str("<p class=\"leise\">Nur Papiergeld. Werte zum abgerundeten Cent, Einstand aufgerundet.</p>");
+        true
     });
-    text
+    (text, lesbar)
 }
 
 #[cfg(test)]
@@ -357,7 +361,10 @@ mod tests {
     fn depot_cash_valuta() {
         let mut html = String::new();
         assert_eq!(cash(&lage(), &mut html), Some(Cent(500_000)));
-        assert!(html.contains("10,00 € (frei ab 17.11.2026)"), "{html}");
+        assert!(
+            html.contains("data-wert=\"1000\">10,00 €</span> (frei ab 17.11.2026)"),
+            "{html}"
+        );
     }
 
     #[test]

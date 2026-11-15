@@ -348,26 +348,55 @@ fn einrichtungsseite(
     antwort(200, HTML, seite.as_bytes())
 }
 
+fn depot_version(d: &Dienst) -> Option<u64> {
+    let z = d.sperre();
+    if z.lage_veraltet || z.laufend.is_some() {
+        return None;
+    }
+    z.lage.as_ref().map(|lage| lage.depot_version)
+}
+
+fn depot_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
+    use depot_lage::depotverlauf::Zeitraum;
+    let abfrage = formular(a.abfrage.as_bytes()).unwrap_or_default();
+    let zeitraum = Zeitraum::aus_abfrage(feld(&abfrage, "zeitraum").unwrap_or_default());
+    let version = depot_version(d);
+    let teil = a.pfad == "/teil/depot";
+    if teil
+        && (version.is_none() || feld(&abfrage, "stand").and_then(|s| s.parse().ok()) == version)
+    {
+        return antwort(200, HTML, b"");
+    }
+    let (mut inhalt, lesbar) = depotseite::inhalt(&d.wurzel.join("daten"), jetzt, zeitraum);
+    if let Some(version) = version.filter(|_| lesbar) {
+        use std::fmt::Write as _;
+        let _ = write!(
+            inhalt,
+            "<span hidden data-depot-stand=\"{version}\"></span>"
+        );
+    }
+    if teil {
+        let inhalt = if lesbar { inhalt.as_bytes() } else { b"" };
+        return antwort(200, HTML, inhalt);
+    }
+    let url = format!("/teil/depot?zeitraum={}", zeitraum.als_abfrage());
+    let html = seiten::rahmen(
+        "/depot",
+        Some(&url),
+        None,
+        &inhalt,
+        d.version.as_deref(),
+        &betriebsleiste(d, heute(jetzt)),
+        seiten::meldungs_aktion(&a.abfrage),
+    );
+    antwort(200, HTML, html.as_bytes())
+}
+
 fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let tag = heute(jetzt);
     match a.pfad.as_str() {
         "/" => live_seite(d, a, jetzt),
-        "/depot" => {
-            let abfrage = formular(a.abfrage.as_bytes()).unwrap_or_default();
-            let zeitraum = depot_lage::depotverlauf::Zeitraum::aus_abfrage(
-                feld(&abfrage, "zeitraum").unwrap_or_default(),
-            );
-            let html = seiten::rahmen(
-                "/depot",
-                None,
-                None,
-                &depotseite::inhalt(&d.wurzel.join("daten"), jetzt, zeitraum),
-                d.version.as_deref(),
-                &betriebsleiste(d, heute(jetzt)),
-                seiten::meldungs_aktion(&a.abfrage),
-            );
-            antwort(200, HTML, html.as_bytes())
-        }
+        "/depot" | "/teil/depot" => depot_seite(d, a, jetzt),
         "/gespraeche" => gespraechsseite(d, a, tag),
         "/export" => seiten::fehler(405, "Verwende das Analyse-Exportformular."),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),

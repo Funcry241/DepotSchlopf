@@ -962,13 +962,28 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const reply=t=>Promise.resolve({ok:true,text:()=>Promise.resolve(t)});
 const health=(start='alt',bereit=true)=>`<span data-start="${start}"></span><span data-bereit="${bereit?'ja':'nein'}"></span>`;
-function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt',urls=['/teil/status','/teil/update','/teil/journal'],forms=[],confirm=()=>false}={}) {
+function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt',urls=['/teil/status','/teil/update','/teil/journal'],forms=[],confirm=()=>false,bewegungReduziert=false}={}) {
   let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={},docEvents={};
   const attributes=new Set();
   const banner={hidden:true,textContent:'',setAttribute:n=>attributes.add(n),removeAttribute:n=>attributes.delete(n),hasAttribute:n=>attributes.has(n)}, reconnect={hidden:true}, reconnectLink={href:'/einrichtung'};
   const element=()=>({attribute:{},textContent:'',setAttribute(n,v){this.attribute[n]=v;}});
   const herz=element(),figuren=element(),dachs=element(),maus=element(),otter=element();
-  const elements=Array.from({length:parts},(_,i)=>({innerHTML:'alt',getAttribute:()=>urls[i],querySelectorAll:()=>[]}));
+  const elements=Array.from({length:parts},(_,i)=>({
+    html:'alt',werte:[],
+    get innerHTML(){return this.html;},
+    set innerHTML(html){
+      this.html=html;
+      this.werte.forEach(e=>{e.isConnected=false;});
+      this.werte=Array.from(html.matchAll(/<span data-schluessel="([^"]+)" data-wert="(-?[0-9]+)">([^<]+)<\/span>/g),
+        ([,schluessel,wert,textContent])=>{
+          const klassen=new Set();
+          return {dataset:{schluessel,wert},textContent,isConnected:true,klassen,classList:{add:c=>klassen.add(c)}};
+        });
+    },
+    getAttribute:()=>urls[i],
+    querySelectorAll(s){return s==='[data-wert][data-schluessel]'?this.werte:[];}
+  }));
+  const plane=(f,delay)=>{const id=++nr;timers.set(id,{f,at:now+delay});return id;};
   const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:id==='neuverbinden-link'?reconnectLink:id==='herz'?herz:id==='kopffiguren'?figuren:id==='kopf-dachs'?dachs:id==='kopf-maus'?maus:id==='kopf-otter'?otter:banner,querySelector:s=>{
     if(s.includes('[data-figuren]')){
       const f=elements[urls.indexOf('/teil/kopf')]?.innerHTML.match(/<span data-figuren ([^>]+)>/);
@@ -982,8 +997,9 @@ function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47
     return known?{getAttribute:()=>known}:null;
   },querySelectorAll:s=>s==='[data-teil]'?elements:s==='form[data-aenderungen]'?forms:[]};
   vm.runInNewContext(script,{document,navigator:{},URL,AbortController,Set,Date:{now:()=>now},
-    window:{confirm,addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
-    setTimeout:(f,delay)=>{const id=++nr;timers.set(id,{f,at:now+delay});return id},clearTimeout:id=>timers.delete(id),
+    window:{confirm,matchMedia:()=>({matches:bewegungReduziert}),addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
+    performance:{now:()=>now},requestAnimationFrame:f=>plane(()=>f(now),100),
+    setTimeout:plane,clearTimeout:id=>timers.delete(id),
     fetch:(url,options)=>{requests.push({url,options});return response(url,options)}
   });
   return {banner,herz,figuren,dachs,maus,otter,reconnect,reconnectLink,elements,requests,navigations,events,docEvents,get timers(){return timers},
@@ -1133,6 +1149,39 @@ test('Kopffiguren bleiben stehen und übernehmen nur Daten und Text',async()=>{
   denkt='helfer';await b.advance(2000);
   assert.equal(b.figuren.attribute['data-denkt'],'helfer');
   assert.equal(b.maus.textContent,'Keine Änderung.');
+});
+function geldbetrag(wert, text) {
+  return `<span data-schluessel="saldo" data-wert="${wert}">${text}</span>`;
+}
+test('Geldwechsel zählt nach dem ersten Abruf und stellt den genauen Servertext wieder her',async()=>{
+  let html=geldbetrag(1234,'12,34 €');
+  const b=browser({parts:1,urls:['/teil/live'],response:u=>reply(u==='/teil/live'?html:health())});
+  await b.advance(2000);
+  assert.equal(b.elements[0].werte[0].klassen.size,0);
+  html=geldbetrag(2534,'25,34 €');
+  await b.advance(2000);
+  const wert=b.elements[0].werte[0];
+  assert.ok(wert.klassen.has('steigt'));
+  assert.match(wert.textContent,/12,34/);
+  await b.advance(300);
+  assert.match(wert.textContent,/18,84/);
+  await b.advance(300);
+  assert.equal(wert.textContent,'25,34 €');
+});
+test('Reduzierte Bewegung zeigt sofort den Servertext, Wiederverbindung überspringt den Hinweis',async()=>{
+  let html=geldbetrag(1234,'12,34 €'),offline=false;
+  const b=browser({parts:1,urls:['/teil/live'],bewegungReduziert:true,
+    response:u=>offline?Promise.reject(Error('offline')):reply(u==='/teil/live'?html:health())});
+  await b.advance(2000);
+  html=geldbetrag(-100,'-1,00 €');
+  await b.advance(2000);
+  assert.equal(b.elements[0].werte[0].textContent,'-1,00 €');
+  assert.ok(b.elements[0].werte[0].klassen.has('faellt'));
+  offline=true;await b.advance(2000);
+  html=geldbetrag(1234,'12,34 €');
+  offline=false;await b.advance(5000);
+  assert.equal(b.elements[0].werte[0].textContent,'12,34 €');
+  assert.equal(b.elements[0].werte[0].klassen.size,0);
 });
 test('abgewiesene Verbindung erholt sich und erkennt auch den Rückfall',async()=>{
   let offline=true;const b=browser({href:'http://127.0.0.1:47410/einrichtung#update',response:()=>offline?Promise.reject(Error('offline')):reply(health('rueckfall'))});
