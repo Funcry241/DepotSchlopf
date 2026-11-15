@@ -166,7 +166,7 @@ fn frage(
 }
 
 /// Zustimmung gilt für Berater und Zielgewichte. `None` ist ein Rückzug.
-fn gleiche_ziele(a: Option<&Vorschlag>, b: Option<&Vorschlag>) -> bool {
+pub(crate) fn gleiche_ziele(a: Option<&Vorschlag>, b: Option<&Vorschlag>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => {
             a.berater == b.berater

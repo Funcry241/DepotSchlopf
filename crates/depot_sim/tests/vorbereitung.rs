@@ -348,3 +348,134 @@ fn offenes_update_verhindert_vorbereitung_ohne_journalaenderung() -> Result<(), 
     assert_eq!(fs::read(pfad).map_err(|e| e.to_string())?, vorher);
     Ok(())
 }
+
+struct VorschauModell {
+    wer: BeraterId,
+    gesehen: Vec<String>,
+    kurstag: Option<Datum>,
+    ausfall: bool,
+}
+
+impl Berater for VorschauModell {
+    fn vorschlagen(&mut self, e: AufrufErlaubnis, l: &Lage<'_>) -> Antwort {
+        assert_eq!(e.buchung().berater, self.wer);
+        self.gesehen = l.ereignisse.to_vec();
+        self.kurstag = l.kurse.alle().next().map(|(_, kurs)| kurs.handelstag());
+        Antwort {
+            prognose: None,
+            verwertbar: !self.ausfall,
+            einschaetzung: if self.ausfall {
+                "Anbieter nicht erreichbar"
+            } else {
+                "Bargeld behalten"
+            }
+            .into(),
+            vorschlag: (!self.ausfall).then(|| Vorschlag {
+                berater: self.wer,
+                zielgewichte_bp: std::collections::BTreeMap::new(),
+                begruendung: std::collections::BTreeMap::new(),
+                limit_bp: std::collections::BTreeMap::new(),
+                stopp_bp: std::collections::BTreeMap::new(),
+            }),
+        }
+    }
+
+    fn pruefen(&mut self, _: AufrufErlaubnis, _: &Lage<'_>, _: &Vorschlag) -> Urteil {
+        Urteil {
+            verwertbar: false,
+            zustimmung: false,
+            begruendung: "Unerwartete Zweitmeinung".into(),
+        }
+    }
+
+    fn kann_abstimmen(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn wochenend_vorschau_bucht_nur_kosten_und_fragt_bei_bargeld_nicht_weiter() -> Result<(), String> {
+    use depot_journal::{KiZweck, KursBeleg};
+    use depot_kern::{Herkunft, Kurs};
+    use depot_sim::vorschau::lauf;
+
+    for ausfall in [false, true] {
+        let ort = Ort::neu()?;
+        let mut j = ort.journal()?;
+        let sonntag = zeit(15)?;
+        let isin = depot_kern::Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let freitag = datum(2026, 11, 13)?;
+        for tag in [12, 13] {
+            let handelstag = datum(2026, 11, tag)?;
+            let schluss = Zeitpunkt::frankfurt(handelstag, 17, 35, 0).ok_or("Schluss")?;
+            let abruf = Zeitpunkt::frankfurt(handelstag, 17, 41, 0).ok_or("Abruf")?;
+            let k = Kurs::neu(Cent(12_300), "EUR", handelstag, schluss, Herkunft::Quelle)
+                .map_err(|e| format!("{e:?}"))?;
+            let beleg = KursBeleg::neu("alphavantage", abruf, b"Kurs", isin.clone(), k)?;
+            j.belege_kurs(&beleg).map_err(|e| format!("{e:?}"))?;
+        }
+        if !ausfall {
+            for id in [depot_kern::TopfId::A, depot_kern::TopfId::B] {
+                let topf =
+                    depot_kern::Topf::neu(id, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+                j.setze_topf(&topf).map_err(|e| format!("{e:?}"))?;
+            }
+            let abdruck = j.bestaetigt().1;
+            j.schliesse_ab(freitag, Cent(1_000_000), &abdruck)
+                .map_err(|e| format!("{e:?}"))?;
+        }
+        let depot_vorher = j.stand().toepfe().clone();
+        nachricht(&mut j, sonntag, sonntag, "Neues Ereignis am Sonntag")?;
+        let spaeter = zeit(16)?;
+        nachricht(&mut j, spaeter, spaeter, "Nach dem Start veröffentlicht")?;
+        drop(j);
+        let mut dachs = VorschauModell {
+            wer: BeraterId::Dachs,
+            gesehen: Vec::new(),
+            kurstag: None,
+            ausfall: false,
+        };
+        let mut maus = VorschauModell {
+            wer: BeraterId::Maus,
+            gesehen: Vec::new(),
+            kurstag: None,
+            ausfall,
+        };
+        lauf(&ort.0, sonntag, &universum()?, &mut dachs, &mut maus)?;
+        assert_eq!(dachs.kurstag, Some(freitag));
+        assert_eq!(maus.kurstag, Some(freitag));
+        assert_eq!(dachs.gesehen, maus.gesehen);
+        assert!(
+            maus.gesehen
+                .iter()
+                .any(|e| e.contains("Neues Ereignis am Sonntag"))
+        );
+        assert!(maus.gesehen.iter().all(|e| !e.contains("Nach dem Start")));
+        let j = ort.journal()?;
+        assert_eq!(j.stand().seit_abschluss(), 0);
+        assert_eq!(j.stand().toepfe(), &depot_vorher);
+        assert!(j.stand().auftraege().is_empty());
+        assert_eq!(
+            j.stand().abschluss().map(|a| a.datum),
+            (!ausfall).then_some(freitag)
+        );
+        assert!(!ort.0.join("daten/papierkonto.txt").exists());
+        assert_eq!(j.stand().ki().buchungen().len(), 2);
+        for (nr, b) in j.stand().ki().buchungen().iter().enumerate() {
+            assert_eq!(b.datum, datum(2026, 11, 15)?);
+            assert_eq!(
+                j.stand().ki().buchungsbeleg(nr),
+                Some((KiZweck::Simulation, false))
+            );
+        }
+        let montag = datum(2026, 11, 16)?;
+        j.pruefe_ki(
+            BeraterId::Dachs,
+            montag,
+            tagnummer(montag).ok_or("Zyklus")?,
+            KiZweck::Erstmeinung,
+        )
+        .map_err(|e| format!("Montagsreserve: {e:?}"))?;
+    }
+    Ok(())
+}

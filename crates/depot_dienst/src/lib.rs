@@ -640,6 +640,7 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let f = formular(a.abfrage.as_bytes()).unwrap_or_default();
     let (art, sha, ziel) = match feld(&f, "art").and_then(Art::aus_kurz) {
         Some(Art::Papier) => (Art::Papier, None, "/"),
+        Some(Art::Simulation) => (Art::Simulation, None, "/"),
         Some(Art::Vorbereiten) => {
             if d.update_offen() {
                 return http::umleitung("/?m=vorbereitung_update#vorbereitung");
@@ -741,6 +742,16 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
                 Err(_) => "auftrag_belegt",
             };
             return http::umleitung(&format!("/?m={m}#vorbereitung"));
+        }
+        Art::Simulation => {
+            let m = if !bestaetigt {
+                "simulation_bestaetigen"
+            } else if d.von_hand(art, jetzt).is_ok() {
+                "auftrag"
+            } else {
+                "auftrag_belegt"
+            };
+            return http::umleitung(&format!("/?m={m}#ki-simulation"));
         }
         Art::Papier if !bestaetigt => "/?m=papier_bestaetigen",
         Art::Update if !bestaetigt => "/einrichtung?m=update_bestaetigen#update",

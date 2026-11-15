@@ -4618,3 +4618,26 @@ fn startgeld_gleich_fuer_kennzahl_und_diagramm() -> Result<(), String> {
     assert!(html.contains("stroke-dasharray=\"8 5\""), "{html}");
     Ok(())
 }
+
+#[test]
+fn simulation_verlangt_kostenbestaetigung_und_reiht_doppelklick_nur_einmal_ein()
+-> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = Datum::neu(2026, 11, 15)
+        .and_then(|tag| Zeitpunkt::frankfurt(tag, 12, 0, 0))
+        .ok_or("Sonntag")?;
+    assert!(get(&d, "/", t).contains("/bestaetigen?art=simulation"));
+    let seite = get(&d, "/bestaetigen?art=simulation", t);
+    assert!(seite.contains("Maximale KI-Reservierung") && seite.contains("geprueft"));
+    let ohne = formular_post("/ausfuehren", &format!("t={TOKEN}&art=simulation"));
+    assert!(text(&behandle(&d, &Attrappe::default(), &ohne, t)).contains("simulation_bestaetigen"));
+    assert!(wartend(&d).is_empty());
+    let mit = formular_post(
+        "/ausfuehren",
+        &format!("t={TOKEN}&art=simulation&geprueft=ja"),
+    );
+    assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=auftrag#ki-simulation"));
+    assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=auftrag_belegt"));
+    assert_eq!(wartend(&d), vec![(Art::Simulation, Anlass::Hand)]);
+    Ok(())
+}

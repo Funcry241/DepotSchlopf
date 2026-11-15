@@ -121,7 +121,7 @@ pub fn tageskurse_am(
     Ok(k)
 }
 
-fn tageskurse_bis(
+pub(crate) fn tageskurse_bis(
     stand: &Stand,
     universum: &Universum,
     bis: Option<Zeitpunkt>,

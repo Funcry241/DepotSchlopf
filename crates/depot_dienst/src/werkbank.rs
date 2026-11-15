@@ -37,6 +37,7 @@ pub enum Art {
     /// Interner Auftrag für die optionale Nachrichtensortierung.
     Gemini,
     Vorbereiten,
+    Simulation,
     Papier,
     Sicherung,
     /// Dauerhafter Verlaufseintrag ohne gestarteten Prozess.
@@ -47,7 +48,7 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 12] = [
+const ALLE_ARTEN: [Art; 13] = [
     Art::Einrichten,
     Art::Kurse,
     Art::Kursdiagnose,
@@ -56,6 +57,7 @@ const ALLE_ARTEN: [Art; 12] = [
     Art::Termine,
     Art::Nachrichten,
     Art::Vorbereiten,
+    Art::Simulation,
     Art::Papier,
     Art::Sicherung,
     Art::UpdatePruefen,
@@ -74,6 +76,7 @@ impl Art {
             Art::Nachrichten => "Schlagzeilen abrufen",
             Art::Gemini => "Gemini-Zuarbeit",
             Art::Vorbereiten => "Nächsten Handelstag vorbereiten",
+            Art::Simulation => "KI-Simulation starten",
             Art::Papier => "Papiertag",
             Art::Sicherung => "Daten sichern",
             Art::PapierAusgelassen => "Papiertag ausgelassen: vor Börsenschluss nicht gestartet",
@@ -94,6 +97,7 @@ impl Art {
             Art::Nachrichten => "nachrichten",
             Art::Gemini => "gemini-vorlauf",
             Art::Vorbereiten => "vorbereiten",
+            Art::Simulation => "simulation",
             Art::Papier => "papier",
             Art::Sicherung => "sicherung",
             Art::PapierAusgelassen => "papier_ausgelassen",
@@ -118,6 +122,7 @@ impl Art {
             Art::Nachrichten => &["nachrichten"],
             Art::Gemini => &["gemini-vorlauf"],
             Art::Vorbereiten => &["vorbereiten"],
+            Art::Simulation => &["simulation"],
             Art::Papier => &["papier"],
             Art::Sicherung => &["sichern"],
             Art::PapierAusgelassen => &["papier_ausgelassen"],
@@ -1427,6 +1432,9 @@ fn einreihen(
     }
     if art == Art::Update && update_commit.is_none() {
         return Err("Kein bestätigter Commit. Bitte suche erneut nach einem Update.");
+    }
+    if art == Art::Simulation && (z.laufend.is_some() || !z.warteschlange.is_empty()) {
+        return Err("Simulation nur bei freiem Dienst starten");
     }
     // Kein Auftrag darf zwischen dem Vorrücken und der Datenprüfung des neuen Dienstes laufen.
     if z.neustart

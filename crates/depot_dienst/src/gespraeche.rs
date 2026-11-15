@@ -47,6 +47,7 @@ pub(crate) fn zweck_text(zweck: &str) -> &str {
         "zweitmeinung" => "Zweitmeinung",
         "abstimmung" => "Abstimmung",
         "vorbereitung" => "Vorbereitung",
+        "simulation" => "Simulation",
         "nachrichten-vorsortieren" => "Nachrichten vorsortieren",
         wert => wert,
     }
