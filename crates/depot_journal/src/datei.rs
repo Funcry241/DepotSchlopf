@@ -749,6 +749,9 @@ impl Journal {
             Art::Ki | Art::KiAbrechnung | Art::KiAufruf | Art::KiGrenzen => Err(
                 JournalFehler::Abgelehnt("KI-Einträge entstehen nur über reserviere".into()),
             ),
+            Art::TopfUmbuchung => Err(JournalFehler::Abgelehnt(
+                "Topfumbuchung nur als atomare Bargeldbuchung".into(),
+            )),
             Art::Auftrag => Err(JournalFehler::Abgelehnt(
                 "Aufträge entstehen nur über reserviere_auftrag".into(),
             )),
@@ -872,6 +875,10 @@ impl Journal {
     ///
     /// # Errors
     /// Wie `anhaengen`; `Abgelehnt` auch bei leerem `wer` oder Text und bei `;` in `wer`.
+    pub fn buche_topfgeld(&mut self, datum: Datum, nach_a: Cent) -> Result<(), JournalFehler> {
+        self.schreibe_eintrag(Art::TopfUmbuchung, &format!("{datum};{}", nach_a.0))
+    }
+
     pub fn belege_lehre(
         &mut self,
         datum: Datum,

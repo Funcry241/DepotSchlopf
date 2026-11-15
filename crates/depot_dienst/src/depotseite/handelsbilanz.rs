@@ -538,6 +538,15 @@ pub(super) fn abschnitt(
     }
     text.push_str("</div>");
     schattenbilanz(stand, text);
+    if let Some(gesamt) =
+        depot_lage::topfgewichtung::feste_haelfte(stand, &depot_kern::liste::als_universum(werte))
+    {
+        let _ = write!(
+            text,
+            "<p>Feste Hälfte · Schattenrechnung anhand der beobachteten Topfrenditen: {gesamt}</p>"
+        );
+    }
+
     text.push_str(r#"<details id="handelsbilanz-vergleich">
         <summary>So wird der Vergleich berechnet</summary><p>Der Vergleichskorb startet am belegten Einstiegstag
         mit dem üblichen Vergleichskapital. Die Rendite berücksichtigt Kaufgebühren und einen rechnerischen
