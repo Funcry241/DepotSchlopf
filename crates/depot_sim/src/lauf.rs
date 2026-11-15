@@ -1447,7 +1447,11 @@ fn belege_kauf(
             .limit
             .mal_stueck(a.stueck)
             .and_then(|volumen| {
-                crate::kostenhuerde::hinweis(volumen, z.grenzen.gebuehren().fuer(volumen)?)
+                crate::kostenhuerde::hinweis(
+                    volumen,
+                    z.grenzen.gebuehren().fuer(volumen)?,
+                    depot_kern::liste::boerse_von(&a.isin),
+                )
             })
             .unwrap_or_else(|| "Kostenhürde nicht berechenbar. Spread nicht belegt.".into());
         begruende(j, tag, "Kostenhürde", &format!("Auftrag {nr}: {huerde}"))?;

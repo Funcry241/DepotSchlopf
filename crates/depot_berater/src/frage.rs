@@ -119,6 +119,12 @@ fn gewinnschwelle(t: &mut String) {
     let grenzen = Grenzen::standard();
     let gebuehren = grenzen.gebuehren();
     gewinnschwelle_mit(t, grenzen.min_order(), |order| gebuehren.fuer(order));
+    let _ = writeln!(
+        t,
+        "Für die Kaufentscheidung rechne zum Gebührenbeispiel den Modellspread für beide Seiten hinzu. Xetra {} Basispunkte, NYSE {} Basispunkte.",
+        depot_sim::kostenhuerde::spread_je_seite_bp(depot_kern::Boerse::Xetra).saturating_mul(2),
+        depot_sim::kostenhuerde::spread_je_seite_bp(depot_kern::Boerse::Nyse).saturating_mul(2)
+    );
 }
 
 fn gewinnschwelle_mit(
@@ -132,7 +138,7 @@ fn gewinnschwelle_mit(
         depot_kern::Cent(100_000),
     ] {
         if let Some(hinweis) =
-            gebuehr(order).and_then(|g| depot_sim::kostenhuerde::hinweis(order, g))
+            gebuehr(order).and_then(|g| depot_sim::kostenhuerde::hinweis(order, g, None))
         {
             let _ = writeln!(t, "{hinweis}");
         }
