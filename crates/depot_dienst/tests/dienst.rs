@@ -1554,7 +1554,7 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
 }
 
 #[test]
-fn zeitplanformular_bewahrt_entwurf_bei_schalterwechsel_im_anderen_tab() -> Result<(), String> {
+fn zeitplanformular_bewahrt_entwurf_bei_aenderung_im_anderen_tab() -> Result<(), String> {
     let d = Dienst::neu(
         ordner()?,
         TOKEN.into(),
@@ -1563,31 +1563,53 @@ fn zeitplanformular_bewahrt_entwurf_bei_schalterwechsel_im_anderen_tab() -> Resu
     );
     let t = donnerstag(12, 0)?;
     assert!(d.schritt(t).is_none());
-    assert!(get(&d, "/einrichtung", t).contains("name=\"planstand\" value=\"aus\""));
+    let formularstand = |html: &str| {
+        html.split_once("name=\"planstand\" value=\"")
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .map(|(stand, _)| stand.to_owned())
+            .ok_or("Zeitplanstand fehlt")
+    };
+    let seite = get(&d, "/einrichtung", t);
+    let alter_stand = formularstand(&seite)?;
+    let nur_speichern = some(seite.find("value=\"speichern\""), "Nur speichern")?;
+    let einschalten = some(seite.find("value=\"speichern_an\""), "Einschalten")?;
+    assert!(
+        nur_speichern < einschalten,
+        "Enter darf den Zeitplan nicht einschalten"
+    );
     let umw = Attrappe::default();
     let an = formular_post("/zeitplan", &format!("t={TOKEN}&aktion=an"));
     assert!(text(&behandle(&d, &umw, &an, t)).contains("m=zeitplan_an"));
     let vorher = d.sperre().zeitplan;
-    let speichern = |stand| {
+    let speichern = |stand: &str| {
         let post = formular_post(
             "/zeitplan",
             &format!("t={TOKEN}&aktion=speichern&planstand={stand}&termine=08%3A15&kurse=08%3A05"),
         );
         text(&behandle(&d, &umw, &post, t))
     };
-    let antwort = speichern("aus");
-    assert!(antwort.contains("m=zeitplan_schalter_geaendert"));
+    let antwort = speichern(&alter_stand);
+    assert!(antwort.contains("m=zeitplan_stand_geaendert"));
     assert_eq!(d.sperre().zeitplan, vorher);
     let seite = get(&d, &ort(&antwort), t);
-    assert!(seite.contains("name=\"planstand\" value=\"an\""));
+    let stand_nach_schalterwechsel = formularstand(&seite)?;
+    assert_ne!(stand_nach_schalterwechsel, alter_stand);
     assert!(seite.contains("Der Zeitplan bleibt eingeschaltet."));
     assert!(!seite.contains("Nur speichern"));
     assert!(seite.contains("value=\"08:05\""));
     assert!(seite.contains("Deine Eingaben stehen als Entwurf"));
-    assert!(speichern("an").contains("m=zeitplan#"));
+    assert!(seite.contains("href=\"#zeitplan\">Zeitplan und Eingaben ansehen"));
+    assert!(speichern(&stand_nach_schalterwechsel).contains("m=zeitplan#"));
     let nachher = d.sperre().zeitplan;
     assert!(nachher.an);
     assert_eq!(nachher.kurse, (8, 5));
+    // Auch neue Uhrzeiten bei unverändertem Schalterstand bleiben erhalten.
+    let antwort = speichern(&stand_nach_schalterwechsel);
+    assert!(antwort.contains("m=zeitplan_stand_geaendert"));
+    assert_eq!(d.sperre().zeitplan, nachher);
+    assert!(
+        get(&d, &ort(&antwort), t).contains("Gespeicherte Uhrzeiten: Termine 08:15, Kurse 08:05.")
+    );
     Ok(())
 }
 
@@ -4055,6 +4077,13 @@ fn pruefbericht_steht_zuerst_und_standard_ist_diese_woche() -> Result<(), String
     let zeit = donnerstag(12, 0)?;
     let html = get(&d, "/", zeit);
     assert!(html.contains("Diese Woche exportieren"));
+    let eigenes_formular = html
+        .split("</form>")
+        .find(|teil| teil.contains("name=\"von\""))
+        .ok_or("Formular für Von/Bis fehlt")?;
+    assert!(eigenes_formular.contains("name=\"zeitraum\" value=\"frei\""));
+    assert!(eigenes_formular.contains("name=\"bis\""));
+    assert_eq!(eigenes_formular.matches("type=\"submit\"").count(), 1);
     let antwort = behandle(
         &d,
         &Attrappe::default(),
@@ -4636,8 +4665,16 @@ fn simulation_verlangt_kostenbestaetigung_und_reiht_doppelklick_nur_einmal_ein()
         "/ausfuehren",
         &format!("t={TOKEN}&art=simulation&geprueft=ja"),
     );
+    d.von_hand(Art::Termine, t)?;
+    let live = get(&d, "/", t);
+    assert!(live.contains("KI-Simulation starten · Dienst belegt"));
+    assert!(!live.contains("/bestaetigen?art=simulation"));
+    assert!(get(&d, "/bestaetigen?art=simulation", t).contains("m=simulation_belegt"));
+    assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=simulation_belegt"));
+    assert_eq!(wartend(&d), vec![(Art::Termine, Anlass::Hand)]);
+    let d = dienst(ordner()?, true);
     assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=auftrag#ki-simulation"));
-    assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=auftrag_belegt"));
+    assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=simulation_belegt"));
     assert_eq!(wartend(&d), vec![(Art::Simulation, Anlass::Hand)]);
     Ok(())
 }

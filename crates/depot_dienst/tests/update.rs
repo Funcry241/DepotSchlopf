@@ -281,7 +281,9 @@ fn einrichtung_zeigt_update_und_sperrt_den_knopf_bis_alle_auftraege_fertig_sind(
 #[test]
 fn doppelte_updatesuche_meldet_den_richtigen_auftrag() -> Result<(), String> {
     let d = dienst(ordner()?);
-    assert!(post_auftrag(&d, Art::UpdatePruefen.kurz())?.contains("m=update#update"));
+    assert!(
+        post_auftrag(&d, Art::UpdatePruefen.kurz())?.contains("m=updatesuche_eingereiht#update")
+    );
     assert!(post_auftrag(&d, Art::UpdatePruefen.kurz())?.contains("m=updatesuche_belegt#update"));
     let html = get(&d, "/einrichtung?m=updatesuche_belegt")?;
     assert!(html.contains("Updatesuche nicht eingereiht."));
@@ -345,7 +347,7 @@ fn knoepfe_auf_der_einrichtung_und_marke_des_starts() -> Result<(), String> {
     assert!(js.contains("data-start") && js.contains("location.replace"));
 
     let r = post_auftrag(&d, "update_pruefen")?;
-    assert!(r.contains("Location: /einrichtung?m=update#update\r\n"));
+    assert!(r.contains("Location: /einrichtung?m=updatesuche_eingereiht#update\r\n"));
     let r = post_auftrag(&d, "update")?;
     assert!(
         r.contains("Location: /einrichtung?m=update_bestaetigen#update\r\n"),
@@ -1118,6 +1120,15 @@ test('Nach einem beendeten Update bleibt ein späterer Abbruch eine normale Stö
   await b.advance(0);
   assert.deepEqual(b.navigations,[]);
   offline=true;await b.advance(2000);
+  assert.equal(b.banner.hasAttribute('data-update-wartet'),false);
+  assert.match(b.banner.textContent,/Verbindung zu DepotSchlopf unterbrochen/);
+});
+test('Verbindungsabbruch während einer Updatesuche zeigt keine Update-Wartezeit',async()=>{
+  const b=browser({
+    href:'http://127.0.0.1:47410/einrichtung?m=updatesuche_eingereiht#update',
+    response:()=>Promise.reject(Error('offline'))
+  });
+  await b.advance(0);
   assert.equal(b.banner.hasAttribute('data-update-wartet'),false);
   assert.match(b.banner.textContent,/Verbindung zu DepotSchlopf unterbrochen/);
 });

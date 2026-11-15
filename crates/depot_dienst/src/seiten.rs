@@ -117,6 +117,12 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str, primaer: bool) 
             maskiere(text)
         );
     }
+    if art == Art::Simulation && z.simulation_belegt() {
+        return format!(
+            "<button type=\"button\" disabled>{} · Dienst belegt</button>",
+            maskiere(text)
+        );
+    }
     if matches!(art, Art::Papier | Art::Vorbereiten | Art::Simulation) {
         return bestaetigungslink(art, text, None, primaer);
     }
@@ -332,9 +338,9 @@ fn einstellungs_meldung(code: &str) -> Option<(&'static str, &'static str)> {
             "offen",
             "Zeitplan unverändert. Bitte lade die Einrichtung neu und wähle die gewünschte Aktion.",
         ),
-        "zeitplan_schalter_geaendert" => (
+        "zeitplan_stand_geaendert" => (
             "offen",
-            "Der Zeitplan wurde inzwischen ein- oder ausgeschaltet. Deine Eingaben stehen als Entwurf im Formular. Prüfe den aktuellen Stand und wähle erneut, wie du speichern möchtest.",
+            "Der gespeicherte Zeitplan hat sich inzwischen geändert. Deine Eingaben stehen als Entwurf im Formular. Prüfe den aktuellen Stand, bevor du erneut speicherst.",
         ),
         "zeitplan_kursfenster" => ("halt", "Kursabruf nur zwischen 07:00 und 08:30"),
         "zeitplan_ungueltig" => (
@@ -382,7 +388,10 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
     if let Some(grund) = vorbereitung_meldung(code) {
         return Some(("offen", grund));
     }
-    if let Some(m) = sperr_meldung(code).or_else(|| einstellungs_meldung(code)) {
+    if let Some(m) = sperr_meldung(code)
+        .or_else(|| einstellungs_meldung(code))
+        .or_else(|| auftrags_meldung(code))
+    {
         return Some(m);
     }
     Some(match code {
@@ -446,9 +455,23 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "halt",
             "Die Freigabe konnte nicht bestätigt werden. Lade die Einrichtung neu und prüfe Journal und Papierkonto.",
         ),
+        _ => return None,
+    })
+}
+
+fn auftrags_meldung(code: &str) -> Option<(&'static str, &'static str)> {
+    Some(match code {
         "papier_bestaetigen" => (
             "offen",
             "Papiertag unverändert. Öffne den Bestätigungsschritt und setze den Haken.",
+        ),
+        "simulation_bestaetigen" => (
+            "offen",
+            "Die KI-Simulation wurde nicht gestartet. Öffne den Bestätigungsschritt und bestätige den möglichen Verbrauch von KI-Budget.",
+        ),
+        "simulation_belegt" => (
+            "offen",
+            "Die KI-Simulation wurde nicht gestartet. Es läuft oder wartet bereits ein Auftrag, oder der Dienst startet nach einem Update neu.",
         ),
         "update_bestaetigen" => (
             "offen",
@@ -461,6 +484,10 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "update" => (
             "gut",
             "Auftrag eingereiht. Sein Protokoll steht auf Live unter Tätigkeit.",
+        ),
+        "updatesuche_eingereiht" => (
+            "gut",
+            "Updatesuche eingereiht. Das Ergebnis erscheint im Abschnitt Update.",
         ),
         "update_belegt" => (
             "offen",
@@ -503,18 +530,19 @@ pub fn meldungs_aktion(abfrage: &str) -> (&'static str, &'static str) {
         .find_map(|p| p.strip_prefix("m="))
         .unwrap_or_default();
     match code {
-        "zeitplan"
-        | "zeitplan_an"
-        | "zeitplan_gespeichert_an"
-        | "zeitplan_aus"
-        | "zeitplan_ungueltig"
-        | "zeitplan_kursfenster"
-        | "zeitplan_schalter_geaendert"
-        | "zeitplan_fehler"
-        | "vorbereitung_quellen" => ("/einrichtung#zeitplan", "Zeitplan und Eingaben ansehen"),
-        "zeitplan_lage" | "zeitplan_neu_laden" | "zeitplan_einrichtung" => {
-            ("/einrichtung#zeitplan", "Einrichtung prüfen")
+        "zeitplan" | "zeitplan_an" | "zeitplan_gespeichert_an" | "zeitplan_aus" => {
+            ("/einrichtung#zeitplan", "Zeitplan ansehen")
         }
+        "zeitplan_ungueltig"
+        | "zeitplan_kursfenster"
+        | "zeitplan_stand_geaendert"
+        | "zeitplan_fehler"
+        | "vorbereitung_quellen" => ("#zeitplan", "Zeitplan und Eingaben ansehen"),
+        "zeitplan_lage" | "zeitplan_einrichtung" => ("#zeitplan", "Einrichtung prüfen"),
+        "zeitplan_neu_laden" => ("/einrichtung#zeitplan", "Einrichtung neu laden"),
+        "simulation_belegt" => ("/#taetigkeit", "Laufende und wartende Aufträge ansehen"),
+        "simulation_bestaetigen" => ("/#ki-simulation", "Zur KI-Simulation"),
+        "updatesuche_eingereiht" => ("#update", "Updatesuche ansehen"),
         "schluessel" | "schluessel_protokoll" | "schluessel_ungueltig" | "schluessel_fehler" => {
             ("/einrichtung#schluessel", "Zugangsdaten prüfen")
         }
@@ -1899,12 +1927,17 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
     let haken = |b: bool| if b { " checked" } else { "" };
     let ent = &e.entwurf;
     let entwurf_hinweis = if ent.leer() {
-        ""
+        String::new()
     } else {
-        "<p class=\"offen\">Das Formular zeigt deine letzten, nicht gespeicherten Eingaben.</p>"
+        format!(
+            "<p class=\"offen\">Das Formular zeigt deine letzten, nicht gespeicherten Eingaben. \
+             Gespeicherte Uhrzeiten: Termine {}, Kurse {}.</p>",
+            uhrzeit_text(p.termine),
+            uhrzeit_text(p.kurse)
+        )
     };
     let (voraussetzung, gesperrt) = zeitplan_voraussetzungen(zustand);
-    let stand = if p.an { "an" } else { "aus" };
+    let stand = p.abdruck();
     let betrieb = zustand.automatik_status();
     let token = maskiere(token);
     let schalter = if p.an {
@@ -1974,7 +2007,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          ein neuer Grund für „Eingriff nötig“ entsteht oder ein Papiertag ausgefallen ist; löst \
          nichts aus und gilt auch bei ausgeschaltetem Zeitplan)</label>\
          <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Änderungen werden erst durch Speichern wirksam.</p>\
-         {einschalten} <button type=\"submit\" name=\"aktion\" value=\"speichern\"{speichern_hervorheben}>{speicher_text}</button>\
+         <button type=\"submit\" name=\"aktion\" value=\"speichern\"{speichern_hervorheben}>{speicher_text}</button> {einschalten}\
          <p>{speicher_hinweis} Du kannst die Einrichtung jederzeit später fortsetzen.</p></div></form></section>",
         uhrzeit_text(ent.termine.unwrap_or(p.termine)),
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),

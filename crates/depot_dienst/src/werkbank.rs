@@ -235,8 +235,8 @@ pub struct Zustand {
 /// Warum ein Zeitplan nicht gespeichert wurde.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ZeitplanAbgelehnt {
-    /// Der Schalter steht anders als beim Öffnen des Formulars.
-    SchalterGeaendert,
+    /// Der gespeicherte Zeitplan hat sich seit dem Öffnen des Formulars geändert.
+    StandGeaendert,
     /// Eine neue Version ist noch nicht bestätigt.
     UpdateOffen,
     /// Einschalten erst, wenn die Einrichtung vollstaendig ist: was fehlt.
@@ -344,6 +344,10 @@ impl Zustand {
             ]),
             (b, None) => b,
         })
+    }
+
+    pub(crate) fn simulation_belegt(&self) -> bool {
+        self.neustart || self.laufend.is_some() || !self.warteschlange.is_empty()
     }
 
     /// Darf der Zeitplan jetzt eingeschaltet werden? Nur mit berechnetem Lagebild und ohne
@@ -1435,8 +1439,8 @@ fn einreihen(
     if art == Art::Update && update_commit.is_none() {
         return Err("Kein bestätigter Commit. Bitte suche erneut nach einem Update.");
     }
-    if art == Art::Simulation && (z.laufend.is_some() || !z.warteschlange.is_empty()) {
-        return Err("Simulation nur bei freiem Dienst starten");
+    if art == Art::Simulation && z.simulation_belegt() {
+        return Err("simulation_belegt");
     }
     // Kein Auftrag darf zwischen dem Vorrücken und der Datenprüfung des neuen Dienstes laufen.
     if z.neustart
