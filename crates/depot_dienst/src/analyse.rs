@@ -119,18 +119,18 @@ pub(crate) fn formular(d: &Dienst, heute: Option<Datum>) -> String {
     };
     let token = depot_lage::html::maskiere(&d.token);
     format!(
-        "<form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+        "<div class=\"analyse-export\"><form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
          <button type=\"submit\" name=\"zeitraum\" value=\"woche\">Diese Woche exportieren</button>\
-         </form><details id=\"analyse-zeitraum\"><summary>Zeitraum exportieren</summary>\
+         </form><details id=\"analyse-zeitraum\"><summary>Zeitraum wählen</summary>\
          <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
-         <button type=\"submit\" name=\"zeitraum\" value=\"heute\" formnovalidate>Heute</button> \
+         <div class=\"aktionszeile\"><button type=\"submit\" name=\"zeitraum\" value=\"heute\" formnovalidate>Heute</button> \
          <button type=\"submit\" name=\"zeitraum\" value=\"gestern\" formnovalidate>Gestern</button> \
          <button type=\"submit\" name=\"zeitraum\" value=\"handelstage\" formnovalidate>Letzte 5 Handelstage</button> \
-         <button type=\"submit\" name=\"zeitraum\" value=\"woche\" formnovalidate>Diese Woche</button>\
-         <p><label>Von <input type=\"date\" name=\"von\" value=\"{heute}\" required></label> \
-         <label>Bis <input type=\"date\" name=\"bis\" value=\"{heute}\" required></label> \
-         <button type=\"submit\" name=\"zeitraum\" value=\"frei\">Zeitraum exportieren</button></p>\
-         <p>Frankfurter Datum, höchstens 31 Kalendertage.</p></form></details>"
+         <button type=\"submit\" name=\"zeitraum\" value=\"woche\" formnovalidate>Diese Woche</button></div>\
+         <div class=\"formularfelder\"><label>Von <input type=\"date\" name=\"von\" value=\"{heute}\" required></label> \
+         <label>Bis <input type=\"date\" name=\"bis\" value=\"{heute}\" required></label></div>\
+         <button type=\"submit\" name=\"zeitraum\" value=\"frei\">Zeitraum exportieren</button>\
+         <p class=\"leise\">Frankfurter Datum, höchstens 31 Kalendertage.</p></form></details></div>"
     )
 }
 

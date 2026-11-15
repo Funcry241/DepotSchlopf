@@ -31,11 +31,11 @@ nav a:focus-visible{outline:2px solid currentColor;outline-offset:2px}\
 .version{margin-inline-start:auto;white-space:nowrap}\
 form.knopf{display:inline;margin:0}\
 a.aktion{display:inline-block;text-decoration:none;padding:10px 16px;border:1px solid var(--linie);border-radius:6px;color:inherit}\
-button{font:inherit;font-weight:600;min-height:44px;padding:10px 16px;border:2px solid var(--linie);border-radius:6px;\
+button,.analyse-export summary{font:inherit;font-weight:600;min-height:44px;padding:10px 16px;border:2px solid var(--linie);border-radius:6px;\
 background:var(--flaeche);color:var(--text);cursor:pointer}\
 button:disabled{color:var(--leise);border-style:dashed;cursor:default}\
-button:not(:disabled):hover,a.aktion:hover{outline:2px solid currentColor;outline-offset:2px}\
-button:focus-visible,a.aktion:focus-visible{outline:3px solid var(--text);outline-offset:3px}\
+button:not(:disabled):hover,a.aktion:hover,.analyse-export summary:hover{outline:2px solid currentColor;outline-offset:2px}\
+button:focus-visible,a.aktion:focus-visible,.analyse-export summary:focus-visible{outline:3px solid var(--text);outline-offset:3px}\
 button.primaer,a.primaer,form.ungespeichert:valid button[data-speichern-hervorheben]:not(:disabled){background:#005c97;color:#fff;border:2px solid #005c97;font-weight:700}\
 button.primaer:disabled{background:var(--flaeche);color:var(--leise);border-color:var(--linie)}\
 button.laeuft{border:2px solid var(--offen);color:var(--offen)}\
@@ -67,6 +67,17 @@ padding:8px 10px;margin:6px 0 12px;max-height:24em;overflow:auto}\
 #neuverbinden{padding:12px}\
 @media(max-width:600px),(max-height:700px){.speicher-aktionen{position:static}}\
 label{display:block;margin:6px 0}\
+.formularfelder,.aktionszeile{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;margin:12px 0}\
+.formularfelder label{display:flex;align-items:center;gap:8px;margin:0;max-width:100%}\
+.formularfelder input,.formularfelder select{box-sizing:border-box;min-height:40px;min-width:0;\
+max-width:100%;font:inherit;padding:4px 8px;border:1px solid var(--linie);border-radius:6px;\
+background:var(--grund);color:var(--text)}\
+.analyse-export{display:flex;align-items:flex-start;gap:8px 16px;flex-wrap:wrap;margin:12px 0}\
+.analyse-export details{flex:1 1 min(100%,12rem)}\
+.analyse-export summary{box-sizing:border-box;display:inline-flex;align-items:center;gap:8px;list-style:none}\
+.analyse-export summary::-webkit-details-marker{display:none}\
+.analyse-export summary::after{content:\"▾\";color:var(--leise)}\
+.analyse-export details[open] summary::after{content:\"▴\"}\
 .einstellungsgruppe{border:2px solid var(--halt)}.zusatz-einstellungen{border:1px solid var(--linie)}\
 .quellen-tabelle td:last-child button{width:100%}\
 .zugang-tabelle input{width:100%}.zugang-tabelle td{overflow-wrap:anywhere}\
@@ -186,7 +197,8 @@ pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> S
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"art\" value=\"{}\">{stand}\
          <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> {haken}</label>\
-         <button class=\"primaer\" type=\"submit\">{knopf}</button> <a href=\"{ziel}\">Abbrechen</a></form></section>",
+         <div class=\"aktionszeile\"><button class=\"primaer\" type=\"submit\">{knopf}</button> \
+         <a href=\"{ziel}\">Abbrechen</a></div></form></section>",
         maskiere(token),
         art.kurz()
     )
@@ -996,11 +1008,11 @@ pub fn fehler(status: u16, text: &str) -> Vec<u8> {
 
 pub(crate) fn protokoll_seite(kennung: &str, text: &str) -> String {
     format!(
-        "<section><h2>Protokoll {0}</h2><p><a href=\"/\">Zurück zu Live</a> · \
-         <a href=\"/protokoll.txt?lauf={0}\" download=\"DepotSchlopf-{0}.log\">Herunterladen</a></p>\
+        "<section><h2>Protokoll {0}</h2><p><a href=\"/\">Zurück zu Live</a></p>\
          <details open><summary>Vollständiges gespeichertes Protokoll</summary>\
-         <button type=\"button\" data-protokoll-kopieren>Protokoll kopieren</button> \
-         <span class=\"leise\" role=\"status\"></span><pre class=\"konsole\" tabindex=\"0\">{1}</pre></details></section>",
+         <div class=\"aktionszeile\"><button type=\"button\" data-protokoll-kopieren>Protokoll kopieren</button>\
+         <a href=\"/protokoll.txt?lauf={0}\" download=\"DepotSchlopf-{0}.log\">Herunterladen</a>\
+         <span class=\"leise\" role=\"status\"></span></div><pre class=\"konsole\" tabindex=\"0\">{1}</pre></details></section>",
         maskiere(kennung),
         maskiere(text)
     )
@@ -1021,8 +1033,8 @@ fn protokoll(a: &Auftrag, offen: bool) -> String {
     };
     format!(
         "<details id=\"protokoll-{}\"{}><summary>Protokoll ({} Zeilen)</summary>\
-         {kopieren}<p><a href=\"/protokoll?lauf={0}\">Vollständiges Protokoll öffnen und kopieren</a> · \
-         <a href=\"/protokoll.txt?lauf={0}\" download=\"DepotSchlopf-{0}.log\">Herunterladen</a></p>\
+         <div class=\"aktionszeile\">{kopieren}<a href=\"/protokoll?lauf={0}\">Vollständiges Protokoll öffnen</a>\
+         <a href=\"/protokoll.txt?lauf={0}\" download=\"DepotSchlopf-{0}.log\">Herunterladen</a></div>\
          <p class=\"leise\">Auszug mit den letzten 500 Zeilen. Es bleiben höchstens 20 Protokolle, \
          je bis zu 16 MiB. Überlange Zeilen und eine erreichte Größenbegrenzung werden im Protokoll vermerkt.</p>\
          <pre class=\"konsole\" tabindex=\"0\">{text}</pre></details>",
@@ -1943,8 +1955,10 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          <form id=\"zeitplan-formular\" method=\"post\" action=\"/zeitplan\" data-aenderungen data-entwurf=\"{entwurf}\">\
          <input type=\"hidden\" name=\"t\" value=\"{token}\">\
          <input type=\"hidden\" name=\"planstand\" value=\"{stand}\">\
-         <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
-         <label>Kursabruf um <input type=\"time\" name=\"kurse\" value=\"{}\" required> <span class=\"leise\">Frankfurter Zeit · 24 Stunden</span></label>\
+         <div class=\"formularfelder\">\
+         <label>Termine abrufen um <input type=\"time\" name=\"termine\" value=\"{}\" aria-describedby=\"zeitplan-uhrzeit\" required></label>\
+         <label>Kursabruf um <input type=\"time\" name=\"kurse\" value=\"{}\" aria-describedby=\"zeitplan-uhrzeit\" required></label></div>\
+         <p id=\"zeitplan-uhrzeit\" class=\"leise\">Frankfurter Zeit · 24 Stunden</p>\
          <p class=\"leise\">{kurse_hinweis}</p>\
          <label><input type=\"checkbox\" name=\"papier_danach\" value=\"ja\"{}> \
          Nach dem letzten Kursabruf des Tages den Papiertag starten (wenn ein Abruf des Tages \
