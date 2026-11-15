@@ -124,6 +124,7 @@ pub(crate) fn einrichtung(
     } else {
         "<label><input type=\"checkbox\" name=\"gratisprojekt\" value=\"ja\" required> Ich verwende ein Google-Gratis-Projekt ohne Abrechnung.</label>"
     };
+    let neuro = crate::neuroschlopf::formular(d);
     format!(
         "<section id=\"zusatz\" class=\"zusatz-einstellungen\" aria-labelledby=\"zusatz-titel\">\
          <h2 id=\"zusatz-titel\">Zusatz-KIs (optional)</h2>\
@@ -135,7 +136,7 @@ pub(crate) fn einrichtung(
          <form method=\"post\" action=\"/gemini\" data-aenderungen><input type=\"hidden\" name=\"t\" value=\"{token}\">\
          {bestaetigung}<button type=\"submit\" name=\"an\" value=\"ja\"{einschalten}>Gemini einschalten</button> \
          <button type=\"submit\" name=\"an\" value=\"nein\"{ausschalten}>Gemini ausschalten</button>\
-         <p data-speicherstand role=\"status\"></p></form></section></section>",
+         <p data-speicherstand role=\"status\"></p></form></section>{neuro}</section>",
         Wer::Berater(depot_kern::BeraterId::Dachs).name(),
         depot_kern::modelle::MODELL_DACHS,
         Wer::Berater(depot_kern::BeraterId::Maus).name(),

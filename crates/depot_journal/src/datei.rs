@@ -89,12 +89,21 @@ fn als_u64(n: usize) -> Result<u64, String> {
 /// Prueft vollstaendige Zeilen ab der Kette `vorher`. Liefert die Eintraege und die letzte
 /// Kette. Jede Abweichung ist ein Fehler: Laenge, Kette, Zeichen, fehlendes Zeilenende.
 fn pruefe_zeilen(bytes: &[u8], vorher: &str) -> Result<(Vec<String>, String), String> {
+    pruefe_zeilen_mit(bytes, vorher, &mut || Ok(()))
+}
+
+fn pruefe_zeilen_mit(
+    bytes: &[u8],
+    vorher: &str,
+    schritt: &mut impl FnMut() -> Result<(), String>,
+) -> Result<(Vec<String>, String), String> {
     if !bytes.is_empty() && !bytes.ends_with(b"\n") {
         return Err("letzte Zeile ohne Zeilenende".into());
     }
     let mut k = vorher.to_string();
     let mut eintraege = Vec::new();
     for (i, z) in bytes.split_inclusive(|b| *b == b'\n').enumerate() {
+        schritt()?;
         let nr = i.saturating_add(1);
         let text = std::str::from_utf8(z)
             .ok()
@@ -345,6 +354,13 @@ impl Drop for Journal {
 
 /// Prueft alle Eintraege nach dem Kopf und rechnet den Stand nach.
 fn nachrechnen(zeilen: &[String]) -> Result<(Vec<(Art, String)>, Stand), JournalFehler> {
+    nachrechnen_mit(zeilen, &mut || Ok(()))
+}
+
+fn nachrechnen_mit(
+    zeilen: &[String],
+    schritt: &mut impl FnMut() -> Result<(), String>,
+) -> Result<(Vec<(Art, String)>, Stand), JournalFehler> {
     let mut alle = zeilen.iter();
     let format = match alle.next().map(String::as_str) {
         Some(KOPF) => FORMAT,
@@ -354,6 +370,7 @@ fn nachrechnen(zeilen: &[String]) -> Result<(Vec<(Art, String)>, Stand), Journal
     let mut stand = Stand::im_format(format);
     let mut eintraege = Vec::new();
     for (i, z) in alle.enumerate() {
+        schritt().map_err(halt)?;
         let nr = i.saturating_add(2);
         let (art, inhalt) = trenne(z).ok_or_else(|| halt(format!("Zeile {nr}: Art unbekannt")))?;
         stand
@@ -485,6 +502,72 @@ impl Journal {
         let ergebnis = pruefe(&stand, &eintraege, original);
         let _ = datei.unlock();
         Ok(ergebnis)
+    }
+
+    /// Liefert die Identität des zuletzt bestätigten Journals. Der Vermerk ist ein
+    /// Änderungssignal und ersetzt beim Hintergrundlesen nicht die Kettenprüfung.
+    pub fn hintergrund_abdruck(pfad: &Path) -> Result<(u64, String), JournalFehler> {
+        kein_link_im_pfad(pfad)?;
+        let vermerk = lies_vermerk(&vermerk_pfad(pfad))?;
+        if vermerk.geplant != 0 {
+            return Err(JournalFehler::Belegt);
+        }
+        Ok((vermerk.laenge, vermerk.kette))
+    }
+
+    /// Prüft einen stabilen Journalausschnitt ohne eine Sperre gegen den Vordergrund.
+    /// Schrittpunkte erlauben dem Aufrufer Drosselung und Abbruch. Ändert sich der
+    /// Bestätigungsvermerk während der Lesung, ist ein erneuter Versuch erforderlich.
+    pub fn pruefe_im_hintergrund<R>(
+        pfad: &Path,
+        leselimit: u64,
+        schritt: &mut impl FnMut() -> Result<(), String>,
+        pruefe: impl FnOnce(
+            &Stand,
+            &[(Art, String)],
+            &[u8],
+            (u64, String),
+            &mut dyn FnMut() -> Result<(), String>,
+        ) -> R,
+    ) -> Result<R, JournalFehler> {
+        let merke = Self::hintergrund_abdruck(pfad)?;
+        if merke.0 > leselimit {
+            return Err(halt("Journal überschreitet die Lesegrenze"));
+        }
+        let mut datei = File::open(pfad)
+            .map_err(|e| halt(format!("Journal lesen: {e}")))?
+            .take(merke.0.saturating_add(1));
+        let mut inhalt = Vec::new();
+        let mut block = [0_u8; 16_384];
+        loop {
+            schritt().map_err(halt)?;
+            let n = datei
+                .read(&mut block)
+                .map_err(|e| halt(format!("Journal lesen: {e}")))?;
+            if n == 0 {
+                break;
+            }
+            let bytes = block.get(..n).ok_or_else(|| halt("Ungültige Blocklänge"))?;
+            inhalt.extend_from_slice(bytes);
+        }
+        let erneut = || Self::hintergrund_abdruck(pfad);
+        if erneut()? != merke {
+            return Err(JournalFehler::Belegt);
+        }
+        if als_u64(inhalt.len()).map_err(halt)? != merke.0 {
+            return Err(halt(
+                "Journal hat einen unvollständigen oder unbestätigten Anhang",
+            ));
+        }
+        let (zeilen, kette) = pruefe_zeilen_mit(&inhalt, &kettenanfang(), schritt).map_err(halt)?;
+        if kette != merke.1 {
+            return Err(halt("Journal weicht vom bestätigten Stand ab"));
+        }
+        let (eintraege, stand) = nachrechnen_mit(&zeilen, schritt)?;
+        if erneut()? != merke {
+            return Err(JournalFehler::Belegt);
+        }
+        Ok(pruefe(&stand, &eintraege, &inhalt, merke, schritt))
     }
 
     /// Oeffnet exklusiv, prueft die ganze Kette gegen den Vermerk, behandelt einen vermerkten

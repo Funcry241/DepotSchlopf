@@ -28,6 +28,7 @@ mod gespraeche;
 pub mod hinweis;
 pub mod http;
 pub mod kostenschutz;
+mod neuroschlopf;
 mod otter;
 mod papierdialog;
 pub use papierdialog::DialogErgebnis;
@@ -221,6 +222,11 @@ fn heute(jetzt: Zeitpunkt) -> Option<depot_kern::Datum> {
 
 const HTML: &str = "text/html; charset=utf-8";
 
+/// Aufruf im einzigen Hintergrundfaden für die optionale lokale Auswertung.
+pub fn starte_neuroschlopf(d: &std::sync::Arc<Dienst>) {
+    neuroschlopf::arbeite(d);
+}
+
 fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
     let ki =
         zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), heute(jetzt));
@@ -231,6 +237,8 @@ fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
     } else {
         html.push_str(&sicherungsstand(d, &z, jetzt));
     }
+    drop(z);
+    html.push_str(&neuroschlopf::live(d));
     html
 }
 
@@ -532,17 +540,20 @@ fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
     })
 }
 
+fn ist_formular(a: &Anfrage) -> bool {
+    a.kopf("content-type")
+        .and_then(|typ| typ.split(';').next())
+        .is_some_and(|t| {
+            t.trim()
+                .eq_ignore_ascii_case("application/x-www-form-urlencoded")
+        })
+}
+
 fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     if !herkunft_erlaubt(a.kopf("origin")) {
         return seiten::fehler(403, "Abgelehnt: fremde Herkunft");
     }
-    let typ_passt = a.kopf("content-type").is_some_and(|typ| {
-        typ.split(';').next().is_some_and(|teil| {
-            teil.trim()
-                .eq_ignore_ascii_case("application/x-www-form-urlencoded")
-        })
-    });
-    if !typ_passt {
+    if !ist_formular(a) {
         return seiten::fehler(400, "Abgelehnt: nur Formulare");
     }
     let Some(f) = formular(&a.rumpf) else {
@@ -558,6 +569,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/ausfuehren" => auftrag_einreihen(d, &f, jetzt),
         "/export" => analyse::exportieren(d, u, jetzt, &f),
         "/gemini" => gemini::speichern(d, &f),
+        "/neuroschlopf" => neuroschlopf::speichern(d, &f),
         "/schluessel" => {
             let (Some(wer), Some(wert)) =
                 (feld(&f, "wer").and_then(Wer::aus_kurz), feld(&f, "wert"))

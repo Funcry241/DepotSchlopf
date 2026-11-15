@@ -49,6 +49,13 @@ fn bediene(d: &Dienst, u: &dyn Umwelt, mut strom: TcpStream) {
     let _ = strom.flush();
 }
 
+fn starte_arbeiter(dienst: &Arc<Dienst>) {
+    let d = Arc::clone(dienst);
+    thread::spawn(move || arbeiter(&d));
+    let d = Arc::clone(dienst);
+    thread::spawn(move || depot_dienst::starte_neuroschlopf(&d));
+}
+
 /// Der Arbeiter: jede Sekunde ein Schritt; ein gestarteter Auftrag wird in eigenem Faden verfolgt.
 /// Nach einem eingespielten Update endet der Dienst, sobald nichts mehr laeuft oder wartet, mit
 /// `NEUSTART`; der Waechter startet dann den neuen Stand.
@@ -292,10 +299,7 @@ fn main() -> ExitCode {
     if let Herkunft::Gebaut(baum) = herkunft {
         sichern(&dienst, baum);
     }
-    {
-        let d = Arc::clone(&dienst);
-        thread::spawn(move || arbeiter(&d));
-    }
+    starte_arbeiter(&dienst);
     println!("[Dienst] Bereit. Fenster offen lassen; Schließen beendet den Dienst.");
     if !ohne_browser {
         oeffne_browser();
