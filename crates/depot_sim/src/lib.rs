@@ -40,6 +40,7 @@ pub mod papiertag;
 mod positionskauf;
 pub mod splitumbuchung;
 pub mod szenario;
+pub mod vorschau;
 pub use positionskauf::Positionskauf;
 pub mod vorbereitung;
 

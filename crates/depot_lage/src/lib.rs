@@ -65,6 +65,7 @@ pub use depot_sim::papierlauf::{
     papier_mindesteinsatz,
 };
 pub use depot_sim::vorbereitung::tag_jetzt as vorbereitungstag;
+pub use depot_sim::vorschau::hoechstkosten as simulationskosten;
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
 pub use zugang::{
     DatenprobeFehler, PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal, sperrdateien,

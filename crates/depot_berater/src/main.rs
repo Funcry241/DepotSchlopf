@@ -66,7 +66,14 @@ fn laufkennung() -> String {
         })
 }
 
-fn lauf(wurzel: &Path, vorbereitung: bool, automatisch: bool) -> Result<(), String> {
+#[derive(Clone, Copy)]
+enum Modus {
+    Papier { automatisch: bool },
+    Vorbereitung,
+    Simulation,
+}
+
+fn lauf(wurzel: &Path, modus: Modus) -> Result<(), String> {
     let werte = beobachtungsliste()?;
     let universum = als_universum(&werte);
     let heute = heute().ok_or("Uhr liefert kein Datum")?;
@@ -106,7 +113,7 @@ fn lauf(wurzel: &Path, vorbereitung: bool, automatisch: bool) -> Result<(), Stri
     .mit_protokoll(protokoll, jetzt)
     .mit_gespraechen(lauf, dachs_schluessel)
     .mit_zuarbeit(zuarbeit);
-    if vorbereitung {
+    if matches!(modus, Modus::Vorbereitung) {
         let zeit = jetzt().ok_or("Uhr liefert keine Zeit")?;
         dachs = dachs.fuer_vorbereitung(zeit);
         maus = maus.fuer_vorbereitung(zeit);
@@ -114,6 +121,16 @@ fn lauf(wurzel: &Path, vorbereitung: bool, automatisch: bool) -> Result<(), Stri
             depot_sim::vorbereitung::lauf(wurzel, zeit, &universum, &mut dachs, &mut maus, jetzt)?;
         println!("[Vorbereitung] {text}");
         return Ok(());
+    }
+    if matches!(modus, Modus::Simulation) {
+        let zeit = jetzt().ok_or("Uhr liefert keine Zeit")?;
+        return depot_sim::vorschau::lauf(
+            wurzel,
+            zeit,
+            &universum,
+            &mut dachs.fuer_simulation(),
+            &mut maus.fuer_simulation(),
+        );
     }
     for (name, b) in [("Dachs", &dachs), ("Maus", &maus)] {
         if let Some(p) = b.pause() {
@@ -126,7 +143,7 @@ fn lauf(wurzel: &Path, vorbereitung: bool, automatisch: bool) -> Result<(), Stri
         &universum,
         &mut dachs,
         &mut maus,
-        automatisch,
+        matches!(modus, Modus::Papier { automatisch: true }),
     );
     if dachs.gesperrt() || maus.gesperrt() {
         eprintln!(
@@ -162,12 +179,19 @@ fn main() -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
-    let automatisch = args.as_slice() == ["papier", "--auto"];
-    if !automatisch && args.as_slice() != ["papier"] && args.as_slice() != ["vorbereiten"] {
-        eprintln!("[Papier] Aufruf: run.cmd papier oder run.cmd vorbereiten");
+    let modus = if args.as_slice() == ["vorbereiten"] {
+        Modus::Vorbereitung
+    } else if args.as_slice() == ["simulation"] {
+        Modus::Simulation
+    } else if args.as_slice() == ["papier"] || args.as_slice() == ["papier", "--auto"] {
+        Modus::Papier {
+            automatisch: args.len() == 2,
+        }
+    } else {
+        eprintln!("[Papier] Aufruf: run.cmd papier, run.cmd vorbereiten oder run.cmd simulation");
         return ExitCode::from(2);
-    }
-    match lauf(&wurzel, args.as_slice() == ["vorbereiten"], automatisch) {
+    };
+    match lauf(&wurzel, modus) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("[Papier] HALT: {e}");

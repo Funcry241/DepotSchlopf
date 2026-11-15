@@ -67,6 +67,7 @@ pub struct KiBerater<N: Netz> {
     /// Wartet vor einem neuen Versand; in Tests ohne echtes Warten.
     schlafe: fn(Duration),
     vorbereitung: Option<Zeitpunkt>,
+    simulation: bool,
     abrechnung: Option<depot_journal::KiAbrechnung>,
     aufruf: Option<KiAufruf>,
     technischer_ausfall: bool,
@@ -117,6 +118,7 @@ impl<N: Netz> KiBerater<N> {
             pause_im_lauf: None,
             schlafe: std::thread::sleep,
             vorbereitung: None,
+            simulation: false,
             abrechnung: None,
             aufruf: None,
             technischer_ausfall: false,
@@ -129,6 +131,13 @@ impl<N: Netz> KiBerater<N> {
     #[must_use]
     pub fn fuer_vorbereitung(mut self, zeit: Zeitpunkt) -> Self {
         self.vorbereitung = Some(zeit);
+        self
+    }
+
+    /// Kennzeichnet Aufrufe der manuellen Handelsvorschau.
+    #[must_use]
+    pub fn fuer_simulation(mut self) -> Self {
+        self.simulation = true;
         self
     }
 
@@ -204,6 +213,7 @@ impl<N: Netz> KiBerater<N> {
         erlaubnis: &AufrufErlaubnis,
     ) -> String {
         if self.vorbereitung.is_none()
+            && !self.simulation
             && let Some(jetzt) = self.gespraechszeit()
         {
             frage::ausfuehrungsschluss(&mut frage, &self.universum, jetzt);
@@ -227,7 +237,13 @@ impl<N: Netz> KiBerater<N> {
             wer: self.protokoll_wer().kurz().into(),
             rolle: "haupt".into(),
             modell: self.anbieter.modell().into(),
-            zweck: zweck.text().into(),
+            zweck: if self.simulation {
+                KiZweck::Simulation
+            } else {
+                zweck
+            }
+            .text()
+            .into(),
             ergebnis: "uebersprungen".into(),
             http: None,
             token_ein: None,

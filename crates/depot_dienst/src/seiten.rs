@@ -106,7 +106,7 @@ fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str, primaer: bool) 
             maskiere(text)
         );
     }
-    if matches!(art, Art::Papier | Art::Vorbereiten) {
+    if matches!(art, Art::Papier | Art::Vorbereiten | Art::Simulation) {
         return bestaetigungslink(art, text, None, primaer);
     }
     let klasse = if primaer { "primaer" } else { "" };
@@ -148,6 +148,17 @@ pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> S
             "/",
             Art::Vorbereiten.name(),
             "Ich nutze das vorhandene KI-Budget für diese Vorbereitung.",
+        )
+    } else if art == Art::Simulation {
+        (
+            format!(
+                "Dachs und Maus beraten mit dem zuletzt belegten Kursstand. Die Simulation versendet keine Orders. Maximale KI-Reservierung je Lauf {}.",
+                depot_lage::simulationskosten()
+                    .map_or_else(|| "nicht berechenbar".into(), |c| c.to_string())
+            ),
+            "/#ki-simulation",
+            Art::Simulation.name(),
+            "Ich nutze das vorhandene KI-Budget für diese Simulation.",
         )
     } else if sha.is_some() {
         (
@@ -1401,6 +1412,23 @@ pub(crate) fn live_mit_ki(
     s.push_str(&taetigkeit(z, heute, ki));
     s.push_str(&gesamtstatus_teil(token, z, false));
     s.push_str(&update_hinweis(z));
+    s.push_str("<section id=\"ki-simulation\"><h2>KI-Simulation</h2>");
+    s.push_str(&auftrag_knopf(
+        token,
+        z,
+        Art::Simulation,
+        Art::Simulation.name(),
+        false,
+    ));
+    if let Some(lauf) = z
+        .laufend
+        .iter()
+        .chain(z.verlauf.iter())
+        .find(|a| a.art == Art::Simulation)
+    {
+        s.push_str(&protokoll(lauf, true));
+    }
+    s.push_str("</section>");
     if z.laufend.is_some() && z.lage.is_some() {
         s.push_str("<p class=\"leise\">Das Lagebild zeigt den Stand vor dem laufenden Auftrag und wird danach aktualisiert.</p>");
     }
