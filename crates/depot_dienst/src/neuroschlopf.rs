@@ -112,6 +112,8 @@ struct Bild {
     stichtag: Zeitpunkt,
     basis: Option<Zeitpunkt>,
     aenderungen: VecDeque<String>,
+    quellen: VecDeque<u64>,
+    beratungsstand: Option<Zeitpunkt>,
 }
 
 impl Bild {
@@ -135,10 +137,27 @@ impl Bild {
         if basis.is_some_and(|b| b > stichtag) || aenderungen.len() > AUSGABE_MAX {
             return None;
         }
+        let quellen = match j.feld("quellen") {
+            Some(q) => q
+                .liste()?
+                .iter()
+                .map(Json::anzahl)
+                .collect::<Option<VecDeque<_>>>()?,
+            None => VecDeque::new(),
+        };
+        let beratungsstand = match j.feld("beratungsstand") {
+            Some(Json::Null) | None => None,
+            Some(t) => Some(Zeitpunkt::aus_sekunden(t.ganz()?)?),
+        };
+        if quellen.len() > AUSGABE_MAX || beratungsstand.is_some_and(|t| t > stichtag) {
+            return None;
+        }
         Some(Self {
             journal,
             stichtag,
             basis,
+            quellen,
+            beratungsstand,
             aenderungen: aenderungen
                 .iter()
                 .map(|a| {
@@ -160,8 +179,17 @@ impl Bild {
         let basis = self
             .basis
             .map_or_else(|| "null".into(), |b| b.sekunden().to_string());
+        let quellen = self
+            .quellen
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let beratungsstand = self
+            .beratungsstand
+            .map_or_else(|| "null".into(), |t| t.sekunden().to_string());
         format!(
-            "{{\"version\":1,\"journal\":{},\"stichtag\":{},\"basis\":{basis},\"aenderungen\":[{aenderungen}]}}\n",
+            "{{\"version\":1,\"journal\":{},\"stichtag\":{},\"basis\":{basis},\"beratungsstand\":{beratungsstand},\"quellen\":[{quellen}],\"aenderungen\":[{aenderungen}]}}\n",
             self.journal.json(),
             self.stichtag.sekunden()
         )
@@ -223,6 +251,7 @@ pub(crate) fn live(d: &Dienst) -> String {
 struct Vergleich<'a> {
     bisher: BTreeMap<(&'static str, &'a str, String), String>,
     ausgabe: VecDeque<String>,
+    quellen: VecDeque<u64>,
     vergleichbar: bool,
     grenze: u64,
 }
@@ -239,6 +268,12 @@ impl<'a> Vergleich<'a> {
         let alt = self.bisher.insert((art, quelle, id), aussage.to_owned());
         if zeile <= self.grenze {
             return;
+        }
+        if self.vergleichbar && alt.as_deref() != Some(aussage) {
+            if self.quellen.len() == AUSGABE_MAX {
+                self.quellen.pop_front();
+            }
+            self.quellen.push_back(zeile);
         }
         let art = if self.vergleichbar {
             match alt {
@@ -283,6 +318,7 @@ fn verglichen(
     let mut v = Vergleich {
         bisher: BTreeMap::new(),
         ausgabe: VecDeque::new(),
+        quellen: VecDeque::new(),
         vergleichbar: basis.is_some(),
         grenze,
     };
@@ -340,11 +376,21 @@ fn verglichen(
         neu.journal = journal;
         return Ok(neu);
     }
+    let (quellen, beratungsstand) = if v.quellen.is_empty() {
+        basis.map_or_else(
+            || (VecDeque::new(), None),
+            |b| (b.quellen.clone(), b.beratungsstand),
+        )
+    } else {
+        (v.quellen, Some(jetzt))
+    };
     Ok(Bild {
         journal,
         stichtag: jetzt,
         basis: basis.map(|v| v.stichtag),
         aenderungen: v.ausgabe,
+        quellen,
+        beratungsstand,
     })
 }
 
@@ -448,12 +494,13 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             &mut schritt,
             |s, e, bytes, m, schritt| {
                 verglichen(s, e, bytes, m.into(), jetzt, gespeichert.as_ref(), schritt)
+                    .map(|bild| (bild, depot_lage::schlopfmodell_pruefungen(s)))
             },
         );
         if !frei(d, &daten) {
             continue;
         }
-        let bild = match neu {
+        let (bild, pruefungen) = match neu {
             Ok(Ok(bild)) => bild,
             Err(JournalFehler::Belegt) => continue,
             Ok(Err(e)) | Err(JournalFehler::Halt(e)) => {
@@ -479,7 +526,15 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             anzeige(&d.neuro, Anzeige::Fehler(e));
             continue;
         }
-        anzeige(&d.neuro, Anzeige::Fertig(zeige(&bild)));
+        let mut html = zeige(&bild);
+        if !pruefungen.is_empty() {
+            html.push_str("<h3>Letzte Thesenprüfung</h3><ul>");
+            for pruefung in pruefungen {
+                let _ = write!(html, "<li>{}</li>", maskiere(&pruefung));
+            }
+            html.push_str("</ul>");
+        }
+        anzeige(&d.neuro, Anzeige::Fertig(html));
         gespeichert = Some(bild);
         geprueft = true;
     }
@@ -575,6 +630,7 @@ mod tests {
         assert!(formulierungen.contains("Quelle hat Aussage geändert"));
         assert!(formulierungen.contains("Neuer Beleg"));
         assert_eq!(nach_neustart.aenderungen.len(), 3);
+        assert_eq!(nach_neustart.quellen.len(), 2);
         assert!(fortlaufend.bild(t2, Some(&gespeichert)).is_err());
         assert_eq!(
             fortlaufend.bild(t3, Some(&nach_neustart))?.json(),

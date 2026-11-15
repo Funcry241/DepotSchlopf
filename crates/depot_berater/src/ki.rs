@@ -73,6 +73,8 @@ pub struct KiBerater<N: Netz> {
     technischer_ausfall: bool,
     mindesteinsatz_grund: Option<(depot_kern::Datum, String)>,
     mindesteinsatz_bp: Option<i64>,
+    schlopfmodell: Option<depot_sim::schlopfmodell::Beratung>,
+    thesenpruefung: Option<String>,
 }
 
 impl<N: Netz> fmt::Debug for KiBerater<N> {
@@ -124,6 +126,8 @@ impl<N: Netz> KiBerater<N> {
             technischer_ausfall: false,
             mindesteinsatz_grund: None,
             mindesteinsatz_bp: None,
+            schlopfmodell: None,
+            thesenpruefung: None,
         }
     }
 
@@ -228,6 +232,29 @@ impl<N: Netz> KiBerater<N> {
         } else {
             frage
         }
+    }
+
+    fn frage_mit_schlopfmodell(
+        &self,
+        frage: String,
+        system: &str,
+        erlaubnis: &AufrufErlaubnis,
+    ) -> (String, Option<depot_sim::schlopfmodell::Beratung>) {
+        if let Some(modell) = self
+            .schlopfmodell
+            .as_ref()
+            .filter(|_| self.vorbereitung.is_none())
+        {
+            let erweitert = format!("{frage}{}", modell.frage());
+            if erlaubnis.eingabe_passt(&self.anbieter.anfrage(
+                erlaubnis.deckel(),
+                system,
+                &erweitert,
+            )) {
+                return (erweitert, Some(modell.clone()));
+            }
+        }
+        (frage, None)
     }
 
     fn gespraech(&self, zweck: KiZweck, zeit: Option<Zeitpunkt>) -> Option<Gespraech> {
@@ -993,6 +1020,14 @@ impl<N: Netz> Berater for KiBerater<N> {
         }
     }
 
+    fn setze_schlopfmodell(&mut self, stand: Option<depot_sim::schlopfmodell::Beratung>) {
+        self.schlopfmodell = stand;
+    }
+
+    fn thesenpruefung(&mut self) -> Option<String> {
+        self.thesenpruefung.take()
+    }
+
     fn vorschlagen(&mut self, erlaubnis: AufrufErlaubnis, lage: &Lage<'_>) -> Antwort {
         self.vorschlagen_mit_bilanz(erlaubnis, lage, &[])
     }
@@ -1019,8 +1054,10 @@ impl<N: Netz> Berater for KiBerater<N> {
         } else {
             f
         };
+        let (f, modell_gesendet) = self.frage_mit_schlopfmodell(f, &system, &erlaubnis);
         let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
         self.mindesteinsatz_grund = None;
+        self.thesenpruefung = None;
         let e = self.fragen(
             &erlaubnis,
             &system,
@@ -1031,6 +1068,9 @@ impl<N: Netz> Berater for KiBerater<N> {
                 KiZweck::Erstmeinung
             },
         );
+        let thesenpruefung = modell_gesendet
+            .and_then(|modell| modell.protokoll(self.wer, e.text.as_ref().ok()?))
+            .filter(|text| !self.geheim_im_gespraech(text));
         let mindesteinsatz_grund = e
             .text
             .as_ref()
@@ -1052,6 +1092,7 @@ impl<N: Netz> Berater for KiBerater<N> {
                 }
             }) {
             Ok(mut a) => {
+                self.thesenpruefung = thesenpruefung;
                 self.mindesteinsatz_grund = mindesteinsatz_grund.map(|grund| (lage.datum, grund));
                 a.prognose = a.prognose.filter(|p| {
                     if self.vorbereitung.is_some() {
