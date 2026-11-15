@@ -652,7 +652,12 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let f = formular(a.abfrage.as_bytes()).unwrap_or_default();
     let (art, sha, ziel) = match feld(&f, "art").and_then(Art::aus_kurz) {
         Some(Art::Papier) => (Art::Papier, None, "/"),
-        Some(Art::Simulation) => (Art::Simulation, None, "/"),
+        Some(Art::Simulation) => {
+            if d.sperre().simulation_belegt() {
+                return http::umleitung("/?m=simulation_belegt#ki-simulation");
+            }
+            (Art::Simulation, None, "/")
+        }
         Some(Art::Vorbereiten) => {
             if d.update_offen() {
                 return http::umleitung("/?m=vorbereitung_update#vorbereitung");
@@ -756,12 +761,14 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
             return http::umleitung(&format!("/?m={m}#vorbereitung"));
         }
         Art::Simulation => {
-            let m = if !bestaetigt {
-                "simulation_bestaetigen"
-            } else if d.von_hand(art, jetzt).is_ok() {
-                "auftrag"
+            let m = if bestaetigt {
+                match d.von_hand(art, jetzt) {
+                    Ok(()) => "auftrag",
+                    Err("simulation_belegt") => "simulation_belegt",
+                    Err(_) => "auftrag_belegt",
+                }
             } else {
-                "auftrag_belegt"
+                "simulation_bestaetigen"
             };
             return http::umleitung(&format!("/?m={m}#ki-simulation"));
         }
@@ -781,7 +788,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
         }
         Art::UpdatePruefen => {
             if d.von_hand(art, jetzt).is_ok() {
-                "/einrichtung?m=update#update"
+                "/einrichtung?m=updatesuche_eingereiht#update"
             } else {
                 "/einrichtung?m=updatesuche_belegt#update"
             }
@@ -831,9 +838,8 @@ fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
                 },
                 entwurf,
                 d.aendere_zeitplan(|alt| {
-                    let stand = if alt.an { "an" } else { "aus" };
-                    if feld(f, "planstand").is_some_and(|gesehen| gesehen != stand) {
-                        return Err(werkbank::ZeitplanAbgelehnt::SchalterGeaendert);
+                    if feld(f, "planstand").is_some_and(|gesehen| gesehen != alt.abdruck()) {
+                        return Err(werkbank::ZeitplanAbgelehnt::StandGeaendert);
                     }
                     Ok(Zeitplan {
                         an: aktion == "speichern_an" || alt.an,
@@ -854,7 +860,7 @@ fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
     };
     let fehler = match ergebnis {
         Ok(()) => return http::umleitung(&format!("/einrichtung?m={meldung}#zeitplan")),
-        Err(werkbank::ZeitplanAbgelehnt::SchalterGeaendert) => "zeitplan_schalter_geaendert",
+        Err(werkbank::ZeitplanAbgelehnt::StandGeaendert) => "zeitplan_stand_geaendert",
         Err(werkbank::ZeitplanAbgelehnt::Einrichtung(_)) => "zeitplan_einrichtung",
         Err(werkbank::ZeitplanAbgelehnt::UpdateOffen) => "vorbereitung_update",
         Err(werkbank::ZeitplanAbgelehnt::LageFehlt) => "zeitplan_lage",

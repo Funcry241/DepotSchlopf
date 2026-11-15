@@ -123,13 +123,15 @@ pub(crate) fn formular(d: &Dienst, heute: Option<Datum>) -> String {
          <button type=\"submit\" name=\"zeitraum\" value=\"woche\">Diese Woche exportieren</button>\
          </form><details id=\"analyse-zeitraum\"><summary>Zeitraum wählen</summary>\
          <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
-         <div class=\"aktionszeile\"><button type=\"submit\" name=\"zeitraum\" value=\"heute\" formnovalidate>Heute</button> \
-         <button type=\"submit\" name=\"zeitraum\" value=\"gestern\" formnovalidate>Gestern</button> \
-         <button type=\"submit\" name=\"zeitraum\" value=\"handelstage\" formnovalidate>Letzte 5 Handelstage</button> \
-         <button type=\"submit\" name=\"zeitraum\" value=\"woche\" formnovalidate>Diese Woche</button></div>\
+         <div class=\"aktionszeile\"><button type=\"submit\" name=\"zeitraum\" value=\"heute\">Heute</button> \
+         <button type=\"submit\" name=\"zeitraum\" value=\"gestern\">Gestern</button> \
+         <button type=\"submit\" name=\"zeitraum\" value=\"handelstage\">Letzte 5 Handelstage</button> \
+         <button type=\"submit\" name=\"zeitraum\" value=\"woche\">Diese Woche</button></div></form>\
+         <form method=\"post\" action=\"/export\" data-download><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <input type=\"hidden\" name=\"zeitraum\" value=\"frei\">\
          <div class=\"formularfelder\"><label>Von <input type=\"date\" name=\"von\" value=\"{heute}\" required></label> \
          <label>Bis <input type=\"date\" name=\"bis\" value=\"{heute}\" required></label></div>\
-         <button type=\"submit\" name=\"zeitraum\" value=\"frei\">Zeitraum exportieren</button>\
+         <button type=\"submit\">Zeitraum exportieren</button>\
          <p class=\"leise\">Frankfurter Datum, höchstens 31 Kalendertage.</p></form></details></div>"
     )
 }

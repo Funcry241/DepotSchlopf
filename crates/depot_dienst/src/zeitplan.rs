@@ -116,6 +116,10 @@ pub fn uhrzeit_text((h, m): (u8, u8)) -> String {
 }
 
 impl Zeitplan {
+    pub(crate) fn abdruck(self) -> String {
+        crate::kostenschutz::abdruck(&self.als_text())
+    }
+
     pub fn als_text(&self) -> String {
         let basis = format!(
             "{KOPF}\nan={}\ntermine={}\nkurse={}\npapier_danach={}\n",
