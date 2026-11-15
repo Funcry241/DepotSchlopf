@@ -1432,11 +1432,6 @@ fn verkauft(j: &Journal, auftraege: &[GenehmigterAuftrag]) -> bool {
     })
 }
 
-/// Die Auftragsstelle: Jeder Auftrag wird mit Deckung reserviert (Kontowaechter), als
-/// gesendet belegt und erst dann an das Konto gesendet. Ohne Antwort gilt der Sendestatus als
-/// unbekannt; geklaert wird nur ueber den Abgleich, nie durch einen zweiten Versand (R37).
-/// Danach laeuft der Markt, und der Kontowaechter gleicht ab: Jede Ausfuehrung steht im
-/// Journal, jede Abweichung haelt an.
 fn belege_kauf(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -1501,26 +1496,47 @@ fn kaufeinstieg(
     else {
         return Ok(these.to_owned());
     };
-    if a.richtung == Richtung::Kauf {
-        let wissen = j
-            .stand()
-            .wissensstichtag(tag.datum)
-            .unwrap_or_else(|| tag.kurse.stand());
-        if let Some(beleg) =
-            crate::zahlenreaktion::belege(j.stand(), &tag.kurse, wissen).get(&a.isin)
-        {
-            begruende(
-                j,
-                tag,
-                marke,
-                &format!("Auftrag {}: {beleg}", a.kennung.nr()),
-            )?;
-            return Ok(these.to_owned());
-        }
+    let wissen = j
+        .stand()
+        .wissensstichtag(tag.datum)
+        .unwrap_or_else(|| tag.kurse.stand());
+    let belege = (a.richtung == Richtung::Kauf)
+        .then(|| crate::zahlenreaktion::belege(j.stand(), &tag.kurse, wissen));
+    belege_zahlenmarke(
+        j,
+        tag,
+        a.kennung.nr(),
+        rest,
+        belege.as_ref().and_then(|b| b.get(&a.isin)),
+    )
+}
+
+fn belege_zahlenmarke(
+    j: &mut Journal,
+    tag: &Tag,
+    nr: u64,
+    rest: &str,
+    beleg: Option<&crate::zahlenreaktion::Reaktion>,
+) -> Result<String, LaufFehler> {
+    let marke = crate::positionskauf::ZAHLEN_UEBERRASCHUNG;
+    if let Some(beleg) = beleg.filter(|b| b.positiv) {
+        begruende(j, tag, marke, &format!("Auftrag {nr}: {}", beleg.text))?;
+        return Ok(format!("[{marke}] {rest}"));
     }
+    begruende(
+        j,
+        tag,
+        marke,
+        &format!("Auftrag {nr}: Marke ohne Beleg herabgestuft"),
+    )?;
     Ok(format!("[Zahlen] {rest}"))
 }
 
+/// Die Auftragsstelle: Jeder Auftrag wird mit Deckung reserviert (Kontowaechter), als
+/// gesendet belegt und erst dann an das Konto gesendet. Ohne Antwort gilt der Sendestatus als
+/// unbekannt; geklaert wird nur ueber den Abgleich, nie durch einen zweiten Versand (R37).
+/// Danach laeuft der Markt, und der Kontowaechter gleicht ab: Jede Ausfuehrung steht im
+/// Journal, jede Abweichung haelt an.
 fn fuehre_aus(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -1673,6 +1689,43 @@ fn protokolliere_ausfuehrungen(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn negative_zahlenreaktion_stuft_kaufmarke_herab() -> Result<(), LaufFehler> {
+        let ordner =
+            std::env::temp_dir().join(format!("depot-quartalsmarke-{}", std::process::id()));
+        std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(journal)?;
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        let datum = depot_kern::Datum::neu(2026, 11, 9).ok_or_else(|| halt("Datum"))?;
+        let zeit = Zeitpunkt::neu(datum, 22, 0, 0).ok_or_else(|| halt("Zeit"))?;
+        let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| halt(format!("{e:?}")))?;
+        let tag = Tag {
+            datum,
+            kurse,
+            ereignisse: Vec::new(),
+        };
+        let negativ = crate::zahlenreaktion::Reaktion {
+            positiv: false,
+            text: "−6,00 %".to_owned(),
+        };
+        let rest = "[Ausstieg 14500 10] These";
+        assert_eq!(
+            belege_zahlenmarke(&mut j, &tag, 1, rest, Some(&negativ))?,
+            format!("[Zahlen] {rest}")
+        );
+        assert!(
+            j.stand()
+                .begruendungen()
+                .iter()
+                .any(|(_, wer, text)| wer == "Zahlen-Überraschung"
+                    && text == "Auftrag 1: Marke ohne Beleg herabgestuft")
+        );
+        drop(j);
+        std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
+        Ok(())
+    }
 
     #[test]
     fn ruhetag_spart_aufrufe_und_handstart_fragt() -> Result<(), LaufFehler> {

@@ -1,4 +1,4 @@
-//! Erste belegte Schlusskursreaktion nach einem datierten Quartalstermin.
+//! Belegte Schlusskursreaktion nach einem datierten Quartalstermin, nur für NYSE-Werte.
 
 use std::collections::BTreeMap;
 
@@ -11,6 +11,18 @@ use depot_kern::{
 use crate::positionskauf::ZAHLEN_UEBERRASCHUNG;
 
 const SCHWELLE_BP: u64 = 500;
+const SIGNAL_HANDELSTAGE: usize = 5;
+
+pub(crate) struct Reaktion {
+    pub(crate) positiv: bool,
+    pub(crate) text: String,
+}
+
+fn im_fenster(reaktion: Datum, ende: Datum) -> bool {
+    std::iter::successors(Some(ende), |tag| Boerse::Nyse.bezugstag(*tag))
+        .take(SIGNAL_HANDELSTAGE)
+        .any(|tag| tag == reaktion)
+}
 
 fn letzter_schluss(wissen: Zeitpunkt) -> Option<Datum> {
     let boerse = Boerse::Nyse;
@@ -44,7 +56,11 @@ fn zeitraum(beleg: &TerminBeleg) -> Option<(Datum, Datum)> {
 }
 
 fn schlusskurs(stand: &Stand, isin: &Isin, tag: Datum, wissen: Zeitpunkt) -> Option<Preis> {
-    let zeit = Boerse::Nyse.schluss(tag)?;
+    let boerse = depot_kern::liste::boerse_von(isin)?;
+    if !boerse.handelstag(tag) {
+        return None;
+    }
+    let zeit = boerse.schluss(tag)?;
     stand
         .kurse()
         .iter()
@@ -70,7 +86,32 @@ fn kapitalereignis(stand: &Stand, isin: &Isin, tag: Datum, wissen: Zeitpunkt) ->
     })
 }
 
-pub(crate) fn belege(stand: &Stand, kurse: &Kurse, wissen: Zeitpunkt) -> BTreeMap<Isin, String> {
+fn rendite(vorher: Preis, nachher: Preis) -> Option<i64> {
+    nachher.checked_sub(vorher)?.in_bp_von(vorher)
+}
+
+fn korbrendite(stand: &Stand, von: Datum, bis: Datum, wissen: Zeitpunkt) -> Option<i64> {
+    let werte = depot_kern::liste::VERGLEICH_ISIN;
+    let gesamt = werte.iter().try_fold(0_i64, |summe, kennung| {
+        let isin = Isin::neu(kennung).ok()?;
+        let davor = schlusskurs(stand, &isin, von, wissen)?;
+        let danach = schlusskurs(stand, &isin, bis, wissen)?;
+        summe.checked_add(rendite(davor, danach)?)
+    })?;
+    gesamt.checked_div(i64::try_from(werte.len()).ok()?)
+}
+
+fn mit_vorzeichen(bp: i64) -> String {
+    let betrag = bp.unsigned_abs();
+    let zeichen = match bp.cmp(&0) {
+        std::cmp::Ordering::Greater => "+",
+        std::cmp::Ordering::Less => "−",
+        std::cmp::Ordering::Equal => "",
+    };
+    format!("{zeichen}{},{:02}", betrag / 100, betrag % 100)
+}
+
+pub(crate) fn belege(stand: &Stand, kurse: &Kurse, wissen: Zeitpunkt) -> BTreeMap<Isin, Reaktion> {
     let Some(ende) = letzter_schluss(wissen) else {
         return BTreeMap::new();
     };
@@ -88,7 +129,7 @@ pub(crate) fn belege(stand: &Stand, kurse: &Kurse, wissen: Zeitpunkt) -> BTreeMa
         .into_iter()
         .filter_map(|(kennung, beleg)| {
             let (von, bis) = zeitraum(beleg)?;
-            if bis != ende
+            if !im_fenster(bis, ende)
                 || beleg.abruf() > Boerse::Nyse.schluss(bis)?
                 || [von, bis].into_iter().any(depot_kern::boerse::target_geschlossen)
             {
@@ -98,30 +139,40 @@ pub(crate) fn belege(stand: &Stand, kurse: &Kurse, wissen: Zeitpunkt) -> BTreeMa
                 return None;
             };
             let kurs = kurse.eintrag(isin)?;
-            if kurs.handelstag() != bis
-                || kurs.zeitpunkt() != Boerse::Nyse.schluss(bis)?
+            if kurs.handelstag() != ende
+                || kurs.zeitpunkt() != Boerse::Nyse.schluss(ende)?
                 || kurs.herkunft() != Herkunft::Quelle
                 || depot_kern::liste::boerse_von(isin) != Some(Boerse::Nyse)
-                || kapitalereignis(stand, isin, bis, wissen)
+                || std::iter::successors(Some(ende), |tag| Boerse::Nyse.bezugstag(*tag))
+                    .take_while(|tag| *tag >= bis)
+                    .any(|tag| kapitalereignis(stand, isin, tag, wissen))
             {
                 return None;
             }
             let vorher = schlusskurs(stand, isin, von, wissen)?;
             let nachher = schlusskurs(stand, isin, bis, wissen)?;
-            if nachher != kurs.preis() {
+            let aktuell = schlusskurs(stand, isin, ende, wissen)?;
+            if aktuell != kurs.preis() {
                 return None;
             }
-            let bp = nachher.checked_sub(vorher)?.in_bp_von(vorher)?;
-            if bp.unsigned_abs() < SCHWELLE_BP {
+            let roh = rendite(vorher, nachher)?;
+            let abstand = roh.checked_sub(korbrendite(stand, von, bis, wissen)?)?;
+            if abstand.unsigned_abs() < SCHWELLE_BP || roh.signum() != abstand.signum() {
                 return None;
             }
-            let betrag = bp.unsigned_abs();
-            let zeichen = if bp > 0 { "+" } else { "−" };
-            let prozent = format!("{zeichen}{},{:02} %", betrag / 100, betrag % 100);
-            Some((
-                isin.clone(),
-                format!("{ZAHLEN_UEBERRASCHUNG} · {isin} · {prozent} in EUR vom Schluss am {von} bis zum Schluss am {bis} · Kalender {kennung}"),
-            ))
+            let positiv = abstand > 0;
+            let art = if positiv {
+                format!("{ZAHLEN_UEBERRASCHUNG} (Kaufanlass)")
+            } else {
+                "Zahlen-Enttäuschung (Bestand prüfen)".into()
+            };
+            let roh = mit_vorzeichen(roh);
+            let abstand = mit_vorzeichen(abstand);
+            let seitdem = mit_vorzeichen(rendite(nachher, aktuell)?);
+            Some((isin.clone(), Reaktion {
+                positiv,
+                text: format!("{art} · {isin} · {roh} % in EUR vom Schluss am {von} bis zum Schluss am {bis} · {abstand} Prozentpunkte gegen den Korb · seitdem {seitdem} % in EUR bis {ende} · Kalender {kennung}"),
+            }))
         })
         .collect()
 }
@@ -134,6 +185,7 @@ pub(crate) fn ereignisse(
 ) -> Vec<String> {
     belege(stand, kurse, wissen)
         .into_values()
+        .map(|beleg| beleg.text)
         .chain(weitere)
         .collect()
 }
