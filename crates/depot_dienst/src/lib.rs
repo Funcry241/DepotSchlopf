@@ -382,7 +382,7 @@ fn depot_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     {
         return antwort(200, HTML, b"");
     }
-    let (mut inhalt, lesbar) = depotseite::inhalt(&d.wurzel.join("daten"), jetzt, zeitraum);
+    let (mut inhalt, lesbar) = depotseite::inhalt(d, jetzt, zeitraum);
     if let Some(version) = version.filter(|_| lesbar) {
         use std::fmt::Write as _;
         let _ = write!(

@@ -815,6 +815,34 @@ fn ausfuehrungen_csv(
     csv
 }
 
+pub(crate) fn reifebericht(d: &Dienst, stand: &Stand, jetzt: Zeitpunkt) -> Option<bool> {
+    let bis = jetzt.frankfurt_tag()?;
+    let start = stand.tagesschluesse().first()?.0;
+    let von = start.max(bis.plus_tage(1_i64.saturating_sub(i64::from(MAX_TAGE)))?);
+    if von > bis {
+        return None;
+    }
+    let zeitraum = Zeitraum { von, bis };
+    let daten = d.wurzel.join("daten");
+    let mut luecken = String::new();
+    let ablauf = ablauf::Ablauf::laden(d, zeitraum, jetzt, &mut luecken);
+    let fehler = fehler::Belege::laden(&daten, &ablauf, zeitraum, &mut luecken);
+    let buch = depot_lage::ausfuehrung::ausfuehrungsbuch(stand);
+    let nachher = nachher::auswertung(stand, &buch, zeitraum, jetzt);
+    let bericht = pruefbericht::bericht(
+        Some(stand),
+        zeitraum,
+        ablauf.ampel(),
+        fehler.ampel(true),
+        nachher.ampel(),
+    );
+    Some(
+        !bericht
+            .lines()
+            .any(|l| l.starts_with("**Rot:") || l.contains("| Rot")),
+    )
+}
+
 struct Betrieb {
     ablauf: ablauf::Ablauf,
     fehler: fehler::Belege,

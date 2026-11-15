@@ -4735,6 +4735,11 @@ fn depot_ohne_technik() -> Result<(), String> {
     assert!(!handelsbilanz.contains("class=\"handelskarte-skala\""));
     assert!(handelsbilanz.contains("Keine abgeschlossenen Verkäufe im Zeitraum."));
 
+    assert!(handelsbilanz.contains("Papierhandels-Reife"));
+    assert!(handelsbilanz.contains("0 von 40"));
+    assert!(handelsbilanz.contains("0 von 30"));
+    assert!(handelsbilanz.contains("Nicht belegt"));
+
     for roh in [
         "Some(",
         "None",

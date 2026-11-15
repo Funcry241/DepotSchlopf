@@ -34,6 +34,7 @@ pub mod handelsergebnis;
 pub mod handelsvergleich;
 pub mod html;
 pub mod messlatte;
+pub mod reife;
 pub mod tage;
 pub mod vergleich;
 pub mod wiederanlauf;
