@@ -305,7 +305,13 @@ pub fn inhalt(daten: &Path, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (String, bo
         let verlauf = depotverlauf(stand, &werte);
         let ab = jetzt.frankfurt_tag().and_then(|heute| zeitraum.ab(heute));
         entwicklung(im_zeitraum(&verlauf, ab), startgeld, zeitraum, &mut text);
-        handelsbilanz::abschnitt(stand, &werte, ab, &mut text);
+        handelsbilanz::abschnitt(
+            stand,
+            &werte,
+            ab,
+            &depot_kern::Grenzen::standard(),
+            &mut text,
+        );
         text.push_str("<p class=\"leise\">Nur Papiergeld. Werte zum abgerundeten Cent, Einstand aufgerundet.</p>");
         true
     });

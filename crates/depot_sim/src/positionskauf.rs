@@ -9,7 +9,7 @@ pub(crate) const ZAHLEN_UEBERRASCHUNG: &str = "Zahlen-Überraschung";
 
 /// Kontrollierte Anlassmarke zu Beginn einer Kaufbegründung.
 pub fn kaufanlass(text: &str) -> Option<&'static str> {
-    let (marke, _) = text.strip_prefix('[')?.split_once("] ")?;
+    let (marke, _) = text.trim_start().strip_prefix('[')?.split_once(']')?;
     [
         "Zahlen",
         ZAHLEN_UEBERRASCHUNG,
@@ -19,7 +19,7 @@ pub fn kaufanlass(text: &str) -> Option<&'static str> {
         "Sonstiges",
     ]
     .into_iter()
-    .find(|anlass| *anlass == marke)
+    .find(|anlass| anlass.to_lowercase() == marke.to_lowercase())
 }
 
 /// Letzte belegte Kaufausführung für eine gehaltene Position und die zugehörige These.
@@ -40,7 +40,9 @@ impl Ausstiegsplan {
     /// Versionsverträgliche Markierung direkt hinter dem Kaufanlass in der Kaufthese.
     pub fn lies(these: &str) -> Option<Self> {
         kaufanlass(these)?;
-        let (_, rest) = these.split_once("] ")?;
+        let (_, rest) = these.split_once(']')?;
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix(':').unwrap_or(rest).trim_start();
         let (felder, _) = rest.strip_prefix("[Ausstieg ")?.split_once("] ")?;
         let (ziel, frist) = felder.split_once(' ')?;
         let kursziel = Cent(ziel.parse::<i64>().ok()?);
@@ -96,4 +98,15 @@ pub fn lies(stand: &Stand, topf: &Topf) -> Vec<Positionskauf> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn kaufanlass_toleriert_schreibvarianten() {
+        for text in [" [zahlen]: x", "[Zahlen]x", "[ZAHLEN] x"] {
+            assert_eq!(super::kaufanlass(text), Some("Zahlen"));
+        }
+        assert_eq!(super::kaufanlass("[Quatsch] x"), None);
+    }
 }

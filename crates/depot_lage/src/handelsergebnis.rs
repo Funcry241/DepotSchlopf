@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use depot_journal::{Stand, kapitalmassnahme::Bewertungsschritt};
-use depot_kern::{Cent, Datum, Isin, TopfId, Zeitpunkt};
+use depot_kern::{Cent, Datum, Grenzen, Herkunft, Isin, Rundung, TopfId, Zeitpunkt};
 use depot_regelwerk::Richtung;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -77,10 +77,10 @@ fn staerkerang(stand: &Stand) -> BTreeMap<u64, usize> {
         .collect()
 }
 
-/// Ein Verkaufsauftrag zählt einmal, auch bei mehreren Füllungen. Ein stornierter oder
-/// verfallener Rest ändert das Ergebnis des bereits ausgeführten Teils nicht.
-pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
-    let anlaesse = stand
+type Positionen<'a> = BTreeMap<(TopfId, &'a Isin), Option<Position>>;
+
+fn anlaesse(stand: &Stand) -> BTreeMap<u64, Option<&'static str>> {
+    stand
         .begruendungen()
         .iter()
         .filter_map(|(_, wer, text)| {
@@ -90,7 +90,11 @@ pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
             let (nr, these) = text.split_once(' ')?;
             Some((nr.parse::<u64>().ok()?, depot_sim::kaufanlass(these)))
         })
-        .collect::<BTreeMap<_, _>>();
+        .collect()
+}
+
+fn ausfuehrungen(stand: &Stand) -> (Positionen<'_>, BTreeMap<u64, Erloes>) {
+    let anlaesse = anlaesse(stand);
     let staerkerang = staerkerang(stand);
     let mut positionen = BTreeMap::<(TopfId, &Isin), Option<Position>>::new();
     let mut erloese = BTreeMap::<u64, Erloes>::new();
@@ -149,6 +153,16 @@ pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
                 .gemeinsam(buchung.map_or_else(Kaufbezug::default, |(_, _, k)| k));
         }
     }
+    (positionen, erloese)
+}
+
+/// Ein Verkaufsauftrag zählt einmal, auch bei mehreren Füllungen. Ein stornierter oder
+/// verfallener Rest ändert das Ergebnis des bereits ausgeführten Teils nicht.
+pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
+    verkaeufe_aus(stand, ausfuehrungen(stand).1)
+}
+
+fn verkaeufe_aus(stand: &Stand, mut erloese: BTreeMap<u64, Erloes>) -> Vec<Verkauf> {
     stand
         .auftraege()
         .iter()
@@ -177,6 +191,99 @@ pub fn verkaeufe(stand: &Stand) -> Vec<Verkauf> {
             })
         })
         .collect()
+}
+
+#[derive(Debug)]
+pub struct OffenePosition {
+    pub topf: TopfId,
+    pub isin: Isin,
+    pub einstand: Option<Cent>,
+    pub wert_netto: Option<Cent>,
+    pub einstieg: Option<Datum>,
+    pub bewertungstag: Option<Datum>,
+}
+
+impl OffenePosition {
+    pub fn netto(&self) -> Option<Cent> {
+        self.wert_netto?.checked_sub(self.einstand?)
+    }
+}
+
+pub fn handelspositionen(stand: &Stand, grenzen: &Grenzen) -> (Vec<Verkauf>, Vec<OffenePosition>) {
+    let (positionen, erloese) = ausfuehrungen(stand);
+    let gebuehren = grenzen.gebuehren();
+    let schlusstag = stand.abschluss().map(|a| a.datum);
+    let verdacht = depot_journal::splitverdacht::aktiv(stand, None);
+    let mut offen = Vec::new();
+    for topf in stand.toepfe().values() {
+        for (isin, stueck) in topf.positionen() {
+            let position = positionen
+                .get(&(topf.id(), isin))
+                .and_then(Option::as_ref)
+                .filter(|p| p.einstand.stueck == *stueck);
+            let einstieg = position.and_then(|p| p.kauf.tag);
+            let letzter_split = stand
+                .kapitalmassnahmen()
+                .iter()
+                .filter(|b| b.massnahme.topf == topf.id() && b.massnahme.isin == *isin)
+                .map(|b| b.massnahme.wirksam)
+                .max();
+            let belegt = stand
+                .kurse()
+                .iter()
+                .filter(|b| {
+                    let k = b.kurs();
+                    b.isin() == isin
+                        && !verdacht.contains_key(isin)
+                        && k.herkunft() == Herkunft::Quelle
+                        && schlusstag.is_some_and(|bis| k.handelstag() <= bis)
+                        && einstieg
+                            .max(letzter_split)
+                            .is_none_or(|von| von <= k.handelstag())
+                })
+                .max_by_key(|b| (b.kurs().handelstag(), b.abruf()));
+            let wert_netto = belegt.and_then(|b| {
+                let wert = b.kurs().preis().mal_stueck(*stueck, Rundung::Ab)?;
+                wert.checked_sub(gebuehren.fuer(wert)?)
+            });
+            offen.push(OffenePosition {
+                topf: topf.id(),
+                isin: isin.clone(),
+                einstand: position.map(|p| p.einstand.kosten),
+                wert_netto,
+                einstieg,
+                bewertungstag: belegt.map(|b| b.kurs().handelstag()),
+            });
+        }
+    }
+    (verkaeufe_aus(stand, erloese), offen)
+}
+
+pub fn nicht_zugeordnete_kaeufe(stand: &Stand, topf: TopfId, ab: Option<Datum>) -> usize {
+    let anlaesse = anlaesse(stand);
+    stand
+        .auftraege()
+        .iter()
+        .filter(|a| {
+            a.beleg.topf == topf
+                && a.beleg.richtung == Richtung::Kauf
+                && a.ausfuehrungen.iter().any(|f| {
+                    ab.is_none_or(|von| {
+                        f.kurszeit
+                            .and_then(Zeitpunkt::frankfurt_tag)
+                            .is_some_and(|tag| tag >= von)
+                    })
+                })
+                && anlaesse.get(&a.beleg.nr).copied().flatten().is_none()
+        })
+        .count()
+}
+
+pub fn mehrertrag(netto: Cent, einstand: Cent, korb_bp: i64) -> Option<Cent> {
+    let differenz = i128::from(einstand.0)
+        .checked_mul(i128::from(korb_bp))?
+        .checked_div(10_000)?;
+    netto.checked_sub(Cent(i64::try_from(differenz).ok()?))
 }
 
 #[derive(Clone, Copy, Debug, Default)]
