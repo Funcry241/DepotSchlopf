@@ -68,6 +68,7 @@ pub enum Art {
     Beobachtung,
     /// `topf;bargeld;isin:stueck,…`: der ganze Stand eines Topfes im Papierdepot.
     Topf,
+    TopfUmbuchung,
     /// `quelle;herkunft;abruf;roh;isin;preis;zeitpunkt`: ein Kurs von aussen, belegt bevor er
     /// verwendet wird (`kursbeleg`). Nur im Format 2; die Abrufe fallen nie zurueck.
     Kurs,
@@ -132,6 +133,7 @@ impl Art {
         match self {
             Art::Beobachtung => "beobachtung",
             Art::Topf => "topf",
+            Art::TopfUmbuchung => "topf-umbuchung",
             Art::Kurs => "kurs",
             Art::Termin => "termin",
             Art::Nachricht => "nachricht",
@@ -163,6 +165,7 @@ impl Art {
         [
             Art::Beobachtung,
             Art::Topf,
+            Art::TopfUmbuchung,
             Art::Kurs,
             Art::Termin,
             Art::Nachricht,
@@ -235,6 +238,7 @@ pub const FORMAT: u8 = 2;
 /// Der Stand, wie er aus dem Journal folgt.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stand {
+    topf_umbuchungen: BTreeMap<Datum, Cent>,
     format: u8,
     toepfe: BTreeMap<TopfId, Topf>,
     startgeld: BTreeMap<TopfId, Option<Cent>>,
@@ -580,6 +584,11 @@ impl Stand {
     }
 
     /// Begruendungen: Datum, wer, Text.
+    /// Vorzeichen positiv für Bargeldzugang bei Dachs.
+    pub fn topf_umbuchungen(&self) -> &BTreeMap<Datum, Cent> {
+        &self.topf_umbuchungen
+    }
+
     pub fn lehren(&self) -> &[(Datum, String, String)] {
         &self.lehren
     }
@@ -766,6 +775,7 @@ impl Stand {
             }
             Art::Weltprognose => self.belege_weltprognose(inhalt)?,
             Art::Aufloesung => return self.loese_auf(inhalt),
+            Art::TopfUmbuchung => self.buche_topfgeld(inhalt)?,
             Art::Auftrag => self.belege_auftrag(inhalt)?,
             Art::Zustand | Art::Stopp => self.belege_meldung(art, inhalt)?,
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
@@ -800,6 +810,46 @@ impl Stand {
             }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    fn buche_topfgeld(&mut self, inhalt: &str) -> Result<(), String> {
+        let (datum, nach_a) = inhalt.split_once(';').ok_or("Topfumbuchung unlesbar")?;
+        let datum = Datum::lies(datum).ok_or("Datum der Topfumbuchung unlesbar")?;
+        let nach_a = Cent(
+            nach_a
+                .parse()
+                .map_err(|_| "Betrag der Topfumbuchung unlesbar")?,
+        );
+        kanonisch(&format!("{datum};{}", nach_a.0), inhalt)?;
+        if nach_a == Cent::NULL
+            || self.abrechnungstag != Some(datum)
+            || self.papier_halt.is_some()
+            || self.offene_auftraege().next().is_some()
+            || self.topf_umbuchungen.contains_key(&datum)
+            || self.abschluss.as_ref().is_some_and(|a| a.datum >= datum)
+        {
+            return Err("Topfumbuchung nicht zulässig".into());
+        }
+        let nach_b = Cent(nach_a.0.checked_neg().ok_or("Topfumbuchung Überlauf")?);
+        let anwenden = |id, betrag| -> Result<Topf, String> {
+            let alt = self.toepfe.get(&id).ok_or("Topf fehlt")?;
+            let bar = alt
+                .bargeld()
+                .checked_add(betrag)
+                .ok_or("Bargeld Überlauf")?;
+            let mut neu = Topf::neu(id, bar).map_err(|e| format!("{e:?}"))?;
+            for (isin, stueck) in alt.positionen() {
+                neu.setze_bestand(isin.clone(), *stueck);
+            }
+            self.pruefe_deckung(&neu, None, Cent::NULL)?;
+            Ok(neu)
+        };
+        let a = anwenden(TopfId::A, nach_a)?;
+        let b = anwenden(TopfId::B, nach_b)?;
+        self.toepfe.insert(TopfId::A, a);
+        self.toepfe.insert(TopfId::B, b);
+        self.topf_umbuchungen.insert(datum, nach_a);
         Ok(())
     }
 

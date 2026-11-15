@@ -1116,3 +1116,5 @@ fn kostenschutz_punkt(inhalt: Option<&str>) -> Punkt {
 }
 
 pub use depot_sim::schatten;
+
+pub use depot_sim::topfgewichtung;

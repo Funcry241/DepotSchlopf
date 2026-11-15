@@ -522,6 +522,7 @@ pub(crate) fn ein_tag(
             return papier_notbremse(jr, z, hoch, &mut *beteiligte.konto, true);
         }
     }
+    pruefe_topfgewichtung(jr, z)?;
     let gestoppt = fuehre_schutzstopps_aus(jr, z, &mut *beteiligte.konto)?;
     // Fuer den Hoechststand zaehlt der aufgerundete Wert (siehe `depotwert`).
     let heute = depotwert(jr.stand().toepfe().values(), z.bewertung, Rundung::Auf)
@@ -548,6 +549,25 @@ pub(crate) fn ein_tag(
     jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
     Ok(hoch)
+}
+
+fn pruefe_topfgewichtung(j: &mut Journal, z: &Zyklus<'_>) -> Result<(), LaufFehler> {
+    use crate::topfgewichtung::{BELEG, faellig, umbuchen};
+    if z.uhr.is_none() || !z.gesperrt.is_empty() || !faellig(j.stand()) {
+        return Ok(());
+    }
+    let frei = [
+        kaufbudget(j, z.grenzen, TopfId::A)?,
+        kaufbudget(j, z.grenzen, TopfId::B)?,
+    ];
+    match umbuchen(j.stand(), z.bewertung, z.grenzen, frei) {
+        Ok(betrag) if betrag != Cent::NULL => {
+            j.buche_topfgeld(z.tag.datum, betrag).map_err(journal)?;
+            begruende(j, z.tag, BELEG, &format!("Bargeldzugang Dachs: {betrag}"))
+        }
+        Ok(_) => begruende(j, z.tag, BELEG, "Keine Änderung der Bargeldzuordnung."),
+        Err(grund) => begruende(j, z.tag, BELEG, &format!("Keine Umbuchung. {grund}.")),
+    }
 }
 
 fn belege_schatten(j: &mut Journal, z: &Zyklus<'_>) -> Result<(), LaufFehler> {

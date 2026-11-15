@@ -47,6 +47,7 @@ pub mod schatten;
 pub mod schlopfmodell;
 pub mod splitumbuchung;
 pub mod szenario;
+pub mod topfgewichtung;
 pub mod vorschau;
 pub use positionskauf::{
     Ausstiegsplan, KAUFTHESE, Kursziel, Positionskauf, kaufanlass, lies as positionskaeufe,
