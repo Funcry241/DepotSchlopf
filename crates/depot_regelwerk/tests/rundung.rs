@@ -230,12 +230,13 @@ fn notbremse_mit_feinem_kurs() {
             .map(|x| (x.auftrag().isin.to_string(), x.auftrag().limit))
             .collect()
     });
-    // 49,925 € × 0,99 = 49,42575 € ergibt 49,43 €.
+    // Hoechster Limitabstand 3 % (#311 H2a): 49,925 € × 0,97 = 48,42725 € ergibt 48,43 €,
+    // 41,155 € × 0,97 = 39,92035 € ergibt 39,93 €.
     assert_eq!(
         limits,
         Some(vec![
-            (MBG.to_string(), Cent(4_075)),
-            (BASF.to_string(), Cent(4_943)),
+            (MBG.to_string(), Cent(3_993)),
+            (BASF.to_string(), Cent(4_843)),
         ])
     );
 }

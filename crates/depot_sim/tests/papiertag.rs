@@ -3391,8 +3391,17 @@ fn zeile_markiert() -> Result<(), String> {
     Ok(())
 }
 
-#[test]
-fn morgens_loest_der_schutzstopp_ohne_zweitmeinung_aus() -> Result<(), String> {
+/// Ein Stopp-Verkauf nach Montag (Kauf) und Dienstag (Halten), am Mittwochmorgen versendet.
+struct Stoppprobe {
+    _ort: Ort,
+    j: Journal,
+    k: Papierdatei,
+    isin: Isin,
+    gehalten: u64,
+    nr: u64,
+}
+
+fn stoppprobe() -> Result<Stoppprobe, String> {
     use depot_regelwerk::Anlass;
 
     let ort = Ort::neu()?;
@@ -3476,6 +3485,87 @@ fn morgens_loest_der_schutzstopp_ohne_zweitmeinung_aus() -> Result<(), String> {
     assert_eq!(order.beleg.isin, isin);
     assert_eq!(order.beleg.stueck, gehalten);
     assert_eq!(order.versand, Some(morgen(mittwoch)?));
+    let nr = order.beleg.nr;
+    Ok(Stoppprobe {
+        _ort: ort,
+        j,
+        k,
+        isin,
+        gehalten,
+        nr,
+    })
+}
+
+#[test]
+fn morgens_loest_der_schutzstopp_ohne_zweitmeinung_aus() -> Result<(), String> {
+    stoppprobe().map(|_| ())
+}
+
+/// Schutz-Stopp mit dem hoechsten erlaubten Limitabstand (#311 H2a): Schluss 218,60 €,
+/// Limit 218,60 × 0,97 = 212,042 €, zur sicheren Seite aufgerundet 212,05 €.
+#[test]
+fn stopp_verkauf_mit_hoechstabstand() -> Result<(), String> {
+    let p = stoppprobe()?;
+    let order = some(p.j.stand().auftrag(p.nr), "Order")?;
+    assert_eq!(order.beleg.limit, Cent(21_205));
+    Ok(())
+}
+
+/// Mittwochsschluss und Donnerstagmorgen fuer die Stoppprobe belegen und laufen lassen.
+fn stopp_donnerstag(p: &mut Stoppprobe, schluss_mittwoch: i64) -> Result<(), String> {
+    let donnerstag = tag(12)?;
+    let morgen = some(Zeitpunkt::frankfurt(donnerstag, 7, 30, 0), "Morgen")?;
+    belege_sperrprobe(&mut p.j, &p.isin, &[(11, schluss_mittwoch)], morgen)?;
+    belege_sperrprobe(&mut p.j, &allianz()?, &[(11, 23_010)], morgen)?;
+    vorbedingung(
+        papiertag(
+            &mut p.j,
+            donnerstag,
+            &universum()?,
+            &start()?,
+            &mut Stumm,
+            &mut Stumm,
+            &mut p.k,
+        ),
+        "Donnerstag",
+    )?;
+    Ok(())
+}
+
+/// −2,5 % am Folgetag: Mit 1 % Abstand (Limit 216,42 €) waere die Order verfallen, mit 3 %
+/// fuellt sie zum Schluss 213,14 €.
+#[test]
+fn stopp_fuellt_bei_minus_2_5() -> Result<(), String> {
+    let mut p = stoppprobe()?;
+    stopp_donnerstag(&mut p, 21_314)?;
+    let order = some(p.j.stand().auftrag(p.nr), "Order")?;
+    assert_eq!(order.zustand, depot_journal::AuftragsZustand::Gefuellt);
+    let topf = some(p.j.stand().toepfe().get(&TopfId::A), "Topf")?;
+    assert_eq!(topf.stueck(&p.isin), 0);
+    assert!(p.gehalten > 0);
+    Ok(())
+}
+
+/// −4 % am Folgetag: Die Order verfaellt, der Schluss liegt weiter unter dem Stopp. Am
+/// naechsten Morgen entsteht eine neue Stopp-Order mit 3 % auf 209,86 €: 203,5642 €,
+/// aufgerundet 203,57 €.
+#[test]
+fn stopp_wiederholt_nach_verfall() -> Result<(), String> {
+    use depot_regelwerk::Anlass;
+
+    let mut p = stoppprobe()?;
+    stopp_donnerstag(&mut p, 20_986)?;
+    let alt = some(p.j.stand().auftrag(p.nr), "Order")?;
+    assert_eq!(alt.zustand, depot_journal::AuftragsZustand::Verfallen);
+    let neu = some(
+        p.j.stand()
+            .offene_auftraege()
+            .find(|l| l.beleg.anlass == Anlass::Stopp),
+        "neue Stopp-Order",
+    )?;
+    assert_ne!(neu.beleg.nr, p.nr);
+    assert_eq!(neu.beleg.stueck, p.gehalten);
+    assert_eq!(neu.beleg.limit, Cent(20_357));
     Ok(())
 }
 
