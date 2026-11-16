@@ -1702,6 +1702,133 @@ fn ohne_eintrag_bleibt_offen() -> Result<(), String> {
     Ok(())
 }
 
+fn reduktionsbestand(stueck: u64) -> Result<Vec<Topf>, String> {
+    let mut toepfe = start()?;
+    // 5000 EUR Gesamtwert bei 100 EUR je Stück.
+    let bargeld = some(Cent(10_000).mal_stueck(stueck), "Bestandswert")?;
+    let mut topf = vorbedingung(
+        Topf::neu(
+            TopfId::A,
+            some(Cent(500_000).checked_sub(bargeld), "Bargeld")?,
+        ),
+        "Topf A",
+    )?;
+    topf.setze_bestand(sap()?, stueck);
+    *some(toepfe.first_mut(), "Topf A")? = topf;
+    Ok(toepfe)
+}
+
+fn reduktionslauf(
+    toepfe: &[Topf],
+    dachs: &mut dyn depot_sim::Berater,
+    maus: &mut dyn depot_sim::Berater,
+) -> Result<(Ort, Journal), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    belege(
+        &mut j,
+        5,
+        &[(&sap()?, "100", "100"), (&allianz()?, "100", "100")],
+    )?;
+    let mut konto = Papierdatei::oeffnen(&ort.konto, false, toepfe)?;
+    vorbedingung(
+        papiertag(
+            &mut j,
+            tag(5)?,
+            &universum()?,
+            toepfe,
+            dachs,
+            maus,
+            &mut konto,
+        ),
+        "Papiertag",
+    )?;
+    Ok((ort, j))
+}
+
+fn reduktion_pruefen(
+    bestand: u64,
+    ziel: i64,
+    tausch: bool,
+    verkauf: Option<u64>,
+) -> Result<(), String> {
+    let heute = tag(5)?;
+    let sap = sap()?;
+    let mut zielgewichte_bp = std::collections::BTreeMap::from([(sap.clone(), ziel)]);
+    if tausch {
+        zielgewichte_bp.insert(allianz()?, 2000);
+    }
+    let mut dachs = Drehbuch::default();
+    dachs.antworten.insert(
+        heute,
+        Antwort {
+            halten: std::collections::BTreeMap::new(),
+            prognose: None,
+            verwertbar: true,
+            einschaetzung: "Eigene Handelsidee".into(),
+            vorschlag: Some(Vorschlag {
+                erwartung_bp: std::collections::BTreeMap::new(),
+                limit_bp: std::collections::BTreeMap::new(),
+                stopp_bp: std::collections::BTreeMap::new(),
+                berater: BeraterId::Dachs,
+                zielgewichte_bp,
+                begruendung: std::collections::BTreeMap::new(),
+            }),
+        },
+    );
+    let mut maus = Drehbuch::default();
+    maus.urteile.insert(
+        heute,
+        Urteil {
+            verwertbar: true,
+            zustimmung: false,
+            begruendung: "Veto zum Vorschlag".into(),
+        },
+    );
+    let (_ort, j) = reduktionslauf(&reduktionsbestand(bestand)?, &mut dachs, &mut maus)?;
+    let auftraege = j.stand().auftraege();
+    if let Some(stueck) = verkauf {
+        let [order] = auftraege else {
+            return Err(format!("Genau ein Verkauf erwartet: {auftraege:?}"));
+        };
+        assert_eq!(order.beleg.richtung, depot_regelwerk::Richtung::Verkauf);
+        assert_eq!(order.beleg.isin, sap);
+        assert_eq!(order.beleg.stueck, stueck);
+        assert_eq!(maus.aufrufe, 1, "nur ihre eigene Erstmeinung");
+    } else {
+        assert!(auftraege.is_empty(), "{auftraege:?}");
+        assert_eq!(maus.aufrufe, 2, "eigene Erstmeinung und Veto");
+    }
+    assert_eq!(
+        j.stand()
+            .begruendungen()
+            .iter()
+            .any(|(_, _, text)| { text == "Topf A: Verkleinerung ohne Zweitmeinung" }),
+        verkauf.is_some()
+    );
+    Ok(())
+}
+
+#[test]
+fn verkauf_ohne_zweitmeinung() -> Result<(), String> {
+    reduktion_pruefen(10, 0, false, Some(10))
+}
+
+#[test]
+fn verkleinern_ohne_zweitmeinung() -> Result<(), String> {
+    reduktion_pruefen(15, 1500, false, Some(7))
+}
+
+#[test]
+fn tausch_braucht_zustimmung() -> Result<(), String> {
+    reduktion_pruefen(10, 0, true, None)
+}
+
+#[test]
+fn aufstocken_braucht_zustimmung() -> Result<(), String> {
+    reduktion_pruefen(10, 3000, false, None)
+}
+
 // Reale Aufrufreihenfolge mit erfundenen Beratern und bestätigter Tokenabrechnung.
 struct Diskutant {
     wer: BeraterId,
@@ -1821,6 +1948,28 @@ fn dialoglauf(a: &mut Diskutant, b: &mut Diskutant) -> Result<(Ort, Journal), St
         .map_err(|e| format!("{e:?}"))?;
     Ok((ort, j))
 }
+#[test]
+fn abstimmung_verkleinert_auch_bei_veto_oder_ausfall() -> Result<(), String> {
+    for antwort in [Some(2000), None] {
+        let mut a = diskutant(BeraterId::Dachs, vec![Some(0), Some(0)], true)?;
+        let mut b = diskutant(BeraterId::Maus, vec![antwort, antwort], true)?;
+        let (_ort, j) = reduktionslauf(&reduktionsbestand(10)?, &mut a, &mut b)?;
+        let [order] = j.stand().auftraege() else {
+            return Err("Genau ein Verkauf aus der Abstimmung erwartet".into());
+        };
+        assert_eq!(order.beleg.topf, TopfId::A);
+        assert_eq!(order.beleg.richtung, depot_regelwerk::Richtung::Verkauf);
+        assert_eq!(order.beleg.stueck, 10);
+        assert!(
+            j.stand()
+                .begruendungen()
+                .iter()
+                .any(|(_, _, text)| { text == "Topf A: Verkleinerung ohne Zweitmeinung" })
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn aenderung_braucht_eine_weitere_gesehene_zustimmung() -> Result<(), String> {
     let mut a = diskutant(BeraterId::Dachs, vec![Some(1000), Some(1000)], false)?;
