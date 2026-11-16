@@ -1231,6 +1231,7 @@ mod tests {
             token_ein: None,
             token_aus: None,
             buchung: None,
+            schlopfmodell: None,
             kosten_cent: None,
             system: Some("Gemeinsamer Systemtext".into()),
             frage: Some(format!(

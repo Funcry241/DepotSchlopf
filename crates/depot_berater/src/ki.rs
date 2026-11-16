@@ -276,6 +276,7 @@ impl<N: Netz> KiBerater<N> {
             token_ein: None,
             token_aus: None,
             buchung: None,
+            schlopfmodell: None,
             kosten_cent: None,
             system: None,
             frage: None,
@@ -539,6 +540,7 @@ impl<N: Netz> KiBerater<N> {
         system: &str,
         frage: &str,
         zweck: KiZweck,
+        schlopfmodell: Option<Zeitpunkt>,
     ) -> Ergebnis {
         let mut e = self.gespraech(zweck, self.gespraechszeit());
         if let Some(eintrag) = &mut e {
@@ -559,6 +561,9 @@ impl<N: Netz> KiBerater<N> {
         }
         self.aufruf = Some(self.aufruf_belegen(erlaubnis, system, &spur, geheim));
         if let Some(mut e) = e {
+            if !geheim && e.http == Some(200) {
+                e.schlopfmodell = schlopfmodell;
+            }
             e.system = Some(system.into());
             e.frage = Some(frage.into());
             e.fehler = aus.text.as_ref().err().cloned();
@@ -941,7 +946,7 @@ impl<N: Netz> Berater for KiBerater<N> {
             "Am {tag} sind durch Bestand und genehmigte Aufträge {einsatz_bp} bp investiert. Der Mindesteinsatz beträgt {minimum_bp} bp. Warum bleibt der Topf darunter?"
         );
         let antwort = self
-            .fragen(&erlaubnis, system, &frage, KiZweck::Abstimmung)
+            .fragen(&erlaubnis, system, &frage, KiZweck::Abstimmung, None)
             .text
             .ok()?;
         let grund = frage::lies_mindesteinsatz(&antwort)?;
@@ -961,7 +966,7 @@ impl<N: Netz> Berater for KiBerater<N> {
         let f = frage::abstimmungs_frage(lage, &self.universum, stand);
         let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
         self.mindesteinsatz_grund = None;
-        let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Abstimmung);
+        let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Abstimmung, None);
         match e
             .text
             .and_then(|t| {
@@ -1035,7 +1040,7 @@ impl<N: Netz> Berater for KiBerater<N> {
     ) -> Result<Vec<String>, String> {
         let system = "Du wertest ausschließlich deine Papierhandelsbilanz aus. Antworte mit höchstens fünf kurzen Lehren, je eine Zeile. Keine Handelsaufträge.";
         let antwort = self
-            .fragen(&erlaubnis, system, frage, KiZweck::Wochenrueckschau)
+            .fragen(&erlaubnis, system, frage, KiZweck::Wochenrueckschau, None)
             .text?;
         if self.geheim_im_gespraech(&antwort) {
             return Err("Rückschau enthält vertrauliche Daten".into());
@@ -1087,6 +1092,9 @@ impl<N: Netz> Berater for KiBerater<N> {
             } else {
                 KiZweck::Erstmeinung
             },
+            modell_gesendet
+                .as_ref()
+                .map(depot_sim::schlopfmodell::Beratung::stand),
         );
         let thesenpruefung = modell_gesendet
             .and_then(|modell| modell.protokoll(self.wer, e.text.as_ref().ok()?))
@@ -1157,7 +1165,7 @@ impl<N: Netz> Berater for KiBerater<N> {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::urteil_frage(lage, &self.universum, vorschlag, bilanz);
         let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
-        let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Zweitmeinung);
+        let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Zweitmeinung, None);
         match e
             .text
             .and_then(|t| frage::lies_urteil(&t).inspect_err(|_| self.technischer_ausfall = true))

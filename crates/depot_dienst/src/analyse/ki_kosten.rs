@@ -369,6 +369,7 @@ mod tests {
             token_ein: Some(12),
             token_aus: Some(3),
             buchung: Some(zweite.buchungsnummer()),
+            schlopfmodell: None,
             kosten_cent: Some(999),
             system: None,
             frage: None,

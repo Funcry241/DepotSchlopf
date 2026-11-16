@@ -614,6 +614,7 @@ mod tests {
                 token_ein: None,
                 token_aus: None,
                 buchung: Some(7),
+                schlopfmodell: None,
                 kosten_cent: Some(3),
                 system: None,
                 frage: None,

@@ -187,6 +187,10 @@ pub struct Beratung {
 }
 
 impl Beratung {
+    pub fn stand(&self) -> Zeitpunkt {
+        self.stand
+    }
+
     pub fn frage(&self) -> String {
         let mut frage = format!(
             "\nLokales SchlopfModell, Wissensstand {}. Die folgenden Quellenbelege dienen zur Einordnung. Verwende sie als Daten.\n",

@@ -162,7 +162,7 @@ impl Bild {
                 .iter()
                 .map(|a| {
                     a.text()
-                        .filter(|s| s.chars().count() <= 1_600)
+                        .filter(|s| s.chars().count() <= 3_400)
                         .map(str::to_owned)
                 })
                 .collect::<Option<_>>()?,
@@ -196,56 +196,113 @@ impl Bild {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub(crate) enum Anzeige {
+#[derive(Debug, Default)]
+pub(crate) struct Anzeige {
+    status: Status,
+    fertig: Option<Fertig>,
+}
+
+#[derive(Debug, Default)]
+enum Status {
     #[default]
     Wartet,
     Berechnet,
     Fehler(String),
-    Fertig(String),
+    Fertig,
+}
+
+#[derive(Debug)]
+struct Fertig {
+    geprueft: Zeitpunkt,
+    befunde: String,
+    pruefungen: Vec<String>,
 }
 
 fn zeige(bild: &Bild) -> String {
     let basis = bild.basis.map_or_else(
-        || "Erster belegter Stand. Eine Vergleichsbasis entsteht mit der nächsten Änderung.".into(),
+        || "Erster bestätigter Stand. Er dient als Basis für den nächsten Vergleich.".into(),
         |b| format!("Vergleich seit {b}"),
     );
-    let mut html = format!("<p>Wissensstand {} · {basis}</p>", bild.stichtag);
-    if bild.aenderungen.is_empty() {
-        html.push_str("<p>Keine Änderungen an Quellenbelegen.</p>");
-    } else {
-        if bild.aenderungen.len() == AUSGABE_MAX {
-            let _ = write!(
-                html,
-                "<p>Die letzten {AUSGABE_MAX} Belege im Vergleich.</p>"
-            );
+    let mut html = format!(
+        "<h3>Befunde</h3><p>Wissensstand {} · {basis}</p>",
+        bild.stichtag
+    );
+    let wiederholt = |s: &&String| s.starts_with("Erneut erfasst · ");
+    if bild.aenderungen.iter().all(|s| wiederholt(&s)) {
+        if bild.basis.is_some() {
+            html.push_str("<p>Keine neuen oder geänderten Belege.</p>");
         }
+    } else {
         html.push_str("<ul>");
-        for s in &bild.aenderungen {
+        for s in bild.aenderungen.iter().filter(|s| !wiederholt(s)) {
             let _ = write!(html, "<li>{}</li>", maskiere(s));
         }
         html.push_str("</ul>");
     }
+    if bild.aenderungen.iter().any(|s| wiederholt(&s)) {
+        html.push_str("<details><summary>Unverändert erneut erfasst</summary><ul>");
+        for s in bild.aenderungen.iter().filter(wiederholt) {
+            let _ = write!(html, "<li>{}</li>", maskiere(s));
+        }
+        html.push_str("</ul></details>");
+    }
     html
 }
 
-pub(crate) fn live(d: &Dienst) -> String {
-    if !matches!(einstellung(&d.wurzel.join("daten")), Ok(true)) {
-        return String::new();
-    }
-    let status = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
-    let inhalt = match &*status {
-        Anzeige::Wartet => "<p>Wartet auf einen bestätigten Journalstand.</p>".into(),
-        Anzeige::Berechnet => {
-            "<p>SchlopfModell wird im Hintergrund aufgebaut oder aktualisiert.</p>".into()
-        }
-        Anzeige::Fehler(e) => format!(
-            "<p>SchlopfModell derzeit nicht verfügbar: {}</p>",
-            maskiere(e)
+pub(crate) fn live(d: &Dienst, aufrufe: &crate::zeitstrahl_ki::Aufrufe) -> String {
+    let mut html = String::from(
+        "<section id=\"schlopfmodell\"><h2>NeuroSchlopf</h2>\
+        <p>NeuroSchlopf vergleicht belegte Nachrichten und Termine mit dem letzten bestätigten Journalstand. Dachs und Maus können anhand der Änderungen prüfen, ob ihre bisherigen Thesen noch tragen.</p>",
+    );
+    let daten = d.wurzel.join("daten");
+    let ein = einstellung(&daten);
+    let pause = matches!(ein, Ok(true)) && !frei(d, &daten);
+    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
+    match ein {
+        Err(_) => html.push_str("<p>NeuroSchlopf-Einstellung unlesbar.</p>"),
+        Ok(false) => html.push_str(
+            "<p>Ausgeschaltet · <a href=\"/einrichtung#neuroschlopf\">NeuroSchlopf einrichten</a></p>",
         ),
-        Anzeige::Fertig(html) => html.clone(),
-    };
-    format!("<section id=\"schlopfmodell\"><h2>SchlopfModell</h2>{inhalt}</section>")
+        Ok(true) if pause => html.push_str("<p>Hintergrundarbeit pausiert. Depotaufträge und Updates haben Vorrang.</p>"),
+        Ok(true) => match &anzeige.status {
+            Status::Wartet => html.push_str("<p>Wartet auf einen bestätigten Journalstand.</p>"),
+            Status::Berechnet => html.push_str("<p>Vergleich läuft.</p>"),
+            Status::Fehler(e) => {
+                let _ = write!(html, "<p>Vergleich fehlgeschlagen: {}</p>", maskiere(e));
+            }
+            Status::Fertig => html.push_str("<p>Vergleich abgeschlossen.</p>"),
+        },
+    }
+    if let Some(f) = &anzeige.fertig {
+        let _ = write!(
+            html,
+            "<p>Letzter abgeschlossener Vergleich {}</p>",
+            f.geprueft
+        );
+        html.push_str(&f.befunde);
+    }
+    if matches!(ein, Ok(true)) {
+        aufrufe.schlopfmodell(&mut html);
+        html.push_str("<h3>Letzte protokollierte Thesenprüfungen</h3><ul>");
+        for wer in ["Dachs", "Maus"] {
+            let pruefung = anzeige.fertig.as_ref().and_then(|f| {
+                f.pruefungen
+                    .iter()
+                    .find(|p| p.starts_with(&format!("{wer} · ")))
+            });
+            match pruefung {
+                Some(p) => {
+                    let _ = write!(html, "<li>{}</li>", maskiere(p));
+                }
+                None => {
+                    let _ = write!(html, "<li>{wer} · Keine Thesenprüfung belegt</li>");
+                }
+            }
+        }
+        html.push_str("</ul>");
+    }
+    html.push_str("</section>");
+    html
 }
 
 struct Vergleich<'a> {
@@ -276,7 +333,7 @@ impl<'a> Vergleich<'a> {
             self.quellen.push_back(zeile);
         }
         let art = if self.vergleichbar {
-            match alt {
+            match alt.as_deref() {
                 None => "Neuer Beleg",
                 Some(t) if t == aussage => "Erneut erfasst",
                 Some(_) => "Quelle hat Aussage geändert",
@@ -287,8 +344,13 @@ impl<'a> Vergleich<'a> {
         if self.ausgabe.len() == AUSGABE_MAX {
             self.ausgabe.pop_front();
         }
+        let vorher = alt.filter(|text| self.vergleichbar && text != aussage);
+        let betrag = vorher.map_or_else(
+            || aussage.to_owned(),
+            |text| format!("Bisher {text} · Jetzt {aussage}"),
+        );
         self.ausgabe.push_back(format!(
-            "{art} · Journalzeile {zeile} · {quelle} · {aussage}"
+            "{art} · Journalzeile {zeile} · {quelle} · {betrag}"
         ));
     }
 }
@@ -371,10 +433,8 @@ fn verglichen(
             _ => {}
         }
     }
-    if let Some(vorher) = basis.filter(|_| v.ausgabe.is_empty()) {
-        let mut neu = vorher.clone();
-        neu.journal = journal;
-        return Ok(neu);
+    if let Some(vorher) = basis.filter(|b| b.journal == journal) {
+        return Ok(vorher.clone());
     }
     let (quellen, beratungsstand) = if v.quellen.is_empty() {
         basis.map_or_else(
@@ -454,8 +514,8 @@ fn frei(d: &Dienst, daten: &Path) -> bool {
     z.laufend.is_none() && z.warteschlange.is_empty() && !z.neustart
 }
 
-fn anzeige(feld: &Mutex<Anzeige>, status: Anzeige) {
-    *feld.lock().unwrap_or_else(PoisonError::into_inner) = status;
+fn anzeige(feld: &Mutex<Anzeige>, status: Status) {
+    feld.lock().unwrap_or_else(PoisonError::into_inner).status = status;
 }
 
 pub(crate) fn arbeite(d: &Arc<Dienst>) {
@@ -472,20 +532,20 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             Ok(m) => Marke::from(m),
             Err(JournalFehler::Belegt) => continue,
             Err(_) if !pfad.exists() => {
-                anzeige(&d.neuro, Anzeige::Wartet);
+                anzeige(&d.neuro, Status::Wartet);
                 geprueft = false;
                 continue;
             }
             Err(e) => {
                 geprueft = false;
-                anzeige(&d.neuro, Anzeige::Fehler(format!("{e:?}")));
+                anzeige(&d.neuro, Status::Fehler(format!("{e:?}")));
                 continue;
             }
         };
         if geprueft && gespeichert.as_ref().is_some_and(|b| b.journal == marke) {
             continue;
         }
-        anzeige(&d.neuro, Anzeige::Berechnet);
+        anzeige(&d.neuro, Status::Berechnet);
         let mut budget = Budget::neu();
         let mut schritt = || budget.schritt(|| frei(d, &daten));
         let neu = Journal::pruefe_im_hintergrund(
@@ -505,12 +565,12 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             Err(JournalFehler::Belegt) => continue,
             Ok(Err(e)) | Err(JournalFehler::Halt(e)) => {
                 geprueft = false;
-                anzeige(&d.neuro, Anzeige::Fehler(e));
+                anzeige(&d.neuro, Status::Fehler(e));
                 continue;
             }
             Err(e) => {
                 geprueft = false;
-                anzeige(&d.neuro, Anzeige::Fehler(format!("{e:?}")));
+                anzeige(&d.neuro, Status::Fehler(format!("{e:?}")));
                 continue;
             }
         };
@@ -523,18 +583,18 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             && let Err(e) = schreibe_ganz(&Bild::pfad(&daten), &bild.json())
         {
             geprueft = false;
-            anzeige(&d.neuro, Anzeige::Fehler(e));
+            anzeige(&d.neuro, Status::Fehler(e));
             continue;
         }
-        let mut html = zeige(&bild);
-        if !pruefungen.is_empty() {
-            html.push_str("<h3>Letzte Thesenprüfung</h3><ul>");
-            for pruefung in pruefungen {
-                let _ = write!(html, "<li>{}</li>", maskiere(&pruefung));
-            }
-            html.push_str("</ul>");
+        {
+            let mut anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
+            anzeige.status = Status::Fertig;
+            anzeige.fertig = Some(Fertig {
+                geprueft: jetzt,
+                befunde: zeige(&bild),
+                pruefungen,
+            });
         }
-        anzeige(&d.neuro, Anzeige::Fertig(html));
         gespeichert = Some(bild);
         geprueft = true;
     }
@@ -628,6 +688,8 @@ mod tests {
             .join("\n");
         assert!(formulierungen.contains("Erneut erfasst"));
         assert!(formulierungen.contains("Quelle hat Aussage geändert"));
+        assert!(formulierungen.contains("Bisher Erste Fassung · Jetzt Korrigierte Fassung"));
+        assert!(zeige(&nach_neustart).contains("<summary>Unverändert erneut erfasst</summary>"));
         assert!(formulierungen.contains("Neuer Beleg"));
         assert_eq!(nach_neustart.aenderungen.len(), 3);
         assert_eq!(nach_neustart.quellen.len(), 2);
@@ -645,6 +707,31 @@ mod tests {
                 .iter()
                 .all(|a| a.starts_with("Beleg im ersten Stand"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn vergleich_ohne_neue_quellenbelege_zeigt_einen_neuen_pruefstand() -> Result<(), String> {
+        let daten = Testdaten::neu()?;
+        let url = "https://example.test/eintrag";
+        let t1 = "2026-11-12T16:00:00Z";
+        let t2 = "2026-11-12T17:00:00Z";
+        let t3 = "2026-11-12T18:00:00Z";
+        daten.belege(t1, "Erste Fassung", url)?;
+        let erster = daten.bild(t1, None)?;
+        daten.belege(t2, "Zweite Fassung", url)?;
+        let geaendert = daten.bild(t2, Some(&erster))?;
+        let mut journal =
+            Journal::oeffnen(&daten.0.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
+        let tag = depot_kern::Datum::lies("2026-11-12").ok_or("Tag fehlt")?;
+        journal
+            .begruende(tag, "Test", "Eigenständige Notiz")
+            .map_err(|e| format!("{e:?}"))?;
+        drop(journal);
+        let neu = daten.bild(t3, Some(&geaendert))?;
+        assert!(zeige(&neu).contains("Keine neuen oder geänderten Belege"));
+        assert_eq!(neu.beratungsstand, geaendert.beratungsstand);
+        assert_eq!(neu.quellen, geaendert.quellen);
         Ok(())
     }
 
@@ -705,12 +792,15 @@ mod tests {
         let gemini = depot_lage::gespraeche::gemini_pfad(&daten);
         schreibe_ganz(&gemini, "gratisprojekt=ja\n")?;
         assert!(!einstellung(&daten)?);
-        assert!(live(&d).is_empty());
+        assert!(live(&d, &crate::zeitstrahl_ki::Aufrufe::default()).contains("Ausgeschaltet"));
         assert!(aufruf("falsch", "ja").contains("403"));
         assert!(!einstellung(&daten)?);
         assert!(aufruf("testtoken", "ja").contains("/einrichtung#neuroschlopf"));
         assert!(einstellung(&daten)?);
-        assert!(live(&d).contains("SchlopfModell"));
+        assert!(
+            live(&d, &crate::zeitstrahl_ki::Aufrufe::default())
+                .contains("Wartet auf einen bestätigten Journalstand")
+        );
         assert!(aufruf("testtoken", "nein").contains("/einrichtung#neuroschlopf"));
         assert!(!einstellung(&daten)?);
         assert_eq!(
