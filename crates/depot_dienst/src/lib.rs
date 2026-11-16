@@ -243,7 +243,7 @@ fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
         html.push_str(&sicherungsstand(d, &z, jetzt));
     }
     drop(z);
-    html.push_str(&neuroschlopf::live(d));
+    html.push_str(&neuroschlopf::live(d, &ki));
     html
 }
 

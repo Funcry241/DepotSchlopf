@@ -24,6 +24,7 @@ pub struct Gespraech {
     pub token_ein: Option<u64>,
     pub token_aus: Option<u64>,
     pub buchung: Option<usize>,
+    pub schlopfmodell: Option<Zeitpunkt>,
     pub kosten_cent: Option<u64>,
     pub system: Option<String>,
     pub frage: Option<String>,
@@ -42,7 +43,7 @@ fn text(t: Option<&str>) -> String {
 impl Gespraech {
     fn zeile(&self) -> String {
         format!(
-            "{{\"v\":1,\"zeit\":{},\"lauf\":{},\"wer\":{},\"rolle\":{},\"modell\":{},\"zweck\":{},\"ergebnis\":{},\"http\":{},\"token_ein\":{},\"token_aus\":{},\"buchung\":{},\"kosten_cent\":{},\"system\":{},\"frage\":{},\"antwort\":{},\"fehler\":{}}}",
+            "{{\"v\":1,\"zeit\":{},\"lauf\":{},\"wer\":{},\"rolle\":{},\"modell\":{},\"zweck\":{},\"ergebnis\":{},\"http\":{},\"token_ein\":{},\"token_aus\":{},\"buchung\":{},\"schlopfmodell\":{},\"kosten_cent\":{},\"system\":{},\"frage\":{},\"antwort\":{},\"fehler\":{}}}",
             zitiere(&self.zeit.to_string()),
             zitiere(&self.lauf),
             zitiere(&self.wer),
@@ -54,6 +55,7 @@ impl Gespraech {
             zahl(self.token_ein),
             zahl(self.token_aus),
             zahl(self.buchung),
+            zahl(self.schlopfmodell.map(Zeitpunkt::sekunden)),
             zahl(self.kosten_cent),
             text(self.system.as_deref()),
             text(self.frage.as_deref()),
@@ -97,6 +99,10 @@ impl Gespraech {
             buchung: match j.feld("buchung") {
                 None | Some(Json::Null) => None,
                 Some(wert) => Some(usize::try_from(wert.anzahl()?).ok()?),
+            },
+            schlopfmodell: match j.feld("schlopfmodell") {
+                None | Some(Json::Null) => None,
+                Some(wert) => Some(Zeitpunkt::aus_sekunden(wert.ganz()?)?),
             },
             kosten_cent: n("kosten_cent")?,
             system: optional("system")?,
@@ -451,6 +457,7 @@ mod tests {
                 token_ein: None,
                 token_aus: None,
                 buchung: Some(7),
+                schlopfmodell: None,
                 kosten_cent: Some(3),
                 system: None,
                 frage: None,

@@ -19,6 +19,15 @@ pub(crate) struct Aufrufe {
     je_lauf: BTreeMap<String, BTreeMap<Beteiligung, BTreeSet<String>>>,
     handzeiten: BTreeMap<String, Vec<Zeitpunkt>>,
     pub(crate) gemini_aktiv: bool,
+    schlopfmodell: Vec<Modellaufruf>,
+}
+
+struct Modellaufruf {
+    tag: Datum,
+    zeit: Zeitpunkt,
+    stand: Option<Zeitpunkt>,
+    lauf: String,
+    wer: String,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -38,6 +47,8 @@ struct Kurz {
     optional: bool,
     ergebnis: String,
     gefragt: bool,
+    schlopfmodell: Option<Zeitpunkt>,
+    modellfrage: bool,
 }
 
 impl From<Gespraech> for Kurz {
@@ -54,6 +65,9 @@ impl From<Gespraech> for Kurz {
             optional: e.rolle == "zusatz",
             ergebnis,
             gefragt: e.ergebnis != "uebersprungen",
+            schlopfmodell: e.schlopfmodell,
+            modellfrage: e.rolle == "haupt"
+                && matches!(e.zweck.as_str(), "erstmeinung" | "simulation"),
         }
     }
 }
@@ -117,6 +131,15 @@ impl Aufrufe {
                 continue;
             };
             for e in eintraege.iter() {
+                if e.modellfrage {
+                    aus.schlopfmodell.push(Modellaufruf {
+                        tag,
+                        zeit: e.zeit,
+                        stand: e.schlopfmodell,
+                        lauf: e.lauf.clone(),
+                        wer: e.wer.clone(),
+                    });
+                }
                 if e.lauf.starts_with("hand-") {
                     aus.handzeiten
                         .entry(e.lauf.clone())
@@ -139,6 +162,53 @@ impl Aufrufe {
             }
         }
         aus
+    }
+
+    pub(crate) fn schlopfmodell(&self, s: &mut String) {
+        s.push_str("<h3>Übermittlung an Dachs und Maus</h3>");
+        let mut laeufe: BTreeMap<(Datum, &str), Vec<&Modellaufruf>> = BTreeMap::new();
+        for e in &self.schlopfmodell {
+            laeufe.entry((e.tag, &e.lauf)).or_default().push(e);
+        }
+        let mut laeufe: Vec<_> = laeufe.into_values().collect();
+        laeufe.sort_by_key(|e| std::cmp::Reverse(e.iter().map(|e| e.zeit).min()));
+        if laeufe.is_empty() {
+            s.push_str(
+                "<p>Heute und gestern ist kein Beratungs- oder Simulationslauf protokolliert.</p>",
+            );
+        }
+        for (nr, lauf) in laeufe.into_iter().enumerate() {
+            let Some(erster) = lauf.iter().min_by_key(|e| e.zeit) else {
+                continue;
+            };
+            let offen = if nr == 0 { " open" } else { "" };
+            let _ = write!(
+                s,
+                "<details{offen}><summary>Lauf vom {}</summary><ul>",
+                erster.zeit
+            );
+            for (wer, titel) in [("dachs", "Dachs"), ("maus", "Maus")] {
+                let _ = write!(s, "<li><strong>{titel}</strong> · ");
+                if let Some((e, stand)) = lauf
+                    .iter()
+                    .filter(|e| e.wer == wer)
+                    .filter_map(|e| e.stand.map(|stand| (e, stand)))
+                    .max_by_key(|(e, _)| e.zeit)
+                {
+                    let _ = write!(
+                        s,
+                        "<a href=\"/gespraeche?tag={}&amp;wer={wer}&amp;lauf={}\">Belege übermittelt am {}</a> · Wissensstand {stand}",
+                        e.tag,
+                        abfragewert(&e.lauf),
+                        e.zeit,
+                    );
+                } else {
+                    s.push_str("Keine Übermittlung für diesen Lauf belegt");
+                }
+                s.push_str("</li>");
+            }
+            s.push_str("</ul></details>");
+        }
     }
 
     pub(crate) fn hat_eintrag(&self, lauf: &str) -> bool {
@@ -280,6 +350,38 @@ mod tests {
         })();
         fs::remove_dir_all(daten)?;
         ergebnis
+    }
+
+    #[test]
+    fn schlopfmodell_zeigt_nur_belegte_uebermittlung_je_berater() -> io::Result<()> {
+        let jetzt = zeit("2026-11-10T06:32:00Z")?;
+        let tag = jetzt
+            .frankfurt_tag()
+            .ok_or_else(|| io::Error::other("Datum fehlt"))?;
+        let mut aufrufe = Aufrufe::default();
+        aufrufe.schlopfmodell.push(Modellaufruf {
+            tag,
+            zeit: jetzt,
+            stand: Some(jetzt),
+            lauf: "test-1".into(),
+            wer: "dachs".into(),
+        });
+        aufrufe.schlopfmodell.push(Modellaufruf {
+            tag,
+            zeit: zeit("2026-11-10T07:32:00Z")?,
+            stand: None,
+            lauf: "test-2".into(),
+            wer: "dachs".into(),
+        });
+        let mut html = String::new();
+        aufrufe.schlopfmodell(&mut html);
+        assert!(html.contains("wer=dachs&amp;lauf=test-1"));
+        assert!(html.contains("<strong>Maus</strong> · Keine Übermittlung für diesen Lauf belegt"));
+        assert!(!html.contains("wer=maus"));
+        assert!(
+            html.contains("<strong>Dachs</strong> · Keine Übermittlung für diesen Lauf belegt")
+        );
+        Ok(())
     }
 
     #[test]
