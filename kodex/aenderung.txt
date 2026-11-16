@@ -1,5 +1,4 @@
 klasse: Funktion
-zweck: Einrichtungsübersicht bei eingeschaltetem Zeitplan ausblenden
+zweck: Verbindungsbalken nach bestätigtem Dienststart automatisch ausblenden
 pfade:
 crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/tests/dienst.rs
