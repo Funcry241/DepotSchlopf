@@ -1,0 +1,3 @@
+# Automatische Tiingo-Split-Umbuchung (#207, P31b)
+
+Vor der Papierbewertung übernimmt DepotSchlopf belegte Splits für bereits am Splittag gehaltene US-Positionen. Die Meldung und der Schlusskurs müssen dieselbe Tiingo-Rohantwort belegen. Die Umbuchung passt Stückzahlen und Schutz-Stopps an. Der Gesamteinstand und der gebuchte Höchststand bleiben erhalten. Widersprüchliche Faktoren, fehlende Belege, offene Aufträge oder ungeklärte Bruchteile stoppen den Papiertag vor der Umbuchung. Nach einem Abbruch gleicht DepotSchlopf gebuchte Änderungen mit dem Papierkonto ab und führt fehlende Umbuchungen fort.

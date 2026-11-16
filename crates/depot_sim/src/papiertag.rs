@@ -810,6 +810,8 @@ pub(crate) fn papiertag_mit_uhr(
 ) -> Result<Ausgang, LaufFehler> {
     let (mut k, wissen_bis) = belegte_lage(j.stand(), universum, heute, uhr)?;
     crate::splitumbuchung::wiederanlauf(j, beteiligte.konto, wissen_bis).map_err(halt)?;
+    crate::splitumbuchung::tiingo_umbuchen(j, beteiligte.konto, &k.heute, wissen_bis)
+        .map_err(halt)?;
     crate::splitumbuchung::pruefe_kursbasis(j.stand(), &k.heute).map_err(halt)?;
     k.vortag = crate::splitumbuchung::vergleichskurse(j.stand(), &k.vortag).map_err(halt)?;
     let neu = j.stand().toepfe().is_empty();

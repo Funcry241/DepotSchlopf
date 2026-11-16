@@ -1,7 +1,7 @@
 //! Wertneutrale Split-Umbuchung und ihre Reihenfolge zwischen Ausführungen.
-use depot_kern::{Cent, Datum, Isin, Preis, TopfId, abdruck::sha256_hex};
+use depot_kern::{Boerse, Cent, Datum, Herkunft, Isin, Preis, TopfId, abdruck::sha256_hex};
 
-use crate::{AuftragsBeleg, Ausfuehrung, Stand};
+use crate::{AuftragsBeleg, Ausfuehrung, NachrichtBeleg, Stand};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Splitfaktor {
@@ -12,6 +12,26 @@ pub struct Splitfaktor {
 impl Splitfaktor {
     pub fn neu(zaehler: u64, nenner: u64) -> Option<Self> {
         (zaehler != 0 && nenner != 0 && zaehler != nenner).then_some(Self { zaehler, nenner })
+    }
+
+    fn dezimal(text: &str) -> Option<Self> {
+        let (ganz, rest) = text.split_once('.').unwrap_or((text, ""));
+        if ganz.is_empty() || !ganz.bytes().chain(rest.bytes()).all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let nenner = 10_u64.checked_pow(u32::try_from(rest.len()).ok()?)?;
+        let ganz: u64 = ganz.parse().ok()?;
+        let rest = if rest.is_empty() {
+            0
+        } else {
+            rest.parse().ok()?
+        };
+        let zaehler = ganz.checked_mul(nenner)?.checked_add(rest)?;
+        let (mut a, mut b) = (zaehler, nenner);
+        while b != 0 {
+            (a, b) = (b, a.checked_rem(b)?);
+        }
+        Self::neu(zaehler.checked_div(a)?, nenner.checked_div(a)?)
     }
 
     pub fn stueck(self, vorher: u64) -> Option<u64> {
@@ -107,6 +127,49 @@ impl Kapitalmassnahme {
     }
 }
 
+/// Liest die ISIN und den Wirktag aus einer vom Tiingo-Sammler belegten Splitmeldung.
+pub fn tiingo_split(beleg: &NachrichtBeleg) -> Option<(Isin, Datum)> {
+    if beleg.quelle() != depot_kern::tiingo::QUELLE_KAPITAL {
+        return None;
+    }
+    let (wert, zusatz) = beleg
+        .text()
+        .strip_prefix("Tiingo: ")?
+        .rsplit_once(") · Split-Faktor ")?;
+    let (_, isin) = wert.rsplit_once(" (")?;
+    let (_, tag) = zusatz.split_once(" am ")?;
+    Some((Isin::neu(isin).ok()?, Datum::lies(tag)?))
+}
+
+impl Kapitalmassnahme {
+    /// Ein Tiingo-Split braucht den Kurs desselben Werts und Handelstags aus derselben Rohantwort.
+    pub fn tiingo(stand: &Stand, topf: TopfId, beleg: &NachrichtBeleg) -> Option<Self> {
+        let (isin, wirksam) = tiingo_split(beleg)?;
+        if Boerse::Nyse.schluss(wirksam)? != beleg.zeit()
+            || !stand.kurse().iter().any(|b| {
+                b.quelle() == depot_kern::liste::QUELLE_US
+                    && b.isin() == &isin
+                    && b.kurs().herkunft() == Herkunft::Quelle
+                    && b.kurs().handelstag() == wirksam
+                    && b.kurs().zeitpunkt() == beleg.zeit()
+                    && b.roh() == beleg.roh()
+                    && b.abruf() <= beleg.abruf()
+            })
+        {
+            return None;
+        }
+        let (_, faktor) = beleg.text().rsplit_once(") · Split-Faktor ")?;
+        let (faktor, _) = faktor.split_once(" am ")?;
+        Some(Self {
+            topf,
+            isin,
+            wirksam,
+            faktor: Splitfaktor::dezimal(faktor)?,
+            quelle: crate::splitverdacht::kennung(beleg),
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GebuchteKapitalmassnahme {
     pub massnahme: Kapitalmassnahme,
@@ -119,4 +182,21 @@ pub struct GebuchteKapitalmassnahme {
 pub enum Bewertungsschritt<'a> {
     Ausfuehrung(&'a AuftragsBeleg, &'a Ausfuehrung),
     Split(&'a Kapitalmassnahme),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tiingo_faktor_skaliert_stopp_und_lehnt_gebrochene_stuecke_ab() -> Result<(), String> {
+        let split = Splitfaktor::dezimal("4").ok_or("Splitfaktor")?;
+        assert_eq!(split.stopp(Cent(39_601)), Some(Cent(9_901)));
+        let reverse = Splitfaktor::dezimal("0.25").ok_or("Reverse-Splitfaktor")?;
+        assert_eq!(reverse.stueck(40), Some(10));
+        assert_eq!(reverse.stueck(41), None);
+        assert_eq!(reverse.stopp(Cent(9_900)), Some(Cent(39_600)));
+        assert!(Splitfaktor::dezimal("1.0").is_none());
+        Ok(())
+    }
 }

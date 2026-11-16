@@ -397,8 +397,23 @@ impl Stand {
                 "Split nur nach einem abgeschlossenen Papiertag im aktuellen Journalformat".into(),
             );
         }
-        if Kapitalmassnahme::xetra(self, m.topf, &m.quelle).as_ref() != Some(m) {
-            return Err("Split stimmt nicht mit einem ungeklärten Xetra-Beleg überein".into());
+        let xetra = Kapitalmassnahme::xetra(self, m.topf, &m.quelle).as_ref() == Some(m);
+        if !xetra {
+            let tiingo = self.nachrichten().iter().any(|beleg| {
+                crate::kapitalmassnahme::tiingo_split(beleg).is_some()
+                    && crate::splitverdacht::kennung(beleg) == m.quelle
+                    && Kapitalmassnahme::tiingo(self, m.topf, beleg).as_ref() == Some(m)
+            });
+            if !tiingo {
+                return Err("Split stimmt mit keinem geprüften Quellenbeleg überein".into());
+            }
+            if self.kapitalmassnahmen.iter().any(|b| {
+                b.massnahme.topf == m.topf
+                    && b.massnahme.isin == m.isin
+                    && b.massnahme.wirksam > m.wirksam
+            }) {
+                return Err("Für diese Position ist bereits ein späterer Split gebucht".into());
+            }
         }
         if !self.kurse().iter().any(|b| {
             b.isin() == &m.isin
