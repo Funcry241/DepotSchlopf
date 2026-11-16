@@ -233,7 +233,8 @@ fn leistbare_stueck(g: &Grenzen, limit: Cent, gewuenscht: u64, budget: Cent) -> 
     })
 }
 
-/// Ganze Positionen, deren belegter Schluss den Schutz-Stopp erreicht hat.
+/// Ganze Positionen, deren belegter Schluss den Schutz-Stopp erreicht hat. Der Ausstieg nutzt
+/// den hoechsten erlaubten Limitabstand, damit er auch an einem schwachen Folgetag fuellt (#311 H2a).
 pub fn stopp_auftraege(
     g: &Grenzen,
     topf: &Topf,
@@ -254,7 +255,7 @@ pub fn stopp_auftraege(
                 stueck,
                 kurs,
                 komplett: true,
-                limit_bp: None,
+                limit_bp: Some(g.limit_abstand_max_bp()),
                 anlass: Anlass::Stopp,
             });
         }
@@ -262,7 +263,8 @@ pub fn stopp_auftraege(
     Some(genehmige(g, &kandidaten, &[], vergabe)?.verkaeufe)
 }
 
-/// Ganze Positionen mit fälligem und nach Beratung unbegründetem Halten schließen.
+/// Ganze Positionen mit fälligem und nach Beratung unbegründetem Halten schließen, mit dem
+/// hoechsten erlaubten Limitabstand wie beim Stopp (#311 H2a).
 pub fn frist_auftraege(
     g: &Grenzen,
     topf: &Topf,
@@ -281,7 +283,7 @@ pub fn frist_auftraege(
                 stueck,
                 kurs,
                 komplett: true,
-                limit_bp: None,
+                limit_bp: Some(g.limit_abstand_max_bp()),
                 anlass: Anlass::FristOhneBegruendung,
             })
         })
@@ -1168,6 +1170,103 @@ mod grenzrahmen_tests {
 mod stopp_tests {
     use super::*;
     use depot_kern::{Datum, Kurs, Zeitpunkt};
+
+    /// Ein Wert mit belegtem Kurs, ein Topf mit 10 Stueck davon.
+    fn probe(cent: i64) -> Result<(Isin, Topf, Kurse), String> {
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 5).ok_or("Tag")?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let kurs = Kurs::neu(Cent(cent), "EUR", tag, zeit, Herkunft::Simulation)
+            .map_err(|e| format!("{e:?}"))?;
+        let kurse = Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| format!("{e:?}"))?;
+        let mut topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+        topf.setze_bestand(isin.clone(), 10);
+        Ok((isin, topf, kurse))
+    }
+
+    /// #311 H2a: Stopp bei Schluss 100,00 € verkauft mit Limit 97,00 €, nicht mehr 99,00 €.
+    #[test]
+    fn stopp_verkauf_mit_hoechstabstand() -> Result<(), String> {
+        let (isin, topf, kurse) = probe(10_000)?;
+        let stopps = [(isin, Cent(10_000))].into_iter().collect();
+        let g = Grenzen::standard();
+        let orders = stopp_auftraege(&g, &topf, &kurse, &stopps, &mut Kennungsvergabe::nach(0))
+            .ok_or("Aufträge")?;
+        assert_eq!(
+            orders.iter().map(|a| a.auftrag().limit).collect::<Vec<_>>(),
+            vec![Cent(9_700)]
+        );
+        // Der Folgeschluss 97,50 € (−2,5 %) liegt ueber dem Limit, die Order fuellt.
+        assert!(orders.iter().all(|a| a.auftrag().limit <= Cent(9_750)));
+        Ok(())
+    }
+
+    /// #311 H2a: Der Fristverkauf nutzt denselben Hoechstabstand, krumme Kurse runden auf.
+    #[test]
+    fn frist_verkauf_mit_hoechstabstand() -> Result<(), String> {
+        let (isin, topf, kurse) = probe(12_345)?;
+        let faellig = [isin].into_iter().collect();
+        let g = Grenzen::standard();
+        let orders = frist_auftraege(&g, &topf, &kurse, &faellig, &mut Kennungsvergabe::nach(0))
+            .ok_or("Aufträge")?;
+        // 123,45 × 0,97 = 119,7465 €, zur sicheren Seite aufgerundet 119,75 €.
+        assert_eq!(
+            orders
+                .iter()
+                .map(|a| (a.auftrag().limit, a.beleg().anlass))
+                .collect::<Vec<_>>(),
+            vec![(Cent(11_975), Anlass::FristOhneBegruendung)]
+        );
+        Ok(())
+    }
+
+    /// #311 H2a: Die Notbremse verkauft jedes Stueck mit Kurs × 0,97, aufgerundet.
+    #[test]
+    fn notbremse_mit_hoechstabstand() -> Result<(), String> {
+        let (_, topf, kurse) = probe(12_345)?;
+        let g = Grenzen::standard();
+        let orders = crate::notbremse_auftraege(&g, &topf, &kurse, &mut Kennungsvergabe::nach(0))
+            .ok_or("Aufträge")?;
+        assert_eq!(
+            orders.iter().map(|a| a.auftrag().limit).collect::<Vec<_>>(),
+            vec![Cent(11_975)]
+        );
+        Ok(())
+    }
+
+    /// Gegenprobe: Ein KI-Verkauf ohne eigenen Abstand bleibt bei der Vorgabe von 100 bp.
+    #[test]
+    fn ki_verkauf_bleibt_bei_vorgabe() -> Result<(), String> {
+        use depot_kern::{BeraterId, Instrument, InstrumentArt};
+        let (isin, topf, kurse) = probe(10_000)?;
+        let universum = Universum::neu(vec![Instrument {
+            isin: isin.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        }]);
+        let vorschlag = Vorschlag {
+            erwartung_bp: BTreeMap::new(),
+            berater: BeraterId::Dachs,
+            zielgewichte_bp: BTreeMap::new(),
+            begruendung: BTreeMap::new(),
+            limit_bp: BTreeMap::new(),
+            stopp_bp: BTreeMap::new(),
+        };
+        let e = entscheide(
+            &Eingabe {
+                grenzen: &Grenzen::standard(),
+                universum: &universum,
+                topf: &topf,
+                kurse: &kurse,
+                vorschlag: Some(&vorschlag),
+                halt: false,
+            },
+            &mut Kennungsvergabe::nach(0),
+        );
+        let limits: Vec<_> = e.verkaeufe.iter().map(|a| a.auftrag().limit).collect();
+        assert_eq!(limits, vec![Cent(9_900)]);
+        Ok(())
+    }
 
     #[test]
     fn stopp_gilt_am_schluss_und_fuer_kleine_positionen() -> Result<(), String> {

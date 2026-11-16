@@ -1,5 +1,9 @@
 klasse: Funktion
-zweck: Einrichtungsübersicht bei eingeschaltetem Zeitplan ausblenden
+zweck: Schutzverkäufe (Stopp, Frist, Notbremse) mit dem höchsten erlaubten Limitabstand von 3 % (#311 H2a)
 pfade:
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/tests/dienst.rs
+CHANGELOG.md
+crates/depot_regelwerk/src/entscheidung.rs
+crates/depot_regelwerk/src/waechter.rs
+crates/depot_regelwerk/tests/regelwerk.rs
+crates/depot_regelwerk/tests/rundung.rs
+crates/depot_sim/tests/papiertag.rs

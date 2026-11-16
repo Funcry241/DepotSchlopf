@@ -472,7 +472,8 @@ fn notbremse_verkauft_alles_mit_limit() {
     assert_eq!(auftraege.len(), 2);
     for a in &auftraege {
         assert_eq!(a.auftrag().richtung, Richtung::Verkauf);
-        assert_eq!(a.auftrag().limit, Cent(9_900));
+        // Hoechster erlaubter Limitabstand 3 % (#311 H2a).
+        assert_eq!(a.auftrag().limit, Cent(9_700));
         assert_eq!(a.beleg().anlass, Anlass::Notbremse);
         assert_eq!(a.auftrag().stueck, topf.stueck(&a.auftrag().isin));
     }

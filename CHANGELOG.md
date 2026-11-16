@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Schutzverkäufe (Schutz-Stopp, Fristverkauf, Notbremse) setzen ihr Limit mit dem höchsten erlaubten Abstand von 3 % statt 1 % unter den Schlusskurs. So füllt ein Ausstieg auch an einem schwachen Folgetag. KI-Orders ohne eigenen Abstand bleiben bei 1 % (#311 H2a). Rückweg: Der vorige Stand lässt sich ohne Sicherung wieder einspielen; offene Schutzorders laufen mit ihrem Limit aus.
+
 - Der Morgenlauf sperrt gehaltene Werte mit unplausiblen Kursen einzeln. Ein belegter Vergleichskurs dient zur Bewertung; Schutz und Handel der übrigen Werte verwenden ihre eigenen gültigen Kurse (#158).
 
 ### Hinzugefügt
