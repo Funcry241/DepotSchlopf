@@ -314,14 +314,53 @@ pub fn entscheide_ersatzkauf(
     entscheide_intern(e, vergabe, Some(frei), true)
 }
 
+/// Eine am letzten Schluss verfallene KI-Kauforder, die der Morgenlauf einmal ohne neue
+/// KI-Antwort wiederholt (#311 H2b). Sie laeuft durch dieselbe Genehmigung wie ein KI-Kauf:
+/// Anteil, Positionszahl, Umschlag, Orderzahl, Mindestorder und Deckung.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Wiederholung {
+    pub isin: Isin,
+    pub stueck: u64,
+    /// Limitabstand zum juengsten Schluss; muss im Rahmen der Grenzen liegen.
+    pub limit_bp: i64,
+    /// Stoppabstand der urspruenglichen Order.
+    pub stopp_bp: Option<i64>,
+}
+
+/// Plant zwingende Verkaeufe wie immer und als einzigen freiwilligen Auftrag die Wiederholung.
+/// `e.vorschlag` wird nicht gelesen.
+pub fn entscheide_wiederholung(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    frei: Cent,
+    w: &Wiederholung,
+) -> Entscheidung {
+    let ohne_vorschlag = Eingabe {
+        vorschlag: None,
+        ..*e
+    };
+    entscheide_plan(&ohne_vorschlag, vergabe, Some(frei), false, Some(w))
+}
+
 fn entscheide_intern(
     e: &Eingabe<'_>,
     vergabe: &mut Kennungsvergabe,
     kaufbudget: Option<Cent>,
     ersatzkauf: bool,
 ) -> Entscheidung {
+    entscheide_plan(e, vergabe, kaufbudget, ersatzkauf, None)
+}
+
+fn entscheide_plan(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    kaufbudget: Option<Cent>,
+    ersatzkauf: bool,
+    wiederholung: Option<&Wiederholung>,
+) -> Entscheidung {
     let mut befunde = Vec::new();
-    let Some((verkaeufe, kaeufe)) = plane(e, kaufbudget, ersatzkauf, &mut befunde) else {
+    let Some((verkaeufe, kaeufe)) = plane(e, kaufbudget, ersatzkauf, wiederholung, &mut befunde)
+    else {
         return Entscheidung::nur(Befund::Rechenfehler);
     };
     let Some(mut ent) = genehmige(e.grenzen, &verkaeufe, &kaeufe, vergabe) else {
@@ -329,7 +368,10 @@ fn entscheide_intern(
     };
     for kauf in &mut ent.kaeufe {
         let isin = &kauf.auftrag().isin;
-        let gefragt = e.vorschlag.and_then(|v| v.stopp_bp.get(isin).copied());
+        let gefragt = match wiederholung {
+            Some(w) => w.stopp_bp.filter(|_| w.isin == *isin),
+            None => e.vorschlag.and_then(|v| v.stopp_bp.get(isin).copied()),
+        };
         let stopp = gefragt.filter(|bp| {
             !ersatzkauf && (e.grenzen.stopp_min_bp()..=e.grenzen.notbremse_bp()).contains(bp)
         });
@@ -388,6 +430,7 @@ fn plane(
     e: &Eingabe<'_>,
     kaufbudget: Option<Cent>,
     ersatzkauf: bool,
+    wiederholung: Option<&Wiederholung>,
     befunde: &mut Vec<Befund>,
 ) -> Option<(Vec<Kandidat>, Vec<Kandidat>)> {
     let g = e.grenzen;
@@ -421,8 +464,14 @@ fn plane(
     abbau_anteil(e, tw, &mut zwang, &mut gesperrt, befunde)?;
     abbau_positionen(e, &mut zwang, &mut gesperrt, befunde)?;
 
+    let wiederholt = match wiederholung {
+        Some(w) if !e.halt => wiederholungs_kandidat(e, w, befunde),
+        _ => None,
+    };
     let ziele = if e.halt {
         befunde.push(Befund::Halt);
+        None
+    } else if wiederholung.is_some() {
         None
     } else {
         match e.vorschlag {
@@ -463,6 +512,16 @@ fn plane(
                 ziele,
                 &gesperrt,
                 ersatzkauf,
+                &mut verkaeufe,
+                &mut kaeufe,
+                &mut befunde_frei,
+            )?;
+        } else if let Some(k) = &wiederholt {
+            freiwillig_aus(
+                e,
+                kaufbudget,
+                tw,
+                vec![k.clone()],
                 &mut verkaeufe,
                 &mut kaeufe,
                 &mut befunde_frei,
@@ -722,12 +781,62 @@ fn freiwillig(
     kaeufe: &mut Vec<Kandidat>,
     befunde: &mut Vec<Befund>,
 ) -> Option<()> {
-    let g = e.grenzen;
     let mut kandidaten = sammle_kandidaten(e, ziele, topfwert, gesperrt, befunde)?;
     if ersatzkauf {
         kandidaten.retain(|k| k.richtung == Richtung::Kauf);
     }
+    freiwillig_aus(
+        e, kaufbudget, topfwert, kandidaten, verkaeufe, kaeufe, befunde,
+    )
+}
 
+/// Der Kandidat einer Wiederholung, oder `None` mit Befund, wenn sie nicht zulaessig ist.
+fn wiederholungs_kandidat(
+    e: &Eingabe<'_>,
+    w: &Wiederholung,
+    befunde: &mut Vec<Befund>,
+) -> Option<Kandidat> {
+    let g = e.grenzen;
+    if !e.universum.handelbar(&w.isin, g) {
+        befunde.push(Befund::VorschlagVerworfen(VerwerfGrund::UnbekannterWert(
+            w.isin.clone(),
+        )));
+        return None;
+    }
+    let Some(kurs) = frischer_kurs(g, e.kurse, &w.isin) else {
+        befunde.push(Befund::KursUnplausibel(w.isin.clone()));
+        return None;
+    };
+    if !(g.limit_abstand_min_bp()..=g.limit_abstand_max_bp()).contains(&w.limit_bp) {
+        befunde.push(Befund::LimitabstandAusserhalb {
+            isin: w.isin.clone(),
+            gefragt: w.limit_bp,
+            verwendet: 0,
+        });
+        return None;
+    }
+    Some(Kandidat {
+        isin: w.isin.clone(),
+        richtung: Richtung::Kauf,
+        stueck: w.stueck,
+        kurs,
+        komplett: false,
+        limit_bp: Some(w.limit_bp),
+        anlass: Anlass::Umschichtung,
+    })
+}
+
+/// Umschlag, Orderzahl und Kaeufe fuer schon gesammelte freiwillige Kandidaten.
+fn freiwillig_aus(
+    e: &Eingabe<'_>,
+    kaufbudget: Option<Cent>,
+    topfwert: Preis,
+    mut kandidaten: Vec<Kandidat>,
+    verkaeufe: &mut Vec<Kandidat>,
+    kaeufe: &mut Vec<Kandidat>,
+    befunde: &mut Vec<Befund>,
+) -> Option<()> {
+    let g = e.grenzen;
     let mut zwang_volumen = Cent::NULL;
     for k in verkaeufe.iter() {
         zwang_volumen = zwang_volumen.checked_add(k.umschlag(g)?)?;
@@ -1297,6 +1406,82 @@ mod stopp_tests {
             stopp_auftraege(&g, topf, &leer, &stopps, &mut Kennungsvergabe::nach(0))
                 .is_some_and(|orders| orders.is_empty())
         );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod wiederholung_tests {
+    use super::*;
+    use depot_kern::{Datum, Instrument, InstrumentArt, Kurs, Zeitpunkt};
+
+    fn lauf(bargeld: i64, stueck: u64, halt: bool) -> Result<Entscheidung, String> {
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 17).ok_or("Tag")?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let kurs = Kurs::neu(Cent(10_150), "EUR", tag, zeit, Herkunft::Simulation)
+            .map_err(|e| format!("{e:?}"))?;
+        let kurse = Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| format!("{e:?}"))?;
+        let topf = Topf::neu(TopfId::A, Cent(bargeld)).map_err(|e| format!("{e:?}"))?;
+        let universum = Universum::neu(vec![Instrument {
+            isin: isin.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        }]);
+        let w = Wiederholung {
+            isin,
+            stueck,
+            limit_bp: 100,
+            stopp_bp: Some(500),
+        };
+        Ok(entscheide_wiederholung(
+            &Eingabe {
+                grenzen: &Grenzen::standard(),
+                universum: &universum,
+                topf: &topf,
+                kurse: &kurse,
+                vorschlag: None,
+                halt,
+            },
+            &mut Kennungsvergabe::nach(0),
+            Cent(bargeld),
+            &w,
+        ))
+    }
+
+    /// Gleiche Stueckzahl, Limit 101,50 × 1,01 = 102,515 € abgerundet 102,51 €, Stopp uebernommen.
+    #[test]
+    fn wiederholung_mit_gleicher_stueckzahl_und_stopp() -> Result<(), String> {
+        let e = lauf(1_000_000, 30, false)?;
+        let kauf = e.kaeufe.first().ok_or("Kauf")?;
+        assert_eq!(e.kaeufe.len(), 1);
+        assert_eq!(kauf.auftrag().stueck, 30);
+        assert_eq!(kauf.auftrag().limit, Cent(10_251));
+        assert_eq!(kauf.stopp_bp(), Some(500));
+        assert_eq!(kauf.beleg().anlass, Anlass::Umschichtung);
+        Ok(())
+    }
+
+    /// 50 Stueck zu 102,51 € waeren 51 % von 10.000 €: auf 40 % des kleinsten moeglichen
+    /// Topfwerts nach Limitverlust und Gebuehr gekuerzt (38 Stueck), mit Befund.
+    #[test]
+    fn wiederholung_respektiert_anteil() -> Result<(), String> {
+        let e = lauf(1_000_000, 50, false)?;
+        let kauf = e.kaeufe.first().ok_or("Kauf")?;
+        assert_eq!(kauf.auftrag().stueck, 38);
+        assert!(
+            e.befunde
+                .iter()
+                .any(|b| matches!(b, Befund::KaufgrenzeGekuerzt(_)))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn wiederholung_entfaellt_bei_halt() -> Result<(), String> {
+        let e = lauf(1_000_000, 30, true)?;
+        assert!(e.kaeufe.is_empty());
+        assert!(e.befunde.contains(&Befund::Halt));
         Ok(())
     }
 }
