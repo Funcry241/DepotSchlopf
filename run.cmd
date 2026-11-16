@@ -6,7 +6,7 @@ rem   run.cmd                  alles: Gate pruefen, danach Assistenten-Export as
 rem   run.cmd festschreibung   Festschreibung neu schreiben (nur fuer FestschreibungAenderung)
 rem   run.cmd kurse [xetra|nyse]  Schlusskurse holen (alle oder nur einer Boerse), im Journal belegen und pruefen (nur lesend)
 rem   run.cmd nachrichten      nur die Nachrichten holen und im Journal belegen (nur lesend)
-rem   run.cmd termine          Termine der EZB holen und im Journal belegen (nur lesend)
+rem   run.cmd termine          Termine von EZB und Fed holen und im Journal belegen (nur lesend)
 rem   run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Schlusskursen (nur Papiergeld)
 rem   run.cmd ruecktest        Schattenstrategien anhand des Journals rueckwaerts pruefen
 rem   run.cmd lage             Lagebild nach daten/lage.html (Bereitschaft, KI-Budget, Depot)

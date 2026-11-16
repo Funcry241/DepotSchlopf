@@ -26,6 +26,7 @@
 pub mod diagnose;
 pub mod ergebnisse;
 pub mod ezb;
+pub mod fed;
 pub use depot_kern::liste;
 pub mod kontingent;
 pub mod nachrichten;

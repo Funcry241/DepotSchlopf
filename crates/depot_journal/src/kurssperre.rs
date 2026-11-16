@@ -31,6 +31,7 @@ pub enum Quelle {
     AlphaVantage,
     Tiingo,
     Ezb,
+    Fed,
     Rss,
 }
 impl Quelle {
@@ -39,14 +40,21 @@ impl Quelle {
             Self::AlphaVantage => "alphavantage",
             Self::Tiingo => "tiingo",
             Self::Ezb => "ezb",
+            Self::Fed => "fed",
             Self::Rss => "rss",
         }
     }
 
     fn lies(s: &str) -> Option<Self> {
-        [Self::AlphaVantage, Self::Tiingo, Self::Ezb, Self::Rss]
-            .into_iter()
-            .find(|q| q.text() == s)
+        [
+            Self::AlphaVantage,
+            Self::Tiingo,
+            Self::Ezb,
+            Self::Fed,
+            Self::Rss,
+        ]
+        .into_iter()
+        .find(|q| q.text() == s)
     }
 
     fn aus_alt(text: &str) -> Option<Self> {
