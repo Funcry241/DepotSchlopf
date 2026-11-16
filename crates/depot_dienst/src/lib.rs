@@ -413,6 +413,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/" => live_seite(d, a, jetzt),
         "/depot" | "/teil/depot" => depot_seite(d, a, jetzt),
         "/gespraeche" => gespraechsseite(d, a, tag),
+        "/gespraeche/rohtext" => gespraechsrohtext(d, a),
         "/export" => seiten::fehler(405, "Verwende das Analyse-Exportformular."),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
         "/teil/sicherung" => antwort(200, HTML, sicherungsinfo(d, jetzt).as_bytes()),
@@ -476,6 +477,16 @@ fn gespraechsseite(d: &Dienst, a: &Anfrage, heute: Option<depot_kern::Datum>) ->
         ("", ""),
     );
     antwort(200, HTML, seite.as_bytes())
+}
+
+fn gespraechsrohtext(d: &Dienst, a: &Anfrage) -> Vec<u8> {
+    let abfrage = formular(a.abfrage.as_bytes()).unwrap_or_default();
+    let nr = feld(&abfrage, "nr").and_then(|nr| nr.parse().ok());
+    let art = feld(&abfrage, "art").unwrap_or_default();
+    match nr.and_then(|nr| gespraeche::rohtext(&d.wurzel.join("daten"), nr, art)) {
+        Some(bytes) => antwort(200, "text/plain; charset=utf-8", &bytes),
+        None => seiten::fehler(404, "Der belegte Rohtext ist nicht verfügbar."),
+    }
 }
 
 /// Der bereits vor diesen Korrekturen vorhandene Statuspfad bleibt der Herzschlag.
