@@ -1824,7 +1824,7 @@ pub(crate) fn quellen_teil(
             "Schlusskurse aller Börsen der Liste (Xetra: Alpha Vantage, US-Börsen: Tiingo mit \
              EZB-Referenzkursen; je mit Schlüssel)",
         ),
-        (Art::Termine, "Termine der EZB (ohne Schlüssel)"),
+        (Art::Termine, "Termine von EZB und Fed (ohne Schlüssel)"),
         (
             Art::Nachrichten,
             "Schlagzeilen: tagesschau und BBC World (kostenlos, ohne Schlüssel; mindestens 90 Minuten Abrufpause)",

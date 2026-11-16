@@ -127,6 +127,7 @@ pub struct KalenderBericht {
     pub unveraendert: usize,
     /// Kuenftige Termine dieser Quelle im Journal, die im Kalender fehlen, aufsteigend.
     pub fehlen: Vec<String>,
+    pub ausgelassen: Vec<String>,
     /// Warum nichts belegt wurde.
     pub fehler: Option<String>,
     /// Die Antwort enthielt einen Schluessel: Kurssperre anlegen.
@@ -134,8 +135,8 @@ pub struct KalenderBericht {
 }
 
 /// Vermerkt auch einen Abruf, der vor der Rohablage scheitert.
-fn merke_abruf(ablage: &Path, tag: Datum) -> Result<bool, String> {
-    let ordner = ablage.join(QUELLE_ERGEBNISSE);
+pub(crate) fn merke_abruf(ablage: &Path, quelle: &str, tag: Datum) -> Result<bool, String> {
+    let ordner = ablage.join(quelle);
     fs::create_dir_all(&ordner).map_err(|e| format!("{}: {e}", ordner.display()))?;
     let pfad = ordner.join(format!("abruf-{tag}.vermerkt"));
     match OpenOptions::new().write(true).create_new(true).open(&pfad) {
@@ -172,7 +173,7 @@ pub fn sammle_ergebnisse(
         bericht.uebersprungen = Some(grund);
         return Ok(bericht);
     }
-    if !merke_abruf(ablage, heute).map_err(SammelFehler::Ablage)? {
+    if !merke_abruf(ablage, QUELLE_ERGEBNISSE, heute).map_err(SammelFehler::Ablage)? {
         bericht.uebersprungen = Some("heute schon abgerufen".into());
         return Ok(bericht);
     }
@@ -212,6 +213,25 @@ pub fn sammle_ergebnisse(
             return Ok(bericht);
         }
     };
+    belege_kalender(
+        &mut bericht,
+        journal,
+        QUELLE_ERGEBNISSE,
+        abruf,
+        &roh,
+        termine,
+    )?;
+    Ok(bericht)
+}
+
+pub(crate) fn belege_kalender(
+    bericht: &mut KalenderBericht,
+    journal: &mut Journal,
+    quelle: &str,
+    abruf: Zeitpunkt,
+    roh: &[u8],
+    termine: Vec<Termin>,
+) -> Result<(), SammelFehler> {
     let (tag, ..) = abruf.in_frankfurt().ok_or(SammelFehler::Uhr)?;
     let im_kalender: BTreeSet<&str> = termine.iter().map(Termin::kennung).collect();
     bericht.fehlen = journal
@@ -219,14 +239,14 @@ pub fn sammle_ergebnisse(
         .aktuelle_termine()
         .into_iter()
         .filter(|(kennung, b)| {
-            b.quelle() == QUELLE_ERGEBNISSE
+            b.quelle() == quelle
                 && !im_kalender.contains(kennung)
                 && b.termin().zeit().tag().is_some_and(|t| t >= tag)
         })
         .map(|(kennung, _)| kennung.to_string())
         .collect();
     for termin in termine {
-        let beleg = TerminBeleg::neu(QUELLE_ERGEBNISSE, Herkunft::Quelle, abruf, &roh, termin)
+        let beleg = TerminBeleg::neu(quelle, Herkunft::Quelle, abruf, roh, termin)
             .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
         match journal
             .belege_termin(&beleg)
@@ -239,7 +259,7 @@ pub fn sammle_ergebnisse(
             }
         }
     }
-    Ok(bericht)
+    Ok(())
 }
 
 #[cfg(test)]

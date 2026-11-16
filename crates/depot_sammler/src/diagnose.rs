@@ -39,6 +39,7 @@ fn name(quelle: &str) -> &'static str {
         "alphavantage" => "Alpha Vantage",
         "tiingo" => "Tiingo",
         "ezb" => "EZB",
+        "fed" => "Fed",
         _ => "nicht zugeordnet",
     }
 }
@@ -183,7 +184,7 @@ fn pruefadresse(
         Quelle::AlphaVantage => Anbieter::AlphaVantage,
         Quelle::Tiingo => Anbieter::Tiingo,
         Quelle::Ezb => return Some((crate::ADRESSE_DEVISEN.into(), None, None)),
-        Quelle::Rss => return None,
+        Quelle::Fed | Quelle::Rss => return None,
     };
     let wert = werte
         .iter()
@@ -206,7 +207,7 @@ fn saubere_daten(quelle: Quelle, roh: &[u8]) -> bool {
             depot_kern::tiingo::lies_tageskurse(text).is_ok_and(|t| !t.kurse.is_empty())
         }
         Quelle::Ezb => depot_kern::Devisen::lies_ezb(text).is_ok(),
-        Quelle::Rss => false,
+        Quelle::Fed | Quelle::Rss => false,
     }
 }
 

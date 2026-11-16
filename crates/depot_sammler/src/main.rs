@@ -536,11 +536,53 @@ fn termine(wurzel: &Path, journal_pfad: &Path) -> ExitCode {
         sperre(wurzel, Quelle::Ezb, bericht.fehler.as_deref(), &zugang);
     }
     let kalender_ok = quartalszahlen(wurzel, &mut journal, &mut netz);
-    if ezb_ok && kalender_ok {
+    let fed_ok = fed(wurzel, &mut journal, &mut netz, &zugang);
+    if ezb_ok && kalender_ok && fed_ok {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     }
+}
+
+fn fed(
+    wurzel: &Path,
+    journal: &mut Journal,
+    netz: &mut dyn depot_sammler::Netz,
+    zugang: &Zugang,
+) -> bool {
+    use depot_sammler::fed::sammle_fed;
+    let bericht = match sammle_fed(journal, netz, &mut jetzt, &wurzel.join("daten/roh"), zugang) {
+        Ok(bericht) => bericht,
+        Err(e) => {
+            eprintln!("[Sammler] Fed: FEHLER, Lauf angehalten: {e:?}");
+            return false;
+        }
+    };
+    if let Some(grund) = &bericht.uebersprungen {
+        println!("[Sammler] Fed: kein Abruf ({grund}).");
+        return true;
+    }
+    if bericht.sicherheitsabbruch {
+        sperre(wurzel, Quelle::Fed, bericht.fehler.as_deref(), zugang);
+    }
+    if let Some(datei) = &bericht.rohdatei {
+        println!("[Sammler] Rohe Fed-Seite: {}", datei.display());
+    }
+    if let Some(fehler) = &bericht.fehler {
+        eprintln!("[Sammler] Fed: FEHLER, nichts belegt ({fehler}).");
+        return false;
+    }
+    println!(
+        "[Sammler] Fed: {} neu, {} geändert, {} unverändert.",
+        bericht.neu, bericht.geaendert, bericht.unveraendert
+    );
+    for kennung in &bericht.fehlen {
+        println!("  {kennung}: steht im Journal, aber nicht mehr im Fed-Kalender");
+    }
+    for zeile in &bericht.ausgelassen {
+        println!("  Fed: ausgelassen ({zeile})");
+    }
+    true
 }
 
 /// Die Quartalszahlen der US-Werte aus dem Ergebniskalender von Alpha Vantage (#120). Optional:

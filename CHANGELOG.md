@@ -10,6 +10,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Hinzugefügt
 
+- Der Terminlauf belegt angekündigte FOMC-Zinsentscheidungen aus dem Fed-Kalender (#121).
+
 - Die Beobachtungsliste umfasst zusätzlich drei Xetra-ETFs und vier US-Aktien (Microsoft, Apple, Amazon und Alphabet), #124.
 
 - Papierorders füllen auf Basis des belegten Schlusskurses mit Modellspread (#207, P33). Der Vergleichskorb berücksichtigt den Aufschlag beim Einstieg. Nach der ersten Ausführung mit Modellspread kann ein älterer Stand den Preisbeleg ablehnen. Vor dem Update eine geprüfte Sicherung anlegen.
