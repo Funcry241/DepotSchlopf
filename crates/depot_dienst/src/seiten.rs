@@ -2771,9 +2771,11 @@ mod update_hinweis_tests {
 
     #[test]
     fn update_hinweis_ist_neutral_bis_zur_frist_und_laedt_nach_bestaetigung() {
-        assert!(STIL_DIENST.contains(
-            ".banner[data-update-wartet]{background:var(--flaeche);color:var(--text)"
-        ));
+        assert!(
+            STIL_DIENST.contains(
+                ".banner[data-update-wartet]{background:var(--flaeche);color:var(--text)"
+            )
+        );
         assert!(APP_JS.contains("var updateFrist = 180000"));
         assert!(APP_JS.contains("jetzt - updateWartetSeit < updateFrist"));
         assert!(APP_JS.contains("Du musst nichts tun"));
