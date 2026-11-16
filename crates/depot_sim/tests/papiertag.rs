@@ -523,7 +523,7 @@ fn kauf_wartet_auf_spaeteren_kurs_und_rundet_auf() -> Result<(), String> {
     let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A")?;
     let stueck = a.stueck(&sap);
     assert!(stueck > 0, "SAP gekauft");
-    assert_eq!(fill.kurs, Cent(23_011), "zum aufgerundeten Cent");
+    assert_eq!(fill.kurs, Cent(23_023), "Briefkurs zum aufgerundeten Cent");
     assert!(j.gleiche_ab(&k).map_err(|e| format!("{e:?}"))?.is_empty());
     // Das Konto in der Datei ist das Konto des Laufs.
     let datei = vorbedingung(fs::read_to_string(&ort.konto), "Konto lesen")?;
@@ -1179,7 +1179,7 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
     )?;
     let verkauf = some(verkauf.first(), "Verkaufsauftrag")?;
 
-    let liquid = vorbedingung(Topf::neu(TopfId::A, Cent(499_725)), "Liquid")?;
+    let liquid = vorbedingung(Topf::neu(TopfId::A, Cent(499_465)), "Liquid")?;
     let vorschlag = Vorschlag {
         erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
@@ -1206,7 +1206,7 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
     let mut k = Papierdatei::oeffnen(&ort.konto, false, &start)?;
     assert_eq!(k.sende(verkauf), Sendeantwort::Angenommen);
     k.markt(&kurse);
-    assert_eq!(k.auszug().bargeld, Cent(499_725));
+    assert_eq!(k.auszug().bargeld, Cent(499_465));
     drop(k);
 
     let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
@@ -1218,7 +1218,7 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
 
     let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
     k.rechne_ab(tag(10)?);
-    assert_eq!(k.auszug().bargeld, Cent(499_725));
+    assert_eq!(k.auszug().bargeld, Cent(499_465));
     assert_eq!(k.sende(kauf_nach_abrechnung), Sendeantwort::Angenommen);
     Ok(())
 }
@@ -2775,7 +2775,7 @@ fn gesperrter_wert_fuellt_am_folgetag() -> Result<(), String> {
     let order = some(j.stand().auftrag(nr), "Nachgeholte SAP-Order")?;
     assert_eq!(order.zustand, depot_journal::AuftragsZustand::Gefuellt);
     let ausfuehrung = some(order.ausfuehrungen.first(), "Ausführung")?;
-    assert_eq!(ausfuehrung.kurs, Cent(16_000));
+    assert_eq!(ausfuehrung.kurs, Cent(16_008));
     assert_eq!(
         ausfuehrung.kurszeit,
         depot_kern::Boerse::Xetra.schluss(freitag)
@@ -2898,11 +2898,12 @@ fn journal_liest_nachgeholte_ausfuehrung(kopie: Option<&std::path::Path>) -> Res
     assert_eq!(order.zustand, AuftragsZustand::Gefuellt);
     assert_eq!(order.frist, frist);
     assert_eq!(aus.kurszeit, frist);
-    assert_eq!((aus.kurs, aus.gebuehr), (Cent(5_000), Cent(150)));
+    assert_eq!((aus.kurs, aus.gebuehr), (Cent(5_003), Cent(150)));
     let buch = depot_sim::ausfuehrung::ausfuehrungsbuch(j.stand());
     let zeile = some(buch.iter().find(|zeile| zeile.nr == nr), "Ausführungsbuch")?;
     assert_eq!(zeile.zustand, AuftragsZustand::Gefuellt);
-    assert_eq!(zeile.fuellpreis, Preis::aus_cent(Cent(5_000)));
+    assert_eq!(zeile.fuellpreis, Preis::aus_cent(Cent(5_003)));
+    assert_eq!(zeile.modellspread_bp, Some(5));
     let kosten = some(
         aus.kurs
             .mal_stueck(aus.stueck)
@@ -2991,10 +2992,10 @@ fn notbremse_verkauf_ueber_ausfall() -> Result<(), String> {
     let aus = some(order.ausfuehrungen.first(), "Ausführung")?;
     assert_eq!(order.zustand, AuftragsZustand::Gefuellt);
     assert_eq!(aus.kurszeit, frist);
-    assert_eq!(aus.kurs, Cent(25_000));
+    assert_eq!(aus.kurs, Cent(24_987));
     let a = some(j.stand().toepfe().get(&TopfId::A), "Topf A")?;
     assert_eq!(a.stueck(&sap), 0);
-    assert_eq!(a.bargeld(), Cent(349_850));
+    assert_eq!(a.bargeld(), Cent(349_720));
     assert_eq!(j.stand().nicht_gutgeschrieben(TopfId::A), Some(Cent::NULL));
     Ok(())
 }
@@ -3438,7 +3439,7 @@ fn morgens_loest_der_schutzstopp_ohne_zweitmeinung_aus() -> Result<(), String> {
         ),
         "Dienstag",
     )?;
-    assert_eq!(j.stand().stoppkurs(TopfId::A, &isin), Some(Cent(21_860)));
+    assert_eq!(j.stand().stoppkurs(TopfId::A, &isin), Some(Cent(21_871)));
     let gehalten = some(j.stand().toepfe().get(&TopfId::A), "Topf")?.stueck(&isin);
     assert!(gehalten > 0);
 

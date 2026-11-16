@@ -224,6 +224,7 @@ mod tests {
             limit_bp: None,
             fuellpreis: None,
             fuellpreis_bp: None,
+            modellspread_bp: None,
             schluss: None,
             schluss_bp: None,
         }

@@ -5,8 +5,8 @@ use std::fmt::Write as _;
 
 use sha2::{Digest, Sha256};
 
-use crate::geld::Cent;
 use crate::instrument::{Instrument, InstrumentArt, Isin};
+use crate::{BP_GANZ, Boerse, Cent, Preis, Rundung};
 
 /// Erzeugt eine Struktur mit privaten Feldern und je Feld einem Leser. Einen Setzer gibt es
 /// nicht, auch nicht hinter einem Feature: Cargo-Features kann jeder Aufrufer einschalten, auch
@@ -73,6 +73,8 @@ versiegelt! {
         limit_abstand_bp: i64,
         limit_abstand_min_bp: i64,
         limit_abstand_max_bp: i64,
+        spread_bp_xetra: i64,
+        spread_bp_nyse: i64,
         /// Kurs springt staerker als das zum Vortag: Daten gelten als unplausibel.
         max_kurssprung_bp: i64,
         /// Tagesverlust des Gesamtdepots, ab dem angehalten wird.
@@ -111,6 +113,8 @@ impl Grenzen {
             limit_abstand_bp: 100,
             limit_abstand_min_bp: 10,
             limit_abstand_max_bp: 300,
+            spread_bp_xetra: 5,
+            spread_bp_nyse: 15,
             max_kurssprung_bp: 1_500,
             tagesverlust_bp: 500,
             notbremse_bp: 2_000,
@@ -126,6 +130,26 @@ impl Grenzen {
             bestand_toleranz_bp: 200,
             kurs_hoechstalter_s: 1_200,
         }
+    }
+
+    /// Modellspread im Papierhandel je Seite der Order.
+    pub fn spread_bp(&self, boerse: Boerse) -> i64 {
+        match boerse {
+            Boerse::Xetra => self.spread_bp_xetra,
+            Boerse::Nyse => self.spread_bp_nyse,
+        }
+    }
+
+    /// Ausführung am Briefkurs (auf) oder Geldkurs (ab), genau einmal auf Cent gerundet.
+    pub fn papierkurs(&self, boerse: Boerse, schluss: Preis, rundung: Rundung) -> Option<Cent> {
+        let spread = self.spread_bp(boerse);
+        let faktor = match rundung {
+            Rundung::Auf => BP_GANZ.checked_add(spread)?,
+            Rundung::Ab => BP_GANZ.checked_sub(spread)?,
+        };
+        schluss
+            .mal_bp(faktor, rundung)
+            .filter(|kurs| *kurs > Cent::NULL)
     }
 
     /// Ob der belegte Depotwert die Papier-Gesamtverlustgrenze erreicht oder unterschreitet.

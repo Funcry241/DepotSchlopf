@@ -37,7 +37,7 @@ Der Lauf schreibt keine Abwägung vor. Was gekauft wird, schlägt der Berater de
 
 ## Ausführung auf Papier
 
-Jeder genehmigte Auftrag wird zuerst belegt (R12), dann zum Schlusskurs des Tages ausgeführt, wenn dieser das Limit einhält; sonst verfällt er. Verkäufe vor Käufen. Jede Ausführung kostet die Gebühr nach Tarif. Bargeld und Bestand werden nie negativ, sonst Halt. Danach steht der neue Topf im Journal.
+Jeder genehmigte Auftrag wird zuerst belegt (R12), dann zum modellierten Briefkurs beim Kauf oder Geldkurs beim Verkauf ausgeführt, wenn dieser das Limit einhält. Als Basis dient der belegte Schlusskurs. Der Modellspread je Seite beträgt 5 bp für Xetra und 15 bp für NYSE. Verkäufe vor Käufen. Jede Ausführung kostet die Gebühr nach Tarif. Bargeld und Bestand werden nie negativ, sonst Halt. Danach steht der neue Topf im Journal.
 
 Seit dem Schritt Kontowächter und Auftragszustände läuft die Ausführung über ein erfundenes Papierkonto: reservieren mit Deckung, als gesendet belegen, senden, Markt, Abgleich. Jede Ausführung steht als eigener Zustandseintrag im Journal und bucht den Topf. Käufe gehen erst raus, wenn alle Verkäufe des Topfes ausgeführt sind. Siehe `docs/befunde/konto.md`.
 
@@ -92,5 +92,5 @@ Gegenproben am fertigen Stand, jeweils neu übersetzt, mit dem Test, der rot wir
 ## Grenzen
 
 - Die Berater sind Drehbücher, keine echten Modelle. Die Anbindung von Claude und GPT kommt später und braucht nur `Berater` umzusetzen.
-- Ausführung nur zum Schlusskurs, ohne Teilausführung und ohne Schlupf.
+- Ausführung auf Basis des Schlusskurses mit Modellspread, ohne Teilausführung.
 - Die Notbremse ist im Beispiel nicht ausgelöst; sie hat einen eigenen Test mit erfundenem Kursrückgang.

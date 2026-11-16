@@ -1201,11 +1201,12 @@ fn belege_preise(j: &mut Journal, t: u8, vorher: &str, heute_p: &str) -> Result<
 }
 
 /// #118: Vergleich seit Start. Einstieg am 05.11. zu 101 €: je Wert 333,33 €, abzüglich 1,50 €
-/// Gebühr bleiben 331,83 €, also 3 Stück für 304,50 €; 15 Werte kosten 4.567,50 €, Bargeld
-/// 432,50 €. Am 06.11. zu 102 €: 4.590,00 € + 432,50 € = 5.022,50 €, also +0,45 %. Dachs und Maus
+/// Gebühr bleiben 331,83 €. Drei Stück je Wert, mit 6 Cent Aufschlag für Xetra und 16 Cent
+/// für NYSE, kosten insgesamt 4.571,70 € inklusive Gebühren. Am 06.11. zu 102 €: 4.590,00 €
+/// Positionswert plus 428,30 € Bargeld = 5.018,30 €, also +0,36 %. Dachs und Maus
 /// waren stumm: 5.000,00 €, ohne KI-Kosten.
 #[test]
-fn vergleich_seit_start_mit_pruefwerten() -> Result<(), String> {
+fn vergleich_mit_abschlag() -> Result<(), String> {
     let ort = Ort::neu()?;
     let mut jr = ort.oeffnen()?;
     belege_alle(&mut jr, 5)?;
@@ -1226,13 +1227,13 @@ fn vergleich_seit_start_mit_pruefwerten() -> Result<(), String> {
     assert_eq!(zeile(0)?.rendite_bp, Some(0));
     assert_eq!(zeile(0)?.ki_kosten, Some(Cent::NULL));
     assert_eq!(zeile(0)?.nach_ki_bp, Some(0));
-    assert_eq!(zeile(2)?.wert, Some(Cent(502_250)));
-    assert_eq!(zeile(2)?.rendite_bp, Some(45));
+    assert_eq!(zeile(2)?.wert, Some(Cent(501_830)));
+    assert_eq!(zeile(2)?.rendite_bp, Some(36));
     assert_eq!(zeile(3)?.wert, Some(Cent(500_000)));
     assert!(v.ohne.is_empty());
     let s = html::seite(&l);
     assert!(s.contains("Vergleich seit Start"), "{s}");
-    assert!(s.contains("+0,45 %"), "{s}");
+    assert!(s.contains("+0,36 %"), "{s}");
     assert!(s.contains("±0,00 %"), "{s}");
     assert!(
         s.contains("Ein Topf liegt vorn, wenn er nach KI-Kosten"),

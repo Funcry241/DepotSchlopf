@@ -1,13 +1,10 @@
 //! Kostenhürde bei gleichem Ordervolumen für Kauf und Verkauf.
 
-use depot_kern::{Boerse, Cent};
+use depot_kern::{Boerse, Cent, Grenzen};
 
 /// Modellabschlag je Seite nach P33. Ein am Markt beobachteter Spread ist nicht verfügbar.
 pub fn spread_je_seite_bp(boerse: Boerse) -> i64 {
-    match boerse {
-        Boerse::Xetra => 5,
-        Boerse::Nyse => 15,
-    }
+    Grenzen::standard().spread_bp(boerse)
 }
 
 pub fn berechne(volumen: Cent, gebuehr: Cent) -> Option<(Cent, i64)> {

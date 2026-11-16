@@ -6,10 +6,9 @@
 //! Kennung, die es schon kennt, und lehnt sie ab; ein Auftrag ohne Deckung im Gesamtkonto wird
 //! abgelehnt.
 //!
-//! **Markt:** Tagesorders werden zu den Schlusskursen des Tages ausgefuehrt, wenn der Kurs das
-//! Limit einhaelt, sonst verfallen sie. Jede Ausfuehrung kostet die Gebuehr nach Tarif. Ein
-//! Kurs feiner als ein Cent wird zur sicheren Seite gerundet: ein Kauf zum aufgerundeten, ein
-//! Verkauf zum abgerundeten Cent. Das Limit gilt am exakten Kurs.
+//! **Markt:** Tagesorders werden zum aus dem Schlusskurs abgeleiteten Brief- oder Geldkurs
+//! ausgeführt. Das Limit gilt gegen diesen Preis. Käufe werden auf Cent aufgerundet,
+//! Verkäufe abgerundet. Jede Ausführung kostet zusätzlich die Gebühr nach Tarif.
 //!
 //! **Datei:** `als_text` und `aus_text` halten das Konto ueber einen Neustart, unabhaengig vom
 //! Journal. Nur so hat der Kontowaechter beim Papiertag etwas, womit er abgleichen kann.
@@ -228,18 +227,18 @@ impl Papierkonto {
             eintrag = eintrag.filter(|k| k.zeitpunkt() == schluss);
         }
         let ausfuehrung = eintrag.and_then(|eintrag| {
-            let exakt = eintrag.preis();
-            // Limit in ganzen Cent: Aufgerundet liegt ein Kurs genau dann nicht ueber dem Limit,
-            // wenn er es exakt nicht tut; abgerundet ebenso nicht darunter.
-            let (kurs, im_limit) = match a.richtung {
-                Richtung::Kauf => {
-                    let k = exakt.mal_stueck(1, Rundung::Auf)?;
-                    (k, k <= a.limit)
-                }
-                Richtung::Verkauf => {
-                    let k = exakt.mal_stueck(1, Rundung::Ab)?;
-                    (k, k >= a.limit)
-                }
+            let rundung = match a.richtung {
+                Richtung::Kauf => Rundung::Auf,
+                Richtung::Verkauf => Rundung::Ab,
+            };
+            let kurs = match depot_kern::liste::boerse_von(&a.isin) {
+                Some(boerse) => Grenzen::standard().papierkurs(boerse, eintrag.preis(), rundung)?,
+                None if o.versand.is_none() => eintrag.preis().mal_stueck(1, rundung)?,
+                None => return None,
+            };
+            let im_limit = match a.richtung {
+                Richtung::Kauf => kurs <= a.limit,
+                Richtung::Verkauf => kurs >= a.limit,
             };
             im_limit.then_some(())?;
             let volumen = kurs.mal_stueck(a.stueck)?;
@@ -667,6 +666,54 @@ mod tests {
     }
 
     #[test]
+    fn kauf_mit_abschlag() -> Result<(), String> {
+        let (mut konto, isin, frist, _) = zwei_orders()?;
+        konto.orders.get_mut(&1).ok_or("Order")?.auftrag.limit = Cent(10_100);
+        konto.markt_fuer(&schlusskurs(&isin, frist, 10_000)?, &BTreeSet::from([1]));
+        let auftrag = konto.order(1).ok_or("Order")?;
+        assert_eq!(auftrag.status, KontoStatus::Gefuellt);
+        assert_eq!(
+            auftrag.ausfuehrungen.first().map(|f| f.kurs),
+            Some(Cent(10_005))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn verkauf_mit_abschlag() -> Result<(), String> {
+        let (mut konto, _, versandfrist, _) = zwei_orders()?;
+        let isin = Isin::neu("US67066G1040").map_err(|e| format!("{e:?}"))?;
+        let tag = versandfrist.frankfurt_tag().ok_or("Tag")?;
+        let frist = Boerse::Nyse.schluss(tag).ok_or("NYSE-Schluss")?;
+        let versand = Zeitpunkt::frankfurt(tag, 7, 40, 0).ok_or("Versand")?;
+        let order = konto.orders.get_mut(&1).ok_or("Order")?;
+        order.auftrag.isin = isin.clone();
+        order.auftrag.richtung = Richtung::Verkauf;
+        order.auftrag.limit = Cent(9_900);
+        order.versand = Some((versand, frist));
+        konto.bestand.insert(isin.clone(), 1);
+        konto.markt_fuer(&schlusskurs(&isin, frist, 10_000)?, &BTreeSet::from([1]));
+        let auftrag = konto.order(1).ok_or("Order")?;
+        assert_eq!(auftrag.status, KontoStatus::Gefuellt);
+        assert_eq!(
+            auftrag.ausfuehrungen.first().map(|f| f.kurs),
+            Some(Cent(9_985))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn limit_gegen_abschlag() -> Result<(), String> {
+        let (mut konto, isin, frist, _) = zwei_orders()?;
+        konto.orders.get_mut(&1).ok_or("Order")?.auftrag.limit = Cent(10_100);
+        konto.markt_fuer(&schlusskurs(&isin, frist, 10_098)?, &BTreeSet::from([1]));
+        let auftrag = konto.order(1).ok_or("Order")?;
+        assert_eq!(auftrag.status, KontoStatus::Verfallen);
+        assert!(auftrag.ausfuehrungen.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn zwei_orders_gleiche_isin() -> Result<(), String> {
         let (mut konto, isin, erste, zweite) = zwei_orders()?;
         konto.markt_fuer(&schlusskurs(&isin, erste, 5_000)?, &BTreeSet::from([1]));
@@ -701,7 +748,7 @@ mod tests {
         assert_eq!(gefuellt.status, KontoStatus::Gefuellt);
         assert_eq!(gefuellt.versand, offen.versand);
         let aus = gefuellt.ausfuehrungen.first().ok_or("Ausführung")?;
-        assert_eq!((aus.kurs, aus.kurszeit), (Cent(5_500), Some(zweite)));
+        assert_eq!((aus.kurs, aus.kurszeit), (Cent(5_503), Some(zweite)));
         Ok(())
     }
 

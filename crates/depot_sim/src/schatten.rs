@@ -187,14 +187,10 @@ fn buchung(
     kauf: bool,
 ) -> Option<(Cent, Cent)> {
     let boerse = depot_kern::liste::boerse_von(isin)?;
-    let spread = crate::kostenhuerde::spread_je_seite_bp(boerse);
-    let basis = preis.mal_stueck(stueck, if kauf { Rundung::Auf } else { Rundung::Ab })?;
-    let abschlag = basis.anteil_bp_auf(spread)?;
-    let volumen = if kauf {
-        basis.checked_add(abschlag)?
-    } else {
-        basis.checked_sub(abschlag)?
-    };
+    let rundung = if kauf { Rundung::Auf } else { Rundung::Ab };
+    let volumen = grenzen
+        .papierkurs(boerse, preis, rundung)?
+        .mal_stueck(stueck)?;
     let gebuehr = grenzen.gebuehren().fuer(volumen)?;
     let netto = if kauf {
         volumen.checked_add(gebuehr)?

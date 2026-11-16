@@ -80,7 +80,7 @@ impl Handelsvergleich {
 
     pub fn rendite(&self, einstieg: Datum, ausstieg: Datum, grenzen: &Grenzen) -> Option<i64> {
         let gebuehren = grenzen.gebuehren();
-        self.rendite_mit(einstieg, ausstieg, false, |v| gebuehren.fuer(v))
+        self.rendite_mit(einstieg, ausstieg, grenzen, false, |v| gebuehren.fuer(v))
     }
 
     pub fn rendite_mit_spread(
@@ -90,31 +90,23 @@ impl Handelsvergleich {
         grenzen: &Grenzen,
     ) -> Option<i64> {
         let gebuehren = grenzen.gebuehren();
-        self.rendite_mit(einstieg, ausstieg, true, |v| gebuehren.fuer(v))
+        self.rendite_mit(einstieg, ausstieg, grenzen, true, |v| gebuehren.fuer(v))
     }
 
     fn rendite_mit(
         &self,
         einstieg: Datum,
         ausstieg: Datum,
-        modellspread: bool,
+        grenzen: &Grenzen,
+        spread_beim_ausstieg: bool,
         gebuehren: impl Fn(Cent) -> Option<Cent>,
     ) -> Option<i64> {
         if einstieg > ausstieg || self.werte.len() != VERGLEICH_ISIN.len() {
             return None;
         }
-        let kurs_mit_spread = |isin, preis: Preis, kauf| {
-            if !modellspread {
-                return Some(preis);
-            }
-            let spread =
-                crate::kostenhuerde::spread_je_seite_bp(depot_kern::liste::boerse_von(isin)?);
-            let faktor = if kauf {
-                10_000_i64.checked_add(spread)?
-            } else {
-                10_000_i64.checked_sub(spread)?
-            };
-            Preis::aus_cent(preis.mal_bp(faktor, if kauf { Rundung::Auf } else { Rundung::Ab })?)
+        let kurs_mit_spread = |isin, preis: Preis, rundung| {
+            let boerse = depot_kern::liste::boerse_von(isin)?;
+            Preis::aus_cent(grenzen.papierkurs(boerse, preis, rundung)?)
         };
         let kaufkurse: Vec<_> = self
             .werte
@@ -125,7 +117,7 @@ impl Handelsvergleich {
                     Some(kurs_mit_spread(
                         isin,
                         *self.kurse.get(&(einstieg, isin.clone()))?,
-                        true,
+                        Rundung::Auf,
                     )?),
                 ))
             })
@@ -138,8 +130,12 @@ impl Handelsvergleich {
             .stueck
             .iter()
             .try_fold(korb.bargeld, |summe, (isin, stueck)| {
-                let kurs =
-                    kurs_mit_spread(isin, *self.kurse.get(&(ausstieg, isin.clone()))?, false)?;
+                let schluss = *self.kurse.get(&(ausstieg, isin.clone()))?;
+                let kurs = if spread_beim_ausstieg {
+                    kurs_mit_spread(isin, schluss, Rundung::Ab)?
+                } else {
+                    schluss
+                };
                 let bestand = self.stueck_am_ausstieg(isin, *stueck, einstieg, ausstieg)?;
                 let volumen = kurs.mal_stueck(bestand, Rundung::Ab)?;
                 summe.checked_add(volumen.checked_sub(gebuehren(volumen)?)?)
@@ -153,7 +149,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unveraenderte_kurse_mit_kauf_und_verkaufsgebuehren() -> Result<(), &'static str> {
+    fn vergleich_mit_abschlag_gebuehren_und_split() -> Result<(), &'static str> {
         let von = Datum::neu(2026, 11, 12).ok_or("Einstieg")?;
         let bis = von.plus_tage(1).ok_or("Ausstieg")?;
         let preis = Preis::aus_cent(Cent(10_000)).ok_or("Kurs")?;
@@ -175,7 +171,11 @@ mod tests {
         let gebuehr = Cent(300)
             .mal_stueck(u64::try_from(VERGLEICH_ISIN.len()).map_err(|_| "Anzahl")?)
             .ok_or("Gebühr")?;
-        let erloes = START_JE_TOPF.checked_sub(gebuehr).ok_or("Erlös")?;
+        // Drei Stück je Wert: zehn Xetra-Werte zu 5 Cent und fünf NYSE-Werte zu 15 Cent Aufschlag.
+        let erloes = START_JE_TOPF
+            .checked_sub(Cent(375))
+            .and_then(|wert| wert.checked_sub(gebuehr))
+            .ok_or("Erlös")?;
         assert_eq!(
             vergleich.rendite(von, bis, &Grenzen::standard()),
             rendite_bp(START_JE_TOPF, erloes)
@@ -184,7 +184,7 @@ mod tests {
             .checked_sub(gebuehr)
             .ok_or("Erlös mit höherer Gebühr")?;
         assert_eq!(
-            vergleich.rendite_mit(von, bis, false, |_| Some(Cent(300))),
+            vergleich.rendite_mit(von, bis, &Grenzen::standard(), false, |_| Some(Cent(300))),
             rendite_bp(START_JE_TOPF, doppelte_gebuehren),
         );
         let isin = vergleich.werte.first().ok_or("Vergleichswert")?.clone();

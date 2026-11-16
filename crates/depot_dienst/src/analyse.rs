@@ -769,7 +769,7 @@ fn ausfuehrungen_csv(
 ) -> String {
     use depot_lage::ausfuehrung::Richtung;
     let mut csv = String::from(
-        "Nr;Topf;ISIN;Richtung;Stück;Versand UTC;Frist UTC;Zustand;Bezug EUR;Limit EUR;Limit bp;Füllpreis EUR;Füllpreis bp;Schluss EUR;Schluss bp\n",
+        "Nr;Topf;ISIN;Richtung;Stück;Versand UTC;Frist UTC;Zustand;Bezug EUR;Limit EUR;Limit bp;Füllpreis EUR;Füllpreis bp;Schluss EUR;Schluss bp;Modellspread bp\n",
     );
     let Some(stand) = stand else { return csv };
     let preis = |wert: Option<depot_kern::Preis>| {
@@ -795,7 +795,7 @@ fn ausfuehrungen_csv(
         };
         let _ = writeln!(
             csv,
-            "{};{:?};{};{richtung};{};{};{};{};{};{};{};{};{};{};{}",
+            "{};{:?};{};{richtung};{};{};{};{};{};{};{};{};{};{};{};{}",
             z.nr,
             z.topf,
             z.isin,
@@ -809,7 +809,8 @@ fn ausfuehrungen_csv(
             preis(z.fuellpreis),
             bp(z.fuellpreis_bp),
             preis(z.schluss),
-            bp(z.schluss_bp)
+            bp(z.schluss_bp),
+            bp(z.modellspread_bp)
         );
     }
     csv
@@ -1123,7 +1124,9 @@ mod tests {
         let zeitraum = Zeitraum { von: tag, bis: tag };
         let csv = ausfuehrungen_csv(Some(&Stand::default()), &[], zeitraum);
         assert!(csv.starts_with("Nr;Topf;ISIN;Richtung;Stück;"));
-        assert!(csv.contains("Füllpreis EUR;Füllpreis bp;Schluss EUR;Schluss bp\n"));
+        assert!(
+            csv.contains("Füllpreis EUR;Füllpreis bp;Schluss EUR;Schluss bp;Modellspread bp\n")
+        );
         assert_eq!(csv, ausfuehrungen_csv(None, &[], zeitraum));
         Ok(())
     }
