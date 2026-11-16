@@ -10,6 +10,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ### Hinzugefügt
 
+- Die Beobachtungsliste umfasst zusätzlich drei Xetra-ETFs und vier US-Aktien (Microsoft, Apple, Amazon und Alphabet), #124.
+
 - Papierorders füllen auf Basis des belegten Schlusskurses mit Modellspread (#207, P33). Der Vergleichskorb berücksichtigt den Aufschlag beim Einstieg. Nach der ersten Ausführung mit Modellspread kann ein älterer Stand den Preisbeleg ablehnen. Vor dem Update eine geprüfte Sicherung anlegen.
 
 - Schutz-Stopp je Papierposition (#198). Erreicht der belegte Schlusskurs den Stoppkurs, plant der Morgenlauf einen zwingenden Limitverkauf. Vor dem Update eine geprüfte Sicherung anlegen. Sobald ein Kaufauftrag mit Stopp im Journal belegt ist, kann ein älterer Stand dieses Journal nicht mehr öffnen.

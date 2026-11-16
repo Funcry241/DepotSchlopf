@@ -53,7 +53,10 @@ pub fn hoechstens_werte(quelle_name: &str) -> usize {
 /// Ein Eintrag der Liste: ISIN, Boerse, Kuerzel bei der Quelle, Name.
 pub type Eintrag<'a> = (&'a str, Boerse, &'a str, &'a str);
 
-const WERTE: [Eintrag<'static>; 16] = [
+/// Die physisch replizierenden UCITS-ETFs der Beobachtungsliste.
+pub const ETF_ISIN: [&str; 3] = ["IE00B4L5Y983", "IE00B5BMR087", "IE0008471009"];
+
+const WERTE: [Eintrag<'static>; 23] = [
     ("DE0007164600", Boerse::Xetra, "SAP.DEX", "SAP"),
     ("DE0007236101", Boerse::Xetra, "SIE.DEX", "Siemens"),
     ("DE0008404005", Boerse::Xetra, "ALV.DEX", "Allianz"),
@@ -75,6 +78,28 @@ const WERTE: [Eintrag<'static>; 16] = [
     ("US30231G1022", Boerse::Nyse, "XOM", "Exxon Mobil"),
     ("US92826C8394", Boerse::Nyse, "V", "Visa"),
     ("US67066G1040", Boerse::Nyse, "NVDA", "NVIDIA"),
+    (
+        "IE00B4L5Y983",
+        Boerse::Xetra,
+        "EUNL.DEX",
+        "iShares Core MSCI World (ETF)",
+    ),
+    (
+        "IE00B5BMR087",
+        Boerse::Xetra,
+        "SXR8.DEX",
+        "iShares Core S&P 500 (ETF)",
+    ),
+    (
+        "IE0008471009",
+        Boerse::Xetra,
+        "EUN2.DEX",
+        "iShares Core EURO STOXX 50 (ETF)",
+    ),
+    ("US5949181045", Boerse::Nyse, "MSFT", "Microsoft"),
+    ("US0378331005", Boerse::Nyse, "AAPL", "Apple"),
+    ("US0231351067", Boerse::Nyse, "AMZN", "Amazon"),
+    ("US02079K3059", Boerse::Nyse, "GOOGL", "Alphabet A"),
 ];
 
 /// Ein beobachteter Wert.
@@ -249,7 +274,11 @@ pub fn als_universum(werte: &[Wert]) -> Universum {
             .map(|w| Instrument {
                 isin: w.isin.clone(),
                 name: w.name.clone(),
-                art: InstrumentArt::Aktie,
+                art: if ETF_ISIN.contains(&w.isin.als_str()) {
+                    InstrumentArt::EtfPhysischUcits
+                } else {
+                    InstrumentArt::Aktie
+                },
             })
             .collect(),
     )
@@ -258,6 +287,58 @@ pub fn als_universum(werte: &[Wert]) -> Universum {
 #[cfg(test)]
 mod papierorder_tests {
     use super::*;
+
+    #[test]
+    fn erweiterte_liste_ist_gueltig_und_haelt_den_vergleich_fest() -> Result<(), String> {
+        let werte = beobachtungsliste()?;
+        assert_eq!(werte.len(), 23);
+        let xetra = werte.iter().filter(|w| w.boerse == Boerse::Xetra).count();
+        assert_eq!(xetra, 13);
+        assert!(xetra <= hoechstens_werte(QUELLE));
+        assert_eq!(VERGLEICH_ISIN.len(), 15);
+        let universum = als_universum(&werte);
+        for (isin, kuerzel) in ETF_ISIN
+            .into_iter()
+            .zip(["EUNL.DEX", "SXR8.DEX", "EUN2.DEX"])
+        {
+            let wert = werte
+                .iter()
+                .find(|w| w.isin.als_str() == isin)
+                .ok_or("ETF fehlt")?;
+            assert_eq!(
+                (wert.boerse, wert.kuerzel.as_str()),
+                (Boerse::Xetra, kuerzel)
+            );
+            assert!(wert.name.ends_with("(ETF)"));
+            assert!(
+                universum
+                    .instrumente()
+                    .iter()
+                    .any(|i| i.isin == wert.isin && i.art == InstrumentArt::EtfPhysischUcits)
+            );
+            assert!(!VERGLEICH_ISIN.contains(&isin));
+        }
+        let thanksgiving = Datum::neu(2026, 11, 26).ok_or("Thanksgiving")?;
+        let freitag = thanksgiving.plus_tage(1).ok_or("Freitag")?;
+        let versand = Zeitpunkt::new_york(thanksgiving, 10, 0, 0).ok_or("Versand")?;
+        let frist = Zeitpunkt::new_york(freitag, 13, 0, 0).ok_or("Frist")?;
+        for kuerzel in ["MSFT", "AAPL", "AMZN", "GOOGL"] {
+            let wert = werte
+                .iter()
+                .find(|w| w.kuerzel == kuerzel)
+                .ok_or("US-Wert fehlt")?;
+            assert_eq!(quelle(wert.boerse), QUELLE_US);
+            assert!(
+                universum
+                    .instrumente()
+                    .iter()
+                    .any(|i| i.isin == wert.isin && i.art == InstrumentArt::Aktie)
+            );
+            assert!(!VERGLEICH_ISIN.contains(&wert.isin.als_str()));
+            assert_eq!(papierorder_schluss(&wert.isin, versand), Some(frist));
+        }
+        Ok(())
+    }
 
     #[test]
     fn nvidia_laeuft_ueber_tiingo_mit_us_boersenfrist() -> Result<(), String> {

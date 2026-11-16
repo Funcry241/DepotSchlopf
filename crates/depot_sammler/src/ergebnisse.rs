@@ -286,6 +286,22 @@ SGU,"STAR GROUP, L.P.",2026-12-14,2026-09-30,,USD,
     }
 
     #[test]
+    fn quartalszahlen_kennen_msft() -> Result<(), String> {
+        let csv = format!("{VORLAGE}MSFT,MICROSOFT,2027-01-27,2026-12-31,,USD,post-market\n");
+        let termine = lies_kalender(&csv, &liste()?).map_err(|e| format!("{e:?}"))?;
+        let msft = termine
+            .iter()
+            .find(|t| t.kennung() == "ergebnis-msft-2026-12-31")
+            .ok_or("Microsoft-Termin fehlt")?;
+        assert!(
+            msft.betroffen().iter().any(
+                |wert| matches!(wert, Betroffen::Wert(isin) if isin.als_str() == "US5949181045")
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
     fn name_mit_komma_ist_kein_fehler() -> Result<(), String> {
         let liste = liste()?;
         assert_eq!(lies_kalender(VORLAGE, &liste).map(|t| t.len()), Ok(3));

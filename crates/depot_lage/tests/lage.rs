@@ -85,10 +85,21 @@ fn belege_alle(j: &mut Journal, t: u8) -> Result<(), String> {
 
 /// Wie `belege_alle`, mit dem Abruf zur angegebenen Uhrzeit (Frankfurt).
 fn belege_um(j: &mut Journal, t: u8, stunde: u8, minute: u8) -> Result<(), String> {
+    let werte = vorbedingung(beobachtungsliste(), "Liste")?;
+    belege_werte(j, t, stunde, minute, &werte)
+}
+
+fn belege_werte(
+    j: &mut Journal,
+    t: u8,
+    stunde: u8,
+    minute: u8,
+    werte: &[depot_kern::liste::Wert],
+) -> Result<(), String> {
     let heute = tag(t)?;
     let vortag = tag(t.saturating_sub(1))?;
     let abruf = some(Zeitpunkt::frankfurt(heute, stunde, minute, 0), "Abruf")?;
-    for w in vorbedingung(beobachtungsliste(), "Liste")? {
+    for w in werte {
         for (d, p) in [(vortag, "100"), (heute, "101")] {
             let zeit = some(Zeitpunkt::frankfurt(d, 17, 35, 0), "Schluss")?;
             let preis = some(Preis::lies_euro(p), "Preis")?;
@@ -1239,6 +1250,39 @@ fn vergleich_mit_abschlag() -> Result<(), String> {
         s.contains("Ein Topf liegt vorn, wenn er nach KI-Kosten"),
         "{s}"
     );
+    Ok(())
+}
+
+#[test]
+fn altes_journal_mit_vorhandenem_bestand_bleibt_lesbar() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut journal = ort.oeffnen()?;
+    let mut alte_liste = beobachtungsliste()?;
+    alte_liste.truncate(16);
+    belege_werte(&mut journal, 5, 17, 40, &alte_liste)?;
+    let sap = vorbedingung(depot_kern::Isin::neu("DE0007164600"), "SAP")?;
+    for mut topf in start()? {
+        if topf.id() == TopfId::A {
+            topf.setze_bestand(sap.clone(), 1);
+        }
+        vorbedingung(journal.setze_topf(&topf), "Startbestand")?;
+    }
+    vorbedingung(
+        journal.schliesse_ab(tag(5)?, Cent(1_010_100), &"a".repeat(64)),
+        "Abschluss",
+    )?;
+    drop(journal);
+
+    let journal = ort.oeffnen()?;
+    let bestand = some(journal.stand().toepfe().get(&TopfId::A), "Topf A")?;
+    assert_eq!(bestand.stueck(&sap), 1);
+    let erweiterte_liste = beobachtungsliste()?;
+    let vergleich = some(
+        depot_lage::vergleich::vergleich_bis(journal.stand(), &erweiterte_liste, None),
+        "Historischer Vergleich",
+    )?;
+    assert!(vergleich.ohne.is_empty());
+    assert!(vergleich.zeilen.iter().all(|zeile| zeile.wert.is_some()));
     Ok(())
 }
 

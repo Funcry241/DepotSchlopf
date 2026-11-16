@@ -76,6 +76,10 @@ fn pruefabruf_verspricht_ohne_treffer_keine_entwarnung_und_maskiert_auch_fehlerm
         }
     }
     let werte = beobachtungsliste()?;
+    let xetra = werte
+        .iter()
+        .filter(|wert| wert.boerse == depot_kern::Boerse::Xetra)
+        .count();
     let z = Zugang::alpha_vantage(Schluessel::neu(KEY)?);
     for netzfehler in [false, true] {
         let mut q = Quelle {
@@ -89,7 +93,10 @@ fn pruefabruf_verspricht_ohne_treffer_keine_entwarnung_und_maskiert_auch_fehlerm
             depot_sammler::diagnose::pruefabruf(&mut Fehler, &z, &werte, &mut |_| {}, &mut melde);
         } else {
             depot_sammler::diagnose::pruefabruf(&mut q, &z, &werte, &mut |_| {}, &mut melde);
-            assert_eq!(q.anzahl, 10, "fehlender Tiingo-Zugang wird nicht abgerufen");
+            assert_eq!(
+                q.anzahl, xetra,
+                "fehlender Tiingo-Zugang wird nicht abgerufen"
+            );
         }
         let text = zeilen.join("\n");
         assert!(text.contains("Kurssperre bleibt bestehen"));
