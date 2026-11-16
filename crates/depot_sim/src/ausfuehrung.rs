@@ -2,7 +2,7 @@
 
 use depot_journal::{AuftragsLage, AuftragsZustand, Stand};
 use depot_kern::{Cent, Datum, Herkunft, Isin, Preis, Rundung, TopfId, Zeitpunkt};
-pub use depot_regelwerk::Richtung;
+pub use depot_regelwerk::{Anlass, Richtung};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrderZeile {
@@ -22,6 +22,10 @@ pub struct OrderZeile {
     pub modellspread_bp: Option<i64>,
     pub schluss: Option<Preis>,
     pub schluss_bp: Option<i64>,
+    /// Warum die Order entstand: KI-Vorschlag oder zwingender Ausstieg.
+    pub anlass: Anlass,
+    /// Handelstag der letzten belegten Ausführung.
+    pub ausgefuehrt_am: Option<Datum>,
 }
 
 fn abstand(preis: Option<Preis>, bezug: Option<Preis>) -> Option<i64> {
@@ -137,6 +141,12 @@ fn orderzeile(order: &AuftragsLage, belege: &[&depot_journal::KursBeleg]) -> Ord
         modellspread_bp: modellspread(order, belege),
         schluss,
         schluss_bp: abstand(schluss, bezug),
+        anlass: order.beleg.anlass,
+        ausgefuehrt_am: order
+            .ausfuehrungen
+            .iter()
+            .filter_map(|aus| aus.kurszeit?.frankfurt_tag())
+            .max(),
     }
 }
 

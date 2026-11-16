@@ -361,6 +361,9 @@ pub fn inhalt(d: &crate::Dienst, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (Strin
         let verlauf = depotverlauf(stand, &werte);
         let ab = jetzt.frankfurt_tag().and_then(|heute| zeitraum.ab(heute));
         entwicklung(im_zeitraum(&verlauf, ab), startgeld, zeitraum, &mut text);
+        if let Some(heute) = jetzt.frankfurt_tag() {
+            depot_lage::leerlauf::html(stand, &verlauf, heute, &mut text);
+        }
         handelsbilanz::abschnitt(
             stand,
             &werte,

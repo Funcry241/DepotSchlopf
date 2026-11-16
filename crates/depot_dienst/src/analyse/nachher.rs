@@ -227,6 +227,8 @@ mod tests {
             modellspread_bp: None,
             schluss: None,
             schluss_bp: None,
+            anlass: depot_lage::ausfuehrung::Anlass::Umschichtung,
+            ausgefuehrt_am: None,
         }
     }
 
