@@ -9,3 +9,4 @@ crates/depot_kern/src/grenzen.rs
 crates/depot_kern/src/liste.rs
 crates/depot_lage/tests/lage.rs
 crates/depot_sammler/src/ergebnisse.rs
+crates/depot_sammler/tests/diagnose.rs
