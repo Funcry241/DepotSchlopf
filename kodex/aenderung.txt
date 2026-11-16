@@ -1,12 +1,9 @@
 klasse: Funktion
-zweck: Leerlauf je Topf und Woche messen, nur lesend: Bargeld, Füllquoten je Anlass und Limitabstand, Verzug vom Verkauf bis zum nächsten Kauf (#311 M0)
+zweck: Verfallene KI-Kauforder einmal ohne neue KI-Antwort wiederholen, mit derselben Genehmigung wie ein KI-Kauf (#311 H2b)
 pfade:
 CHANGELOG.md
-crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/analyse/leerlauf.rs
-crates/depot_dienst/src/analyse/nachher.rs
-crates/depot_dienst/src/analyse/orders.rs
-crates/depot_dienst/src/depotseite.rs
-crates/depot_lage/src/leerlauf.rs
-crates/depot_lage/src/lib.rs
-crates/depot_sim/src/ausfuehrung.rs
+crates/depot_regelwerk/src/entscheidung.rs
+crates/depot_regelwerk/src/lib.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/lib.rs
+crates/depot_sim/src/wiederholung.rs

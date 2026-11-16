@@ -54,6 +54,7 @@ pub use positionskauf::{
 };
 pub mod vergleichsrechnung;
 pub mod vorbereitung;
+mod wiederholung;
 pub mod wochenrueckschau;
 mod zahlenreaktion;
 
