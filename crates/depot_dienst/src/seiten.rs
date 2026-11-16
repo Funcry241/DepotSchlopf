@@ -1777,7 +1777,7 @@ fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
          und kein Papiertag beginnt, auch nicht von Hand.</p><pre>{}</pre>\
          <p>Empfohlen: Zuerst <b>Kurssperre sicher untersuchen</b>. Der Prüfabruf zeigt nur \
          Quelle, erkannten Zugang und Antwortart. Keine Antwort und keine Kurse werden gespeichert, \
-         die Sperre bleibt bestehen. Bis zu 15 Abrufe mit 15 Sekunden Abstand verbrauchen \
+         die Sperre bleibt bestehen. Ein Abruf je Wert mit 15 Sekunden Abstand verbraucht \
          Quellenkontingent und können mehrere Minuten dauern. Das Ergebnis steht auf Live \
          unter Tätigkeit im kopierbaren Protokoll.</p>{}\
          <p class=\"leise\">So prüfen: Beim Anbieter nachsehen, ob der Schlüssel noch gilt, und \

@@ -213,6 +213,32 @@ mod tests {
     }
 
     #[test]
+    fn erweiterte_xetra_liste_passt_einmal_ins_kontingent() -> Result<(), String> {
+        let daten =
+            std::env::temp_dir().join(format!("depot-kontingent-etfs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&daten);
+        fs::create_dir(&daten).map_err(|e| e.to_string())?;
+        let abrufe = Abrufe::sperren(&daten)?;
+        let jetzt = zeit(9, 8)?;
+        let xetra: Vec<_> = depot_kern::liste::beobachtungsliste()?
+            .into_iter()
+            .filter(|wert| wert.boerse == depot_kern::Boerse::Xetra)
+            .collect();
+        abrufe.pruefe(jetzt, xetra.len().saturating_add(1))?;
+        for wert in &xetra {
+            abrufe.vermerke(jetzt, &wert.kuerzel)?;
+        }
+        assert_eq!(
+            abrufe.pruefe(jetzt, xetra.len()),
+            Err("Tageskontingent Alpha Vantage reicht nicht (7 von 20 frei, 13 nötig).".into())
+        );
+        assert_eq!(stand(&daten, jetzt)?.0, 13);
+        drop(abrufe);
+        fs::remove_dir_all(daten).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[test]
     fn zwei_laeufe_erschoepfen_das_kontingent_des_kalendertags() -> Result<(), String> {
         let daten = std::env::temp_dir().join(format!("depot-kontingent-{}", std::process::id()));
         let _ = fs::remove_dir_all(&daten);

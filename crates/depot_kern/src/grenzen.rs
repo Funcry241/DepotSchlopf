@@ -218,6 +218,20 @@ mod tests {
     }
 
     #[test]
+    fn etf_gesperrt_wenn_nicht_freigegeben() -> Result<(), String> {
+        let liste = crate::liste::beobachtungsliste()?;
+        let universum = crate::liste::als_universum(&liste);
+        let etf = Isin::neu("IE00B4L5Y983").map_err(|e| format!("{e:?}"))?;
+        let sap = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let mut grenzen = Grenzen::standard();
+        assert!(universum.handelbar(&etf, &grenzen));
+        grenzen.etf_freigegeben = false;
+        assert!(!universum.handelbar(&etf, &grenzen));
+        assert!(universum.handelbar(&sap, &grenzen));
+        Ok(())
+    }
+
+    #[test]
     fn fingerabdruck_aendert_sich() {
         let a = Grenzen::standard();
         let mut b = Grenzen::standard();
