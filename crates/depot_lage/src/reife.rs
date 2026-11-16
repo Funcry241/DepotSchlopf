@@ -2,7 +2,7 @@
 
 use depot_journal::Stand;
 use depot_kern::liste::Wert;
-use depot_kern::{Cent, Datum, Grenzen, Zeitpunkt};
+use depot_kern::{Cent, Datum, Grenzen};
 
 use crate::handelsergebnis::verkaeufe;
 use crate::handelsvergleich::Handelsvergleich;
@@ -31,21 +31,6 @@ impl Reife {
     }
 }
 
-fn modellierte_spreadkosten(stand: &Stand, tag: Datum) -> Option<Cent> {
-    stand
-        .ausfuehrungsfolge()
-        .try_fold(Cent::NULL, |summe, (auftrag, f)| {
-            if f.kurszeit.and_then(Zeitpunkt::frankfurt_tag)? > tag {
-                return Some(summe);
-            }
-            let boerse = depot_kern::liste::boerse_von(&auftrag.isin)?;
-            let volumen = f.kurs.mal_stueck(f.stueck)?;
-            summe.checked_add(
-                volumen.anteil_bp_auf(depot_sim::kostenhuerde::spread_je_seite_bp(boerse))?,
-            )
-        })
-}
-
 fn papier_rendite(stand: &Stand, werte: &[Wert], tag: Datum) -> Option<i64> {
     let vergleich = vergleich_bis(stand, werte, Some(tag))?;
     let [dachs, maus, ..] = vergleich.zeilen.as_slice() else {
@@ -58,8 +43,7 @@ fn papier_rendite(stand: &Stand, werte: &[Wert], tag: Datum) -> Option<i64> {
         .wert?
         .checked_add(maus.wert?)?
         .checked_sub(dachs.ki_kosten?)?
-        .checked_sub(maus.ki_kosten?)?
-        .checked_sub(modellierte_spreadkosten(stand, tag)?)?;
+        .checked_sub(maus.ki_kosten?)?;
     rendite_bp(start, netto)
 }
 

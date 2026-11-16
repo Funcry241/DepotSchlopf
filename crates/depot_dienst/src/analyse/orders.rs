@@ -17,7 +17,7 @@ pub(super) fn bericht(
     zeitraum: Zeitraum,
 ) -> String {
     let mut aus = String::from(
-        "\n## Im Zeitraum belegte Orderbewegungen\n\nDie Auswahl nutzt Versand, Frist, Ausführung und datierte Journalbewegungen. Der angezeigte Zustand gilt zum Exportzeitpunkt. Die Frist ist der vorgesehene Börsenschluss. Ausführungszeilen zeigen die gesamte belegte Orderhistorie, auch außerhalb des gewählten Zeitraums. Netto bezeichnet den Geldabfluss beim Kauf und den Geldzufluss beim Verkauf nach Gebühren. Ein Geld-Brief-Spread ist im Papierjournal nicht belegt.\n",
+        "\n## Im Zeitraum belegte Orderbewegungen\n\nDie Auswahl nutzt Versand, Frist, Ausführung und datierte Journalbewegungen. Der angezeigte Zustand gilt zum Exportzeitpunkt. Die Frist ist der vorgesehene Börsenschluss. Ausführungszeilen zeigen die gesamte belegte Orderhistorie, auch außerhalb des gewählten Zeitraums. Netto bezeichnet den Geldabfluss beim Kauf und den Geldzufluss beim Verkauf nach Gebühren. Der Modellspread ist bei eindeutigem Abgleich von Schluss- und Füllkurs ausgewiesen.\n",
     );
     let (bewegungen, mut undatiert) = journalbewegungen(eintraege, zeitraum);
     let gruende = verfallsgruende(stand, zeitraum);
@@ -162,9 +162,13 @@ fn schreibe_order(
     }
     let _ = writeln!(
         aus,
-        "- Durchschnittlicher Füllpreis {} · Abstand zum Bezugskurs {}.",
+        "- Durchschnittlicher Füllpreis {} · Abstand zum Bezugskurs {} · Modellspread {}.",
         preis(z.fuellpreis),
-        prozent(z.fuellpreis_bp)
+        prozent(z.fuellpreis_bp),
+        z.modellspread_bp.map_or_else(
+            || "nicht eindeutig belegbar".into(),
+            |bp| format!("{bp} bp")
+        )
     );
     for f in &order.ausfuehrungen {
         let _ = writeln!(
@@ -244,6 +248,7 @@ mod tests {
             limit_bp: None,
             fuellpreis: None,
             fuellpreis_bp: None,
+            modellspread_bp: None,
             schluss: None,
             schluss_bp: None,
         };

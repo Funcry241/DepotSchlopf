@@ -79,7 +79,7 @@ pub(super) fn bericht(
         ),
         (
             "Orders",
-            "04_orders_und_depot.md zeigt Limit, Versand, Frist, Verfallsgrund und Ausführungen mit Gebühren und Netto. Ein Geld-Brief-Spread ist nicht belegt.",
+            "04_orders_und_depot.md zeigt Limit, Versand, Frist, Verfallsgrund und Ausführungen mit Gebühren und Netto. Der Modellspread steht bei eindeutigem Kursabgleich im Ausführungsbuch.",
         ),
         (
             "Depot und Leistung",

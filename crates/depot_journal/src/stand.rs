@@ -1347,7 +1347,14 @@ impl Stand {
                         && b.kurs().zeitpunkt() == zeit
                         && (!(vorabend || nachgeholt)
                             || stichtag.is_some_and(|bis| b.abruf() <= bis))
-                        && b.kurs().preis().mal_stueck(1, rundung) == Some(aus.kurs)
+                        && (b.kurs().preis().mal_stueck(1, rundung) == Some(aus.kurs)
+                            || depot_kern::liste::boerse_von(&beleg.isin).is_some_and(|boerse| {
+                                depot_kern::Grenzen::standard().papierkurs(
+                                    boerse,
+                                    b.kurs().preis(),
+                                    rundung,
+                                ) == Some(aus.kurs)
+                            }))
                 })
             {
                 return Err("Kein passender Kursbeleg am Abrechnungstag".into());

@@ -524,7 +524,7 @@ pub(super) fn abschnitt(
         .div_ceil(500)
         .saturating_mul(500);
     text.push_str(r#"<section id="handelsbilanz"><h3>Handelsbilanz</h3>
-        <p class="leise">Für den gewählten Depotzeitraum · Spread und KI-Kosten sind hier nicht eingerechnet.</p>
+        <p class="leise">Für den gewählten Depotzeitraum · Der Füllpreis enthält einen gebuchten Modellspread. KI-Kosten sind hier nicht eingerechnet.</p>
         <div class="handelskarten">"#);
     for zahlen in &toepfe {
         let id = karte(zahlen, skala, text);

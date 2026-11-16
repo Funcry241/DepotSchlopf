@@ -19,6 +19,7 @@ pub struct OrderZeile {
     pub limit_bp: Option<i64>,
     pub fuellpreis: Option<Preis>,
     pub fuellpreis_bp: Option<i64>,
+    pub modellspread_bp: Option<i64>,
     pub schluss: Option<Preis>,
     pub schluss_bp: Option<i64>,
 }
@@ -71,6 +72,35 @@ pub fn ausfuehrungsbuch(stand: &Stand) -> Vec<OrderZeile> {
         .collect()
 }
 
+fn modellspread(order: &AuftragsLage, belege: &[&depot_journal::KursBeleg]) -> Option<i64> {
+    let boerse = depot_kern::liste::boerse_von(&order.beleg.isin)?;
+    let grenzen = depot_kern::Grenzen::standard();
+    let rundung = match order.beleg.richtung {
+        Richtung::Kauf => Rundung::Auf,
+        Richtung::Verkauf => Rundung::Ab,
+    };
+    let mut teile = order.ausfuehrungen.iter().map(|aus| {
+        let zeit = aus.kurszeit?;
+        let (ohne, mit) = belege.iter().filter(|b| b.kurs().zeitpunkt() == zeit).fold(
+            (false, false),
+            |(ohne, mit), b| {
+                let schluss = b.kurs().preis();
+                (
+                    ohne || schluss.mal_stueck(1, rundung) == Some(aus.kurs),
+                    mit || grenzen.papierkurs(boerse, schluss, rundung) == Some(aus.kurs),
+                )
+            },
+        );
+        match (ohne, mit) {
+            (false, true) => Some(grenzen.spread_bp(boerse)),
+            (true, false) => Some(0),
+            _ => None,
+        }
+    });
+    let spread = teile.next()??;
+    teile.all(|teil| teil == Some(spread)).then_some(spread)
+}
+
 fn orderzeile(order: &AuftragsLage, belege: &[&depot_journal::KursBeleg]) -> OrderZeile {
     let bezug = order.versand.and_then(|versand| {
         belege
@@ -104,6 +134,7 @@ fn orderzeile(order: &AuftragsLage, belege: &[&depot_journal::KursBeleg]) -> Ord
         limit_bp: abstand(Preis::aus_cent(order.beleg.limit), bezug),
         fuellpreis,
         fuellpreis_bp: abstand(fuellpreis, bezug),
+        modellspread_bp: modellspread(order, belege),
         schluss,
         schluss_bp: abstand(schluss, bezug),
     }
@@ -247,6 +278,21 @@ mod tests {
         let z = orderzeile(&o, &[&bezug, &schluss]);
         assert_eq!(z.fuellpreis, Preis::aus_cent(Cent(10_050)));
         assert_eq!((z.limit_bp, z.fuellpreis_bp), (Some(100), Some(50)));
+        Ok(())
+    }
+
+    #[test]
+    fn spread_nur_bei_eindeutigem_schlussbeleg() -> Result<(), String> {
+        let mut o = order(Richtung::Kauf, AuftragsZustand::Gefuellt)?;
+        o.ausfuehrungen.first_mut().ok_or("Ausführung")?.kurs = Cent(10_005);
+        let [bezug, modell] = belege(&o, 10_000)?;
+        let [_, alt] = belege(&o, 10_005)?;
+        assert_eq!(orderzeile(&o, &[&bezug, &modell]).modellspread_bp, Some(5));
+        assert_eq!(orderzeile(&o, &[&bezug, &alt]).modellspread_bp, Some(0));
+        assert_eq!(
+            orderzeile(&o, &[&bezug, &modell, &alt]).modellspread_bp,
+            None
+        );
         Ok(())
     }
 

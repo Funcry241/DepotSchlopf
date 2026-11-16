@@ -296,7 +296,7 @@ fn reifeampel(
             Some(reife.genug_trades()),
         ),
         (
-            "Netto über dem Korb nach Gebühren, Modellspread und KI-Kosten",
+            "Netto über dem Korb nach gebuchten Ausführungskosten und KI-Kosten",
             paar(reife.netto_bp),
             reife.netto_erfuellt(),
         ),

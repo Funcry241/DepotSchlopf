@@ -7,7 +7,7 @@
 //! eines Tages (`tageskurse_am`) und die gebuchten KI-Kosten (`Buchung::reserviert`, wie die
 //! Budgetanzeige). Nichts davon entscheidet etwas.
 //!
-//! **Vereinfachung:** Das Vergleichsdepot kauft zu den Schlusskursen des ersten Papiertags.
+//! **Vereinfachung:** Das Vergleichsdepot kauft am ersten Papiertag zu Schlusskursen plus Modellspread.
 //! Die Toepfe kaufen erst zum naechsten geprueften Schluss nach Versand.
 //!
 //! **Rundung:** Kauf zum aufgerundeten Cent plus Gebuehr, Bewertung zum abgerundeten Cent,
@@ -151,13 +151,21 @@ pub fn vergleich_bis(s: &Stand, werte: &[Wert], bis: Option<Datum>) -> Option<Ve
         .map(|t| topf_zeile(s, t, toepfe, jetzt, *bewertet))
         .collect();
 
-    let gebuehren = Grenzen::standard();
+    let grenzen = Grenzen::standard();
     let einstieg = kurse_start.as_ref().map(|k| {
         let mit_kurs: Vec<(Isin, Option<Preis>)> = vergleich
             .iter()
-            .map(|i| (i.clone(), k.heute.kurs(i)))
+            .map(|i| {
+                let preis = k
+                    .heute
+                    .kurs(i)
+                    .zip(depot_kern::liste::boerse_von(i))
+                    .and_then(|(kurs, boerse)| grenzen.papierkurs(boerse, kurs, Rundung::Auf))
+                    .and_then(Preis::aus_cent);
+                (i.clone(), preis)
+            })
             .collect();
-        kaufe_gleich(START_JE_TOPF, &mit_kurs, |v| gebuehren.gebuehren().fuer(v))
+        kaufe_gleich(START_JE_TOPF, &mit_kurs, |v| grenzen.gebuehren().fuer(v))
     });
     let (wert, grund, ohne) = match (&einstieg, jetzt) {
         (Err(e), _) => (None, Some(format!("Einstieg: {e}")), Vec::new()),
