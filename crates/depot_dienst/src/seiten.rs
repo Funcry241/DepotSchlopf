@@ -2306,9 +2306,12 @@ pub fn einrichtung(
     e: &Einrichtung,
     zusatz: &str,
 ) -> String {
-    let mut s = String::from(
-        "<section><h2>Einrichtung – Schritt für Schritt</h2><p>Hier legst du fest, wie DepotSchlopf für dich arbeitet. Du kannst die Einrichtung jederzeit später fortsetzen. Änderungen gelten nach dem Speichern; an jedem Formular steht, was als Nächstes geschieht.</p><p><a href=\"#zeitplan\">Automatische Läufe einrichten</a> · <a href=\"#schluessel\">Zugangsdaten prüfen</a></p></section>",
-    );
+    let mut s = String::new();
+    if !z.zeitplan.an {
+        s.push_str(
+            "<section><h2>Einrichtung – Schritt für Schritt</h2><p>Hier legst du fest, wie DepotSchlopf für dich arbeitet. Du kannst die Einrichtung jederzeit später fortsetzen. Änderungen gelten nach dem Speichern; an jedem Formular steht, was als Nächstes geschieht.</p><p><a href=\"#zeitplan\">Automatische Läufe einrichten</a> · <a href=\"#schluessel\">Zugangsdaten prüfen</a></p></section>",
+        );
+    }
     let _ = write!(
         s,
         "<div id=\"stand\" data-teil=\"/teil/status\">{}</div>",

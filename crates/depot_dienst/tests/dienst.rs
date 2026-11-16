@@ -1538,8 +1538,13 @@ fn zeitplan_einschalten_erst_nach_vollstaendiger_einrichtung() -> Result<(), Str
         lagebild_mit_schluesseln(true),
     ));
     assert!(fertig.schritt(t).is_none());
+    assert!(get(&fertig, "/einrichtung", t).contains("Einrichtung – Schritt für Schritt"));
     assert!(text(&behandle(&fertig, &umw, &an, t)).contains("m=zeitplan_an#"));
     assert!(fertig.sperre().zeitplan.an);
+    let seite = get(&fertig, "/einrichtung", t);
+    assert!(!seite.contains("Einrichtung – Schritt für Schritt"));
+    let selten = some(seite.split_once("id=\"selten\""), "Seltene Einstellungen")?.1;
+    assert!(selten.contains("id=\"schluessel\""));
     assert!(text(&behandle(&fertig, &umw, &aus, t)).contains("m=zeitplan#"));
     assert!(fertig.sperre().zeitplan.an, "Speichern schaltet nicht aus");
     let altes_formular = formular_post("/zeitplan", &format!("t={TOKEN}&an=ja"));

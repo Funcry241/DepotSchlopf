@@ -1,8 +1,5 @@
 klasse: Funktion
-zweck: Belegte Tiingo-Splits im Papierdepot wertneutral umbuchen
+zweck: Einrichtungsübersicht bei eingeschaltetem Zeitplan ausblenden
 pfade:
-crates/depot_journal/src/kapitalmassnahme.rs
-crates/depot_journal/src/stand.rs
-crates/depot_sim/src/papiertag.rs
-crates/depot_sim/src/splitumbuchung.rs
-docs/befunde/tiingo-splits.md
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/dienst.rs
