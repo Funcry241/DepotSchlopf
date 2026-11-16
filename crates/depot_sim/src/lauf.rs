@@ -47,7 +47,7 @@ use crate::szenario::{Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Szenario, Tag};
 const DATEN: &str = "Daten";
 const WAECHTER: &str = "Waechter";
 const KOSTENSCHUTZ: &str = "Kostenschutz";
-const REGELWERK: &str = "Regelwerk";
+pub(crate) const REGELWERK: &str = "Regelwerk";
 const SIMULATION: &str = "Simulation";
 const KONTOWAECHTER: &str = "Kontowaechter";
 const AUFTRAGSSTELLE: &str = "Auftragsstelle";
@@ -949,7 +949,7 @@ fn frage(
     let mut verwertbar = false;
     let mut fristverkaeufe = BTreeSet::new();
     // Ein Berater ohne Anbindung wird nicht gefragt und kostet nichts: Fuer ihn wird keine
-    // Erlaubnis reserviert. Ohne Vorschlag oder ohne Zweitmeinung gibt es keinen Auftrag.
+    // Erlaubnis reserviert. Ohne verwendbaren Vorschlag plant das Regelwerk nur zwingende Aufträge.
     if !frager.angebunden() {
         let grund = nicht_angebunden(frager);
         frager.anfrage_uebersprungen(depot_journal::KiZweck::Erstmeinung, &grund);
@@ -1229,6 +1229,15 @@ fn zweite_meinung(
     antwort: TopfAntwort,
     pruefer: &mut dyn Berater,
 ) -> Result<TopfAntwort, LaufFehler> {
+    if z.uhr.is_some()
+        && antwort
+            .vorschlag
+            .as_ref()
+            .is_some_and(|v| crate::abstimmung::nur_verkleinerung(&antwort.topf, &z.tag.kurse, v))
+    {
+        crate::abstimmung::belege_verkleinerung(j, z, &antwort.topf)?;
+        return Ok(antwort);
+    }
     let TopfAntwort {
         topf,
         mut vorschlag,

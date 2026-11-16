@@ -1,8 +1,8 @@
 //! Begrenzter Austausch nach fixierten unabhängigen Erst- und Zweitmeinungen.
-use crate::lauf::{TopfAntwort, Zyklus, begruende, journal};
+use crate::lauf::{TopfAntwort, Zyklus, begruende, journal, topf_name};
 use crate::{Antwort, Berater, Lage, LaufFehler};
 use depot_journal::{Journal, KiZweck};
-use depot_kern::{BeraterId, Vorschlag};
+use depot_kern::{BeraterId, Kurse, Topf, Vorschlag};
 use depot_ki::Sperre;
 
 pub(crate) const ABSTIMMUNG_RUNDEN: u32 = 2;
@@ -187,6 +187,63 @@ pub(crate) fn gleiche_ziele(a: Option<&Vorschlag>, b: Option<&Vorschlag>) -> boo
     }
 }
 
+pub(crate) fn nur_verkleinerung(topf: &Topf, kurse: &Kurse, v: &Vorschlag) -> bool {
+    use depot_regelwerk::entscheidung::ist_gewicht_bp;
+    if v.berater != topf.id().berater() {
+        return false;
+    }
+    let mut reduziert = false;
+    for (isin, ziel) in &v.zielgewichte_bp {
+        if topf.stueck(isin) == 0 {
+            if *ziel != 0 {
+                return false;
+            }
+            continue;
+        }
+        let Some(ist) = ist_gewicht_bp(topf, kurse, isin) else {
+            return false;
+        };
+        if !(0..=ist).contains(ziel) {
+            return false;
+        }
+        reduziert |= *ziel == 0 || *ziel < ist;
+    }
+    reduziert
+}
+
+pub(crate) fn belege_verkleinerung(
+    buch: &mut Journal,
+    zyklus: &Zyklus<'_>,
+    topf: &Topf,
+) -> Result<(), LaufFehler> {
+    begruende(
+        buch,
+        zyklus.tag,
+        crate::lauf::REGELWERK,
+        &format!("{}: Verkleinerung ohne Zweitmeinung", topf_name(topf.id())),
+    )
+}
+
+fn eigener_stand(
+    buch: &mut Journal,
+    zyklus: &Zyklus<'_>,
+    gueltig: &mut TopfAntwort,
+    neu: Option<&Vorschlag>,
+) -> Result<bool, LaufFehler> {
+    let nur_verkleinerung =
+        neu.is_some_and(|v| nur_verkleinerung(&gueltig.topf, &zyklus.tag.kurse, v));
+    let geaendert = !gleiche_ziele(gueltig.vorschlag.as_ref(), neu);
+    if nur_verkleinerung {
+        if geaendert {
+            belege_verkleinerung(buch, zyklus, &gueltig.topf)?;
+        }
+        gueltig.vorschlag = neu.cloned();
+    } else if geaendert {
+        gueltig.vorschlag = None;
+    }
+    Ok(nur_verkleinerung)
+}
+
 fn uebernehme(
     gueltig: &mut TopfAntwort,
     bisher: Option<&Vorschlag>,
@@ -262,10 +319,14 @@ pub(crate) fn berate(
         }
         // Rückzug, Wechsel und Widerruf gelten auch bei einer unvollständigen Runde.
         let [ga, gb] = &mut gueltig;
-        if !gleiche_ziele(ga.vorschlag.as_ref(), erste.eigene.vorschlag.as_ref()) {
-            ga.vorschlag = None;
-        }
-        if !erste.zustimmung_fremd && gleiche_ziele(gb.vorschlag.as_ref(), vb.as_ref()) {
+        let verkleinert_a = eigener_stand(buch, zyklus, ga, erste.eigene.vorschlag.as_ref())?;
+        if !erste.zustimmung_fremd
+            && gleiche_ziele(gb.vorschlag.as_ref(), vb.as_ref())
+            && !gb
+                .vorschlag
+                .as_ref()
+                .is_some_and(|v| nur_verkleinerung(&gb.topf, &zyklus.tag.kurse, v))
+        {
             gb.vorschlag = None;
         }
         if !crate::lauf::beratungszeit(zyklus) {
@@ -278,8 +339,12 @@ pub(crate) fn berate(
             break;
         }
         let [ga, gb] = &mut gueltig;
-        uebernehme(ga, va.as_ref(), &erste, &zweite);
-        uebernehme(gb, vb.as_ref(), &zweite, &erste);
+        if !verkleinert_a {
+            uebernehme(ga, va.as_ref(), &erste, &zweite);
+        }
+        if !eigener_stand(buch, zyklus, gb, zweite.eigene.vorschlag.as_ref())? {
+            uebernehme(gb, vb.as_ref(), &zweite, &erste);
+        }
         let gleich = gleiche_ziele(va.as_ref(), erste.eigene.vorschlag.as_ref())
             && gleiche_ziele(vb.as_ref(), zweite.eigene.vorschlag.as_ref());
         letzte_a = crate::vorbereitung::text_fuer_frage(&erste.eigene.einschaetzung);
@@ -297,6 +362,92 @@ pub(crate) fn berate(
 mod tests {
     use super::*;
     use depot_kern::{Cent, Datum, Herkunft, Isin, Kurs, Kurse, Topf, TopfId, Zeitpunkt};
+
+    #[test]
+    fn invariante_nie_kauf_ohne_zustimmung() -> Result<(), String> {
+        use depot_kern::{Grenzen, Instrument, InstrumentArt, Universum};
+        use depot_regelwerk::{Eingabe, Kennungsvergabe, entscheide_mit_kaufbudget};
+        let tag = Datum::neu(2026, 11, 10).ok_or("Datum")?;
+        let zeit = Zeitpunkt::neu(tag, 17, 35, 0).ok_or("Zeit")?;
+        let sap = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let alv = Isin::neu("DE0008404005").map_err(|e| format!("{e:?}"))?;
+        let kurs = Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Simulation)
+            .map_err(|e| format!("{e:?}"))?;
+        let kurse = Kurse::neu(zeit, vec![(sap.clone(), kurs.clone()), (alv.clone(), kurs)])
+            .map_err(|e| format!("{e:?}"))?;
+        let grenzen = Grenzen::standard();
+        let universum = Universum::neu(
+            [&sap, &alv]
+                .into_iter()
+                .map(|isin| Instrument {
+                    isin: isin.clone(),
+                    name: isin.als_str().into(),
+                    art: InstrumentArt::Aktie,
+                })
+                .collect(),
+        );
+        let mut verkauf_geprueft = false;
+        for bestand in [0_i64, 5, 10, 15] {
+            let bestand_bp = bestand.saturating_mul(200);
+            let mut topf = Topf::neu(
+                TopfId::A,
+                Cent(500_000_i64.saturating_sub(bestand.saturating_mul(10_000))),
+            )
+            .map_err(|e| format!("{e:?}"))?;
+            topf.setze_bestand(
+                sap.clone(),
+                u64::try_from(bestand).map_err(|e| e.to_string())?,
+            );
+            for ziel in [
+                -1,
+                0,
+                500,
+                1500,
+                2000,
+                3000,
+                4000,
+                10001,
+                bestand_bp,
+                bestand_bp.saturating_add(1),
+            ] {
+                for fremd in [-1, 0, 1, 2000] {
+                    let v = Vorschlag {
+                        berater: BeraterId::Dachs,
+                        zielgewichte_bp: std::collections::BTreeMap::from([
+                            (sap.clone(), ziel),
+                            (alv.clone(), fremd),
+                        ]),
+                        begruendung: std::collections::BTreeMap::new(),
+                        erwartung_bp: std::collections::BTreeMap::new(),
+                        limit_bp: std::collections::BTreeMap::new(),
+                        stopp_bp: std::collections::BTreeMap::new(),
+                    };
+                    let ohne_zustimmung = nur_verkleinerung(&topf, &kurse, &v);
+                    assert_eq!(
+                        ohne_zustimmung,
+                        fremd == 0 && (0..bestand_bp).contains(&ziel),
+                        "Bestand {bestand}, Ziel {ziel}, neues Ziel {fremd}"
+                    );
+                    let plan = entscheide_mit_kaufbudget(
+                        &Eingabe {
+                            grenzen: &grenzen,
+                            universum: &universum,
+                            topf: &topf,
+                            kurse: &kurse,
+                            vorschlag: ohne_zustimmung.then_some(&v),
+                            halt: false,
+                        },
+                        &mut Kennungsvergabe::nach(0),
+                        topf.bargeld(),
+                    );
+                    assert!(plan.kaeufe.is_empty(), "{plan:?}");
+                    verkauf_geprueft |= !plan.verkaeufe.is_empty();
+                }
+            }
+        }
+        assert!(verkauf_geprueft);
+        Ok(())
+    }
 
     #[test]
     fn abstimmung_ausgelassen_gleich() -> Result<(), String> {
