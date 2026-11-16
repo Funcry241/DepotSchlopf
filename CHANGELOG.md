@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Analyse-Export und Depotseite zeigen den Leerlauf je Topf und Woche: Euro-Tage und Quote in Bargeld, Füllquote je Anlass und je Limitabstand (bis 100, 101–200, 201–300 bp) sowie die Handelstage vom gefüllten Verkauf bis zum nächsten gefüllten Kauf, getrennt nach KI- und erzwungenem Verkauf (#311 M0). Nur lesend, das Journal ändert sich nicht.
+
 - Schutzverkäufe (Schutz-Stopp, Fristverkauf, Notbremse) setzen ihr Limit mit dem höchsten erlaubten Abstand von 3 % statt 1 % unter den Schlusskurs. So füllt ein Ausstieg auch an einem schwachen Folgetag. KI-Orders ohne eigenen Abstand bleiben bei 1 % (#311 H2a). Rückweg: Der vorige Stand lässt sich ohne Sicherung wieder einspielen; offene Schutzorders laufen mit ihrem Limit aus.
 
 - Der Morgenlauf sperrt gehaltene Werte mit unplausiblen Kursen einzeln. Ein belegter Vergleichskurs dient zur Bewertung; Schutz und Handel der übrigen Werte verwenden ihre eigenen gültigen Kurse (#158).
