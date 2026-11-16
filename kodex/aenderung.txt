@@ -2,6 +2,7 @@ klasse: Funktion
 zweck: Schutzverkäufe (Stopp, Frist, Notbremse) mit dem höchsten erlaubten Limitabstand von 3 % (#311 H2a)
 pfade:
 CHANGELOG.md
+crates/depot_journal/tests/konto.rs
 crates/depot_regelwerk/src/entscheidung.rs
 crates/depot_regelwerk/src/waechter.rs
 crates/depot_regelwerk/tests/regelwerk.rs

@@ -46,8 +46,8 @@ fn wert() -> Result<Isin, String> {
     vorbedingung(Isin::neu("DE0007164600"), "ISIN")
 }
 
-/// Limit der Notbremse bei 100 € Kurs: 1 % darunter.
-const LIMIT: i64 = 9_900;
+/// Notbremse-Limit bei Kurs 100 € mit dem hoechsten Limitabstand 3 % (#311 H2a).
+const LIMIT: i64 = 9_700;
 
 /// Ein Topf mit `stueck` Stueck und 1.000 € Bargeld.
 fn topf(id: TopfId, stueck: u64) -> Result<Topf, String> {
@@ -229,7 +229,11 @@ fn zustandsmaschine_laesst_nur_erlaubte_schritte_zu() -> Result<(), String> {
     vorbedingung(j.melde(1, &Meldung::Unbekannt), "unbekannt")?;
     j = pruefe(j, "Versand nach unbekannt", Meldung::Gesendet)?;
     vorbedingung(j.melde(1, &Meldung::Angenommen), "angenommen")?;
-    j = pruefe(j, "unter dem Limit", Meldung::Ausfuehrung(aus(1, 9_899, 0)))?;
+    j = pruefe(
+        j,
+        "unter dem Limit",
+        Meldung::Ausfuehrung(aus(1, LIMIT - 1, 0)),
+    )?;
     j = pruefe(
         j,
         "mehr als beauftragt",
@@ -262,7 +266,7 @@ fn zustandsmaschine_laesst_nur_erlaubte_schritte_zu() -> Result<(), String> {
     }
     // Ueber `anhaengen` entsteht weder ein Auftrag noch ein Zustand.
     for (art, inhalt) in [
-        (Art::Auftrag, "2;A;DE0007164600;Verkauf;5;9900;Notbremse"),
+        (Art::Auftrag, "2;A;DE0007164600;Verkauf;5;9700;Notbremse"),
         (Art::Zustand, "1;storniert"),
     ] {
         if !matches!(j.anhaengen(art, inhalt), Err(JournalFehler::Abgelehnt(_))) {
@@ -284,7 +288,7 @@ fn zweiter_versand_in_der_datei_ist_halt() -> Result<(), String> {
     let datei = neuer_pfad()?;
     let inhalt = inhalt_fuer(&[
         (Art::Topf, "A;100000;DE0007164600:10"),
-        (Art::Auftrag, "1;A;DE0007164600;Verkauf;10;9900;Notbremse"),
+        (Art::Auftrag, "1;A;DE0007164600;Verkauf;10;9700;Notbremse"),
         (Art::Zustand, "1;gesendet"),
         (Art::Zustand, "1;gesendet"),
     ]);
