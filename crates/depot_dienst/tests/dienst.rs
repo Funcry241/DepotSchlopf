@@ -3739,6 +3739,109 @@ fn gespraeche_zeigt_alle_ki_rollen_filtert_und_maskiert() -> Result<(), String> 
 }
 
 #[test]
+fn gespraech_zeigt_journalbeleg_und_liefert_nur_gepruefte_rohtexte() -> Result<(), String> {
+    use depot_journal::{Journal, KiAufruf, KiAufrufErgebnis};
+    use depot_kern::abdruck::sha256_hex;
+    use depot_lage::gespraeche::{Gespraech, anhaengen};
+
+    let d = dienst(ordner()?, true);
+    let daten = d.wurzel.join("daten");
+    let zeit = donnerstag(17, 50)?;
+    let (tag, ..) = some(zeit.in_frankfurt(), "Frankfurter Tag")?;
+    let pfad = daten.join("journal.txt");
+    Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+    let mut journal = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+    let nr = journal
+        .reserviere(BeraterId::Dachs, tag, 1)
+        .map_err(|e| format!("{e:?}"))?
+        .buchungsnummer();
+    let frage = "<script>Belegte Frage</script>";
+    let antwort = "Belegte Antwort";
+    let frage_sha = sha256_hex(frage.as_bytes());
+    let antwort_sha = sha256_hex(antwort.as_bytes());
+    let vorlage = sha256_hex(b"Testvorlage");
+    journal
+        .belege_ki_aufruf(&KiAufruf {
+            nr,
+            anbieter: "test".into(),
+            modell: "Journalmodell".into(),
+            vorlage: vorlage.clone(),
+            frage: Some(frage_sha.clone()),
+            antwort: Some(antwort_sha.clone()),
+            token_ein: None,
+            token_aus: None,
+            ergebnis: KiAufrufErgebnis::Beantwortet,
+        })
+        .map_err(|e| format!("{e:?}"))?;
+    drop(journal);
+    let gespraech = Gespraech {
+        zeit,
+        lauf: "probe".into(),
+        wer: "dachs".into(),
+        rolle: "haupt".into(),
+        modell: "Protokollmodell".into(),
+        zweck: "erstmeinung".into(),
+        ergebnis: "ok".into(),
+        http: Some(200),
+        token_ein: None,
+        token_aus: None,
+        buchung: Some(nr),
+        kosten_cent: Some(u64::MAX),
+        system: None,
+        frage: None,
+        antwort: Some("Zusammengefasste Antwort".into()),
+        fehler: None,
+    };
+    anhaengen(&daten, &gespraech).map_err(|e| e.to_string())?;
+    anhaengen(
+        &daten,
+        &Gespraech {
+            wer: "maus".into(),
+            ..gespraech
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let roh = daten.join("roh/ki");
+    fs::create_dir_all(&roh).map_err(|e| e.to_string())?;
+    let frage_pfad = roh.join(format!("{frage_sha}.txt"));
+    fs::write(&frage_pfad, frage).map_err(|e| e.to_string())?;
+
+    let html = get(&d, "/gespraeche", zeit);
+    assert_eq!(
+        html.matches("Journalbeleg · Modell Journalmodell").count(),
+        1
+    );
+    assert!(html.contains(&format!(
+        "<code title=\"{vorlage}\">{}</code>",
+        vorlage.get(..8).unwrap_or_default()
+    )));
+    assert!(html.contains(&format!("/gespraeche/rohtext?nr={nr}&amp;art=frage")));
+    assert!(html.contains(&format!(
+        "Antwort: Rohtext fehlt <code>{antwort_sha}</code>"
+    )));
+    assert!(html.contains("Kosten noch offen"));
+    assert!(!html.contains(frage));
+
+    let lese = |art| get(&d, &format!("/gespraeche/rohtext?nr={nr}&art={art}"), zeit);
+    let geliefert = lese("frage");
+    assert!(geliefert.starts_with("HTTP/1.1 200 OK"));
+    assert!(geliefert.contains("Content-Type: text/plain; charset=utf-8"));
+    assert!(geliefert.contains("X-Content-Type-Options: nosniff"));
+    assert!(geliefert.ends_with(frage));
+    assert!(lese("antwort").starts_with("HTTP/1.1 404"));
+    assert!(lese("../journal.txt").starts_with("HTTP/1.1 404"));
+    assert!(
+        get(&d, "/gespraeche/rohtext?nr=nicht-belegt&art=frage", zeit).starts_with("HTTP/1.1 404")
+    );
+
+    fs::write(roh.join(format!("{antwort_sha}.txt")), antwort).map_err(|e| e.to_string())?;
+    assert!(lese("antwort").ends_with(antwort));
+    fs::write(frage_pfad, "Abweichender Inhalt").map_err(|e| e.to_string())?;
+    assert!(lese("frage").starts_with("HTTP/1.1 404"));
+    Ok(())
+}
+
+#[test]
 fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), String> {
     use depot_dienst::werkbank::{Auftrag, Frueher};
     use depot_lage::gespraeche::{Gespraech, anhaengen};

@@ -1,7 +1,11 @@
 //! Lokale Ansicht der protokollierten Aufrufe aller KI-Rollen.
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::fs;
+use std::io::Read as _;
+use std::path::{Path, PathBuf};
+
+use depot_journal::{Journal, KiAufruf, KiStand};
 
 use depot_kern::json::{Json, erstes_objekt};
 use depot_kern::{BeraterId, Cent, Datum};
@@ -53,17 +57,102 @@ pub(crate) fn zweck_text(zweck: &str) -> &str {
     }
 }
 
-fn kosten(e: &Gespraech, buchungen: &[(BeraterId, Cent)]) -> Option<u64> {
-    let cent = e.kosten_cent?;
-    let Some(nr) = e.buchung else {
-        return Some(cent);
+struct Belege<'a> {
+    daten: &'a Path,
+    ki: Option<&'a KiStand>,
+}
+
+impl Belege<'_> {
+    fn buchung(&self, e: &Gespraech) -> Option<(usize, Cent)> {
+        let nr = e.buchung?;
+        let buchung = self.ki?.buchungen().get(nr)?;
+        let wer = match buchung.berater {
+            BeraterId::Dachs => "dachs",
+            BeraterId::Maus => "maus",
+        };
+        (wer == e.wer).then_some((nr, buchung.reserviert))
+    }
+
+    fn aufruf(&self, nr: usize) -> Option<&KiAufruf> {
+        self.ki?.aufruf(nr)
+    }
+}
+
+fn rohdatei(daten: &Path, sha: &str) -> PathBuf {
+    daten.join("roh/ki").join(format!("{sha}.txt"))
+}
+
+fn rohdatei_vorhanden(pfad: &Path) -> bool {
+    fs::symlink_metadata(pfad).is_ok_and(|info| info.is_file())
+}
+
+pub(crate) fn rohtext(daten: &Path, nr: usize, art: &str) -> Option<Vec<u8>> {
+    // Anbieterantworten sind auf 4 MiB begrenzt. Auch lokale Dateien begrenzt lesen.
+    const MAX_BYTES: u64 = 4 * 1024 * 1024;
+    let sha = Journal::pruefe_lesend(&daten.join("journal.txt"), |stand| {
+        let beleg = stand.ki().aufruf(nr)?;
+        match art {
+            "frage" => beleg.frage.clone(),
+            "antwort" => beleg.antwort.clone(),
+            _ => None,
+        }
+    })
+    .ok()??;
+    let pfad = rohdatei(daten, &sha);
+    if !rohdatei_vorhanden(&pfad) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(pfad)
+        .ok()?
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (u64::try_from(bytes.len()).ok()? <= MAX_BYTES
+        && depot_kern::abdruck::sha256_hex(&bytes) == sha)
+        .then_some(bytes)
+}
+
+fn rohlink(s: &mut String, daten: &Path, nr: usize, art: &str, titel: &str, sha: Option<&str>) {
+    let Some(sha) = sha else {
+        let _ = write!(s, " · {titel}: kein Abdruck");
+        return;
     };
-    let (berater, gebucht) = buchungen.get(nr)?;
-    let wer = match berater {
-        BeraterId::Dachs => "dachs",
-        BeraterId::Maus => "maus",
-    };
-    (wer == e.wer && u64::try_from(gebucht.0).ok() == Some(cent)).then_some(cent)
+    if rohdatei_vorhanden(&rohdatei(daten, sha)) {
+        let _ = write!(
+            s,
+            " · <a href=\"/gespraeche/rohtext?nr={nr}&amp;art={art}\">{titel}</a>"
+        );
+    } else {
+        let _ = write!(s, " · {titel}: Rohtext fehlt");
+    }
+    let _ = write!(s, " <code>{sha}</code>");
+}
+
+fn journalbeleg(s: &mut String, daten: &Path, beleg: &KiAufruf) {
+    let kurz = beleg.vorlage.get(..8).unwrap_or(&beleg.vorlage);
+    let _ = write!(
+        s,
+        "<p>Journalbeleg · Modell {} · Vorlage <code title=\"{}\">{kurz}</code>",
+        maskiere(&beleg.modell),
+        beleg.vorlage,
+    );
+    let vorlage = daten
+        .join("roh/ki/vorlage")
+        .join(format!("{}.txt", beleg.vorlage));
+    if !rohdatei_vorhanden(&vorlage) {
+        s.push_str(" (Rohtext fehlt)");
+    }
+    rohlink(s, daten, beleg.nr, "frage", "Frage", beleg.frage.as_deref());
+    rohlink(
+        s,
+        daten,
+        beleg.nr,
+        "antwort",
+        "Antwort",
+        beleg.antwort.as_deref(),
+    );
+    s.push_str("</p>");
 }
 
 fn absatz(s: &mut String, vorspann: &str, text: &str) {
@@ -217,7 +306,7 @@ fn fehler_text(e: &Gespraech) -> &'static str {
     }
 }
 
-fn eintrag(s: &mut String, e: &Gespraech, buchungen: &[(BeraterId, Cent)]) {
+fn eintrag(s: &mut String, e: &Gespraech, belege: &Belege<'_>) {
     let rolle = if e.rolle == "zusatz" {
         "Zusatz-KI"
     } else {
@@ -231,12 +320,25 @@ fn eintrag(s: &mut String, e: &Gespraech, buchungen: &[(BeraterId, Cent)]) {
         depot_lage::zeit_text(e.zeit),
         maskiere(zweck_text(&e.zweck)),
     );
-    if let Some(cent) = kosten(e, buchungen).and_then(|c| i64::try_from(c).ok()) {
-        let _ = write!(s, " · {}", Cent(cent));
+    let buchung = belege.buchung(e);
+    let kosten = if e.buchung.is_none() {
+        e.kosten_cent
+            .and_then(|cent| i64::try_from(cent).ok())
+            .map(Cent)
+    } else {
+        buchung
+            .map(|(_, cent)| cent)
+            .filter(|cent| u64::try_from(cent.0).ok() == e.kosten_cent)
+    };
+    if let Some(cent) = kosten {
+        let _ = write!(s, " · {cent}");
     } else if e.buchung.is_some() {
         s.push_str(" · Kosten noch offen");
     }
     s.push_str("</p>");
+    if let Some(beleg) = buchung.and_then(|(nr, _)| belege.aufruf(nr)) {
+        journalbeleg(s, belege.daten, beleg);
+    }
     if e.ergebnis == "ok"
         && let Some(antwort) = &e.antwort
     {
@@ -313,7 +415,7 @@ fn tag_lesen(daten: &Path, datum: Datum) -> Tag {
     }
 }
 
-fn aufrufe_nach_lauf(s: &mut String, aufrufe: Vec<&Gespraech>, buchungen: &[(BeraterId, Cent)]) {
+fn aufrufe_nach_lauf(s: &mut String, aufrufe: Vec<&Gespraech>, belege: &Belege<'_>) {
     let mut laeufe = BTreeMap::<&str, Vec<&Gespraech>>::new();
     for e in aufrufe {
         laeufe.entry(&e.lauf).or_default().push(e);
@@ -327,7 +429,7 @@ fn aufrufe_nach_lauf(s: &mut String, aufrufe: Vec<&Gespraech>, buchungen: &[(Ber
             .unwrap_or_default();
         let _ = write!(s, "<section><h4>Lauf ab {beginn}</h4>");
         for e in eintraege.into_iter().rev() {
-            eintrag(s, e, buchungen);
+            eintrag(s, e, belege);
         }
         s.push_str("</section>");
     }
@@ -394,7 +496,7 @@ fn tagesstand(
     tag: &Tag,
     wer: &str,
     lauf: &str,
-    buchungen: &[(BeraterId, Cent)],
+    belege: &Belege<'_>,
     leer_zeigen: bool,
 ) {
     let sichtbar: Vec<_> = tag
@@ -417,7 +519,7 @@ fn tagesstand(
         .into_iter()
         .partition(|e| e.ergebnis == "uebersprungen");
     tagesueberblick(s, &aufrufe);
-    aufrufe_nach_lauf(s, aufrufe, buchungen);
+    aufrufe_nach_lauf(s, aufrufe, belege);
     if !ausgelassen.is_empty() {
         let _ = write!(
             s,
@@ -456,14 +558,14 @@ pub(crate) fn inhalt(
             .map(|d| tag_lesen(daten, d))
             .collect()
     };
-    let buchungen = if tage
+    let ki = if tage
         .iter()
         .flat_map(|tag| &tag.eintraege)
         .any(|e| e.buchung.is_some())
     {
-        gespraeche::gebuchte_kosten(daten).unwrap_or_default()
+        Journal::pruefe_lesend(&daten.join("journal.txt"), |stand| stand.ki().clone()).ok()
     } else {
-        Vec::new()
+        None
     };
     filter(
         &mut s,
@@ -473,9 +575,13 @@ pub(crate) fn inhalt(
         &tage,
         gespraeche::gemini_aktiv(daten),
     );
+    let belege = Belege {
+        daten,
+        ki: ki.as_ref(),
+    };
     let vor_tagen = s.len();
     for tag in tage {
-        tagesstand(&mut s, &tag, wer, lauf, &buchungen, einzel.is_some());
+        tagesstand(&mut s, &tag, wer, lauf, &belege, einzel.is_some());
     }
     if s.len() == vor_tagen {
         s.push_str("<p>Keine Gespräche für die Auswahl.</p>");
@@ -515,15 +621,14 @@ mod tests {
                 fehler: None,
             }],
         };
-        let mut buchungen = vec![(BeraterId::Maus, Cent(1)); 7];
-        buchungen.push((BeraterId::Dachs, Cent(20)));
+        let belege = Belege {
+            daten: Path::new(""),
+            ki: None,
+        };
         let mut html = String::new();
-        tagesstand(&mut html, &tag, "", "", &buchungen, true);
+        tagesstand(&mut html, &tag, "", "", &belege, true);
         assert!(html.contains("Kosten noch offen"));
         assert!(!html.contains("0,20 €") && !html.contains("0,03 €"));
-        let mut html = String::new();
-        tagesstand(&mut html, &tag, "", "", &[], true);
-        assert!(html.contains("Kosten noch offen") && !html.contains("0,03 €"));
         let eintrag = tag.eintraege.first().ok_or("Gespräch fehlt")?;
         let ausgelassen = Gespraech {
             wer: "gemini".into(),
@@ -541,7 +646,7 @@ mod tests {
             ..tag
         };
         let mut html = String::new();
-        tagesstand(&mut html, &tag, "", "", &[], true);
+        tagesstand(&mut html, &tag, "", "", &belege, true);
         assert_eq!(html.matches("<h4>Lauf ab").count(), 1);
         assert_eq!(html.matches("Kein Zugangsschlüssel verfügbar").count(), 1);
         assert!(html.contains("2-mal nicht gefragt"));

@@ -1,10 +1,6 @@
 klasse: Funktion
-zweck: Reifekriterien des Papierdepots einzeln und rein lesend anzeigen
+zweck: Journalbelege und zugehörige Rohtexte in den KI-Gesprächen anzeigen
 pfade:
-crates/depot_dienst/src/analyse.rs
-crates/depot_dienst/src/depotseite.rs
+crates/depot_dienst/src/gespraeche.rs
 crates/depot_dienst/src/lib.rs
 crates/depot_dienst/tests/dienst.rs
-crates/depot_lage/src/lib.rs
-crates/depot_lage/src/reife.rs
-crates/depot_sim/src/handelsvergleich.rs
