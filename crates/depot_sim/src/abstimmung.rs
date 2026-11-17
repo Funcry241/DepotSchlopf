@@ -436,6 +436,7 @@ mod tests {
                             kurse: &kurse,
                             vorschlag: ohne_zustimmung.then_some(&v),
                             halt: false,
+                            vor_valuta: &[],
                         },
                         &mut Kennungsvergabe::nach(0),
                         topf.bargeld(),

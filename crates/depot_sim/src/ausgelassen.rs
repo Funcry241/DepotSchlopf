@@ -108,6 +108,7 @@ mod tests {
                 kurse: &kurse,
                 vorschlag: Some(&v),
                 halt: false,
+                vor_valuta: &[],
             },
             &mut Kennungsvergabe::nach(0),
         );

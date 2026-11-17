@@ -243,6 +243,9 @@ pub struct Stand {
     toepfe: BTreeMap<TopfId, Topf>,
     startgeld: BTreeMap<TopfId, Option<Cent>>,
     stopps: BTreeMap<(TopfId, Isin), Cent>,
+    /// Mit noch nicht abgerechnetem Erlös gekaufte Werte und die Valuta, vor der ein
+    /// freiwilliger Verkauf gesperrt ist (#311 H1a).
+    valuta_sperren: BTreeMap<(TopfId, Isin), Datum>,
     auftraege: Vec<AuftragsLage>,
     ausfuehrungsfolge: Vec<(usize, usize)>,
     kapitalmassnahmen: Vec<GebuchteKapitalmassnahme>,
@@ -718,7 +721,19 @@ impl Stand {
         &self.abrechnungen
     }
 
-    /// Gebuchte Verkaufserlöse, die wegen ihrer Valuta noch nicht für Käufe frei sind.
+    /// Werte dieses Topfes, die mit noch nicht abgerechnetem Verkaufserlös gekauft wurden und
+    /// vor dieser Valuta nicht freiwillig verkauft werden dürfen (#311 H1a). Stopp, Notbremse
+    /// und andere zwingende Ausstiege verkaufen trotzdem.
+    pub fn vor_valuta(&self, topf: TopfId, tag: Datum) -> Vec<(Isin, Datum)> {
+        self.valuta_sperren
+            .iter()
+            .filter(|((t, _), valuta)| *t == topf && **valuta > tag)
+            .map(|((_, isin), valuta)| (isin.clone(), *valuta))
+            .collect()
+    }
+
+    /// Gefüllte Verkaufserlöse vor ihrer Valuta. Sie sind für Käufe schon frei (#311 H1a);
+    /// was damit gekauft wird, sperrt `vor_valuta`.
     pub fn nicht_gutgeschrieben(&self, topf: TopfId) -> Option<Cent> {
         self.gesperrt(topf)
     }
@@ -753,7 +768,7 @@ impl Stand {
             Art::Topf => {
                 let t = lies_topf(inhalt).ok_or("Topf unlesbar")?;
                 kanonisch(&topf_text(&t), inhalt)?;
-                self.pruefe_deckung(&t, None, Cent::NULL)?;
+                self.pruefe_deckung(&t, None)?;
                 self.startgeld
                     .entry(t.id())
                     .or_insert_with(|| t.positionen().is_empty().then(|| t.bargeld()));
@@ -857,7 +872,7 @@ impl Stand {
             for (isin, stueck) in alt.positionen() {
                 neu.setze_bestand(isin.clone(), *stueck);
             }
-            self.pruefe_deckung(&neu, None, Cent::NULL)?;
+            self.pruefe_deckung(&neu, None)?;
             Ok(neu)
         };
         let a = anwenden(TopfId::A, nach_a)?;
@@ -912,7 +927,7 @@ impl Stand {
             .get(&b.topf)
             .ok_or_else(|| format!("Auftrag {nr}: Topf {:?} fehlt", b.topf))?;
         let neu = AuftragsLage::reserviert(b);
-        self.pruefe_deckung(topf, Some(&neu), Cent::NULL)?;
+        self.pruefe_deckung(topf, Some(&neu))?;
         self.letzte_kennung = nr;
         self.auftraege.push(neu);
         Ok(())
@@ -1286,15 +1301,17 @@ impl Stand {
             .toepfe
             .get(&neu.beleg.topf)
             .ok_or_else(|| format!("Auftrag {nr}: Topf fehlt"))?;
+        let sperre = match m {
+            Meldung::Ausfuehrung(a) if neu.beleg.richtung == Richtung::Kauf => {
+                self.valuta_sperre(topf, a)?
+            }
+            _ => None,
+        };
         let (topf, erloes) = match m {
             Meldung::Ausfuehrung(a) => (buche(topf, &neu.beleg, a)?, self.neuer_erloes(&neu, a)?),
             _ => (topf.clone(), None),
         };
-        self.pruefe_deckung(
-            &topf,
-            Some(&neu),
-            erloes.map_or(Cent::NULL, |(_, netto)| netto),
-        )?;
+        self.pruefe_deckung(&topf, Some(&neu))?;
         if let Some((valuta, netto)) = erloes {
             let gesamt = self
                 .abrechnungen
@@ -1303,6 +1320,13 @@ impl Stand {
                 .checked_add(netto)
                 .ok_or("Verkaufserlös: Überlauf")?;
             self.abrechnungen.insert(nr, (valuta, gesamt));
+        }
+        if let Some(valuta) = sperre {
+            let platz = self
+                .valuta_sperren
+                .entry((neu.beleg.topf, neu.beleg.isin.clone()))
+                .or_insert(valuta);
+            *platz = (*platz).max(valuta);
         }
         if matches!(m, Meldung::Ausfuehrung(_)) {
             self.ausfuehrungsfolge
@@ -1319,6 +1343,31 @@ impl Stand {
             *platz = neu;
         }
         Ok(())
+    }
+
+    /// Bezahlt ein Kauf mehr als das abgerechnete Bargeld, nutzt er noch nicht abgerechneten
+    /// Erlös: Dann gilt die späteste offene Valuta als Sperre für freiwillige Verkäufe.
+    fn valuta_sperre(
+        &self,
+        topf: &Topf,
+        a: &crate::auftrag::Ausfuehrung,
+    ) -> Result<Option<Datum>, String> {
+        let kosten = a
+            .kurs
+            .mal_stueck(a.stueck)
+            .and_then(|v| v.checked_add(a.gebuehr))
+            .ok_or("Valuta: Überlauf")?;
+        let abgerechnet = self
+            .gesperrt(topf.id())
+            .and_then(|g| topf.bargeld().checked_sub(g))
+            .ok_or("Valuta: Überlauf")?;
+        Ok((kosten > abgerechnet)
+            .then(|| self.naechste_valuta_spaetest(topf.id()))
+            .flatten())
+    }
+
+    fn naechste_valuta_spaetest(&self, topf: TopfId) -> Option<Datum> {
+        self.offene_valuta(topf).map(|(valuta, _)| *valuta).max()
     }
 
     fn neuer_erloes(
@@ -1392,12 +1441,7 @@ impl Stand {
     /// der Bestand jedes Werts alle offenen Verkaeufe. `ersatz` steht fuer den Auftrag mit
     /// seiner Kennung oder kommt neu hinzu. Was ein Kauf darueber hinaus an Gebuehr braucht,
     /// prueft der Kontowaechter vor der Reservierung (`Journal::reserviere_auftrag`).
-    fn pruefe_deckung(
-        &self,
-        topf: &Topf,
-        ersatz: Option<&AuftragsLage>,
-        neuer_erloes: Cent,
-    ) -> Result<(), String> {
+    fn pruefe_deckung(&self, topf: &Topf, ersatz: Option<&AuftragsLage>) -> Result<(), String> {
         let ersetzt = ersatz.map(|e| e.beleg.nr);
         let offene = self
             .auftraege
@@ -1424,11 +1468,8 @@ impl Stand {
                 }
             }
         }
-        let frei = self
-            .gesperrt(topf.id())
-            .and_then(|s| s.checked_add(neuer_erloes))
-            .and_then(|s| topf.bargeld().checked_sub(s))
-            .ok_or("Deckung: Überlauf")?;
+        // Gefüllte, noch nicht abgerechnete Erlöse decken Käufe (#311 H1a).
+        let frei = topf.bargeld();
         if kauf > frei {
             return Err(format!(
                 "Deckung: offene Käufe {} Cent über dem Bargeld {} Cent",

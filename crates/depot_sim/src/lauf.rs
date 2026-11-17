@@ -1506,6 +1506,12 @@ fn topf_zyklus(
     let id = topf.id();
     let t = topf_name(id);
     let mut vergabe = j.kennungsvergabe();
+    let vor_valuta: Vec<_> = j
+        .stand()
+        .vor_valuta(id, tag.datum)
+        .into_iter()
+        .map(|(isin, _)| isin)
+        .collect();
     let eingabe = Eingabe {
         grenzen: z.grenzen,
         universum: z.universum,
@@ -1513,6 +1519,7 @@ fn topf_zyklus(
         kurse: &tag.kurse,
         vorschlag: vorschlag.as_ref(),
         halt: false,
+        vor_valuta: &vor_valuta,
     };
     let frei = kaufbudget(j, z.grenzen, id)?;
     let ent = match &wiederholung {
@@ -2368,6 +2375,7 @@ mod wiederholung_tests {
                 kurse: &kurse_montag,
                 vorschlag: None,
                 halt: false,
+                vor_valuta: &[],
             },
             &mut j.kennungsvergabe(),
             nur_bargeld.bargeld(),

@@ -1571,17 +1571,53 @@ fn cash_teile_ergeben_bargeld() -> Result<(), String> {
     let frei = some(topf.frei, "Freies Bargeld")?;
     let vorgemerkt = some(topf.vorgemerkt, "Vorgemerkt")?;
     let valuta = some(topf.nicht_gutgeschrieben, "Ausstehend")?;
-    assert_eq!(
-        frei.checked_add(vorgemerkt)
-            .and_then(|v| v.checked_add(valuta)),
-        Some(topf.bargeld)
-    );
+    // Der gefüllte Erlös vor Valuta ist schon frei für Käufe (#311 H1a).
+    assert_eq!(frei.checked_add(vorgemerkt), Some(topf.bargeld));
     assert_eq!(
         Some(frei),
         depot_journal::konto::verfuegbar(&depot_kern::Grenzen::standard(), j.stand(), TopfId::A)
     );
     assert_eq!((vorgemerkt, valuta), (Cent(2_150), Cent(1_850)));
     assert_eq!(topf.naechste_valuta, depot_journal::papier_valuta(tag(12)?));
+    Ok(())
+}
+
+/// #311 H1a: Ein Kauf, der mehr als das abgerechnete Bargeld kostet, nutzt den gefüllten Erlös
+/// vor Valuta und sperrt freiwillige Verkäufe des Werts bis dahin. Ein Kauf aus abgerechnetem
+/// Bargeld sperrt nichts.
+#[test]
+fn kauf_mit_erloes_vor_valuta_sperrt_bis_zur_valuta() -> Result<(), String> {
+    use depot_journal::Art::{Abrechnungstag, Auftrag, Zustand};
+    let alv = "DE0008404005";
+    let buch = |stueck: u64, kurs: u64| {
+        let kauf = format!("3;A;{alv};Kauf;{stueck};{kurs};Umschichtung");
+        let aus = format!("3;ausfuehrung;{stueck};{kurs};150");
+        let ort = kaufbuch(
+            7,
+            1_000,
+            &[
+                (Abrechnungstag, "2026-11-12"),
+                (Auftrag, "2;A;DE0007164600;Verkauf;2;1000;Notbremse"),
+                (Zustand, "2;gesendet"),
+                (Zustand, "2;angenommen"),
+                (Zustand, "2;ausfuehrung;2;1000;150"),
+                (Auftrag, kauf.as_str()),
+                (Zustand, "3;gesendet"),
+                (Zustand, "3;angenommen"),
+                (Zustand, aus.as_str()),
+            ],
+        )?;
+        let j = ort.oeffnen()?;
+        Ok::<_, String>(j.stand().vor_valuta(TopfId::A, tag(12)?))
+    };
+    // Bargeld 4.947,00 €, davon 18,50 € Erlös vor Valuta: 21,50 € kosten nur Abgerechnetes.
+    assert!(buch(2, 1_000)?.is_empty());
+    // 4.931,50 € liegen über den abgerechneten 4.928,50 €: Sperre bis zur Valuta.
+    let valuta = some(depot_journal::papier_valuta(tag(12)?), "Valuta")?;
+    assert_eq!(
+        buch(1, 493_000)?,
+        vec![(vorbedingung(depot_kern::Isin::neu(alv), "ISIN")?, valuta)]
+    );
     Ok(())
 }
 

@@ -104,7 +104,7 @@ fn cash(d: &DepotLage, text: &mut String) -> Option<Cent> {
         text,
         "<section><h2>Cash-Konto</h2><dl><dt>Bargeld gesamt</dt><dd>{}</dd>\
         <dt>Frei für Käufe</dt><dd>{}</dd><dt>Vorgemerkt für offene Käufe</dt><dd>{}</dd>\
-        <dt>Verkaufserlös noch nicht gutgeschrieben</dt><dd>{}{valuta}</dd></dl></section>",
+        <dt>Verkaufserlös vor Valuta, schon frei für Käufe</dt><dd>{}{valuta}</dd></dl></section>",
         geldwechsel("depot-bargeld", bar),
         geldwechsel("depot-frei", summe(|topf| topf.frei)),
         geldwechsel("depot-vorgemerkt", summe(|topf| topf.vorgemerkt)),
