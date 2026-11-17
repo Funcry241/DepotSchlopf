@@ -1,0 +1,6 @@
+klasse: KodexAenderung
+zweck: Windows-Bau-Cache für passende Prüfungen wiederherstellen
+pfade:
+.github/workflows/kodex.yml
+kodex/festschreibung.txt
+kodex/freigaben/c2-windows-cache-lesen.txt

@@ -13,12 +13,19 @@
     clippy::cast_sign_loss
 )]
 
+mod testlauf;
 mod testumgebung;
 
 use std::process::{Command, ExitCode};
 use std::time::Instant;
 
-fn cargo(args: &[&str]) -> bool {
+fn cargo(wurzel: &std::path::Path, args: &[&str]) -> bool {
+    if cfg!(windows) && args.first() == Some(&"test") {
+        return testlauf::parallel(wurzel).unwrap_or_else(|e| {
+            eprintln!("[Kodex] Paralleler Testlauf fehlgeschlagen: {e}");
+            false
+        });
+    }
     let schritt = args.join(" ");
     let start = Instant::now();
     println!("[Kodex] cargo {schritt}");
@@ -155,7 +162,7 @@ fn main() -> ExitCode {
             &["test", "--workspace", "--no-fail-fast"],
         ];
         for s in schritte {
-            if !cargo(s) {
+            if !cargo(&wurzel, s) {
                 eprintln!("[Kodex] ABGELEHNT: cargo {} fehlgeschlagen", s.join(" "));
                 return ExitCode::FAILURE;
             }

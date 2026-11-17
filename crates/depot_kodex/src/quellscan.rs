@@ -16,7 +16,8 @@
 //!   keine Namensauflösung, kein Netz-Crate. Auch von ihnen haengt kein anderes Crate ab.
 //!
 //! - Geprueft wird, was kompiliert werden kann: Im Crate liegen nur `Cargo.toml`, `src/` und
-//!   `tests/`; darin nur `.rs`-Dateien, und jede wird vollstaendig geprueft. `#[path]` und
+//!   `tests/`; darin wird jede Rust-Datei vollstaendig geprueft. Der Dienst hat daneben
+//!   zwei feste Text-Assets unter `src/assets/`. `#[path]` und
 //!   `include!` sind verboten, Target-Pfade enden auf `.rs`. Damit liegt jede kompilierte Datei
 //!   im geprueften Quellbaum (K7-03).
 //! - In reinen Crates zaehlt jede Bedeutung eines Alias; mehrdeutige Aliasse und das Einbinden
@@ -96,8 +97,17 @@ fn eintraege(dir: &Path, fehler: &mut Vec<String>) -> Vec<std::path::PathBuf> {
 }
 
 /// Alle `.rs`-Dateien unter `dir`. Links, Sonderdateien und Lesefehler sind Fehler.
-fn rs_dateien(dir: &Path, aus: &mut Vec<std::path::PathBuf>, fehler: &mut Vec<String>) {
+fn rs_dateien(
+    dir: &Path,
+    dienst_assets: Option<&Path>,
+    aus: &mut Vec<std::path::PathBuf>,
+    fehler: &mut Vec<String>,
+) {
     for p in eintraege(dir, fehler) {
+        if dienst_assets == Some(p.as_path()) {
+            pruefe_dienst_assets(&p, fehler);
+            continue;
+        }
         match fs::symlink_metadata(&p) {
             Err(e) => fehler.push(format!("{}: nicht lesbar: {e}", p.display())),
             Ok(m) if m.file_type().is_symlink() => {
@@ -106,13 +116,13 @@ fn rs_dateien(dir: &Path, aus: &mut Vec<std::path::PathBuf>, fehler: &mut Vec<St
                     p.display()
                 ));
             }
-            Ok(m) if m.is_dir() => rs_dateien(&p, aus, fehler),
+            Ok(m) if m.is_dir() => rs_dateien(&p, dienst_assets, aus, fehler),
             Ok(m) if m.is_file() => {
                 if p.extension().is_some_and(|x| x == "rs") {
                     aus.push(p);
                 } else {
                     // Cargo baut auch Dateien mit anderer Endung (Targetpfad, `#[path]`). Im
-                    // Quellbaum liegt deshalb nur Rust-Code, und der wird vollstaendig geprueft.
+                    // übrigen Quellbaum liegt deshalb nur Rust-Code, den wir vollständig prüfen.
                     fehler.push(format!(
                         "{}: keine .rs-Datei im Quellbaum (geprüft wird, was kompiliert werden kann)",
                         p.display()
@@ -359,6 +369,7 @@ fn bind_lokal(t: &[Token], i: usize) -> bool {
 const START_MODULE: &[&str] = &[
     "depot_kodex/src/git.rs",
     "depot_kodex/src/main.rs",
+    "depot_kodex/src/testlauf.rs",
     "depot_kodex/src/testumgebung.rs",
     "depot_lauf/src/abbild.rs",
     "depot_lauf/src/export.rs",
@@ -374,7 +385,12 @@ const START_MODULE: &[&str] = &[
     "depot_dienst/src/bin/depot_waechter.rs",
 ];
 
-const DYNAMISCHE_STARTS: [(&str, usize, &str); 5] = [
+const DYNAMISCHE_STARTS: [(&str, usize, &str); 6] = [
+    (
+        "depot_kodex/src/testlauf.rs",
+        1,
+        "von Cargo gemeldetes Testprogramm unter dem Prüf-Bauordner",
+    ),
     (
         "depot_lauf/src/update/update_dialog.rs",
         1,
@@ -586,6 +602,27 @@ pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> 
     fehler
 }
 
+/// Der feste Asset-Ordner enthält nur JavaScript und CSS, die als Text eingebunden werden.
+fn pruefe_dienst_assets(dir: &Path, fehler: &mut Vec<String>) {
+    if !optionaler_ordner(dir, fehler) {
+        return;
+    }
+    for p in eintraege(dir, fehler) {
+        match fs::symlink_metadata(&p) {
+            Ok(m)
+                if m.is_file()
+                    && p.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| matches!(name, "app.js" | "stil.css")) => {}
+            Ok(_) => fehler.push(format!(
+                "{}: erwartet wird eine reguläre Oberflächendatei (app.js oder stil.css)",
+                p.display()
+            )),
+            Err(e) => fehler.push(format!("{}: nicht lesbar: {e}", p.display())),
+        }
+    }
+}
+
 fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
     let dir = manifest::crate_ordner(wurzel, krate);
     let m = match manifest::lies(&dir.join("Cargo.toml")) {
@@ -654,7 +691,8 @@ fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
             continue;
         }
         let mut dateien = Vec::new();
-        rs_dateien(&ordner, &mut dateien, fehler);
+        let dienst_assets = (krate == "depot_dienst" && produktiv).then(|| ordner.join("assets"));
+        rs_dateien(&ordner, dienst_assets.as_deref(), &mut dateien, fehler);
         for d in dateien {
             let anzeige = d
                 .strip_prefix(wurzel)

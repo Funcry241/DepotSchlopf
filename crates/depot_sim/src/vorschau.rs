@@ -476,10 +476,10 @@ pub fn lauf(
         ereignisse.len()
     );
     crate::schlopfmodell::vorbereiten(&daten, &mut j, zeit, fuer, dachs, maus);
-    let mut ea = erste(&mut j, &budget, dachs, &lage_a)?;
     let mut eb = erste(&mut j, &budget, maus, &lage_b)?;
-    zweitmeinung(&mut j, &budget, maus, &lage_a, &mut ea)?;
+    let mut ea = erste(&mut j, &budget, dachs, &lage_a)?;
     zweitmeinung(&mut j, &budget, dachs, &lage_b, &mut eb)?;
+    zweitmeinung(&mut j, &budget, maus, &lage_a, &mut ea)?;
     abstimmen(
         &mut j,
         &Dialog {

@@ -1,0 +1,7 @@
+klasse: KodexAenderung
+zweck: Die beiden Oberflächendateien am für Alt-Updates kompatiblen Pfad prüfen
+pfade:
+crates/depot_kodex/src/pfade.rs
+crates/depot_kodex/src/quellscan.rs
+kodex/festschreibung.txt
+kodex/freigaben/p48-update-kompatibilitaet.txt

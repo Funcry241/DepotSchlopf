@@ -52,12 +52,25 @@ impl AufrufErlaubnis {
 
     /// Nur eine plausible Anbieterabrechnung kann eine Reservierung vermindern.
     pub fn abrechnung(&self, token_ein: u64, token_aus: u64) -> Option<crate::KiAbrechnung> {
+        self.abrechnung_mit_cache(token_ein, token_aus, 0, 0)
+    }
+
+    /// Bucht die tatsächlichen Kosten mit den beiden belegten Cache-Anteilen.
+    pub fn abrechnung_mit_cache(
+        &self,
+        token_ein: u64,
+        token_aus: u64,
+        cache_schreiben: u64,
+        cache_lesen: u64,
+    ) -> Option<crate::KiAbrechnung> {
         if token_ein > u64::from(self.deckel.max_token_ein())
             || token_aus > u64::from(self.deckel.max_token_aus())
         {
             return None;
         }
-        let ist = self.deckel.kosten_ist(token_ein, token_aus)?;
+        let ist =
+            self.deckel
+                .kosten_mit_cache(token_ein, token_aus, cache_schreiben, cache_lesen)?;
         (ist <= self.buchung.reserviert).then_some(crate::KiAbrechnung {
             nr: self.nr,
             reserviert: self.buchung.reserviert,

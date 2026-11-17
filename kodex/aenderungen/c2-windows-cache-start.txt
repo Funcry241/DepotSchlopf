@@ -1,0 +1,9 @@
+klasse: KodexAenderung
+zweck: Windows-Bauordner nach erfolgreichen main-Prüfungen für den Cache speichern
+pfade:
+.github/scripts/kodex_baucache.ps1
+.github/scripts/kodex_nachweis.py
+.github/scripts/test_kodex_nachweis.py
+.github/workflows/kodex.yml
+kodex/festschreibung.txt
+kodex/freigaben/c2-windows-cache-start.txt

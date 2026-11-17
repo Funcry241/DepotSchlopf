@@ -119,6 +119,16 @@ pub trait Berater {
     ) -> crate::abstimmung::AbstimmungsAntwort {
         crate::abstimmung::AbstimmungsAntwort::unverwertbar()
     }
+    fn abstimmen_mit_bilanz(
+        &mut self,
+        erlaubnis: AufrufErlaubnis,
+        lage: &Lage<'_>,
+        stand: &crate::abstimmung::AbstimmungsStand,
+        _bilanz: &[(BeraterId, depot_journal::Auswertung)],
+    ) -> crate::abstimmung::AbstimmungsAntwort {
+        self.abstimmen(erlaubnis, lage, stand)
+    }
+
     fn aufruf(&mut self) -> Option<depot_journal::KiAufruf> {
         None
     }

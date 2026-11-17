@@ -6,6 +6,10 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Prompt-Caching und Kostenbuchung (#312, P44): Dachs nutzt für den gemeinsamen Tagesblock den Fünf-Minuten-Cache. Beide Erstmeinungen stehen fest, bevor Dachs und Maus in dieser Reihenfolge die Zweitmeinungen abgeben. Die Abrechnung trennt volle Eingabe, Cache-Schreiben, Cache-Lesen und Ausgabe. Für den großen Aufruf sind höchstens 26 Cent bei Dachs und 13 Cent bei Maus reserviert. Das Monatslimit von 20 € je KI gilt weiter.
+
+- Windows-Kodex (#313, C1): Bis zu vier Cargo-Testprogramme laufen parallel mit eigener temporärer Umgebung, Cargo führt die Doctests separat aus und der Linux-Lauf nutzt weiter den bisherigen Testaufruf.
+
 - Bezahlte Vorarbeit kommt in der Frage an (#312-4, P40): Die Lage ordnet die Ereignisse jetzt als Termine, Wochenlehren, frühere Hypothesen und erst dann Nachrichten. Wird der Platz knapp, fallen Nachrichten weg, nicht die bezahlte Vorarbeit. Das Journal vermerkt dieselbe Reihenfolge, Ereignis- und Belegnummern bleiben gleich. Liegt eine vollständige Gemini-Vorsortierung vor, gehen Nachrichten mit Relevanz 0 nur noch als Nummer und mit Relevanz 1 nur mit Titel hinaus; ohne Gemini bleibt die Frage byte-gleich. Prognosen und Kaufbelege zählen nur für Ereignisse, die die Frage gezeigt hat. Beim Wiederabspielen alter Tage ändert sich nur die Reihenfolge der angezeigten Ereignisse. Rückweg ohne Sicherung.
 
 - Kurzbild des Laufs (#313 E4, P38): Am Ende jedes Gate-Laufs stehen im Protokoll und in GitHub Actions in der Zusammenfassung höchstens 60 Zeilen: Ergebnis, Dauer je Stufe, jeder fehlgeschlagene Test mit der ersten Zeile seiner Meldung, Abstürze ohne Testergebnis und die zehn langsamsten Testprogramme. Ein Geheimnismuster hält das Kurzbild wie den Export ganz zurück. Das Format der Testprogramme ist mit C1 abgestimmt (parallele Tests). Kein Eingriff in den Workflow.
