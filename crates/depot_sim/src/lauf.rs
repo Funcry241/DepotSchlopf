@@ -529,11 +529,11 @@ pub(crate) fn ein_tag(
     let heute = depotwert(jr.stand().toepfe().values(), z.bewertung, Rundung::Auf)
         .ok_or_else(|| rechnung("Depotwert"))?;
     let b = beteiligte;
-    let topf_a = frage_topf(jr, z, TopfId::A, b.dachs, &gestoppt)?;
     let topf_b = frage_topf(jr, z, TopfId::B, b.maus, &gestoppt)?;
+    let topf_a = frage_topf(jr, z, TopfId::A, b.dachs, &gestoppt)?;
     let erste = [topf_a.clone(), topf_b.clone()];
-    let topf_a = zweite_meinung(jr, z, topf_a, b.maus)?;
     let topf_b = zweite_meinung(jr, z, topf_b, b.dachs)?;
+    let topf_a = zweite_meinung(jr, z, topf_a, b.maus)?;
     let mut antworten = crate::abstimmung::berate(jr, z, erste, [topf_a, topf_b], b.dachs, b.maus)?;
     if b.dachs.kostensperre() || b.maus.kostensperre() {
         for antwort in &mut antworten {
@@ -1120,7 +1120,9 @@ impl TopfAntwort {
     }
 }
 
-fn prognosebilanz(stand: &depot_journal::Stand) -> Vec<(BeraterId, depot_journal::Auswertung)> {
+pub(crate) fn prognosebilanz(
+    stand: &depot_journal::Stand,
+) -> Vec<(BeraterId, depot_journal::Auswertung)> {
     [BeraterId::Dachs, BeraterId::Maus]
         .into_iter()
         .filter_map(|wer| {

@@ -1982,6 +1982,24 @@ fn dialoglauf(a: &mut Diskutant, b: &mut Diskutant) -> Result<(Ort, Journal), St
     Ok((ort, j))
 }
 #[test]
+fn reihenfolge_zweitmeinung() -> Result<(), String> {
+    use BeraterId::{Dachs, Maus};
+    let mut a = diskutant(Dachs, vec![Some(1_000)], false)?;
+    let mut b = diskutant(Maus, vec![Some(1_000)], false)?;
+    let (_ort, j) = dialoglauf(&mut a, &mut b)?;
+    let reihenfolge: Vec<_> = j
+        .stand()
+        .ki()
+        .buchungen()
+        .iter()
+        .take(4)
+        .map(|b| b.berater)
+        .collect();
+    assert_eq!(reihenfolge, [Maus, Dachs, Dachs, Maus]);
+    Ok(())
+}
+
+#[test]
 fn abstimmung_verkleinert_auch_bei_veto_oder_ausfall() -> Result<(), String> {
     for antwort in [Some(2000), None] {
         let mut a = diskutant(BeraterId::Dachs, vec![Some(0), Some(0)], true)?;

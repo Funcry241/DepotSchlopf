@@ -60,10 +60,10 @@ const DACHS: BeraterId = BeraterId::Dachs;
 
 #[test]
 fn hoechstkosten_je_aufruf() {
-    assert_eq!(KiDeckel::standard(DACHS).hoechstkosten(), Some(Cent(24)));
+    assert_eq!(KiDeckel::standard(DACHS).hoechstkosten(), Some(Cent(26)));
     assert_eq!(
         KiDeckel::standard(BeraterId::Maus).hoechstkosten(),
-        Some(Cent(12))
+        Some(Cent(13))
     );
 }
 

@@ -130,7 +130,8 @@ fn frage(
         positionskaeufe: &positionskaeufe,
         ereignisse: &zyklus.tag.ereignisse,
     };
-    let mut erste = zweite.abstimmen(erlaubnis, &lage, dialog);
+    let bilanz = crate::lauf::prognosebilanz(buch.stand());
+    let mut erste = zweite.abstimmen_mit_bilanz(erlaubnis, &lage, dialog, &bilanz);
     crate::lauf::belege_ki(buch, zweite).map_err(journal)?;
     let wer = match topf.topf.id().berater() {
         BeraterId::Dachs => "Dachs",
