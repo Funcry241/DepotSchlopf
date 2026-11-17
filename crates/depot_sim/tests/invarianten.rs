@@ -176,8 +176,9 @@ type Stand = Option<i64>;
 /// in jeder Runde als fremden Vorschlag sehen muss.
 fn modell(runden: &[(Zug, Zug)]) -> ([Stand; 2], Vec<Stand>, Vec<Stand>) {
     let mut gezeigt: [Stand; 2] = [Some(ERST_BP), Some(ERST_BP)];
-    // Nach der Zweitmeinung mit Zustimmung ist die Erstmeinung freigegeben.
-    let mut frei: [Stand; 2] = gezeigt;
+    // Maus' Zweitmeinung legt ein Veto gegen Topf A ein, damit ein Punkt offen ist und die
+    // Abstimmung überhaupt läuft (#312-1, P35). Topf B ist nach Dachs' Zustimmung freigegeben.
+    let mut frei: [Stand; 2] = [None, gezeigt[1]];
     let (mut sieht_a, mut sieht_b) = (Vec::new(), Vec::new());
     let antwort = |s: Schritt, eigen: Stand| match s {
         Schritt::Behalten => Some(eigen),
@@ -317,7 +318,7 @@ fn spieler(wer: BeraterId, zuege: Vec<Zug>) -> Result<Spieler, String> {
         tag()?,
         Urteil {
             verwertbar: true,
-            zustimmung: true,
+            zustimmung: wer != BeraterId::Maus,
             begruendung: format!("Zweitmeinung {wer:?}"),
         },
     );
@@ -491,6 +492,62 @@ fn pruefe_abstimmungsfolgen(
         offen.truncate(11);
         Ok(offen)
     })
+}
+
+/// P35: Stimmen beide Zweitmeinungen zu, ist kein Punkt offen. Die Abstimmung entfällt ohne
+/// Aufruf, und beide Erstmeinungen werden ausgeführt.
+#[test]
+fn abstimmung_entfaellt_ohne_offenen_punkt() -> Result<(), String> {
+    let mut a = spieler(BeraterId::Dachs, vec![(Schritt::Aendern(1_000), true)])?;
+    let mut b = spieler(BeraterId::Maus, vec![(Schritt::Aendern(1_000), true)])?;
+    for urteil in b.plan.urteile.values_mut() {
+        urteil.zustimmung = true;
+    }
+    let ort = Ort::neu()?;
+    let mut j = vorbedingung(Journal::oeffnen(&ort.journal), "Journal")?;
+    belege(&mut j)?;
+    let mut k = depot_sim::Papierdatei::oeffnen(&ort.konto, false, &start()?)?;
+    papiertag(
+        &mut j,
+        tag()?,
+        &universum()?,
+        &start()?,
+        &mut a,
+        &mut b,
+        &mut k,
+    )
+    .map_err(|e| format!("Papiertag {e:?}"))?;
+    assert!(
+        a.gesehen.is_empty() && b.gesehen.is_empty(),
+        "keine Abstimmungsrunde"
+    );
+    for wer in [BeraterId::Dachs, BeraterId::Maus] {
+        let n = j
+            .stand()
+            .ki()
+            .buchungen()
+            .iter()
+            .filter(|x| x.berater == wer)
+            .count();
+        assert_eq!(n, 2, "{wer:?}: nur Erst- und Zweitmeinung");
+    }
+    assert!(
+        j.stand()
+            .begruendungen()
+            .iter()
+            .any(|(_, _, text)| text == "Abstimmung entfällt: kein offener Punkt")
+    );
+    for topf in [TopfId::A, TopfId::B] {
+        let ist: Vec<u64> = j
+            .stand()
+            .auftraege()
+            .iter()
+            .filter(|l| l.beleg.topf == topf)
+            .map(|l| l.beleg.stueck)
+            .collect();
+        assert_eq!(ist, vec![stueck(ERST_BP)], "{topf:?}");
+    }
+    Ok(())
 }
 
 #[test]
