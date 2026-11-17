@@ -368,15 +368,23 @@ pub(crate) fn prognose_sichtbar(p: &Weltprognose, lage: &Lage<'_>, frage: &str) 
 }
 
 pub(crate) fn prognose_ereignis_sichtbar(p: &Weltprognose, lage: &Lage<'_>, frage: &str) -> bool {
-    let Some(text) = p
-        .ereignis_nr
-        .checked_sub(1)
-        .and_then(|nr| lage.ereignisse.get(nr))
-    else {
+    ereignis_sichtbar(p.ereignis_nr, lage, frage)
+}
+
+/// Titel einer Nachricht ohne angehängte Adresse (`Titel | https://…`).
+pub(crate) fn kurzfassung(text: &str) -> &str {
+    text.split_once(" | ").map_or(text, |(titel, _)| titel)
+}
+
+/// Hat die gesendete Frage Ereignis `nr` gezeigt, im vollen Wortlaut oder als Titel (#312-4)?
+/// Ein ausgeblendetes oder abgeschnittenes Ereignis ist nicht sichtbar.
+pub(crate) fn ereignis_sichtbar(nr: usize, lage: &Lage<'_>, frage: &str) -> bool {
+    let Some(text) = nr.checked_sub(1).and_then(|i| lage.ereignisse.get(i)) else {
         return false;
     };
-    let zeile = ereignis_zeile(p.ereignis_nr, text);
-    frage.lines().any(|l| l == zeile)
+    let voll = ereignis_zeile(nr, text);
+    let titel = ereignis_zeile(nr, kurzfassung(text));
+    frage.lines().any(|l| l == voll || l == titel)
 }
 
 /// Der Auftrag wird vor beiden unabhaengigen Antworten identisch eingefroren.
@@ -1124,6 +1132,39 @@ mod handelssystem_tests {
             text.contains("Gewicht heute 23,4 % (2340 bp), höchstens 40,0 % (2.000,00 EUR)"),
             "{text}"
         );
+        Ok(())
+    }
+
+    /// Gegenprobe P40/#325: Ein ausgeblendetes Ereignis ist für Prognose und Kaufbeleg nicht
+    /// sichtbar, ein auf den Titel gekürztes schon; Nummern außerhalb der Lage nie.
+    #[test]
+    fn ausgeblendetes_ereignis_ist_nicht_sichtbar() -> Result<(), String> {
+        let datum = Datum::neu(2026, 11, 10).ok_or("Datum")?;
+        let zeit = Zeitpunkt::neu(datum, 20, 0, 0).ok_or("Zeit")?;
+        let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
+        let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+        let ereignisse: Vec<String> = vec![
+            "Termin 11.11.2026: EZB".into(),
+            "Nachricht 1 | https://example.test/a".into(),
+            "Nachricht 2 | https://example.test/b".into(),
+        ];
+        let lage = Lage {
+            anlass: None,
+            datum,
+            topf: &topf,
+            kaufbar: Cent(500_000),
+            kurse: &kurse,
+            verlauf: &[],
+            kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
+            ereignisse: &ereignisse,
+            relative_staerke: &[],
+            positionskaeufe: &[],
+        };
+        let frage = "- Ereignis 1: Termin 11.11.2026: EZB\n- Ereignis 2: (Relevanz 0, ausgeblendet)\n- Ereignis 3: Nachricht 2";
+        let sichtbar: Vec<bool> = (0..=4)
+            .map(|nr| ereignis_sichtbar(nr, &lage, frage))
+            .collect();
+        assert_eq!(sichtbar, vec![false, true, false, true, false]);
         Ok(())
     }
 

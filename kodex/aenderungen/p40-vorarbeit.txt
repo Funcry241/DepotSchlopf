@@ -1,0 +1,11 @@
+klasse: Funktion
+zweck: Bezahlte Vorarbeit vor Nachrichten, Gemini-Relevanz verdichtet die Frage (#312-4, P40)
+pfade:
+CHANGELOG.md
+crates/depot_berater/src/frage.rs
+crates/depot_berater/src/ki.rs
+crates/depot_berater/src/zusatz.rs
+crates/depot_sim/src/papiertag.rs
+crates/depot_sim/tests/papiertag.rs
+crates/depot_sim/tests/vorbereitung.rs
+kodex/aenderungen/p40-vorarbeit.txt

@@ -400,6 +400,37 @@ impl Zuarbeit {
             .unwrap_or_default()
     }
 
+    /// Verdichtet die Nachrichten einer Frage nach der vollständigen Vorsortierung (#312-4):
+    /// Relevanz 0 nur noch mit Nummer, Relevanz 1 nur mit Titel, ab 2 im vollen Wortlaut. Nur
+    /// aufrufen, wenn [`Self::hinweise`] eine Sortierung geliefert hat.
+    pub(crate) fn verdichte(&self, ereignisse: &[String], frage: &str) -> String {
+        let mut ersatz = BTreeMap::new();
+        for (nr, e) in ereignisse
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.starts_with("Nachricht "))
+        {
+            let Some(m) = self.meldungen.get(&kennung(e)) else {
+                continue;
+            };
+            let nummer = nr.saturating_add(1);
+            let neu = match m.relevanz {
+                0 => format!("- Ereignis {nummer}: (Relevanz 0, ausgeblendet)"),
+                1 => crate::frage::ereignis_zeile(nummer, crate::frage::kurzfassung(e)),
+                _ => continue,
+            };
+            ersatz.insert(crate::frage::ereignis_zeile(nummer, e), neu);
+        }
+        let mut aus = String::with_capacity(frage.len());
+        for (i, zeile) in frage.split('\n').enumerate() {
+            if i > 0 {
+                aus.push('\n');
+            }
+            aus.push_str(ersatz.get(zeile).map_or(zeile, String::as_str));
+        }
+        aus
+    }
+
     pub(crate) fn hinweise(&self, ereignisse: &[String], frage: &str) -> Option<String> {
         let mut passend = Vec::new();
         let mut gesehen = BTreeSet::new();
@@ -512,6 +543,63 @@ mod tests {
         ] {
             assert!(pruefe(&ungültig, &ids, &liste).is_none());
         }
+        Ok(())
+    }
+
+    fn zuarbeit(relevanzen: &[(&str, u8)]) -> Result<Zuarbeit, String> {
+        let liste = universum()?;
+        let mut ids = BTreeMap::new();
+        let mut teile = Vec::new();
+        for (text, relevanz) in relevanzen {
+            let id = kennung(text);
+            ids.insert(id.clone(), id.clone());
+            teile.push(format!(
+                "{{\"kennung\":\"{id}\",\"relevanz\":{relevanz},\"werte\":[],\"kurz\":\"k\"}}"
+            ));
+        }
+        let antwort = format!("{{\"meldungen\":[{}]}}", teile.join(","));
+        Ok(Zuarbeit {
+            meldungen: pruefe(&antwort, &ids, &liste).ok_or("Antwort verworfen")?,
+        })
+    }
+
+    /// Gegenproben P40 (#312-4): Relevanz 0 ausgeblendet mit Nummer, Relevanz 1 nur Titel,
+    /// ab 2 voller Wortlaut. Ohne vollständige Sortierung bleibt die Frage unverändert.
+    #[test]
+    fn gemini_relevanz_verdichtet_die_frage() -> Result<(), String> {
+        let null = "Nachricht 10.11.2026 07:00 UTC (rss): Sport | https://example.test/a";
+        let eins = "Nachricht 10.11.2026 07:01 UTC (rss): Zinsen | https://example.test/b";
+        let zwei = "Nachricht 10.11.2026 07:02 UTC (rss): SAP | https://example.test/c";
+        let ereignisse: Vec<String> = [
+            "Termin 11.11.2026: EZB".into(),
+            null.into(),
+            eins.into(),
+            zwei.into(),
+        ]
+        .into();
+        let frage: String = ereignisse
+            .iter()
+            .enumerate()
+            .map(|(i, e)| crate::frage::ereignis_zeile(i.saturating_add(1), e))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let z = zuarbeit(&[(null, 0), (eins, 1), (zwei, 2)])?;
+        assert!(z.hinweise(&ereignisse, &frage).is_some());
+        let v = z.verdichte(&ereignisse, &frage);
+        let zeilen: Vec<&str> = v.lines().collect();
+        assert_eq!(
+            zeilen,
+            vec![
+                "- Ereignis 1: Termin 11.11.2026: EZB",
+                "- Ereignis 2: (Relevanz 0, ausgeblendet)",
+                "- Ereignis 3: Nachricht 10.11.2026 07:01 UTC (rss): Zinsen",
+                &crate::frage::ereignis_zeile(4, zwei),
+            ]
+        );
+        // Unvollständige Sortierung: keine Hinweise, die Frage geht unverändert (byte-gleich).
+        let teilweise = zuarbeit(&[(null, 0)])?;
+        assert!(teilweise.hinweise(&ereignisse, &frage).is_none());
+        assert!(Zuarbeit::default().hinweise(&ereignisse, &frage).is_none());
         Ok(())
     }
 
