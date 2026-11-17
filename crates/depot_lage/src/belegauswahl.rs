@@ -10,6 +10,7 @@ use depot_journal::Stand;
 use depot_kern::Datum;
 use depot_sim::belegrang::{
     Grundrang, Heute, Sortierer, hat_fragebeleg, kandidatenanzahl, kaufbelege, messe,
+    tage_mit_zielbelegen,
 };
 
 pub fn bericht(stand: &Stand, von: Datum, bis: Datum) -> String {
@@ -43,6 +44,7 @@ struct Tagesbasis {
     kandidaten: usize,
     prognosen: usize,
     kaeufe: usize,
+    ziele: usize,
 }
 
 /// Zählt Fälle mit mindestens einer auflösbaren Verknüpfung. Ein genannter Beleg
@@ -72,14 +74,19 @@ fn datenbasis(text: &mut String, stand: &Stand, von: Datum, bis: Datum) {
             tag.kaeufe = tag.kaeufe.saturating_add(1);
         }
     }
-    text.push_str("\n#### Datenbasis für NeuroSchlopf\n\nEin genannter Beleg ist ein Hinweis auf Relevanz. Kandidaten ohne Bewertung bleiben unbewertet. Die Tabelle zeigt Fälle mit mindestens einer auflösbaren Belegnummer. Bei Altständen ohne Frageabschnitt gilt die vollständige Beobachtungsliste des Tages.\n\n");
+    for datum in tage_mit_zielbelegen(stand) {
+        if let Some(tag) = tage.get_mut(&datum) {
+            tag.ziele = tag.ziele.saturating_add(1);
+        }
+    }
+    text.push_str("\n#### Datenbasis für NeuroSchlopf\n\nEin genannter Beleg ist ein Hinweis auf Relevanz. Kandidaten ohne Bewertung bleiben unbewertet. Die Tabelle zeigt Fälle mit mindestens einer auflösbaren Belegnummer. Bei Altständen ohne Frageabschnitt gilt die vollständige Beobachtungsliste des Tages. Vorschlagsziele zählen je Berater und Wert unabhängig vom späteren Urteil oder Auftrag.\n\n");
     if tage.is_empty() {
         text.push_str("Im Zeitraum sind keine Kandidaten im Journal belegt.\n");
         return;
     }
     let tage_mit_verknuepfung = tage
         .values()
-        .filter(|t| t.prognosen != 0 || t.kaeufe != 0)
+        .filter(|t| t.prognosen != 0 || t.kaeufe != 0 || t.ziele != 0)
         .count();
     let _ = writeln!(
         text,
@@ -87,13 +94,13 @@ fn datenbasis(text: &mut String, stand: &Stand, von: Datum, bis: Datum) {
         tage.len()
     );
     text.push_str(
-        "| Tag | Kandidaten | Prognosen mit Beleg | Käufe mit Beleg |\n|---|---:|---:|---:|\n",
+        "| Tag | Kandidaten | Prognosen mit Beleg | Käufe mit Beleg | Vorschlagsziele mit Beleg |\n|---|---:|---:|---:|---:|\n",
     );
     for (tag, t) in tage {
         let _ = writeln!(
             text,
-            "| {tag} | {} | {} | {} |",
-            t.kandidaten, t.prognosen, t.kaeufe
+            "| {tag} | {} | {} | {} | {} |",
+            t.kandidaten, t.prognosen, t.kaeufe, t.ziele
         );
     }
 }
@@ -143,12 +150,20 @@ mod tests {
                 .map_err(fehler)?;
             j.begruende(tag, depot_sim::belegrang::KAUFBELEG, "2 Maus 3")
                 .map_err(fehler)?;
-            j.beobachte(danach, "Ohne Bewertung").map_err(fehler)?;
+            j.beobachte(danach, "Beleg für Reduktion").map_err(fehler)?;
+            for text in [
+                "Maus DE0007164600 0 1",
+                "Maus DE0007164600 0 1",
+                "Dachs DE0007164600 2000 2",
+            ] {
+                j.begruende(danach, depot_sim::belegrang::ZIELBELEG, text)
+                    .map_err(fehler)?;
+            }
             j.beobachte(ausserhalb, "Außerhalb").map_err(fehler)?;
             let t = bericht(j.stand(), tag, danach);
-            assert!(t.contains("Tage mit verknüpften Belegen: 1 von 2"), "{t}");
-            assert!(t.contains("| 2026-11-16 | 2 | 0 | 1 |"), "{t}");
-            assert!(t.contains("| 2026-11-17 | 1 | 0 | 0 |"), "{t}");
+            assert!(t.contains("Tage mit verknüpften Belegen: 2 von 2"), "{t}");
+            assert!(t.contains("| 2026-11-16 | 2 | 0 | 1 | 0 |"), "{t}");
+            assert!(t.contains("| 2026-11-17 | 1 | 0 | 0 | 1 |"), "{t}");
             assert!(!t.contains("| 2026-11-18 |"), "{t}");
             Ok(())
         })();
