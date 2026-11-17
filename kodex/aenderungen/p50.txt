@@ -1,0 +1,12 @@
+klasse: TestOnly
+zweck: Das bestehende Dienst-Testprogramm nach Themen in Module teilen
+pfade:
+crates/depot_dienst/tests/dienst.rs
+crates/depot_dienst/tests/dienst/depot.rs
+crates/depot_dienst/tests/dienst/dienstbetrieb.rs
+crates/depot_dienst/tests/dienst/einrichtung.rs
+crates/depot_dienst/tests/dienst/http_schnittstelle.rs
+crates/depot_dienst/tests/dienst/ki_gespraeche.rs
+crates/depot_dienst/tests/dienst/live.rs
+crates/depot_dienst/tests/dienst/main.rs
+crates/depot_dienst/tests/dienst/update_leiste.rs
