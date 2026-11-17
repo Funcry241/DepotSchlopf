@@ -126,57 +126,7 @@ pub fn anlass_text(anlass: Anlass) -> &'static str {
     }
 }
 
-/// Stufe des Limitabstands zum Bezugskurs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Stufe {
-    Bis100,
-    Bis200,
-    Bis300,
-    Unbelegt,
-}
-
-impl Stufe {
-    pub fn von(limit_bp: Option<i64>) -> Self {
-        match limit_bp.map(i64::unsigned_abs) {
-            Some(0..=100) => Self::Bis100,
-            Some(101..=200) => Self::Bis200,
-            Some(201..=300) => Self::Bis300,
-            _ => Self::Unbelegt,
-        }
-    }
-
-    pub fn text(self) -> &'static str {
-        match self {
-            Self::Bis100 => "bis 100 bp",
-            Self::Bis200 => "101–200 bp",
-            Self::Bis300 => "201–300 bp",
-            Self::Unbelegt => "nicht belegt",
-        }
-    }
-}
-
-/// Gefüllte und verfallene Orders; offene und abgelehnte zählen nicht.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Quote {
-    pub gefuellt: u32,
-    pub verfallen: u32,
-}
-
-impl Quote {
-    /// Füllquote in Prozent, abgerundet.
-    pub fn prozent(&self) -> Option<u32> {
-        let summe = self.gefuellt.checked_add(self.verfallen)?;
-        self.gefuellt.checked_mul(100)?.checked_div(summe)
-    }
-
-    fn zaehle(&mut self, zustand: AuftragsZustand) {
-        match zustand {
-            AuftragsZustand::Gefuellt => self.gefuellt = self.gefuellt.saturating_add(1),
-            AuftragsZustand::Verfallen => self.verfallen = self.verfallen.saturating_add(1),
-            _ => {}
-        }
-    }
-}
+pub use depot_sim::ausfuehrung::{Quote, Stufe};
 
 /// Topf, Woche des Versands, Richtung („Kauf“/„Verkauf“) und Gruppe.
 pub type QuotenSchluessel<T> = (TopfId, Datum, &'static str, T);

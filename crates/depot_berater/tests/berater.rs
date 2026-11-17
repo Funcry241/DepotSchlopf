@@ -389,6 +389,7 @@ fn frage_hinweis() -> Result<(), String> {
                     verfallen: 4,
                     mittlere_bewegung_bp: Some(230),
                     mittlerer_fuellpreis_bp: None,
+                    stufen: depot_sim::ausfuehrung::Fuellquoten::default(),
                 },
                 ..*lage
             },
@@ -404,6 +405,93 @@ fn frage_hinweis() -> Result<(), String> {
     )?;
     assert!(hinweis.contains("14 von 18 gefüllt, 4 verfallen (im Mittel +2,3 %"));
     assert!(hinweis.len() < 200);
+    Ok(())
+}
+
+/// #311 H2c: Füllquote je Limitabstand mit Zahl der Orders, hinter dem gecachten Tagesblock.
+fn frage_mit_stufen(stufen: depot_sim::ausfuehrung::Fuellquoten) -> Result<String, String> {
+    let universum = universum()?;
+    mit_lage(|lage| {
+        depot_berater::frage::vorschlag_frage(
+            &Lage {
+                kaufbilanz: depot_sim::ausfuehrung::Kennzahlen {
+                    stufen,
+                    ..depot_sim::ausfuehrung::Kennzahlen::default()
+                },
+                ..*lage
+            },
+            &universum,
+            &[],
+        )
+    })
+}
+
+const TOPFLAGE: &str = "\nTopflage:\n";
+
+fn gecachter_block(frage: &str) -> Result<String, String> {
+    let (tag, _) = some(frage.split_once(TOPFLAGE), "Topfblock")?;
+    let anfrage = depot_berater::Anbieter::Anthropic.anfrage(
+        &depot_ki::KiDeckel::standard(BeraterId::Dachs),
+        "System",
+        frage,
+    );
+    let block = format!(
+        r#"{{"type":"text","text":{},"cache_control":{{"type":"ephemeral"}}}}"#,
+        zitiere(tag)
+    );
+    assert!(anfrage.contains(&block), "{anfrage}");
+    Ok(tag.to_string())
+}
+
+#[test]
+fn fuellquote_je_limitabstand_mit_anzahl() -> Result<(), String> {
+    use depot_sim::ausfuehrung::{Fuellquoten, Quote};
+    let q = |gefuellt, verfallen| Quote {
+        gefuellt,
+        verfallen,
+    };
+    let stufen = Fuellquoten {
+        kauf: [q(3, 2), q(1, 3), q(0, 0)],
+        verkauf: [q(0, 0), q(0, 0), q(2, 0)],
+    };
+    let frage = frage_mit_stufen(stufen)?;
+    for zeile in [
+        "- Kauf bis 100 bp: 3 von 5 Orders gefüllt (60 %)",
+        "- Kauf 101–200 bp: 1 von 4 Orders gefüllt (25 %)",
+        "- Kauf 201–300 bp: keine Order beobachtet",
+        "- Verkauf bis 100 bp: keine Order beobachtet",
+        "- Verkauf 101–200 bp: keine Order beobachtet",
+        "- Verkauf 201–300 bp: 2 von 2 Orders gefüllt (100 %)",
+    ] {
+        assert!(frage.lines().any(|l| l == zeile), "{zeile}\n{frage}");
+    }
+    assert!(frage.contains("keine Handelsregel, limit_bp wählst du selbst"));
+    assert!(frage.contains("Optional limit_bp von 10 bis 300 je Wert"));
+    assert!(!frage.contains("noch kein Messwert"));
+    // Der Cache aus P44 greift weiter: der gemeinsame Tagesblock ist bytegleich mit dem ohne
+    // Messwerte, die Zahlen stehen erst im ungecachten Topfteil.
+    let (_, topfteil) = some(frage.split_once(TOPFLAGE), "Topfblock")?;
+    assert!(topfteil.contains("Füllquote je Limitabstand"));
+    let mit = gecachter_block(&frage)?;
+    let ohne = gecachter_block(&frage_mit_stufen(Fuellquoten::default())?)?;
+    assert_eq!(mit, ohne);
+    assert!(!mit.contains("Füllquote"));
+    Ok(())
+}
+
+#[test]
+fn fuellquote_ohne_verwertbare_daten() -> Result<(), String> {
+    let frage = frage_mit_stufen(depot_sim::ausfuehrung::Fuellquoten::default())?;
+    let zeile = some(
+        frage
+            .lines()
+            .find(|l| l.starts_with("Füllquote je Limitabstand")),
+        "Füllquote",
+    )?;
+    assert!(zeile.contains("noch kein Messwert"), "{zeile}");
+    assert!(zeile.contains("Wähle limit_bp nach eigener Einschätzung"));
+    assert!(!frage.contains("Orders gefüllt ("));
+    assert!(!frage.contains("keine Order beobachtet"));
     Ok(())
 }
 
