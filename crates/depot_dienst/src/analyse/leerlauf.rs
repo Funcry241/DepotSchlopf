@@ -106,7 +106,38 @@ pub(super) fn bericht(
     if leer {
         text.push_str("| – | – | – | – | – | – |\n");
     }
+    vetoschatten(stand, punkte, zeitraum, &mut text);
     text
+}
+
+/// Punkt 5: Was ein abgelehnter Kauf bis zum Ende des Zeitraums netto gebracht hätte.
+fn vetoschatten(stand: &Stand, punkte: &[Tagespunkt], zeitraum: Zeitraum, text: &mut String) {
+    text.push_str("\n### Schatten der Vetos\n\nAbgelehnte Käufe der Erstmeinung, gerechnet wie im Papierkonto: Einstieg zum Schluss des Vetotags mit Modellspread, Ausstieg zum jüngsten belegten Schluss im Zeitraum mit Modellspread, beide Gebühren. Datengrundlage für die offene Frage zum halben Kauf; gebaut ist diese Regel nicht.\n\n| Vetotag | Topf | ISIN | Zielgewicht | Stück | Einstieg | Ausstieg | netto | bei halber Größe |\n|---|---|---|---:|---:|---:|---|---:|---:|\n");
+    let zeilen: Vec<_> = depot_lage::vetoschatten::schatten(stand, punkte, zeitraum.bis)
+        .into_iter()
+        .filter(|s| (zeitraum.von..=zeitraum.bis).contains(&s.veto.tag))
+        .collect();
+    if zeilen.is_empty() {
+        text.push_str("| – | – | – | – | – | – | – | – | – |\n");
+    }
+    let geld = |c: Option<depot_kern::Cent>| c.map_or_else(|| "–".into(), |c| c.to_string());
+    for s in zeilen {
+        let ausstieg = s
+            .ausstieg
+            .map_or_else(|| "–".into(), |(tag, kurs)| format!("{kurs} am {tag}"));
+        let _ = writeln!(
+            text,
+            "| {} | {:?} | {} | {} | {} | {} | {ausstieg} | {} | {} |",
+            s.veto.tag,
+            s.veto.topf,
+            s.veto.isin,
+            prozent(Some(s.veto.ziel_bp)),
+            s.stueck,
+            s.einstieg,
+            geld(s.netto),
+            geld(s.netto_halb)
+        );
+    }
 }
 
 fn quote(prozent: Option<u32>) -> String {
@@ -175,6 +206,7 @@ mod tests {
         };
         let text = bericht(&Stand::default(), &buch, &[], zeitraum);
         assert!(text.contains("## Leerlauf je Topf und Woche"));
+        assert!(text.contains("### Schatten der Vetos"));
         assert!(text.contains("| B | 2026-11-16 | Verkauf | Stopp | 1 | 0 | 100 % |"));
         assert!(text.contains("| B | 2026-11-16 | Verkauf | 201–300 bp | 1 | 0 | 100 % |"));
         assert!(text.contains("| B | #7 | 2026-11-16 | erzwungen | #8 am 2026-11-18 | 2 |"));
