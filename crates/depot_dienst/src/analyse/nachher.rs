@@ -142,12 +142,14 @@ pub(super) fn auswertung(
             entscheidungen.push(Entscheidung {
                 tag,
                 beleg: format!(
-                    "Order #{} · {richtung} · Topf {}",
+                    "Order #{} · {richtung} · Topf {} · {} · {}",
                     order.nr,
                     match order.topf {
                         TopfId::A => "A",
                         TopfId::B => "B",
-                    }
+                    },
+                    depot_lage::leerlauf::anlass_text(order.anlass),
+                    depot_lage::zustand_text(order.zustand)
                 ),
                 isin: &order.isin,
                 basis: order.bezug,
