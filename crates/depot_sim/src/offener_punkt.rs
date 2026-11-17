@@ -1,11 +1,21 @@
+<<<<<<< HEAD
 //! Abstimmung nur bei offenem Punkt (#312-1, P35).
+=======
+//! Abstimmung nur bei offenem Punkt (#312-1, P35). Vorarbeit für Maus, noch nicht eingebaut.
+>>>>>>> origin/main
 //!
 //! Die Abstimmung kostet bis zu vier bezahlte Aufrufe. Sie lohnt nur, wenn nach Erst- und
 //! Zweitmeinung noch etwas offen ist: Für einen Topf weicht der gültige Vorschlag vom ersten ab
 //! (Veto, Teilveto, Rückzug), oder ein Ersatzkauf nach technischem Ausfall der Zweitmeinung
 //! wartet auf Bestätigung. Sonst entfällt sie, auch wenn beide Töpfe Bargeld sagen.
 //!
+<<<<<<< HEAD
 //! Eingebaut in `abstimmung::berate` gleich nach den Frühausstiegen.
+=======
+//! Einbau: In `abstimmung::berate` nach den Frühausstiegen
+//! `if !offener_punkt([(ea.vorschlag.as_ref(), gueltig[0].vorschlag.as_ref(), gueltig[0].ersatzkauf_offen()), …])`
+//! journalisiert „Abstimmung entfällt: kein offener Punkt“ und gibt `gueltig` ohne Reservierung zurück.
+>>>>>>> origin/main
 
 use depot_kern::Vorschlag;
 
