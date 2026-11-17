@@ -423,7 +423,7 @@ struct Lesestand {
 }
 
 // Regelmäßig auch den alten Teil prüfen, falls sich Dateizeit und Vermerk nicht ändern.
-const LESECACHE_VOLLPRUEFUNG: Duration = Duration::from_mins(5);
+const LESECACHE_VOLLPRUEFUNG: Duration = Duration::from_secs(300);
 
 /// Der bestätigte Stand und seine lesbaren Einträge im Cache.
 pub type GelesenerJournalstand<'a> = (&'a Stand, &'a [(Art, String)]);
