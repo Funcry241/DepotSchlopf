@@ -115,6 +115,17 @@ Doppelklick auf `DepotSchlopf.cmd` startet den Dienst und öffnet http://127.0.0
 - **Diagnoseprotokolle:** Unter Tätigkeit lässt sich je Lauf das gespeicherte Protokoll öffnen, kopieren oder herunterladen, auch nach einem Neustart. Es enthält Zeitstempel und die gestartete Version. In `daten/protokolle/` bleiben höchstens 20 Dateien mit je bis zu 16 MiB; Kürzungen und ausgelassene überlange Zeilen sind gekennzeichnet. Die Live-Vorschau zeigt die letzten 500 Zeilen. Zugangsdaten in Adressen, Headern und Fehlermeldungen werden an der Quelle durch `***` ersetzt. Eine zusätzliche Prüfsummenkontrolle entfernt übersehene Schlüsselzeilen und meldet den Fehler in der Oberfläche; bei nicht verfügbarem Schlüsselschutz wird die Ausgabe unterdrückt. Das Geschäfts- und Kostenjournal bleibt die maßgebliche Aufzeichnung.
 - **Update:** „Nach Update suchen“ nennt die neuen Stände auf `main`. „Update einspielen“ prüft den neuen Stand zuerst mit dem ganzen Gate in einem eigenen Ordner und rückt den Projektordner nur dann vorwärts, ohne Lokales zu überschreiben. Danach startet der Dienst neu und die Seite lädt sich selbst neu; kommt der neue Stand nicht hoch, setzt `DepotSchlopf.cmd` den alten zurück. Dasselbe ohne Oberfläche: `run.cmd update pruefen` und `run.cmd update`.
 
+Wenn eine Updatesuche oder ein geplanter Lauf auf ein Update wartet, steht der Grund auf **Live** und unter **Einrichtung → Update**. Dauert der Neustart länger als drei Minuten, prüfe das schwarze DepotSchlopf-Fenster auf eine Fehlermeldung. Falls es geschlossen ist, starte einmal `DepotSchlopf.cmd` neu.
+
+Diese beiden Befehle in PowerShell im DepotSchlopf-Ordner lesen den Stand:
+
+```powershell
+git rev-parse --short HEAD
+Test-Path .\daten\update_offen.txt
+```
+
+Der erste Befehl zeigt den Commit im Projektordner. Den Commit des laufenden Dienstes zeigt die Oberfläche unter **Einrichtung → Update**. Bei `True` liegt die Update-Markierung vor. DepotSchlopf verwaltet sie und bestätigt den neuen Stand oder setzt auf den bisherigen Stand zurück. Steht der zweite Befehl auf `False` und wartet die Suche weiter, prüfe den Status auf **Live** und die letzten relevanten Zeilen im DepotSchlopf-Fenster.
+
 Schutz gegen fremde Webseiten: Jede Anfrage braucht `Host` 127.0.0.1 oder localhost mit dem eigenen Port, jede Änderung zusätzlich die eigene Herkunft und den Zufallswert dieses Dienststarts. Antworten verbieten Einbetten und fremde Skripte.
 
 ## Mitmachen
