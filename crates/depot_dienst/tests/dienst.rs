@@ -2801,6 +2801,19 @@ fn konsole_stil_hell_dunkel() -> Result<(), String> {
 }
 
 #[test]
+fn app_js_unveraendert() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let antwort = get(&d, "/app.js", donnerstag(12, 0)?);
+    let (_, js) = some(antwort.split_once("\r\n\r\n"), "HTTP-Antwort")?;
+    // SHA-256 des ausgelieferten Skripts vor dem Umzug.
+    assert_eq!(
+        depot_kern::abdruck::sha256_hex(js.as_bytes()),
+        "5828f6e0ee97f749dada24041aaf3cc7304484b38d252f54a3cbdf7191a64fd2"
+    );
+    Ok(())
+}
+
+#[test]
 fn app_js_rettet_scrollstand() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let js = get(&d, "/app.js", donnerstag(12, 0)?);
