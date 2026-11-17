@@ -1,4 +1,7 @@
 klasse: Funktion
-zweck: Verbindungsbalken nach bestätigtem Dienststart automatisch ausblenden
+zweck: Blockierte Update-Suche und geplante Aufträge auf Live und in der Einrichtung erklären
 pfade:
+README.md
+crates/depot_dienst/src/lib.rs
 crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/update.rs

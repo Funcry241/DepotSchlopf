@@ -1108,7 +1108,12 @@ fn auftragsergebnis_html(a: &Auftrag, z: &Zustand, ki: &Aufrufe) -> String {
 }
 
 /// Was der Dienst tut: laufender Auftrag, Warteschlange, naechster Lauf, Verlauf.
-fn taetigkeit(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
+fn taetigkeit(
+    z: &Zustand,
+    heute: Option<Datum>,
+    ki: &Aufrufe,
+    update_sperre: Option<UpdateSperre>,
+) -> String {
     let klasse = z.laufend.as_ref().map_or("", |_| "aktiver-bereich");
     let mut s = format!("<section id=\"taetigkeit\" class=\"{klasse}\"><h2>Tätigkeit</h2>");
     if let Some(a) = &z.laufend {
@@ -1131,6 +1136,8 @@ fn taetigkeit(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
                 maskiere(h)
             );
         }
+    } else if update_sperre.is_some() {
+        s.push_str("<p class=\"kopf\">Aufträge warten auf den Abschluss des Updates.</p>");
     } else {
         s.push_str("<p class=\"kopf\">Gerade läuft nichts.</p>");
         // Was der letzte Lauf heute zu sagen hatte, etwa warum der Papiertag ausfiel.
@@ -1172,7 +1179,9 @@ fn taetigkeit(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
             .collect();
         let _ = write!(s, "<p>Wartet: {}</p>", maskiere(&liste.join(", ")));
     }
-    s.push_str(&naechster_abschnitt(z, heute, false));
+    if update_sperre.is_none() {
+        s.push_str(&naechster_abschnitt(z, heute, false));
+    }
     letzter_fehler_hinweis(&mut s, z);
     if !z.verlauf.is_empty() {
         s.push_str(
@@ -1234,8 +1243,55 @@ pub fn marke(start: &str) -> String {
     format!("<span hidden data-start=\"{}\"></span>", maskiere(start))
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum UpdateSperre {
+    Neustart,
+    Probe,
+    Unbestaetigt,
+    NichtPruefbar,
+    BestaetigungFehlgeschlagen,
+}
+
+impl UpdateSperre {
+    fn hinweis(self, zeitplan_an: bool) -> String {
+        let (klasse, grund) = match self {
+            Self::Neustart => (
+                "offen",
+                "Update eingespielt. Der Dienst startet neu. Neustart noch nicht bestätigt.",
+            ),
+            Self::Probe => ("offen", "Die neue Version läuft zur Probe. Die Bestätigung steht aus."),
+            Self::Unbestaetigt => ("offen", "Neustart noch nicht bestätigt."),
+            Self::NichtPruefbar => ("halt", "Der offene Update-Stand lässt sich nicht prüfen."),
+            Self::BestaetigungFehlgeschlagen => (
+                "halt",
+                "Der Start der neuen Version konnte nicht bestätigt werden.",
+            ),
+        };
+        let blockiert = if zeitplan_an {
+            "Auch geplante Aufträge wie der Morgenlauf warten auf den Abschluss des Updates."
+        } else {
+            "DepotSchlopf startet bis zum Abschluss des Updates keine neuen Aufträge."
+        };
+        let weiter = if klasse == "halt" {
+            "Prüfe das schwarze DepotSchlopf-Fenster auf eine Fehlermeldung. Falls es geschlossen ist, starte DepotSchlopf.cmd einmal neu."
+        } else {
+            "Du musst nichts tun. Die Seite lädt sich nach dem Neustart von selbst neu."
+        };
+        format!("<p class=\"kopf {klasse}\">{grund} {blockiert} {weiter}</p>")
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct UpdateAnzeige<'a> {
+    pub sperre: Option<UpdateSperre>,
+    pub version: Option<&'a str>,
+}
+
 /// Hinweis zum Update, falls es einen gibt.
-fn update_hinweis(z: &Zustand) -> String {
+fn update_hinweis(z: &Zustand, sperre: Option<UpdateSperre>) -> String {
+    if let Some(sperre) = sperre {
+        return sperre.hinweis(z.zeitplan.an);
+    }
     match &z.update_meldung {
         Some((fehler, text)) => format!(
             "<p class=\"kopf {}\">{}</p>",
@@ -1329,7 +1385,7 @@ fn gesamtstatus_teil(token: &str, z: &Zustand, einrichtung: bool) -> String {
 
 /// Gemeinsame, unabhängig von Formularen aufgefrischte Betriebsleiste.
 pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
-    betriebsleiste_mit_kurssperre(start, z, heute, None)
+    betriebsleiste_mit_kurssperre(start, z, heute, None, None)
 }
 
 pub(crate) fn betriebsleiste_mit_kurssperre(
@@ -1337,6 +1393,7 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
     z: &Zustand,
     heute: Option<Datum>,
     kurssperre: Option<&str>,
+    update_sperre: Option<UpdateSperre>,
 ) -> String {
     let mut s = marke(start);
     let betrieb = z.gesamtstatus();
@@ -1368,6 +1425,8 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
         }
     } else if z.neustart {
         s.push_str("<div class=\"betrieb aktiv\"><strong>Update: Neustart wird vorbereitet.</strong><p>Die Oberfläche verbindet sich von selbst neu.</p>");
+    } else if update_sperre.is_some() {
+        s.push_str("<div class=\"betrieb\"><strong>Aufträge warten auf den Abschluss des Updates.</strong>");
     } else {
         s.push_str("<div class=\"betrieb\"><strong>Im Moment läuft kein Auftrag.</strong>");
         s.push_str(&naechster_abschnitt(z, heute, true));
@@ -1394,7 +1453,8 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
         }
     }
     s.push_str("</div>");
-    if z.auftrag_stand(Art::Update).is_none()
+    if update_sperre.is_none()
+        && z.auftrag_stand(Art::Update).is_none()
         && let Some((sha, _)) = z.update_angebot()
     {
         let _ = write!(
@@ -1405,7 +1465,9 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
             maskiere(crate::rueckfall::kurz(sha))
         );
     }
-    s.push_str(&update_hinweis(z));
+    if update_sperre.is_none() {
+        s.push_str(&update_hinweis(z, None));
+    }
     if let Some(text) = kurssperre {
         s.push_str(text);
     }
@@ -1414,7 +1476,7 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
 
 /// Der Inhalt der Live-Seite (auch `/teil/live`).
 pub fn live(token: &str, start: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
-    live_mit_ki(token, start, z, jetzt, &Aufrufe::default())
+    live_mit_ki(token, start, z, jetzt, &Aufrufe::default(), None)
 }
 
 fn vorbereitung_auf_live(token: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
@@ -1445,11 +1507,12 @@ pub(crate) fn live_mit_ki(
     z: &Zustand,
     jetzt: Zeitpunkt,
     ki: &Aufrufe,
+    update_sperre: Option<UpdateSperre>,
 ) -> String {
     let heute = ortszeit(jetzt).map(|(d, ..)| d);
     let mut s = marke(start);
     s.push_str(&zeitstrahl(z, heute, ki));
-    s.push_str(&taetigkeit(z, heute, ki));
+    s.push_str(&taetigkeit(z, heute, ki, update_sperre));
     s.push_str(&gesamtstatus_teil(token, z, false));
     if z.laufend.is_none()
         && !z.lage_veraltet
@@ -1460,7 +1523,7 @@ pub(crate) fn live_mit_ki(
     {
         diagnose.html(&mut s);
     }
-    s.push_str(&update_hinweis(z));
+    s.push_str(&update_hinweis(z, update_sperre));
     s.push_str("<section id=\"ki-simulation\"><h2>KI-Simulation</h2>");
     s.push_str(&auftrag_knopf(
         token,
@@ -2081,9 +2144,16 @@ fn autostart_knopf(s: &mut String, token: &str, wert: &str, knopf: &str, bestaet
     );
 }
 
-pub(crate) fn update_aktionen(token: &str, start: &str, z: &Zustand) -> String {
+pub(crate) fn update_aktionen(
+    token: &str,
+    start: &str,
+    z: &Zustand,
+    update: UpdateAnzeige<'_>,
+) -> String {
     let mut s = marke(start);
-    s.push_str(&update_hinweis(z));
+    let version = update.version.map_or("unbekannt", crate::rueckfall::kurz);
+    let _ = write!(s, "<p>Laufender Programmstand: {}</p>", maskiere(version));
+    s.push_str(&update_hinweis(z, update.sperre));
     if let Some((fehler, text)) = &z.programm_meldung {
         let _ = write!(
             s,
@@ -2103,6 +2173,9 @@ pub(crate) fn update_aktionen(token: &str, start: &str, z: &Zustand) -> String {
             z.update_angebot().is_none()
         )
     );
+    if update.sperre.is_some() {
+        return s;
+    }
     if let Some(status) = z.auftrag_stand(Art::Update) {
         let _ = write!(
             s,
@@ -2158,7 +2231,14 @@ pub(crate) fn update_aktionen(token: &str, start: &str, z: &Zustand) -> String {
     s
 }
 
-fn update_teil(token: &str, start: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
+fn update_teil(
+    token: &str,
+    start: &str,
+    z: &Zustand,
+    e: &Einrichtung,
+    s: &mut String,
+    update: UpdateAnzeige<'_>,
+) {
     let _ = write!(
         s,
         "<section id=\"update\"><h2>Update</h2>\
@@ -2167,7 +2247,7 @@ fn update_teil(token: &str, start: &str, z: &Zustand, e: &Einrichtung, s: &mut S
          <details><summary>Technische Details</summary><p>Der Dienst prüft die Version aus <code>main</code> \
          in einem eigenen Ordner. Deine Sicherung liegt unter <code>daten/sicherung</code>. \
          Falls der Dienst mit der neuen Version nicht startet, kehrt er zum alten Stand zurück.</p>",
-        update_aktionen(token, start, z)
+        update_aktionen(token, start, z, update)
     );
     match &e.abgelehnt {
         Ok(l) if l.is_empty() => {}
@@ -2306,6 +2386,18 @@ pub fn einrichtung(
     e: &Einrichtung,
     zusatz: &str,
 ) -> String {
+    einrichtung_mit_update(token, start, z, heute, e, zusatz, UpdateAnzeige::default())
+}
+
+pub(crate) fn einrichtung_mit_update(
+    token: &str,
+    start: &str,
+    z: &Zustand,
+    heute: Option<Datum>,
+    e: &Einrichtung,
+    zusatz: &str,
+    update: UpdateAnzeige<'_>,
+) -> String {
     let mut s = String::new();
     if !z.zeitplan.an {
         s.push_str(
@@ -2332,7 +2424,7 @@ pub fn einrichtung(
         quellen_teil(token, start, z, e.alpha_kontingent)
     );
     zeitplan_teil(token, z, e, &mut s);
-    update_teil(token, start, z, e, &mut s);
+    update_teil(token, start, z, e, &mut s, update);
     s.push_str("<section id=\"selten\" class=\"einstellungsgruppe\" aria-labelledby=\"selten-titel\"><h2 id=\"selten-titel\">Seltene Einstellungen</h2><p>Für die erste Einrichtung oder wenn sich etwas ändert: Zugangsdaten, Datenspeicherung, Windows-Start und technische Prüfungen.</p>");
     if z.zeitplan.an {
         s.push_str(&erste_schritte(z, e));

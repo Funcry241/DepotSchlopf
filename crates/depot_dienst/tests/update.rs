@@ -740,6 +740,54 @@ fn programmdatei_aus_der_bauausgabe() {
 }
 
 #[test]
+fn updatesuche_zeigt_warteschlange_und_update_sperre_getrennt() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let t = mittag()?;
+    let mut d = dienst(wurzel.clone());
+    let vorher = "a".repeat(40);
+    let neu = "b".repeat(40);
+    some(Arc::get_mut(&mut d), "Dienst vor dem Update")?.version = Some(vorher.clone());
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(t), "Terminabruf startet")?;
+    d.einreihen(Art::UpdatePruefen, Anlass::Hand)?;
+
+    let normal = get(&d, "/teil/update")?;
+    assert!(normal.contains("Nach Update suchen · wartet"));
+    assert!(!normal.contains("Neustart noch nicht bestätigt"));
+    d.verfolge(nr, kind, || mittag().ok());
+
+    d.sperre().zeitplan.an = true;
+    offen_schreiben(&wurzel, &vorher, &neu)?;
+    assert!(d.schritt(t).is_none(), "Offenes Update sperrt die Suche");
+    for pfad in ["/", "/teil/live", "/einrichtung", "/teil/update"] {
+        let html = get(&d, pfad)?;
+        assert!(html.contains("Neustart noch nicht bestätigt"), "{pfad}");
+        assert!(
+            html.contains("Auch geplante Aufträge wie der Morgenlauf warten"),
+            "{pfad}"
+        );
+    }
+    let update = get(&d, "/teil/update")?;
+    assert!(update.contains("Laufender Programmstand: aaaaaaaaaa"));
+    assert!(!update.contains("Hier erscheint das Ergebnis der Suche."));
+
+    some(Arc::get_mut(&mut d), "Dienst in der Probezeit")?.version = Some(neu);
+    assert!(get(&d, "/teil/update")?.contains("Die neue Version läuft zur Probe."));
+    d.sperre().update_meldung = Some((true, "Probe fehlgeschlagen".into()));
+    let fehlgeschlagen = get(&d, "/teil/update")?;
+    assert!(fehlgeschlagen.contains("Der Start der neuen Version konnte nicht bestätigt werden."));
+    assert!(fehlgeschlagen.contains("Falls es geschlossen ist, starte DepotSchlopf.cmd einmal neu."));
+
+    fs::write(rueckfall::offen_pfad(&wurzel), "unlesbarer Stand").map_err(|e| e.to_string())?;
+    assert!(get(&d, "/teil/live")?.contains("Der offene Update-Stand lässt sich nicht prüfen."));
+    fs::remove_file(rueckfall::offen_pfad(&wurzel)).map_err(|e| e.to_string())?;
+    d.sperre().zeitplan.an = false;
+    assert!(get(&d, "/teil/update")?.contains("Hier erscheint das Ergebnis der Suche."));
+    assert_eq!(lauf_ab(&d, t)?, Art::UpdatePruefen);
+    Ok(())
+}
+
+#[test]
 fn update_abschluss_bleibt_nach_bestaetigung_und_rueckfall_sichtbar() -> Result<(), String> {
     use depot_dienst::aktualisierung::{self, Phase};
     for bestaetigen in [true, false] {
