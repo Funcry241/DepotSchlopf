@@ -1,15 +1,4 @@
 klasse: Funktion
-zweck: Tausch am selben Schluss im Papierkonto: Kauf rechnet Erlös der Verkäufe desselben Plans zum Limit ein und füllt nur nach ihnen (#311 H1b)
+zweck: Verbindungsbalken nach bestätigtem Dienststart automatisch ausblenden
 pfade:
-CHANGELOG.md
-crates/depot_journal/src/konto.rs
-crates/depot_journal/src/stand.rs
-crates/depot_lage/tests/lage.rs
-crates/depot_regelwerk/src/auftrag.rs
-crates/depot_regelwerk/src/entscheidung.rs
-crates/depot_regelwerk/src/lib.rs
-crates/depot_sim/src/ausfuehrung.rs
-crates/depot_sim/src/lauf.rs
-crates/depot_sim/src/papier.rs
-crates/depot_sim/src/papierdatei.rs
-crates/depot_sim/tests/papiertag.rs
+crates/depot_dienst/src/seiten.rs

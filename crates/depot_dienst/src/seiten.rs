@@ -2571,16 +2571,24 @@ pub const APP_JS: &str = r#""use strict";
       var updateBestaetigt = updateWartetSeit !== null;
       updateWartetSeit = null;
       banner.removeAttribute("data-update-wartet");
-      if (updateBestaetigt || (start && neu !== start)) {
+      if (andererStart || updateBestaetigt || (start && neu !== start)) {
+        andererStart = true;
+        var ziel = wiederverbindungsziel();
         if (offen()) {
-          andererStart = true;
           banner.textContent = "DepotSchlopf wurde neu gestartet. Deine ungespeicherten Eingaben stehen noch hier. Prüfe sie vor dem Neuladen. Zum Speichern braucht diese Seite die neue Verbindung.";
+          banner.setAttribute("data-update-wartet", "");
           banner.hidden = false;
-          document.getElementById("neuverbinden-link").href = wiederverbindungsziel();
+          document.getElementById("neuverbinden-link").href = ziel;
           document.getElementById("neuverbinden").hidden = false;
         } else if (!neuladen) {
+          banner.hidden = true;
+          // Derselbe Anker kann bei replace() eine Navigation im selben Dokument sein.
+          if (ziel === window.location.pathname + window.location.search + window.location.hash) {
+            window.location.reload();
+          } else {
+            window.location.replace(ziel);
+          }
           neuladen = true;
-          window.location.replace(wiederverbindungsziel());
         }
       } else {
         start = neu;
@@ -2772,7 +2780,10 @@ mod update_hinweis_tests {
         assert!(APP_JS.contains("jetzt - updateWartetSeit < updateFrist"));
         assert!(APP_JS.contains("Du musst nichts tun"));
         assert!(APP_JS.contains("starte DepotSchlopf.cmd erneut"));
-        assert!(APP_JS.contains("if (updateBestaetigt || (start && neu !== start))"));
-        assert!(APP_JS.contains("window.location.replace(wiederverbindungsziel())"));
+        assert!(
+            APP_JS.contains("if (andererStart || updateBestaetigt || (start && neu !== start))")
+        );
+        assert!(APP_JS.contains("window.location.reload()"));
+        assert!(APP_JS.contains("window.location.replace(ziel)"));
     }
 }
