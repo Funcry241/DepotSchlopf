@@ -213,7 +213,7 @@ jobs:
 
   kodex-windows-update:
     needs: windows-update-filter
-    if: ${{ needs.windows-update-filter.outputs.update == 'true' }}
+    if: ${{ !cancelled() && needs.windows-update-filter.result == 'success' && needs.windows-update-filter.outputs.update == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -290,7 +290,7 @@ jobs:
 
   kodex-pr-nachweis:
     needs: [kodex, kodex-windows, kodex-windows-update]
-    if: github.event_name == 'pull_request' && needs.kodex-windows-update.result == 'success'
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.kodex.result == 'success' && needs.kodex-windows.result == 'success' && needs.kodex-windows-update.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
