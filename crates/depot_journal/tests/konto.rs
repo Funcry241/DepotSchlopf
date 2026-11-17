@@ -399,6 +399,7 @@ fn kauf_mit_stopp(
             kurse: &kurse,
             vorschlag: Some(&vorschlag),
             halt: false,
+            vor_valuta: &[],
         },
         &mut Kennungsvergabe::nach(nach),
     );

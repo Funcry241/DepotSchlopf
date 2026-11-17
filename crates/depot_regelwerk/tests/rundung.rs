@@ -87,6 +87,7 @@ fn lauf(topf: &Topf, kurse: &Kurse, ziele: &[(&str, i64)]) -> Entscheidung {
             kurse,
             vorschlag: Some(&v),
             halt: false,
+            vor_valuta: &[],
         },
         &mut Kennungsvergabe::nach(0),
     )
@@ -102,6 +103,7 @@ fn lauf_ohne(topf: &Topf, kurse: &Kurse) -> Entscheidung {
             kurse,
             vorschlag: None,
             halt: false,
+            vor_valuta: &[],
         },
         &mut Kennungsvergabe::nach(0),
     )

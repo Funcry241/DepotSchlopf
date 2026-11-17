@@ -28,6 +28,9 @@ pub struct Eingabe<'a> {
     /// Kill-Switch, Tagesverlust, Datenfehler oder leeres Budget: Dann gibt es keine
     /// freiwilligen Auftraege. Zwingende Ausstiege laufen weiter (R36).
     pub halt: bool,
+    /// Mit noch nicht abgerechnetem Erloes gekaufte Werte: Vor deren Valuta kein freiwilliger
+    /// Verkauf (#311 H1a, `Stand::vor_valuta`). Zwingende Verkaeufe gehen immer durch.
+    pub vor_valuta: &'a [Isin],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,6 +88,8 @@ pub enum Befund {
         isin: Isin,
         gefragt: Option<i64>,
     },
+    /// Freiwilliger Verkauf vor der Valuta des Erloeses, mit dem der Wert gekauft wurde (#311 H1a).
+    VorValuta(Isin),
     LimitabstandAusserhalb {
         isin: Isin,
         gefragt: i64,
@@ -296,7 +301,8 @@ pub fn entscheide(e: &Eingabe<'_>, vergabe: &mut Kennungsvergabe) -> Entscheidun
 }
 
 /// Plant Käufe mit dem vom Kontowächter berechneten freien Bargeld. Geplante Verkäufe
-/// erhöhen dieses Budget erst nach der Abrechnung.
+/// erhöhen dieses Budget erst nach ihrer Füllung; gefüllte Erlöse zählen schon vor der
+/// Valuta (#311 H1a).
 pub fn entscheide_mit_kaufbudget(
     e: &Eingabe<'_>,
     vergabe: &mut Kennungsvergabe,
@@ -1035,6 +1041,11 @@ fn sammle_kandidaten(
                 anlass: Anlass::Umschichtung,
             }
         };
+        // Mit noch nicht abgerechnetem Erloes gekauft: vor der Valuta kein freiwilliger Verkauf.
+        if k.richtung == Richtung::Verkauf && e.vor_valuta.contains(isin) {
+            befunde.push(Befund::VorValuta(isin.clone()));
+            continue;
+        }
         // Mindestorder am Limit; der Verkauf des ganzen Bestands ist ausgenommen.
         if k.stueck == 0 || (k.volumen(g)? < g.min_order() && !k.komplett) {
             befunde.push(Befund::UnterMindestorder(isin.clone()));
@@ -1112,6 +1123,7 @@ mod tests {
                         kurse: &kurse,
                         vorschlag: None,
                         halt: false,
+                        vor_valuta: &[],
                     };
                     let mut befunde = Vec::new();
                     let kandidaten = sammle_kandidaten(
@@ -1236,6 +1248,7 @@ mod grenzrahmen_tests {
                 kurse: &kurse,
                 vorschlag: Some(&vorschlag),
                 halt: false,
+                vor_valuta: &[],
             },
             &mut Kennungsvergabe::nach(0),
             Cent(100_000),
@@ -1369,6 +1382,7 @@ mod stopp_tests {
                 kurse: &kurse,
                 vorschlag: Some(&vorschlag),
                 halt: false,
+                vor_valuta: &[],
             },
             &mut Kennungsvergabe::nach(0),
         );
@@ -1442,6 +1456,7 @@ mod wiederholung_tests {
                 kurse: &kurse,
                 vorschlag: None,
                 halt,
+                vor_valuta: &[],
             },
             &mut Kennungsvergabe::nach(0),
             Cent(bargeld),
@@ -1482,6 +1497,82 @@ mod wiederholung_tests {
         let e = lauf(1_000_000, 30, true)?;
         assert!(e.kaeufe.is_empty());
         assert!(e.befunde.contains(&Befund::Halt));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod vor_valuta_tests {
+    use super::*;
+    use depot_kern::{Datum, Instrument, InstrumentArt, Kurs, Zeitpunkt};
+
+    /// Topf mit 5.000 € Bargeld und `stueck` SAP zu 101,50 €; die KI will SAP ganz verkaufen.
+    fn lauf(stueck: u64, gesperrt: bool) -> Result<Entscheidung, String> {
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 17).ok_or("Tag")?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let kurs = Kurs::neu(Cent(10_150), "EUR", tag, zeit, Herkunft::Simulation)
+            .map_err(|e| format!("{e:?}"))?;
+        let kurse = Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| format!("{e:?}"))?;
+        let mut topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+        topf.setze_bestand(isin.clone(), stueck);
+        let universum = Universum::neu(vec![Instrument {
+            isin: isin.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        }]);
+        let vorschlag = Vorschlag {
+            erwartung_bp: BTreeMap::new(),
+            limit_bp: BTreeMap::new(),
+            stopp_bp: BTreeMap::new(),
+            berater: BeraterId::Dachs,
+            zielgewichte_bp: BTreeMap::new(),
+            begruendung: BTreeMap::new(),
+        };
+        let sperre = if gesperrt { vec![isin] } else { Vec::new() };
+        Ok(entscheide(
+            &Eingabe {
+                grenzen: &Grenzen::standard(),
+                universum: &universum,
+                topf: &topf,
+                kurse: &kurse,
+                vorschlag: Some(&vorschlag),
+                halt: false,
+                vor_valuta: &sperre,
+            },
+            &mut Kennungsvergabe::nach(0),
+        ))
+    }
+
+    #[test]
+    fn ki_verkauf_ohne_sperre() -> Result<(), String> {
+        let e = lauf(20, false)?;
+        assert_eq!(e.verkaeufe.len(), 1);
+        assert_eq!(
+            e.verkaeufe.first().map(|v| v.beleg().anlass),
+            Some(Anlass::Umschichtung)
+        );
+        Ok(())
+    }
+
+    /// #311 H1a Gegenprobe 2: Ein KI-Verkauf vor der Valuta wird mit `VorValuta` abgelehnt.
+    #[test]
+    fn ki_verkauf_vor_valuta_abgelehnt() -> Result<(), String> {
+        let e = lauf(20, true)?;
+        assert!(e.verkaeufe.is_empty(), "{e:?}");
+        assert!(e.befunde.iter().any(|b| matches!(b, Befund::VorValuta(_))));
+        Ok(())
+    }
+
+    /// Zwingende Verkäufe gehen trotz Sperre durch: 60 Stück sind über 55 % des Topfs.
+    #[test]
+    fn zwingender_abbau_trotz_sperre() -> Result<(), String> {
+        let e = lauf(60, true)?;
+        assert_eq!(
+            e.verkaeufe.first().map(|v| v.beleg().anlass),
+            Some(Anlass::Abbau),
+            "{e:?}"
+        );
         Ok(())
     }
 }

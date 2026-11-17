@@ -272,6 +272,12 @@ fn plan(
             || s.ersatzkauf
             || (lage.topf.positionen().is_empty() && v.zielgewichte_bp.is_empty())
     });
+    let vor_valuta: Vec<_> = j
+        .stand()
+        .vor_valuta(lage.topf.id(), lage.datum)
+        .into_iter()
+        .map(|(isin, _)| isin)
+        .collect();
     let eingabe = Eingabe {
         grenzen,
         universum,
@@ -279,6 +285,7 @@ fn plan(
         kurse: lage.kurse,
         vorschlag: v,
         halt,
+        vor_valuta: &vor_valuta,
     };
     let mut vergabe = Kennungsvergabe::nach(0);
     let entscheidung = if s.ersatzkauf && !halt {

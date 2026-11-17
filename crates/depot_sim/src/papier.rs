@@ -175,19 +175,11 @@ impl Papierkonto {
             .filter(|o| o.status == KontoStatus::Offen)
     }
 
-    fn abgerechnetes_bargeld(&self) -> Option<Cent> {
-        self.abrechnungen
-            .values()
-            .filter(|(valuta, _)| self.abrechnungstag.is_none_or(|tag| *valuta > tag))
-            .try_fold(self.bargeld, |saldo, (_, erloes)| {
-                saldo.checked_sub(*erloes)
-            })
-    }
-
     fn gedeckt(&self, a: &Order) -> Option<bool> {
         match a.richtung {
             Richtung::Kauf => {
-                let mut frei = self.abgerechnetes_bargeld()?;
+                // Gefüllte Erlöse vor Valuta decken Käufe wie beim Bargeldkonto (#311 H1a).
+                let mut frei = self.bargeld;
                 for o in self
                     .offen()
                     .filter(|o| o.auftrag.richtung == Richtung::Kauf)

@@ -133,6 +133,7 @@ fn lauf(
             kurse,
             vorschlag: v,
             halt,
+            vor_valuta: &[],
         },
         &mut Kennungsvergabe::nach(0),
     )
@@ -159,6 +160,7 @@ fn ersatzkauf_halbiert_ziele_und_behaelt_bestand() {
         kurse: &kurse,
         vorschlag: Some(&v),
         halt: false,
+        vor_valuta: &[],
     };
     let plan = |e: &Eingabe<'_>| {
         depot_regelwerk::entscheide_ersatzkauf(e, &mut Kennungsvergabe::nach(0), e.topf.bargeld())
@@ -534,6 +536,7 @@ fn zufallstest_grenzen_am_schlusskurs() {
                 kurse: &kurse,
                 vorschlag: Some(&v),
                 halt: false,
+                vor_valuta: &[],
             },
             &mut Kennungsvergabe::nach(0),
         );

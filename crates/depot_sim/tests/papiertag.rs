@@ -1154,7 +1154,7 @@ fn belege_kurse(j: &mut Journal) -> Result<(), String> {
 }
 
 #[test]
-fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
+fn verkaufserloes_deckt_kauf_vor_der_abrechnung() -> Result<(), String> {
     use depot_journal::Konto;
     use depot_kern::{Grenzen, Kurse};
     use depot_regelwerk::{Eingabe, Kennungsvergabe, entscheide, notbremse_auftraege};
@@ -1196,11 +1196,10 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
         kurse: &kurse,
         vorschlag: Some(&vorschlag),
         halt: false,
+        vor_valuta: &[],
     };
     let kauf = entscheide(&eingabe, &mut vergabe);
     let kauf = some(kauf.kaeufe.first(), "Kaufauftrag")?;
-    let kauf_nach_abrechnung = entscheide(&eingabe, &mut vergabe);
-    let kauf_nach_abrechnung = some(kauf_nach_abrechnung.kaeufe.first(), "Zweiter Kaufauftrag")?;
 
     let start = [start];
     let mut k = Papierdatei::oeffnen(&ort.konto, false, &start)?;
@@ -1209,23 +1208,16 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
     assert_eq!(k.auszug().bargeld, Cent(499_465));
     drop(k);
 
+    // Vor der Valuta (Dienstag, 10.11.) deckt der gefüllte Erlös den Kauf schon (#311 H1a).
     let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
     k.rechne_ab(tag(9)?);
-    assert!(matches!(k.sende(kauf), Sendeantwort::Abgelehnt(_)));
-    k.rechne_ab(tag(10)?);
+    assert_eq!(k.sende(kauf), Sendeantwort::Angenommen);
     assert_eq!(k.stoerung(), None);
-    drop(k);
-
-    let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
-    k.rechne_ab(tag(10)?);
-    assert_eq!(k.auszug().bargeld, Cent(499_465));
-    assert_eq!(k.sende(kauf_nach_abrechnung), Sendeantwort::Angenommen);
     Ok(())
 }
 
 #[test]
-fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() -> Result<(), String>
-{
+fn papiertag_gleicht_abrechnung_ab_und_kauft_mit_erloes_vor_valuta() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let mut a = vorbedingung(Topf::neu(TopfId::A, Cent::NULL), "Topf A")?;
@@ -1278,7 +1270,17 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
             t != 5,
             "Verkaufserloes am Tag {t}"
         );
-        assert_eq!(a.stueck(&allianz) > 0, t == 11, "Kauf am Tag {t}");
+        // Der am Freitag gefüllte Erlös kauft schon vor seiner Valuta (Dienstag); die
+        // Füllung des Kaufs meldet der Montag. Vor #311 H1a kam der Kauf erst am Mittwoch.
+        assert_eq!(a.stueck(&allianz) > 0, t >= 9, "Kauf am Tag {t}");
+        if t == 9 {
+            // Bis zur Valuta am Dienstag kein freiwilliger Verkauf, ab Dienstag wieder.
+            assert_eq!(
+                j.stand().vor_valuta(TopfId::A, datum),
+                vec![(allianz.clone(), tag(10)?)]
+            );
+            assert!(j.stand().vor_valuta(TopfId::A, tag(10)?).is_empty());
+        }
         assert!(
             !j.stand().begruendungen().iter().any(|(d, wer, text)| {
                 *d == datum && wer == "Kontowaechter" && text.contains("keine Deckung")
@@ -1294,7 +1296,7 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
 }
 
 #[test]
-fn papiertag_kuerzt_kauf_bei_gebundenem_verkaufserloes() -> Result<(), String> {
+fn papiertag_kauft_mit_gefuelltem_erloes_vor_valuta() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let mut topf_a = vorbedingung(Topf::neu(TopfId::A, Cent(45_000)), "Topf A")?;
@@ -1334,7 +1336,8 @@ fn papiertag_kuerzt_kauf_bei_gebundenem_verkaufserloes() -> Result<(), String> {
             .find(|l| l.beleg.topf == TopfId::A && l.beleg.isin == allianz);
         assert_eq!(
             kauf.map(|l| (l.beleg.stueck, l.versand.is_some())),
-            (tagnummer == 6).then_some((2, true)),
+            // 450 € Bargeld plus der gefüllte SAP-Erlös: ungekürzt 5 Stück (vor #311 H1a: 2).
+            (tagnummer == 6).then_some((5, true)),
             "{:?}",
             journal.stand().begruendungen()
         );

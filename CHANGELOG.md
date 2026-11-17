@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- **⚠️ Vor dem Einspielen eine geprüfte Sicherung von Journal und Papierkonto anlegen. Kein Rückweg ohne diese Sicherung.** Ein gefüllter Verkaufserlös zählt schon vor seiner Valuta (zwei Xetra-Handelstage) für Käufe, wie beim Bargeldkonto. Was mit diesem Erlös gekauft wird, darf vor dessen Valuta nicht freiwillig verkauft werden (Befund `VorValuta`); Schutz-Stopp, Notbremse, Fristverkauf und Abbau verkaufen immer. Ein Kauf aus abgerechnetem Bargeld sperrt nichts. Spart je Umschichtung bis zu zwei Handelstage (#311 H1a). Sobald ein Kauf mit Erlös vor Valuta im Journal steht, lehnt ein älterer Stand dieses Journal ab („Deckung“).
+
 - Der Analyse-Export zeigt im Nachher-Blick Anlass und Zustand jeder Order, so lassen sich verfallene Kauforders je Anlass nachverfolgen. Neu ist der Abschnitt „Schatten der Vetos“: Was ein von der Zweitmeinung abgelehnter Kauf bis zum Ende des Zeitraums netto gebracht hätte, auch bei halber Größe (#311 M0). Nur lesend.
 
 - Ist eine KI-Kauforder am letzten Schluss verfallen und hat der Topf heute keinen Anlass, wiederholt der Morgenlauf sie einmal ohne neuen KI-Aufruf: gleiche Stückzahl und gleicher Stopp, Limit zum jüngsten Schluss mit dem ursprünglichen Abstand, höchstens 3 % über dem Entschlusskurs. Die Wiederholung läuft durch dieselbe Genehmigung wie ein KI-Kauf. Liegt der Schluss darüber, verfällt die Wiederholung oder verfallen mehrere Kauforders zugleich, wird das zum Anlass und die KI entscheidet neu (#311 H2b). Rückweg ohne Sicherung: keine neue Anlass-Art im Journal.
