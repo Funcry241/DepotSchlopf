@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Kodex-Befunde aufgeteilt (#190, nach C1): `depot_kodex/tests/befunde.rs` ist auf drei Testprogramme verteilt (`befunde.rs`, `befunde_regeln.rs`, `befunde_compiler.rs`, gemeinsame Prüfkopie in `befunde_gemeinsam/mod.rs`), damit das Windows-Gate sie parallel startet. Dieselben 22 Tests, unverändert. Die Festschreibung ändert sich nur im Kodex-Abdruck (Grenzfreigabe Wolfgang 17.11.2026).
+
 - Prompt-Caching und Kostenbuchung (#312, P44): Dachs nutzt für den gemeinsamen Tagesblock den Fünf-Minuten-Cache. Beide Erstmeinungen stehen fest, bevor Dachs und Maus in dieser Reihenfolge die Zweitmeinungen abgeben. Die Abrechnung trennt volle Eingabe, Cache-Schreiben, Cache-Lesen und Ausgabe. Für den großen Aufruf sind höchstens 26 Cent bei Dachs und 13 Cent bei Maus reserviert. Das Monatslimit von 20 € je KI gilt weiter.
 
 - Windows-Kodex (#313, C1): Bis zu vier Cargo-Testprogramme laufen parallel mit eigener temporärer Umgebung, Cargo führt die Doctests separat aus und der Linux-Lauf nutzt weiter den bisherigen Testaufruf.
