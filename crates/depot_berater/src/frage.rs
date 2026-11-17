@@ -455,7 +455,7 @@ gewicht_bp 0. gewicht_bp in Basispunkten (10000 = 100 %), Summe höchstens 10000
 Bargeld. Für Käufe und Zukäufe enthält \"begruendung\" den Kurstreiber, den Zeithorizont, \
 die Positionsgröße und das Ausstiegskriterium. Beginne jede Kaufbegründung mit genau einer Anlassmarke und einem Leerzeichen: [Zahlen], [Notenbank], [Meldung], [Kursbewegung] oder [Sonstiges]. Verwende [Zahlen-Überraschung] statt [Zahlen], wenn für denselben Wert „Zahlen-Überraschung (Kaufanlass)“ belegt ist und du deshalb kaufen willst. Prüfe die Richtung und ob der Impuls nach Kosten noch trägt. Setze direkt danach den Plan im Format [Ausstieg +GEWINNbp HANDELSTAGE], zum Beispiel [Ausstieg +800bp 10]. Gib bei einem Kauf den erwarteten Kursgewinn zusätzlich als erwartung_bp im Ziel an (400 entspricht +4 %). Begründe, warum er die Gebührenhürde für die geplante Kaufgröße übersteigt. Willst du Bargeld behalten oder sonst nichts ändern, setze \"ziele\": null. Nur wenn du den gesamten Bestand ausdrücklich verkaufen willst, setze \"ziele\": [] und nenne den Grund in \"verkaufsgrund\".\n\
 Optional kannst du Bargeld parken, auch mit \"ziele\": null: \"parkwert\": {{\"isin\": \"ETF der Liste\", \"reserve_bp\": 1000, \"naechster_kauf_tage\": 5, \"begruendung\": \"...\"}}. Bargeld über der Reserve (Anteil am Topfwert) geht dann in diesen ETF, höchstens 40 % des Topfs; er zählt nicht gegen die Zahl der Werte. Das Regelwerk parkt nur, wenn naechster_kauf_tage mindestens 5 ist (frühester erwarteter anderer Kauf in Handelstagen), und erst ab 1.000 € Zukauf, weil sich die Gebühren sonst nicht lohnen. Hältst du einen Parkwert, nenne ihn bei jedem Vorschlag wieder als parkwert: Dann verkleinert das Regelwerk ihn zuerst, wenn andere Ziele das Bargeld brauchen. Ohne parkwert bleibt er wie jeder nicht genannte Wert unverändert.\n\
-Wenn du eine Position mit abgelaufener Frist weiter hältst, nenne die ISIN mit aktueller Begründung im Feld \"halten\": [{{\"isin\":\"…\",\"begruendung\":\"…\"}}]. Bei Verkauf setze ihr gewicht_bp auf 0. Für fällige Positionen ohne Haltebegründung wird ein Verkauf geprüft. Wenn du den in der Frage genannten Mindesteinsatz unterschreitest, nenne den Grund im JSON-Feld \"unter_mindesteinsatz\".\n\
+Wenn du eine Position mit abgelaufener Frist weiter hältst, nenne die ISIN mit aktueller Begründung im Feld \"halten\": [{{\"isin\":\"…\",\"begruendung\":\"…\"}}]. Bei Verkauf setze ihr gewicht_bp auf 0. Für fällige Positionen ohne Haltebegründung wird ein Verkauf geprüft. Gib immer das Feld \"unter_mindesteinsatz\" an: den Grund, wenn dein Vorschlag den in der Frage genannten Mindesteinsatz unterschreitet, sonst null. Es gibt keine Nachfrage.\n\
 Zusätzlich kannst du getrennt vom Handel eine nachprüfbare Weltprognose abgeben. Füge dazu \n\
 das Feld \"prognose\": {{\"ereignis_nr\": 1, \"isin\": \"...\", \"richtung\": \"steigt\", \n\
 \"handelstage\": 3, \"begruendung\": \"konkrete Wirkung\", \"widerlegung\": \"was würde dich widerlegen?\"}} hinzu. \n\
@@ -509,7 +509,11 @@ pub fn urteil_frage(
 Aufgabe: Prüfe den Vorschlag als Zweitmeinung. Prüfe bei Käufen besonders den kurzfristigen \
 Kurstreiber, den Vorteil nach Gebühren, die Positionsgröße und den Stoppabstand. Stimme nur zu, wenn der Vorschlag \
 aus der beobachteten Lage begründet ist. Antworte mit:\n\
-{{\"zustimmung\": true oder false, \"begruendung\": \"...\"}}",
+{{\"zustimmung\": true oder false, \"abgelehnt\": [\"ISIN\"], \"begruendung\": \"...\"}}\n\
+Lehnst du nur einzelne Werte ab, setze zustimmung auf false und nenne genau diese ISINs aus dem \
+Vorschlag in abgelehnt; die übrigen Werte gelten dann als geprüft und zugestimmt, abgelehnte \
+gehaltene Werte bleiben unverändert. Ohne abgelehnt gilt ein false für den ganzen Vorschlag. \
+Bei Zustimmung lass abgelehnt weg.",
         lage_text(lage, universum, bilanz),
         name(v.berater)
     )
@@ -737,11 +741,34 @@ pub fn lies_urteil(text: &str) -> Result<Urteil, String> {
         .feld("zustimmung")
         .and_then(Json::wahr)
         .ok_or("Feld zustimmung fehlt oder ist nicht true/false")?;
+    let feld = w.feld("abgelehnt").filter(|f| !matches!(f, Json::Null));
+    // Ein Ja mit Ablehnungsliste widerspricht sich und gilt als Veto gegen alles (#311 H4).
+    let leer = feld.is_some_and(|f| f.liste().is_some_and(<[Json]>::is_empty));
+    let (zustimmung, abgelehnt) = if zustimmung && feld.is_some() && !leer {
+        (false, Some(Vec::new()))
+    } else {
+        (zustimmung, feld.map(abgelehnte_werte))
+    };
     Ok(Urteil {
         verwertbar: true,
         zustimmung,
         begruendung: text_feld(&w, "begruendung")?,
+        abgelehnt,
     })
+}
+
+/// Das Feld `abgelehnt` einer Zweitmeinung. Ist es keine Liste von ISINs, wird es leer: Ein Nein
+/// gilt dann für den ganzen Vorschlag. Das ist kein Formfehler, sonst zählte das Urteil als
+/// technischer Ausfall und gäbe den Ersatzkauf frei.
+fn abgelehnte_werte(feld: &Json) -> Vec<depot_kern::Isin> {
+    feld.liste()
+        .and_then(|werte| {
+            werte
+                .iter()
+                .map(|w| w.text().and_then(|t| depot_kern::Isin::neu(t).ok()))
+                .collect::<Option<Vec<_>>>()
+        })
+        .unwrap_or_default()
 }
 
 fn abstimmungs_ziele(vorschlag: Option<&Vorschlag>) -> String {

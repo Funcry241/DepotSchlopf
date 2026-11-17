@@ -1,7 +1,7 @@
 //! Veto je Wert (#311 H4, P43): Die Zweitmeinung kann einzelne Werte eines Vorschlags ablehnen.
 //!
-//! Vorarbeit bis P35 auf `main` ist: die reine Regel mit ihren Gegenproben. Eingebunden wird sie
-//! erst mit P43, zusammen mit dem Feld `abgelehnt` im Urteil.
+//! Eingebunden in `lauf::zweite_meinung` über das Feld `Urteil::abgelehnt`. Ein Teilveto lässt
+//! den ersten und den gültigen Vorschlag auseinanderfallen, also startet es die Abstimmung (P35).
 //!
 //! Regel: Nur ein ausdrückliches `true` ist Zustimmung. Ein Nein mit einer gültigen Liste
 //! abgelehnter Werte streicht genau diese Werte; alle übrigen bleiben unverändert. Fehlt die

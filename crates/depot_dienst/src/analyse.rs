@@ -884,6 +884,7 @@ fn journalpaket(
                         .unwrap_or_default(),
                     zeitraum,
                 )
+                + &depot_lage::belegauswahl::bericht(stand, zeitraum.von, zeitraum.bis)
                 + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege)
                 + &nachher.bericht;
             Journalpaket {

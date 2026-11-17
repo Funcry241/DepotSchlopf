@@ -320,6 +320,7 @@ fn spieler(wer: BeraterId, zuege: Vec<Zug>) -> Result<Spieler, String> {
             verwertbar: true,
             zustimmung: wer != BeraterId::Maus,
             begruendung: format!("Zweitmeinung {wer:?}"),
+            abgelehnt: None,
         },
     );
     Ok(Spieler {
