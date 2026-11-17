@@ -11,6 +11,12 @@ const SCHREIBSPERRE: &str = ".schreibsperre";
 const MAX_DATEI: u64 = 8 * 1024 * 1024;
 const MAX_ZEILE: usize = 512 * 1024;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CacheToken {
+    pub geschrieben: u64,
+    pub gelesen: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Gespraech {
     pub zeit: Zeitpunkt,
@@ -23,6 +29,7 @@ pub struct Gespraech {
     pub http: Option<u16>,
     pub token_ein: Option<u64>,
     pub token_aus: Option<u64>,
+    pub cache: Option<CacheToken>,
     pub buchung: Option<usize>,
     pub schlopfmodell: Option<Zeitpunkt>,
     pub kosten_cent: Option<u64>,
@@ -43,7 +50,7 @@ fn text(t: Option<&str>) -> String {
 impl Gespraech {
     fn zeile(&self) -> String {
         format!(
-            "{{\"v\":1,\"zeit\":{},\"lauf\":{},\"wer\":{},\"rolle\":{},\"modell\":{},\"zweck\":{},\"ergebnis\":{},\"http\":{},\"token_ein\":{},\"token_aus\":{},\"buchung\":{},\"schlopfmodell\":{},\"kosten_cent\":{},\"system\":{},\"frage\":{},\"antwort\":{},\"fehler\":{}}}",
+            "{{\"v\":1,\"zeit\":{},\"lauf\":{},\"wer\":{},\"rolle\":{},\"modell\":{},\"zweck\":{},\"ergebnis\":{},\"http\":{},\"token_ein\":{},\"token_aus\":{},\"cache_geschrieben\":{},\"cache_gelesen\":{},\"buchung\":{},\"schlopfmodell\":{},\"kosten_cent\":{},\"system\":{},\"frage\":{},\"antwort\":{},\"fehler\":{}}}",
             zitiere(&self.zeit.to_string()),
             zitiere(&self.lauf),
             zitiere(&self.wer),
@@ -54,6 +61,8 @@ impl Gespraech {
             zahl(self.http),
             zahl(self.token_ein),
             zahl(self.token_aus),
+            zahl(self.cache.map(|c| c.geschrieben)),
+            zahl(self.cache.map(|c| c.gelesen)),
             zahl(self.buchung),
             zahl(self.schlopfmodell.map(Zeitpunkt::sekunden)),
             zahl(self.kosten_cent),
@@ -78,6 +87,21 @@ impl Gespraech {
             Json::Null => Some(None),
             wert => Some(Some(wert.anzahl()?)),
         };
+        let cache_zahl = |name| match j.feld(name) {
+            None | Some(Json::Null) => Some(None),
+            Some(wert) => Some(Some(wert.anzahl()?)),
+        };
+        let cache = match (
+            cache_zahl("cache_geschrieben")?,
+            cache_zahl("cache_gelesen")?,
+        ) {
+            (Some(geschrieben), Some(gelesen)) => Some(CacheToken {
+                geschrieben,
+                gelesen,
+            }),
+            (None, None) => None,
+            _ => return None,
+        };
         let rolle = t("rolle")?;
         if !matches!(rolle, "haupt" | "zusatz") {
             return None;
@@ -96,6 +120,7 @@ impl Gespraech {
             },
             token_ein: n("token_ein")?,
             token_aus: n("token_aus")?,
+            cache,
             buchung: match j.feld("buchung") {
                 None | Some(Json::Null) => None,
                 Some(wert) => Some(usize::try_from(wert.anzahl()?).ok()?),
@@ -456,6 +481,10 @@ mod tests {
                 http: None,
                 token_ein: None,
                 token_aus: None,
+                cache: Some(CacheToken {
+                    geschrieben: 12,
+                    gelesen: 0,
+                }),
                 buchung: Some(7),
                 schlopfmodell: None,
                 kosten_cent: Some(3),
@@ -464,8 +493,13 @@ mod tests {
                 antwort: None,
                 fehler: None,
             };
-            let alt = eintrag.zeile().replace("\"buchung\":7,", "");
-            assert!(Gespraech::lies(&alt).is_some_and(|e| e.buchung.is_none()));
+            let alt = eintrag
+                .zeile()
+                .replace("\"cache_geschrieben\":12,\"cache_gelesen\":0,", "")
+                .replace("\"buchung\":7,", "");
+            assert!(
+                Gespraech::lies(&alt).is_some_and(|e| e.buchung.is_none() && e.cache.is_none())
+            );
             anhaengen(&daten, &eintrag)?;
             let sperre = sperre_schreiber(&daten)?;
             let mut f = OpenOptions::new().append(true).open(datei(&daten, tag))?;

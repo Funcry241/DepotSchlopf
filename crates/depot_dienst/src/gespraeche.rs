@@ -613,6 +613,7 @@ mod tests {
                 http: None,
                 token_ein: None,
                 token_aus: None,
+                cache: None,
                 buchung: Some(7),
                 schlopfmodell: None,
                 kosten_cent: Some(3),
