@@ -78,6 +78,7 @@ fn lauf(topf: &Topf, kurse: &Kurse, ziele: &[(&str, i64)]) -> Entscheidung {
         berater: BeraterId::Dachs,
         zielgewichte_bp: ziele.iter().map(|(i, g)| (isin(i), *g)).collect(),
         begruendung: BTreeMap::new(),
+        belege: std::collections::BTreeMap::new(),
         park: None,
     };
     entscheide(

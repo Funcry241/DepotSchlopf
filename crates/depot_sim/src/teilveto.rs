@@ -46,6 +46,7 @@ pub fn urteilsfolge(v: &Vorschlag, zustimmung: bool, abgelehnt: Option<&[Isin]>)
         rest.stopp_bp.remove(isin);
         rest.erwartung_bp.remove(isin);
         rest.begruendung.remove(isin);
+        rest.belege.remove(isin);
         if rest.park.as_ref().is_some_and(|p| &p.isin == isin) {
             rest.park = None;
         }
@@ -85,12 +86,14 @@ mod tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp: BTreeMap::new(),
             begruendung: BTreeMap::new(),
+            belege: BTreeMap::new(),
             park: None,
         };
         for s in [A, B, C] {
             v.zielgewichte_bp.insert(isin(s)?, 2_000);
             v.stopp_bp.insert(isin(s)?, 500);
             v.begruendung.insert(isin(s)?, "beobachtet".into());
+            v.belege.insert(isin(s)?, vec![1]);
         }
         Ok(v)
     }
@@ -112,7 +115,9 @@ mod tests {
         erwartet.zielgewichte_bp.remove(&isin(C)?);
         erwartet.stopp_bp.remove(&isin(C)?);
         erwartet.begruendung.remove(&isin(C)?);
+        erwartet.belege.remove(&isin(C)?);
         assert_eq!(*rest, erwartet);
+        assert!(!rest.belege.contains_key(&isin(C)?));
         Ok(())
     }
 

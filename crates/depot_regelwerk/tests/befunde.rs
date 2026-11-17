@@ -128,6 +128,7 @@ fn vorschlag(berater: BeraterId, gewichte: &[(usize, i64)]) -> Vorschlag {
         berater,
         zielgewichte_bp: gewichte.iter().map(|(i, g)| (isin(*i), *g)).collect(),
         begruendung: BTreeMap::new(),
+        belege: std::collections::BTreeMap::new(),
         park: None,
     }
 }

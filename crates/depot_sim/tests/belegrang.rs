@@ -7,10 +7,76 @@ use std::fs;
 use depot_journal::{Journal, KursBeleg, PrognoseBeleg, Prognoserichtung, Weltprognose};
 use depot_kern::liste::{als_universum, beobachtungsliste};
 use depot_kern::{BeraterId, Datum, Herkunft, Isin, Kurs, Preis, Zeitpunkt};
-use depot_sim::belegrang::{Grundrang, Heute, Messung, kandidaten_am, messe, thesen_vor};
+use depot_sim::belegrang::{
+    Grundrang, Heute, KAUFBELEG, Kaufbeleg, Messung, kandidaten_am, kaufbelege, messe, thesen_vor,
+};
 
 fn tag(t: u8) -> Result<Datum, String> {
     Datum::neu(2026, 11, t).ok_or_else(|| format!("Tag {t}"))
+}
+
+fn journal(name: &str) -> Result<(std::path::PathBuf, Journal), String> {
+    let dir = std::env::temp_dir().join(format!("depot_{name}_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let pfad = dir.join("journal.txt");
+    Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+    let j = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+    Ok((dir, j))
+}
+
+/// Gegenprobe Beleg↔These (#325): Ein Kauf nennt die Ereignisse 2 und 4 des Tages. Die
+/// heutige Reihenfolge zeigt Nr. 2 unter den ersten drei, der Grundrang wegen der SAP-These
+/// Nr. 4. Fremde oder kaputte Kaufbelegzeilen entfallen beim Lesen, ohne Fehler.
+#[test]
+fn kaufbelege_zaehlen_in_der_messung() -> Result<(), String> {
+    let (dir, mut j) = journal("kaufbeleg")?;
+    let universum = als_universum(&beobachtungsliste()?);
+    j.begruende(
+        tag(13)?,
+        "Dachs",
+        "Topf A: DE0007164600 2000 bp: Auftragslage",
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    for text in [
+        "Gold",
+        "Autobauer",
+        "Öl",
+        "Zinsen",
+        "SAP hebt die Prognose an",
+    ] {
+        j.beobachte(tag(16)?, text).map_err(|e| format!("{e:?}"))?;
+    }
+    for (wer, text) in [
+        (KAUFBELEG, "7 Dachs 5"),
+        (KAUFBELEG, "8 Maus 0"),
+        (KAUFBELEG, "9 Igel 1"),
+        (KAUFBELEG, "x Maus 1"),
+        (KAUFBELEG, "10 Maus 1 mehr"),
+        ("Kaufthese", "11 Maus 1"),
+    ] {
+        j.begruende(tag(16)?, wer, text)
+            .map_err(|e| format!("{e:?}"))?;
+    }
+    assert_eq!(
+        kaufbelege(j.stand()),
+        vec![Kaufbeleg {
+            datum: tag(16)?,
+            auftrag: 7,
+            berater: BeraterId::Dachs,
+            nummern: vec![5],
+        }]
+    );
+    let woche = tag(16)?..=tag(20)?;
+    let kauf = |kauf_unter_drei| Messung {
+        kauf_faelle: 1,
+        kauf_unter_drei,
+        ..Messung::default()
+    };
+    assert_eq!(messe(j.stand(), &universum, &Heute, woche.clone()), kauf(0));
+    assert_eq!(messe(j.stand(), &universum, &Grundrang, woche), kauf(1));
+    drop(j);
+    fs::remove_dir_all(&dir).map_err(|e| e.to_string())
 }
 
 #[test]
@@ -76,6 +142,7 @@ fn grundrang_findet_den_beleg_zur_these() -> Result<(), String> {
     let alle = |unter_drei| Messung {
         faelle: 1,
         unter_drei,
+        ..Messung::default()
     };
     let woche = tag(16)?..=tag(20)?;
     assert_eq!(messe(j.stand(), &universum, &Heute, woche.clone()), alle(0));

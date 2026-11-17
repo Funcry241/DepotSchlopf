@@ -121,6 +121,8 @@ pub struct Vorschlag {
     pub limit_bp: BTreeMap<Isin, i64>,
     pub stopp_bp: BTreeMap<Isin, i64>,
     pub begruendung: BTreeMap<Isin, String>,
+    /// Nummern der Lage-Ereignisse, auf die sich ein Kauf stützt (#325, Beleg↔These).
+    pub belege: BTreeMap<Isin, Vec<usize>>,
     /// Wunsch, Bargeld über einer Reserve in einen ETF zu parken (#311 H3).
     pub park: Option<Parkwunsch>,
 }
