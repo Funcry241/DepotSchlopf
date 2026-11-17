@@ -258,6 +258,12 @@ fn datum_text(d: Datum) -> String {
 
 /// Die zum Wissensstichtag bekannten Termine und Nachrichten eines Papiertags.
 pub fn weltbelege_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
+    let mut aus = termine_am(stand, handelstag, wissen_bis);
+    aus.extend(nachrichten(stand, handelstag, wissen_bis));
+    aus
+}
+
+fn termine_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
     let Some(von) = tagesbeginn(handelstag) else {
         return Vec::new();
     };
@@ -290,14 +296,17 @@ pub fn weltbelege_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) ->
         })
         .collect();
     aus.sort();
-    let mut aus: Vec<String> = aus.into_iter().map(|(_, t)| t).collect();
-    aus.extend(nachrichten(stand, handelstag, wissen_bis));
-    aus
+    aus.into_iter().map(|(_, t)| t).collect()
 }
 
 /// Quellenbelege plus vorher fixierte Hypothesen; diese sind ausdruecklich keine Fakten.
+///
+/// Reihenfolge (#312-4, P40): Termine, Wochenlehren, frühere Hypothesen, dann Nachrichten. Die
+/// Frage kürzt am Ende, wenn der Platz nicht reicht; bezahlte Vorarbeit kommt so immer an. Das
+/// Journal vermerkt die Beobachtungen in derselben Reihenfolge, Ereignis- und Belegnummern
+/// bleiben damit gleich.
 pub fn weltlage_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
-    let mut aus = weltbelege_am(stand, handelstag, wissen_bis);
+    let mut aus = termine_am(stand, handelstag, wissen_bis);
     aus.extend(crate::wochenrueckschau::sichtbare_lehren(stand, handelstag));
     for p in stand
         .vorbereitungen()
@@ -335,6 +344,7 @@ pub fn weltlage_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> V
             }
         }
     }
+    aus.extend(nachrichten(stand, handelstag, wissen_bis));
     aus
 }
 

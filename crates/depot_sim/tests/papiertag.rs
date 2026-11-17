@@ -1117,6 +1117,12 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
         n.last().map(|t| t.as_str()),
         Some("Nachricht 04.11.2026 05:30 UTC (alphavantage-news): gestern 11")
     );
+    // Gegenprobe P40/#325: Die Frage nummeriert die Ereignisse in derselben Reihenfolge, in
+    // der das Journal sie vermerkt. Beleg- und Ereignisnummern zeigen also auf denselben Text.
+    assert_eq!(
+        depot_sim::belegrang::kandidaten_am(j.stand(), tag(5)?),
+        dachs.gesehen
+    );
     assert!(!dachs.gesehen.iter().any(|t| t.contains("zu alt")));
     assert!(!dachs.gesehen.iter().any(|t| t.contains("Nachtrag")));
     assert!(
