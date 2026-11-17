@@ -141,6 +141,11 @@ def hole_export():
     stand = os.environ["GITHUB_SHA"]
     if ereignis["after"] != stand or befehl("git", "rev-parse", "HEAD") != stand:
         return
+    # Ein geänderter Cache-Pfad braucht zunächst einen vollständigen Lauf auf main.
+    cache_grundlage = (".github/scripts/kodex_baucache.ps1", "Cargo.lock", "rust-toolchain.toml")
+    if befehl("git", "diff", "--name-only", ereignis["before"], stand, "--", *cache_grundlage):
+        print("Windows-Bau-Cache initialisieren: reguläre Prüfungen laufen.")
+        return
     lauf = finde_lauf(
         api, repo, ereignis["repository"]["id"], git_baum(stand), git_baum(ereignis["before"])
     )
