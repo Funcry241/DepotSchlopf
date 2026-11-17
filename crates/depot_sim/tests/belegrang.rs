@@ -103,9 +103,17 @@ fn grundrang_findet_den_beleg_zur_these() -> Result<(), String> {
         "Ölpreis steigt",
         "SAP hebt die Jahresprognose an",
     ];
+    j.beobachte(tag(16)?, "Tiingo-Normalisierung: Kurs gerundet")
+        .map_err(|e| format!("{e:?}"))?;
     for text in gesehen {
         j.beobachte(tag(16)?, text).map_err(|e| format!("{e:?}"))?;
     }
+    j.begruende(tag(16)?, "Frageliste", "1 4")
+        .map_err(|e| format!("{e:?}"))?;
+    j.begruende(tag(16)?, KAUFBELEG, "7 Dachs 5")
+        .map_err(|e| format!("{e:?}"))?;
+    j.beobachte(tag(16)?, "Spätere Beobachtung")
+        .map_err(|e| format!("{e:?}"))?;
     assert_eq!(kandidaten_am(j.stand(), tag(16)?), gesehen);
     let ereignis = gesehen[3].to_string();
     let schluss = Zeitpunkt::frankfurt(tag(16)?, 17, 35, 0).ok_or("Schluss")?;
@@ -125,7 +133,7 @@ fn grundrang_findet_den_beleg_zur_these() -> Result<(), String> {
             isin: sap.clone(),
             richtung: Prognoserichtung::Steigt,
             handelstage: 3,
-            ereignis_nr: 4,
+            ereignis_nr: 5,
             begruendung: "Prognose angehoben".into(),
             widerlegung: "Kurs fällt trotzdem".into(),
         },
@@ -142,7 +150,8 @@ fn grundrang_findet_den_beleg_zur_these() -> Result<(), String> {
     let alle = |unter_drei| Messung {
         faelle: 1,
         unter_drei,
-        ..Messung::default()
+        kauf_faelle: 1,
+        kauf_unter_drei: unter_drei,
     };
     let woche = tag(16)?..=tag(20)?;
     assert_eq!(messe(j.stand(), &universum, &Heute, woche.clone()), alle(0));

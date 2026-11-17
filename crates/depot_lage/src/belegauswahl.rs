@@ -4,11 +4,13 @@
 //! unter den ersten drei steht. Heute zeigt die Frage die Belege in fester Reihenfolge; der
 //! Grundrang ist der Maßstab für jeden späteren Sortierer. Nur lesend.
 
-use std::fmt::Write as _;
+use std::{collections::BTreeMap, fmt::Write as _};
 
 use depot_journal::Stand;
 use depot_kern::Datum;
-use depot_sim::belegrang::{Grundrang, Heute, Sortierer, messe};
+use depot_sim::belegrang::{
+    Grundrang, Heute, Sortierer, hat_fragebeleg, kandidatenanzahl, kaufbelege, messe,
+};
 
 pub fn bericht(stand: &Stand, von: Datum, bis: Datum) -> String {
     let mut text = String::from(
@@ -32,7 +34,68 @@ pub fn bericht(stand: &Stand, von: Datum, bis: Datum) -> String {
             quote(m.kauf_unter_drei, m.kauf_faelle)
         );
     }
+    datenbasis(&mut text, stand, von, bis);
     text
+}
+
+#[derive(Default)]
+struct Tagesbasis {
+    kandidaten: usize,
+    prognosen: usize,
+    kaeufe: usize,
+}
+
+/// Zählt Fälle mit mindestens einer auflösbaren Verknüpfung. Ein genannter Beleg
+/// ist ein Hinweis auf Relevanz. Die übrigen Kandidaten bleiben unbewertet.
+fn datenbasis(text: &mut String, stand: &Stand, von: Datum, bis: Datum) {
+    let zeitraum = von..=bis;
+    let mut tage = BTreeMap::<Datum, Tagesbasis>::new();
+    for (tag, _) in stand.beobachtungen() {
+        if zeitraum.contains(tag) {
+            tage.entry(*tag).or_default();
+        }
+    }
+    for (tag, basis) in &mut tage {
+        basis.kandidaten = kandidatenanzahl(stand, *tag);
+    }
+    for p in stand.weltprognosen() {
+        if let Some(tag) = tage.get_mut(&p.datum)
+            && hat_fragebeleg(stand, p.datum, &[p.prognose.ereignis_nr])
+        {
+            tag.prognosen = tag.prognosen.saturating_add(1);
+        }
+    }
+    for kauf in kaufbelege(stand) {
+        if let Some(tag) = tage.get_mut(&kauf.datum)
+            && hat_fragebeleg(stand, kauf.datum, &kauf.nummern)
+        {
+            tag.kaeufe = tag.kaeufe.saturating_add(1);
+        }
+    }
+    text.push_str("\n#### Datenbasis für NeuroSchlopf\n\nEin genannter Beleg ist ein Hinweis auf Relevanz. Kandidaten ohne Bewertung bleiben unbewertet. Die Tabelle zeigt Fälle mit mindestens einer auflösbaren Belegnummer. Bei Altständen ohne Frageabschnitt gilt die vollständige Beobachtungsliste des Tages.\n\n");
+    if tage.is_empty() {
+        text.push_str("Im Zeitraum sind keine Kandidaten im Journal belegt.\n");
+        return;
+    }
+    let tage_mit_verknuepfung = tage
+        .values()
+        .filter(|t| t.prognosen != 0 || t.kaeufe != 0)
+        .count();
+    let _ = writeln!(
+        text,
+        "**Tage mit verknüpften Belegen: {tage_mit_verknuepfung} von {} Tagen mit Kandidaten.**\n",
+        tage.len()
+    );
+    text.push_str(
+        "| Tag | Kandidaten | Prognosen mit Beleg | Käufe mit Beleg |\n|---|---:|---:|---:|\n",
+    );
+    for (tag, t) in tage {
+        let _ = writeln!(
+            text,
+            "| {tag} | {} | {} | {} |",
+            t.kandidaten, t.prognosen, t.kaeufe
+        );
+    }
 }
 
 fn quote(treffer: u64, faelle: u64) -> String {
@@ -56,6 +119,40 @@ mod tests {
             "{t}"
         );
         assert!(t.contains("| Grundrang | 0 | 0 | – | 0 | 0 | – |"), "{t}");
+        assert!(
+            t.contains("Im Zeitraum sind keine Kandidaten im Journal belegt."),
+            "{t}"
+        );
         Ok(())
+    }
+    #[test]
+    fn datenbasis_zaehlt_nur_aufloesbare_verknuepfungen_im_zeitraum() -> Result<(), String> {
+        let dir = std::env::temp_dir().join(format!("depot_belegauswahl_{}", std::process::id()));
+        std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
+        let ergebnis = (|| {
+            let tag = Datum::neu(2026, 11, 16).ok_or("Datum")?;
+            let danach = tag.plus_tage(1).ok_or("Folgetag")?;
+            let ausserhalb = danach.plus_tage(1).ok_or("Dritter Tag")?;
+            let pfad = dir.join("journal.txt");
+            let fehler = |e| format!("{e:?}");
+            depot_journal::Journal::einrichten(&pfad).map_err(fehler)?;
+            let mut j = depot_journal::Journal::oeffnen(&pfad).map_err(fehler)?;
+            j.beobachte(tag, "Erster Kandidat").map_err(fehler)?;
+            j.beobachte(tag, "Zweiter Kandidat").map_err(fehler)?;
+            j.begruende(tag, depot_sim::belegrang::KAUFBELEG, "1 Dachs 2")
+                .map_err(fehler)?;
+            j.begruende(tag, depot_sim::belegrang::KAUFBELEG, "2 Maus 3")
+                .map_err(fehler)?;
+            j.beobachte(danach, "Ohne Bewertung").map_err(fehler)?;
+            j.beobachte(ausserhalb, "Außerhalb").map_err(fehler)?;
+            let t = bericht(j.stand(), tag, danach);
+            assert!(t.contains("Tage mit verknüpften Belegen: 1 von 2"), "{t}");
+            assert!(t.contains("| 2026-11-16 | 2 | 0 | 1 |"), "{t}");
+            assert!(t.contains("| 2026-11-17 | 1 | 0 | 0 |"), "{t}");
+            assert!(!t.contains("| 2026-11-18 |"), "{t}");
+            Ok(())
+        })();
+        std::fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
+        ergebnis
     }
 }

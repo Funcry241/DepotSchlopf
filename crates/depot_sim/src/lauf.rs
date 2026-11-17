@@ -447,6 +447,24 @@ pub(crate) struct Zyklus<'a> {
     pub(crate) bewertung: &'a Kurse,
 }
 
+fn belege_frageliste(j: &mut Journal, tag: &Tag) -> Result<(), LaufFehler> {
+    let beginn = j
+        .stand()
+        .beobachtungen()
+        .iter()
+        .filter(|(datum, _)| *datum == tag.datum)
+        .count();
+    for ereignis in &tag.ereignisse {
+        j.beobachte(tag.datum, &sauber(ereignis)).map_err(journal)?;
+    }
+    begruende(
+        j,
+        tag,
+        crate::belegrang::FRAGELISTE,
+        &format!("{beginn} {}", tag.ereignisse.len()),
+    )
+}
+
 /// Ein Tag. Liefert den Hoechststand nach dem Tag.
 pub(crate) fn ein_tag(
     jr: &mut Journal,
@@ -456,10 +474,7 @@ pub(crate) fn ein_tag(
     beteiligte: &mut Beteiligte<'_, '_, '_>,
 ) -> Result<Cent, LaufFehler> {
     let tag = z.tag;
-    for ereignis in &tag.ereignisse {
-        jr.beobachte(tag.datum, &sauber(ereignis))
-            .map_err(journal)?;
-    }
+    belege_frageliste(jr, tag)?;
     jr.beginne_abrechnung(tag.datum).map_err(journal)?;
     kontowaechter(jr, tag, &*beteiligte.konto)?;
     beteiligte.konto.rechne_ab(tag.datum);
@@ -1058,21 +1073,31 @@ fn belege_prognose(
     j: &mut Journal,
     lage: &Lage<'_>,
     berater: BeraterId,
-    prognose: Weltprognose,
+    mut prognose: Weltprognose,
 ) -> Result<(), LaufFehler> {
     let ereignis = prognose
         .ereignis_nr
         .checked_sub(1)
-        .and_then(|nr| lage.ereignisse.get(nr));
-    if let (Some(ereignis), Some(ausgangskurs)) = (ereignis, lage.kurse.kurs(&prognose.isin))
+        .and_then(|i| lage.ereignisse.get(i).map(|text| (i, sauber(text))));
+    if let (Some((index, ereignis)), Some(ausgangskurs)) =
+        (ereignis, lage.kurse.kurs(&prognose.isin))
         && prognose.gueltig()
     {
+        let Some(nr) = crate::belegrang::journalnummer(j.stand(), lage.datum, index, &ereignis)
+        else {
+            return j.begruende(
+                lage.datum,
+                name(berater),
+                "Prognose verworfen: Weltprognose: Ereignisnummer und Ereignistext passen nicht zum Journalbeleg des Prognosetags",
+            ).map_err(journal);
+        };
+        prognose.ereignis_nr = nr;
         match j.belege_weltprognose(&PrognoseBeleg {
             datum: lage.datum,
             berater,
             prognose,
             ausgangskurs,
-            ereignis: sauber(ereignis),
+            ereignis,
         }) {
             Ok(()) => {}
             Err(JournalFehler::Abgelehnt(grund)) => j
@@ -1831,16 +1856,14 @@ fn belege_kaufbelege(
     wer: BeraterId,
     nummern: &[usize],
 ) -> Result<(), LaufFehler> {
-    let heute = j
-        .stand()
-        .beobachtungen()
-        .iter()
-        .filter(|(d, _)| *d == tag.datum)
-        .count();
     let gueltig: Vec<String> = nummern
         .iter()
-        .filter(|n| (1..=heute).contains(*n))
-        .map(ToString::to_string)
+        .filter_map(|n| n.checked_sub(1))
+        .filter_map(|i| {
+            let text = sauber(tag.ereignisse.get(i)?);
+            crate::belegrang::journalnummer(j.stand(), tag.datum, i, &text)
+        })
+        .map(|n| n.to_string())
         .collect();
     if gueltig.is_empty() {
         return Ok(());

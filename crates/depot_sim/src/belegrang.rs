@@ -13,7 +13,7 @@ use depot_journal::Stand;
 use depot_kern::{BeraterId, Datum, Isin, Universum};
 
 /// Absender der Kaufbelege (#325): `"{auftrag} {Berater} {n},{m}"`, Nummern der Beobachtungen
-/// des Kauftags in Frage-Reihenfolge ab 1.
+/// des Kauftags als Tagesnummern ab 1.
 pub const KAUFBELEG: &str = "Kaufbeleg";
 
 /// Ein Kauf mit den Ereignissen, auf die die KI ihn gestützt hat.
@@ -22,7 +22,7 @@ pub struct Kaufbeleg {
     pub datum: Datum,
     pub auftrag: u64,
     pub berater: BeraterId,
-    /// Ereignisnummern ab 1, wie die Frage sie gezeigt hat.
+    /// Einsbasierte Tagesnummern im Journal.
     pub nummern: Vec<usize>,
 }
 
@@ -194,16 +194,102 @@ pub struct Messung {
     pub kauf_unter_drei: u64,
 }
 
-/// Die Belege, die eine Frage an diesem Tag gesehen hat, in ihrer Reihenfolge. Der Papiertag
-/// vermerkt sie vor der ersten Frage als Beobachtungen (`lauf::ein_tag`); die Liste ist also
-/// zum Stichtag reproduzierbar, ohne dass das Journal etwas Neues speichern muss.
-pub fn kandidaten_am(stand: &Stand, tag: Datum) -> Vec<String> {
+pub(crate) const FRAGELISTE: &str = "Frageliste";
+
+/// Start und Ende eines Frageabschnitts als nullbasierte Tagesindizes.
+fn abschnitte(stand: &Stand, tag: Datum) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+    stand
+        .begruendungen()
+        .iter()
+        .filter_map(move |(datum, wer, text)| {
+            if *datum != tag || wer != FRAGELISTE {
+                return None;
+            }
+            let (start, anzahl) = text.split_once(' ')?;
+            let start: usize = start.parse().ok()?;
+            Some(start..start.checked_add(anzahl.parse().ok()?)?)
+        })
+}
+
+fn beobachtungen_am(stand: &Stand, tag: Datum) -> impl Iterator<Item = &String> {
     stand
         .beobachtungen()
         .iter()
-        .filter(|(d, _)| *d == tag)
-        .map(|(_, t)| t.clone())
+        .filter(move |(datum, _)| *datum == tag)
+        .map(|(_, text)| text)
+}
+
+/// Übersetzt eine Fragennummer nach Textabgleich in die übliche Journalnummer
+/// des Tages. Ältere Leser können damit dieselbe Beobachtung auflösen.
+pub(crate) fn journalnummer(
+    stand: &Stand,
+    tag: Datum,
+    frageindex: usize,
+    text: &str,
+) -> Option<usize> {
+    let index = match abschnitte(stand, tag).last() {
+        Some(abschnitt) => {
+            let index = abschnitt.start.checked_add(frageindex)?;
+            abschnitt.contains(&index).then_some(index)?
+        }
+        None => frageindex,
+    };
+    (beobachtungen_am(stand, tag).nth(index)? == text)
+        .then(|| index.checked_add(1))
+        .flatten()
+}
+
+fn abschnitt_fuer(stand: &Stand, tag: Datum, nummern: &[usize]) -> Option<std::ops::Range<usize>> {
+    let mut bekannt = false;
+    for abschnitt in abschnitte(stand, tag) {
+        bekannt = true;
+        if nummern
+            .iter()
+            .any(|n| n.checked_sub(1).is_some_and(|i| abschnitt.contains(&i)))
+        {
+            return Some(abschnitt);
+        }
+    }
+    (!bekannt).then(|| 0..beobachtungen_am(stand, tag).count())
+}
+
+fn kandidaten_im(stand: &Stand, tag: Datum, abschnitt: std::ops::Range<usize>) -> Vec<String> {
+    beobachtungen_am(stand, tag)
+        .skip(abschnitt.start)
+        .take(abschnitt.len())
+        .cloned()
         .collect()
+}
+
+/// Kandidaten des letzten belegten Frageabschnitts. Altstände nutzen die Tagesliste.
+pub fn kandidaten_am(stand: &Stand, tag: Datum) -> Vec<String> {
+    abschnitte(stand, tag).last().map_or_else(
+        || beobachtungen_am(stand, tag).cloned().collect(),
+        |abschnitt| kandidaten_im(stand, tag, abschnitt),
+    )
+}
+
+/// Zahl der belegten Kandidaten über alle Frageabschnitte eines Tages.
+pub fn kandidatenanzahl(stand: &Stand, tag: Datum) -> usize {
+    let beobachtungen = beobachtungen_am(stand, tag).count();
+    let mut abschnitte = abschnitte(stand, tag).peekable();
+    if abschnitte.peek().is_none() {
+        return beobachtungen;
+    }
+    abschnitte.fold(0_usize, |summe, a| {
+        summe.saturating_add(a.end.min(beobachtungen).saturating_sub(a.start))
+    })
+}
+
+/// Mindestens eine Tagesnummer verweist auf einen Kandidaten der Frage.
+pub fn hat_fragebeleg(stand: &Stand, tag: Datum, nummern: &[usize]) -> bool {
+    let beobachtungen = beobachtungen_am(stand, tag).count();
+    abschnitt_fuer(stand, tag, nummern).is_some_and(|a| {
+        nummern.iter().any(|n| {
+            n.checked_sub(1)
+                .is_some_and(|i| i < beobachtungen && a.contains(&i))
+        })
+    })
 }
 
 /// Wie oft steht der Beleg, auf den eine KI ihre Weltprognose gestützt hat, beim Sortierer
@@ -221,8 +307,17 @@ pub fn messe(
         .iter()
         .filter(|p| zeitraum.contains(&p.datum))
     {
-        let kandidaten = kandidaten_am(stand, p.datum);
-        let Some(gewaehlt) = p.prognose.ereignis_nr.checked_sub(1) else {
+        let nummer = p.prognose.ereignis_nr;
+        let Some(abschnitt) = abschnitt_fuer(stand, p.datum, &[nummer]) else {
+            continue;
+        };
+        let start = abschnitt.start;
+        let kandidaten = kandidaten_im(stand, p.datum, abschnitt);
+        let Some(gewaehlt) = nummer
+            .checked_sub(1)
+            .and_then(|n| n.checked_sub(start))
+            .filter(|i| *i < kandidaten.len())
+        else {
             continue;
         };
         m.faelle = m.faelle.saturating_add(1);
@@ -240,7 +335,11 @@ pub fn messe(
         .iter()
         .filter(|k| zeitraum.contains(&k.datum))
     {
-        let kandidaten = kandidaten_am(stand, k.datum);
+        let Some(abschnitt) = abschnitt_fuer(stand, k.datum, &k.nummern) else {
+            continue;
+        };
+        let start = abschnitt.start;
+        let kandidaten = kandidaten_im(stand, k.datum, abschnitt);
         let thesen = thesen_vor(stand, universum, k.berater, k.datum);
         let oben: Vec<usize> = sortierer
             .ordne(&kandidaten, &thesen)
@@ -251,6 +350,7 @@ pub fn messe(
         if k.nummern
             .iter()
             .filter_map(|n| n.checked_sub(1))
+            .filter_map(|i| i.checked_sub(start))
             .any(|i| oben.contains(&i))
         {
             m.kauf_unter_drei = m.kauf_unter_drei.saturating_add(1);
