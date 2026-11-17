@@ -1005,6 +1005,9 @@ fn frage(
         if z.uhr.is_some() && verwertbar {
             fristverkaeufe = pruefe_fristen(j, tag, lage, &antwort)?;
         }
+        if let Some(v) = &antwort.vorschlag {
+            belege_erstmeinungsziele(j, tag, wer, v)?;
+        }
         crate::ausgelassen::belege_ausgelassene(j, z, lage, &mut antwort.vorschlag, name(wer))?;
         if let Some(v) = &antwort.vorschlag {
             for (isin, bp) in &v.zielgewichte_bp {
@@ -1856,15 +1859,7 @@ fn belege_kaufbelege(
     wer: BeraterId,
     nummern: &[usize],
 ) -> Result<(), LaufFehler> {
-    let gueltig: Vec<String> = nummern
-        .iter()
-        .filter_map(|n| n.checked_sub(1))
-        .filter_map(|i| {
-            let text = sauber(tag.ereignisse.get(i)?);
-            crate::belegrang::journalnummer(j.stand(), tag.datum, i, &text)
-        })
-        .map(|n| n.to_string())
-        .collect();
+    let gueltig = gelesene_belegnummern(j.stand(), tag, nummern);
     if gueltig.is_empty() {
         return Ok(());
     }
@@ -1874,6 +1869,46 @@ fn belege_kaufbelege(
         crate::belegrang::KAUFBELEG,
         &format!("{nr} {} {}", name(wer), gueltig.join(",")),
     )
+}
+
+fn gelesene_belegnummern(
+    stand: &depot_journal::Stand,
+    tag: &Tag,
+    nummern: &[usize],
+) -> Vec<String> {
+    nummern
+        .iter()
+        .filter_map(|n| n.checked_sub(1))
+        .filter_map(|i| {
+            let text = sauber(tag.ereignisse.get(i)?);
+            crate::belegrang::journalnummer(stand, tag.datum, i, &text)
+        })
+        .map(|n| n.to_string())
+        .collect()
+}
+
+/// Die Erstmeinung ist ein Beobachtungsbeleg, unabhängig von späteren Orders.
+fn belege_erstmeinungsziele(
+    j: &mut Journal,
+    tag: &Tag,
+    wer: BeraterId,
+    vorschlag: &Vorschlag,
+) -> Result<(), LaufFehler> {
+    for (isin, gewicht) in &vorschlag.zielgewichte_bp {
+        let Some(nummern) = vorschlag.belege.get(isin) else {
+            continue;
+        };
+        let gueltig = gelesene_belegnummern(j.stand(), tag, nummern);
+        if !gueltig.is_empty() {
+            begruende(
+                j,
+                tag,
+                crate::belegrang::ZIELBELEG,
+                &format!("{} {isin} {gewicht} {}", name(wer), gueltig.join(",")),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Der besondere Kaufanlass zählt nur mit der zum Auftrag belegten Kursreaktion.

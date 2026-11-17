@@ -4050,6 +4050,23 @@ fn schattenzahlen_kauft_nach_positiver_reaktion_ohne_papierorder_aenderung() -> 
     Ok(())
 }
 
+fn pruefe_zielbelege(j: &Journal, isins: [&Isin; 2]) {
+    let zielbelege: Vec<_> = j
+        .stand()
+        .begruendungen()
+        .iter()
+        .filter(|(_, wer, _)| wer == depot_sim::belegrang::ZIELBELEG)
+        .map(|(_, _, text)| text.clone())
+        .collect();
+    assert_eq!(zielbelege.len(), 2, "{zielbelege:?}");
+    for isin in isins {
+        assert!(
+            zielbelege.contains(&format!("Dachs {isin} 2000 1")),
+            "{zielbelege:?}"
+        );
+    }
+}
+
 /// P43 (#311 H4): Lehnt die Zweitmeinung nur Allianz ab, kauft Topf A trotzdem SAP. Das Journal
 /// nennt das Teilveto lesbar wie ein Veto, mit den abgelehnten Werten.
 #[test]
@@ -4119,6 +4136,7 @@ fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
         .map(|l| &l.beleg.isin)
         .collect();
     assert_eq!(isins, vec![&sap]);
+    pruefe_zielbelege(&j, [&sap, &allianz]);
     let kaufbelege: Vec<&str> = j
         .stand()
         .begruendungen()

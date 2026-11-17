@@ -1,0 +1,8 @@
+klasse: Funktion
+zweck: Belege zu Erstmeinungszielen unabhängig von späteren Orders im Analyse-Export zählen
+pfade:
+crates/depot_berater/src/frage.rs
+crates/depot_lage/src/belegauswahl.rs
+crates/depot_sim/src/belegrang.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/tests/papiertag.rs

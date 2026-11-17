@@ -55,6 +55,41 @@ pub fn kaufbelege(stand: &Stand) -> Vec<Kaufbeleg> {
         .collect()
 }
 
+/// Journalbegründung für ein belegtes Ziel aus der Erstmeinung.
+pub const ZIELBELEG: &str = "Zielbeleg";
+
+/// Liefert je auflösbarem Vorschlagsziel seinen Tag, einmal je Berater und Wert.
+pub fn tage_mit_zielbelegen(stand: &Stand) -> impl Iterator<Item = Datum> + '_ {
+    let mut gesehen = BTreeSet::new();
+    stand
+        .begruendungen()
+        .iter()
+        .filter_map(move |(datum, wer, text)| {
+            if wer != ZIELBELEG {
+                return None;
+            }
+            let mut felder = text.split_whitespace();
+            let berater = felder.next()?;
+            if !matches!(berater, "Dachs" | "Maus") {
+                return None;
+            }
+            let isin = Isin::neu(felder.next()?).ok()?;
+            let gewicht = felder.next()?.parse::<i64>().ok()?;
+            let nummern = felder
+                .next()?
+                .split(',')
+                .map(|n| n.parse::<usize>().ok().filter(|n| *n > 0))
+                .collect::<Option<Vec<_>>>()?;
+            if felder.next().is_some()
+                || !(0..=10_000).contains(&gewicht)
+                || !hat_fragebeleg(stand, *datum, &nummern)
+            {
+                return None;
+            }
+            gesehen.insert((*datum, berater, isin)).then_some(*datum)
+        })
+}
+
 /// Eine bestehende These: ein Wert, den der Berater vor dem Stichtag genannt hat.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct These {
