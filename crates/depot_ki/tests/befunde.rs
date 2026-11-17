@@ -70,9 +70,9 @@ fn befund_1_k02_negativer_preis_wird_abgelehnt() -> Result<(), String> {
     sonde::verboten(
         &KI,
         "pub fn negativ() -> depot_ki::Preise {\n    \
-         depot_ki::Preise { cent_je_mio_ein: -1_000_000, cent_je_mio_aus: 2_000 }\n}\n",
+         depot_ki::Preise { eingabe: -1_000_000, ausgabe: 2_000, cache_schreiben: 125, cache_lesen: 5 }\n}\n",
         &sonde::PRIVAT,
-        &["cent_je_mio_ein"],
+        &["eingabe"],
     )?;
     for b in [DACHS, BeraterId::Maus] {
         let kosten = KiDeckel::standard(b).hoechstkosten();
