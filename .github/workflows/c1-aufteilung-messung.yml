@@ -1,6 +1,6 @@
 name: Messung C1-Aufteilung
 
-# Nur auf dem Messzweig: misst die Windows-Teststufe des Gates für main und für den Patch.
+# Nur auf dem Messzweig: misst die Windows-Teststufe des Gates für main und für Teil 2 allein (Kodex-Befunde).
 on:
   push:
     branches: [claude/project-thread-fg6cp4]
@@ -15,15 +15,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stand: [main, patch]
+        stand: [main, kodex]
         runde: [1, 2]
         include:
           - stand: main
             sha: 0bfe4fd6cda6d91a10d39a135f5caa3a8993b4d8
             basis: c11911137745fb92657669c019b8d752668c5e4f
-          - stand: patch
-            sha: 8fdf1c23e8145cd1faef431e824dfc78a81d7e8b
-            basis: d3d7d0c
+          - stand: kodex
+            sha: cdef98607fa3d2c9b32ec659895043dfa547ce29
+            basis: 0bfe4fd6cda6d91a10d39a135f5caa3a8993b4d8
     steps:
       - name: Temporäre Dateien im Arbeitsbereich des Runners ablegen
         shell: pwsh
