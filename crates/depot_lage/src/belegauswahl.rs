@@ -8,7 +8,9 @@ use std::{collections::BTreeMap, fmt::Write as _};
 
 use depot_journal::Stand;
 use depot_kern::Datum;
-use depot_sim::belegrang::{Grundrang, Heute, Sortierer, kaufbelege, messe};
+use depot_sim::belegrang::{
+    Grundrang, Heute, Sortierer, hat_fragebeleg, kandidatenanzahl, kaufbelege, messe,
+};
 
 pub fn bericht(stand: &Stand, von: Datum, bis: Datum) -> String {
     let mut text = String::from(
@@ -50,28 +52,27 @@ fn datenbasis(text: &mut String, stand: &Stand, von: Datum, bis: Datum) {
     let mut tage = BTreeMap::<Datum, Tagesbasis>::new();
     for (tag, _) in stand.beobachtungen() {
         if zeitraum.contains(tag) {
-            let basis = tage.entry(*tag).or_default();
-            basis.kandidaten = basis.kandidaten.saturating_add(1);
+            tage.entry(*tag).or_default();
         }
+    }
+    for (tag, basis) in &mut tage {
+        basis.kandidaten = kandidatenanzahl(stand, *tag);
     }
     for p in stand.weltprognosen() {
         if let Some(tag) = tage.get_mut(&p.datum)
-            && (1..=tag.kandidaten).contains(&p.prognose.ereignis_nr)
+            && hat_fragebeleg(stand, p.datum, &[p.prognose.ereignis_nr])
         {
             tag.prognosen = tag.prognosen.saturating_add(1);
         }
     }
     for kauf in kaufbelege(stand) {
         if let Some(tag) = tage.get_mut(&kauf.datum)
-            && kauf
-                .nummern
-                .iter()
-                .any(|n| (1..=tag.kandidaten).contains(n))
+            && hat_fragebeleg(stand, kauf.datum, &kauf.nummern)
         {
             tag.kaeufe = tag.kaeufe.saturating_add(1);
         }
     }
-    text.push_str("\n#### Datenbasis für NeuroSchlopf\n\nEin genannter Beleg ist ein Hinweis auf Relevanz. Kandidaten ohne Bewertung bleiben unbewertet. Die Tabelle zeigt Fälle mit mindestens einer auflösbaren Belegnummer.\n\n");
+    text.push_str("\n#### Datenbasis für NeuroSchlopf\n\nEin genannter Beleg ist ein Hinweis auf Relevanz. Kandidaten ohne Bewertung bleiben unbewertet. Die Tabelle zeigt Fälle mit mindestens einer auflösbaren Belegnummer. Bei Altständen ohne Frageabschnitt gilt die vollständige Beobachtungsliste des Tages.\n\n");
     if tage.is_empty() {
         text.push_str("Im Zeitraum sind keine Kandidaten im Journal belegt.\n");
         return;
