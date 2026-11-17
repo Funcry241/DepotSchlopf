@@ -15,7 +15,7 @@ impl Sortierer for NurBestaetigung {
     fn ordne(&self, k: &[String], _: &[These]) -> Vec<usize> {
         let mut r: Vec<usize> = (0..k.len()).collect();
         r.sort_by_key(|i| {
-            let t = k[*i].to_lowercase();
+            let t = k.get(*i).map(|s| s.to_lowercase()).unwrap_or_default();
             std::cmp::Reverse(
                 ["hebt", "steigt", "rekord", "übertrifft"]
                     .iter()
@@ -55,7 +55,7 @@ fn unter_drei(s: &dyn Sortierer, thesen: &[These]) -> (usize, usize) {
         "Ölpreis steigt nach OPEC",
         "Inflation Euroraum 2,1 %",
     ];
-    let (mut ja, mut gegen) = (0, 0);
+    let (mut ja, mut gegen) = (0_usize, 0_usize);
     for (best, wid) in paare() {
         for vorn_best in [true, false] {
             let mut k: Vec<String> = fuell.iter().map(|s| (*s).to_owned()).collect();
@@ -72,8 +72,8 @@ fn unter_drei(s: &dyn Sortierer, thesen: &[These]) -> (usize, usize) {
                 .take(3)
                 .filter_map(|i| k.get(i))
                 .collect();
-            ja += usize::from(top.contains(&&best));
-            gegen += usize::from(top.contains(&&wid));
+            ja = ja.saturating_add(usize::from(top.contains(&&best)));
+            gegen = gegen.saturating_add(usize::from(top.contains(&&wid)));
         }
     }
     (ja, gegen)
