@@ -276,6 +276,7 @@ impl<N: Netz> KiBerater<N> {
             http: None,
             token_ein: None,
             token_aus: None,
+            cache: None,
             buchung: None,
             schlopfmodell: None,
             kosten_cent: None,
@@ -661,6 +662,10 @@ impl<N: Netz> KiBerater<N> {
             e.ergebnis = art.kurz().into();
             e.token_ein = Some(v.token_ein);
             e.token_aus = Some(v.token_aus);
+            e.cache = Some(depot_journal::gespraeche::CacheToken {
+                geschrieben: v.cache_schreiben,
+                gelesen: v.cache_lesen,
+            });
             e.kosten_cent = ist.and_then(|c| u64::try_from(c.0).ok());
             e.antwort = text.as_ref().ok().cloned();
         }

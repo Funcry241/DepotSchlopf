@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use depot_journal::Stand;
+use depot_journal::{Stand, gespraeche::CacheToken};
 use depot_kern::{BeraterId, Cent, Datum};
 use depot_lage::gespraeche::Gespraech;
 
@@ -26,16 +26,20 @@ struct Tokenbelege {
     vollstaendig: usize,
     ein: Option<u64>,
     aus: Option<u64>,
+    cache_geschrieben: Option<u64>,
+    cache_gelesen: Option<u64>,
 }
 
 impl Tokenbelege {
-    fn erfasse(&mut self, ein: Option<u64>, aus: Option<u64>) {
+    fn erfasse(&mut self, ein: Option<u64>, aus: Option<u64>, cache: Option<CacheToken>) {
         self.anzahl = self.anzahl.saturating_add(1);
         self.vollstaendig = self
             .vollstaendig
             .saturating_add(usize::from(ein.is_some() && aus.is_some()));
         addiere_token(&mut self.ein, ein);
         addiere_token(&mut self.aus, aus);
+        addiere_token(&mut self.cache_geschrieben, cache.map(|c| c.geschrieben));
+        addiere_token(&mut self.cache_gelesen, cache.map(|c| c.gelesen));
     }
 }
 
@@ -45,6 +49,7 @@ struct Aufruf {
     zweck: String,
     ein: Option<u64>,
     aus: Option<u64>,
+    cache: Option<CacheToken>,
 }
 
 impl Gespraechsbelege {
@@ -69,7 +74,7 @@ impl Gespraechsbelege {
                 self.gemini
                     .entry(tag)
                     .or_default()
-                    .erfasse(e.token_ein, e.token_aus);
+                    .erfasse(e.token_ein, e.token_aus, e.cache);
             }
             let (Some(nr), Some(wer)) = (e.buchung, berater(&e.wer)) else {
                 continue;
@@ -86,6 +91,7 @@ impl Gespraechsbelege {
                         zweck: e.zweck.clone(),
                         ein: e.token_ein,
                         aus: e.token_aus,
+                        cache: e.cache,
                     })
                 });
         }
@@ -163,7 +169,7 @@ pub(super) fn bericht(
     belege: &Gespraechsbelege,
 ) -> String {
     let mut text = String::from(
-        "\n## KI-Kosten\n\nBeträge stammen aus dem Journal. Offene Reservierungen stehen mit ihrer Höchstsumme separat. Die Tokenzahlen summieren nur eindeutig zugeordnete Belege.\n\n",
+        "\n## KI-Kosten\n\nBeträge stammen aus dem Journal. Offene Reservierungen stehen mit ihrer Höchstsumme separat. Die Tokenzahlen summieren nur eindeutig zugeordnete Belege. Ein Strich bei Cache-Token bedeutet, dass keine Zahlen belegt sind.\n\n",
     );
     let mut je_tag = BTreeMap::<(Datum, &str), Tagessumme>::new();
     let mut aufrufe = String::new();
@@ -189,20 +195,23 @@ pub(super) fn bericht(
             .filter(|a| a.tag == b.datum && a.wer == b.berater && a.zweck == zweck.text());
         let ein = aufruf.and_then(|a| a.ein);
         let aus = aufruf.and_then(|a| a.aus);
+        let cache = aufruf.and_then(|a| a.cache);
         let summe = je_tag.entry((b.datum, wer)).or_default();
         summe.buche(b.reserviert, abgerechnet);
         gesamt.buche(b.reserviert, abgerechnet);
-        summe.token.erfasse(ein, aus);
+        summe.token.erfasse(ein, aus, cache);
         let status = if abgerechnet { "abgerechnet" } else { "offen" };
         let _ = writeln!(
             aufrufe,
-            "| {} | {wer} | {} | {} | {nr} | {} | {status} | {} | {} |",
+            "| {} | {wer} | {} | {} | {nr} | {} | {status} | {} | {} | {} | {} |",
             b.datum,
             b.zyklus,
             super::gespraeche::zweck_text(zweck.text()),
             b.reserviert,
             token(ein),
-            token(aus)
+            token(aus),
+            token(cache.map(|c| c.geschrieben)),
+            token(cache.map(|c| c.gelesen))
         );
     }
     let _ = writeln!(
@@ -212,34 +221,9 @@ pub(super) fn bericht(
         geld(gesamt.reserviert),
         gesamt.offen
     );
-    if !je_tag.is_empty() || !belege.gemini.is_empty() {
-        text.push_str("| Tag | KI | Abgerechnet | Offen reserviert | Aufrufe mit vollständigem Tokenbeleg | Token ein | Token aus |\n|---|---|---:|---:|---|---:|---:|\n");
-        for ((tag, wer), s) in je_tag {
-            let _ = writeln!(
-                text,
-                "| {tag} | {wer} | {} | {} ({}) | {} von {} | {} | {} |",
-                geld(s.kosten),
-                geld(s.reserviert),
-                s.offen,
-                s.token.vollstaendig,
-                s.token.anzahl,
-                token(s.token.ein),
-                token(s.token.aus)
-            );
-        }
-        for (tag, s) in &belege.gemini {
-            let _ = writeln!(
-                text,
-                "| {tag} | Gemini | nicht im Journal gebucht | – | {} von {} | {} | {} |",
-                s.vollstaendig,
-                s.anzahl,
-                token(s.ein),
-                token(s.aus)
-            );
-        }
-    }
+    tagessummen(&mut text, je_tag, &belege.gemini);
     if !aufrufe.is_empty() {
-        text.push_str("\n### Buchungen je Entscheidung\n\n| Tag | KI | Zyklus | Entscheidungsphase | Buchung | Betrag | Status | Token ein | Token aus |\n|---|---|---:|---|---:|---:|---|---:|---:|\n");
+        text.push_str("\n### Buchungen je Entscheidung\n\n| Tag | KI | Zyklus | Entscheidungsphase | Buchung | Betrag | Status | Token ein | Token aus | Cache geschrieben | Cache gelesen |\n|---|---|---:|---|---:|---:|---|---:|---:|---:|---:|\n");
         text.push_str(&aufrufe);
     }
     let _ = writeln!(
@@ -256,6 +240,43 @@ pub(super) fn bericht(
     }
     verhaeltnis(&mut text, stand, zeitraum, depotwerte);
     text
+}
+
+fn tagessummen(
+    text: &mut String,
+    je_tag: BTreeMap<(Datum, &str), Tagessumme>,
+    gemini: &BTreeMap<Datum, Tokenbelege>,
+) {
+    if !je_tag.is_empty() || !gemini.is_empty() {
+        text.push_str("| Tag | KI | Abgerechnet | Offen reserviert | Aufrufe mit vollständigem Tokenbeleg | Token ein | Token aus | Cache geschrieben | Cache gelesen |\n|---|---|---:|---:|---|---:|---:|---:|---:|\n");
+        for ((tag, wer), s) in je_tag {
+            let _ = writeln!(
+                text,
+                "| {tag} | {wer} | {} | {} ({}) | {} von {} | {} | {} | {} | {} |",
+                geld(s.kosten),
+                geld(s.reserviert),
+                s.offen,
+                s.token.vollstaendig,
+                s.token.anzahl,
+                token(s.token.ein),
+                token(s.token.aus),
+                token(s.token.cache_geschrieben),
+                token(s.token.cache_gelesen)
+            );
+        }
+        for (tag, s) in gemini {
+            let _ = writeln!(
+                text,
+                "| {tag} | Gemini | nicht im Journal gebucht | – | {} von {} | {} | {} | {} | {} |",
+                s.vollstaendig,
+                s.anzahl,
+                token(s.ein),
+                token(s.aus),
+                token(s.cache_geschrieben),
+                token(s.cache_gelesen)
+            );
+        }
+    }
 }
 
 fn verhaeltnis(
@@ -332,6 +353,32 @@ mod tests {
     use depot_journal::{Journal, KiZweck};
     use depot_kern::Zeitpunkt;
 
+    fn gespraech(zeit: Zeitpunkt, buchung: usize) -> Gespraech {
+        Gespraech {
+            zeit,
+            lauf: "beispiel".into(),
+            wer: "maus".into(),
+            rolle: "haupt".into(),
+            modell: "testmodell".into(),
+            zweck: "erstmeinung".into(),
+            ergebnis: "ok".into(),
+            http: Some(200),
+            token_ein: Some(12),
+            token_aus: Some(3),
+            cache: Some(CacheToken {
+                geschrieben: 0,
+                gelesen: 10,
+            }),
+            buchung: Some(buchung),
+            schlopfmodell: None,
+            kosten_cent: Some(999),
+            system: None,
+            frage: None,
+            antwort: None,
+            fehler: None,
+        }
+    }
+
     #[test]
     fn kosten_und_token_bleiben_an_ihrer_journalbuchung() -> Result<(), String> {
         let ordner = std::env::temp_dir().join(format!("depot-kosten-{}", crate::neues_token()));
@@ -357,25 +404,8 @@ mod tests {
             .reserviere(BeraterId::Dachs, danach, 3)
             .map_err(|e| format!("{e:?}"))?;
         assert!(ausserhalb.buchung().reserviert > Cent::NULL);
-        let gespr = Gespraech {
-            zeit: Zeitpunkt::neu(bis, 12, 0, 0).ok_or("Zeit")?,
-            lauf: "beispiel".into(),
-            wer: "maus".into(),
-            rolle: "haupt".into(),
-            modell: "testmodell".into(),
-            zweck: "erstmeinung".into(),
-            ergebnis: "ok".into(),
-            http: Some(200),
-            token_ein: Some(12),
-            token_aus: Some(3),
-            buchung: Some(zweite.buchungsnummer()),
-            schlopfmodell: None,
-            kosten_cent: Some(999),
-            system: None,
-            frage: None,
-            antwort: None,
-            fehler: None,
-        };
+        let zeit = Zeitpunkt::neu(bis, 12, 0, 0).ok_or("Zeit")?;
+        let gespr = gespraech(zeit, zweite.buchungsnummer());
         let werte = [(von, Cent(100_000)), (bis, Cent(100_100))].into();
         let zeitraum = Zeitraum { von, bis };
         let mut belege = Gespraechsbelege::default();
@@ -384,6 +414,7 @@ mod tests {
             buchung: None,
             token_ein: Some(7),
             token_aus: Some(2),
+            cache: None,
             ..gespr.clone()
         };
         let uebersprungen = Gespraech {
@@ -393,12 +424,12 @@ mod tests {
         };
         belege.erfasse(&[gespr.clone(), gemini, uebersprungen], 0);
         let text = bericht(journal.stand(), zeitraum, &werte, &belege);
-        assert!(text.contains("| Dachs | 0,00 € | 0,00 € (0) | 0 von 1 | – | – |"));
+        assert!(text.contains("| Dachs | 0,00 € | 0,00 € (0) | 0 von 1 | – | – | – | – |"));
         assert!(text.contains(&format!(
-            "| Maus | 0,00 € | {betrag} (1) | 1 von 1 | 12 | 3 |"
+            "| Maus | 0,00 € | {betrag} (1) | 1 von 1 | 12 | 3 | 0 | 10 |"
         )));
         assert!(text.contains("| 0 | 0,00 € | abgerechnet |"));
-        assert!(text.contains(&format!("| 1 | {betrag} | offen | 12 | 3 |")));
+        assert!(text.contains(&format!("| 1 | {betrag} | offen | 12 | 3 | 0 | 10 |")));
         assert!(text.contains(&format!(
             "0,00 % (höchstens {} einschließlich offener Reservierungen)",
             prozent(betrag.0.checked_mul(100))
@@ -409,7 +440,9 @@ mod tests {
             "Im Zeitraum abgerechnet: 0,00 €. Offene Reservierungen: {betrag} (1 Buchungen)."
         )));
         assert!(!text.contains(&format!("| {danach} |")));
-        assert!(text.contains("| Gemini | nicht im Journal gebucht | – | 1 von 1 | 7 | 2 |"));
+        assert!(
+            text.contains("| Gemini | nicht im Journal gebucht | – | 1 von 1 | 7 | 2 | – | – |")
+        );
         for endwert in [Cent(100_000), Cent(99_999)] {
             let werte = [(von, Cent(100_000)), (bis, endwert)].into();
             assert!(
@@ -427,7 +460,7 @@ mod tests {
         belege.erfasse(&[gespr], 0);
         let text = bericht(journal.stand(), zeitraum, &werte, &belege);
         assert!(text.contains(&format!(
-            "| Maus | 0,00 € | {betrag} (1) | 0 von 1 | – | – |"
+            "| Maus | 0,00 € | {betrag} (1) | 0 von 1 | – | – | – | – |"
         )));
         drop(journal);
         std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;

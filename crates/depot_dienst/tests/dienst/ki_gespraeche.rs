@@ -21,6 +21,7 @@ fn gespraeche_zeigt_alle_ki_rollen_filtert_und_maskiert() -> Result<(), String> 
         http: Some(200),
         token_ein: Some(123),
         token_aus: Some(45),
+        cache: None,
         buchung: None,
         schlopfmodell: None,
         kosten_cent: Some(3),
@@ -135,6 +136,7 @@ fn gespraech_zeigt_journalbeleg_und_liefert_nur_gepruefte_rohtexte() -> Result<(
         http: Some(200),
         token_ein: None,
         token_aus: None,
+        cache: None,
         buchung: Some(nr),
         schlopfmodell: None,
         kosten_cent: Some(u64::MAX),
@@ -222,8 +224,7 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
         });
     }
     let html = get(&d, "/teil/live", zeit);
-    assert!(html.contains("Modell nicht protokolliert"));
-    assert!(!html.contains("Dachs ("));
+    assert!(html.contains("Modell nicht protokolliert") && !html.contains("Dachs ("));
 
     for (lauf, wer, rolle, modell, ergebnis, frage) in [
         (
@@ -270,6 +271,7 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
             http: Some(200),
             token_ein: None,
             token_aus: None,
+            cache: None,
             buchung: None,
             schlopfmodell: None,
             kosten_cent: None,
@@ -331,6 +333,7 @@ fn gemini_ohne_anfrage_hat_eigenen_lauf_und_keine_erfolgsmeldung() -> Result<(),
             http: None,
             token_ein: None,
             token_aus: None,
+            cache: None,
             buchung: None,
             schlopfmodell: None,
             kosten_cent: None,

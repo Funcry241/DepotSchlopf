@@ -1,0 +1,11 @@
+klasse: Funktion
+zweck: Belegte Cache-Token je Tag und KI-Buchung in der Export-Kostentabelle zeigen
+pfade:
+crates/depot_berater/src/ki.rs
+crates/depot_berater/src/zusatz.rs
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/analyse/entscheidungsgrundlage.rs
+crates/depot_dienst/src/analyse/ki_kosten.rs
+crates/depot_dienst/src/gespraeche.rs
+crates/depot_dienst/tests/dienst/ki_gespraeche.rs
+crates/depot_journal/src/gespraeche.rs

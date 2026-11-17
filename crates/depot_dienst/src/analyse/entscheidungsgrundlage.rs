@@ -153,6 +153,7 @@ mod tests {
             http: None,
             token_ein: None,
             token_aus: None,
+            cache: None,
             buchung: None,
             schlopfmodell: None,
             kosten_cent: None,
