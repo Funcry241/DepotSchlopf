@@ -1,0 +1,60 @@
+name: Messung C1-Aufteilung
+
+# Nur auf dem Messzweig: misst die Windows-Teststufe des Gates für main und für den Patch.
+on:
+  push:
+    branches: [claude/project-thread-fg6cp4]
+
+permissions:
+  contents: read
+
+jobs:
+  messung:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        stand: [main, patch]
+        runde: [1, 2]
+        include:
+          - stand: main
+            sha: 0bfe4fd6cda6d91a10d39a135f5caa3a8993b4d8
+            basis: c11911137745fb92657669c019b8d752668c5e4f
+          - stand: patch
+            sha: 8fdf1c23e8145cd1faef431e824dfc78a81d7e8b
+            basis: d3d7d0c
+    steps:
+      - name: Temporäre Dateien im Arbeitsbereich des Runners ablegen
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+      - name: Zeilenenden beim Checkout festlegen
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ matrix.sha }}
+      - name: Rust-Werkzeugkette aus rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Bauordner des Gates bestimmen
+        id: bauordner
+        shell: pwsh
+        continue-on-error: true
+        run: ./.github/scripts/kodex_baucache.ps1 -Art gate
+      - name: Bauordner aus Cache laden (nur lesen)
+        if: ${{ steps.bauordner.outputs.pfad != '' }}
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.bauordner.outputs.pfad }}
+          key: kodex-bau-v1-gate-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-0bfe4fd6cda6d91a10d39a135f5caa3a8993b4d8
+          restore-keys: kodex-bau-v1-gate-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+      - name: Gate unter Windows (${{ matrix.stand }}, Runde ${{ matrix.runde }})
+        shell: pwsh
+        run: |
+          cargo run --locked -p depot_lauf -- alles --basis ${{ matrix.basis }} 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\gate.log"
+          $code = $LASTEXITCODE
+          Select-String -Path "$env:RUNNER_TEMP\gate.log" -Pattern '\[Kodex\] (Testprogramm \S+ · Exit|\d+ Testprogramme|cargo test.*Dauer)' | ForEach-Object { $_.Line }
+          exit $code
