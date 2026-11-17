@@ -76,7 +76,7 @@ pub use depot_sim::vorschau::hoechstkosten as simulationskosten;
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
 pub use zugang::{
     DatenprobeFehler, PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal,
-    mit_journal_und_eintraegen, sperrdateien, update_datenprobe,
+    mit_journal_und_eintraegen, mit_lesecache, sperrdateien, update_datenprobe,
 };
 
 use depot_journal::Stand;

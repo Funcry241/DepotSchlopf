@@ -1,0 +1,11 @@
+klasse: Funktion
+zweck: Bestätigten Journalstand für die wiederholte Dienstansicht wiederverwenden
+pfade:
+crates/depot_dienst/src/depotseite.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_journal/src/datei.rs
+crates/depot_journal/src/lib.rs
+crates/depot_journal/tests/lesecache.rs
+crates/depot_lage/src/lib.rs
+crates/depot_lage/src/zugang.rs

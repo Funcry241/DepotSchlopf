@@ -20,6 +20,7 @@ use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write as _};
 use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime};
 
 use depot_kern::{BeraterId, Cent, Datum, Topf, TopfId, Zeitpunkt};
 use depot_ki::{Sperre, grenzabdruck};
@@ -369,16 +370,26 @@ fn nachrechnen_mit(
     };
     let mut stand = Stand::im_format(format);
     let mut eintraege = Vec::new();
-    for (i, z) in alle.enumerate() {
+    zeilen_anwenden(&mut stand, &mut eintraege, alle, schritt)?;
+    Ok((eintraege, stand))
+}
+
+fn zeilen_anwenden<'a>(
+    stand: &mut Stand,
+    eintraege: &mut Vec<(Art, String)>,
+    zeilen: impl Iterator<Item = &'a String>,
+    schritt: &mut impl FnMut() -> Result<(), String>,
+) -> Result<(), JournalFehler> {
+    for z in zeilen {
         schritt().map_err(halt)?;
-        let nr = i.saturating_add(2);
+        let nr = eintraege.len().saturating_add(2);
         let (art, inhalt) = trenne(z).ok_or_else(|| halt(format!("Zeile {nr}: Art unbekannt")))?;
         stand
             .anwenden(art, inhalt)
             .map_err(|e| halt(format!("Zeile {nr}: {e}")))?;
         eintraege.push((art, inhalt.to_string()));
     }
-    Ok((eintraege, stand))
+    Ok(())
 }
 
 fn lies_vermerk(pfad: &Path) -> Result<Vermerk, JournalFehler> {
@@ -392,6 +403,147 @@ fn lies_vermerk(pfad: &Path) -> Result<Vermerk, JournalFehler> {
         .filter(|n| *n <= 4096)
         .and_then(|_| Vermerk::lies(&text))
         .ok_or_else(|| halt("Anhangsvermerk unlesbar"))
+}
+
+/// Bestätigter Journalstand für wiederholte Anzeigen im laufenden Dienst.
+/// Schreibpfade und Exporte prüfen das Journal weiterhin vollständig.
+#[derive(Debug, Default)]
+pub struct Lesecache {
+    stand: Option<Lesestand>,
+}
+
+#[derive(Debug)]
+struct Lesestand {
+    pfad: PathBuf,
+    geaendert: Option<SystemTime>,
+    voll_geprueft: Instant,
+    vermerk: Vermerk,
+    eintraege: Vec<(Art, String)>,
+    stand: Stand,
+}
+
+// Regelmäßig auch den alten Teil prüfen, falls sich Dateizeit und Vermerk nicht ändern.
+const LESECACHE_VOLLPRUEFUNG: Duration = Duration::from_mins(5);
+
+/// Der bestätigte Stand und seine lesbaren Einträge im Cache.
+pub type GelesenerJournalstand<'a> = (&'a Stand, &'a [(Art, String)]);
+
+impl Lesecache {
+    /// Liest unter geteilter Sperre. Ein bestätigter Anhang wird ab der letzten
+    /// bekannten Kette geprüft. Der erste Zugriff und die regelmäßige
+    /// Vollprüfung prüfen die ganze Datei.
+    ///
+    /// # Errors
+    /// Bei einer belegten Sperre oder einem unvollständigen Journalstand.
+    pub fn lesen(
+        &mut self,
+        pfad: &Path,
+        leselimit: u64,
+    ) -> Result<GelesenerJournalstand<'_>, JournalFehler> {
+        let vorher = self.stand.take();
+        if !Journal::eingerichtet(pfad)? {
+            return Err(halt("nicht eingerichtet: Journal und Vermerk fehlen"));
+        }
+        let mut datei = File::open(pfad).map_err(|e| halt(format!("Journal lesen: {e}")))?;
+        match datei.try_lock_shared() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => {
+                self.stand = vorher;
+                return Err(JournalFehler::Belegt);
+            }
+            Err(TryLockError::Error(e)) => return Err(halt(format!("sperren: {e}"))),
+        }
+        let vermerk = lies_vermerk(&vermerk_pfad(pfad))?;
+        if vermerk.laenge > leselimit {
+            return Err(halt("Journal überschreitet die Lesegrenze"));
+        }
+        let metadata = datei.metadata().map_err(|e| halt(e.to_string()))?;
+        if vermerk.geplant != 0 || metadata.len() != vermerk.laenge {
+            return Err(halt(
+                "Journal hat einen offenen oder unvollständigen Anhang",
+            ));
+        }
+
+        let geaendert = metadata.modified().ok();
+        let alt = vorher
+            .filter(|alt| alt.pfad == pfad && alt.voll_geprueft.elapsed() < LESECACHE_VOLLPRUEFUNG);
+        let neu = match alt {
+            Some(alt)
+                if alt.vermerk == vermerk && geaendert.is_some() && geaendert == alt.geaendert =>
+            {
+                alt
+            }
+            Some(mut alt) if alt.vermerk.laenge < vermerk.laenge => {
+                match lesecache_zeilen(&mut datei, alt.vermerk.laenge, &vermerk, &alt.vermerk.kette)
+                {
+                    Ok(zeilen) => {
+                        zeilen_anwenden(
+                            &mut alt.stand,
+                            &mut alt.eintraege,
+                            zeilen.iter(),
+                            &mut || Ok(()),
+                        )?;
+                        alt.vermerk = vermerk;
+                        alt.geaendert = geaendert;
+                        alt
+                    }
+                    Err(_) => lesestand_voll(&mut datei, pfad, vermerk, geaendert)?,
+                }
+            }
+            _ => lesestand_voll(&mut datei, pfad, vermerk, geaendert)?,
+        };
+        let _ = datei.unlock();
+        let stand = self.stand.insert(neu);
+        Ok((&stand.stand, &stand.eintraege))
+    }
+}
+
+fn lesestand_voll(
+    datei: &mut File,
+    pfad: &Path,
+    vermerk: Vermerk,
+    geaendert: Option<SystemTime>,
+) -> Result<Lesestand, JournalFehler> {
+    let zeilen = lesecache_zeilen(datei, 0, &vermerk, &kettenanfang())?;
+    let (eintraege, stand) = nachrechnen(&zeilen)?;
+    Ok(Lesestand {
+        pfad: pfad.to_owned(),
+        geaendert,
+        voll_geprueft: Instant::now(),
+        vermerk,
+        eintraege,
+        stand,
+    })
+}
+
+fn lesecache_zeilen(
+    datei: &mut File,
+    ab: u64,
+    vermerk: &Vermerk,
+    vorher: &str,
+) -> Result<Vec<String>, JournalFehler> {
+    datei
+        .seek(SeekFrom::Start(ab))
+        .map_err(|e| halt(format!("Journal lesen: {e}")))?;
+    let erwartet = vermerk
+        .laenge
+        .checked_sub(ab)
+        .ok_or_else(|| halt("Vermerk ist zu kurz"))?;
+    let mut inhalt = Vec::new();
+    datei
+        .take(erwartet.saturating_add(1))
+        .read_to_end(&mut inhalt)
+        .map_err(|e| halt(format!("Journal lesen: {e}")))?;
+    if als_u64(inhalt.len()).map_err(halt)? != erwartet {
+        return Err(halt(
+            "Journal hat einen offenen oder unvollständigen Anhang",
+        ));
+    }
+    let (zeilen, kette) = pruefe_zeilen(&inhalt, vorher).map_err(halt)?;
+    if kette != vermerk.kette {
+        return Err(halt("Journal weicht vom bestätigten Stand ab"));
+    }
+    Ok(zeilen)
 }
 
 impl Journal {
