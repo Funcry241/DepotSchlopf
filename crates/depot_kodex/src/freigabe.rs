@@ -32,7 +32,10 @@ const FELDER: [&str; 4] = ["typ", "diff", "festschreibung", "erteilt"];
 /// Diff-Hash ueber die geaenderten Pfade ohne die Freigabe.
 pub fn diff_hash(wurzel: &Path, diff: &BTreeSet<String>) -> String {
     let mut text = String::new();
-    for p in diff.iter().filter(|p| p.as_str() != FREIGABE) {
+    for p in diff
+        .iter()
+        .filter(|p| p.as_str() != FREIGABE && !crate::pruefdateien::ist_freigabe(p))
+    {
         match fs::read(wurzel.join(p)) {
             Ok(inhalt) => {
                 let _ = writeln!(text, "{p}\t{}", sha_bytes(&normalisiert(&inhalt)));
@@ -68,26 +71,32 @@ fn lies(text: &str) -> Result<BTreeMap<String, String>, String> {
 }
 
 pub fn pruefe(wurzel: &Path, diff: &BTreeSet<String>) -> Vec<String> {
-    let festschreibung = diff.contains(crate::FESTSCHREIBUNG);
-    let freigabe = diff.contains(FREIGABE);
-    if !festschreibung {
-        return if freigabe {
+    pruefe_mit_pfad(wurzel, diff, diff.contains(FREIGABE).then_some(FREIGABE))
+}
+
+pub(crate) fn pruefe_mit_pfad(
+    wurzel: &Path,
+    diff: &BTreeSet<String>,
+    freigabe: Option<&str>,
+) -> Vec<String> {
+    if !diff.contains(crate::FESTSCHREIBUNG) {
+        return if let Some(pfad) = freigabe {
             vec![format!(
-                "Grenzfreigabe {FREIGABE} geändert, aber die Festschreibung nicht: eine Freigabe gilt nur für ihre eigene Änderung"
+                "Grenzfreigabe {pfad} geändert, aber die Festschreibung nicht: eine Freigabe gilt nur für ihre eigene Änderung"
             )]
         } else {
             Vec::new()
         };
     }
-    if !freigabe {
+    let Some(pfad) = freigabe else {
         return vec![format!(
-            "Grenzfreigabe fehlt: {} geändert ohne neue {FREIGABE} (R30)",
+            "Grenzfreigabe fehlt: {} geändert ohne neue Freigabedatei (R30)",
             crate::FESTSCHREIBUNG
         )];
-    }
-    let text = match fs::read(wurzel.join(FREIGABE)) {
+    };
+    let text = match fs::read(wurzel.join(pfad)) {
         Ok(t) => String::from_utf8_lossy(&t).into_owned(),
-        Err(e) => return vec![format!("Grenzfreigabe {FREIGABE} nicht lesbar: {e}")],
+        Err(e) => return vec![format!("Grenzfreigabe {pfad} nicht lesbar: {e}")],
     };
     let neu = match fs::read(wurzel.join(crate::FESTSCHREIBUNG)) {
         Ok(t) => sha_bytes(&normalisiert(&t)),
@@ -123,6 +132,26 @@ pub(crate) fn pruefe_werte(text: &str, neu: &str, d: &str) -> Vec<String> {
         ));
     }
     fehler
+}
+
+/// Zielpfad und Text der Grenzfreigabe für die Deklaration dieses Diffs.
+pub fn vorlage_fuer_diff(
+    wurzel: &Path,
+    diff: &crate::git::Diff,
+) -> Result<(String, String), String> {
+    let basis = crate::git::baum_pfade(wurzel, &diff.basis)?;
+    let pruefdateien = crate::pruefdateien::waehle(&diff.pfade, &basis)?;
+    let pfad = match pruefdateien.freigabe {
+        Some(pfad) => pfad.to_owned(),
+        None => pruefdateien
+            .deklaration
+            .strip_prefix("kodex/aenderungen/")
+            .map_or_else(
+                || FREIGABE.to_owned(),
+                |name| format!("kodex/freigaben/{name}"),
+            ),
+    };
+    Ok((pfad, vorlage(wurzel, &diff.pfade)?))
 }
 
 /// Text einer passenden Freigabe fuer den aktuellen Stand (Vorlage fuer Wolfgang).

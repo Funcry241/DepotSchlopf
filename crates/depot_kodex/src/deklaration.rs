@@ -99,15 +99,22 @@ fn deckt(eintrag: &str, pfad: &str) -> bool {
 
 /// Undeklariert = 0 und deklariert-aber-unveraendert = 0.
 pub fn vergleiche(deklaration: &Deklaration, diff: &BTreeSet<String>) -> Vec<String> {
+    vergleiche_mit_pfad(deklaration, diff, crate::DEKLARATION)
+}
+
+pub(crate) fn vergleiche_mit_pfad(
+    deklaration: &Deklaration,
+    diff: &BTreeSet<String>,
+    deklarationspfad: &str,
+) -> Vec<String> {
     let mut fehler = Vec::new();
-    if !diff.contains(crate::DEKLARATION) {
+    if !diff.contains(deklarationspfad) {
         fehler.push(format!(
-            "{} wurde nicht erneuert: jede Änderung braucht ihre eigene Deklaration",
-            crate::DEKLARATION
+            "{deklarationspfad} wurde nicht erneuert: jede Änderung braucht ihre eigene Deklaration"
         ));
     }
     for pfad in diff {
-        if pfad != crate::DEKLARATION && !deklaration.pfade.iter().any(|e| deckt(e, pfad)) {
+        if pfad != deklarationspfad && !deklaration.pfade.iter().any(|e| deckt(e, pfad)) {
             fehler.push(format!("undeklarierte Änderung: {pfad}"));
         }
     }

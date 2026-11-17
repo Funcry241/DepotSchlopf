@@ -105,7 +105,9 @@ fn kodex_dateien(
         if matches!(
             name.as_str(),
             crate::DEKLARATION | crate::FESTSCHREIBUNG | crate::freigabe::FREIGABE
-        ) {
+        ) || crate::pruefdateien::ist_deklaration(&name)
+            || crate::pruefdateien::ist_freigabe(&name)
+        {
             continue;
         }
         let typ = eintrag.file_type().map_err(|e| format!("{name}: {e}"))?;
@@ -276,6 +278,27 @@ pub fn pruefe(wurzel: &Path, klasse: Klasse, diff: &BTreeSet<String>) -> Vec<Str
 mod tests {
     use super::*;
     use crate::toml;
+
+    #[test]
+    fn deklaration_nicht_im_kodex_hash() -> Result<(), String> {
+        let ordner = std::env::temp_dir().join(format!("depot-kodex-p34-{}", std::process::id()));
+        fs::create_dir_all(ordner.join("kodex/aenderungen")).map_err(|e| e.to_string())?;
+        fs::create_dir_all(ordner.join("kodex/freigaben")).map_err(|e| e.to_string())?;
+        let ergebnis = (|| {
+            let mut vorher = BTreeMap::new();
+            let mut danach = BTreeMap::new();
+            kodex_dateien(&ordner, Path::new("kodex"), &mut vorher)?;
+            fs::write(ordner.join("kodex/aenderungen/p34.txt"), "Deklaration")
+                .map_err(|e| e.to_string())?;
+            fs::write(ordner.join("kodex/freigaben/p34.txt"), "Freigabe")
+                .map_err(|e| e.to_string())?;
+            kodex_dateien(&ordner, Path::new("kodex"), &mut danach)?;
+            assert_eq!(vorher, danach);
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(&ordner);
+        ergebnis
+    }
 
     #[test]
     fn neue_und_umbenannte_kapitalmassnahme_aendern_die_festschreibung() -> Result<(), String> {

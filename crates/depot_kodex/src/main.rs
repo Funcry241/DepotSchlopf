@@ -106,10 +106,10 @@ fn main() -> ExitCode {
     if args.first().map(String::as_str) == Some("freigabe") {
         // Schreibt nichts und meldet nie ein offenes Gate (R27): nur die Vorlage.
         let vorlage = depot_kodex::git::aenderungen(&wurzel, basis)
-            .and_then(|d| depot_kodex::freigabe::vorlage(&wurzel, &d.pfade));
+            .and_then(|d| depot_kodex::freigabe::vorlage_fuer_diff(&wurzel, &d));
         return match vorlage {
-            Ok(v) => {
-                println!("[Kodex] Vorlage für {}:", depot_kodex::freigabe::FREIGABE);
+            Ok((pfad, v)) => {
+                println!("[Kodex] Vorlage für {pfad}:");
                 print!("{v}");
                 ExitCode::SUCCESS
             }

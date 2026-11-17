@@ -193,6 +193,15 @@ pub fn merge_base(wurzel: &Path, basis: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&mb).trim().to_string())
 }
 
+pub(crate) fn baum_pfade(wurzel: &Path, rev: &str) -> Result<BTreeSet<String>, String> {
+    Ok(pfadliste(&ausgabe(
+        wurzel,
+        &["ls-tree", "-r", "--name-only", "-z", rev, "--"],
+    )?)?
+    .into_iter()
+    .collect())
+}
+
 /// Inhalt einer Datei im Stand `rev`; `None`, wenn es sie dort nicht gibt.
 pub fn datei_im_stand(wurzel: &Path, rev: &str, pfad: &str) -> Option<Vec<u8>> {
     ausgabe(wurzel, &["show", &format!("{rev}:{pfad}")]).ok()
