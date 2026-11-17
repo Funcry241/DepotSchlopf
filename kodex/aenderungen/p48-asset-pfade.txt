@@ -1,0 +1,6 @@
+klasse: KodexAenderung
+zweck: Die zwei Oberflächendateien außerhalb des Rust-Quellbaums als Produktivcode klassifizieren
+pfade:
+crates/depot_kodex/src/pfade.rs
+kodex/festschreibung.txt
+kodex/freigaben/p48-asset-pfade.txt
