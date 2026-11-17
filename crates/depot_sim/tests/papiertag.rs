@@ -554,6 +554,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
                 begruendung: [(sap.clone(), "beobachtet".to_string())]
                     .into_iter()
                     .collect(),
+                belege: std::collections::BTreeMap::new(),
                 park: None,
             }),
         },
@@ -706,6 +707,7 @@ fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), 
                         begruendung: [(sap.clone(), "beobachtet".to_string())]
                             .into_iter()
                             .collect(),
+                        belege: std::collections::BTreeMap::new(),
                         park: None,
                     }),
                 },
@@ -1192,6 +1194,7 @@ fn verkaufserloes_deckt_kauf_vor_der_abrechnung() -> Result<(), String> {
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(isin.clone(), 2_000)].into_iter().collect(),
         begruendung: [(isin, "beobachtet".into())].into_iter().collect(),
+        belege: std::collections::BTreeMap::new(),
         park: None,
     };
     let universum = universum()?;
@@ -1789,6 +1792,7 @@ fn reduktion_pruefen(
                 berater: BeraterId::Dachs,
                 zielgewichte_bp,
                 begruendung: std::collections::BTreeMap::new(),
+                belege: std::collections::BTreeMap::new(),
                 park: None,
             }),
         },
@@ -1932,6 +1936,7 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
                 berater: wer,
                 zielgewichte_bp: [(sap.clone(), 2000)].into_iter().collect(),
                 begruendung: [(sap, "Belegte Lage".into())].into_iter().collect(),
+                belege: std::collections::BTreeMap::new(),
                 park: None,
             }),
         },
@@ -4051,6 +4056,10 @@ fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
                 ]
                 .into_iter()
                 .collect(),
+                // Beleg↔These (#325): Nr. 99 gibt es nicht, Allianz fällt mit dem Veto heraus.
+                belege: [(sap.clone(), vec![1, 99]), (allianz.clone(), vec![1])]
+                    .into_iter()
+                    .collect(),
                 park: None,
             }),
         },
@@ -4066,6 +4075,7 @@ fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
     );
     let mut j = ort.oeffnen()?;
     belege(&mut j, 5, &[(&sap, "229", "230"), (&allianz, "350", "351")])?;
+    belege_schlagzeilen(&mut j, 1, 0)?;
     let mut k = konto(&ort, &j)?;
     let aus = papiertag(
         &mut j,
@@ -4085,6 +4095,21 @@ fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
         .map(|l| &l.beleg.isin)
         .collect();
     assert_eq!(isins, vec![&sap]);
+    let kaufbelege: Vec<&str> = j
+        .stand()
+        .begruendungen()
+        .iter()
+        .filter(|(_, wer, _)| wer == depot_sim::belegrang::KAUFBELEG)
+        .map(|(_, _, t)| t.as_str())
+        .collect();
+    let nr = j
+        .stand()
+        .auftraege()
+        .iter()
+        .find(|l| l.beleg.isin == sap)
+        .map(|l| l.beleg.nr)
+        .ok_or("SAP-Auftrag")?;
+    assert_eq!(kaufbelege, vec![format!("{nr} Dachs 1")]);
     let zeile = format!("Topf A: Veto: nur {allianz}: Allianz zu teuer");
     assert!(
         j.stand()

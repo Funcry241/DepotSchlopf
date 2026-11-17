@@ -12,6 +12,49 @@ use std::collections::BTreeSet;
 use depot_journal::Stand;
 use depot_kern::{BeraterId, Datum, Isin, Universum};
 
+/// Absender der Kaufbelege (#325): `"{auftrag} {Berater} {n},{m}"`, Nummern der Beobachtungen
+/// des Kauftags in Frage-Reihenfolge ab 1.
+pub const KAUFBELEG: &str = "Kaufbeleg";
+
+/// Ein Kauf mit den Ereignissen, auf die die KI ihn gestützt hat.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Kaufbeleg {
+    pub datum: Datum,
+    pub auftrag: u64,
+    pub berater: BeraterId,
+    /// Ereignisnummern ab 1, wie die Frage sie gezeigt hat.
+    pub nummern: Vec<usize>,
+}
+
+/// Alle Kaufbelege im Journal. Unlesbare Zeilen entfallen; ältere Journale haben keine.
+pub fn kaufbelege(stand: &Stand) -> Vec<Kaufbeleg> {
+    stand
+        .begruendungen()
+        .iter()
+        .filter(|(_, wer, _)| wer == KAUFBELEG)
+        .filter_map(|(datum, _, text)| {
+            let mut teile = text.split(' ');
+            let auftrag = teile.next()?.parse().ok()?;
+            let berater = match teile.next()? {
+                "Dachs" => BeraterId::Dachs,
+                "Maus" => BeraterId::Maus,
+                _ => return None,
+            };
+            let nummern = teile
+                .next()?
+                .split(',')
+                .map(|n| n.parse::<usize>().ok().filter(|n| *n > 0))
+                .collect::<Option<Vec<_>>>()?;
+            teile.next().is_none().then_some(Kaufbeleg {
+                datum: *datum,
+                auftrag,
+                berater,
+                nummern,
+            })
+        })
+        .collect()
+}
+
 /// Eine bestehende These: ein Wert, den der Berater vor dem Stichtag genannt hat.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct These {
@@ -145,6 +188,10 @@ pub struct Messung {
     pub faelle: u64,
     /// Davon stand der gestützte Beleg unter den ersten drei.
     pub unter_drei: u64,
+    /// Käufe mit genannten Belegen (#325, Beleg↔These).
+    pub kauf_faelle: u64,
+    /// Davon stand mindestens einer der genannten Belege unter den ersten drei.
+    pub kauf_unter_drei: u64,
 }
 
 /// Die Belege, die eine Frage an diesem Tag gesehen hat, in ihrer Reihenfolge. Der Papiertag
@@ -187,6 +234,26 @@ pub fn messe(
             .any(|i| *i == gewaehlt)
         {
             m.unter_drei = m.unter_drei.saturating_add(1);
+        }
+    }
+    for k in kaufbelege(stand)
+        .iter()
+        .filter(|k| zeitraum.contains(&k.datum))
+    {
+        let kandidaten = kandidaten_am(stand, k.datum);
+        let thesen = thesen_vor(stand, universum, k.berater, k.datum);
+        let oben: Vec<usize> = sortierer
+            .ordne(&kandidaten, &thesen)
+            .into_iter()
+            .take(3)
+            .collect();
+        m.kauf_faelle = m.kauf_faelle.saturating_add(1);
+        if k.nummern
+            .iter()
+            .filter_map(|n| n.checked_sub(1))
+            .any(|i| oben.contains(&i))
+        {
+            m.kauf_unter_drei = m.kauf_unter_drei.saturating_add(1);
         }
     }
     m

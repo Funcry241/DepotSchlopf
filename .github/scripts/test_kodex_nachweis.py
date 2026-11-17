@@ -1,8 +1,9 @@
 """Gegenproben für die Wiederverwendung identischer PR-Prüfungen."""
 
 import unittest
+from unittest.mock import patch
 
-from kodex_nachweis import WORKFLOW, finde_lauf, name
+from kodex_nachweis import WORKFLOW, finde_lauf, name, pr_basis
 
 BAUM = "1" * 40
 BASIS = "2" * 40
@@ -90,6 +91,17 @@ class Nachweis(unittest.TestCase):
     def test_windows_update_schritt_uebersprungen_trotz_gruenem_job(self):
         self.windows_update["steps"][0]["conclusion"] = "skipped"
         self.assertIsNone(self.finde())
+
+    def test_pr_basis_ist_der_erste_elterncommit_des_checkouts(self):
+        with patch("kodex_nachweis.befehl", return_value=f"{BAUM} {BASIS} {KOPF}"):
+            self.assertEqual(pr_basis(BAUM, KOPF), BASIS)
+
+    def test_pr_basis_weist_falschen_checkout_oder_kopf_ab(self):
+        with patch("kodex_nachweis.befehl", return_value=f"{BAUM} {BASIS} {KOPF}"):
+            with self.assertRaises(ValueError):
+                pr_basis(ANDERER_BAUM, KOPF)
+            with self.assertRaises(ValueError):
+                pr_basis(BAUM, ANDERER_BAUM)
 
     def test_abgelaufen(self):
         self.beleg["expired"] = True

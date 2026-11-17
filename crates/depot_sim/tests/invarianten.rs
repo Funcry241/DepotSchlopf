@@ -234,6 +234,7 @@ fn vorschlag(wer: BeraterId, bp: i64) -> Result<Vorschlag, String> {
         berater: wer,
         zielgewichte_bp: [(sap()?, bp)].into_iter().collect(),
         begruendung: [(sap()?, "Belegte Lage".into())].into_iter().collect(),
+        belege: std::collections::BTreeMap::new(),
         park: None,
     })
 }

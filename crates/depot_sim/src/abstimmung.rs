@@ -453,6 +453,7 @@ mod tests {
                         erwartung_bp: std::collections::BTreeMap::new(),
                         limit_bp: std::collections::BTreeMap::new(),
                         stopp_bp: std::collections::BTreeMap::new(),
+                        belege: std::collections::BTreeMap::new(),
                         park: None,
                     };
                     let ohne_zustimmung = nur_verkleinerung(&topf, &kurse, &v);
@@ -500,6 +501,7 @@ mod tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp: std::collections::BTreeMap::new(),
             begruendung: std::collections::BTreeMap::new(),
+            belege: std::collections::BTreeMap::new(),
             park: None,
         };
         let mut alt = neu.clone();

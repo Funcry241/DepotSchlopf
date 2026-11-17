@@ -1810,7 +1810,45 @@ fn belege_kauf(
             &format!("{nr} {grund}"),
         )?;
     }
+    if a.richtung == Richtung::Kauf
+        && let Some(v) = vorschlag
+        && let Some(nummern) = v.belege.get(&a.isin)
+    {
+        belege_kaufbelege(j, tag, nr, v.berater, nummern)?;
+    }
     Ok(())
+}
+
+/// Verknüpft den Kauf mit den Ereignissen des Tages, auf die die KI ihn stützt (#325).
+/// Nur Nummern, die heute als Beobachtung im Journal stehen, zählen. Ältere Stände lesen
+/// die Zeile als gewöhnliche Begründung.
+fn belege_kaufbelege(
+    j: &mut Journal,
+    tag: &Tag,
+    nr: u64,
+    wer: BeraterId,
+    nummern: &[usize],
+) -> Result<(), LaufFehler> {
+    let heute = j
+        .stand()
+        .beobachtungen()
+        .iter()
+        .filter(|(d, _)| *d == tag.datum)
+        .count();
+    let gueltig: Vec<String> = nummern
+        .iter()
+        .filter(|n| (1..=heute).contains(*n))
+        .map(ToString::to_string)
+        .collect();
+    if gueltig.is_empty() {
+        return Ok(());
+    }
+    begruende(
+        j,
+        tag,
+        crate::belegrang::KAUFBELEG,
+        &format!("{nr} {} {}", name(wer), gueltig.join(",")),
+    )
 }
 
 /// Der besondere Kaufanlass zählt nur mit der zum Auftrag belegten Kursreaktion.
@@ -2179,6 +2217,7 @@ mod tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp: [(isin, bp)].into_iter().collect(),
             begruendung: std::collections::BTreeMap::new(),
+            belege: std::collections::BTreeMap::new(),
             park: None,
         })
     }

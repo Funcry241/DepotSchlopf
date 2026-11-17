@@ -100,21 +100,29 @@ def ausgabe(feld, wert):
         print(f"{feld}={wert}", file=ziel)
 
 
+def ereignis_daten():
+    return json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+
+
+def pr_basis(geprueft, kopf):
+    eltern = befehl("git", "show", "-s", "--format=%H %P", "HEAD").split()
+    if len(eltern) != 3 or eltern[0] != geprueft or eltern[2] != kopf:
+        raise ValueError("Checkout ist nicht der Merge-Stand des PR-Laufs")
+    return eltern[1]
+
+
 def belege_pr():
-    ereignis = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+    ereignis = ereignis_daten()
     pr = ereignis["pull_request"]
     repository = ereignis["repository"]["id"]
     if pr["base"]["ref"] != "main" or pr["head"]["repo"]["id"] != repository:
         return
     if os.environ["GITHUB_RUN_ATTEMPT"] != "1":
         return
-    basis = pr["base"]["sha"]
     kopf = pr["head"]["sha"]
-    geprüft = os.environ["GITHUB_SHA"]
-    eltern = befehl("git", "show", "-s", "--format=%H %P", "HEAD").split()
-    if eltern != [geprüft, basis, kopf]:
-        return
-    baum = git_baum(geprüft)
+    geprueft = os.environ["GITHUB_SHA"]
+    basis = pr_basis(geprueft, kopf)
+    baum = git_baum(geprueft)
     # Nur der mit GitHubs API unabhängig überprüfbare Fall bekommt einen Beleg.
     if git_baum(kopf) != baum:
         return
@@ -126,7 +134,7 @@ def belege_pr():
 
 
 def hole_export():
-    ereignis = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+    ereignis = ereignis_daten()
     if ereignis["ref"] != "refs/heads/main" or ereignis.get("forced"):
         return
     repo = os.environ["GITHUB_REPOSITORY"]
@@ -149,6 +157,10 @@ def hole_export():
 
 if __name__ == "__main__":
     aufgabe = sys.argv[1]
+    if aufgabe == "basis":
+        pr = ereignis_daten()["pull_request"]
+        print(pr_basis(os.environ["GITHUB_SHA"], pr["head"]["sha"]))
+        sys.exit(0)
     try:
         {"beleg": belege_pr, "export": hole_export}[aufgabe]()
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as fehler:

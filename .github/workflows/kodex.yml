@@ -71,9 +71,13 @@ jobs:
         id: filter
         env:
           EREIGNIS: ${{ github.event_name }}
-          BASIS: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python -B .github/scripts/windows_update.py filter "$EREIGNIS" "$BASIS" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ "$EREIGNIS" = pull_request ]; then
+            BASIS=$(python -B .github/scripts/kodex_nachweis.py basis)
+            python -B .github/scripts/windows_update.py filter "$EREIGNIS" "$BASIS" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            python -B .github/scripts/windows_update.py filter "$EREIGNIS" >> "$GITHUB_OUTPUT"
+          fi
 
   kodex-linux-gate:
     needs: kodex-nachweis
@@ -88,8 +92,12 @@ jobs:
         run: rustup toolchain install
       - name: Gate und Assistenten-Export (wie run.cmd)
         env:
-          BASIS: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: cargo run --locked -p depot_lauf -- alles --basis "$BASIS"
+          BASIS: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            BASIS=$(python -B .github/scripts/kodex_nachweis.py basis)
+          fi
+          cargo run --locked -p depot_lauf -- alles --basis "$BASIS"
       - name: Assistenten-Export bereitstellen
         if: always()
         uses: actions/upload-artifact@v4
@@ -186,8 +194,12 @@ jobs:
       - name: Gate und Assistenten-Export unter Windows
         shell: pwsh
         env:
-          BASIS: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASIS: ${{ github.event.before }}
         run: |
+          if ($env:GITHUB_EVENT_NAME -eq "pull_request") {
+            $env:BASIS = python -B .github/scripts/kodex_nachweis.py basis
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
           cargo run --locked -p depot_lauf -- alles --basis "$env:BASIS"
           exit $LASTEXITCODE
       - name: Windows-Assistenten-Export bereitstellen

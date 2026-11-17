@@ -64,6 +64,7 @@ mod tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp: BTreeMap::new(),
             begruendung: BTreeMap::new(),
+            belege: std::collections::BTreeMap::new(),
             park: None,
         };
         for (s, bp) in ziele {

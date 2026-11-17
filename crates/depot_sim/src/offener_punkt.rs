@@ -39,6 +39,7 @@ mod tests {
             berater,
             zielgewichte_bp: BTreeMap::new(),
             begruendung: BTreeMap::new(),
+            belege: std::collections::BTreeMap::new(),
             park: None,
         };
         for s in werte {
