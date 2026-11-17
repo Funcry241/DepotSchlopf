@@ -10,7 +10,9 @@
 use std::collections::BTreeSet;
 
 use depot_journal::Stand;
-use depot_kern::{BeraterId, Datum, Isin, Universum};
+use depot_kern::{BeraterId, Datum, Isin, Universum, liste::Wert};
+
+use crate::nachrichtenbezug::Wortsuche;
 
 /// Absender der Kaufbelege (#325): `"{auftrag} {Berater} {n},{m}"`, Nummern der Beobachtungen
 /// des Kauftags als Tagesnummern ab 1.
@@ -117,65 +119,83 @@ impl Sortierer for Heute {
     }
 }
 
-/// Einfache Rangfolge ohne Lernen. Punkte: Wertbezug 4 je genannter These (höchstens 8),
-/// Termin 2, sonst 0. Bei Gleichstand bleibt die heutige Reihenfolge, die bei Nachrichten
-/// schon die neueste zuerst nennt (Aktualität).
+/// Einfache Rangfolge ohne Lernen. Punkte: 4 je belegerwähnter ISIN (höchstens 8),
+/// Termin 2. Gleichstand behält die bisherige Kandidatenreihenfolge.
 #[derive(Clone, Copy, Debug)]
-pub struct Grundrang;
+pub struct Grundrang<'a> {
+    werte: &'a [Wert],
+}
 
-impl Grundrang {
-    fn punkte(beleg: &str, thesen: &[These]) -> u32 {
-        let klein = beleg.to_lowercase();
-        let bezug = thesen
+impl<'a> Grundrang<'a> {
+    #[must_use]
+    pub fn neu(werte: &'a [Wert]) -> Self {
+        Self { werte }
+    }
+
+    fn punkte(&self, beleg: &str, thesen: &[These]) -> u32 {
+        // Von der bisherigen Sortierung angehängte Wertmarkierungen und der Quellenlink
+        // sind selbst kein Hinweis auf einen Wertbezug.
+        let inhalt = beleg.split(" | ").next().unwrap_or(beleg);
+        let inhalt = inhalt
+            .split(" [betrifft: ")
+            .next()
+            .unwrap_or(inhalt)
+            .to_lowercase();
+        let suche = Wortsuche::neu(&inhalt);
+        let isins: BTreeSet<&Isin> = thesen
             .iter()
-            .filter(|t| {
-                klein.contains(&t.isin.als_str().to_lowercase())
-                    || t.name
-                        .as_deref()
-                        .and_then(kernname)
-                        .is_some_and(|n| klein.contains(&n))
-            })
-            .count();
-        let bezug = u32::try_from(bezug.min(2)).unwrap_or(2).saturating_mul(4);
+            .filter(|t| self.trifft(&suche, t))
+            .map(|t| &t.isin)
+            .collect();
+        let bezug = u32::try_from(isins.len().min(2))
+            .unwrap_or(2)
+            .saturating_mul(4);
         let termin = if beleg.starts_with("Termin ") { 2 } else { 0 };
         bezug.saturating_add(termin)
     }
+
+    fn trifft(&self, suche: &Wortsuche<'_>, these: &These) -> bool {
+        let isin = these.isin.als_str();
+        if suche.trifft(isin) {
+            return true;
+        }
+        if isin == "DE0007236101"
+            && ["Siemens Energy", "Siemens Healthineers", "Siemens Gamesa"]
+                .iter()
+                .any(|name| suche.trifft(name))
+        {
+            return suche.trifft("Siemens AG") || suche.trifft("SIE");
+        }
+        let alias = match isin {
+            "US02079K3059" => "Google",
+            "DE0008430026" => "Munich Re",
+            "DE0007100000" => "Mercedes",
+            "US46625H1005" => "JP Morgan",
+            _ => "",
+        };
+        suche.trifft(alias)
+            || self
+                .werte
+                .iter()
+                .find(|w| w.isin == these.isin)
+                .map_or_else(
+                    || these.name.as_deref().is_some_and(|n| suche.trifft(n)),
+                    |wert| suche.wert(wert),
+                )
+    }
 }
 
-impl Sortierer for Grundrang {
+impl Sortierer for Grundrang<'_> {
     fn name(&self) -> &'static str {
-        "Grundrang"
+        "Grundrang v2"
     }
     fn ordne(&self, kandidaten: &[String], thesen: &[These]) -> Vec<usize> {
         let mut rang: Vec<usize> = (0..kandidaten.len()).collect();
-        // Stabil: Gleichstand behält die heutige Reihenfolge.
-        rang.sort_by_key(|i| {
-            std::cmp::Reverse(kandidaten.get(*i).map_or(0, |b| Self::punkte(b, thesen)))
+        rang.sort_by_cached_key(|i| {
+            std::cmp::Reverse(kandidaten.get(*i).map_or(0, |b| self.punkte(b, thesen)))
         });
         rang
     }
-}
-
-/// Erstes prägendes Wort eines Namens, klein ("SAP SE" → "sap", "Deutsche Telekom AG" →
-/// "deutsche telekom"). Rechtsformen und zu kurze Namen zählen nicht.
-fn kernname(name: &str) -> Option<String> {
-    const FORMEN: [&str; 9] = [
-        "ag", "se", "inc", "inc.", "corp", "corp.", "plc", "nv", "sa",
-    ];
-    let teile: Vec<String> = name
-        .split_whitespace()
-        .map(str::to_lowercase)
-        .filter(|t| !FORMEN.contains(&t.as_str()))
-        .take(2)
-        .collect();
-    let kern = match teile.as_slice() {
-        [a, b] if a.chars().count() < 5 || ["deutsche", "the"].contains(&a.as_str()) => {
-            format!("{a} {b}")
-        }
-        [a, ..] => a.clone(),
-        [] => return None,
-    };
-    (kern.chars().count() >= 3).then_some(kern)
 }
 
 /// Thesen eines Beraters zum Stichtag: alle Werte, die er in den fünf Kalendertagen davor
@@ -418,6 +438,8 @@ mod tests {
     /// Meldung ohne Bezug. Gleichstand behält die Reihenfolge (neueste zuerst).
     #[test]
     fn grundrang_bevorzugt_wertbezug_dann_termin() -> Result<(), String> {
+        let werte = depot_kern::liste::beobachtungsliste()?;
+        let rang = Grundrang::neu(&werte);
         let thesen = [these("DE0007164600", "SAP SE")?];
         let k = texte(&[
             "Nachricht: Ölpreis steigt",
@@ -425,13 +447,15 @@ mod tests {
             "Termin 18.11.: Zinsentscheid (bestätigt)",
             "Nachricht: SAP hebt Prognose an",
         ]);
-        assert_eq!(Grundrang.ordne(&k, &thesen), vec![3, 2, 0, 1]);
+        assert_eq!(rang.ordne(&k, &thesen), vec![3, 2, 0, 1]);
         Ok(())
     }
 
     /// Jeder Index genau einmal, auch ohne Thesen und bei leerer Liste.
     #[test]
     fn ordnung_ist_eine_vertauschung() -> Result<(), String> {
+        let werte = depot_kern::liste::beobachtungsliste()?;
+        let rang = Grundrang::neu(&werte);
         let thesen = [these("DE0007164600", "SAP SE")?];
         for n in 0..12_usize {
             let k: Vec<String> = (0..n)
@@ -444,7 +468,7 @@ mod tests {
                 })
                 .collect();
             for t in [&thesen[..], &[]] {
-                let mut r = Grundrang.ordne(&k, t);
+                let mut r = rang.ordne(&k, t);
                 r.sort_unstable();
                 assert_eq!(r, (0..n).collect::<Vec<_>>());
             }
@@ -452,19 +476,56 @@ mod tests {
         Ok(())
     }
 
-    /// Die ISIN im Text zählt wie der Name; Rechtsformen allein nie („SE“ träfe sonst fast
-    /// jede Meldung).
     #[test]
-    fn kernname_und_isin() -> Result<(), String> {
-        assert_eq!(kernname("SAP SE").as_deref(), Some("sap"));
+    fn grundrang_fehlzuordnungen() -> Result<(), String> {
+        let werte = depot_kern::liste::beobachtungsliste()?;
+        let rang = Grundrang::neu(&werte);
+        for (isin, meldung, punkte) in [
+            ("DE0007164600", "Fed will Zinsen asap senken", 0),
+            ("US92826C8394", "USA verschärfen Visapflicht", 0),
+            ("US0231351067", "Abholzung im Amazonas", 0),
+            ("US0378331005", "Pineapple wird teurer", 0),
+            ("US4781601046", "Boris Johnson kritisiert die Regierung", 0),
+            ("DE0007236101", "Siemens Energy erhält Großauftrag", 0),
+            ("DE0007236101", "Siemens Healthineers senkt Margenziel", 0),
+            (
+                "DE0007236101",
+                "Siemens AG und Siemens Energy melden Zahlen",
+                4,
+            ),
+            ("US02079K3059", "Google verliert Kartellverfahren", 4),
+            ("DE0008430026", "Munich Re erhöht Dividende", 4),
+            ("DE0007100000", "Mercedes ruft Autos zurück", 4),
+            ("US46625H1005", "JP Morgan senkt Kursziel", 4),
+            ("US1912161007", "Coca Cola erhöht Preise", 4),
+            ("DE0007164600", "Meldung zu DE0007164600", 4),
+            (
+                "DE0007164600",
+                "Irrelevant | https://example.org/sap [betrifft: SAP]",
+                0,
+            ),
+            (
+                "DE0007236101",
+                "Siemens Energy erhält Großauftrag [betrifft: Siemens]",
+                0,
+            ),
+        ] {
+            let these = these(isin, isin)?;
+            assert_eq!(
+                rang.punkte(meldung, &[these.clone(), these]),
+                punkte,
+                "{meldung}"
+            );
+        }
+        let etfs = [
+            these("IE00B4L5Y983", "iShares")?,
+            these("IE00B5BMR087", "iShares")?,
+            these("IE0008471009", "iShares")?,
+        ];
         assert_eq!(
-            kernname("Deutsche Telekom AG").as_deref(),
-            Some("deutsche telekom")
+            rang.punkte("BlackRock senkt Gebühren für iShares-ETFs", &etfs),
+            0
         );
-        assert_eq!(kernname("SE"), None);
-        let thesen = [these("DE0007164600", "SE")?];
-        assert_eq!(Grundrang::punkte("Meldung zu DE0007164600", &thesen), 4);
-        assert_eq!(Grundrang::punkte("Meldung einer SE", &thesen), 0);
         Ok(())
     }
 }

@@ -1,0 +1,7 @@
+klasse: Funktion
+zweck: Wertbezug im Grundrang mit Wortgrenzen, Aliasnamen und eindeutigen ISINs messen
+pfade:
+crates/depot_lage/src/belegauswahl.rs
+crates/depot_sim/src/belegrang.rs
+crates/depot_sim/src/nachrichtenbezug.rs
+crates/depot_sim/tests/belegrang.rs

@@ -31,7 +31,9 @@ fn journal(name: &str) -> Result<(std::path::PathBuf, Journal), String> {
 #[test]
 fn kaufbelege_zaehlen_in_der_messung() -> Result<(), String> {
     let (dir, mut j) = journal("kaufbeleg")?;
-    let universum = als_universum(&beobachtungsliste()?);
+    let werte = beobachtungsliste()?;
+    let universum = als_universum(&werte);
+    let grundrang = Grundrang::neu(&werte);
     j.begruende(
         tag(13)?,
         "Dachs",
@@ -74,7 +76,7 @@ fn kaufbelege_zaehlen_in_der_messung() -> Result<(), String> {
         ..Messung::default()
     };
     assert_eq!(messe(j.stand(), &universum, &Heute, woche.clone()), kauf(0));
-    assert_eq!(messe(j.stand(), &universum, &Grundrang, woche), kauf(1));
+    assert_eq!(messe(j.stand(), &universum, &grundrang, woche), kauf(1));
     drop(j);
     fs::remove_dir_all(&dir).map_err(|e| e.to_string())
 }
@@ -87,7 +89,9 @@ fn grundrang_findet_den_beleg_zur_these() -> Result<(), String> {
     let pfad = dir.join("journal.txt");
     Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
     let mut j = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
-    let universum = als_universum(&beobachtungsliste()?);
+    let werte = beobachtungsliste()?;
+    let universum = als_universum(&werte);
+    let grundrang = Grundrang::neu(&werte);
     let sap = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
     // Am Freitag nennt Dachs SAP als Ziel; das ist die bestehende These vom Montag.
     j.begruende(
@@ -155,10 +159,10 @@ fn grundrang_findet_den_beleg_zur_these() -> Result<(), String> {
     };
     let woche = tag(16)?..=tag(20)?;
     assert_eq!(messe(j.stand(), &universum, &Heute, woche.clone()), alle(0));
-    assert_eq!(messe(j.stand(), &universum, &Grundrang, woche), alle(1));
+    assert_eq!(messe(j.stand(), &universum, &grundrang, woche), alle(1));
     let davor = tag(9)?..=tag(13)?;
     assert_eq!(
-        messe(j.stand(), &universum, &Grundrang, davor),
+        messe(j.stand(), &universum, &grundrang, davor),
         Messung::default()
     );
     drop(j);

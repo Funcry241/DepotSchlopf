@@ -37,13 +37,22 @@ impl Bezug<'_> {
     }
 }
 
-pub(crate) fn bezug<'a>(text: &str, werte: &'a [Wert]) -> Bezug<'a> {
-    let text = text.to_lowercase();
-    let woerter: Vec<_> = text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect();
-    let trifft = |ausdruck: &str| {
+pub(crate) struct Wortsuche<'a> {
+    woerter: Vec<&'a str>,
+}
+
+impl<'a> Wortsuche<'a> {
+    /// Der Text ist bereits kleingeschrieben.
+    pub(crate) fn neu(text: &'a str) -> Self {
+        Self {
+            woerter: text
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .collect(),
+        }
+    }
+
+    pub(crate) fn trifft(&self, ausdruck: &str) -> bool {
         let ausdruck = ausdruck.to_lowercase();
         let teile: Vec<_> = ausdruck
             .split(|c: char| !c.is_alphanumeric())
@@ -51,8 +60,19 @@ pub(crate) fn bezug<'a>(text: &str, werte: &'a [Wert]) -> Bezug<'a> {
             .collect();
         ausdruck.chars().count() >= 3
             && !teile.is_empty()
-            && woerter.windows(teile.len()).any(|w| w == teile)
-    };
+            && self.woerter.windows(teile.len()).any(|w| w == teile)
+    }
+
+    pub(crate) fn wert(&self, w: &Wert) -> bool {
+        self.trifft(w.isin.als_str())
+            || self.trifft(&w.name)
+            || self.trifft(w.kuerzel.strip_suffix(".DEX").unwrap_or(&w.kuerzel))
+    }
+}
+
+pub(crate) fn bezug<'a>(text: &str, werte: &'a [Wert]) -> Bezug<'a> {
+    let text = text.to_lowercase();
+    let suche = Wortsuche::neu(&text);
     let makro = [
         "Zins",
         "Leitzins",
@@ -68,15 +88,8 @@ pub(crate) fn bezug<'a>(text: &str, werte: &'a [Wert]) -> Bezug<'a> {
         "oil",
     ]
     .into_iter()
-    .any(|wort| woerter.contains(&wort.to_lowercase().as_str()));
-    let werte = werte
-        .iter()
-        .filter(|w| {
-            trifft(w.isin.als_str())
-                || trifft(&w.name)
-                || trifft(w.kuerzel.strip_suffix(".DEX").unwrap_or(&w.kuerzel))
-        })
-        .collect();
+    .any(|wort| suche.woerter.contains(&wort.to_lowercase().as_str()));
+    let werte = werte.iter().filter(|w| suche.wert(w)).collect();
     Bezug { werte, makro }
 }
 
