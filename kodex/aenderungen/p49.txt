@@ -1,0 +1,6 @@
+klasse: KodexAenderung
+zweck: JavaScript der Dienstoberfläche im Linux-Gate auf Syntax prüfen
+pfade:
+.github/workflows/kodex.yml
+kodex/festschreibung.txt
+kodex/freigaben/p49.txt

@@ -90,6 +90,8 @@ jobs:
           fetch-depth: 0
       - name: Rust-Werkzeugkette aus rust-toolchain.toml
         run: rustup toolchain install
+      - name: JavaScript der Oberfläche prüfen
+        run: node --check crates/depot_dienst/src/assets/app.js
       - name: Gate und Assistenten-Export (wie run.cmd)
         env:
           BASIS: ${{ github.event.before }}
