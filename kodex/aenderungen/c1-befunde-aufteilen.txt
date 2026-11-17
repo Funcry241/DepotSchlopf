@@ -1,0 +1,11 @@
+klasse: KodexAenderung
+zweck: Kodex-Befunde auf drei Testprogramme verteilen, damit C1 sie parallel startet (#190)
+pfade:
+CHANGELOG.md
+crates/depot_kodex/tests/befunde.rs
+crates/depot_kodex/tests/befunde_compiler.rs
+crates/depot_kodex/tests/befunde_gemeinsam/mod.rs
+crates/depot_kodex/tests/befunde_regeln.rs
+kodex/aenderungen/c1-befunde-aufteilen.txt
+kodex/festschreibung.txt
+kodex/freigaben/c1-befunde-aufteilen.txt
