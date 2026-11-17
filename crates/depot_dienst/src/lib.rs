@@ -505,11 +505,20 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/bestaetigen" => auftrag_bestaetigen(d, a, jetzt),
         "/protokoll" | "/protokoll.txt" => protokoll_lesen(d, a, tag),
         "/einrichtung" => einrichtungsseite(d, u, a, jetzt, tag),
-        "/app.js" => antwort(
-            200,
-            "text/javascript; charset=utf-8",
-            seiten::APP_JS.as_bytes(),
-        ),
+        "/app.js" => {
+            // Rust-Quelltext normalisierte im früheren Literal CRLF bereits beim Einlesen.
+            // Der ausgelieferte Text bleibt auch aus einem Windows-Checkout bytegleich.
+            let skript = seiten::APP_JS;
+            if skript.as_bytes().contains(&b'\r') {
+                antwort(
+                    200,
+                    "text/javascript; charset=utf-8",
+                    skript.replace("\r\n", "\n").as_bytes(),
+                )
+            } else {
+                antwort(200, "text/javascript; charset=utf-8", skript.as_bytes())
+            }
+        }
         _ => seiten::fehler(404, "Nicht gefunden"),
     }
 }
