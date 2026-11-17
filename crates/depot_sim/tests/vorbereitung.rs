@@ -102,6 +102,44 @@ fn nachricht(j: &mut Journal, wann: Zeitpunkt, abruf: Zeitpunkt, text: &str) -> 
         .map_err(|e| format!("{e:?}"))
 }
 
+/// Gegenprobe P40 (#312-4): Bezahlte Vorarbeit steht vor den Nachrichten des Tages. Die
+/// Frage kürzt am Ende, die Hypothese kommt also auch bei vielen Nachrichten an.
+#[test]
+fn vorarbeit_vor_nachrichten() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.journal()?;
+    let t = zeit(7)?;
+    nachricht(&mut j, t, t, "Politisches Ereignis am Samstag")?;
+    let (mut dachs, mut maus, _) = modelle()?;
+    vorbereiten(&mut j, t, &universum()?, &mut dachs, &mut maus, || Some(t))?;
+    let montag = datum(2026, 11, 9)?;
+    let frueh = Zeitpunkt::frankfurt(montag, 8, 0, 0).ok_or("Zeit")?;
+    for n in 0..40 {
+        nachricht(
+            &mut j,
+            frueh,
+            frueh,
+            &format!("Montagsmeldung {n} {}", "x".repeat(700)),
+        )?;
+    }
+    let lage = weltlage_am(j.stand(), montag, zeit(9)?);
+    let hypothese = lage
+        .iter()
+        .position(|s| s.contains("Frühere KI-Hypothese"))
+        .ok_or("Hypothese fehlt")?;
+    let erste_meldung = lage
+        .iter()
+        .position(|s| s.contains("Montagsmeldung"))
+        .ok_or("Meldung fehlt")?;
+    assert!(hypothese < erste_meldung, "{lage:?}");
+    assert!(
+        lage.iter()
+            .skip(erste_meldung)
+            .all(|s| !s.contains("Hypothese"))
+    );
+    Ok(())
+}
+
 #[test]
 fn zwei_unabhaengige_erstmeinungen_ohne_handelszustand_und_ohne_wiederholung() -> Result<(), String>
 {

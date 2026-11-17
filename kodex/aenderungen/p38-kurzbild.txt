@@ -1,0 +1,7 @@
+klasse: Funktion
+zweck: Fehlerbild und Laufzeiten in die Zusammenfassung des Laufs (#313 E4, P38)
+pfade:
+CHANGELOG.md
+crates/depot_lauf/src/main.rs
+crates/depot_lauf/src/zusammenfassung.rs
+kodex/aenderungen/p38-kurzbild.txt

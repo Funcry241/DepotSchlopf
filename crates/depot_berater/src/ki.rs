@@ -225,7 +225,8 @@ impl<N: Netz> KiBerater<N> {
         let Some(hinweise) = self.zuarbeit.hinweise(lage.ereignisse, &frage) else {
             return frage;
         };
-        let ergaenzt = format!("{frage}{hinweise}");
+        let verdichtet = self.zuarbeit.verdichte(lage.ereignisse, &frage);
+        let ergaenzt = format!("{verdichtet}{hinweise}");
         let inhalt = self.anbieter.anfrage(erlaubnis.deckel(), system, &ergaenzt);
         if erlaubnis.eingabe_passt(&inhalt) {
             ergaenzt
@@ -1103,6 +1104,13 @@ impl<N: Netz> Berater for KiBerater<N> {
             Ok(mut a) => {
                 self.thesenpruefung = thesenpruefung;
                 self.mindesteinsatz_grund = mindesteinsatz_grund.map(|grund| (lage.datum, grund));
+                // Belege zählen nur für Ereignisse, die die Frage gezeigt hat (#325, #312-4).
+                if let Some(v) = a.vorschlag.as_mut() {
+                    for nummern in v.belege.values_mut() {
+                        nummern.retain(|nr| frage::ereignis_sichtbar(*nr, lage, &f));
+                    }
+                    v.belege.retain(|_, nummern| !nummern.is_empty());
+                }
                 a.prognose = a.prognose.filter(|p| {
                     if self.vorbereitung.is_some() {
                         frage::prognose_ereignis_sichtbar(p, lage, &f)
