@@ -158,11 +158,15 @@ impl Umwelt for System {
 /// Das Lagebild fuer den Dienst: dieselbe Rechnung wie `run.cmd lage`, dazu der Stand der
 /// Schluessel und Knoepfe, die Auftraege einreihen.
 pub fn lagerechner(umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerechner {
+    let lesecache = std::sync::Mutex::new(depot_journal::Lesecache::default());
     Box::new(move |wurzel: &Path, jetzt: Zeitpunkt| {
         let daten = wurzel.join("daten");
         let sperren = sperrdateien(&daten);
         let (anbieter, anbieter_unlesbar) = anbieterprotokoll(&daten);
-        let mut bild = depot_lage::mit_journal_und_eintraegen(&daten, |journal, eintraege| {
+        let mut cache = lesecache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut bild = depot_lage::mit_lesecache(&daten, &mut cache, |journal, eintraege| {
             let mut bild = lagebild(&Umgebung {
                 jetzt,
                 journal,
@@ -189,6 +193,7 @@ pub fn lagerechner(umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerechner {
             }
             bild
         });
+        drop(cache);
         bild.gemini_budget = Some(gemini::budget(&daten, heute(jetzt)));
         bild
     })

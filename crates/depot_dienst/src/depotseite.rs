@@ -330,7 +330,11 @@ pub fn inhalt(d: &crate::Dienst, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (Strin
         "<section><h2>Depot</h2><p class=\"leise\">Stand {}</p></section>",
         zeit_text(jetzt)
     );
-    let lesbar = depot_lage::mit_journal(&daten, |zugang| {
+    let mut cache = d
+        .depot_lesecache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let lesbar = depot_lage::mit_lesecache(&daten, &mut cache, |zugang, _| {
         let stand = match zugang {
             Zugang::Offen(stand) if !stand.toepfe().is_empty() => stand,
             Zugang::NichtEingerichtet | Zugang::Offen(_) => {

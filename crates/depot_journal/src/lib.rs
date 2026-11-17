@@ -74,7 +74,9 @@ pub mod weltprognose;
 
 pub use aufloesung::{Aufloesung, Auswertung, Ergebnis, werte_aus, wilson_bp};
 pub use auftrag::{AuftragsLage, AuftragsZustand, Ausfuehrung, Meldung};
-pub use datei::{Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
+pub use datei::{
+    GelesenerJournalstand, Journal, JournalFehler, Lesecache, inhalt_fuer, vermerk_fuer,
+};
 pub use kasse::{AufrufErlaubnis, KiStand};
 pub use konto::{
     Abrechnungen, Abweichung, Konto, KontoOrder, KontoStatus, Kontoauszug, papier_valuta,

@@ -418,6 +418,7 @@ pub struct Dienst {
     /// Commit des laufenden Programms, einmal beim Dienststart ermittelt.
     pub version: Option<String>,
     pub zustand: Mutex<Zustand>,
+    pub(crate) depot_lesecache: Mutex<depot_journal::Lesecache>,
     pub(crate) gespraechscache: crate::zeitstrahl_ki::Cache,
     pub(crate) papierdialog: Mutex<()>,
     pub(crate) neuro: Mutex<crate::neuroschlopf::Anzeige>,
@@ -728,6 +729,7 @@ impl Dienst {
                 protokoll_datei: None,
                 protokoll_fehler: None,
             }),
+            depot_lesecache: Mutex::default(),
             gespraechscache: crate::zeitstrahl_ki::Cache::default(),
             papierdialog: Mutex::new(()),
             neuro: Mutex::default(),

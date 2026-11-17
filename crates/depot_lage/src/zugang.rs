@@ -46,26 +46,45 @@ pub fn mit_journal_und_eintraegen<R>(
     daten: &Path,
     f: impl FnOnce(Zugang<'_>, &[(depot_journal::Art, String)]) -> R,
 ) -> R {
-    let pfad = daten.join(JOURNAL);
-    let eingerichtet = match Journal::eingerichtet(&pfad) {
-        Ok(e) => e,
-        Err(e) => return f(Zugang::Fehler(&fehler_text(&e)), &[]),
+    let pfad = match journalpfad(daten) {
+        Ok(Some(pfad)) => pfad,
+        Ok(None) => return f(Zugang::NichtEingerichtet, &[]),
+        Err(grund) => return f(Zugang::Fehler(&grund), &[]),
     };
-    if !eingerichtet {
-        return match spur(&daten.join(PAPIERKONTO)) {
-            Ok(false) => f(Zugang::NichtEingerichtet, &[]),
-            Ok(true) => f(
-                Zugang::Fehler("Papierkonto ohne Journal und Vermerk: Datenbestand unvollständig"),
-                &[],
-            ),
-            Err(t) => f(Zugang::Fehler(&t), &[]),
-        };
-    }
     match Journal::oeffnen(&pfad) {
         Ok(j) => f(Zugang::Offen(j.stand()), j.eintraege()),
         Err(JournalFehler::Belegt) => f(Zugang::Belegt, &[]),
         Err(e) => f(Zugang::Fehler(&fehler_text(&e)), &[]),
     }
+}
+
+/// Liest das Journal für die Dienstansicht über deren eigenen Speicher.
+pub fn mit_lesecache<R>(
+    daten: &Path,
+    cache: &mut depot_journal::Lesecache,
+    f: impl FnOnce(Zugang<'_>, &[(depot_journal::Art, String)]) -> R,
+) -> R {
+    let pfad = match journalpfad(daten) {
+        Ok(Some(pfad)) => pfad,
+        Ok(None) => return f(Zugang::NichtEingerichtet, &[]),
+        Err(grund) => return f(Zugang::Fehler(&grund), &[]),
+    };
+    match cache.lesen(&pfad, u64::MAX) {
+        Ok((stand, eintraege)) => f(Zugang::Offen(stand), eintraege),
+        Err(JournalFehler::Belegt) => f(Zugang::Belegt, &[]),
+        Err(e) => f(Zugang::Fehler(&fehler_text(&e)), &[]),
+    }
+}
+
+fn journalpfad(daten: &Path) -> Result<Option<std::path::PathBuf>, String> {
+    let pfad = daten.join(JOURNAL);
+    if Journal::eingerichtet(&pfad).map_err(|e| fehler_text(&e))? {
+        return Ok(Some(pfad));
+    }
+    if spur(&daten.join(PAPIERKONTO))? {
+        return Err("Papierkonto ohne Journal und Vermerk: Datenbestand unvollständig".into());
+    }
+    Ok(None)
 }
 
 /// Eine belegte Journalsperre ist vorübergehend. Andere Fehler verlangen einen Eingriff.
