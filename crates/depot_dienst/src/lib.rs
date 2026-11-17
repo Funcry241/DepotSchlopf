@@ -250,12 +250,12 @@ fn update_sperre(d: &Dienst, z: &werkbank::Zustand) -> Option<seiten::UpdateSper
         .and_then(|zeit| zeit.elapsed().ok())
         .is_some_and(|dauer| dauer.as_secs() >= 180);
     if frist_abgelaufen {
-        return Some(UpdateSperre::BestaetigungFehlgeschlagen);
+        return Some(UpdateSperre::BestaetigungFehlgeschlagen(offen));
     }
     if z.neustart || z.laufend.as_ref().is_some_and(|a| a.art == Art::Update) {
         Some(UpdateSperre::Neustart)
     } else if z.update_meldung.as_ref().is_some_and(|(fehler, _)| *fehler) {
-        Some(UpdateSperre::BestaetigungFehlgeschlagen)
+        Some(UpdateSperre::BestaetigungFehlgeschlagen(offen))
     } else if d.version.as_deref() == Some(offen.neu.as_str()) {
         Some(UpdateSperre::Probe)
     } else {
@@ -268,7 +268,7 @@ fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
         zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), heute(jetzt));
     let z = d.sperre();
     let sperre = update_sperre(d, &z);
-    let mut html = seiten::live_mit_ki(&d.token, &d.start, &z, jetzt, &ki, sperre);
+    let mut html = seiten::live_mit_ki(&d.token, &d.start, &z, jetzt, &ki, sperre.as_ref());
     if sicherung::ziel(&d.wurzel).is_empty() {
         html.push_str("<p class=\"leise\">Sicherung: aus</p>");
     } else {
@@ -306,7 +306,7 @@ fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {
         &z,
         tag,
         kurssperre.as_deref(),
-        update_sperre(d, &z),
+        update_sperre(d, &z).as_ref(),
     )
 }
 
@@ -388,9 +388,11 @@ fn einrichtungsseite(
         },
         ..gespeichert
     };
+    let sperre = update_sperre(d, &zustand);
     let update = seiten::UpdateAnzeige {
-        sperre: update_sperre(d, &zustand),
+        sperre: sperre.as_ref(),
         version: d.version.as_deref(),
+        jetzt: Some(jetzt),
     };
     let inhalt = seiten::einrichtung_mit_update(
         &d.token,
@@ -488,9 +490,11 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/teil/kopf" => antwort(200, HTML, betriebsleiste(d, tag).as_bytes()),
         "/teil/update" => {
             let z = d.sperre();
+            let sperre = update_sperre(d, &z);
             let update = seiten::UpdateAnzeige {
-                sperre: update_sperre(d, &z),
+                sperre: sperre.as_ref(),
                 version: d.version.as_deref(),
+                jetzt: Some(jetzt),
             };
             antwort(
                 200,

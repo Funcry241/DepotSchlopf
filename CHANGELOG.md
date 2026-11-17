@@ -6,6 +6,10 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Die Abstimmung zwischen Dachs und Maus entfällt, wenn nichts offen ist: Beide Zweitmeinungen stimmen zu oder sagen Bargeld, und kein Ersatzkauf wartet. Das Journal vermerkt „Abstimmung entfällt: kein offener Punkt“. Spart an solchen Tagen bis zu vier bezahlte Aufrufe (#312-1). Nach einem Veto oder Teilveto läuft die Abstimmung wie bisher. Rückweg ohne Sicherung.
+
+- Ein Parkwert-ETF zählt nicht mehr zum Mindesteinsatz von 30 %. Die Regel soll zu aktiven Käufen führen und lässt sich nicht durch Parken erfüllen (#311 H3).
+
 - **⚠️ Vor dem Einspielen eine geprüfte Sicherung von Journal und Papierkonto anlegen. Kein Rückweg ohne diese Sicherung.** Tausch am selben Schluss, nur im Papierkonto: Plant ein Topf Verkäufe und Käufe an derselben Börse, darf ein Kauf den Erlös dieser Verkäufe zum Verkaufslimit abzüglich der höchsten Gebühr einrechnen (schlechtester Fall). Der Kauf hängt an allen Verkäufen des Plans: Das Konto rechnet erst die Verkäufe ab, dann die Käufe; füllt ein Verkauf nicht, verfällt der Kauf. Das Bargeld wird nie negativ. Bisher entfielen die Käufe eines solchen Plans ganz. Ein echter Broker bekommt keine Tauschorders, bis eine bedingte Order dort geklärt ist (#311 H1b). Sobald ein Tauschkauf (`nach=`) im Journal oder eine Zeile `tausch;` im Papierkonto steht, lehnt ein älterer Stand beide ab.
 
 - Eine KI kann in ihrer Antwort einen Parkwert nennen, auch mit „ziele“: null: einen ETF der Liste, eine Bargeldreserve und in wie vielen Handelstagen sie frühestens einen anderen Kauf erwartet. Bargeld über der Reserve geht in diesen ETF, höchstens 40 % des Topfs. Das Regelwerk parkt nur bei mindestens 5 Handelstagen und ab 1.000 € Zukauf. Brauchen andere Ziele das Bargeld, verkleinert es den Parkwert zuerst. Ein gehaltener ETF zählt nicht gegen die Zahl der Werte, alle Verlustgrenzen gelten. Ein Parkwert braucht wie jeder Kauf die Zweitmeinung (#311 H3). Rückweg ohne Sicherung: Das Journal ändert sich nicht, Parkwerte stehen als Begründung darin.

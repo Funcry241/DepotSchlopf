@@ -259,6 +259,34 @@ fn uebernehme(
     }
 }
 
+/// Ohne offenen Punkt klärt die Abstimmung nichts und kostet nur Aufrufe (#312-1, P35).
+fn entfaellt(
+    buch: &mut Journal,
+    zyklus: &Zyklus<'_>,
+    erste: [&TopfAntwort; 2],
+    gueltig: &[TopfAntwort; 2],
+) -> Result<bool, LaufFehler> {
+    let [ea, eb] = erste;
+    let [ga, gb] = gueltig;
+    let toepfe = [(ea, ga), (eb, gb)].map(|(e, g)| {
+        (
+            e.vorschlag.as_ref(),
+            g.vorschlag.as_ref(),
+            g.ersatzkauf_offen(),
+        )
+    });
+    if crate::offener_punkt::offener_punkt(toepfe) {
+        return Ok(false);
+    }
+    begruende(
+        buch,
+        zyklus.tag,
+        crate::lauf::REGELWERK,
+        "Abstimmung entfällt: kein offener Punkt",
+    )?;
+    Ok(true)
+}
+
 pub(crate) fn berate(
     buch: &mut Journal,
     zyklus: &Zyklus<'_>,
@@ -275,6 +303,9 @@ pub(crate) fn berate(
         .iter()
         .any(|e| *e != crate::lauf::Erstmeinung::Verwertbar)
     {
+        return Ok(gueltig);
+    }
+    if entfaellt(buch, zyklus, [&ea, &eb], &gueltig)? {
         return Ok(gueltig);
     }
     let (da, db) = (

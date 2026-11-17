@@ -35,7 +35,9 @@ pub mod handelsergebnis;
 pub mod handelsvergleich;
 pub mod kursverlauf;
 pub mod lauf;
+pub mod mindesteinsatz;
 mod nachrichtenbezug;
+pub mod offener_punkt;
 pub mod papier;
 pub mod papierdatei;
 pub mod papierlauf;
@@ -47,6 +49,7 @@ pub mod schatten;
 pub mod schlopfmodell;
 pub mod splitumbuchung;
 pub mod szenario;
+pub mod teilveto;
 pub mod topfgewichtung;
 pub mod vorschau;
 pub use positionskauf::{

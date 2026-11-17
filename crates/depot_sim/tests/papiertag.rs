@@ -1936,7 +1936,9 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
         tag(5)?,
         Urteil {
             verwertbar: true,
-            zustimmung: true,
+            // Maus legt in der Zweitmeinung ein Veto gegen Topf A ein; nur dann ist ein Punkt
+            // offen und die Abstimmung läuft (#312-1, P35).
+            zustimmung: wer != BeraterId::Maus,
             begruendung: format!("Unabhängige Zweitmeinung {wer:?}"),
         },
     );
@@ -2052,6 +2054,12 @@ fn aenderung_oder_rueckzug_gilt_auch_ohne_zweite_antwort() -> Result<(), String>
 fn widerruf_gilt_auch_ohne_verwertbare_zweite_antwort() -> Result<(), String> {
     let mut a = diskutant(BeraterId::Dachs, vec![Some(2000)], true)?;
     let mut b = diskutant(BeraterId::Maus, vec![None], false)?;
+    // Hier trägt Maus' Zweitmeinung Topf A; offen ist Topf B nach Dachs' Veto.
+    for (urteile, zustimmung) in [(&mut a.plan.urteile, false), (&mut b.plan.urteile, true)] {
+        for u in urteile.values_mut() {
+            u.zustimmung = zustimmung;
+        }
+    }
     let (_ort, j) = dialoglauf(&mut a, &mut b)?;
     assert_eq!(a.gesehen.len(), 1);
     assert_eq!(b.gesehen.len(), 1);
