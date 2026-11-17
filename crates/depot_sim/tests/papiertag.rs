@@ -1072,6 +1072,12 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
     let mut j = ort.oeffnen()?;
     // Wie `run.cmd kurse`: erst die Kurse, dann die Nachrichten.
     belege_kurse(&mut j)?;
+    let notiz = format!(
+        "Tiingo-Normalisierung: isin=US0378331005; abruf=2026-11-05T17:00:00Z; roh={}; zeile=2; feld=close; original=224.47999999999998; nach-millionstel-usd=224480000; rundung=halb-gerade; abweichung-hoechstens=0.000000001-USD",
+        "a".repeat(64)
+    );
+    vorbedingung(j.beobachte(tag(5)?, &notiz), "Tiingo-Rundungsbeleg")?;
+    assert_eq!(j.stand().seit_abschluss(), 0);
     let abruf = some(Zeitpunkt::neu(tag(5)?, 17, 0, 0), "Abruf")?;
     let mut belege = |zeit: Zeitpunkt, text: &str| -> Result<(), String> {
         let b = vorbedingung(

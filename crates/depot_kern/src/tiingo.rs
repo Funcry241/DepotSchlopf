@@ -15,6 +15,50 @@ pub struct Rundungsbeleg {
     pub preis: Preis,
 }
 
+/// Erkennt das bestehende Journalformat für eine belegte Tiingo-Rundung.
+#[must_use]
+pub fn ist_rundungsbeobachtung(text: &str) -> bool {
+    let Some(felder) = text.strip_prefix("Tiingo-Normalisierung: ") else {
+        return false;
+    };
+    let teile: Vec<_> = felder.splitn(8, "; ").collect();
+    let [
+        isin,
+        abruf,
+        roh,
+        zeile,
+        feld,
+        original,
+        preis,
+        "rundung=halb-gerade; abweichung-hoechstens=0.000000001-USD",
+    ] = teile.as_slice()
+    else {
+        return false;
+    };
+    let Some(original) = original.strip_prefix("original=") else {
+        return false;
+    };
+    let preis = preis
+        .strip_prefix("nach-millionstel-usd=")
+        .and_then(|wert| wert.parse().ok());
+    isin.strip_prefix("isin=")
+        .is_some_and(|s| crate::Isin::neu(s).is_ok())
+        && abruf
+            .strip_prefix("abruf=")
+            .and_then(crate::Zeitpunkt::lies)
+            .is_some()
+        && roh
+            .strip_prefix("roh=")
+            .is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        && zeile
+            .strip_prefix("zeile=")
+            .and_then(|s| s.parse::<usize>().ok())
+            .is_some_and(|n| n >= 2)
+        && matches!(*feld, "feld=close" | "feld=high" | "feld=low")
+        && crate::lies_preis(original).is_none()
+        && normalisiere(original).is_some_and(|gerundet| Some(gerundet.fein()) == preis)
+}
+
 /// Optionale Tiingo-Felder zum unbereinigten Tageskurs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Marktdaten {
