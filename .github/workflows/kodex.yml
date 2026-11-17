@@ -194,9 +194,18 @@ jobs:
       - name: Bauordner des Gates bestimmen
         id: bauordner
         shell: pwsh
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.pull_request.head.repo.full_name == github.repository }}
         continue-on-error: true
         run: ./.github/scripts/kodex_baucache.ps1 -Art gate
+      - name: Bauordner aus Cache laden
+        id: gate-baucache
+        if: ${{ steps.bauordner.outputs.pfad != '' }}
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.bauordner.outputs.pfad }}
+          key: kodex-bau-v1-gate-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: kodex-bau-v1-gate-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
       - name: Gate und Assistenten-Export unter Windows
         shell: pwsh
         env:
@@ -209,7 +218,7 @@ jobs:
           cargo run --locked -p depot_lauf -- alles --basis "$env:BASIS"
           exit $LASTEXITCODE
       - name: Geprüften Bauordner für Folgeläufe speichern
-        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.bauordner.outputs.pfad != '' }}
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.bauordner.outputs.pfad != '' && steps.gate-baucache.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -245,9 +254,18 @@ jobs:
       - name: Bauordner des Gates bestimmen
         id: bauordner
         shell: pwsh
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.pull_request.head.repo.full_name == github.repository }}
         continue-on-error: true
         run: ./.github/scripts/kodex_baucache.ps1 -Art update
+      - name: Bauordner aus Cache laden
+        id: gate-baucache
+        if: ${{ steps.bauordner.outputs.pfad != '' }}
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.bauordner.outputs.pfad }}
+          key: kodex-bau-v1-update-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: kodex-bau-v1-update-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
       - name: Cache-Schlüssel für alten Updater bestimmen
         id: alt
         shell: pwsh
@@ -273,7 +291,7 @@ jobs:
           python .github/scripts/pruefe_update_alt.py --isolierte-pruefmaschine --arbeit "$env:RUNNER_TEMP/depot-update-alt" --alt-bau "$env:RUNNER_TEMP/update-alt-bau" @optionen
           exit $LASTEXITCODE
       - name: Geprüften Bauordner für Folgeläufe speichern
-        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.bauordner.outputs.pfad != '' }}
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.bauordner.outputs.pfad != '' && steps.gate-baucache.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
