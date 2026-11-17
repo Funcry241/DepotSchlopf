@@ -1,7 +1,15 @@
-klasse: Funktion
-zweck: Blockierte Update-Suche und geplante Aufträge auf Live und in der Einrichtung erklären
+klasse: KodexAenderung
+zweck: Änderungsdeklarationen und gebundene Freigaben getrennt je PR ablegen
 pfade:
-README.md
-crates/depot_dienst/src/lib.rs
-crates/depot_dienst/src/seiten.rs
-crates/depot_dienst/tests/update.rs
+crates/depot_kodex/src/deklaration.rs
+crates/depot_kodex/src/festschreibung.rs
+crates/depot_kodex/src/freigabe.rs
+crates/depot_kodex/src/git.rs
+crates/depot_kodex/src/lib.rs
+crates/depot_kodex/src/main.rs
+crates/depot_kodex/src/pfade.rs
+crates/depot_kodex/src/pr.rs
+crates/depot_kodex/src/pruefdateien.rs
+crates/depot_kodex/tests/pr.rs
+kodex/festschreibung.txt
+kodex/freigabe.txt
