@@ -1,0 +1,72 @@
+name: P51-Messung
+
+# Windows-Abnahme für P51 (#313 E5): Dienststart bis „bereit“ mit großem, erfundenem
+# Messjournal. Läuft nur auf dem Messzweig und verändert main nicht. Den geprüften Stand
+# nennt .github/p51-messung-stand.txt (Zweig, Tag oder Commit); Werkzeug und Erzeuger
+# kommen immer von diesem Zweig.
+on:
+  push:
+    branches: [claude/project-thread-inffs1]
+    paths:
+      - .github/workflows/p51-messung.yml
+      - .github/scripts/p51_messung.py
+      - .github/p51-messung-stand.txt
+      - crates/depot_sim/tests/messjournal.rs
+
+permissions:
+  contents: read
+
+jobs:
+  messung:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: werkzeug
+      - name: Geprüften Stand bestimmen
+        id: stand
+        run: |
+          $stand = (Get-Content -Raw werkzeug/.github/p51-messung-stand.txt).Trim()
+          "ref=$stand" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.stand.outputs.ref }}
+          path: pruefling
+      - name: Rust-Werkzeugkette aus rust-toolchain.toml
+        working-directory: pruefling
+        run: rustup toolchain install
+      - name: Messjournal erzeugen (1.000 Handelstage, nur erfundene Daten)
+        working-directory: pruefling
+        env:
+          MESSJOURNAL_ZIEL: ${{ runner.temp }}/messjournal
+          MESSJOURNAL_TAGE: "1000"
+          MESSJOURNAL_START: "2022-11-01"
+        run: |
+          Copy-Item ../werkzeug/crates/depot_sim/tests/messjournal.rs crates/depot_sim/tests/messjournal.rs -Force
+          "Commit: $(git rev-parse HEAD)"
+          cargo test --locked --release -p depot_sim --test messjournal erzeuge_messjournal -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash -Algorithm SHA256 "$env:MESSJOURNAL_ZIEL/journal.txt" | Format-List
+      - name: Journal::oeffnen messen (Debug wie der installierte Stand)
+        working-directory: pruefling
+        env:
+          MESSJOURNAL_ZIEL: ${{ runner.temp }}/messjournal
+        run: |
+          cargo test --locked -p depot_sim --test messjournal miss_oeffnen -- --ignored --nocapture
+          exit $LASTEXITCODE
+      - name: Dienst bauen (Debug, wie der Wächter baut)
+        working-directory: pruefling
+        run: |
+          cargo build --locked -p depot_dienst --bins
+          exit $LASTEXITCODE
+      - name: Dienststart bis bereit und Gegenproben
+        working-directory: pruefling
+        run: |
+          # Der Prüfstand bleibt sauber: messjournal.rs ist nur Werkzeug.
+          Remove-Item crates/depot_sim/tests/messjournal.rs
+          python -B ../werkzeug/.github/scripts/p51_messung.py "$PWD" "${{ runner.temp }}/messjournal" "$PWD/target/debug/depot_dienst.exe" 3
+          exit $LASTEXITCODE
