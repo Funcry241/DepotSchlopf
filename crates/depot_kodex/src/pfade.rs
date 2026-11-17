@@ -30,10 +30,6 @@ const WERKZEUG: [&str; 8] = [
     "LICENSE",
 ];
 
-pub(crate) fn ist_dienst_asset(name: &str) -> bool {
-    matches!(name, "app.js" | "stil.css")
-}
-
 pub fn rolle(pfad: &str) -> Rolle {
     if pfad == crate::DEKLARATION || crate::pruefdateien::ist_deklaration(pfad) {
         return Rolle::Deklaration;
@@ -59,13 +55,6 @@ pub fn rolle(pfad: &str) -> Rolle {
     }
     if WERKZEUG.contains(&pfad) {
         return Rolle::Werkzeug;
-    }
-    // Die beiden eingebundenen Oberflächendateien liegen außerhalb des Rust-Quellbaums.
-    if pfad
-        .strip_prefix("crates/depot_dienst/assets/")
-        .is_some_and(ist_dienst_asset)
-    {
-        return Rolle::Produktiv;
     }
     if let Some(rest) = pfad.strip_prefix("crates/") {
         let mut teile = rest.splitn(3, '/');
@@ -144,24 +133,6 @@ mod tests {
         assert_eq!(rolle("DepotSchlopf.cmd"), Rolle::Werkzeug);
         assert_eq!(rolle("geheim.sh"), Rolle::Unbekannt);
         assert_eq!(rolle("anders.cmd"), Rolle::Unbekannt);
-    }
-
-    #[test]
-    fn nur_die_beiden_dienst_assets_sind_produktivcode() {
-        for pfad in [
-            "crates/depot_dienst/assets/app.js",
-            "crates/depot_dienst/assets/stil.css",
-        ] {
-            assert_eq!(rolle(pfad), Rolle::Produktiv);
-            assert!(erlaubt(Klasse::RefactorOnly, rolle(pfad)));
-        }
-        for pfad in [
-            "crates/depot_dienst/assets/anderes.js",
-            "crates/depot_dienst/assets/mod.rs",
-            "crates/depot_ki/assets/app.js",
-        ] {
-            assert_eq!(rolle(pfad), Rolle::Unbekannt);
-        }
     }
 
     #[test]
