@@ -2721,7 +2721,8 @@ mod wiederholung_tests {
 }
 
 /// #311 H1b, P45-Gegenprobe Börsen-Mix: Ein NYSE-Verkauf deckt keinen Xetra-Kauf als Tausch am
-/// selben Schluss. Der Plan fällt auf das freie Bargeld zurück; nur Xetra mit Xetra tauscht.
+/// selben Schluss und umgekehrt. Der Plan fällt auf das freie Bargeld zurück; nur Xetra mit
+/// Xetra tauscht.
 #[cfg(test)]
 mod tausch_boersen_tests {
     use super::*;
@@ -2804,7 +2805,7 @@ mod tausch_boersen_tests {
     }
 
     #[test]
-    fn nyse_verkauf_deckt_keinen_xetra_kauf() -> Result<(), LaufFehler> {
+    fn tausch_nur_an_derselben_boerse() -> Result<(), LaufFehler> {
         let (jpm, alv) = (isin(JPM)?, isin(ALV)?);
         let gemischt = plan(JPM, SAP)?;
         assert!(
@@ -2817,6 +2818,16 @@ mod tausch_boersen_tests {
                 .kaeufe
                 .iter()
                 .chain(&gemischt.verkaeufe)
+                .all(|a| a.nach().is_empty())
+        );
+        // Umgekehrt deckt ein Xetra-Verkauf keinen NYSE-Kauf.
+        let umgekehrt = plan(SAP, JPM)?;
+        assert!(!kauf_von(&umgekehrt, JPM)?, "{umgekehrt:?}");
+        assert!(
+            umgekehrt
+                .kaeufe
+                .iter()
+                .chain(&umgekehrt.verkaeufe)
                 .all(|a| a.nach().is_empty())
         );
         // Gegenstück: Xetra mit Xetra tauscht am selben Schluss.
