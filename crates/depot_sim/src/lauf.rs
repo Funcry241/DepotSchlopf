@@ -1381,16 +1381,25 @@ fn zweite_meinung(
     })
 }
 
+/// Der Parkwert zählt nicht zum Mindesteinsatz: Die 30-%-Regel soll zu aktiven Käufen führen
+/// (#311 H3, Festlegung 2).
 fn geplanter_einsatz(
     topf: &Topf,
     kurse: &Kurse,
     plan: &depot_regelwerk::Entscheidung,
+    park: Option<&Isin>,
 ) -> Option<i64> {
     let gesamt = topf.wert_exakt(kurse)?;
     let bargeld = depot_kern::Preis::aus_cent(topf.bargeld())?;
     let mut eingesetzt = gesamt.checked_sub(bargeld)?;
+    if let Some(p) = park.filter(|p| topf.stueck(p) > 0) {
+        eingesetzt = eingesetzt.checked_sub(kurse.kurs(p)?.mal_stueck_exakt(topf.stueck(p))?)?;
+    }
     for auftrag in plan.verkaeufe.iter().chain(&plan.kaeufe) {
         let a = auftrag.auftrag();
+        if Some(&a.isin) == park {
+            continue;
+        }
         let wert = kurse.kurs(&a.isin)?.mal_stueck_exakt(a.stueck)?;
         eingesetzt = match a.richtung {
             Richtung::Kauf => eingesetzt.checked_add(wert)?,
@@ -1405,6 +1414,7 @@ fn mindesteinsatz(
     z: &Zyklus<'_>,
     topf: &Topf,
     plan: &depot_regelwerk::Entscheidung,
+    park: Option<&Isin>,
     berater: &mut dyn Berater,
     minimum_bp: i64,
 ) -> Result<bool, LaufFehler> {
@@ -1416,7 +1426,7 @@ fn mindesteinsatz(
         return Ok(false);
     }
     let Some(einsatz_bp) =
-        geplanter_einsatz(topf, &z.tag.kurse, plan).filter(|bp| *bp < minimum_bp)
+        geplanter_einsatz(topf, &z.tag.kurse, plan, park).filter(|bp| *bp < minimum_bp)
     else {
         return Ok(false);
     };
@@ -1537,7 +1547,11 @@ fn topf_zyklus(
         Some(w) => depot_regelwerk::entscheide_wiederholung(&eingabe, &mut vergabe, frei, w),
         None => plane_topf(j, &eingabe, frei, ersatzkauf, konto.tausch_moeglich()),
     };
-    let nachgefragt = !ruhetag && mindesteinsatz(j, z, &topf, &ent, berater, minimum_bp)?;
+    let park = vorschlag
+        .as_ref()
+        .and_then(|v| v.park.as_ref())
+        .map(|p| &p.isin);
+    let nachgefragt = !ruhetag && mindesteinsatz(j, z, &topf, &ent, park, berater, minimum_bp)?;
     // Auch die budgetierte Nachfrage darf die Frische der Kaufkurse nicht verlängern.
     if nachgefragt && !beratungszeit(z) {
         return begruende(
@@ -2142,6 +2156,25 @@ mod tests {
         Ok(())
     }
 
+    /// #311 H3, Festlegung 2: Der Parkwert füllt den Mindesteinsatz nicht.
+    #[test]
+    fn parkwert_zaehlt_nicht_zum_mindesteinsatz() -> Result<(), LaufFehler> {
+        let datum = depot_kern::Datum::neu(2026, 11, 6).ok_or_else(|| halt("Datum"))?;
+        let zeit = Zeitpunkt::neu(datum, 16, 35, 0).ok_or_else(|| halt("Zeit"))?;
+        let etf = depot_kern::Isin::neu("IE00B4L5Y983").map_err(|e| halt(format!("{e:?}")))?;
+        let preis = depot_kern::Preis::lies_euro("100").ok_or_else(|| halt("Preis"))?;
+        let kurs = depot_kern::Kurs::exakt(preis, "EUR", datum, zeit, Herkunft::Quelle)
+            .map_err(|e| halt(format!("{e:?}")))?;
+        let kurse =
+            Kurse::neu(zeit, vec![(etf.clone(), kurs)]).map_err(|e| halt(format!("{e:?}")))?;
+        let mut topf = Topf::neu(TopfId::A, Cent(600_000)).map_err(|e| halt(format!("{e:?}")))?;
+        topf.setze_bestand(etf.clone(), 40);
+        let plan = depot_regelwerk::Entscheidung::default();
+        assert_eq!(geplanter_einsatz(&topf, &kurse, &plan, None), Some(4_000));
+        assert_eq!(geplanter_einsatz(&topf, &kurse, &plan, Some(&etf)), Some(0));
+        Ok(())
+    }
+
     #[test]
     fn mindesteinsatz_fragt_einmal_und_vermerkt_fehlenden_grund() -> Result<(), LaufFehler> {
         struct Nachfrage(usize);
@@ -2207,27 +2240,16 @@ mod tests {
         j.rechne_ki_ab(&erster.abrechnung(0, 0).ok_or_else(|| halt("Abrechnung"))?)
             .map_err(journal)?;
         let plan = depot_regelwerk::Entscheidung::default();
-        assert!(!mindesteinsatz(&mut j, &z, &topf, &plan, &mut berater, 0)?);
+        let mut pruefe = |j: &mut Journal, z: &Zyklus<'_>, minimum| {
+            mindesteinsatz(j, z, &topf, &plan, None, &mut berater, minimum)
+        };
+        assert!(!pruefe(&mut j, &z, 0)?);
         let gesperrt = Zyklus {
             vollstaendige_kurse: false,
             ..z
         };
-        assert!(!mindesteinsatz(
-            &mut j,
-            &gesperrt,
-            &topf,
-            &plan,
-            &mut berater,
-            3_000
-        )?);
-        assert!(mindesteinsatz(
-            &mut j,
-            &z,
-            &topf,
-            &plan,
-            &mut berater,
-            3_000
-        )?);
+        assert!(!pruefe(&mut j, &gesperrt, 3_000)?);
+        assert!(pruefe(&mut j, &z, 3_000)?);
         assert_eq!(berater.0, 1);
         assert!(
             j.stand().begruendungen().iter().any(|(_, _, text)| {
