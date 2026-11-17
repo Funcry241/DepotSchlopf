@@ -1,0 +1,9 @@
+klasse: TestOnly
+zweck: Invarianten von depot_sim auf drei Testprogramme verteilen, damit C1 sie parallel startet (#190)
+pfade:
+CHANGELOG.md
+crates/depot_sim/tests/invarianten.rs
+crates/depot_sim/tests/invarianten_modell/mod.rs
+crates/depot_sim/tests/invarianten_wiederanlauf.rs
+crates/depot_sim/tests/invarianten_zufall.rs
+kodex/aenderungen/c1-invarianten-aufteilen.txt
