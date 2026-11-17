@@ -1535,8 +1535,7 @@ fn topf_zyklus(
     let frei = kaufbudget(j, z.grenzen, id)?;
     let ent = match &wiederholung {
         Some(w) => depot_regelwerk::entscheide_wiederholung(&eingabe, &mut vergabe, frei, w),
-        None if ersatzkauf => entscheide_ersatzkauf(&eingabe, &mut vergabe, frei),
-        None => entscheide_mit_kaufbudget(&eingabe, &mut vergabe, frei),
+        None => plane_topf(j, &eingabe, frei, ersatzkauf, konto.tausch_moeglich()),
     };
     let nachgefragt = !ruhetag && mindesteinsatz(j, z, &topf, &ent, berater, minimum_bp)?;
     // Auch die budgetierte Nachfrage darf die Frische der Kaufkurse nicht verlängern.
@@ -1576,10 +1575,11 @@ fn topf_zyklus(
         return fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto);
     }
     let alle = fuehre_aus(j, z, id, &ent.verkaeufe, None, konto);
-    // Positions- und Anteilsgrenzen können einen ausgeführten Verkauf voraussetzen.
-    // Der geplante Erlös steht für Käufe erst nach der Abrechnung zur Verfügung.
+    // Positions- und Anteilsgrenzen können einen ausgeführten Verkauf voraussetzen. Ein
+    // Tauschkauf hängt an allen Verkäufen des Plans und füllt nur nach ihnen (#311 H1b).
+    let tausch = ent.kaeufe.iter().any(|k| !k.nach().is_empty());
     match alle {
-        Ok(()) if verkauft(j, &ent.verkaeufe) => {
+        Ok(()) if verkauft(j, &ent.verkaeufe) || (tausch && unterwegs(j, &ent.verkaeufe)) => {
             fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto)
         }
         Ok(()) if ent.kaeufe.is_empty() => Ok(()),
@@ -1628,6 +1628,55 @@ fn belege_topfbefunde(
         begruende(j, tag, REGELWERK, &grund)?;
     }
     Ok(())
+}
+
+/// Der Plan eines Topfes. Tausch am selben Schluss nur im Papierkonto und nur an derselben
+/// Börse (#311 H1b); sonst warten Käufe auf die Füllung der Verkäufe.
+fn plane_topf(
+    j: &Journal,
+    eingabe: &Eingabe<'_>,
+    frei: Cent,
+    ersatzkauf: bool,
+    tausch: bool,
+) -> depot_regelwerk::Entscheidung {
+    if tausch {
+        let ent =
+            depot_regelwerk::entscheide_tausch(eingabe, &mut j.kennungsvergabe(), frei, ersatzkauf);
+        if gleicher_schluss(&ent) {
+            return ent;
+        }
+    }
+    let mut vergabe = j.kennungsvergabe();
+    if ersatzkauf {
+        entscheide_ersatzkauf(eingabe, &mut vergabe, frei)
+    } else {
+        entscheide_mit_kaufbudget(eingabe, &mut vergabe, frei)
+    }
+}
+
+/// Kaufen und Verkaufen alle Aufträge an derselben Börse, also zum selben Schluss? Sonst
+/// lohnt kein Tausch: Der Kauf käme vor dem Erlös (#311 H1b).
+fn gleicher_schluss(ent: &depot_regelwerk::Entscheidung) -> bool {
+    let mut boersen = ent
+        .verkaeufe
+        .iter()
+        .chain(&ent.kaeufe)
+        .map(|a| depot_kern::liste::boerse_von(&a.auftrag().isin));
+    let erste = boersen.next().flatten();
+    erste.is_some() && boersen.all(|b| b == erste)
+}
+
+/// Sind alle diese Verkäufe gesendet und noch offen oder gefüllt? Nur dann kann ein Tauschkauf
+/// nach ihnen füllen.
+fn unterwegs(j: &Journal, auftraege: &[GenehmigterAuftrag]) -> bool {
+    auftraege.iter().all(|a| {
+        j.stand()
+            .auftrag(a.auftrag().kennung.nr())
+            .is_some_and(|l| {
+                l.zustand == AuftragsZustand::Gefuellt
+                    || (l.zustand.offen() && l.zustand != AuftragsZustand::Reserviert)
+            })
+    })
 }
 
 /// Sind alle diese Auftraege ganz ausgefuehrt?

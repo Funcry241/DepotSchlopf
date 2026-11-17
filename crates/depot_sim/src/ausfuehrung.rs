@@ -236,6 +236,7 @@ mod tests {
                 },
                 anlass: Anlass::Umschichtung,
                 stopp_bp: None,
+                nach: Vec::new(),
             },
             zustand,
             ausfuehrungen: if zustand == AuftragsZustand::Gefuellt {

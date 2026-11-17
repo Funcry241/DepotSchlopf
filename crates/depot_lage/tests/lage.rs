@@ -1621,6 +1621,45 @@ fn kauf_mit_erloes_vor_valuta_sperrt_bis_zur_valuta() -> Result<(), String> {
     Ok(())
 }
 
+/// #311 H1b im Journal: Ein Tauschkauf rechnet den Erlös seines offenen Verkaufs zum Limit
+/// ein, füllt nur nach ihm und bindet nach dessen Verfall kein Bargeld mehr.
+#[test]
+fn tauschkauf_im_journal() -> Result<(), String> {
+    use depot_journal::Art::{Auftrag, Zustand};
+    // Bargeld 4.928,50 €, 7 SAP. Verkauf 2 zu mindestens 1.000 €, Kauf 3 über 10.000 €.
+    let buch = |kauf: &str, danach: &[&str]| {
+        let mut eintraege = vec![
+            (Auftrag, "2;A;DE0007164600;Verkauf;7;100000;Umschichtung"),
+            (Zustand, "2;gesendet"),
+            (Zustand, "2;angenommen"),
+            (Auftrag, kauf),
+            (Zustand, "3;gesendet"),
+            (Zustand, "3;angenommen"),
+        ];
+        eintraege.extend(danach.iter().map(|z| (Zustand, *z)));
+        let ort = kaufbuch(7, 1_000, &eintraege)?;
+        Ok::<_, String>(ort.oeffnen().map(|j| j.stand().toepfe().clone()))
+    };
+    let tausch = "3;A;DE0008404005;Kauf;10;100000;Umschichtung;nach=2";
+    // Ohne Bindung an den Verkauf fehlt die Deckung.
+    assert!(buch("3;A;DE0008404005;Kauf;10;100000;Umschichtung", &[])?.is_err());
+    assert!(buch(tausch, &[])?.is_ok());
+    // Füllung erst nach dem Verkauf.
+    assert!(buch(tausch, &["3;ausfuehrung;10;100000;150"])?.is_err());
+    let gefuellt = buch(
+        tausch,
+        &["2;ausfuehrung;7;100000;150", "3;ausfuehrung;10;100000;150"],
+    )?
+    .map_err(|e| format!("{e:?}"))?;
+    let a = some(gefuellt.get(&TopfId::A), "Topf A")?;
+    assert_eq!(a.bargeld(), Cent(192_550));
+    // Verfällt der Verkauf, bindet der Kauf nichts mehr und verfällt danach.
+    assert!(buch(tausch, &["2;verfallen", "3;verfallen"])?.is_ok());
+    // Ein Tausch nach einem Kauf ist unzulässig.
+    assert!(buch("3;A;DE0008404005;Kauf;1;100000;Umschichtung;nach=1", &[])?.is_err());
+    Ok(())
+}
+
 fn tagesergebnis_buch(zwei_abschluesse: bool) -> Result<Ort, String> {
     let ort = Ort::neu()?;
     let mut j = ort.oeffnen()?;

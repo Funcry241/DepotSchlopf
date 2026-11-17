@@ -304,7 +304,7 @@ pub fn frist_auftraege(
 }
 
 pub fn entscheide(e: &Eingabe<'_>, vergabe: &mut Kennungsvergabe) -> Entscheidung {
-    entscheide_intern(e, vergabe, None, false)
+    entscheide_intern(e, vergabe, Kaufbudget::Bargeld, false)
 }
 
 /// Plant Käufe mit dem vom Kontowächter berechneten freien Bargeld. Geplante Verkäufe
@@ -315,7 +315,40 @@ pub fn entscheide_mit_kaufbudget(
     vergabe: &mut Kennungsvergabe,
     frei: Cent,
 ) -> Entscheidung {
-    entscheide_intern(e, vergabe, Some(frei), false)
+    entscheide_intern(e, vergabe, Kaufbudget::Frei(frei), false)
+}
+
+/// Tausch am selben Schluss, nur im Papierkonto (#311 H1b): Käufe dürfen zusätzlich den Erlös
+/// der Verkäufe desselben Plans zum Verkaufslimit abzüglich der höchsten Gebühr einrechnen
+/// (schlechtester Fall). Jeder Kauf hängt dann an allen Verkäufen des Plans (`nach`): Füllt
+/// einer nicht, verfällt der Kauf.
+pub fn entscheide_tausch(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    frei: Cent,
+    ersatzkauf: bool,
+) -> Entscheidung {
+    let mut ent = entscheide_intern(e, vergabe, Kaufbudget::Tausch(frei), ersatzkauf);
+    let nach: Vec<u64> = ent
+        .verkaeufe
+        .iter()
+        .map(|v| v.auftrag().kennung.nr())
+        .collect();
+    for kauf in &mut ent.kaeufe {
+        kauf.setze_nach(nach.clone());
+    }
+    ent
+}
+
+/// Woher das Geld für Käufe kommt.
+#[derive(Clone, Copy, Debug)]
+enum Kaufbudget {
+    /// Bargeld des Topfes plus geplante Verkäufe (Regelprüfung ohne Konto).
+    Bargeld,
+    /// Freies Bargeld laut Kontowächter, ohne geplante Verkäufe.
+    Frei(Cent),
+    /// Freies Bargeld plus die geplanten Verkäufe desselben Schlusses (#311 H1b).
+    Tausch(Cent),
 }
 
 /// Bei technisch ausgefallener Zweitmeinung nur halbierte Kaufziele und zwingende Verkäufe planen.
@@ -324,7 +357,7 @@ pub fn entscheide_ersatzkauf(
     vergabe: &mut Kennungsvergabe,
     frei: Cent,
 ) -> Entscheidung {
-    entscheide_intern(e, vergabe, Some(frei), true)
+    entscheide_intern(e, vergabe, Kaufbudget::Frei(frei), true)
 }
 
 /// Eine am letzten Schluss verfallene KI-Kauforder, die der Morgenlauf einmal ohne neue
@@ -352,13 +385,19 @@ pub fn entscheide_wiederholung(
         vorschlag: None,
         ..*e
     };
-    entscheide_plan(&ohne_vorschlag, vergabe, Some(frei), false, Some(w))
+    entscheide_plan(
+        &ohne_vorschlag,
+        vergabe,
+        Kaufbudget::Frei(frei),
+        false,
+        Some(w),
+    )
 }
 
 fn entscheide_intern(
     e: &Eingabe<'_>,
     vergabe: &mut Kennungsvergabe,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     ersatzkauf: bool,
 ) -> Entscheidung {
     entscheide_plan(e, vergabe, kaufbudget, ersatzkauf, None)
@@ -367,7 +406,7 @@ fn entscheide_intern(
 fn entscheide_plan(
     e: &Eingabe<'_>,
     vergabe: &mut Kennungsvergabe,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     ersatzkauf: bool,
     wiederholung: Option<&Wiederholung>,
 ) -> Entscheidung {
@@ -441,7 +480,7 @@ fn genehmige(
 /// Plant alle Auftraege. `None` nur bei einem Rechenfehler.
 fn plane(
     e: &Eingabe<'_>,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     ersatzkauf: bool,
     wiederholung: Option<&Wiederholung>,
     befunde: &mut Vec<Befund>,
@@ -853,7 +892,7 @@ fn parke(
 )]
 fn freiwillig(
     e: &Eingabe<'_>,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     topfwert: Preis,
     ziele: &BTreeMap<Isin, i64>,
     gesperrt: &BTreeSet<Isin>,
@@ -910,7 +949,7 @@ fn wiederholungs_kandidat(
 /// Umschlag, Orderzahl und Kaeufe fuer schon gesammelte freiwillige Kandidaten.
 fn freiwillig_aus(
     e: &Eingabe<'_>,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     topfwert: Preis,
     mut kandidaten: Vec<Kandidat>,
     verkaeufe: &mut Vec<Kandidat>,
@@ -963,7 +1002,7 @@ fn freiwillig_aus(
 /// alles am Limit mit hoechster Gebuehr.
 fn kaufe(
     e: &Eingabe<'_>,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     topfwert: Preis,
     verkaeufe: &[Kandidat],
     geplant: Vec<Kandidat>,
@@ -971,10 +1010,14 @@ fn kaufe(
     befunde: &mut Vec<Befund>,
 ) -> Option<()> {
     let g = e.grenzen;
-    let mut budget = kaufbudget.unwrap_or_else(|| e.topf.bargeld());
+    let mut budget = match kaufbudget {
+        Kaufbudget::Bargeld => e.topf.bargeld(),
+        Kaufbudget::Frei(frei) | Kaufbudget::Tausch(frei) => frei,
+    };
     let mut verlust = Cent::NULL;
     for k in verkaeufe {
-        if kaufbudget.is_none() {
+        // Ein Verkauf erlöst mindestens sein Limit, abzüglich der höchsten Gebühr.
+        if matches!(kaufbudget, Kaufbudget::Bargeld | Kaufbudget::Tausch(_)) {
             let erloes = k.volumen(g)?;
             budget = budget
                 .checked_add(erloes)?
@@ -1852,6 +1895,76 @@ mod park_tests {
             "{e:?}"
         );
         assert!(e.verkaeufe.is_empty(), "{e:?}");
+        Ok(())
+    }
+
+    /// #311 H1b: Der Tausch rechnet den Erlös der Verkäufe zum Limit ein und bindet die Käufe
+    /// an sie; ohne Tausch bleibt das Kaufbudget beim freien Bargeld.
+    #[test]
+    fn tausch_rechnet_verkaeufe_ein_und_bindet_kaeufe() -> Result<(), String> {
+        let ohne = lauf(0, &[(SAP, 40)], &[(SAP, 0), (ALV, 3_000)], None, Some(0))?;
+        assert_eq!(kauf(&ohne, ALV)?, None);
+        let tausch = {
+            let tag = Datum::neu(2026, 11, 17).ok_or("Tag")?;
+            let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+            let kurs = |s: &str| -> Result<_, String> {
+                Ok((
+                    isin(s)?,
+                    Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Simulation)
+                        .map_err(|e| format!("{e:?}"))?,
+                ))
+            };
+            let kurse =
+                Kurse::neu(zeit, vec![kurs(SAP)?, kurs(ALV)?]).map_err(|e| format!("{e:?}"))?;
+            let mut topf = Topf::neu(TopfId::A, Cent::NULL).map_err(|e| format!("{e:?}"))?;
+            topf.setze_bestand(isin(SAP)?, 40);
+            let universum = Universum::neu(
+                [SAP, ALV]
+                    .into_iter()
+                    .map(|s| {
+                        Ok(Instrument {
+                            isin: isin(s)?,
+                            name: s.into(),
+                            art: InstrumentArt::Aktie,
+                        })
+                    })
+                    .collect::<Result<_, String>>()?,
+            );
+            let vorschlag = Vorschlag {
+                erwartung_bp: BTreeMap::new(),
+                limit_bp: BTreeMap::new(),
+                stopp_bp: BTreeMap::new(),
+                berater: BeraterId::Dachs,
+                zielgewichte_bp: [(isin(SAP)?, 0), (isin(ALV)?, 3_000)].into_iter().collect(),
+                begruendung: BTreeMap::new(),
+                park: None,
+            };
+            entscheide_tausch(
+                &Eingabe {
+                    grenzen: &Grenzen::standard(),
+                    universum: &universum,
+                    topf: &topf,
+                    kurse: &kurse,
+                    vorschlag: Some(&vorschlag),
+                    halt: false,
+                    vor_valuta: &[],
+                },
+                &mut Kennungsvergabe::nach(0),
+                Cent::NULL,
+                false,
+            )
+        };
+        let verkauf = tausch
+            .verkaeufe
+            .first()
+            .ok_or("Verkauf")?
+            .auftrag()
+            .kennung
+            .nr();
+        let k = tausch.kaeufe.first().ok_or("Tauschkauf")?;
+        assert_eq!(k.auftrag().isin, isin(ALV)?);
+        assert_eq!(k.nach(), &[verkauf]);
+        assert!(tausch.verkaeufe.iter().all(|v| v.nach().is_empty()));
         Ok(())
     }
 
