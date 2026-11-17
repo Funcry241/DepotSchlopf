@@ -934,25 +934,6 @@ impl<N: Netz> Berater for KiBerater<N> {
             .map(|(_, grund)| grund)
     }
 
-    fn frage_mindesteinsatz(
-        &mut self,
-        erlaubnis: AufrufErlaubnis,
-        tag: depot_kern::Datum,
-        einsatz_bp: i64,
-        minimum_bp: i64,
-    ) -> Option<String> {
-        let system = "Begründe die vorhandene Papier-Handelsentscheidung kurz sachlich auf Deutsch. Liefere ausschließlich ein JSON-Objekt mit dem Feld unter_mindesteinsatz. Schlage keine neuen Orders vor.";
-        let frage = format!(
-            "Am {tag} sind durch Bestand und genehmigte Aufträge {einsatz_bp} bp investiert. Der Mindesteinsatz beträgt {minimum_bp} bp. Warum bleibt der Topf darunter?"
-        );
-        let antwort = self
-            .fragen(&erlaubnis, system, &frage, KiZweck::Abstimmung, None)
-            .text
-            .ok()?;
-        let grund = frage::lies_mindesteinsatz(&antwort)?;
-        (!self.enthaelt_schluessel(&grund)).then_some(grund)
-    }
-
     fn kann_abstimmen(&self) -> bool {
         true
     }

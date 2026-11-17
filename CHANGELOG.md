@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Unterschreitet ein Plan den Mindesteinsatz, fragt DepotSchlopf die KI nicht mehr eigens nach dem Grund. Die Erstmeinung nennt ihn im Pflichtfeld `unter_mindesteinsatz` (Text oder null). Fehlt er, unterscheidet das Journal „fehlt“ (die KI wollte selbst weniger einsetzen) von „fehlt, Regelwerk kürzte“ (die Zielgewichte der KI erreichen das Minimum, das Regelwerk hat gekürzt). Nur „fehlt“ zählt im Prüfbericht als fehlende Pflichtbegründung. Die Nachfrage war als Abstimmung gebucht und verfälschte die Kosten je Zweck (#312-3). Die Pflichtbegründung vom 14.11. bleibt. Rückweg ohne Sicherung.
+
 - Die Zweitmeinung urteilt je Wert: Mit `"zustimmung": false` und `"abgelehnt": ["ISIN", …]` fallen nur diese Werte aus dem Vorschlag, der Rest wird ausgeführt; abgelehnte gehaltene Werte bleiben unverändert. Fehlt die Liste, ist sie unklar oder nennt sie einen fremden Wert, gilt das Veto wie bisher für den ganzen Vorschlag; ein Ja mit Liste ebenso. Das Journal schreibt „Veto: nur ISIN, …“, der Vetoschatten rechnet nur diese Werte. Ein Teilveto startet die Abstimmung (#311 H4). Ein halber Kauf trotz Veto ist nicht eingebaut. Rückweg ohne Sicherung: Ein älterer Stand liest die Zeile als Veto.
 
 - Die Abstimmung zwischen Dachs und Maus entfällt, wenn nichts offen ist: Beide Zweitmeinungen stimmen zu oder sagen Bargeld, und kein Ersatzkauf wartet. Das Journal vermerkt „Abstimmung entfällt: kein offener Punkt“. Spart an solchen Tagen bis zu vier bezahlte Aufrufe (#312-1). Nach einem Veto oder Teilveto läuft die Abstimmung wie bisher. Rückweg ohne Sicherung.

@@ -1,5 +1,5 @@
 klasse: Funktion
-zweck: Zweitmeinung urteilt je Wert (#311 H4, P43)
+zweck: Zweitmeinung urteilt je Wert (#311 H4, P43); Mindesteinsatz ohne Nachfrage (#312-3, P37)
 pfade:
 CHANGELOG.md
 crates/depot_berater/src/frage.rs
@@ -8,6 +8,7 @@ crates/depot_berater/tests/berater.rs
 crates/depot_lage/src/vetoschatten.rs
 crates/depot_lage/tests/lage.rs
 crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/mindesteinsatz.rs
 crates/depot_sim/src/szenario.rs
 crates/depot_sim/src/teilveto.rs
 crates/depot_sim/tests/invarianten.rs

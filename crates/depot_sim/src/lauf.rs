@@ -1441,41 +1441,35 @@ fn mindesteinsatz(
     z: &Zyklus<'_>,
     topf: &Topf,
     plan: &depot_regelwerk::Entscheidung,
-    park: Option<&Isin>,
+    vorschlag: Option<&Vorschlag>,
     berater: &mut dyn Berater,
     minimum_bp: i64,
-) -> Result<bool, LaufFehler> {
+) -> Result<(), LaufFehler> {
     if minimum_bp == 0
         || !z.gesperrt.is_empty()
         || !z.vollstaendige_kurse
         || !depot_kern::liste::handelstag(z.tag.datum)
     {
-        return Ok(false);
+        return Ok(());
     }
+    let park = vorschlag.and_then(|v| v.park.as_ref()).map(|p| &p.isin);
     let Some(einsatz_bp) =
         geplanter_einsatz(topf, &z.tag.kurse, plan, park).filter(|bp| *bp < minimum_bp)
     else {
-        return Ok(false);
+        return Ok(());
     };
-    let wer = topf.id().berater();
-    let mut grund = berater.mindesteinsatz_begruendung(z.tag.datum);
-    let mut nachgefragt = false;
-    if grund.is_none() && berater.angebunden() {
-        match j.reserviere_fuer(wer, z.tag.datum, z.nr, depot_journal::KiZweck::Abstimmung) {
-            Ok(erlaubnis) => {
-                nachgefragt = true;
-                grund =
-                    berater.frage_mindesteinsatz(erlaubnis, z.tag.datum, einsatz_bp, minimum_bp);
-                belege_ki(j, berater).map_err(journal)?;
-            }
-            Err(Sperre::Kassenbuch(e)) => return Err(halt(format!("Kassenbuch: {e}"))),
-            Err(_) => {}
-        }
-    }
-    let status = grund.map_or_else(
-        || "fehlt".into(),
-        |grund| format!("begründet: {}", sauber(&grund)),
-    );
+    // Keine Nachfrage mehr: Der Grund kommt mit der Erstmeinung (#312-3, P37).
+    let grund = berater.mindesteinsatz_begruendung(z.tag.datum);
+    let gehalten: BTreeMap<Isin, i64> = topf
+        .positionen()
+        .keys()
+        .filter_map(|isin| {
+            depot_regelwerk::entscheidung::ist_gewicht_bp(topf, &z.tag.kurse, isin)
+                .map(|bp| (isin.clone(), bp))
+        })
+        .collect();
+    let ki_bp = crate::mindesteinsatz::ki_einsatz_bp(&gehalten, vorschlag);
+    let status = crate::mindesteinsatz::vermerk(grund.as_deref(), ki_bp, minimum_bp);
     begruende(
         j,
         z.tag,
@@ -1485,7 +1479,7 @@ fn mindesteinsatz(
             topf_name(topf.id())
         ),
     )?;
-    Ok(nachgefragt)
+    Ok(())
 }
 
 fn fuehre_fristverkaeufe_aus(
@@ -1574,34 +1568,8 @@ fn topf_zyklus(
         Some(w) => depot_regelwerk::entscheide_wiederholung(&eingabe, &mut vergabe, frei, w),
         None => plane_topf(j, &eingabe, frei, ersatzkauf, konto.tausch_moeglich()),
     };
-    let park = vorschlag
-        .as_ref()
-        .and_then(|v| v.park.as_ref())
-        .map(|p| &p.isin);
-    let nachgefragt = !ruhetag && mindesteinsatz(j, z, &topf, &ent, park, berater, minimum_bp)?;
-    // Auch die budgetierte Nachfrage darf die Frische der Kaufkurse nicht verlängern.
-    if nachgefragt && !beratungszeit(z) {
-        return begruende(
-            j,
-            tag,
-            DATEN,
-            "Keine neuen Aufträge: Kursfrist nach Mindesteinsatz-Nachfrage abgelaufen.",
-        );
-    }
-    if nachgefragt && berater.kostensperre() {
-        let zwingend: Vec<_> = ent
-            .verkaeufe
-            .iter()
-            .filter(|a| a.beleg().anlass.zwingend())
-            .cloned()
-            .collect();
-        fuehre_aus(j, z, id, &zwingend, None, konto)?;
-        return begruende(
-            j,
-            tag,
-            KOSTENSCHUTZ,
-            "Keine neuen Aufträge: Kostensperre nach Mindesteinsatz-Nachfrage.",
-        );
+    if !ruhetag {
+        mindesteinsatz(j, z, &topf, &ent, vorschlag.as_ref(), berater, minimum_bp)?;
     }
     if ersatzkauf {
         begruende(
@@ -2202,9 +2170,24 @@ mod tests {
         Ok(())
     }
 
+    fn sap_vorschlag(bp: i64) -> Result<Vorschlag, LaufFehler> {
+        let isin = depot_kern::Isin::neu("DE0007164600").map_err(|e| halt(format!("{e:?}")))?;
+        Ok(Vorschlag {
+            erwartung_bp: std::collections::BTreeMap::new(),
+            limit_bp: std::collections::BTreeMap::new(),
+            stopp_bp: std::collections::BTreeMap::new(),
+            berater: BeraterId::Dachs,
+            zielgewichte_bp: [(isin, bp)].into_iter().collect(),
+            begruendung: std::collections::BTreeMap::new(),
+            park: None,
+        })
+    }
+
+    /// #312-3: Der Grund kommt nur mit der Erstmeinung, keine Nachfrage. Ziele 40 %, die das
+    /// Regelwerk nicht plant, sind kein Versäumnis der KI („Regelwerk kürzte“).
     #[test]
-    fn mindesteinsatz_fragt_einmal_und_vermerkt_fehlenden_grund() -> Result<(), LaufFehler> {
-        struct Nachfrage(usize);
+    fn mindesteinsatz_ohne_feld_fragt_nicht() -> Result<(), LaufFehler> {
+        struct Nachfrage(Option<String>);
         impl Berater for Nachfrage {
             fn vorschlagen(
                 &mut self,
@@ -2221,15 +2204,8 @@ mod tests {
             ) -> crate::Urteil {
                 unreachable!("nur Nachfrage")
             }
-            fn frage_mindesteinsatz(
-                &mut self,
-                _: depot_journal::AufrufErlaubnis,
-                _: depot_kern::Datum,
-                _: i64,
-                _: i64,
-            ) -> Option<String> {
-                self.0 = self.0.saturating_add(1);
-                None
+            fn mindesteinsatz_begruendung(&mut self, _: depot_kern::Datum) -> Option<String> {
+                self.0.take()
             }
         }
         let ordner =
@@ -2259,7 +2235,7 @@ mod tests {
             gesperrt: &BTreeSet::new(),
             bewertung: &tag.kurse,
         };
-        let mut berater = Nachfrage(0);
+        let mut berater = Nachfrage(None);
         let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| halt(format!("{e:?}")))?;
         let erster = j
             .reserviere(BeraterId::Dachs, datum, 1)
@@ -2267,23 +2243,40 @@ mod tests {
         j.rechne_ki_ab(&erster.abrechnung(0, 0).ok_or_else(|| halt("Abrechnung"))?)
             .map_err(journal)?;
         let plan = depot_regelwerk::Entscheidung::default();
-        let mut pruefe = |j: &mut Journal, z: &Zyklus<'_>, minimum| {
-            mindesteinsatz(j, z, &topf, &plan, None, &mut berater, minimum)
+        let ki = sap_vorschlag(4_000)?;
+        let mut pruefe = |j: &mut Journal, z: &Zyklus<'_>, v, grund, minimum| {
+            berater.0 = grund;
+            mindesteinsatz(j, z, &topf, &plan, v, &mut berater, minimum)
         };
-        assert!(!pruefe(&mut j, &z, 0)?);
+        pruefe(&mut j, &z, None, None, 0)?;
         let gesperrt = Zyklus {
             vollstaendige_kurse: false,
             ..z
         };
-        assert!(!pruefe(&mut j, &gesperrt, 3_000)?);
-        assert!(pruefe(&mut j, &z, 3_000)?);
-        assert_eq!(berater.0, 1);
-        assert!(
-            j.stand().begruendungen().iter().any(|(_, _, text)| {
-                text == "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt"
-            })
+        pruefe(&mut j, &gesperrt, None, None, 3_000)?;
+        assert!(j.stand().begruendungen().is_empty());
+        pruefe(&mut j, &z, None, None, 3_000)?;
+        pruefe(&mut j, &z, Some(&ki), None, 3_000)?;
+        pruefe(&mut j, &z, None, Some("NVIDIA abwarten".into()), 3_000)?;
+        let zeilen: Vec<&str> = j
+            .stand()
+            .begruendungen()
+            .iter()
+            .map(|(_, _, text)| text.as_str())
+            .collect();
+        assert_eq!(
+            zeilen,
+            [
+                "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt",
+                "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt, Regelwerk kürzte",
+                "Topf A: unter_mindesteinsatz 0 von 3000 bp · begründet: NVIDIA abwarten",
+            ]
         );
-        assert_eq!(j.stand().ki().buchungen().len(), 2);
+        assert_eq!(
+            j.stand().ki().buchungen().len(),
+            1,
+            "keine Nachfrage gebucht"
+        );
         drop(j);
         std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
         Ok(())

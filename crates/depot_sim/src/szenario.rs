@@ -99,16 +99,6 @@ pub trait Berater {
         None
     }
 
-    fn frage_mindesteinsatz(
-        &mut self,
-        _erlaubnis: AufrufErlaubnis,
-        _tag: Datum,
-        _einsatz_bp: i64,
-        _minimum_bp: i64,
-    ) -> Option<String> {
-        None
-    }
-
     fn zweitmeinung_technisch_ausgefallen(&self) -> bool {
         false
     }
