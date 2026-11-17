@@ -27,6 +27,17 @@ class Nachweis(unittest.TestCase):
             "run_attempt": 1, "head_sha": KOPF,
         }
         self.git = {"sha": KOPF, "tree": {"sha": BAUM}}
+        self.windows_update = {
+            "name": "kodex-windows-update",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [{
+                "name": "Alter Updater bei laufendem Dienst",
+                "status": "completed",
+                "conclusion": "success",
+            }],
+        }
+        self.jobs = {"jobs": [self.windows_update]}
 
     def api(self, pfad):
         return {
@@ -36,6 +47,7 @@ class Nachweis(unittest.TestCase):
                 {"artifacts": []},
             f"repos/{REPO}/actions/runs/42": self.lauf,
             f"repos/{REPO}/git/commits/{KOPF}": self.git,
+            f"repos/{REPO}/actions/runs/42/attempts/1/jobs?per_page=100": self.jobs,
         }[pfad]
 
     def finde(self, basis=BASIS):
@@ -66,6 +78,18 @@ class Nachweis(unittest.TestCase):
                 self.lauf[feld] = wert
                 self.assertIsNone(self.finde())
                 self.lauf[feld] = alt
+
+    def test_windows_update_uebersprungen_trotz_gruenem_workflow(self):
+        self.windows_update["conclusion"] = "skipped"
+        self.assertIsNone(self.finde())
+
+    def test_windows_update_fehlt(self):
+        self.jobs["jobs"].clear()
+        self.assertIsNone(self.finde())
+
+    def test_windows_update_schritt_uebersprungen_trotz_gruenem_job(self):
+        self.windows_update["steps"][0]["conclusion"] = "skipped"
+        self.assertIsNone(self.finde())
 
     def test_abgelaufen(self):
         self.beleg["expired"] = True

@@ -49,6 +49,23 @@ def form_treffer(beleg, lauf, repo_id):
     )
 
 
+def windows_update_bestanden(jobs):
+    """Ein übersprungener Job oder Prüfschritt trägt keinen Nachweis."""
+    for job in jobs:
+        if (
+            job.get("name") == "kodex-windows-update"
+            and job.get("status") == "completed"
+            and job.get("conclusion") == "success"
+        ):
+            return any(
+                schritt.get("name") == "Alter Updater bei laufendem Dienst"
+                and schritt.get("status") == "completed"
+                and schritt.get("conclusion") == "success"
+                for schritt in job.get("steps", [])
+            )
+    return False
+
+
 def finde_lauf(api, repo, repo_id, baum, basis):
     belege = api(f"repos/{repo}/actions/artifacts?name={name(baum, basis)}&per_page=20")
     for beleg in belege.get("artifacts", []):
@@ -66,7 +83,10 @@ def finde_lauf(api, repo, repo_id, baum, basis):
             continue
         # Das Artefakt allein darf keinen anderen Baum als geprüft ausgeben.
         git_commit = api(f"repos/{repo}/git/commits/{sha}")
-        if git_commit.get("sha") == sha and (git_commit.get("tree") or {}).get("sha") == baum:
+        if git_commit.get("sha") != sha or (git_commit.get("tree") or {}).get("sha") != baum:
+            continue
+        jobs = api(f"repos/{repo}/actions/runs/{lauf_id}/attempts/1/jobs?per_page=100")
+        if windows_update_bestanden(jobs.get("jobs", [])):
             return lauf_id
     return None
 
