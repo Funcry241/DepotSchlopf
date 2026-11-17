@@ -1,0 +1,7 @@
+klasse: KodexAenderung
+zweck: Die zwei Oberflächendateien des Dienstes auch in der Prüfung der Crate-Struktur berücksichtigen
+pfade:
+crates/depot_kodex/src/pfade.rs
+crates/depot_kodex/src/quellscan.rs
+kodex/festschreibung.txt
+kodex/freigaben/p48-asset-quellscan.txt

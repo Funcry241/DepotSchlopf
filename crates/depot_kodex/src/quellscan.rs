@@ -592,6 +592,27 @@ pub fn pruefe_datei(krate: &str, produktiv: bool, anzeige: &str, text: &str) -> 
     fehler
 }
 
+/// Nur die beiden festen Oberflächendateien liegen außerhalb des Rust-Quellbaums.
+fn pruefe_dienst_assets(dir: &Path, fehler: &mut Vec<String>) {
+    if !optionaler_ordner(dir, fehler) {
+        return;
+    }
+    for p in eintraege(dir, fehler) {
+        match fs::symlink_metadata(&p) {
+            Ok(m)
+                if m.is_file()
+                    && p.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(crate::pfade::ist_dienst_asset) => {}
+            Ok(_) => fehler.push(format!(
+                "{}: erwartet wird eine reguläre Oberflächendatei (app.js oder stil.css)",
+                p.display()
+            )),
+            Err(e) => fehler.push(format!("{}: nicht lesbar: {e}", p.display())),
+        }
+    }
+}
+
 fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
     let dir = manifest::crate_ordner(wurzel, krate);
     let m = match manifest::lies(&dir.join("Cargo.toml")) {
@@ -607,7 +628,9 @@ fn pruefe_crate(wurzel: &Path, krate: &str, fehler: &mut Vec<String>) {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        if !matches!(name.as_str(), "Cargo.toml" | "src" | "tests") {
+        if krate == "depot_dienst" && name == "assets" {
+            pruefe_dienst_assets(&p, fehler);
+        } else if !matches!(name.as_str(), "Cargo.toml" | "src" | "tests") {
             fehler.push(format!(
                 "crates/{krate}/{name}: unbekannter Eintrag im Crate (nur Cargo.toml, src/, tests/; \
                  Cargo baut sonst z. B. examples/ und benches/ ungeprüft)"
