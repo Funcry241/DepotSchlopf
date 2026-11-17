@@ -1,4 +1,8 @@
 klasse: Funktion
-zweck: Verbindungsbalken nach bestätigtem Dienststart automatisch ausblenden
+zweck: Parkwert zählt nicht zum Mindesteinsatz (#311 H3); Bausteine für P35, P37 und P43 mit Gegenproben
 pfade:
-crates/depot_dienst/src/seiten.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/lib.rs
+crates/depot_sim/src/mindesteinsatz.rs
+crates/depot_sim/src/offener_punkt.rs
+crates/depot_sim/src/teilveto.rs
