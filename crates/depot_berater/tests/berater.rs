@@ -530,6 +530,7 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(sap()?, 3_000)].into_iter().collect(),
         begruendung: [(sap()?, "Zahlen".to_string())].into_iter().collect(),
+        park: None,
     };
     let e = ort.erlaubnis(BeraterId::Maus, 1)?;
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
@@ -1103,6 +1104,7 @@ fn zurueckgegebener_schluessel_gelangt_nie_ins_ergebnis() -> Result<(), String> 
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(sap()?, 1_000)].into_iter().collect(),
         begruendung: [(sap()?, "x".to_string())].into_iter().collect(),
+        park: None,
     };
     let e = ort.erlaubnis(BeraterId::Maus, 1)?;
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
@@ -1134,6 +1136,7 @@ fn reservierung_ist_eine_gesicherte_obergrenze() -> Result<(), String> {
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(sap()?, 1_000)].into_iter().collect(),
         begruendung: [(sap()?, lang)].into_iter().collect(),
+        park: None,
     };
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
     assert!(!u.zustimmung);
@@ -1529,6 +1532,7 @@ fn grosse_lage_vorschlag(werte: &[depot_kern::liste::Wert], lang: &str) -> Vorsc
             .take(4)
             .map(|w| (w.isin.clone(), lang.to_owned()))
             .collect(),
+        park: None,
     }
 }
 
@@ -1801,6 +1805,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
             berater: BeraterId::Maus,
             zielgewichte_bp: [(isin.clone(), 2000)].into(),
             begruendung: [(isin, antwort.into())].into(),
+            park: None,
         }),
         eigene_erstmeinung: "Eigene Erstmeinung".into(),
         fremde_beitraege: antwort.into(),

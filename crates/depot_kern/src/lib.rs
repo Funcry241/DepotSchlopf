@@ -42,7 +42,7 @@ pub mod tiingo;
 pub mod zeit;
 
 pub use boerse::Boerse;
-pub use depot::{BeraterId, Topf, TopfFehler, TopfId, Vorschlag};
+pub use depot::{BeraterId, Parkwunsch, Topf, TopfFehler, TopfId, Vorschlag};
 pub use devisen::{Devisen, DevisenFehler};
 pub use geld::{BP_GANZ, Cent};
 pub use grenzen::{Gebuehren, Grenzen, Universum};

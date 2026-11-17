@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Eine KI kann in ihrer Antwort einen Parkwert nennen, auch mit „ziele“: null: einen ETF der Liste, eine Bargeldreserve und in wie vielen Handelstagen sie frühestens einen anderen Kauf erwartet. Bargeld über der Reserve geht in diesen ETF, höchstens 40 % des Topfs. Das Regelwerk parkt nur bei mindestens 5 Handelstagen und ab 1.000 € Zukauf. Brauchen andere Ziele das Bargeld, verkleinert es den Parkwert zuerst. Ein gehaltener ETF zählt nicht gegen die Zahl der Werte, alle Verlustgrenzen gelten. Ein Parkwert braucht wie jeder Kauf die Zweitmeinung (#311 H3). Rückweg ohne Sicherung: Das Journal ändert sich nicht, Parkwerte stehen als Begründung darin.
+
 - **⚠️ Vor dem Einspielen eine geprüfte Sicherung von Journal und Papierkonto anlegen. Kein Rückweg ohne diese Sicherung.** Ein gefüllter Verkaufserlös zählt schon vor seiner Valuta (zwei Xetra-Handelstage) für Käufe, wie beim Bargeldkonto. Was mit diesem Erlös gekauft wird, darf vor dessen Valuta nicht freiwillig verkauft werden (Befund `VorValuta`); Schutz-Stopp, Notbremse, Fristverkauf und Abbau verkaufen immer. Ein Kauf aus abgerechnetem Bargeld sperrt nichts. Spart je Umschichtung bis zu zwei Handelstage (#311 H1a). Sobald ein Kauf mit Erlös vor Valuta im Journal steht, lehnt ein älterer Stand dieses Journal ab („Deckung“).
 
 - Der Analyse-Export zeigt im Nachher-Blick Anlass und Zustand jeder Order, so lassen sich verfallene Kauforders je Anlass nachverfolgen. Neu ist der Abschnitt „Schatten der Vetos“: Was ein von der Zweitmeinung abgelehnter Kauf bis zum Ende des Zeitraums netto gebracht hätte, auch bei halber Größe (#311 M0). Nur lesend.

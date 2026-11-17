@@ -995,6 +995,17 @@ fn frage(
                 let grund = v.begruendung.get(isin).map_or("", String::as_str);
                 begruende(j, tag, name(wer), &format!("{t}: {isin} {bp} bp: {grund}"))?;
             }
+            if let Some(p) = &v.park {
+                begruende(
+                    j,
+                    tag,
+                    name(wer),
+                    &format!(
+                        "{t}: Parkwert {}, Reserve {} bp, nächster Kauf frühestens in {} Handelstagen: {}",
+                        p.isin, p.reserve_bp, p.naechster_kauf_tage, p.begruendung
+                    ),
+                )?;
+            }
         }
         if fristverkaeufe.is_empty() {
             vorschlag = antwort.vorschlag;

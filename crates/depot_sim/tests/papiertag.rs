@@ -554,6 +554,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
                 begruendung: [(sap.clone(), "beobachtet".to_string())]
                     .into_iter()
                     .collect(),
+                park: None,
             }),
         },
     );
@@ -704,6 +705,7 @@ fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), 
                         begruendung: [(sap.clone(), "beobachtet".to_string())]
                             .into_iter()
                             .collect(),
+                        park: None,
                     }),
                 },
             );
@@ -1187,6 +1189,7 @@ fn verkaufserloes_deckt_kauf_vor_der_abrechnung() -> Result<(), String> {
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(isin.clone(), 2_000)].into_iter().collect(),
         begruendung: [(isin, "beobachtet".into())].into_iter().collect(),
+        park: None,
     };
     let universum = universum()?;
     let eingabe = Eingabe {
@@ -1776,6 +1779,7 @@ fn reduktion_pruefen(
                 berater: BeraterId::Dachs,
                 zielgewichte_bp,
                 begruendung: std::collections::BTreeMap::new(),
+                park: None,
             }),
         },
     );
@@ -1917,6 +1921,7 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
                 berater: wer,
                 zielgewichte_bp: [(sap.clone(), 2000)].into_iter().collect(),
                 begruendung: [(sap, "Belegte Lage".into())].into_iter().collect(),
+                park: None,
             }),
         },
     );

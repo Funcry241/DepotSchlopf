@@ -294,6 +294,7 @@ fn vorschlag(berater: BeraterId, ziele: &[(&Isin, i64, &str)]) -> Vorschlag {
             .iter()
             .map(|(i, _, t)| ((*i).clone(), (*t).to_string()))
             .collect(),
+        park: None,
     }
 }
 

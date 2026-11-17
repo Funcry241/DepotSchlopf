@@ -121,4 +121,16 @@ pub struct Vorschlag {
     pub limit_bp: BTreeMap<Isin, i64>,
     pub stopp_bp: BTreeMap<Isin, i64>,
     pub begruendung: BTreeMap<Isin, String>,
+    /// Wunsch, Bargeld über einer Reserve in einen ETF zu parken (#311 H3).
+    pub park: Option<Parkwunsch>,
+}
+
+/// Parkwert einer KI-Antwort: Bargeld über `reserve_bp` des Topfwerts geht in diesen ETF, wenn
+/// die KI frühestens in `naechster_kauf_tage` Handelstagen einen anderen Kauf erwartet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Parkwunsch {
+    pub isin: Isin,
+    pub reserve_bp: i64,
+    pub naechster_kauf_tage: i64,
+    pub begruendung: String,
 }

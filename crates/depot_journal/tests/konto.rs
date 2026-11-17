@@ -389,6 +389,7 @@ fn kauf_mit_stopp(
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(w.clone(), 2_500)].into_iter().collect(),
         begruendung: [(w, "erfunden".to_string())].into_iter().collect(),
+        park: None,
     };
     let grenzen = Grenzen::standard();
     let ent = entscheide(

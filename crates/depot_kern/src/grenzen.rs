@@ -195,6 +195,13 @@ impl Universum {
         })
     }
 
+    /// Ob der Wert ein ETF der Liste ist (Parkplatz, #311 H3).
+    pub fn ist_etf(&self, isin: &Isin) -> bool {
+        self.instrumente
+            .iter()
+            .any(|i| &i.isin == isin && i.art == InstrumentArt::EtfPhysischUcits)
+    }
+
     /// Alle Instrumente der Liste, in ihrer Reihenfolge.
     pub fn instrumente(&self) -> &[Instrument] {
         &self.instrumente
