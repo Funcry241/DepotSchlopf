@@ -1,0 +1,37 @@
+# Nur Messung für #325 Aufgabe 21 (Dachs). Läuft ausschließlich auf diesem Zweig, wird nie übernommen.
+name: neuro-bau-messung
+on:
+  push:
+    branches: [claude/project-thread-931tge]
+    paths: [".github/workflows/neuro-bau-messung.yml", "werkzeuge/neuroproto/**"]
+permissions:
+  contents: read
+jobs:
+  messen:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Werkzeugkette
+        shell: pwsh
+        run: rustup show active-toolchain; rustc -V
+      - name: DepotSchlopf kalt (release, alle Crates)
+        shell: pwsh
+        run: |
+          $t = Measure-Command { cargo build --release --workspace --locked 2>&1 | Out-Host }
+          "depot_kalt_s=$([int]$t.TotalSeconds)" | Tee-Object -Append messung.txt
+          "depot_crates=$((Select-String -Path Cargo.lock -Pattern '^name = ').Count)" | Tee-Object -Append messung.txt
+          Get-ChildItem target/release/*.exe | ForEach-Object { "exe $($_.Name)=$($_.Length)" } | Tee-Object -Append messung.txt
+      - name: Neuro-Prototyp kalt (release)
+        shell: pwsh
+        working-directory: werkzeuge/neuroproto
+        run: |
+          $t = Measure-Command { cargo build --release --locked 2>&1 | Out-Host }
+          "proto_kalt_s=$([int]$t.TotalSeconds)" | Tee-Object -Append ../../messung.txt
+          "proto_crates=$((Select-String -Path Cargo.lock -Pattern '^name = ').Count)" | Tee-Object -Append ../../messung.txt
+          "proto_exe=$((Get-Item target/release/neuroproto.exe).Length)" | Tee-Object -Append ../../messung.txt
+          "proto_target_mb=$([int]((Get-ChildItem target -Recurse | Measure-Object Length -Sum).Sum/1MB))" | Tee-Object -Append ../../messung.txt
+          ./target/release/neuroproto.exe | Tee-Object -Append ../../messung.txt
+      - name: Ergebnis
+        shell: pwsh
+        run: Get-Content messung.txt

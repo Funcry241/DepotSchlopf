@@ -1,0 +1,12 @@
+[package]
+name = "neuroproto"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+burn = { version = "=0.21.0", default-features = false, features = ["std", "flex", "autodiff"] }
+
+[workspace]
+
+[profile.release]
+codegen-units = 16
