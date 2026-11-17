@@ -1108,6 +1108,25 @@ fn auftragsergebnis_html(a: &Auftrag, z: &Zustand, ki: &Aufrufe) -> String {
 }
 
 /// Was der Dienst tut: laufender Auftrag, Warteschlange, naechster Lauf, Verlauf.
+fn wartende_auftraege(
+    s: &mut String,
+    z: &Zustand,
+    heute: Option<Datum>,
+    update_sperre: Option<UpdateSperre>,
+) {
+    if !z.warteschlange.is_empty() {
+        let liste: Vec<String> = z
+            .warteschlange
+            .iter()
+            .map(|a| format!("{} ({})", a.art.name(), anlass_text(a.anlass)))
+            .collect();
+        let _ = write!(s, "<p>Wartet: {}</p>", maskiere(&liste.join(", ")));
+    }
+    if update_sperre.is_none() {
+        s.push_str(&naechster_abschnitt(z, heute, false));
+    }
+}
+
 fn taetigkeit(
     z: &Zustand,
     heute: Option<Datum>,
@@ -1171,17 +1190,7 @@ fn taetigkeit(
             maskiere(&text)
         );
     }
-    if !z.warteschlange.is_empty() {
-        let liste: Vec<String> = z
-            .warteschlange
-            .iter()
-            .map(|a| format!("{} ({})", a.art.name(), anlass_text(a.anlass)))
-            .collect();
-        let _ = write!(s, "<p>Wartet: {}</p>", maskiere(&liste.join(", ")));
-    }
-    if update_sperre.is_none() {
-        s.push_str(&naechster_abschnitt(z, heute, false));
-    }
+    wartende_auftraege(&mut s, z, heute, update_sperre);
     letzter_fehler_hinweis(&mut s, z);
     if !z.verlauf.is_empty() {
         s.push_str(
