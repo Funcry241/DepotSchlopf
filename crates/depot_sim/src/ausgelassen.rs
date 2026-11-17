@@ -98,6 +98,7 @@ mod tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp: ziele.into_iter().collect(),
             begruendung: std::collections::BTreeMap::new(),
+            park: None,
         };
         let ergaenzt = ergaenze_ausgelassene(&topf, &kurse, &mut v);
         let entscheidung = entscheide(
@@ -108,6 +109,7 @@ mod tests {
                 kurse: &kurse,
                 vorschlag: Some(&v),
                 halt: false,
+                vor_valuta: &[],
             },
             &mut Kennungsvergabe::nach(0),
         );

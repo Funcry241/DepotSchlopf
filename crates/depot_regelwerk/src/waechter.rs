@@ -66,9 +66,10 @@ pub fn notbremse_auftraege(
             continue;
         }
         let kurs = crate::entscheidung::frischer_kurs(grenzen, kurse, isin)?;
-        // Mindestpreis, aufgerundet: nie billiger als Kurs und Limit-Abstand vorsehen.
+        // Mindestpreis, aufgerundet: hoechster erlaubter Limit-Abstand, damit der Ausstieg auch
+        // an einem schwachen Folgetag fuellt (#311 H2a).
         let limit = kurs.mal_bp(
-            BP_GANZ.checked_sub(grenzen.limit_abstand_bp())?,
+            BP_GANZ.checked_sub(grenzen.limit_abstand_max_bp())?,
             Rundung::Auf,
         )?;
         geplant.push((isin.clone(), *stueck, limit));

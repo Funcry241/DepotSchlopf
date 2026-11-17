@@ -995,6 +995,17 @@ fn frage(
                 let grund = v.begruendung.get(isin).map_or("", String::as_str);
                 begruende(j, tag, name(wer), &format!("{t}: {isin} {bp} bp: {grund}"))?;
             }
+            if let Some(p) = &v.park {
+                begruende(
+                    j,
+                    tag,
+                    name(wer),
+                    &format!(
+                        "{t}: Parkwert {}, Reserve {} bp, nächster Kauf frühestens in {} Handelstagen: {}",
+                        p.isin, p.reserve_bp, p.naechster_kauf_tage, p.begruendung
+                    ),
+                )?;
+            }
         }
         if fristverkaeufe.is_empty() {
             vorschlag = antwort.vorschlag;
@@ -1091,6 +1102,8 @@ pub(crate) struct TopfAntwort {
     zweitmeinung_ausgefallen: bool,
     ersatzkauf: bool,
     fristverkaeufe: BTreeSet<Isin>,
+    /// Verfallene KI-Kauforder, die heute ohne KI wiederholt wird (#311 H2b).
+    wiederholung: Option<depot_regelwerk::Wiederholung>,
 }
 
 impl TopfAntwort {
@@ -1119,6 +1132,60 @@ pub(crate) fn kaufbudget(j: &Journal, g: &Grenzen, id: TopfId) -> Result<Cent, L
             topf_name(id)
         ))
     })
+}
+
+/// Was der Morgenlauf für einen Topf ohne Sperre und ohne offenen Auftrag tut.
+enum Heute {
+    /// Kein Anlass: keine KI, höchstens die Wiederholung einer verfallenen Kauforder.
+    Ruhetag(Option<depot_regelwerk::Wiederholung>),
+    /// Die KI wird gefragt, mit diesem Anlass.
+    Fragen(Option<String>),
+}
+
+fn anlass_heute(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    t: &str,
+    lage: &Lage<'_>,
+) -> Result<Heute, LaufFehler> {
+    let tag = z.tag;
+    let mut anlass = if z.anlass_pruefen {
+        crate::anlass::anlass(j.stand(), z.universum, lage)
+    } else if z.uhr.is_some() {
+        Some("Papiertag von Hand".into())
+    } else {
+        None
+    };
+    let pruefung = if z.anlass_pruefen && anlass.is_none() {
+        crate::wiederholung::pruefe(j.stand(), z.grenzen, lage)
+    } else {
+        None
+    };
+    if let Some(crate::wiederholung::Pruefung::Anlass(grund)) = &pruefung {
+        anlass = Some(grund.clone());
+    }
+    if !z.anlass_pruefen || anlass.is_some() {
+        return Ok(Heute::Fragen(anlass));
+    }
+    begruende(
+        j,
+        tag,
+        SIMULATION,
+        &format!("{t}: {}", crate::anlass::RUHETAG),
+    )?;
+    let Some(crate::wiederholung::Pruefung::Wiederholen { nr, kauf }) = pruefung else {
+        return Ok(Heute::Ruhetag(None));
+    };
+    begruende(
+        j,
+        tag,
+        AUFTRAGSSTELLE,
+        &format!(
+            "{t}: Wiederholung von Auftrag {nr}: {} Stück {}, Limitabstand {} bp, ohne neue KI-Antwort",
+            kauf.stueck, kauf.isin, kauf.limit_bp
+        ),
+    )?;
+    Ok(Heute::Ruhetag(Some(kauf)))
 }
 
 fn frage_topf(
@@ -1158,6 +1225,7 @@ fn frage_topf(
         .find(|l| l.versand.is_some() && l.beleg.topf == id)
         .map(|l| l.beleg.nr);
     let gesperrt = z.gesperrt.iter().find(|isin| topf.stueck(isin) != 0);
+    let mut wiederholung = None;
     let (vorschlag, erstmeinung, fristverkaeufe) = if let Some(isin) = gesperrt {
         begruende(
             j,
@@ -1178,38 +1246,29 @@ fn frage_topf(
         // Auch nach abgewiesenem Schutzverkauf keine neuen Käufe für diesen Topf.
         (None, Erstmeinung::Unverwertbar, BTreeSet::new())
     } else {
-        let anlass = if z.anlass_pruefen {
-            crate::anlass::anlass(j.stand(), z.universum, &lage)
-        } else if z.uhr.is_some() {
-            Some("Papiertag von Hand".into())
-        } else {
-            None
-        };
-        if z.anlass_pruefen && anlass.is_none() {
-            begruende(
-                j,
-                tag,
-                SIMULATION,
-                &format!("{t}: {}", crate::anlass::RUHETAG),
-            )?;
-            (None, Erstmeinung::Ruhetag, BTreeSet::new())
-        } else {
-            if let Some(grund) = &anlass {
-                begruende(
-                    j,
-                    tag,
-                    SIMULATION,
-                    &format!("{t}: {}{grund}", crate::anlass::ANLASS),
-                )?;
+        match anlass_heute(j, z, t, &lage)? {
+            Heute::Ruhetag(w) => {
+                wiederholung = w;
+                (None, Erstmeinung::Ruhetag, BTreeSet::new())
             }
-            lage.anlass = anlass.as_deref();
-            let (vorschlag, verwertbar, fristverkaeufe) = frage(j, z, id, frager, &lage)?;
-            let erstmeinung = if verwertbar {
-                Erstmeinung::Verwertbar
-            } else {
-                Erstmeinung::Unverwertbar
-            };
-            (vorschlag, erstmeinung, fristverkaeufe)
+            Heute::Fragen(anlass) => {
+                if let Some(grund) = &anlass {
+                    begruende(
+                        j,
+                        tag,
+                        SIMULATION,
+                        &format!("{t}: {}{grund}", crate::anlass::ANLASS),
+                    )?;
+                }
+                lage.anlass = anlass.as_deref();
+                let (vorschlag, verwertbar, fristverkaeufe) = frage(j, z, id, frager, &lage)?;
+                let erstmeinung = if verwertbar {
+                    Erstmeinung::Verwertbar
+                } else {
+                    Erstmeinung::Unverwertbar
+                };
+                (vorschlag, erstmeinung, fristverkaeufe)
+            }
         }
     };
     Ok(TopfAntwort {
@@ -1219,6 +1278,7 @@ fn frage_topf(
         zweitmeinung_ausgefallen: false,
         ersatzkauf: false,
         fristverkaeufe,
+        wiederholung,
     })
 }
 
@@ -1245,6 +1305,7 @@ fn zweite_meinung(
         mut zweitmeinung_ausgefallen,
         mut ersatzkauf,
         fristverkaeufe,
+        wiederholung,
     } = antwort;
     let (tag, zyklus) = (z.tag, z.nr);
     let id = topf.id();
@@ -1316,6 +1377,7 @@ fn zweite_meinung(
         zweitmeinung_ausgefallen,
         ersatzkauf,
         fristverkaeufe,
+        wiederholung,
     })
 }
 
@@ -1444,6 +1506,7 @@ fn topf_zyklus(
         zweitmeinung_ausgefallen,
         ersatzkauf,
         fristverkaeufe,
+        wiederholung,
         ..
     } = antwort;
     let ruhetag = antwort.erstmeinung == Erstmeinung::Ruhetag;
@@ -1454,23 +1517,26 @@ fn topf_zyklus(
     let id = topf.id();
     let t = topf_name(id);
     let mut vergabe = j.kennungsvergabe();
-    let entscheide = if ersatzkauf {
-        entscheide_ersatzkauf
-    } else {
-        entscheide_mit_kaufbudget
+    let vor_valuta: Vec<_> = j
+        .stand()
+        .vor_valuta(id, tag.datum)
+        .into_iter()
+        .map(|(isin, _)| isin)
+        .collect();
+    let eingabe = Eingabe {
+        grenzen: z.grenzen,
+        universum: z.universum,
+        topf: &topf,
+        kurse: &tag.kurse,
+        vorschlag: vorschlag.as_ref(),
+        halt: false,
+        vor_valuta: &vor_valuta,
     };
-    let ent = entscheide(
-        &Eingabe {
-            grenzen: z.grenzen,
-            universum: z.universum,
-            topf: &topf,
-            kurse: &tag.kurse,
-            vorschlag: vorschlag.as_ref(),
-            halt: false,
-        },
-        &mut vergabe,
-        kaufbudget(j, z.grenzen, id)?,
-    );
+    let frei = kaufbudget(j, z.grenzen, id)?;
+    let ent = match &wiederholung {
+        Some(w) => depot_regelwerk::entscheide_wiederholung(&eingabe, &mut vergabe, frei, w),
+        None => plane_topf(j, &eingabe, frei, ersatzkauf, konto.tausch_moeglich()),
+    };
     let nachgefragt = !ruhetag && mindesteinsatz(j, z, &topf, &ent, berater, minimum_bp)?;
     // Auch die budgetierte Nachfrage darf die Frische der Kaufkurse nicht verlängern.
     if nachgefragt && !beratungszeit(z) {
@@ -1509,10 +1575,11 @@ fn topf_zyklus(
         return fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto);
     }
     let alle = fuehre_aus(j, z, id, &ent.verkaeufe, None, konto);
-    // Positions- und Anteilsgrenzen können einen ausgeführten Verkauf voraussetzen.
-    // Der geplante Erlös steht für Käufe erst nach der Abrechnung zur Verfügung.
+    // Positions- und Anteilsgrenzen können einen ausgeführten Verkauf voraussetzen. Ein
+    // Tauschkauf hängt an allen Verkäufen des Plans und füllt nur nach ihnen (#311 H1b).
+    let tausch = ent.kaeufe.iter().any(|k| !k.nach().is_empty());
     match alle {
-        Ok(()) if verkauft(j, &ent.verkaeufe) => {
+        Ok(()) if verkauft(j, &ent.verkaeufe) || (tausch && unterwegs(j, &ent.verkaeufe)) => {
             fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto)
         }
         Ok(()) if ent.kaeufe.is_empty() => Ok(()),
@@ -1561,6 +1628,55 @@ fn belege_topfbefunde(
         begruende(j, tag, REGELWERK, &grund)?;
     }
     Ok(())
+}
+
+/// Der Plan eines Topfes. Tausch am selben Schluss nur im Papierkonto und nur an derselben
+/// Börse (#311 H1b); sonst warten Käufe auf die Füllung der Verkäufe.
+fn plane_topf(
+    j: &Journal,
+    eingabe: &Eingabe<'_>,
+    frei: Cent,
+    ersatzkauf: bool,
+    tausch: bool,
+) -> depot_regelwerk::Entscheidung {
+    if tausch {
+        let ent =
+            depot_regelwerk::entscheide_tausch(eingabe, &mut j.kennungsvergabe(), frei, ersatzkauf);
+        if gleicher_schluss(&ent) {
+            return ent;
+        }
+    }
+    let mut vergabe = j.kennungsvergabe();
+    if ersatzkauf {
+        entscheide_ersatzkauf(eingabe, &mut vergabe, frei)
+    } else {
+        entscheide_mit_kaufbudget(eingabe, &mut vergabe, frei)
+    }
+}
+
+/// Kaufen und Verkaufen alle Aufträge an derselben Börse, also zum selben Schluss? Sonst
+/// lohnt kein Tausch: Der Kauf käme vor dem Erlös (#311 H1b).
+fn gleicher_schluss(ent: &depot_regelwerk::Entscheidung) -> bool {
+    let mut boersen = ent
+        .verkaeufe
+        .iter()
+        .chain(&ent.kaeufe)
+        .map(|a| depot_kern::liste::boerse_von(&a.auftrag().isin));
+    let erste = boersen.next().flatten();
+    erste.is_some() && boersen.all(|b| b == erste)
+}
+
+/// Sind alle diese Verkäufe gesendet und noch offen oder gefüllt? Nur dann kann ein Tauschkauf
+/// nach ihnen füllen.
+fn unterwegs(j: &Journal, auftraege: &[GenehmigterAuftrag]) -> bool {
+    auftraege.iter().all(|a| {
+        j.stand()
+            .auftrag(a.auftrag().kennung.nr())
+            .is_some_and(|l| {
+                l.zustand == AuftragsZustand::Gefuellt
+                    || (l.zustand.offen() && l.zustand != AuftragsZustand::Reserviert)
+            })
+    })
 }
 
 /// Sind alle diese Auftraege ganz ausgefuehrt?
@@ -2217,6 +2333,306 @@ mod tests {
         assert_eq!(j.stand().seit_abschluss(), 0);
         drop(j);
         std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
+        Ok(())
+    }
+}
+
+/// #311 H2b: Eine verfallene KI-Kauforder wird einmal ohne neue KI-Antwort wiederholt.
+#[cfg(test)]
+mod wiederholung_tests {
+    use super::*;
+    use depot_journal::{KursBeleg, Meldung};
+    use depot_kern::{Boerse, Datum, Herkunft, Instrument, InstrumentArt, Kurs};
+
+    struct Probe(Option<String>);
+    impl Berater for Probe {
+        fn vorschlagen(
+            &mut self,
+            _: depot_journal::AufrufErlaubnis,
+            lage: &Lage<'_>,
+        ) -> crate::Antwort {
+            self.0 = Some(lage.anlass.unwrap_or("ohne Anlass").to_owned());
+            crate::Antwort {
+                halten: std::collections::BTreeMap::new(),
+                prognose: None,
+                verwertbar: true,
+                einschaetzung: "Bargeld".into(),
+                vorschlag: None,
+            }
+        }
+        fn pruefen(
+            &mut self,
+            _: depot_journal::AufrufErlaubnis,
+            _: &Lage<'_>,
+            _: &Vorschlag,
+        ) -> crate::Urteil {
+            unreachable!("ohne Vorschlag gibt es nichts zu prüfen")
+        }
+    }
+
+    fn sap() -> Result<Isin, LaufFehler> {
+        Isin::neu("DE0007164600").map_err(|e| halt(format!("{e:?}")))
+    }
+
+    fn datum(t: u8) -> Result<Datum, LaufFehler> {
+        Datum::neu(2026, 11, t).ok_or_else(|| halt("Datum"))
+    }
+
+    fn schlusskurs(t: u8, cent: i64) -> Result<Kurs, LaufFehler> {
+        let d = datum(t)?;
+        let zeit = Boerse::Xetra.schluss(d).ok_or_else(|| halt("Schluss"))?;
+        Kurs::neu(Cent(cent), "EUR", d, zeit, Herkunft::Quelle).map_err(|e| halt(format!("{e:?}")))
+    }
+
+    /// Freitag 13.11. Schluss 100,00 €, Montag 16.11. Kauf von 20 SAP mit Limit 101,00 €
+    /// (100 bp), versandt um 7:30, verfallen am Montagsschluss `schluss_montag`. Mit
+    /// `erstmeinung_montag` hatte Topf A am Montag eine Erstmeinung, sonst am Freitag.
+    struct Probelauf {
+        _ordner: std::path::PathBuf,
+        j: Journal,
+        topf: Topf,
+        tag: Tag,
+        universum: Universum,
+        grenzen: Grenzen,
+    }
+
+    fn probelauf(
+        name: &str,
+        schluss_montag: i64,
+        erstmeinung_montag: bool,
+    ) -> Result<Probelauf, LaufFehler> {
+        probelauf_mit(name, schluss_montag, erstmeinung_montag, 0)
+    }
+
+    /// Der Montagskauf über 20 SAP, versandt um 7:30 und am Montagsschluss verfallen.
+    fn montagskauf(
+        j: &mut Journal,
+        grenzen: &Grenzen,
+        universum: &Universum,
+        isin: &Isin,
+        alv: &Isin,
+        basf: &Isin,
+    ) -> Result<(), LaufFehler> {
+        let freitag = schlusskurs(13, 10_000)?;
+        let versand = Zeitpunkt::frankfurt(datum(16)?, 7, 30, 0).ok_or_else(|| halt("Versand"))?;
+        let kurse_montag = Kurse::neu(
+            versand,
+            vec![
+                (isin.clone(), freitag),
+                (alv.clone(), schlusskurs(13, 10_000)?),
+                (basf.clone(), schlusskurs(13, 10_000)?),
+            ],
+        )
+        .map_err(|e| halt(format!("{e:?}")))?;
+        // Der Montagskauf allein, ohne die Zusatzpositionen: Nur er wird später wiederholt.
+        let nur_bargeld =
+            Topf::neu(TopfId::A, Cent(1_000_000)).map_err(|e| halt(format!("{e:?}")))?;
+        let ent = depot_regelwerk::entscheide_wiederholung(
+            &Eingabe {
+                grenzen,
+                universum,
+                topf: &nur_bargeld,
+                kurse: &kurse_montag,
+                vorschlag: None,
+                halt: false,
+                vor_valuta: &[],
+            },
+            &mut j.kennungsvergabe(),
+            nur_bargeld.bargeld(),
+            &depot_regelwerk::Wiederholung {
+                isin: isin.clone(),
+                stueck: 20,
+                limit_bp: 100,
+                stopp_bp: Some(500),
+            },
+        );
+        let kauf = ent.kaeufe.first().ok_or_else(|| halt("Kauf"))?;
+        j.reserviere_auftrag(grenzen, TopfId::A, kauf)
+            .map_err(journal)?;
+        let frist = Boerse::Xetra
+            .schluss(datum(16)?)
+            .ok_or_else(|| halt("Frist"))?;
+        j.melde(1, &Meldung::GesendetAm(versand, frist))
+            .map_err(journal)?;
+        j.melde(1, &Meldung::Angenommen).map_err(journal)?;
+        j.melde(1, &Meldung::Verfallen).map_err(journal)?;
+        Ok(())
+    }
+
+    /// Je `allianz` Stück Allianz und BASF zu 100,00 € dazu: Über 50 % gebunden ist ein
+    /// Kurssprung eines nicht gehaltenen Werts kein Anlass, die Prüfung der Wiederholung
+    /// entscheidet.
+    fn probelauf_mit(
+        name: &str,
+        schluss_montag: i64,
+        erstmeinung_montag: bool,
+        allianz: u64,
+    ) -> Result<Probelauf, LaufFehler> {
+        let ordner =
+            std::env::temp_dir().join(format!("depot-wiederholung-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&ordner);
+        std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(journal)?;
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        let mut topf = Topf::neu(TopfId::A, Cent(1_000_000)).map_err(|e| halt(format!("{e:?}")))?;
+        let alv = Isin::neu("DE0008404005").map_err(|e| halt(format!("{e:?}")))?;
+        let basf = Isin::neu("DE000BASF111").map_err(|e| halt(format!("{e:?}")))?;
+        if allianz > 0 {
+            topf.setze_bestand(alv.clone(), allianz);
+            topf.setze_bestand(basf.clone(), allianz);
+        }
+        j.setze_topf(&topf).map_err(journal)?;
+        let isin = sap()?;
+        let freitag = schlusskurs(13, 10_000)?;
+        let abruf = Zeitpunkt::frankfurt(datum(14)?, 9, 0, 0).ok_or_else(|| halt("Abruf"))?;
+        j.belege_kurs(
+            &KursBeleg::neu(
+                "alphavantage",
+                abruf,
+                b"Probe",
+                isin.clone(),
+                freitag.clone(),
+            )
+            .map_err(|e| halt(format!("{e:?}")))?,
+        )
+        .map_err(journal)?;
+        let erstmeinung = if erstmeinung_montag { 16 } else { 13 };
+        j.reserviere(BeraterId::Dachs, datum(erstmeinung)?, 1)
+            .map_err(|e| halt(format!("{e:?}")))?;
+        let universum = Universum::neu(
+            [(&isin, "SAP"), (&alv, "Allianz"), (&basf, "BASF")]
+                .into_iter()
+                .map(|(isin, name)| Instrument {
+                    isin: isin.clone(),
+                    name: name.into(),
+                    art: InstrumentArt::Aktie,
+                })
+                .collect(),
+        );
+        let grenzen = Grenzen::standard();
+        montagskauf(&mut j, &grenzen, &universum, &isin, &alv, &basf)?;
+        let dienstag = Zeitpunkt::frankfurt(datum(17)?, 7, 30, 0).ok_or_else(|| halt("Morgen"))?;
+        let montag = schlusskurs(16, schluss_montag)?;
+        j.belege_kurs(
+            &KursBeleg::neu(
+                "alphavantage",
+                dienstag,
+                b"Probe",
+                isin.clone(),
+                montag.clone(),
+            )
+            .map_err(|e| halt(format!("{e:?}")))?,
+        )
+        .map_err(journal)?;
+        let tag = Tag {
+            datum: datum(17)?,
+            kurse: Kurse::neu(
+                dienstag,
+                vec![
+                    (isin, montag),
+                    (alv, schlusskurs(16, 10_000)?),
+                    (basf, schlusskurs(16, 10_000)?),
+                ],
+            )
+            .map_err(|e| halt(format!("{e:?}")))?,
+            ereignisse: Vec::new(),
+        };
+        Ok(Probelauf {
+            _ordner: ordner,
+            j,
+            topf,
+            tag,
+            universum,
+            grenzen,
+        })
+    }
+
+    fn morgen(p: &mut Probelauf, anlass_pruefen: bool) -> Result<(TopfAntwort, Probe), LaufFehler> {
+        let zeit = p.tag.kurse.stand();
+        let uhr = move || Some(zeit);
+        let z = Zyklus {
+            anlass_pruefen,
+            grenzen: &p.grenzen,
+            universum: &p.universum,
+            tag: &p.tag,
+            vortag: &p.tag.kurse,
+            nr: 2,
+            abdruck: "Probe",
+            uhr: Some(&uhr),
+            vollstaendige_kurse: true,
+            gesperrt: &BTreeSet::new(),
+            bewertung: &p.tag.kurse,
+        };
+        let mut probe = Probe(None);
+        let antwort = frage_topf(&mut p.j, &z, TopfId::A, &mut probe, &BTreeSet::new())?;
+        if antwort.wiederholung.is_some() {
+            let mut konto = crate::papier::Papierkonto::eroeffne(std::slice::from_ref(&p.topf))
+                .ok_or_else(|| halt("Papierkonto"))?;
+            topf_zyklus(&mut p.j, &z, antwort.clone(), &mut konto, &mut probe, 0)?;
+        }
+        Ok((antwort, probe))
+    }
+
+    /// Entschluss 100,00 €, 100 bp, Verfall bei Schluss 101,50 €: neue Order über 20 Stück mit
+    /// Limit 101,50 × 1,01 = 102,515 €, abgerundet 102,51 € (≤ 103,00 €), Stopp übernommen.
+    #[test]
+    fn wiederholung_mit_neuem_limit() -> Result<(), LaufFehler> {
+        let mut p = probelauf("limit", 10_150, true)?;
+        let (antwort, probe) = morgen(&mut p, true)?;
+        assert_eq!(probe.0, None, "KI nicht gefragt");
+        assert!(antwort.wiederholung.is_some());
+        let neu =
+            p.j.stand()
+                .auftraege()
+                .iter()
+                .find(|a| a.beleg.nr == 2)
+                .ok_or_else(|| halt("neue Order"))?;
+        assert_eq!(neu.beleg.stueck, 20);
+        assert_eq!(neu.beleg.limit, Cent(10_251));
+        assert_eq!(neu.beleg.stopp_bp, Some(500));
+        assert_eq!(p.j.stand().ki().buchungen().len(), 1, "kein KI-Aufruf");
+        assert!(
+            p.j.stand()
+                .begruendungen()
+                .iter()
+                .any(|(_, _, t)| t.starts_with("Topf A: Wiederholung von Auftrag 1: 20 Stück"))
+        );
+        Ok(())
+    }
+
+    /// Ein Schluss über Entschlusskurs × 1,03 macht die verfallene Order zum Anlass.
+    #[test]
+    fn keine_wiederholung_ueber_3_prozent() -> Result<(), LaufFehler> {
+        let mut p = probelauf_mit("hoch", 10_350, true, 600)?;
+        let (antwort, probe) = morgen(&mut p, true)?;
+        assert!(antwort.wiederholung.is_none());
+        let anlass = probe.0.ok_or_else(|| halt("KI nicht gefragt"))?;
+        assert!(
+            anlass.starts_with("verfallene Kauforder bei DE0007164600"),
+            "{anlass}"
+        );
+        Ok(())
+    }
+
+    /// Ohne Erstmeinung am Versandtag war die Order schon eine Wiederholung: keine zweite.
+    #[test]
+    fn hoechstens_eine_wiederholung() -> Result<(), LaufFehler> {
+        let mut p = probelauf("zweite", 10_150, false)?;
+        let (antwort, probe) = morgen(&mut p, true)?;
+        assert!(antwort.wiederholung.is_none());
+        let anlass = probe.0.ok_or_else(|| halt("KI nicht gefragt"))?;
+        assert!(anlass.contains("Wiederholung 1 verfallen"), "{anlass}");
+        Ok(())
+    }
+
+    /// Hat der Topf ohnehin einen Anlass (hier der Handstart), fragt der Lauf die KI.
+    #[test]
+    fn anlass_schlaegt_wiederholung() -> Result<(), LaufFehler> {
+        let mut p = probelauf("anlass", 10_150, true)?;
+        let (antwort, probe) = morgen(&mut p, false)?;
+        assert!(antwort.wiederholung.is_none());
+        assert_eq!(probe.0.as_deref(), Some("Papiertag von Hand"));
         Ok(())
     }
 }

@@ -128,6 +128,7 @@ fn vorschlag(berater: BeraterId, gewichte: &[(usize, i64)]) -> Vorschlag {
         berater,
         zielgewichte_bp: gewichte.iter().map(|(i, g)| (isin(*i), *g)).collect(),
         begruendung: BTreeMap::new(),
+        park: None,
     }
 }
 
@@ -157,6 +158,7 @@ fn lauf_mit(
             kurse,
             vorschlag: v,
             halt,
+            vor_valuta: &[],
         },
         &mut Kennungsvergabe::nach(0),
     )
@@ -603,6 +605,7 @@ fn befund_1_f09_notbremse_und_umschichtung_vergeben_verschiedene_kennungen() {
             kurse: &kurse_alle(10_000),
             vorschlag: Some(&v),
             halt: false,
+            vor_valuta: &[],
         },
         &mut vergabe,
     );
@@ -1131,6 +1134,7 @@ fn befund_k9_03_abbruch_verbraucht_keine_kennung() {
             kurse: &kurse,
             vorschlag: Some(&v),
             halt: false,
+            vor_valuta: &[],
         },
         &mut vergabe,
     );

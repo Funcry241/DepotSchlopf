@@ -6,6 +6,20 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- **⚠️ Vor dem Einspielen eine geprüfte Sicherung von Journal und Papierkonto anlegen. Kein Rückweg ohne diese Sicherung.** Tausch am selben Schluss, nur im Papierkonto: Plant ein Topf Verkäufe und Käufe an derselben Börse, darf ein Kauf den Erlös dieser Verkäufe zum Verkaufslimit abzüglich der höchsten Gebühr einrechnen (schlechtester Fall). Der Kauf hängt an allen Verkäufen des Plans: Das Konto rechnet erst die Verkäufe ab, dann die Käufe; füllt ein Verkauf nicht, verfällt der Kauf. Das Bargeld wird nie negativ. Bisher entfielen die Käufe eines solchen Plans ganz. Ein echter Broker bekommt keine Tauschorders, bis eine bedingte Order dort geklärt ist (#311 H1b). Sobald ein Tauschkauf (`nach=`) im Journal oder eine Zeile `tausch;` im Papierkonto steht, lehnt ein älterer Stand beide ab.
+
+- Eine KI kann in ihrer Antwort einen Parkwert nennen, auch mit „ziele“: null: einen ETF der Liste, eine Bargeldreserve und in wie vielen Handelstagen sie frühestens einen anderen Kauf erwartet. Bargeld über der Reserve geht in diesen ETF, höchstens 40 % des Topfs. Das Regelwerk parkt nur bei mindestens 5 Handelstagen und ab 1.000 € Zukauf. Brauchen andere Ziele das Bargeld, verkleinert es den Parkwert zuerst. Ein gehaltener ETF zählt nicht gegen die Zahl der Werte, alle Verlustgrenzen gelten. Ein Parkwert braucht wie jeder Kauf die Zweitmeinung (#311 H3). Rückweg ohne Sicherung: Das Journal ändert sich nicht, Parkwerte stehen als Begründung darin.
+
+- **⚠️ Vor dem Einspielen eine geprüfte Sicherung von Journal und Papierkonto anlegen. Kein Rückweg ohne diese Sicherung.** Ein gefüllter Verkaufserlös zählt schon vor seiner Valuta (zwei Xetra-Handelstage) für Käufe, wie beim Bargeldkonto. Was mit diesem Erlös gekauft wird, darf vor dessen Valuta nicht freiwillig verkauft werden (Befund `VorValuta`); Schutz-Stopp, Notbremse, Fristverkauf und Abbau verkaufen immer. Ein Kauf aus abgerechnetem Bargeld sperrt nichts. Spart je Umschichtung bis zu zwei Handelstage (#311 H1a). Sobald ein Kauf mit Erlös vor Valuta im Journal steht, lehnt ein älterer Stand dieses Journal ab („Deckung“).
+
+- Der Analyse-Export zeigt im Nachher-Blick Anlass und Zustand jeder Order, so lassen sich verfallene Kauforders je Anlass nachverfolgen. Neu ist der Abschnitt „Schatten der Vetos“: Was ein von der Zweitmeinung abgelehnter Kauf bis zum Ende des Zeitraums netto gebracht hätte, auch bei halber Größe (#311 M0). Nur lesend.
+
+- Ist eine KI-Kauforder am letzten Schluss verfallen und hat der Topf heute keinen Anlass, wiederholt der Morgenlauf sie einmal ohne neuen KI-Aufruf: gleiche Stückzahl und gleicher Stopp, Limit zum jüngsten Schluss mit dem ursprünglichen Abstand, höchstens 3 % über dem Entschlusskurs. Die Wiederholung läuft durch dieselbe Genehmigung wie ein KI-Kauf. Liegt der Schluss darüber, verfällt die Wiederholung oder verfallen mehrere Kauforders zugleich, wird das zum Anlass und die KI entscheidet neu (#311 H2b). Rückweg ohne Sicherung: keine neue Anlass-Art im Journal.
+
+- Analyse-Export und Depotseite zeigen den Leerlauf je Topf und Woche: Euro-Tage und Quote in Bargeld, Füllquote je Anlass und je Limitabstand (bis 100, 101–200, 201–300 bp) sowie die Handelstage vom gefüllten Verkauf bis zum nächsten gefüllten Kauf, getrennt nach KI- und erzwungenem Verkauf (#311 M0). Nur lesend, das Journal ändert sich nicht.
+
+- Schutzverkäufe (Schutz-Stopp, Fristverkauf, Notbremse) setzen ihr Limit mit dem höchsten erlaubten Abstand von 3 % statt 1 % unter den Schlusskurs. So füllt ein Ausstieg auch an einem schwachen Folgetag. KI-Orders ohne eigenen Abstand bleiben bei 1 % (#311 H2a). Rückweg: Der vorige Stand lässt sich ohne Sicherung wieder einspielen; offene Schutzorders laufen mit ihrem Limit aus.
+
 - Der Morgenlauf sperrt gehaltene Werte mit unplausiblen Kursen einzeln. Ein belegter Vergleichskurs dient zur Bewertung; Schutz und Handel der übrigen Werte verwenden ihre eigenen gültigen Kurse (#158).
 
 ### Hinzugefügt

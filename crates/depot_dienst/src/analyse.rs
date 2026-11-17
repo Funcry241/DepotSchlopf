@@ -21,6 +21,7 @@ mod fehler;
 mod historie;
 mod journal;
 mod ki_kosten;
+mod leerlauf;
 mod leistung;
 mod nachher;
 mod orders;
@@ -875,6 +876,14 @@ fn journalpaket(
                 betrieb.fehler.ampel(true),
                 nachher.ampel(),
             ) + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
+                + &leerlauf::bericht(
+                    stand,
+                    &buch,
+                    &depot_kern::liste::beobachtungsliste()
+                        .map(|werte| depot_lage::depotverlauf::depotverlauf(stand, &werte))
+                        .unwrap_or_default(),
+                    zeitraum,
+                )
                 + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege)
                 + &nachher.bericht;
             Journalpaket {

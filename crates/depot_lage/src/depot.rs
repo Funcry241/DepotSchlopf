@@ -149,9 +149,9 @@ fn topf_lage(s: &Stand, t: &Topf, kurse: Option<&depot_kern::Kurse>, werte: &[We
         topf: t.id(),
         bargeld: t.bargeld(),
         frei,
-        vorgemerkt: frei
-            .zip(nicht_gutgeschrieben)
-            .and_then(|(frei, ausstehend)| t.bargeld().checked_sub(frei)?.checked_sub(ausstehend)),
+        // Gefüllte Erlöse vor Valuta sind schon frei (#311 H1a): Vorgemerkt ist nur, was offene
+        // Käufe binden.
+        vorgemerkt: frei.and_then(|frei| t.bargeld().checked_sub(frei)),
         nicht_gutgeschrieben,
         naechste_valuta: s.naechste_valuta(t.id()),
         wert: kurse.and_then(|k| t.wert_gerundet(k, Rundung::Ab)),

@@ -554,6 +554,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
                 begruendung: [(sap.clone(), "beobachtet".to_string())]
                     .into_iter()
                     .collect(),
+                park: None,
             }),
         },
     );
@@ -704,6 +705,7 @@ fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), 
                         begruendung: [(sap.clone(), "beobachtet".to_string())]
                             .into_iter()
                             .collect(),
+                        park: None,
                     }),
                 },
             );
@@ -1154,7 +1156,7 @@ fn belege_kurse(j: &mut Journal) -> Result<(), String> {
 }
 
 #[test]
-fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
+fn verkaufserloes_deckt_kauf_vor_der_abrechnung() -> Result<(), String> {
     use depot_journal::Konto;
     use depot_kern::{Grenzen, Kurse};
     use depot_regelwerk::{Eingabe, Kennungsvergabe, entscheide, notbremse_auftraege};
@@ -1187,6 +1189,7 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(isin.clone(), 2_000)].into_iter().collect(),
         begruendung: [(isin, "beobachtet".into())].into_iter().collect(),
+        park: None,
     };
     let universum = universum()?;
     let eingabe = Eingabe {
@@ -1196,11 +1199,10 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
         kurse: &kurse,
         vorschlag: Some(&vorschlag),
         halt: false,
+        vor_valuta: &[],
     };
     let kauf = entscheide(&eingabe, &mut vergabe);
     let kauf = some(kauf.kaeufe.first(), "Kaufauftrag")?;
-    let kauf_nach_abrechnung = entscheide(&eingabe, &mut vergabe);
-    let kauf_nach_abrechnung = some(kauf_nach_abrechnung.kaeufe.first(), "Zweiter Kaufauftrag")?;
 
     let start = [start];
     let mut k = Papierdatei::oeffnen(&ort.konto, false, &start)?;
@@ -1209,23 +1211,16 @@ fn verkaufserloes_bleibt_bis_zur_abrechnung_gesperrt() -> Result<(), String> {
     assert_eq!(k.auszug().bargeld, Cent(499_465));
     drop(k);
 
+    // Vor der Valuta (Dienstag, 10.11.) deckt der gefüllte Erlös den Kauf schon (#311 H1a).
     let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
     k.rechne_ab(tag(9)?);
-    assert!(matches!(k.sende(kauf), Sendeantwort::Abgelehnt(_)));
-    k.rechne_ab(tag(10)?);
+    assert_eq!(k.sende(kauf), Sendeantwort::Angenommen);
     assert_eq!(k.stoerung(), None);
-    drop(k);
-
-    let mut k = Papierdatei::oeffnen(&ort.konto, true, &start)?;
-    k.rechne_ab(tag(10)?);
-    assert_eq!(k.auszug().bargeld, Cent(499_465));
-    assert_eq!(k.sende(kauf_nach_abrechnung), Sendeantwort::Angenommen);
     Ok(())
 }
 
 #[test]
-fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() -> Result<(), String>
-{
+fn papiertag_gleicht_abrechnung_ab_und_tauscht_am_selben_schluss() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let mut a = vorbedingung(Topf::neu(TopfId::A, Cent::NULL), "Topf A")?;
@@ -1278,7 +1273,24 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
             t != 5,
             "Verkaufserloes am Tag {t}"
         );
-        assert_eq!(a.stueck(&allianz) > 0, t == 11, "Kauf am Tag {t}");
+        // Tausch am selben Schluss (#311 H1b): Der Kauf hängt am SAP-Verkauf und füllt mit ihm
+        // am Freitag. Vor #311 H1a kam der Kauf erst am Mittwoch, mit H1a am Montag.
+        assert_eq!(a.stueck(&allianz) > 0, t >= 6, "Kauf am Tag {t}");
+        if t == 6 {
+            let kauf = j
+                .stand()
+                .auftraege()
+                .iter()
+                .find(|l| l.beleg.topf == TopfId::A && l.beleg.isin == allianz)
+                .ok_or("Tauschkauf fehlt")?;
+            assert!(!kauf.beleg.nach.is_empty(), "{kauf:?}");
+            // Mit Erlös vor Valuta gekauft: bis Dienstag kein freiwilliger Verkauf.
+            assert_eq!(
+                j.stand().vor_valuta(TopfId::A, datum),
+                vec![(allianz.clone(), tag(10)?)]
+            );
+            assert!(j.stand().vor_valuta(TopfId::A, tag(10)?).is_empty());
+        }
         assert!(
             !j.stand().begruendungen().iter().any(|(d, wer, text)| {
                 *d == datum && wer == "Kontowaechter" && text.contains("keine Deckung")
@@ -1294,7 +1306,7 @@ fn papiertag_gleicht_abrechnung_ab_und_gibt_erloes_am_zweiten_handelstag_frei() 
 }
 
 #[test]
-fn papiertag_kuerzt_kauf_bei_gebundenem_verkaufserloes() -> Result<(), String> {
+fn papiertag_kauft_mit_gefuelltem_erloes_vor_valuta() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let mut topf_a = vorbedingung(Topf::neu(TopfId::A, Cent(45_000)), "Topf A")?;
@@ -1334,7 +1346,8 @@ fn papiertag_kuerzt_kauf_bei_gebundenem_verkaufserloes() -> Result<(), String> {
             .find(|l| l.beleg.topf == TopfId::A && l.beleg.isin == allianz);
         assert_eq!(
             kauf.map(|l| (l.beleg.stueck, l.versand.is_some())),
-            (tagnummer == 6).then_some((2, true)),
+            // 450 € Bargeld plus der gefüllte SAP-Erlös: ungekürzt 5 Stück (vor #311 H1a: 2).
+            (tagnummer == 6).then_some((5, true)),
             "{:?}",
             journal.stand().begruendungen()
         );
@@ -1773,6 +1786,7 @@ fn reduktion_pruefen(
                 berater: BeraterId::Dachs,
                 zielgewichte_bp,
                 begruendung: std::collections::BTreeMap::new(),
+                park: None,
             }),
         },
     );
@@ -1914,6 +1928,7 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
                 berater: wer,
                 zielgewichte_bp: [(sap.clone(), 2000)].into_iter().collect(),
                 begruendung: [(sap, "Belegte Lage".into())].into_iter().collect(),
+                park: None,
             }),
         },
     );
@@ -3391,8 +3406,17 @@ fn zeile_markiert() -> Result<(), String> {
     Ok(())
 }
 
-#[test]
-fn morgens_loest_der_schutzstopp_ohne_zweitmeinung_aus() -> Result<(), String> {
+/// Ein Stopp-Verkauf nach Montag (Kauf) und Dienstag (Halten), am Mittwochmorgen versendet.
+struct Stoppprobe {
+    _ort: Ort,
+    j: Journal,
+    k: Papierdatei,
+    isin: Isin,
+    gehalten: u64,
+    nr: u64,
+}
+
+fn stoppprobe() -> Result<Stoppprobe, String> {
     use depot_regelwerk::Anlass;
 
     let ort = Ort::neu()?;
@@ -3476,6 +3500,87 @@ fn morgens_loest_der_schutzstopp_ohne_zweitmeinung_aus() -> Result<(), String> {
     assert_eq!(order.beleg.isin, isin);
     assert_eq!(order.beleg.stueck, gehalten);
     assert_eq!(order.versand, Some(morgen(mittwoch)?));
+    let nr = order.beleg.nr;
+    Ok(Stoppprobe {
+        _ort: ort,
+        j,
+        k,
+        isin,
+        gehalten,
+        nr,
+    })
+}
+
+#[test]
+fn morgens_loest_der_schutzstopp_ohne_zweitmeinung_aus() -> Result<(), String> {
+    stoppprobe().map(|_| ())
+}
+
+/// Schutz-Stopp mit dem hoechsten erlaubten Limitabstand (#311 H2a): Schluss 218,60 €,
+/// Limit 218,60 × 0,97 = 212,042 €, zur sicheren Seite aufgerundet 212,05 €.
+#[test]
+fn stopp_verkauf_mit_hoechstabstand() -> Result<(), String> {
+    let p = stoppprobe()?;
+    let order = some(p.j.stand().auftrag(p.nr), "Order")?;
+    assert_eq!(order.beleg.limit, Cent(21_205));
+    Ok(())
+}
+
+/// Mittwochsschluss und Donnerstagmorgen fuer die Stoppprobe belegen und laufen lassen.
+fn stopp_donnerstag(p: &mut Stoppprobe, schluss_mittwoch: i64) -> Result<(), String> {
+    let donnerstag = tag(12)?;
+    let morgen = some(Zeitpunkt::frankfurt(donnerstag, 7, 30, 0), "Morgen")?;
+    belege_sperrprobe(&mut p.j, &p.isin, &[(11, schluss_mittwoch)], morgen)?;
+    belege_sperrprobe(&mut p.j, &allianz()?, &[(11, 23_010)], morgen)?;
+    vorbedingung(
+        papiertag(
+            &mut p.j,
+            donnerstag,
+            &universum()?,
+            &start()?,
+            &mut Stumm,
+            &mut Stumm,
+            &mut p.k,
+        ),
+        "Donnerstag",
+    )?;
+    Ok(())
+}
+
+/// −2,5 % am Folgetag: Mit 1 % Abstand (Limit 216,42 €) waere die Order verfallen, mit 3 %
+/// fuellt sie zum Schluss 213,14 €.
+#[test]
+fn stopp_fuellt_bei_minus_2_5() -> Result<(), String> {
+    let mut p = stoppprobe()?;
+    stopp_donnerstag(&mut p, 21_314)?;
+    let order = some(p.j.stand().auftrag(p.nr), "Order")?;
+    assert_eq!(order.zustand, depot_journal::AuftragsZustand::Gefuellt);
+    let topf = some(p.j.stand().toepfe().get(&TopfId::A), "Topf")?;
+    assert_eq!(topf.stueck(&p.isin), 0);
+    assert!(p.gehalten > 0);
+    Ok(())
+}
+
+/// −4 % am Folgetag: Die Order verfaellt, der Schluss liegt weiter unter dem Stopp. Am
+/// naechsten Morgen entsteht eine neue Stopp-Order mit 3 % auf 209,86 €: 203,5642 €,
+/// aufgerundet 203,57 €.
+#[test]
+fn stopp_wiederholt_nach_verfall() -> Result<(), String> {
+    use depot_regelwerk::Anlass;
+
+    let mut p = stoppprobe()?;
+    stopp_donnerstag(&mut p, 20_986)?;
+    let alt = some(p.j.stand().auftrag(p.nr), "Order")?;
+    assert_eq!(alt.zustand, depot_journal::AuftragsZustand::Verfallen);
+    let neu = some(
+        p.j.stand()
+            .offene_auftraege()
+            .find(|l| l.beleg.anlass == Anlass::Stopp),
+        "neue Stopp-Order",
+    )?;
+    assert_ne!(neu.beleg.nr, p.nr);
+    assert_eq!(neu.beleg.stueck, p.gehalten);
+    assert_eq!(neu.beleg.limit, Cent(20_357));
     Ok(())
 }
 

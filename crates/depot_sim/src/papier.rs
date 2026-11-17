@@ -43,6 +43,11 @@ pub trait Broker: Konto {
     fn stoppe_kaeufe(&mut self) -> bool {
         false
     }
+    /// Kann das Konto einen Kauf an Verkäufe desselben Schlusses binden (#311 H1b)? Nur das
+    /// Papierkonto; ein echter Broker braucht dafür eine bedingte Order.
+    fn tausch_moeglich(&self) -> bool {
+        false
+    }
     /// Der Markt laeuft bis zum Schluss dieses Handelstags.
     fn markt(&mut self, kurse: &Kurse);
     fn markt_fuer(&mut self, kurse: &Kurse, nummern: &std::collections::BTreeSet<u64>);
@@ -83,6 +88,8 @@ struct PapierOrder {
     status: KontoStatus,
     ausfuehrungen: Vec<Ausfuehrung>,
     versand: Option<(Zeitpunkt, Zeitpunkt)>,
+    /// Tauschkauf (#311 H1b): füllt nur, wenn diese Verkäufe vorher gefüllt sind.
+    nach: Vec<u64>,
 }
 
 /// Das erfundene Gesamtkonto.
@@ -175,24 +182,52 @@ impl Papierkonto {
             .filter(|o| o.status == KontoStatus::Offen)
     }
 
-    fn abgerechnetes_bargeld(&self) -> Option<Cent> {
-        self.abrechnungen
-            .values()
-            .filter(|(valuta, _)| self.abrechnungstag.is_none_or(|tag| *valuta > tag))
-            .try_fold(self.bargeld, |saldo, (_, erloes)| {
-                saldo.checked_sub(*erloes)
-            })
+    /// Ein Tauschkauf, dessen Verkauf ungefüllt endete, kann nicht mehr füllen.
+    fn tausch_unmoeglich(&self, o: &PapierOrder) -> bool {
+        o.nach.iter().any(|v| {
+            self.orders
+                .get(v)
+                .is_none_or(|s| !matches!(s.status, KontoStatus::Offen | KontoStatus::Gefuellt))
+        })
     }
 
-    fn gedeckt(&self, a: &Order) -> Option<bool> {
+    /// `tausch;NR;3+4`: Ein Kauf hängt an aufsteigenden, verschiedenen Verkaufskennungen.
+    fn lies_tausch(&mut self, nr: &str, liste: &str) -> Option<()> {
+        let nr: u64 = nr.parse().ok()?;
+        let nach: Vec<u64> = liste
+            .split('+')
+            .map(|v| v.parse().ok())
+            .collect::<Option<_>>()?;
+        let o = self.orders.get_mut(&nr)?;
+        (o.auftrag.richtung == Richtung::Kauf
+            && o.nach.is_empty()
+            && !nach.is_empty()
+            && nach.windows(2).all(|w| w.first() < w.get(1)))
+        .then(|| o.nach = nach)
+    }
+
+    fn gedeckt(&self, a: &Order, nach: &[u64]) -> Option<bool> {
         match a.richtung {
             Richtung::Kauf => {
-                let mut frei = self.abgerechnetes_bargeld()?;
+                // Gefüllte Erlöse vor Valuta decken Käufe wie beim Bargeldkonto (#311 H1a).
+                let mut frei = self.bargeld;
+                let mut verkaeufe: std::collections::BTreeSet<u64> = nach.iter().copied().collect();
                 for o in self
                     .offen()
-                    .filter(|o| o.auftrag.richtung == Richtung::Kauf)
+                    .filter(|o| o.auftrag.richtung == Richtung::Kauf && !self.tausch_unmoeglich(o))
                 {
                     frei = frei.checked_sub(self.bedarf(&o.auftrag)?)?;
+                    verkaeufe.extend(o.nach.iter().copied());
+                }
+                // Tauschkäufe rechnen den schlechtesten Erlös ihrer offenen Verkäufe ein (#311 H1b).
+                for v in verkaeufe {
+                    if let Some(s) = self.orders.get(&v).filter(|s| {
+                        s.status == KontoStatus::Offen && s.auftrag.richtung == Richtung::Verkauf
+                    }) {
+                        let volumen = s.auftrag.limit.mal_stueck(s.auftrag.stueck)?;
+                        let netto = volumen.checked_sub(self.gebuehren.fuer(volumen)?)?;
+                        frei = frei.checked_add(netto.max(Cent::NULL))?;
+                    }
                 }
                 Some(self.bedarf(a)? <= frei)
             }
@@ -219,6 +254,23 @@ impl Papierkonto {
             return;
         };
         let a = &o.auftrag;
+        if !o.nach.is_empty()
+            && o.nach
+                .iter()
+                .any(|v| self.orders.get(v).map(|s| s.status) != Some(KontoStatus::Gefuellt))
+        {
+            // Der Tauschkauf füllt nur nach seinen Verkäufen; sonst verfällt er an seinem Schluss.
+            let faellig = o.versand.is_none_or(|(_, schluss)| {
+                kurse.stand() >= schluss
+                    && kurse
+                        .eintrag(&a.isin)
+                        .is_some_and(|k| k.zeitpunkt() >= schluss)
+            });
+            if faellig && let Some(o) = self.orders.get_mut(&nr) {
+                o.status = KontoStatus::Verfallen;
+            }
+            return;
+        }
         let mut eintrag = kurse.eintrag(&a.isin);
         if let Some((_, schluss)) = o.versand {
             if kurse.stand() < schluss || eintrag.is_none_or(|k| k.zeitpunkt() < schluss) {
@@ -344,7 +396,15 @@ impl Papierkonto {
         } else {
             None
         };
-        let status = if self.gedeckt(&o) == Some(true) {
+        let nach = g.nach().to_vec();
+        let tausch_ok = nach.iter().all(|v| {
+            self.orders.get(v).is_some_and(|s| {
+                s.status == KontoStatus::Offen
+                    && s.auftrag.richtung == Richtung::Verkauf
+                    && s.versand.map(|(_, f)| f) == versand.map(|(_, f)| f)
+            })
+        });
+        let status = if tausch_ok && self.gedeckt(&o, &nach) == Some(true) {
             KontoStatus::Offen
         } else {
             KontoStatus::Abgelehnt
@@ -356,6 +416,7 @@ impl Papierkonto {
                 status,
                 ausfuehrungen: Vec::new(),
                 versand,
+                nach,
             },
         );
         match status {
@@ -366,6 +427,10 @@ impl Papierkonto {
 }
 
 impl Broker for Papierkonto {
+    fn tausch_moeglich(&self) -> bool {
+        true
+    }
+
     fn kapitalmassnahmen(
         &mut self,
         massnahmen: &[depot_journal::kapitalmassnahme::GebuchteKapitalmassnahme],
@@ -400,7 +465,14 @@ impl Broker for Papierkonto {
     }
 
     fn markt_fuer(&mut self, kurse: &Kurse, nummern: &std::collections::BTreeSet<u64>) {
-        for nr in nummern {
+        // Erst die Verkäufe, dann die Käufe: So hat ein Tauschkauf den Erlös (#311 H1b).
+        let mut folge: Vec<u64> = nummern.iter().copied().collect();
+        folge.sort_by_key(|nr| {
+            self.orders
+                .get(nr)
+                .is_some_and(|o| o.auftrag.richtung == Richtung::Kauf)
+        });
+        for nr in &folge {
             if self
                 .orders
                 .get(nr)
@@ -492,6 +564,10 @@ impl Papierkonto {
             if let Some((zeit, frist)) = o.versand {
                 let _ = writeln!(t, "versand;{nr};{zeit};{frist}");
             }
+            if !o.nach.is_empty() {
+                let nach: Vec<String> = o.nach.iter().map(u64::to_string).collect();
+                let _ = writeln!(t, "tausch;{nr};{}", nach.join("+"));
+            }
             for x in &o.ausfuehrungen {
                 let _ = write!(
                     t,
@@ -560,9 +636,11 @@ impl Papierkonto {
                         status: lies_status(status).ok_or_else(fehler)?,
                         ausfuehrungen: Vec::new(),
                         versand: None,
+                        nach: Vec::new(),
                     };
                     k.orders.insert(nr.parse().map_err(|_| fehler())?, o);
                 }
+                ["tausch", nr, liste] => k.lies_tausch(nr, liste).ok_or_else(fehler)?,
                 ["versand", nr, zeit, frist] => {
                     let nr = nr.parse().map_err(|_| fehler())?;
                     let o = k.orders.get_mut(&nr).ok_or_else(fehler)?;
@@ -646,6 +724,7 @@ mod tests {
                     status: KontoStatus::Offen,
                     ausfuehrungen: Vec::new(),
                     versand: Some((versand, frist)),
+                    nach: Vec::new(),
                 },
             );
             fristen.push(frist);
@@ -762,6 +841,119 @@ mod tests {
         let order = konto.order(2).ok_or("Order")?;
         assert_eq!(order.status, KontoStatus::Offen);
         assert_eq!(order.versand.map(|(_, frist)| frist), Some(zweite));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tausch_tests {
+    use super::*;
+    use depot_kern::{Boerse, Herkunft, Kurs};
+    use std::collections::BTreeSet;
+
+    const SAP: &str = "DE0007164600";
+    const ALV: &str = "DE0008404005";
+
+    /// Konto mit `bargeld`, 10 SAP; Order 1 verkauft 10 SAP zu mindestens 99 €, Order 2 kauft
+    /// `stueck` Allianz zu höchstens 101 € und hängt an Order 1.
+    fn tausch(bargeld: i64, stueck: u64) -> Result<(Papierkonto, Zeitpunkt), String> {
+        let sap = Isin::neu(SAP).map_err(|e| format!("{e:?}"))?;
+        let alv = Isin::neu(ALV).map_err(|e| format!("{e:?}"))?;
+        let mut topf =
+            Topf::neu(depot_kern::TopfId::A, Cent(bargeld)).map_err(|e| format!("{e:?}"))?;
+        topf.setze_bestand(sap.clone(), 10);
+        let mut konto = Papierkonto::eroeffne(&[topf]).ok_or("Konto")?;
+        let datum = Datum::neu(2026, 11, 17).ok_or("Datum")?;
+        let versand = Zeitpunkt::frankfurt(datum, 7, 40, 0).ok_or("Versand")?;
+        let frist = Boerse::Xetra.schluss(datum).ok_or("Schluss")?;
+        for (nr, isin, richtung, stueck, limit, nach) in [
+            (1, sap, Richtung::Verkauf, 10, 9_900, Vec::new()),
+            (2, alv, Richtung::Kauf, stueck, 10_100, vec![1]),
+        ] {
+            konto.orders.insert(
+                nr,
+                PapierOrder {
+                    auftrag: Order {
+                        isin,
+                        richtung,
+                        stueck,
+                        limit: Cent(limit),
+                    },
+                    status: KontoStatus::Offen,
+                    ausfuehrungen: Vec::new(),
+                    versand: Some((versand, frist)),
+                    nach,
+                },
+            );
+        }
+        Ok((konto, frist))
+    }
+
+    fn schluss(frist: Zeitpunkt, sap: i64, alv: i64) -> Result<Kurse, String> {
+        let datum = frist.frankfurt_tag().ok_or("Datum")?;
+        let kurs = |cent| {
+            Kurs::neu(Cent(cent), "EUR", datum, frist, Herkunft::Quelle)
+                .map_err(|e| format!("{e:?}"))
+        };
+        Kurse::neu(
+            frist,
+            vec![
+                (Isin::neu(SAP).map_err(|e| format!("{e:?}"))?, kurs(sap)?),
+                (Isin::neu(ALV).map_err(|e| format!("{e:?}"))?, kurs(alv)?),
+            ],
+        )
+        .map_err(|e| format!("{e:?}"))
+    }
+
+    /// Deckung: 9 Allianz zu 101 € plus Gebühr passen nur mit dem Verkaufserlös zum Limit.
+    #[test]
+    fn tauschkauf_rechnet_verkaufserloes_zum_limit_ein() -> Result<(), String> {
+        // Geprüft wird der neue Kauf vor seiner Annahme, also ohne ihn im Buch.
+        let neu = |stueck| -> Result<_, String> {
+            let (mut konto, _) = tausch(0, stueck)?;
+            let kauf = konto.orders.remove(&2).ok_or("Kauf")?.auftrag;
+            Ok((konto, kauf))
+        };
+        let (konto, kauf) = neu(9)?;
+        assert_eq!(konto.gedeckt(&kauf, &[1]), Some(true));
+        assert_eq!(konto.gedeckt(&kauf, &[]), Some(false));
+        // 10 Stück übersteigen den schlechtesten Erlös von 990 € minus Gebühr.
+        let (konto, kauf) = neu(10)?;
+        assert_eq!(konto.gedeckt(&kauf, &[1]), Some(false));
+        Ok(())
+    }
+
+    /// #311 H1b Gegenprobe 3: Füllt der Verkauf nicht, verfällt der Tauschkauf, und das Bargeld
+    /// wird nie negativ. Geprüft über ein Raster von Schlusskursen und Startbargeld.
+    #[test]
+    fn tauschkauf_nur_nach_seinem_verkauf_bargeld_nie_negativ() -> Result<(), String> {
+        for bargeld in [0, 5_000, 50_000] {
+            for sap in (9_700..=10_300).step_by(50) {
+                for alv in (9_800..=10_300).step_by(50) {
+                    let (mut konto, frist) = tausch(bargeld, 9)?;
+                    // Der Kauf steht vorne: Das Konto ordnet die Verkäufe trotzdem zuerst.
+                    konto.markt_fuer(&schluss(frist, sap, alv)?, &BTreeSet::from([2, 1]));
+                    let status = |nr| konto.orders.get(&nr).map(|o| o.status);
+                    assert!(konto.bargeld >= Cent::NULL, "{bargeld} {sap} {alv}");
+                    if status(2) == Some(KontoStatus::Gefuellt) {
+                        assert_eq!(status(1), Some(KontoStatus::Gefuellt));
+                    }
+                    if status(1) != Some(KontoStatus::Gefuellt) {
+                        assert_eq!(status(2), Some(KontoStatus::Verfallen), "{sap} {alv}");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn tausch_ueberdauert_die_datei() -> Result<(), String> {
+        let (konto, _) = tausch(0, 9)?;
+        let text = konto.als_text();
+        assert!(text.contains("\ntausch;2;1\n"), "{text}");
+        assert_eq!(Papierkonto::aus_text(&text)?, konto);
+        assert!(Papierkonto::aus_text(&text.replace("tausch;2;1", "tausch;1;2")).is_err());
         Ok(())
     }
 }

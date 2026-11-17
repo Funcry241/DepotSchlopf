@@ -208,6 +208,9 @@ pub struct AuftragsBeleg {
     pub limit: Cent,
     pub anlass: Anlass,
     pub stopp_bp: Option<i64>,
+    /// Tauschkauf (#311 H1b): rechnet den Erlös dieser Verkäufe desselben Schlusses ein und
+    /// füllt nur nach ihnen.
+    pub nach: Vec<u64>,
 }
 
 /// Ein Tagesabschluss.
@@ -243,6 +246,9 @@ pub struct Stand {
     toepfe: BTreeMap<TopfId, Topf>,
     startgeld: BTreeMap<TopfId, Option<Cent>>,
     stopps: BTreeMap<(TopfId, Isin), Cent>,
+    /// Mit noch nicht abgerechnetem Erlös gekaufte Werte und die Valuta, vor der ein
+    /// freiwilliger Verkauf gesperrt ist (#311 H1a).
+    valuta_sperren: BTreeMap<(TopfId, Isin), Datum>,
     auftraege: Vec<AuftragsLage>,
     ausfuehrungsfolge: Vec<(usize, usize)>,
     kapitalmassnahmen: Vec<GebuchteKapitalmassnahme>,
@@ -718,7 +724,51 @@ impl Stand {
         &self.abrechnungen
     }
 
-    /// Gebuchte Verkaufserlöse, die wegen ihrer Valuta noch nicht für Käufe frei sind.
+    /// Werte dieses Topfes, die mit noch nicht abgerechnetem Verkaufserlös gekauft wurden und
+    /// vor dieser Valuta nicht freiwillig verkauft werden dürfen (#311 H1a). Stopp, Notbremse
+    /// und andere zwingende Ausstiege verkaufen trotzdem.
+    pub fn vor_valuta(&self, topf: TopfId, tag: Datum) -> Vec<(Isin, Datum)> {
+        self.valuta_sperren
+            .iter()
+            .filter(|((t, _), valuta)| *t == topf && **valuta > tag)
+            .map(|((_, isin), valuta)| (isin.clone(), *valuta))
+            .collect()
+    }
+
+    /// Ein Tauschkauf, dessen Verkauf ungefüllt endete, kann nicht mehr füllen (#311 H1b).
+    pub fn tausch_unmoeglich(&self, l: &AuftragsLage) -> bool {
+        l.beleg.nach.iter().any(|v| {
+            self.auftrag(*v).is_none_or(|s| {
+                !s.zustand.offen() && s.zustand != crate::auftrag::AuftragsZustand::Gefuellt
+            })
+        })
+    }
+
+    /// Schlechtester Erlös der offenen Verkäufe `nach`, an denen Tauschkäufe hängen: Limit mal
+    /// offene Stück abzüglich der höchsten Gebühr, jeder Verkauf einmal (#311 H1b).
+    pub fn tauscherloes(
+        &self,
+        nach: impl IntoIterator<Item = u64>,
+        gebuehren: &depot_kern::Gebuehren,
+    ) -> Option<Cent> {
+        let nach: BTreeSet<u64> = nach.into_iter().collect();
+        let mut summe = Cent::NULL;
+        for v in nach {
+            let Some(s) = self.auftrag(v) else {
+                continue;
+            };
+            if s.beleg.richtung != Richtung::Verkauf || !s.zustand.offen() {
+                continue;
+            }
+            let volumen = s.beleg.limit.mal_stueck(s.offen_stueck())?;
+            let netto = volumen.checked_sub(gebuehren.fuer(volumen)?)?;
+            summe = summe.checked_add(netto.max(Cent::NULL))?;
+        }
+        Some(summe)
+    }
+
+    /// Gefüllte Verkaufserlöse vor ihrer Valuta. Sie sind für Käufe schon frei (#311 H1a);
+    /// was damit gekauft wird, sperrt `vor_valuta`.
     pub fn nicht_gutgeschrieben(&self, topf: TopfId) -> Option<Cent> {
         self.gesperrt(topf)
     }
@@ -753,7 +803,7 @@ impl Stand {
             Art::Topf => {
                 let t = lies_topf(inhalt).ok_or("Topf unlesbar")?;
                 kanonisch(&topf_text(&t), inhalt)?;
-                self.pruefe_deckung(&t, None, Cent::NULL)?;
+                self.pruefe_deckung(&t, None)?;
                 self.startgeld
                     .entry(t.id())
                     .or_insert_with(|| t.positionen().is_empty().then(|| t.bargeld()));
@@ -857,7 +907,7 @@ impl Stand {
             for (isin, stueck) in alt.positionen() {
                 neu.setze_bestand(isin.clone(), *stueck);
             }
-            self.pruefe_deckung(&neu, None, Cent::NULL)?;
+            self.pruefe_deckung(&neu, None)?;
             Ok(neu)
         };
         let a = anwenden(TopfId::A, nach_a)?;
@@ -911,8 +961,18 @@ impl Stand {
             .toepfe
             .get(&b.topf)
             .ok_or_else(|| format!("Auftrag {nr}: Topf {:?} fehlt", b.topf))?;
+        for v in &b.nach {
+            let gueltig = self.auftrag(*v).is_some_and(|l| {
+                l.beleg.topf == b.topf && l.beleg.richtung == Richtung::Verkauf && l.zustand.offen()
+            });
+            if !gueltig {
+                return Err(format!(
+                    "Auftrag {nr}: Tausch nach {v} ohne offenen Verkauf desselben Topfes"
+                ));
+            }
+        }
         let neu = AuftragsLage::reserviert(b);
-        self.pruefe_deckung(topf, Some(&neu), Cent::NULL)?;
+        self.pruefe_deckung(topf, Some(&neu))?;
         self.letzte_kennung = nr;
         self.auftraege.push(neu);
         Ok(())
@@ -1281,20 +1341,30 @@ impl Stand {
             .position(|l| l.beleg.nr == nr)
             .ok_or_else(|| format!("Auftrag {nr} unbekannt"))?;
         let alt = self.auftraege.get(index).ok_or("Auftrag fehlt")?;
+        if matches!(m, Meldung::Ausfuehrung(_))
+            && alt.beleg.nach.iter().any(|v| {
+                self.auftrag(*v).map(|l| l.zustand)
+                    != Some(crate::auftrag::AuftragsZustand::Gefuellt)
+            })
+        {
+            return Err(format!("Tauschkauf {nr} vor seinen Verkäufen ausgeführt"));
+        }
         let neu = alt.nach(m)?;
         let topf = self
             .toepfe
             .get(&neu.beleg.topf)
             .ok_or_else(|| format!("Auftrag {nr}: Topf fehlt"))?;
+        let sperre = match m {
+            Meldung::Ausfuehrung(a) if neu.beleg.richtung == Richtung::Kauf => {
+                self.valuta_sperre(topf, a)?
+            }
+            _ => None,
+        };
         let (topf, erloes) = match m {
             Meldung::Ausfuehrung(a) => (buche(topf, &neu.beleg, a)?, self.neuer_erloes(&neu, a)?),
             _ => (topf.clone(), None),
         };
-        self.pruefe_deckung(
-            &topf,
-            Some(&neu),
-            erloes.map_or(Cent::NULL, |(_, netto)| netto),
-        )?;
+        self.pruefe_deckung(&topf, Some(&neu))?;
         if let Some((valuta, netto)) = erloes {
             let gesamt = self
                 .abrechnungen
@@ -1303,6 +1373,13 @@ impl Stand {
                 .checked_add(netto)
                 .ok_or("Verkaufserlös: Überlauf")?;
             self.abrechnungen.insert(nr, (valuta, gesamt));
+        }
+        if let Some(valuta) = sperre {
+            let platz = self
+                .valuta_sperren
+                .entry((neu.beleg.topf, neu.beleg.isin.clone()))
+                .or_insert(valuta);
+            *platz = (*platz).max(valuta);
         }
         if matches!(m, Meldung::Ausfuehrung(_)) {
             self.ausfuehrungsfolge
@@ -1319,6 +1396,31 @@ impl Stand {
             *platz = neu;
         }
         Ok(())
+    }
+
+    /// Bezahlt ein Kauf mehr als das abgerechnete Bargeld, nutzt er noch nicht abgerechneten
+    /// Erlös: Dann gilt die späteste offene Valuta als Sperre für freiwillige Verkäufe.
+    fn valuta_sperre(
+        &self,
+        topf: &Topf,
+        a: &crate::auftrag::Ausfuehrung,
+    ) -> Result<Option<Datum>, String> {
+        let kosten = a
+            .kurs
+            .mal_stueck(a.stueck)
+            .and_then(|v| v.checked_add(a.gebuehr))
+            .ok_or("Valuta: Überlauf")?;
+        let abgerechnet = self
+            .gesperrt(topf.id())
+            .and_then(|g| topf.bargeld().checked_sub(g))
+            .ok_or("Valuta: Überlauf")?;
+        Ok((kosten > abgerechnet)
+            .then(|| self.naechste_valuta_spaetest(topf.id()))
+            .flatten())
+    }
+
+    fn naechste_valuta_spaetest(&self, topf: TopfId) -> Option<Datum> {
+        self.offene_valuta(topf).map(|(valuta, _)| *valuta).max()
     }
 
     fn neuer_erloes(
@@ -1392,19 +1494,23 @@ impl Stand {
     /// der Bestand jedes Werts alle offenen Verkaeufe. `ersatz` steht fuer den Auftrag mit
     /// seiner Kennung oder kommt neu hinzu. Was ein Kauf darueber hinaus an Gebuehr braucht,
     /// prueft der Kontowaechter vor der Reservierung (`Journal::reserviere_auftrag`).
-    fn pruefe_deckung(
-        &self,
-        topf: &Topf,
-        ersatz: Option<&AuftragsLage>,
-        neuer_erloes: Cent,
-    ) -> Result<(), String> {
+    fn pruefe_deckung(&self, topf: &Topf, ersatz: Option<&AuftragsLage>) -> Result<(), String> {
         let ersetzt = ersatz.map(|e| e.beleg.nr);
-        let offene = self
+        let offene: Vec<&AuftragsLage> = self
             .auftraege
             .iter()
             .filter(|l| Some(l.beleg.nr) != ersetzt)
             .chain(ersatz)
-            .filter(|l| l.beleg.topf == topf.id() && l.zustand.offen());
+            .filter(|l| l.beleg.topf == topf.id() && l.zustand.offen())
+            .filter(|l| !self.tausch_unmoeglich(l))
+            .collect();
+        let nach = offene
+            .iter()
+            .filter(|l| l.beleg.richtung == Richtung::Kauf)
+            .flat_map(|l| l.beleg.nach.iter().copied());
+        let erloes = self
+            .tauscherloes(nach, &Grenzen::standard().gebuehren())
+            .ok_or("Deckung: Überlauf")?;
         let mut kauf = Cent::NULL;
         let mut verkauf: BTreeMap<&Isin, u64> = BTreeMap::new();
         for l in offene {
@@ -1424,10 +1530,11 @@ impl Stand {
                 }
             }
         }
-        let frei = self
-            .gesperrt(topf.id())
-            .and_then(|s| s.checked_add(neuer_erloes))
-            .and_then(|s| topf.bargeld().checked_sub(s))
+        // Gefüllte, noch nicht abgerechnete Erlöse decken Käufe (#311 H1a), Tauschkäufe dazu
+        // die offenen Verkäufe, an denen sie hängen (#311 H1b).
+        let frei = topf
+            .bargeld()
+            .checked_add(erloes)
             .ok_or("Deckung: Überlauf")?;
         if kauf > frei {
             return Err(format!(
@@ -1638,6 +1745,7 @@ pub(crate) fn beleg_text(topf: TopfId, g: &GenehmigterAuftrag) -> String {
         limit: a.limit,
         anlass: g.beleg().anlass,
         stopp_bp: g.stopp_bp(),
+        nach: g.nach().to_vec(),
     })
 }
 
@@ -1652,11 +1760,27 @@ pub(crate) fn auftrag_text(b: &AuftragsBeleg) -> String {
         b.limit.0,
         anlass_name(b.anlass)
     );
-    if let Some(bp) = b.stopp_bp {
+    let text = if let Some(bp) = b.stopp_bp {
         format!("{text};{bp}")
     } else {
         text
+    };
+    if b.nach.is_empty() {
+        text
+    } else {
+        let nach: Vec<String> = b.nach.iter().map(u64::to_string).collect();
+        format!("{text};nach={}", nach.join("+"))
     }
+}
+
+/// `nach=3+4`: aufsteigende, verschiedene Kennungen.
+fn lies_nach(t: &str) -> Option<Vec<u64>> {
+    let liste = t.strip_prefix("nach=")?;
+    let nach: Vec<u64> = liste
+        .split('+')
+        .map(|n| n.parse().ok())
+        .collect::<Option<_>>()?;
+    (!nach.is_empty() && nach.windows(2).all(|w| w.first() < w.get(1))).then_some(nach)
 }
 
 fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
@@ -1682,6 +1806,12 @@ fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
     if stueck == 0 || limit.0 <= 0 {
         return None;
     }
+    let (rest, nach) = match rest {
+        [vorne @ .., letzt] if letzt.starts_with("nach=") && richtung == Richtung::Kauf => {
+            (vorne, lies_nach(letzt)?)
+        }
+        _ => (rest, Vec::new()),
+    };
     let stopp_bp = match rest {
         [] => None,
         [bp] if richtung == Richtung::Kauf => {
@@ -1704,6 +1834,7 @@ fn lies_auftrag(inhalt: &str) -> Option<AuftragsBeleg> {
         limit,
         anlass,
         stopp_bp,
+        nach,
     })
 }
 

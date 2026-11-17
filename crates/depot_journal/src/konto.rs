@@ -119,19 +119,27 @@ pub enum Abweichung {
 }
 
 /// Bargeld eines Topfes, das noch fuer einen Kauf frei ist: Bargeld minus aller offenen Kaeufe
-/// am Limit samt Gebuehr und minus noch nicht abgerechneter Erloese.
+/// am Limit samt Gebuehr. Gefuellte, noch nicht abgerechnete Erloese zaehlen schon (#311 H1a);
+/// was damit gekauft wird, sperrt `Stand::vor_valuta` gegen freiwillige Verkaeufe.
+///
+/// Offene Tauschkäufe (#311 H1b) rechnen zusätzlich den schlechtesten Erlös der offenen
+/// Verkäufe ein, an denen sie hängen; ein Tauschkauf, dessen Verkauf ungefüllt endete, bindet
+/// nichts mehr.
 pub fn verfuegbar(grenzen: &Grenzen, stand: &Stand, topf: TopfId) -> Option<Cent> {
-    let mut frei = stand
-        .toepfe()
-        .get(&topf)?
-        .bargeld()
-        .checked_sub(stand.gesperrt(topf)?)?;
+    verfuegbar_mit(grenzen, stand, topf, &[])
+}
+
+fn verfuegbar_mit(grenzen: &Grenzen, stand: &Stand, topf: TopfId, nach: &[u64]) -> Option<Cent> {
+    let mut frei = stand.toepfe().get(&topf)?.bargeld();
+    let mut verkaeufe = nach.to_vec();
     for l in stand.offene_auftraege() {
-        if l.beleg.topf == topf && l.beleg.richtung == Richtung::Kauf {
+        if l.beleg.topf == topf && l.beleg.richtung == Richtung::Kauf && !stand.tausch_unmoeglich(l)
+        {
             frei = frei.checked_sub(kaufbedarf(grenzen, l.beleg.limit, l.offen_stueck())?)?;
+            verkaeufe.extend_from_slice(&l.beleg.nach);
         }
     }
-    Some(frei)
+    frei.checked_add(stand.tauscherloes(verkaeufe, &grenzen.gebuehren())?)
 }
 
 /// Limit mal Menge plus hoechstmoegliche Gebuehr.
@@ -156,7 +164,8 @@ pub(crate) fn pruefe_deckung(
     }
     let a = auftrag.auftrag();
     if a.richtung == Richtung::Kauf {
-        let frei = verfuegbar(grenzen, stand, topf).ok_or("Deckung nicht berechenbar")?;
+        let frei = verfuegbar_mit(grenzen, stand, topf, auftrag.nach())
+            .ok_or("Deckung nicht berechenbar")?;
         let bedarf = kaufbedarf(grenzen, a.limit, a.stueck).ok_or("Deckung: Überlauf")?;
         if bedarf > frei {
             return Err(format!(

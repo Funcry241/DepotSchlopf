@@ -11,8 +11,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use depot_kern::{
-    BP_GANZ, BeraterId, Cent, Grenzen, Herkunft, Isin, Kurse, Preis, Rundung, Topf, TopfId,
-    Universum, Vorschlag,
+    BP_GANZ, BeraterId, Cent, Grenzen, Herkunft, Isin, Kurse, Parkwunsch, Preis, Rundung, Topf,
+    TopfId, Universum, Vorschlag,
 };
 
 use crate::auftrag::{Anlass, Auftrag, GenehmigterAuftrag, Kennungsvergabe, RegelBeleg, Richtung};
@@ -28,6 +28,9 @@ pub struct Eingabe<'a> {
     /// Kill-Switch, Tagesverlust, Datenfehler oder leeres Budget: Dann gibt es keine
     /// freiwilligen Auftraege. Zwingende Ausstiege laufen weiter (R36).
     pub halt: bool,
+    /// Mit noch nicht abgerechnetem Erloes gekaufte Werte: Vor deren Valuta kein freiwilliger
+    /// Verkauf (#311 H1a, `Stand::vor_valuta`). Zwingende Verkaeufe gehen immer durch.
+    pub vor_valuta: &'a [Isin],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,6 +88,15 @@ pub enum Befund {
         isin: Isin,
         gefragt: Option<i64>,
     },
+    /// Bargeld über der Reserve geht in den Parkwert: neues Zielgewicht (#311 H3).
+    Parkwert {
+        isin: Isin,
+        ziel_bp: i64,
+    },
+    /// Der Parkwert ist kein handelbarer ETF mit frischem Kurs; es wird nicht geparkt.
+    ParkwertUngueltig(Isin),
+    /// Freiwilliger Verkauf vor der Valuta des Erloeses, mit dem der Wert gekauft wurde (#311 H1a).
+    VorValuta(Isin),
     LimitabstandAusserhalb {
         isin: Isin,
         gefragt: i64,
@@ -233,7 +245,8 @@ fn leistbare_stueck(g: &Grenzen, limit: Cent, gewuenscht: u64, budget: Cent) -> 
     })
 }
 
-/// Ganze Positionen, deren belegter Schluss den Schutz-Stopp erreicht hat.
+/// Ganze Positionen, deren belegter Schluss den Schutz-Stopp erreicht hat. Der Ausstieg nutzt
+/// den hoechsten erlaubten Limitabstand, damit er auch an einem schwachen Folgetag fuellt (#311 H2a).
 pub fn stopp_auftraege(
     g: &Grenzen,
     topf: &Topf,
@@ -254,7 +267,7 @@ pub fn stopp_auftraege(
                 stueck,
                 kurs,
                 komplett: true,
-                limit_bp: None,
+                limit_bp: Some(g.limit_abstand_max_bp()),
                 anlass: Anlass::Stopp,
             });
         }
@@ -262,7 +275,8 @@ pub fn stopp_auftraege(
     Some(genehmige(g, &kandidaten, &[], vergabe)?.verkaeufe)
 }
 
-/// Ganze Positionen mit fälligem und nach Beratung unbegründetem Halten schließen.
+/// Ganze Positionen mit fälligem und nach Beratung unbegründetem Halten schließen, mit dem
+/// hoechsten erlaubten Limitabstand wie beim Stopp (#311 H2a).
 pub fn frist_auftraege(
     g: &Grenzen,
     topf: &Topf,
@@ -281,7 +295,7 @@ pub fn frist_auftraege(
                 stueck,
                 kurs,
                 komplett: true,
-                limit_bp: None,
+                limit_bp: Some(g.limit_abstand_max_bp()),
                 anlass: Anlass::FristOhneBegruendung,
             })
         })
@@ -290,17 +304,51 @@ pub fn frist_auftraege(
 }
 
 pub fn entscheide(e: &Eingabe<'_>, vergabe: &mut Kennungsvergabe) -> Entscheidung {
-    entscheide_intern(e, vergabe, None, false)
+    entscheide_intern(e, vergabe, Kaufbudget::Bargeld, false)
 }
 
 /// Plant Käufe mit dem vom Kontowächter berechneten freien Bargeld. Geplante Verkäufe
-/// erhöhen dieses Budget erst nach der Abrechnung.
+/// erhöhen dieses Budget erst nach ihrer Füllung; gefüllte Erlöse zählen schon vor der
+/// Valuta (#311 H1a).
 pub fn entscheide_mit_kaufbudget(
     e: &Eingabe<'_>,
     vergabe: &mut Kennungsvergabe,
     frei: Cent,
 ) -> Entscheidung {
-    entscheide_intern(e, vergabe, Some(frei), false)
+    entscheide_intern(e, vergabe, Kaufbudget::Frei(frei), false)
+}
+
+/// Tausch am selben Schluss, nur im Papierkonto (#311 H1b): Käufe dürfen zusätzlich den Erlös
+/// der Verkäufe desselben Plans zum Verkaufslimit abzüglich der höchsten Gebühr einrechnen
+/// (schlechtester Fall). Jeder Kauf hängt dann an allen Verkäufen des Plans (`nach`): Füllt
+/// einer nicht, verfällt der Kauf.
+pub fn entscheide_tausch(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    frei: Cent,
+    ersatzkauf: bool,
+) -> Entscheidung {
+    let mut ent = entscheide_intern(e, vergabe, Kaufbudget::Tausch(frei), ersatzkauf);
+    let nach: Vec<u64> = ent
+        .verkaeufe
+        .iter()
+        .map(|v| v.auftrag().kennung.nr())
+        .collect();
+    for kauf in &mut ent.kaeufe {
+        kauf.setze_nach(nach.clone());
+    }
+    ent
+}
+
+/// Woher das Geld für Käufe kommt.
+#[derive(Clone, Copy, Debug)]
+enum Kaufbudget {
+    /// Bargeld des Topfes plus geplante Verkäufe (Regelprüfung ohne Konto).
+    Bargeld,
+    /// Freies Bargeld laut Kontowächter, ohne geplante Verkäufe.
+    Frei(Cent),
+    /// Freies Bargeld plus die geplanten Verkäufe desselben Schlusses (#311 H1b).
+    Tausch(Cent),
 }
 
 /// Bei technisch ausgefallener Zweitmeinung nur halbierte Kaufziele und zwingende Verkäufe planen.
@@ -309,17 +357,62 @@ pub fn entscheide_ersatzkauf(
     vergabe: &mut Kennungsvergabe,
     frei: Cent,
 ) -> Entscheidung {
-    entscheide_intern(e, vergabe, Some(frei), true)
+    entscheide_intern(e, vergabe, Kaufbudget::Frei(frei), true)
+}
+
+/// Eine am letzten Schluss verfallene KI-Kauforder, die der Morgenlauf einmal ohne neue
+/// KI-Antwort wiederholt (#311 H2b). Sie laeuft durch dieselbe Genehmigung wie ein KI-Kauf:
+/// Anteil, Positionszahl, Umschlag, Orderzahl, Mindestorder und Deckung.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Wiederholung {
+    pub isin: Isin,
+    pub stueck: u64,
+    /// Limitabstand zum juengsten Schluss; muss im Rahmen der Grenzen liegen.
+    pub limit_bp: i64,
+    /// Stoppabstand der urspruenglichen Order.
+    pub stopp_bp: Option<i64>,
+}
+
+/// Plant zwingende Verkaeufe wie immer und als einzigen freiwilligen Auftrag die Wiederholung.
+/// `e.vorschlag` wird nicht gelesen.
+pub fn entscheide_wiederholung(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    frei: Cent,
+    w: &Wiederholung,
+) -> Entscheidung {
+    let ohne_vorschlag = Eingabe {
+        vorschlag: None,
+        ..*e
+    };
+    entscheide_plan(
+        &ohne_vorschlag,
+        vergabe,
+        Kaufbudget::Frei(frei),
+        false,
+        Some(w),
+    )
 }
 
 fn entscheide_intern(
     e: &Eingabe<'_>,
     vergabe: &mut Kennungsvergabe,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     ersatzkauf: bool,
 ) -> Entscheidung {
+    entscheide_plan(e, vergabe, kaufbudget, ersatzkauf, None)
+}
+
+fn entscheide_plan(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    kaufbudget: Kaufbudget,
+    ersatzkauf: bool,
+    wiederholung: Option<&Wiederholung>,
+) -> Entscheidung {
     let mut befunde = Vec::new();
-    let Some((verkaeufe, kaeufe)) = plane(e, kaufbudget, ersatzkauf, &mut befunde) else {
+    let Some((verkaeufe, kaeufe)) = plane(e, kaufbudget, ersatzkauf, wiederholung, &mut befunde)
+    else {
         return Entscheidung::nur(Befund::Rechenfehler);
     };
     let Some(mut ent) = genehmige(e.grenzen, &verkaeufe, &kaeufe, vergabe) else {
@@ -327,7 +420,10 @@ fn entscheide_intern(
     };
     for kauf in &mut ent.kaeufe {
         let isin = &kauf.auftrag().isin;
-        let gefragt = e.vorschlag.and_then(|v| v.stopp_bp.get(isin).copied());
+        let gefragt = match wiederholung {
+            Some(w) => w.stopp_bp.filter(|_| w.isin == *isin),
+            None => e.vorschlag.and_then(|v| v.stopp_bp.get(isin).copied()),
+        };
         let stopp = gefragt.filter(|bp| {
             !ersatzkauf && (e.grenzen.stopp_min_bp()..=e.grenzen.notbremse_bp()).contains(bp)
         });
@@ -384,8 +480,9 @@ fn genehmige(
 /// Plant alle Auftraege. `None` nur bei einem Rechenfehler.
 fn plane(
     e: &Eingabe<'_>,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     ersatzkauf: bool,
+    wiederholung: Option<&Wiederholung>,
     befunde: &mut Vec<Befund>,
 ) -> Option<(Vec<Kandidat>, Vec<Kandidat>)> {
     let g = e.grenzen;
@@ -419,8 +516,14 @@ fn plane(
     abbau_anteil(e, tw, &mut zwang, &mut gesperrt, befunde)?;
     abbau_positionen(e, &mut zwang, &mut gesperrt, befunde)?;
 
+    let wiederholt = match wiederholung {
+        Some(w) if !e.halt => wiederholungs_kandidat(e, w, befunde),
+        _ => None,
+    };
     let ziele = if e.halt {
         befunde.push(Befund::Halt);
+        None
+    } else if wiederholung.is_some() {
         None
     } else {
         match e.vorschlag {
@@ -461,6 +564,16 @@ fn plane(
                 ziele,
                 &gesperrt,
                 ersatzkauf,
+                &mut verkaeufe,
+                &mut kaeufe,
+                &mut befunde_frei,
+            )?;
+        } else if let Some(k) = &wiederholt {
+            freiwillig_aus(
+                e,
+                kaufbudget,
+                tw,
+                vec![k.clone()],
                 &mut verkaeufe,
                 &mut kaeufe,
                 &mut befunde_frei,
@@ -627,6 +740,16 @@ fn abbau_positionen(
         let wert = e.kurse.kurs(isin)?.mal_stueck_exakt(*gehalten)?;
         bleiben.push((wert, isin.clone(), *gehalten));
     }
+    // Der größte gehaltene ETF ist der Parkplatz und zählt nicht gegen die Werteanzahl (#311 H3).
+    if let Some(platz) = bleiben
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, isin, _))| e.universum.ist_etf(isin))
+        .max_by(|(_, a), (_, b)| a.cmp(b))
+        .map(|(i, _)| i)
+    {
+        bleiben.remove(platz);
+    }
     let zu_viel = bleiben.len().saturating_sub(g.max_werte());
     if zu_viel == 0 {
         return Some(());
@@ -684,7 +807,9 @@ fn pruefe_vorschlag(
         summe = summe.saturating_add(*gewicht);
         ziele.insert(isin.clone(), *gewicht);
     }
-    if ziele.len() > e.grenzen.max_werte() {
+    // Ein ETF als Parkplatz zählt nicht gegen die Werteanzahl (#311 H3).
+    let park = usize::from(ziele.keys().any(|i| e.universum.ist_etf(i)));
+    if ziele.len().saturating_sub(park) > e.grenzen.max_werte() {
         return Err(VerwerfGrund::ZuVieleWerte(ziele.len()));
     }
     if summe > BP_GANZ {
@@ -700,7 +825,63 @@ fn pruefe_vorschlag(
             *gewicht = e.grenzen.max_anteil_bp();
         }
     }
+    if let Some(p) = &v.park {
+        parke(e, p, &mut ziele, befunde);
+    }
     Ok(ziele)
+}
+
+/// Frühestens so viele Handelstage bis zum nächsten anderen Kauf, damit sich das Parken lohnt.
+pub const PARK_MIN_TAGE: i64 = 5;
+/// Kleinster Zukauf in den Parkwert; darunter fressen die Gebühren den Ertrag.
+pub const PARK_MIN_ZUKAUF: Cent = Cent(100_000);
+
+/// Setzt das Zielgewicht des Parkwerts auf das Bargeld über der Reserve, höchstens den
+/// Höchstanteil (#311 H3). Erwartet die KI bald einen anderen Kauf oder lohnt der Zukauf nicht,
+/// wächst der Parkwert nicht; brauchen andere Ziele das Bargeld, schrumpft er zuerst.
+fn parke(
+    e: &Eingabe<'_>,
+    p: &Parkwunsch,
+    ziele: &mut BTreeMap<Isin, i64>,
+    befunde: &mut Vec<Befund>,
+) {
+    let g = e.grenzen;
+    if !e.universum.ist_etf(&p.isin)
+        || !e.universum.handelbar(&p.isin, g)
+        || frischer_kurs(g, e.kurse, &p.isin).is_none()
+        || !(0..=BP_GANZ).contains(&p.reserve_bp)
+    {
+        befunde.push(Befund::ParkwertUngueltig(p.isin.clone()));
+        return;
+    }
+    let andere: i64 = ziele
+        .iter()
+        .filter(|(isin, _)| **isin != p.isin)
+        .map(|(_, bp)| *bp)
+        .sum();
+    let ist = if e.topf.stueck(&p.isin) == 0 {
+        0
+    } else {
+        ist_gewicht_bp(e.topf, e.kurse, &p.isin).unwrap_or(0)
+    };
+    let mut ziel = BP_GANZ
+        .saturating_sub(andere)
+        .saturating_sub(p.reserve_bp)
+        .clamp(0, g.max_anteil_bp());
+    let zukauf = e
+        .topf
+        .wert_exakt(e.kurse)
+        .and_then(|w| w.mal_bp(ziel.saturating_sub(ist), Rundung::Ab));
+    if ziel > ist
+        && (p.naechster_kauf_tage < PARK_MIN_TAGE || zukauf.is_none_or(|z| z < PARK_MIN_ZUKAUF))
+    {
+        ziel = ist;
+    }
+    ziele.insert(p.isin.clone(), ziel);
+    befunde.push(Befund::Parkwert {
+        isin: p.isin.clone(),
+        ziel_bp: ziel,
+    });
 }
 
 /// Freiwillige Auftraege. Umschlag und Orderzahl gelten fuer das, was die zwingenden
@@ -711,7 +892,7 @@ fn pruefe_vorschlag(
 )]
 fn freiwillig(
     e: &Eingabe<'_>,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     topfwert: Preis,
     ziele: &BTreeMap<Isin, i64>,
     gesperrt: &BTreeSet<Isin>,
@@ -720,12 +901,62 @@ fn freiwillig(
     kaeufe: &mut Vec<Kandidat>,
     befunde: &mut Vec<Befund>,
 ) -> Option<()> {
-    let g = e.grenzen;
     let mut kandidaten = sammle_kandidaten(e, ziele, topfwert, gesperrt, befunde)?;
     if ersatzkauf {
         kandidaten.retain(|k| k.richtung == Richtung::Kauf);
     }
+    freiwillig_aus(
+        e, kaufbudget, topfwert, kandidaten, verkaeufe, kaeufe, befunde,
+    )
+}
 
+/// Der Kandidat einer Wiederholung, oder `None` mit Befund, wenn sie nicht zulaessig ist.
+fn wiederholungs_kandidat(
+    e: &Eingabe<'_>,
+    w: &Wiederholung,
+    befunde: &mut Vec<Befund>,
+) -> Option<Kandidat> {
+    let g = e.grenzen;
+    if !e.universum.handelbar(&w.isin, g) {
+        befunde.push(Befund::VorschlagVerworfen(VerwerfGrund::UnbekannterWert(
+            w.isin.clone(),
+        )));
+        return None;
+    }
+    let Some(kurs) = frischer_kurs(g, e.kurse, &w.isin) else {
+        befunde.push(Befund::KursUnplausibel(w.isin.clone()));
+        return None;
+    };
+    if !(g.limit_abstand_min_bp()..=g.limit_abstand_max_bp()).contains(&w.limit_bp) {
+        befunde.push(Befund::LimitabstandAusserhalb {
+            isin: w.isin.clone(),
+            gefragt: w.limit_bp,
+            verwendet: 0,
+        });
+        return None;
+    }
+    Some(Kandidat {
+        isin: w.isin.clone(),
+        richtung: Richtung::Kauf,
+        stueck: w.stueck,
+        kurs,
+        komplett: false,
+        limit_bp: Some(w.limit_bp),
+        anlass: Anlass::Umschichtung,
+    })
+}
+
+/// Umschlag, Orderzahl und Kaeufe fuer schon gesammelte freiwillige Kandidaten.
+fn freiwillig_aus(
+    e: &Eingabe<'_>,
+    kaufbudget: Kaufbudget,
+    topfwert: Preis,
+    mut kandidaten: Vec<Kandidat>,
+    verkaeufe: &mut Vec<Kandidat>,
+    kaeufe: &mut Vec<Kandidat>,
+    befunde: &mut Vec<Befund>,
+) -> Option<()> {
+    let g = e.grenzen;
     let mut zwang_volumen = Cent::NULL;
     for k in verkaeufe.iter() {
         zwang_volumen = zwang_volumen.checked_add(k.umschlag(g)?)?;
@@ -771,7 +1002,7 @@ fn freiwillig(
 /// alles am Limit mit hoechster Gebuehr.
 fn kaufe(
     e: &Eingabe<'_>,
-    kaufbudget: Option<Cent>,
+    kaufbudget: Kaufbudget,
     topfwert: Preis,
     verkaeufe: &[Kandidat],
     geplant: Vec<Kandidat>,
@@ -779,10 +1010,14 @@ fn kaufe(
     befunde: &mut Vec<Befund>,
 ) -> Option<()> {
     let g = e.grenzen;
-    let mut budget = kaufbudget.unwrap_or_else(|| e.topf.bargeld());
+    let mut budget = match kaufbudget {
+        Kaufbudget::Bargeld => e.topf.bargeld(),
+        Kaufbudget::Frei(frei) | Kaufbudget::Tausch(frei) => frei,
+    };
     let mut verlust = Cent::NULL;
     for k in verkaeufe {
-        if kaufbudget.is_none() {
+        // Ein Verkauf erlöst mindestens sein Limit, abzüglich der höchsten Gebühr.
+        if matches!(kaufbudget, Kaufbudget::Bargeld | Kaufbudget::Tausch(_)) {
             let erloes = k.volumen(g)?;
             budget = budget
                 .checked_add(erloes)?
@@ -801,16 +1036,20 @@ fn kaufe(
         .filter(|k| k.komplett)
         .map(|k| &k.isin)
         .collect();
-    let mut positionen = e
+    let bleiben: Vec<&Isin> = e
         .topf
         .positionen()
         .keys()
         .filter(|i| !ganz_verkauft.contains(i))
-        .count();
+        .collect();
+    // Ein ETF ist der Parkplatz und zählt nicht gegen die Werteanzahl (#311 H3).
+    let mut park_frei = !bleiben.iter().any(|i| e.universum.ist_etf(i));
+    let mut positionen = bleiben.len().saturating_sub(usize::from(!park_frei));
 
     for k in geplant {
         let gehalten = e.topf.stueck(&k.isin);
-        if gehalten == 0 && positionen >= g.max_werte() {
+        let als_park = gehalten == 0 && park_frei && e.universum.ist_etf(&k.isin);
+        if gehalten == 0 && !als_park && positionen >= g.max_werte() {
             befunde.push(Befund::PositionsgrenzeErreicht(k.isin));
             continue;
         }
@@ -834,7 +1073,9 @@ fn kaufe(
             continue;
         }
         budget = budget.checked_sub(volumen.checked_add(g.gebuehren().fuer(volumen)?)?)?;
-        if gehalten == 0 {
+        if als_park {
+            park_frei = false;
+        } else if gehalten == 0 {
             positionen = positionen.checked_add(1)?;
         }
         kaeufe.push(Kandidat { stueck, ..k });
@@ -924,6 +1165,11 @@ fn sammle_kandidaten(
                 anlass: Anlass::Umschichtung,
             }
         };
+        // Mit noch nicht abgerechnetem Erloes gekauft: vor der Valuta kein freiwilliger Verkauf.
+        if k.richtung == Richtung::Verkauf && e.vor_valuta.contains(isin) {
+            befunde.push(Befund::VorValuta(isin.clone()));
+            continue;
+        }
         // Mindestorder am Limit; der Verkauf des ganzen Bestands ist ausgenommen.
         if k.stueck == 0 || (k.volumen(g)? < g.min_order() && !k.komplett) {
             befunde.push(Befund::UnterMindestorder(isin.clone()));
@@ -1001,6 +1247,7 @@ mod tests {
                         kurse: &kurse,
                         vorschlag: None,
                         halt: false,
+                        vor_valuta: &[],
                     };
                     let mut befunde = Vec::new();
                     let kandidaten = sammle_kandidaten(
@@ -1116,6 +1363,7 @@ mod grenzrahmen_tests {
             begruendung: BTreeMap::new(),
             limit_bp: [(isin, abstand)].into_iter().collect(),
             stopp_bp: std::collections::BTreeMap::new(),
+            park: None,
         };
         Ok(entscheide_mit_kaufbudget(
             &Eingabe {
@@ -1125,6 +1373,7 @@ mod grenzrahmen_tests {
                 kurse: &kurse,
                 vorschlag: Some(&vorschlag),
                 halt: false,
+                vor_valuta: &[],
             },
             &mut Kennungsvergabe::nach(0),
             Cent(100_000),
@@ -1169,6 +1418,105 @@ mod stopp_tests {
     use super::*;
     use depot_kern::{Datum, Kurs, Zeitpunkt};
 
+    /// Ein Wert mit belegtem Kurs, ein Topf mit 10 Stueck davon.
+    fn probe(cent: i64) -> Result<(Isin, Topf, Kurse), String> {
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 5).ok_or("Tag")?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let kurs = Kurs::neu(Cent(cent), "EUR", tag, zeit, Herkunft::Simulation)
+            .map_err(|e| format!("{e:?}"))?;
+        let kurse = Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| format!("{e:?}"))?;
+        let mut topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+        topf.setze_bestand(isin.clone(), 10);
+        Ok((isin, topf, kurse))
+    }
+
+    /// #311 H2a: Stopp bei Schluss 100,00 € verkauft mit Limit 97,00 €, nicht mehr 99,00 €.
+    #[test]
+    fn stopp_verkauf_mit_hoechstabstand() -> Result<(), String> {
+        let (isin, topf, kurse) = probe(10_000)?;
+        let stopps = [(isin, Cent(10_000))].into_iter().collect();
+        let g = Grenzen::standard();
+        let orders = stopp_auftraege(&g, &topf, &kurse, &stopps, &mut Kennungsvergabe::nach(0))
+            .ok_or("Aufträge")?;
+        assert_eq!(
+            orders.iter().map(|a| a.auftrag().limit).collect::<Vec<_>>(),
+            vec![Cent(9_700)]
+        );
+        // Der Folgeschluss 97,50 € (−2,5 %) liegt ueber dem Limit, die Order fuellt.
+        assert!(orders.iter().all(|a| a.auftrag().limit <= Cent(9_750)));
+        Ok(())
+    }
+
+    /// #311 H2a: Der Fristverkauf nutzt denselben Hoechstabstand, krumme Kurse runden auf.
+    #[test]
+    fn frist_verkauf_mit_hoechstabstand() -> Result<(), String> {
+        let (isin, topf, kurse) = probe(12_345)?;
+        let faellig = [isin].into_iter().collect();
+        let g = Grenzen::standard();
+        let orders = frist_auftraege(&g, &topf, &kurse, &faellig, &mut Kennungsvergabe::nach(0))
+            .ok_or("Aufträge")?;
+        // 123,45 × 0,97 = 119,7465 €, zur sicheren Seite aufgerundet 119,75 €.
+        assert_eq!(
+            orders
+                .iter()
+                .map(|a| (a.auftrag().limit, a.beleg().anlass))
+                .collect::<Vec<_>>(),
+            vec![(Cent(11_975), Anlass::FristOhneBegruendung)]
+        );
+        Ok(())
+    }
+
+    /// #311 H2a: Die Notbremse verkauft jedes Stueck mit Kurs × 0,97, aufgerundet.
+    #[test]
+    fn notbremse_mit_hoechstabstand() -> Result<(), String> {
+        let (_, topf, kurse) = probe(12_345)?;
+        let g = Grenzen::standard();
+        let orders = crate::notbremse_auftraege(&g, &topf, &kurse, &mut Kennungsvergabe::nach(0))
+            .ok_or("Aufträge")?;
+        assert_eq!(
+            orders.iter().map(|a| a.auftrag().limit).collect::<Vec<_>>(),
+            vec![Cent(11_975)]
+        );
+        Ok(())
+    }
+
+    /// Gegenprobe: Ein KI-Verkauf ohne eigenen Abstand bleibt bei der Vorgabe von 100 bp.
+    #[test]
+    fn ki_verkauf_bleibt_bei_vorgabe() -> Result<(), String> {
+        use depot_kern::{BeraterId, Instrument, InstrumentArt};
+        let (isin, topf, kurse) = probe(10_000)?;
+        let universum = Universum::neu(vec![Instrument {
+            isin: isin.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        }]);
+        let vorschlag = Vorschlag {
+            erwartung_bp: BTreeMap::new(),
+            berater: BeraterId::Dachs,
+            zielgewichte_bp: BTreeMap::new(),
+            begruendung: BTreeMap::new(),
+            limit_bp: BTreeMap::new(),
+            stopp_bp: BTreeMap::new(),
+            park: None,
+        };
+        let e = entscheide(
+            &Eingabe {
+                grenzen: &Grenzen::standard(),
+                universum: &universum,
+                topf: &topf,
+                kurse: &kurse,
+                vorschlag: Some(&vorschlag),
+                halt: false,
+                vor_valuta: &[],
+            },
+            &mut Kennungsvergabe::nach(0),
+        );
+        let limits: Vec<_> = e.verkaeufe.iter().map(|a| a.auftrag().limit).collect();
+        assert_eq!(limits, vec![Cent(9_900)]);
+        Ok(())
+    }
+
     #[test]
     fn stopp_gilt_am_schluss_und_fuer_kleine_positionen() -> Result<(), String> {
         let g = Grenzen::standard();
@@ -1198,6 +1546,440 @@ mod stopp_tests {
             stopp_auftraege(&g, topf, &leer, &stopps, &mut Kennungsvergabe::nach(0))
                 .is_some_and(|orders| orders.is_empty())
         );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod wiederholung_tests {
+    use super::*;
+    use depot_kern::{Datum, Instrument, InstrumentArt, Kurs, Zeitpunkt};
+
+    fn lauf(bargeld: i64, stueck: u64, halt: bool) -> Result<Entscheidung, String> {
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 17).ok_or("Tag")?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let kurs = Kurs::neu(Cent(10_150), "EUR", tag, zeit, Herkunft::Simulation)
+            .map_err(|e| format!("{e:?}"))?;
+        let kurse = Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| format!("{e:?}"))?;
+        let topf = Topf::neu(TopfId::A, Cent(bargeld)).map_err(|e| format!("{e:?}"))?;
+        let universum = Universum::neu(vec![Instrument {
+            isin: isin.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        }]);
+        let w = Wiederholung {
+            isin,
+            stueck,
+            limit_bp: 100,
+            stopp_bp: Some(500),
+        };
+        Ok(entscheide_wiederholung(
+            &Eingabe {
+                grenzen: &Grenzen::standard(),
+                universum: &universum,
+                topf: &topf,
+                kurse: &kurse,
+                vorschlag: None,
+                halt,
+                vor_valuta: &[],
+            },
+            &mut Kennungsvergabe::nach(0),
+            Cent(bargeld),
+            &w,
+        ))
+    }
+
+    /// Gleiche Stueckzahl, Limit 101,50 × 1,01 = 102,515 € abgerundet 102,51 €, Stopp uebernommen.
+    #[test]
+    fn wiederholung_mit_gleicher_stueckzahl_und_stopp() -> Result<(), String> {
+        let e = lauf(1_000_000, 30, false)?;
+        let kauf = e.kaeufe.first().ok_or("Kauf")?;
+        assert_eq!(e.kaeufe.len(), 1);
+        assert_eq!(kauf.auftrag().stueck, 30);
+        assert_eq!(kauf.auftrag().limit, Cent(10_251));
+        assert_eq!(kauf.stopp_bp(), Some(500));
+        assert_eq!(kauf.beleg().anlass, Anlass::Umschichtung);
+        Ok(())
+    }
+
+    /// 50 Stueck zu 102,51 € waeren 51 % von 10.000 €: auf 40 % des kleinsten moeglichen
+    /// Topfwerts nach Limitverlust und Gebuehr gekuerzt (38 Stueck), mit Befund.
+    #[test]
+    fn wiederholung_respektiert_anteil() -> Result<(), String> {
+        let e = lauf(1_000_000, 50, false)?;
+        let kauf = e.kaeufe.first().ok_or("Kauf")?;
+        assert_eq!(kauf.auftrag().stueck, 38);
+        assert!(
+            e.befunde
+                .iter()
+                .any(|b| matches!(b, Befund::KaufgrenzeGekuerzt(_)))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn wiederholung_entfaellt_bei_halt() -> Result<(), String> {
+        let e = lauf(1_000_000, 30, true)?;
+        assert!(e.kaeufe.is_empty());
+        assert!(e.befunde.contains(&Befund::Halt));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod vor_valuta_tests {
+    use super::*;
+    use depot_kern::{Datum, Instrument, InstrumentArt, Kurs, Zeitpunkt};
+
+    /// Topf mit 5.000 € Bargeld und `stueck` SAP zu 101,50 €; die KI will SAP ganz verkaufen.
+    fn lauf(stueck: u64, gesperrt: bool) -> Result<Entscheidung, String> {
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 17).ok_or("Tag")?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let kurs = Kurs::neu(Cent(10_150), "EUR", tag, zeit, Herkunft::Simulation)
+            .map_err(|e| format!("{e:?}"))?;
+        let kurse = Kurse::neu(zeit, vec![(isin.clone(), kurs)]).map_err(|e| format!("{e:?}"))?;
+        let mut topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+        topf.setze_bestand(isin.clone(), stueck);
+        let universum = Universum::neu(vec![Instrument {
+            isin: isin.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        }]);
+        let vorschlag = Vorschlag {
+            erwartung_bp: BTreeMap::new(),
+            limit_bp: BTreeMap::new(),
+            stopp_bp: BTreeMap::new(),
+            berater: BeraterId::Dachs,
+            zielgewichte_bp: BTreeMap::new(),
+            begruendung: BTreeMap::new(),
+            park: None,
+        };
+        let sperre = if gesperrt { vec![isin] } else { Vec::new() };
+        Ok(entscheide(
+            &Eingabe {
+                grenzen: &Grenzen::standard(),
+                universum: &universum,
+                topf: &topf,
+                kurse: &kurse,
+                vorschlag: Some(&vorschlag),
+                halt: false,
+                vor_valuta: &sperre,
+            },
+            &mut Kennungsvergabe::nach(0),
+        ))
+    }
+
+    #[test]
+    fn ki_verkauf_ohne_sperre() -> Result<(), String> {
+        let e = lauf(20, false)?;
+        assert_eq!(e.verkaeufe.len(), 1);
+        assert_eq!(
+            e.verkaeufe.first().map(|v| v.beleg().anlass),
+            Some(Anlass::Umschichtung)
+        );
+        Ok(())
+    }
+
+    /// #311 H1a Gegenprobe 2: Ein KI-Verkauf vor der Valuta wird mit `VorValuta` abgelehnt.
+    #[test]
+    fn ki_verkauf_vor_valuta_abgelehnt() -> Result<(), String> {
+        let e = lauf(20, true)?;
+        assert!(e.verkaeufe.is_empty(), "{e:?}");
+        assert!(e.befunde.iter().any(|b| matches!(b, Befund::VorValuta(_))));
+        Ok(())
+    }
+
+    /// Zwingende Verkäufe gehen trotz Sperre durch: 60 Stück sind über 55 % des Topfs.
+    #[test]
+    fn zwingender_abbau_trotz_sperre() -> Result<(), String> {
+        let e = lauf(60, true)?;
+        assert_eq!(
+            e.verkaeufe.first().map(|v| v.beleg().anlass),
+            Some(Anlass::Abbau),
+            "{e:?}"
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod park_tests {
+    use super::*;
+    use depot_kern::{Datum, Instrument, InstrumentArt, Kurs, Zeitpunkt};
+
+    const SAP: &str = "DE0007164600";
+    const ALV: &str = "DE0008404005";
+    const BASF: &str = "DE000BASF111";
+    const BAYER: &str = "DE000BAY0017";
+    const ETF: &str = "IE00B4L5Y983";
+
+    fn isin(s: &str) -> Result<Isin, String> {
+        Isin::neu(s).map_err(|e| format!("{e:?}"))
+    }
+
+    /// Alle Werte zu 100 €. `bestand` in Stück, `ziele` in bp, `park` als (Reserve, Tage).
+    fn lauf(
+        bargeld: i64,
+        bestand: &[(&str, u64)],
+        ziele: &[(&str, i64)],
+        park: Option<(&str, i64, i64)>,
+        kaufbudget: Option<i64>,
+    ) -> Result<Entscheidung, String> {
+        let tag = Datum::neu(2026, 11, 17).ok_or("Tag")?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let alle = [SAP, ALV, BASF, BAYER, ETF];
+        let mut kurse = Vec::new();
+        let mut instrumente = Vec::new();
+        for s in alle {
+            let kurs = Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Simulation)
+                .map_err(|e| format!("{e:?}"))?;
+            kurse.push((isin(s)?, kurs));
+            instrumente.push(Instrument {
+                isin: isin(s)?,
+                name: s.into(),
+                art: if s == ETF {
+                    InstrumentArt::EtfPhysischUcits
+                } else {
+                    InstrumentArt::Aktie
+                },
+            });
+        }
+        let kurse = Kurse::neu(zeit, kurse).map_err(|e| format!("{e:?}"))?;
+        let mut topf = Topf::neu(TopfId::A, Cent(bargeld)).map_err(|e| format!("{e:?}"))?;
+        for (s, stueck) in bestand {
+            topf.setze_bestand(isin(s)?, *stueck);
+        }
+        let mut zielgewichte_bp = BTreeMap::new();
+        let mut begruendung = BTreeMap::new();
+        for (s, bp) in ziele {
+            zielgewichte_bp.insert(isin(s)?, *bp);
+            begruendung.insert(isin(s)?, "beobachtet".to_owned());
+        }
+        let park = match park {
+            Some((s, reserve_bp, naechster_kauf_tage)) => Some(Parkwunsch {
+                isin: isin(s)?,
+                reserve_bp,
+                naechster_kauf_tage,
+                begruendung: "nichts in Sicht".into(),
+            }),
+            None => None,
+        };
+        let vorschlag = Vorschlag {
+            erwartung_bp: BTreeMap::new(),
+            limit_bp: BTreeMap::new(),
+            stopp_bp: BTreeMap::new(),
+            berater: BeraterId::Dachs,
+            zielgewichte_bp,
+            begruendung,
+            park,
+        };
+        let universum = Universum::neu(instrumente);
+        let e = Eingabe {
+            grenzen: &Grenzen::standard(),
+            universum: &universum,
+            topf: &topf,
+            kurse: &kurse,
+            vorschlag: Some(&vorschlag),
+            halt: false,
+            vor_valuta: &[],
+        };
+        let mut vergabe = Kennungsvergabe::nach(0);
+        Ok(match kaufbudget {
+            Some(frei) => entscheide_mit_kaufbudget(&e, &mut vergabe, Cent(frei)),
+            None => entscheide(&e, &mut vergabe),
+        })
+    }
+
+    fn kauf(e: &Entscheidung, s: &str) -> Result<Option<u64>, String> {
+        let i = isin(s)?;
+        Ok(e.kaeufe
+            .iter()
+            .find(|k| k.auftrag().isin == i)
+            .map(|k| k.auftrag().stueck))
+    }
+
+    /// Gegenprobe (a): Topf 10.000 €, Reserve 10 %, Bargeld 6.000 €: Parkziel 50 % auf 40 %
+    /// gekappt; der Kauf bleibt unter 40 % des kleinsten Topfwerts nach Limit und Gebühr.
+    #[test]
+    fn parkt_bargeld_ueber_reserve_bis_hoechstanteil() -> Result<(), String> {
+        let e = lauf(
+            600_000,
+            &[(SAP, 40)],
+            &[(SAP, 4_000)],
+            Some((ETF, 1_000, 5)),
+            None,
+        )?;
+        assert!(e.befunde.contains(&Befund::Parkwert {
+            isin: isin(ETF)?,
+            ziel_bp: 4_000
+        }));
+        let stueck = kauf(&e, ETF)?.ok_or("Parkkauf fehlt")?;
+        assert!((38..=40).contains(&stueck), "{stueck}");
+        Ok(())
+    }
+
+    /// Gegenprobe (b): Erwartet die KI in 2 Handelstagen einen Kauf, wird nicht geparkt.
+    #[test]
+    fn kein_parken_bei_baldigem_kauf() -> Result<(), String> {
+        let e = lauf(
+            600_000,
+            &[(SAP, 40)],
+            &[(SAP, 4_000)],
+            Some((ETF, 1_000, 2)),
+            None,
+        )?;
+        assert_eq!(kauf(&e, ETF)?, None);
+        assert!(e.befunde.contains(&Befund::Parkwert {
+            isin: isin(ETF)?,
+            ziel_bp: 0
+        }));
+        Ok(())
+    }
+
+    /// Unter 1.000 € Zukauf lohnt das Parken nicht.
+    #[test]
+    fn kein_parken_unter_mindestzukauf() -> Result<(), String> {
+        // 1.500 € Bargeld, Reserve 6 %: nur 900 € wären zu parken.
+        let bestand = [(SAP, 40), (ALV, 40), (BASF, 5)];
+        let ziele = [(SAP, 4_000), (ALV, 4_000), (BASF, 500)];
+        let e = lauf(150_000, &bestand, &ziele, Some((ETF, 600, 5)), None)?;
+        assert_eq!(kauf(&e, ETF)?, None);
+        Ok(())
+    }
+
+    /// Gegenprobe (c): Zielkauf 3.000 € bei 500 € Bargeld: zuerst wird der Parkwert verkauft,
+    /// der Kauf ist bis zum Erlös auf das Bargeld begrenzt.
+    #[test]
+    fn parkwert_wird_zuerst_verkauft() -> Result<(), String> {
+        let e = lauf(
+            50_000,
+            &[(SAP, 30), (ALV, 30), (ETF, 35)],
+            &[(SAP, 3_000), (ALV, 3_000), (BASF, 3_000)],
+            Some((ETF, 500, 5)),
+            Some(50_000),
+        )?;
+        let etf = isin(ETF)?;
+        let verkauf = e
+            .verkaeufe
+            .iter()
+            .find(|v| v.auftrag().isin == etf)
+            .ok_or("Parkverkauf fehlt")?;
+        assert_eq!(verkauf.auftrag().stueck, 30);
+        assert_eq!(verkauf.beleg().anlass, Anlass::Umschichtung);
+        assert!(kauf(&e, BASF)?.is_none_or(|s| s <= 4), "{e:?}");
+        Ok(())
+    }
+
+    /// Der Parkplatz zählt nicht gegen die Werteanzahl: Kauf neben vier Aktien, kein Abbau.
+    #[test]
+    fn parkwert_zaehlt_nicht_gegen_werteanzahl() -> Result<(), String> {
+        let vier = [(SAP, 15), (ALV, 15), (BASF, 15), (BAYER, 15)];
+        let ziele = [(SAP, 1_500), (ALV, 1_500), (BASF, 1_500), (BAYER, 1_500)];
+        let e = lauf(400_000, &vier, &ziele, Some((ETF, 0, 10)), None)?;
+        assert!(kauf(&e, ETF)?.is_some(), "{e:?}");
+        let gehalten = [(SAP, 15), (ALV, 15), (BASF, 15), (BAYER, 15), (ETF, 20)];
+        let mit_etf = [
+            (SAP, 1_500),
+            (ALV, 1_500),
+            (BASF, 1_500),
+            (BAYER, 1_500),
+            (ETF, 2_000),
+        ];
+        let e = lauf(200_000, &gehalten, &mit_etf, None, None)?;
+        assert!(
+            !e.befunde
+                .iter()
+                .any(|b| matches!(b, Befund::ZuVielePositionen { .. })),
+            "{e:?}"
+        );
+        assert!(e.verkaeufe.is_empty(), "{e:?}");
+        Ok(())
+    }
+
+    /// #311 H1b: Der Tausch rechnet den Erlös der Verkäufe zum Limit ein und bindet die Käufe
+    /// an sie; ohne Tausch bleibt das Kaufbudget beim freien Bargeld.
+    #[test]
+    fn tausch_rechnet_verkaeufe_ein_und_bindet_kaeufe() -> Result<(), String> {
+        let ohne = lauf(0, &[(SAP, 40)], &[(SAP, 0), (ALV, 3_000)], None, Some(0))?;
+        assert_eq!(kauf(&ohne, ALV)?, None);
+        let tausch = {
+            let tag = Datum::neu(2026, 11, 17).ok_or("Tag")?;
+            let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+            let kurs = |s: &str| -> Result<_, String> {
+                Ok((
+                    isin(s)?,
+                    Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Simulation)
+                        .map_err(|e| format!("{e:?}"))?,
+                ))
+            };
+            let kurse =
+                Kurse::neu(zeit, vec![kurs(SAP)?, kurs(ALV)?]).map_err(|e| format!("{e:?}"))?;
+            let mut topf = Topf::neu(TopfId::A, Cent::NULL).map_err(|e| format!("{e:?}"))?;
+            topf.setze_bestand(isin(SAP)?, 40);
+            let universum = Universum::neu(
+                [SAP, ALV]
+                    .into_iter()
+                    .map(|s| {
+                        Ok(Instrument {
+                            isin: isin(s)?,
+                            name: s.into(),
+                            art: InstrumentArt::Aktie,
+                        })
+                    })
+                    .collect::<Result<_, String>>()?,
+            );
+            let vorschlag = Vorschlag {
+                erwartung_bp: BTreeMap::new(),
+                limit_bp: BTreeMap::new(),
+                stopp_bp: BTreeMap::new(),
+                berater: BeraterId::Dachs,
+                zielgewichte_bp: [(isin(SAP)?, 0), (isin(ALV)?, 3_000)].into_iter().collect(),
+                begruendung: BTreeMap::new(),
+                park: None,
+            };
+            entscheide_tausch(
+                &Eingabe {
+                    grenzen: &Grenzen::standard(),
+                    universum: &universum,
+                    topf: &topf,
+                    kurse: &kurse,
+                    vorschlag: Some(&vorschlag),
+                    halt: false,
+                    vor_valuta: &[],
+                },
+                &mut Kennungsvergabe::nach(0),
+                Cent::NULL,
+                false,
+            )
+        };
+        let verkauf = tausch
+            .verkaeufe
+            .first()
+            .ok_or("Verkauf")?
+            .auftrag()
+            .kennung
+            .nr();
+        let k = tausch.kaeufe.first().ok_or("Tauschkauf")?;
+        assert_eq!(k.auftrag().isin, isin(ALV)?);
+        assert_eq!(k.nach(), &[verkauf]);
+        assert!(tausch.verkaeufe.iter().all(|v| v.nach().is_empty()));
+        Ok(())
+    }
+
+    /// Ein Parkwert, der kein ETF ist, wird nicht verwendet.
+    #[test]
+    fn aktie_ist_kein_parkwert() -> Result<(), String> {
+        let e = lauf(
+            600_000,
+            &[(SAP, 40)],
+            &[(SAP, 4_000)],
+            Some((ALV, 1_000, 5)),
+            None,
+        )?;
+        assert!(e.befunde.contains(&Befund::ParkwertUngueltig(isin(ALV)?)));
+        assert_eq!(kauf(&e, ALV)?, None);
         Ok(())
     }
 }
