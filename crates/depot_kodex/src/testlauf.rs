@@ -67,9 +67,9 @@ fn testbau(ausgabe: &str, wurzel: &Path, ziel: &Path) -> Result<Testbau, String>
                     return Err("Testpaket liegt außerhalb des Prüfstands".into());
                 }
                 programme.insert(
-                    binary.clone(),
+                    echt.clone(),
                     Testprogramm {
-                        binary,
+                        binary: echt,
                         paket: paket.to_owned(),
                         name,
                     },
@@ -319,6 +319,59 @@ pub(super) fn parallel(wurzel: &Path) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn artefakt(wurzel: &Path, binary: &Path) -> String {
+        let zitiere = |p: &Path| json::zitiere(&p.to_string_lossy());
+        format!(
+            r#"{{"reason":"compiler-artifact","profile":{{"test":true}},"executable":{},"manifest_path":{},"target":{{"src_path":{}}}}}"#,
+            zitiere(binary),
+            zitiere(&wurzel.join("Cargo.toml")),
+            zitiere(&wurzel.join("src/main.rs"))
+        )
+    }
+
+    #[test]
+    fn testbau_lehnt_relative_und_fremde_programmpfade_ab() -> Result<(), String> {
+        let wurzel = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let binary = std::env::current_exe().map_err(|e| e.to_string())?;
+        let ziel = binary.with_extension("fremder-bauordner");
+        assert_eq!(
+            testbau(&artefakt(wurzel, Path::new("relativ")), wurzel, &ziel)
+                .err()
+                .as_deref(),
+            Some("Cargo lieferte einen relativen Testpfad")
+        );
+        assert_eq!(
+            testbau(&artefakt(wurzel, &binary), wurzel, &ziel)
+                .err()
+                .as_deref(),
+            Some("Testprogramm liegt außerhalb des Prüf-Bauordners")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn testbau_verlangt_erfolgreichen_abschluss() -> Result<(), String> {
+        let wurzel = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let binary = std::env::current_exe()
+            .and_then(|pfad| pfad.canonicalize())
+            .map_err(|e| e.to_string())?;
+        let ziel = binary.parent().ok_or("Bauordner fehlt")?;
+        let artefakt = artefakt(wurzel, &binary);
+        for ende in ["", r#"{"reason":"build-finished","success":false}"#] {
+            assert_eq!(
+                testbau(&format!("{artefakt}\n{ende}"), wurzel, ziel)
+                    .err()
+                    .as_deref(),
+                Some("Kein vollständiger Cargo-Testbau")
+            );
+        }
+        let erfolgreich = r#"{"reason":"build-finished","success":true}"#;
+        let bau = testbau(&format!("{artefakt}\n{erfolgreich}"), wurzel, ziel)?;
+        assert_eq!(bau.programme.len(), 1);
+        assert_eq!(bau.programme.first().map(|p| &p.binary), Some(&binary));
+        Ok(())
+    }
 
     #[test]
     fn testanzahl_zaehlt_ignorierte_und_fehler() {

@@ -1,0 +1,8 @@
+klasse: KodexAenderung
+zweck: Identische bestandene Kodex-Prüfungen auf main wiederverwenden
+pfade:
+.github/scripts/kodex_nachweis.py
+.github/scripts/test_kodex_nachweis.py
+.github/workflows/kodex.yml
+kodex/festschreibung.txt
+kodex/freigaben/p47-kodex-nachweis.txt
