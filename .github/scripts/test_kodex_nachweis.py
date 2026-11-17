@@ -1,9 +1,10 @@
 """Gegenproben für die Wiederverwendung identischer PR-Prüfungen."""
 
 import unittest
+from os import environ
 from unittest.mock import patch
 
-from kodex_nachweis import WORKFLOW, finde_lauf, name, pr_basis
+from kodex_nachweis import WORKFLOW, finde_lauf, hole_export, name, pr_basis
 
 BAUM = "1" * 40
 BASIS = "2" * 40
@@ -102,6 +103,22 @@ class Nachweis(unittest.TestCase):
                 pr_basis(ANDERER_BAUM, KOPF)
             with self.assertRaises(ValueError):
                 pr_basis(BAUM, ANDERER_BAUM)
+
+    def test_geaenderte_cachegrundlage_startet_regulaeren_lauf(self):
+        event = {
+            "ref": "refs/heads/main", "after": KOPF, "before": BASIS,
+            "repository": {"id": 1},
+        }
+        env = {"GITHUB_REPOSITORY": REPO, "GITHUB_SHA": KOPF}
+        with (
+            patch.dict(environ, env),
+            patch("kodex_nachweis.ereignis_daten", return_value=event),
+            patch("kodex_nachweis.befehl", side_effect=[KOPF, "Cargo.lock"]),
+            patch("kodex_nachweis.finde_lauf") as suche,
+            patch("builtins.print"),
+        ):
+            hole_export()
+        suche.assert_not_called()
 
     def test_abgelaufen(self):
         self.beleg["expired"] = True
