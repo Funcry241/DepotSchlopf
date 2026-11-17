@@ -1,10 +1,7 @@
 klasse: Funktion
-zweck: Abstimmung nur bei offenem Punkt (#312-1, P35)
+zweck: Blockierte Update-Suche und geplante Aufträge auf Live und in der Einrichtung erklären
 pfade:
-CHANGELOG.md
-crates/depot_berater/tests/berater.rs
-crates/depot_sim/src/abstimmung.rs
-crates/depot_sim/src/lauf.rs
-crates/depot_sim/src/offener_punkt.rs
-crates/depot_sim/tests/invarianten.rs
-crates/depot_sim/tests/papiertag.rs
+README.md
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/update.rs

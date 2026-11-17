@@ -120,6 +120,10 @@ impl Umwelt for Leer {
 }
 
 fn get(d: &Dienst, pfad: &str) -> Result<String, String> {
+    Ok(get_um(d, pfad, mittag()?))
+}
+
+fn get_um(d: &Dienst, pfad: &str, jetzt: Zeitpunkt) -> String {
     let (p, abfrage) = pfad.split_once('?').unwrap_or((pfad, ""));
     let a = depot_dienst::http::Anfrage {
         methode: "GET".into(),
@@ -128,7 +132,7 @@ fn get(d: &Dienst, pfad: &str) -> Result<String, String> {
         kopf: vec![("Host".into(), HOST.into())],
         rumpf: Vec::new(),
     };
-    Ok(String::from_utf8_lossy(&behandle(d, &Leer, &a, mittag()?)).into_owned())
+    String::from_utf8_lossy(&behandle(d, &Leer, &a, jetzt)).into_owned()
 }
 
 fn post_auftrag(d: &Dienst, art: &str) -> Result<String, String> {
@@ -737,6 +741,138 @@ fn programmdatei_aus_der_bauausgabe() {
         waechter::programm_aus_bau(&format!("{lib}\n{anderes}")),
         None
     );
+}
+
+#[test]
+fn updatesuche_wartet_regulaer_hinter_einem_auftrag() -> Result<(), String> {
+    let d = dienst(ordner()?);
+    let t = mittag()?;
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(t), "Terminabruf startet")?;
+    d.einreihen(Art::UpdatePruefen, Anlass::Hand)?;
+    let html = get(&d, "/teil/update")?;
+    assert!(html.contains("Nach Update suchen · wartet"));
+    assert!(!html.contains("Neustart noch nicht bestätigt"));
+    d.verfolge(nr, kind, || mittag().ok());
+    Ok(())
+}
+
+#[test]
+fn update_neustart_und_probe_zeigen_neutrales_warten() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let mut d = dienst(wurzel.clone());
+    let vorher = "a".repeat(40);
+    let neu = "b".repeat(40);
+    some(Arc::get_mut(&mut d), "Alter Dienst")?.version = Some(vorher.clone());
+    offen_schreiben(&wurzel, &vorher, &neu)?;
+    d.einreihen(Art::UpdatePruefen, Anlass::Hand)?;
+    assert!(d.schritt(mittag()?).is_none());
+    assert!(get(&d, "/teil/update")?.contains("Laufender Programmstand: aaaaaaaaaa"));
+    for pfad in ["/", "/teil/live", "/einrichtung", "/teil/update"] {
+        assert!(
+            get(&d, pfad)?.contains("Neustart noch nicht bestätigt"),
+            "{pfad}"
+        );
+    }
+    d.sperre().neustart = true;
+    let html = get(&d, "/teil/live")?;
+    assert!(html.contains("Der Dienst startet neu."));
+    assert!(html.contains("Du musst nichts tun."));
+
+    d.sperre().neustart = false;
+    some(Arc::get_mut(&mut d), "Neuer Dienst")?.version = Some(neu);
+    assert!(get(&d, "/teil/update")?.contains("Die neue Version läuft zur Probe."));
+    Ok(())
+}
+
+#[test]
+fn update_frist_zeigt_betroffene_commits_und_abhilfe() -> Result<(), String> {
+    use std::time::{Duration, SystemTime};
+
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone());
+    offen_schreiben(&wurzel, &"a".repeat(40), &"b".repeat(40))?;
+    let datei = fs::OpenOptions::new()
+        .write(true)
+        .open(rueckfall::offen_pfad(&wurzel))
+        .map_err(|e| e.to_string())?;
+    let alt = some(
+        SystemTime::now().checked_sub(Duration::from_secs(240)),
+        "Abgelaufene Frist",
+    )?;
+    datei.set_modified(alt).map_err(|e| e.to_string())?;
+    let html = get(&d, "/teil/update")?;
+    assert!(html.contains("Der Start der neuen Version konnte nicht bestätigt werden."));
+    assert!(html.contains("Offenes Update: aaaaaaa → bbbbbbb."));
+    assert!(html.contains("starte DepotSchlopf.cmd einmal neu"));
+    Ok(())
+}
+
+#[test]
+fn update_sperre_zeigt_faelligen_morgenlauf_und_holt_ihn_einmal_nach() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone());
+    let tag = some(Datum::neu(2026, 11, 5), "Handelstag")?;
+    let vorher = some(Zeitpunkt::frankfurt(tag, 7, 29, 0), "Vor dem Morgenlauf")?;
+    let faellig = some(Zeitpunkt::frankfurt(tag, 7, 30, 0), "Morgenlauf")?;
+    {
+        let mut z = d.sperre();
+        z.zeitplan.an = true;
+        z.zeitplan.kurse = (7, 30);
+        z.zeitplan.termine = (7, 20);
+        z.erledigt.termine = Some(tag);
+        z.boersen = vec![depot_kern::Boerse::Xetra];
+    }
+    offen_schreiben(&wurzel, &"a".repeat(40), &"b".repeat(40))?;
+    assert!(d.schritt(faellig).is_none());
+    assert!(d.sperre().warteschlange.is_empty());
+    assert!(!get_um(&d, "/teil/live", vorher).contains("Morgenlauf fällig"));
+    for pfad in ["/", "/teil/live", "/einrichtung", "/teil/update"] {
+        assert!(
+            get_um(&d, pfad, faellig).contains("Morgenlauf fällig seit 07:30"),
+            "{pfad}"
+        );
+    }
+    fs::remove_file(rueckfall::offen_pfad(&wurzel)).map_err(|e| e.to_string())?;
+    assert_eq!(
+        lauf_ab(&d, faellig)?,
+        Art::KurseVon(depot_kern::Boerse::Xetra)
+    );
+    assert!(!get_um(&d, "/teil/live", faellig).contains("Morgenlauf fällig"));
+    let z = d.sperre();
+    assert_eq!(
+        z.verlauf
+            .iter()
+            .filter(|a| matches!(a.art, Art::KurseVon(_)))
+            .count(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn fremde_update_markierung_verlangt_eine_pruefung_von_hand() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone());
+    fs::write(rueckfall::offen_pfad(&wurzel), "unlesbarer Stand").map_err(|e| e.to_string())?;
+    let html = get(&d, "/teil/live")?;
+    assert!(html.contains("Prüfe die Update-Markierung von Hand."));
+    assert!(!html.contains("starte DepotSchlopf.cmd einmal neu"));
+    Ok(())
+}
+
+#[test]
+fn abgelehnter_stand_ist_sichtbar_und_blockiert_keine_suche() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let neu = "b".repeat(40);
+    fs::write(rueckfall::abgelehnt_pfad(&wurzel), format!("{neu}\n")).map_err(|e| e.to_string())?;
+    let mut d = dienst(wurzel);
+    some(Arc::get_mut(&mut d), "Alter Dienst")?.version = Some("a".repeat(40));
+    let html = get(&d, "/einrichtung")?;
+    assert!(html.contains("Zurückgesetzt und nicht mehr angeboten: bbbbbbbbbb"));
+    assert!(!html.contains("Update bestätigt"));
+    assert!(!html.contains("Neustart noch nicht bestätigt"));
+    suche_update(&d, mittag()?)
 }
 
 #[test]

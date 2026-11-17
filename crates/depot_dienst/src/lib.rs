@@ -232,11 +232,43 @@ pub fn starte_neuroschlopf(d: &std::sync::Arc<Dienst>) {
     neuroschlopf::arbeite(d);
 }
 
+fn update_sperre(d: &Dienst, z: &werkbank::Zustand) -> Option<seiten::UpdateSperre> {
+    use seiten::UpdateSperre;
+
+    if !d.update_offen() {
+        return None;
+    }
+    let offen = match rueckfall::offen(&d.wurzel) {
+        Ok(Some(offen)) => offen,
+        Ok(None) if !d.update_offen() => return None,
+        Ok(None) | Err(_) => return Some(UpdateSperre::NichtPruefbar),
+    };
+    let frist_abgelaufen = rueckfall::offen_pfad(&d.wurzel)
+        .metadata()
+        .and_then(|datei| datei.modified())
+        .ok()
+        .and_then(|zeit| zeit.elapsed().ok())
+        .is_some_and(|dauer| dauer.as_secs() >= 180);
+    if frist_abgelaufen {
+        return Some(UpdateSperre::BestaetigungFehlgeschlagen(offen));
+    }
+    if z.neustart || z.laufend.as_ref().is_some_and(|a| a.art == Art::Update) {
+        Some(UpdateSperre::Neustart)
+    } else if z.update_meldung.as_ref().is_some_and(|(fehler, _)| *fehler) {
+        Some(UpdateSperre::BestaetigungFehlgeschlagen(offen))
+    } else if d.version.as_deref() == Some(offen.neu.as_str()) {
+        Some(UpdateSperre::Probe)
+    } else {
+        Some(UpdateSperre::Unbestaetigt)
+    }
+}
+
 fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
     let ki =
         zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), heute(jetzt));
     let z = d.sperre();
-    let mut html = seiten::live_mit_ki(&d.token, &d.start, &z, jetzt, &ki);
+    let sperre = update_sperre(d, &z);
+    let mut html = seiten::live_mit_ki(&d.token, &d.start, &z, jetzt, &ki, sperre.as_ref());
     if sicherung::ziel(&d.wurzel).is_empty() {
         html.push_str("<p class=\"leise\">Sicherung: aus</p>");
     } else {
@@ -268,7 +300,14 @@ fn sicherungsinfo(d: &Dienst, jetzt: Zeitpunkt) -> String {
 
 fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {
     let kurssperre = seiten::kurssperre_status(&d.wurzel.join("daten"), tag);
-    seiten::betriebsleiste_mit_kurssperre(&d.start, &d.sperre(), tag, kurssperre.as_deref())
+    let z = d.sperre();
+    seiten::betriebsleiste_mit_kurssperre(
+        &d.start,
+        &z,
+        tag,
+        kurssperre.as_deref(),
+        update_sperre(d, &z).as_ref(),
+    )
 }
 
 fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
@@ -349,7 +388,21 @@ fn einrichtungsseite(
         },
         ..gespeichert
     };
-    let inhalt = seiten::einrichtung(&d.token, &d.start, &zustand, tag, &gespeichert, &zusatz);
+    let sperre = update_sperre(d, &zustand);
+    let update = seiten::UpdateAnzeige {
+        sperre: sperre.as_ref(),
+        version: d.version.as_deref(),
+        jetzt: Some(jetzt),
+    };
+    let inhalt = seiten::einrichtung_mit_update(
+        &d.token,
+        &d.start,
+        &zustand,
+        tag,
+        &gespeichert,
+        &zusatz,
+        update,
+    );
     drop(zustand);
     let seite = seiten::rahmen(
         "/einrichtung",
@@ -435,11 +488,20 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             .as_bytes(),
         ),
         "/teil/kopf" => antwort(200, HTML, betriebsleiste(d, tag).as_bytes()),
-        "/teil/update" => antwort(
-            200,
-            HTML,
-            seiten::update_aktionen(&d.token, &d.start, &d.sperre()).as_bytes(),
-        ),
+        "/teil/update" => {
+            let z = d.sperre();
+            let sperre = update_sperre(d, &z);
+            let update = seiten::UpdateAnzeige {
+                sperre: sperre.as_ref(),
+                version: d.version.as_deref(),
+                jetzt: Some(jetzt),
+            };
+            antwort(
+                200,
+                HTML,
+                seiten::update_aktionen(&d.token, &d.start, &z, update).as_bytes(),
+            )
+        }
         "/bestaetigen" => auftrag_bestaetigen(d, a, jetzt),
         "/protokoll" | "/protokoll.txt" => protokoll_lesen(d, a, tag),
         "/einrichtung" => einrichtungsseite(d, u, a, jetzt, tag),
@@ -491,9 +553,7 @@ fn gespraechsrohtext(d: &Dienst, a: &Anfrage) -> Vec<u8> {
 
 /// Der bereits vor diesen Korrekturen vorhandene Statuspfad bleibt der Herzschlag.
 fn verbindungsstatus(d: &Dienst, tag: Option<depot_kern::Datum>) -> Vec<u8> {
-    let bereit = !rueckfall::offen_pfad(&d.wurzel)
-        .try_exists()
-        .unwrap_or(true);
+    let bereit = !d.update_offen();
     let zustand = d.sperre();
     let update_laueft = zustand.auftrag_stand(Art::Update).is_some() || zustand.neustart;
     let text = format!(
