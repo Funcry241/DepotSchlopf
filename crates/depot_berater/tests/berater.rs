@@ -1991,3 +1991,30 @@ fn alter_vorschlag_lesbar() -> Result<(), String> {
     assert!(some(a.vorschlag, "alter Vorschlag")?.limit_bp.is_empty());
     Ok(())
 }
+
+/// P43 (#311 H4): Die Zweitmeinung darf einzelne Werte ablehnen. Jede unklare Liste und jedes Ja
+/// mit Liste gilt als Veto gegen alles, nie als Formfehler (der gäbe den Ersatzkauf frei).
+#[test]
+fn zweitmeinung_liest_abgelehnte_werte() -> Result<(), String> {
+    use depot_berater::frage::lies_urteil;
+    let isin = |s: &str| Isin::neu(s).map_err(|e| format!("{e:?}"));
+    let teil = lies_urteil(
+        r#"{"zustimmung": false, "abgelehnt": ["DE000BASF111"], "begruendung": "zu teuer"}"#,
+    )?;
+    assert!(!teil.zustimmung);
+    assert_eq!(teil.abgelehnt, Some(vec![isin("DE000BASF111")?]));
+    let ganz = lies_urteil(r#"{"zustimmung": false, "begruendung": "nein"}"#)?;
+    assert_eq!(ganz.abgelehnt, None);
+    let null = lies_urteil(r#"{"zustimmung": false, "abgelehnt": null, "begruendung": "nein"}"#)?;
+    assert_eq!(null.abgelehnt, None);
+    let unklar =
+        lies_urteil(r#"{"zustimmung": false, "abgelehnt": ["BASF"], "begruendung": "nein"}"#)?;
+    assert_eq!(unklar.abgelehnt, Some(Vec::new()));
+    let widerspruch =
+        lies_urteil(r#"{"zustimmung": true, "abgelehnt": ["DE000BASF111"], "begruendung": "ja"}"#)?;
+    assert!(!widerspruch.zustimmung);
+    assert_eq!(widerspruch.abgelehnt, Some(Vec::new()));
+    let ja_leer = lies_urteil(r#"{"zustimmung": true, "abgelehnt": [], "begruendung": "ja"}"#)?;
+    assert!(ja_leer.zustimmung);
+    Ok(())
+}

@@ -509,7 +509,11 @@ pub fn urteil_frage(
 Aufgabe: Prüfe den Vorschlag als Zweitmeinung. Prüfe bei Käufen besonders den kurzfristigen \
 Kurstreiber, den Vorteil nach Gebühren, die Positionsgröße und den Stoppabstand. Stimme nur zu, wenn der Vorschlag \
 aus der beobachteten Lage begründet ist. Antworte mit:\n\
-{{\"zustimmung\": true oder false, \"begruendung\": \"...\"}}",
+{{\"zustimmung\": true oder false, \"abgelehnt\": [\"ISIN\"], \"begruendung\": \"...\"}}\n\
+Lehnst du nur einzelne Werte ab, setze zustimmung auf false und nenne genau diese ISINs aus dem \
+Vorschlag in abgelehnt; die übrigen Werte gelten dann als geprüft und zugestimmt, abgelehnte \
+gehaltene Werte bleiben unverändert. Ohne abgelehnt gilt ein false für den ganzen Vorschlag. \
+Bei Zustimmung lass abgelehnt weg.",
         lage_text(lage, universum, bilanz),
         name(v.berater)
     )
@@ -737,11 +741,34 @@ pub fn lies_urteil(text: &str) -> Result<Urteil, String> {
         .feld("zustimmung")
         .and_then(Json::wahr)
         .ok_or("Feld zustimmung fehlt oder ist nicht true/false")?;
+    let feld = w.feld("abgelehnt").filter(|f| !matches!(f, Json::Null));
+    // Ein Ja mit Ablehnungsliste widerspricht sich und gilt als Veto gegen alles (#311 H4).
+    let leer = feld.is_some_and(|f| f.liste().is_some_and(<[Json]>::is_empty));
+    let (zustimmung, abgelehnt) = if zustimmung && feld.is_some() && !leer {
+        (false, Some(Vec::new()))
+    } else {
+        (zustimmung, feld.map(abgelehnte_werte))
+    };
     Ok(Urteil {
         verwertbar: true,
         zustimmung,
         begruendung: text_feld(&w, "begruendung")?,
+        abgelehnt,
     })
+}
+
+/// Das Feld `abgelehnt` einer Zweitmeinung. Ist es keine Liste von ISINs, wird es leer: Ein Nein
+/// gilt dann für den ganzen Vorschlag. Das ist kein Formfehler, sonst zählte das Urteil als
+/// technischer Ausfall und gäbe den Ersatzkauf frei.
+fn abgelehnte_werte(feld: &Json) -> Vec<depot_kern::Isin> {
+    feld.liste()
+        .and_then(|werte| {
+            werte
+                .iter()
+                .map(|w| w.text().and_then(|t| depot_kern::Isin::neu(t).ok()))
+                .collect::<Option<Vec<_>>>()
+        })
+        .unwrap_or_default()
 }
 
 fn abstimmungs_ziele(vorschlag: Option<&Vorschlag>) -> String {

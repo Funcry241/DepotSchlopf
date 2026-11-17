@@ -71,6 +71,9 @@ pub struct Urteil {
     pub verwertbar: bool,
     pub zustimmung: bool,
     pub begruendung: String,
+    /// Bei einem Nein: die Werte, die die Zweitmeinung ablehnt (#311 H4). `None` oder eine
+    /// ungültige Liste heißt Veto gegen den ganzen Vorschlag (siehe `teilveto`).
+    pub abgelehnt: Option<Vec<depot_kern::Isin>>,
 }
 
 /// Ein Berater. Jede Frage kostet eine `AufrufErlaubnis`; die gibt es nur, wenn das Journal die
@@ -204,6 +207,7 @@ impl Berater for Stumm {
             verwertbar: false,
             zustimmung: false,
             begruendung: "nicht angebunden".into(),
+            abgelehnt: None,
         }
     }
 }
@@ -253,6 +257,7 @@ impl Berater for Drehbuch {
                 verwertbar: false,
                 zustimmung: false,
                 begruendung: "keine Antwort".into(),
+                abgelehnt: None,
             })
     }
 }
@@ -313,6 +318,7 @@ fn urteil(zustimmung: bool, begruendung: &str) -> Urteil {
         verwertbar: true,
         zustimmung,
         begruendung: begruendung.into(),
+        abgelehnt: None,
     }
 }
 

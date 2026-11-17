@@ -40,13 +40,26 @@ pub fn vetos(begruendungen: &[(Datum, String, String)]) -> Vec<Veto> {
             BeraterId::Maus => BeraterId::Dachs,
         });
         let mut ziele = BTreeMap::<(Datum, Isin), i64>::new();
-        let mut veto_tage = Vec::new();
+        // Je Veto-Tag die abgelehnten Werte; `None` heißt der ganze Vorschlag.
+        let mut veto_tage: Vec<(Datum, Option<Vec<Isin>>)> = Vec::new();
         for (tag, wer, text) in begruendungen {
             let Some(rest) = text.strip_prefix(&praefix) else {
                 continue;
             };
-            if wer == zweit && rest.starts_with("Veto: ") {
-                veto_tage.push(*tag);
+            if wer == zweit
+                && let Some(veto) = rest.strip_prefix("Veto: ")
+            {
+                // Teilveto (#311 H4): „Veto: nur ISIN, ISIN: Begründung“.
+                let nur = veto
+                    .strip_prefix("nur ")
+                    .and_then(|r| r.split_once(": "))
+                    .map(|(liste, _)| {
+                        liste
+                            .split(", ")
+                            .filter_map(|i| Isin::neu(i).ok())
+                            .collect()
+                    });
+                veto_tage.push((*tag, nur));
             } else if wer == erst
                 && let Some((kopf, _)) = rest.split_once(" bp: ")
                 && let Some((isin, bp)) = kopf.split_once(' ')
@@ -56,9 +69,9 @@ pub fn vetos(begruendungen: &[(Datum, String, String)]) -> Vec<Veto> {
             }
         }
         veto_tage.dedup();
-        for tag in veto_tage {
+        for (tag, nur) in veto_tage {
             for ((_, isin), ziel_bp) in ziele.iter().filter(|((t, _), _)| *t == tag) {
-                if *ziel_bp > 0 {
+                if *ziel_bp > 0 && nur.as_ref().is_none_or(|n: &Vec<Isin>| n.contains(isin)) {
                     aus.push(Veto {
                         tag,
                         topf,
@@ -180,6 +193,31 @@ mod tests {
                 topf: TopfId::A,
                 isin: Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?,
                 ziel_bp: 2000,
+            }]
+        );
+        Ok(())
+    }
+
+    /// Ein Teilveto (#311 H4) wirft nur die genannten Werte in den Schatten, die übrigen
+    /// wurden ausgeführt.
+    #[test]
+    fn teilveto_nur_fuer_genannte_werte() -> Result<(), String> {
+        let z = |wer: &str, text: &str| -> Result<_, String> {
+            Ok((tag(16)?, wer.to_string(), text.to_string()))
+        };
+        let begruendungen = vec![
+            z("Dachs", "Topf A: DE0007164600 2000 bp: Auftragslage")?,
+            z("Dachs", "Topf A: DE0008404005 1500 bp: Zahlen")?,
+            z("Maus", "Topf A: Veto: nur DE0008404005: zu teuer")?,
+        ];
+        let v = vetos(&begruendungen);
+        assert_eq!(
+            v,
+            vec![Veto {
+                tag: tag(16)?,
+                topf: TopfId::A,
+                isin: Isin::neu("DE0008404005").map_err(|e| format!("{e:?}"))?,
+                ziel_bp: 1500,
             }]
         );
         Ok(())

@@ -1184,6 +1184,7 @@ impl<N: Netz> Berater for KiBerater<N> {
                     sauber(&self.bereinigt(&grund)),
                     e.kosten
                 ),
+                abgelehnt: None,
             },
         }
     }

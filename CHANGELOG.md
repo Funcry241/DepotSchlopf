@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Die Zweitmeinung urteilt je Wert: Mit `"zustimmung": false` und `"abgelehnt": ["ISIN", …]` fallen nur diese Werte aus dem Vorschlag, der Rest wird ausgeführt; abgelehnte gehaltene Werte bleiben unverändert. Fehlt die Liste, ist sie unklar oder nennt sie einen fremden Wert, gilt das Veto wie bisher für den ganzen Vorschlag; ein Ja mit Liste ebenso. Das Journal schreibt „Veto: nur ISIN, …“, der Vetoschatten rechnet nur diese Werte. Ein Teilveto startet die Abstimmung (#311 H4). Ein halber Kauf trotz Veto ist nicht eingebaut. Rückweg ohne Sicherung: Ein älterer Stand liest die Zeile als Veto.
+
 - Die Abstimmung zwischen Dachs und Maus entfällt, wenn nichts offen ist: Beide Zweitmeinungen stimmen zu oder sagen Bargeld, und kein Ersatzkauf wartet. Das Journal vermerkt „Abstimmung entfällt: kein offener Punkt“. Spart an solchen Tagen bis zu vier bezahlte Aufrufe (#312-1). Nach einem Veto oder Teilveto läuft die Abstimmung wie bisher. Rückweg ohne Sicherung.
 
 - Ein Parkwert-ETF zählt nicht mehr zum Mindesteinsatz von 30 %. Die Regel soll zu aktiven Käufen führen und lässt sich nicht durch Parken erfüllen (#311 H3).

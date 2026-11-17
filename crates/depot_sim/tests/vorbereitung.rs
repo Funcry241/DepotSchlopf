@@ -74,6 +74,7 @@ impl Berater for Modell {
             verwertbar: false,
             zustimmung: false,
             begruendung: "Keine Handelsprüfung in der Vorbereitung".into(),
+            abgelehnt: None,
         }
     }
 }
@@ -394,6 +395,7 @@ impl Berater for VorschauModell {
             verwertbar: false,
             zustimmung: false,
             begruendung: "Unerwartete Zweitmeinung".into(),
+            abgelehnt: None,
         }
     }
 

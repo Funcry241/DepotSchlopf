@@ -42,6 +42,7 @@ use depot_regelwerk::{
 use crate::abdruck;
 use crate::papier::{Broker, Sendeantwort};
 use crate::szenario::{Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Szenario, Tag};
+use crate::teilveto::Urteilsfolge;
 
 /// Wer im Journal begruendet, ausser Dachs und Maus.
 const DATEN: &str = "Daten";
@@ -1287,6 +1288,24 @@ fn frage_topf(
 }
 
 /// Der zweite Berater prueft den Vorschlag, dann entscheidet das Regelwerk.
+/// Journalwort eines Urteils. Ein Teilveto ist lesbar wie ein Veto und nennt die abgelehnten
+/// Werte; `vetoschatten` rechnet nur diese (#311 H4).
+fn urteil_wort(folge: Option<&Urteilsfolge>) -> String {
+    match folge {
+        Some(Urteilsfolge::Zustimmung) => ZUSTIMMUNG.to_string(),
+        Some(Urteilsfolge::Veto) => VETO.to_string(),
+        Some(Urteilsfolge::Teilveto { abgelehnt, .. }) => format!(
+            "{VETO}: nur {}",
+            abgelehnt
+                .iter()
+                .map(Isin::als_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        None => URTEIL_VERWORFEN.to_string(),
+    }
+}
+
 fn zweite_meinung(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -1355,11 +1374,10 @@ fn zweite_meinung(
     {
         let urteil = pruefer.pruefen_mit_bilanz(e, &lage, &v, &prognosebilanz(j.stand()));
         belege_ki(j, pruefer).map_err(journal)?;
-        let wort = match (urteil.verwertbar, urteil.zustimmung) {
-            (true, true) => ZUSTIMMUNG,
-            (true, false) => VETO,
-            (false, _) => URTEIL_VERWORFEN,
-        };
+        let folge = urteil.verwertbar.then(|| {
+            crate::teilveto::urteilsfolge(&v, urteil.zustimmung, urteil.abgelehnt.as_deref())
+        });
+        let wort = urteil_wort(folge.as_ref());
         begruende(
             j,
             tag,
@@ -1370,9 +1388,14 @@ fn zweite_meinung(
         ersatzkauf = zweitmeinung_ausgefallen
             && pruefer.zweitmeinung_technisch_ausgefallen()
             && !pruefer.kostensperre();
-        if (urteil.verwertbar && urteil.zustimmung) || ersatzkauf {
-            vorschlag = Some(v);
-        }
+        vorschlag = match folge {
+            Some(Urteilsfolge::Zustimmung) => Some(v),
+            Some(Urteilsfolge::Teilveto {
+                vorschlag: rest, ..
+            }) => Some(*rest),
+            _ if ersatzkauf => Some(v),
+            _ => None,
+        };
     }
     Ok(TopfAntwort {
         topf,
