@@ -1220,7 +1220,7 @@ fn verkaufserloes_deckt_kauf_vor_der_abrechnung() -> Result<(), String> {
 }
 
 #[test]
-fn papiertag_gleicht_abrechnung_ab_und_kauft_mit_erloes_vor_valuta() -> Result<(), String> {
+fn papiertag_gleicht_abrechnung_ab_und_tauscht_am_selben_schluss() -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let mut a = vorbedingung(Topf::neu(TopfId::A, Cent::NULL), "Topf A")?;
@@ -1273,11 +1273,18 @@ fn papiertag_gleicht_abrechnung_ab_und_kauft_mit_erloes_vor_valuta() -> Result<(
             t != 5,
             "Verkaufserloes am Tag {t}"
         );
-        // Der am Freitag gefüllte Erlös kauft schon vor seiner Valuta (Dienstag); die
-        // Füllung des Kaufs meldet der Montag. Vor #311 H1a kam der Kauf erst am Mittwoch.
-        assert_eq!(a.stueck(&allianz) > 0, t >= 9, "Kauf am Tag {t}");
-        if t == 9 {
-            // Bis zur Valuta am Dienstag kein freiwilliger Verkauf, ab Dienstag wieder.
+        // Tausch am selben Schluss (#311 H1b): Der Kauf hängt am SAP-Verkauf und füllt mit ihm
+        // am Freitag. Vor #311 H1a kam der Kauf erst am Mittwoch, mit H1a am Montag.
+        assert_eq!(a.stueck(&allianz) > 0, t >= 6, "Kauf am Tag {t}");
+        if t == 6 {
+            let kauf = j
+                .stand()
+                .auftraege()
+                .iter()
+                .find(|l| l.beleg.topf == TopfId::A && l.beleg.isin == allianz)
+                .ok_or("Tauschkauf fehlt")?;
+            assert!(!kauf.beleg.nach.is_empty(), "{kauf:?}");
+            // Mit Erlös vor Valuta gekauft: bis Dienstag kein freiwilliger Verkauf.
             assert_eq!(
                 j.stand().vor_valuta(TopfId::A, datum),
                 vec![(allianz.clone(), tag(10)?)]

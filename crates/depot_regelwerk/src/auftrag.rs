@@ -114,6 +114,7 @@ pub struct GenehmigterAuftrag {
     beleg: RegelBeleg,
     _siegel: siegel::Siegel,
     stopp_bp: Option<i64>,
+    nach: Vec<u64>,
 }
 
 impl GenehmigterAuftrag {
@@ -123,7 +124,18 @@ impl GenehmigterAuftrag {
             beleg,
             _siegel: siegel::Siegel::neu(),
             stopp_bp: None,
+            nach: Vec::new(),
         }
+    }
+
+    pub(crate) fn setze_nach(&mut self, nach: Vec<u64>) {
+        self.nach = nach;
+    }
+
+    /// Verkäufe desselben Schlusses, deren Erlös dieser Kauf einrechnet (#311 H1b). Füllt einer
+    /// davon nicht, verfällt der Kauf.
+    pub fn nach(&self) -> &[u64] {
+        &self.nach
     }
 
     pub(crate) fn setze_stopp(&mut self, stopp_bp: Option<i64>) {

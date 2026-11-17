@@ -134,6 +134,10 @@ impl Konto for Papierdatei {
 }
 
 impl Broker for Papierdatei {
+    fn tausch_moeglich(&self) -> bool {
+        self.konto.tausch_moeglich()
+    }
+
     fn kapitalmassnahmen(
         &mut self,
         massnahmen: &[depot_journal::kapitalmassnahme::GebuchteKapitalmassnahme],
