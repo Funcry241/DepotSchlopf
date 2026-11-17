@@ -47,6 +47,7 @@ pub mod schatten;
 pub mod schlopfmodell;
 pub mod splitumbuchung;
 pub mod szenario;
+pub mod teilveto;
 pub mod topfgewichtung;
 pub mod vorschau;
 pub use positionskauf::{
