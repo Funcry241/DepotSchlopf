@@ -1,0 +1,8 @@
+klasse: Funktion
+zweck: Echte Tiingo-Rundungsbelege dürfen den folgenden Papiertag nicht blockieren
+pfade:
+crates/depot_journal/src/stand.rs
+crates/depot_journal/tests/tag.rs
+crates/depot_kern/src/tiingo.rs
+crates/depot_sammler/tests/tiingo.rs
+crates/depot_sim/tests/papiertag.rs

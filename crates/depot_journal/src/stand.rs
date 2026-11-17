@@ -1021,8 +1021,11 @@ impl Stand {
             self.merke_rss_abruf(a);
             Ok(true)
         } else {
+            // Behalte die Tagesnummer für bestehende Verweise. Die Rundungsnotiz
+            // gehört zum Kursabruf und beginnt keinen Papiertag.
+            let vom_sammler = depot_kern::tiingo::ist_rundungsbeobachtung(&b.1);
             self.beobachtungen.push(b);
-            Ok(false)
+            Ok(vom_sammler)
         }
     }
 

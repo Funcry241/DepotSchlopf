@@ -79,6 +79,33 @@ fn abgelehnt<T: std::fmt::Debug>(r: &Result<T, JournalFehler>, fall: &str) {
 }
 
 #[test]
+fn tiingo_notiz_beginnt_keinen_tag_und_laesst_echten_anhang_offen() -> Result<(), String> {
+    let ort = Ort::eingerichtet()?;
+    let mut j = ort.oeffnen()?;
+    let datum = tag(25)?;
+    vorbedingung(
+        j.schliesse_ab(tag(24)?, Cent(500_000), &abdruck()),
+        "Abschluss",
+    )?;
+    let notiz = format!(
+        "Tiingo-Normalisierung: isin=US0378331005; abruf=2026-11-25T22:05:00Z; roh={}; zeile=2; feld=close; original=224.47999999999998; nach-millionstel-usd=224480000; rundung=halb-gerade; abweichung-hoechstens=0.000000001-USD",
+        abdruck()
+    );
+    vorbedingung(j.beobachte(datum, &notiz), "Sammlerbeobachtung")?;
+    assert_eq!(j.stand().seit_abschluss(), 0);
+    assert_eq!(j.stand().beobachtungen(), &[(datum, notiz.clone())]);
+    let falsche_notiz = notiz.replace("224480000", "224480001");
+    vorbedingung(j.beobachte(datum, &falsche_notiz), "Falscher Nachweis")?;
+    vorbedingung(j.beobachte(datum, &notiz), "Weitere Sammlerbeobachtung")?;
+    assert_eq!(j.stand().seit_abschluss(), 1);
+    drop(j);
+    let j = ort.oeffnen()?;
+    assert_eq!(j.stand().seit_abschluss(), 1);
+    assert_eq!(j.stand().beobachtungen().len(), 3);
+    Ok(())
+}
+
+#[test]
 fn begruendung_wird_belegt_und_nachgerechnet() -> Result<(), String> {
     let o = Ort::eingerichtet()?;
     {

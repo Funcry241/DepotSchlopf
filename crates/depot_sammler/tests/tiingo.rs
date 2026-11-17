@@ -719,6 +719,11 @@ fn normalisierung_steht_vor_dem_kurs_im_journal_und_nie_nach_sicherheitsabbruch(
                 .iter()
                 .filter(|(_, t)| t.contains("Tiingo-Normalisierung"))
                 .collect();
+            assert_eq!(
+                j.stand().seit_abschluss(),
+                0,
+                "Kursabruf beginnt keinen Papiertag"
+            );
             assert_eq!(belege.len(), 2, "Nur heute und Vortag belegen");
             assert!(belege.iter().all(|(_, t)| !t.contains("zeile=4;")));
             let index = notiz.ok_or("Normalisierungsbeleg fehlt")?;
