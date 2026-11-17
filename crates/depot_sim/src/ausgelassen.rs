@@ -98,6 +98,7 @@ mod tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp: ziele.into_iter().collect(),
             begruendung: std::collections::BTreeMap::new(),
+            belege: std::collections::BTreeMap::new(),
             park: None,
         };
         let ergaenzt = ergaenze_ausgelassene(&topf, &kurse, &mut v);

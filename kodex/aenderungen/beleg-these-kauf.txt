@@ -1,0 +1,26 @@
+klasse: Funktion
+zweck: Beleg und These bei Käufen im Journal verknüpfen (#325, Vorbereitung NeuroSchlopf)
+pfade:
+CHANGELOG.md
+crates/depot_berater/src/frage.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_journal/tests/konto.rs
+crates/depot_kern/src/depot.rs
+crates/depot_lage/src/belegauswahl.rs
+crates/depot_regelwerk/src/entscheidung.rs
+crates/depot_regelwerk/tests/befunde.rs
+crates/depot_regelwerk/tests/regelwerk.rs
+crates/depot_regelwerk/tests/rundung.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/src/ausgelassen.rs
+crates/depot_sim/src/belegrang.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/mindesteinsatz.rs
+crates/depot_sim/src/offener_punkt.rs
+crates/depot_sim/src/szenario.rs
+crates/depot_sim/src/teilveto.rs
+crates/depot_sim/tests/belegrang.rs
+crates/depot_sim/tests/invarianten.rs
+crates/depot_sim/tests/papiertag.rs
+crates/depot_sim/tests/vorbereitung.rs
+kodex/aenderungen/beleg-these-kauf.txt

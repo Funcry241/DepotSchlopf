@@ -289,6 +289,7 @@ fn vorschlag(berater: BeraterId, ziele: &[(&Isin, i64, &str)]) -> Vorschlag {
             .iter()
             .map(|(i, _, t)| ((*i).clone(), (*t).to_string()))
             .collect(),
+        belege: std::collections::BTreeMap::new(),
         park: None,
     }
 }

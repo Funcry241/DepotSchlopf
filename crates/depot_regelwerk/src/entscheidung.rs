@@ -1363,6 +1363,7 @@ mod grenzrahmen_tests {
             begruendung: BTreeMap::new(),
             limit_bp: [(isin, abstand)].into_iter().collect(),
             stopp_bp: std::collections::BTreeMap::new(),
+            belege: std::collections::BTreeMap::new(),
             park: None,
         };
         Ok(entscheide_mit_kaufbudget(
@@ -1498,6 +1499,7 @@ mod stopp_tests {
             begruendung: BTreeMap::new(),
             limit_bp: BTreeMap::new(),
             stopp_bp: BTreeMap::new(),
+            belege: std::collections::BTreeMap::new(),
             park: None,
         };
         let e = entscheide(
@@ -1654,6 +1656,7 @@ mod vor_valuta_tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp: BTreeMap::new(),
             begruendung: BTreeMap::new(),
+            belege: std::collections::BTreeMap::new(),
             park: None,
         };
         let sperre = if gesperrt { vec![isin] } else { Vec::new() };
@@ -1773,6 +1776,7 @@ mod park_tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp,
             begruendung,
+            belege: BTreeMap::new(),
             park,
         };
         let universum = Universum::neu(instrumente);
@@ -1937,6 +1941,7 @@ mod park_tests {
                 berater: BeraterId::Dachs,
                 zielgewichte_bp: [(isin(SAP)?, 0), (isin(ALV)?, 3_000)].into_iter().collect(),
                 begruendung: BTreeMap::new(),
+                belege: std::collections::BTreeMap::new(),
                 park: None,
             };
             entscheide_tausch(
