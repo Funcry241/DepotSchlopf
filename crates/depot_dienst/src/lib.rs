@@ -249,15 +249,14 @@ fn update_sperre(d: &Dienst, z: &werkbank::Zustand) -> Option<seiten::UpdateSper
         .ok()
         .and_then(|zeit| zeit.elapsed().ok())
         .is_some_and(|dauer| dauer.as_secs() >= 180);
-    let neuer_dienst = d.version.as_deref() == Some(offen.neu.as_str());
-    let probe_fehlgeschlagen =
-        neuer_dienst && z.update_meldung.as_ref().is_some_and(|(fehler, _)| *fehler);
-    if frist_abgelaufen || probe_fehlgeschlagen {
+    if frist_abgelaufen {
         return Some(UpdateSperre::BestaetigungFehlgeschlagen);
     }
     if z.neustart || z.laufend.as_ref().is_some_and(|a| a.art == Art::Update) {
         Some(UpdateSperre::Neustart)
-    } else if neuer_dienst {
+    } else if z.update_meldung.as_ref().is_some_and(|(fehler, _)| *fehler) {
+        Some(UpdateSperre::BestaetigungFehlgeschlagen)
+    } else if d.version.as_deref() == Some(offen.neu.as_str()) {
         Some(UpdateSperre::Probe)
     } else {
         Some(UpdateSperre::Unbestaetigt)
