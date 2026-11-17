@@ -261,6 +261,8 @@ pub(super) fn parallel(wurzel: &Path) -> Result<bool, String> {
     let start = Instant::now();
     let mut cargo = Command::new("cargo");
     let umgebung = Testumgebung::neu()?;
+    println!("[Kodex] cargo {}", TESTS.join(" "));
+    println!("[Kodex] Tests laufen mit eigenen temporären Dateien und eigener Git-Konfiguration.");
     cargo
         .args(TESTS)
         .args(["--no-run", "--message-format=json"]);
