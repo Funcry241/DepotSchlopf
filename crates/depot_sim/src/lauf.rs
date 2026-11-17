@@ -2719,3 +2719,125 @@ mod wiederholung_tests {
         Ok(())
     }
 }
+
+/// #311 H1b, P45-Gegenprobe Börsen-Mix: Ein NYSE-Verkauf deckt keinen Xetra-Kauf als Tausch am
+/// selben Schluss und umgekehrt. Der Plan fällt auf das freie Bargeld zurück; nur Xetra mit
+/// Xetra tauscht.
+#[cfg(test)]
+mod tausch_boersen_tests {
+    use super::*;
+    use depot_kern::{Datum, Instrument, InstrumentArt, Kurs};
+
+    const SAP: &str = "DE0007164600";
+    const ALV: &str = "DE0008404005";
+    const JPM: &str = "US46625H1005";
+
+    fn isin(s: &str) -> Result<Isin, LaufFehler> {
+        Isin::neu(s).map_err(|e| halt(format!("{e:?}")))
+    }
+
+    /// Plant im Papierkonto (Tausch erlaubt) den Verkauf aller `verkauf` und 30 % `kauf`, ohne
+    /// freies Bargeld.
+    fn plan(verkauf: &str, kauf: &str) -> Result<depot_regelwerk::Entscheidung, LaufFehler> {
+        let ordner = std::env::temp_dir().join(format!(
+            "depot-tausch-boersen-{verkauf}-{kauf}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(journal)?;
+        let j = Journal::oeffnen(&pfad).map_err(journal)?;
+        let tag = Datum::neu(2026, 11, 17).ok_or_else(|| halt("Tag"))?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or_else(|| halt("Zeit"))?;
+        let kurs = |s: &str| -> Result<_, LaufFehler> {
+            Ok((
+                isin(s)?,
+                Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Simulation)
+                    .map_err(|e| halt(format!("{e:?}")))?,
+            ))
+        };
+        let kurse = Kurse::neu(zeit, vec![kurs(verkauf)?, kurs(kauf)?])
+            .map_err(|e| halt(format!("{e:?}")))?;
+        let mut topf = Topf::neu(TopfId::A, Cent::NULL).map_err(|e| halt(format!("{e:?}")))?;
+        topf.setze_bestand(isin(verkauf)?, 40);
+        let universum = Universum::neu(
+            [verkauf, kauf]
+                .into_iter()
+                .map(|s| {
+                    Ok(Instrument {
+                        isin: isin(s)?,
+                        name: s.into(),
+                        art: InstrumentArt::Aktie,
+                    })
+                })
+                .collect::<Result<_, LaufFehler>>()?,
+        );
+        let vorschlag = Vorschlag {
+            erwartung_bp: BTreeMap::new(),
+            limit_bp: BTreeMap::new(),
+            stopp_bp: BTreeMap::new(),
+            berater: BeraterId::Dachs,
+            zielgewichte_bp: [(isin(verkauf)?, 0), (isin(kauf)?, 3_000)]
+                .into_iter()
+                .collect(),
+            begruendung: BTreeMap::new(),
+            belege: BTreeMap::new(),
+            park: None,
+        };
+        let eingabe = Eingabe {
+            grenzen: &Grenzen::standard(),
+            universum: &universum,
+            topf: &topf,
+            kurse: &kurse,
+            vorschlag: Some(&vorschlag),
+            halt: false,
+            vor_valuta: &[],
+        };
+        let ent = plane_topf(&j, &eingabe, Cent::NULL, false, true);
+        drop(j);
+        std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
+        Ok(ent)
+    }
+
+    fn kauf_von(ent: &depot_regelwerk::Entscheidung, s: &str) -> Result<bool, LaufFehler> {
+        let isin = isin(s)?;
+        Ok(ent.kaeufe.iter().any(|k| k.auftrag().isin == isin))
+    }
+
+    #[test]
+    fn tausch_nur_an_derselben_boerse() -> Result<(), LaufFehler> {
+        let (jpm, alv) = (isin(JPM)?, isin(ALV)?);
+        let gemischt = plan(JPM, SAP)?;
+        assert!(
+            gemischt.verkaeufe.iter().any(|v| v.auftrag().isin == jpm),
+            "{gemischt:?}"
+        );
+        assert!(!kauf_von(&gemischt, SAP)?, "{gemischt:?}");
+        assert!(
+            gemischt
+                .kaeufe
+                .iter()
+                .chain(&gemischt.verkaeufe)
+                .all(|a| a.nach().is_empty())
+        );
+        // Umgekehrt deckt ein Xetra-Verkauf keinen NYSE-Kauf.
+        let umgekehrt = plan(SAP, JPM)?;
+        assert!(!kauf_von(&umgekehrt, JPM)?, "{umgekehrt:?}");
+        assert!(
+            umgekehrt
+                .kaeufe
+                .iter()
+                .chain(&umgekehrt.verkaeufe)
+                .all(|a| a.nach().is_empty())
+        );
+        // Gegenstück: Xetra mit Xetra tauscht am selben Schluss.
+        let gleich = plan(SAP, ALV)?;
+        let k = gleich
+            .kaeufe
+            .iter()
+            .find(|k| k.auftrag().isin == alv)
+            .ok_or_else(|| halt("Tauschkauf fehlt"))?;
+        assert!(!k.nach().is_empty(), "{gleich:?}");
+        Ok(())
+    }
+}
