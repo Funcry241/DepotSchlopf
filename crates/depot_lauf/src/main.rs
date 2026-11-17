@@ -24,6 +24,7 @@ mod export;
 mod sicherung;
 mod update;
 mod updatedaten;
+mod zusammenfassung;
 
 use std::fs;
 use std::path::Path;
@@ -59,6 +60,27 @@ fn wiederherstellung(wurzel: &Path) -> Vec<String> {
         }
     }
     warnungen
+}
+
+/// Kurzbild ans Ende des Protokolls und, in GitHub Actions, in die Zusammenfassung des Laufs
+/// (#313 E4). Ein Schreibfehler dort ändert das Ergebnis des Laufs nicht.
+fn melde_kurzbild(lauf: &export::Lauf) {
+    if lauf.befehl == "festschreibung" {
+        return;
+    }
+    let bild = zusammenfassung::kurzbild(&lauf.konsole, lauf.erfolgreich());
+    let text = bild.join("\n");
+    println!("{text}");
+    if let Some(ziel) = std::env::var_os("GITHUB_STEP_SUMMARY") {
+        let geschrieben = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&ziel)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, format!("{text}\n").as_bytes()));
+        if let Err(e) = geschrieben {
+            eprintln!("[DepotSchlopf] Zusammenfassung nicht geschrieben: {e}");
+        }
+    }
 }
 
 /// Startet das Gate im Ordner `dir` mit dem Build-Ordner `bau`.
@@ -203,6 +225,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
+    melde_kurzbild(&lauf);
     if lauf.erfolgreich() {
         if let Some(a) = lauf
             .abbild
