@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Eignung der vorhandenen Belegverknüpfungen für NeuroSchlopf im Analyse-Export sichtbar machen
+pfade:
+crates/depot_lage/src/belegauswahl.rs
