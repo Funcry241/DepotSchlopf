@@ -359,6 +359,7 @@ fn bind_lokal(t: &[Token], i: usize) -> bool {
 const START_MODULE: &[&str] = &[
     "depot_kodex/src/git.rs",
     "depot_kodex/src/main.rs",
+    "depot_kodex/src/testlauf.rs",
     "depot_kodex/src/testumgebung.rs",
     "depot_lauf/src/abbild.rs",
     "depot_lauf/src/export.rs",
@@ -374,7 +375,12 @@ const START_MODULE: &[&str] = &[
     "depot_dienst/src/bin/depot_waechter.rs",
 ];
 
-const DYNAMISCHE_STARTS: [(&str, usize, &str); 5] = [
+const DYNAMISCHE_STARTS: [(&str, usize, &str); 6] = [
+    (
+        "depot_kodex/src/testlauf.rs",
+        1,
+        "von Cargo gemeldetes Testprogramm unter dem Prüf-Bauordner",
+    ),
     (
         "depot_lauf/src/update/update_dialog.rs",
         1,

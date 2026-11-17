@@ -1,0 +1,8 @@
+klasse: KodexAenderung
+zweck: Cargo-Testprogramme im Windows-Kodex-Gate parallel ausführen
+pfade:
+crates/depot_kodex/src/main.rs
+crates/depot_kodex/src/quellscan.rs
+crates/depot_kodex/src/testlauf.rs
+kodex/festschreibung.txt
+kodex/freigaben/c1-parallele-testprogramme.txt
