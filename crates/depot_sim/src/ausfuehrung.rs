@@ -150,12 +150,119 @@ fn orderzeile(order: &AuftragsLage, belege: &[&depot_journal::KursBeleg]) -> Ord
     }
 }
 
+/// Stufe des Limitabstands zum Bezugskurs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Stufe {
+    Bis100,
+    Bis200,
+    Bis300,
+    Unbelegt,
+}
+
+impl Stufe {
+    pub fn von(limit_bp: Option<i64>) -> Self {
+        match limit_bp.map(i64::unsigned_abs) {
+            Some(0..=100) => Self::Bis100,
+            Some(101..=200) => Self::Bis200,
+            Some(201..=300) => Self::Bis300,
+            _ => Self::Unbelegt,
+        }
+    }
+
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::Bis100 => "bis 100 bp",
+            Self::Bis200 => "101–200 bp",
+            Self::Bis300 => "201–300 bp",
+            Self::Unbelegt => "nicht belegt",
+        }
+    }
+}
+
+/// Gefüllte und verfallene Orders; offene und abgelehnte zählen nicht.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Quote {
+    pub gefuellt: u32,
+    pub verfallen: u32,
+}
+
+impl Quote {
+    /// Füllquote in Prozent, abgerundet.
+    pub fn prozent(&self) -> Option<u32> {
+        let summe = self.gefuellt.checked_add(self.verfallen)?;
+        self.gefuellt.checked_mul(100)?.checked_div(summe)
+    }
+
+    pub fn zaehle(&mut self, zustand: AuftragsZustand) {
+        match zustand {
+            AuftragsZustand::Gefuellt => self.gefuellt = self.gefuellt.saturating_add(1),
+            AuftragsZustand::Verfallen => self.verfallen = self.verfallen.saturating_add(1),
+            _ => {}
+        }
+    }
+}
+
+/// Füllquote der KI-Orders je Richtung und Stufe des Limitabstands (#311 H2c). Gezählt
+/// werden nur Orders aus KI-Vorschlägen mit belegtem Abstand; erzwungene Ausstiege
+/// (Stopp, Notbremse, Frist, Abbau, Positivliste) wählen ihren Abstand nicht selbst.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Fuellquoten {
+    pub kauf: [Quote; 3],
+    pub verkauf: [Quote; 3],
+}
+
+impl Fuellquoten {
+    /// Die belegten Stufen in Anzeigereihenfolge, passend zu den Feldern `kauf` und `verkauf`.
+    pub const STUFEN: [Stufe; 3] = [Stufe::Bis100, Stufe::Bis200, Stufe::Bis300];
+
+    /// Keine einzige entschiedene Order in irgendeiner Stufe.
+    pub fn leer(&self) -> bool {
+        self.kauf
+            .iter()
+            .chain(&self.verkauf)
+            .all(|q| q.gefuellt == 0 && q.verfallen == 0)
+    }
+
+    fn zaehle(&mut self, z: &OrderZeile) {
+        let Some(i) = Self::STUFEN
+            .iter()
+            .position(|s| *s == Stufe::von(z.limit_bp))
+        else {
+            return;
+        };
+        let reihe = match z.richtung {
+            Richtung::Kauf => &mut self.kauf,
+            Richtung::Verkauf => &mut self.verkauf,
+        };
+        if let Some(q) = reihe.get_mut(i) {
+            q.zaehle(z.zustand);
+        }
+    }
+}
+
+/// Füllquoten aller Töpfe seit `ab` (Versandtag). Der Limitabstand wirkt am Markt gleich,
+/// egal welcher Topf die Order schickt; beide Töpfe zusammen geben mehr Beobachtungen.
+pub fn fuellquoten(zeilen: &[OrderZeile], ab: Datum) -> Fuellquoten {
+    let mut f = Fuellquoten::default();
+    for z in zeilen.iter().filter(|z| {
+        !z.anlass.zwingend()
+            && z.versand
+                .and_then(Zeitpunkt::frankfurt_tag)
+                .is_some_and(|tag| tag >= ab)
+    }) {
+        f.zaehle(z);
+    }
+    f
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Kennzahlen {
     pub gefuellt: usize,
     pub verfallen: usize,
     pub mittlerer_fuellpreis_bp: Option<i64>,
     pub mittlere_bewegung_bp: Option<i64>,
+    /// Füllquote je Limitabstand über beide Töpfe (#311 H2c). Nur `kaufbilanz` füllt sie.
+    pub stufen: Fuellquoten,
 }
 
 pub fn letzte_20_tage(heute: Datum) -> Datum {
@@ -172,12 +279,12 @@ pub fn letzte_20_tage(heute: Datum) -> Datum {
 }
 
 pub(crate) fn kaufbilanz(stand: &Stand, topf: TopfId, heute: Datum) -> Kennzahlen {
-    je_ki(
-        &ausfuehrungsbuch(stand),
-        topf,
-        Richtung::Kauf,
-        letzte_20_tage(heute),
-    )
+    let buch = ausfuehrungsbuch(stand);
+    let ab = letzte_20_tage(heute);
+    Kennzahlen {
+        stufen: fuellquoten(&buch, ab),
+        ..je_ki(&buch, topf, Richtung::Kauf, ab)
+    }
 }
 
 pub fn je_ki(zeilen: &[OrderZeile], topf: TopfId, richtung: Richtung, ab: Datum) -> Kennzahlen {
@@ -387,6 +494,51 @@ mod tests {
             (3, 1, Some(50), Some(240))
         );
         assert_eq!(je_ki(&zeilen, TopfId::B, Richtung::Kauf, tag).gefuellt, 1);
+        Ok(())
+    }
+
+    /// #311 H2c: je Richtung und Stufe gezählt, beide Töpfe zusammen; erzwungene, alte,
+    /// offene und Orders ohne Bezugskurs zählen nicht.
+    #[test]
+    fn fuellquoten_je_stufe() -> Result<(), String> {
+        let o = order(Richtung::Kauf, AuftragsZustand::Gefuellt)?;
+        let [bezug, schluss] = belege(&o, 10_050)?;
+        let basis = orderzeile(&o, &[&bezug, &schluss]);
+        let zeile = |richtung, bp, zustand| OrderZeile {
+            richtung,
+            limit_bp: bp,
+            zustand,
+            ..basis.clone()
+        };
+        let tag = Datum::neu(2026, 11, 10).ok_or("Tag")?;
+        let mut topf_b = zeile(Richtung::Kauf, Some(100), AuftragsZustand::Verfallen);
+        topf_b.topf = TopfId::B;
+        let mut stopp = zeile(Richtung::Verkauf, Some(-300), AuftragsZustand::Gefuellt);
+        stopp.anlass = Anlass::Stopp;
+        let mut alt = zeile(Richtung::Kauf, Some(100), AuftragsZustand::Gefuellt);
+        alt.versand = Zeitpunkt::frankfurt(Datum::neu(2026, 10, 1).ok_or("Alt")?, 7, 40, 0);
+        let zeilen = [
+            zeile(Richtung::Kauf, Some(100), AuftragsZustand::Gefuellt),
+            zeile(Richtung::Kauf, Some(50), AuftragsZustand::Gefuellt),
+            topf_b,
+            zeile(Richtung::Kauf, Some(150), AuftragsZustand::Verfallen),
+            zeile(Richtung::Kauf, Some(250), AuftragsZustand::Angenommen),
+            zeile(Richtung::Kauf, None, AuftragsZustand::Gefuellt),
+            zeile(Richtung::Verkauf, Some(-280), AuftragsZustand::Gefuellt),
+            zeile(Richtung::Verkauf, Some(-280), AuftragsZustand::Verfallen),
+            stopp,
+            alt,
+        ];
+        let f = fuellquoten(&zeilen, tag);
+        let paare = |reihe: &[Quote; 3]| reihe.map(|q| (q.gefuellt, q.verfallen));
+        assert_eq!(paare(&f.kauf), [(2, 1), (0, 1), (0, 0)]);
+        assert_eq!(paare(&f.verkauf), [(0, 0), (0, 0), (1, 1)]);
+        assert_eq!(f.kauf.first().and_then(Quote::prozent), Some(66));
+        assert!(!f.leer());
+        // Ohne verwertbare Daten: nur erzwungene, offene oder unbelegte Orders.
+        let leer = fuellquoten(&zeilen[4..6], tag);
+        assert!(leer.leer());
+        assert!(fuellquoten(&[], tag).leer());
         Ok(())
     }
 }

@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Füllquote je Limitabstand in der KI-Frage (#311 H2c): Dachs und Maus sehen im Topfteil der Frage, wie viele ihrer KI-Orders der letzten 20 Handelstage je Richtung und Abstandsstufe (bis 100, 101–200, 201–300 bp) gefüllt wurden, mit der Zahl der beobachteten Orders. Gezählt werden beide Töpfe, nur gefüllte oder verfallene Orders aus KI-Vorschlägen mit belegtem Abstand; Stopp, Notbremse, Frist und andere erzwungene Ausstiege nicht. Ohne Daten sagt die Frage ausdrücklich, dass es noch keinen Messwert gibt. Die Zahlen sind ein Hinweis, `limit_bp` wählt die KI weiter selbst. Sie stehen hinter dem gemeinsamen Tagesblock, der Prompt-Cache aus P44 bleibt bytegleich. Kein Journaleintrag, Rückweg ohne Sicherung.
+
 - Prompt-Caching und Kostenbuchung (#312, P44): Dachs nutzt für den gemeinsamen Tagesblock den Fünf-Minuten-Cache. Beide Erstmeinungen stehen fest, bevor Dachs und Maus in dieser Reihenfolge die Zweitmeinungen abgeben. Die Abrechnung trennt volle Eingabe, Cache-Schreiben, Cache-Lesen und Ausgabe. Für den großen Aufruf sind höchstens 26 Cent bei Dachs und 13 Cent bei Maus reserviert. Das Monatslimit von 20 € je KI gilt weiter.
 
 - Windows-Kodex (#313, C1): Bis zu vier Cargo-Testprogramme laufen parallel mit eigener temporärer Umgebung, Cargo führt die Doctests separat aus und der Linux-Lauf nutzt weiter den bisherigen Testaufruf.

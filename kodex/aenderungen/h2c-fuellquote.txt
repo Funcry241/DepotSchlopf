@@ -1,0 +1,9 @@
+klasse: Funktion
+zweck: Füllquote je Limitabstand mit Zahl der Orders in der KI-Frage (#311 H2c)
+pfade:
+CHANGELOG.md
+crates/depot_berater/src/frage.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_lage/src/leerlauf.rs
+crates/depot_sim/src/ausfuehrung.rs
+kodex/aenderungen/h2c-fuellquote.txt
