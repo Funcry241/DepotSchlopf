@@ -30,6 +30,10 @@ const WERKZEUG: [&str; 8] = [
     "LICENSE",
 ];
 
+pub(crate) fn ist_dienst_asset(name: &str) -> bool {
+    matches!(name, "app.js" | "stil.css")
+}
+
 pub fn rolle(pfad: &str) -> Rolle {
     if pfad == crate::DEKLARATION || crate::pruefdateien::ist_deklaration(pfad) {
         return Rolle::Deklaration;
@@ -57,10 +61,10 @@ pub fn rolle(pfad: &str) -> Rolle {
         return Rolle::Werkzeug;
     }
     // Die beiden eingebundenen Oberflächendateien liegen außerhalb des Rust-Quellbaums.
-    if matches!(
-        pfad,
-        "crates/depot_dienst/assets/app.js" | "crates/depot_dienst/assets/stil.css"
-    ) {
+    if pfad
+        .strip_prefix("crates/depot_dienst/assets/")
+        .is_some_and(ist_dienst_asset)
+    {
         return Rolle::Produktiv;
     }
     if let Some(rest) = pfad.strip_prefix("crates/") {
