@@ -1,16 +1,22 @@
 klasse: Funktion
-zweck: Zweitmeinung urteilt je Wert (#311 H4, P43); Mindesteinsatz ohne Nachfrage (#312-3, P37)
+zweck: Zweitmeinung urteilt je Wert (#311 H4, P43); Mindesteinsatz ohne Nachfrage (#312-3, P37); Belegauswahl messen für NeuroSchlopf (#325)
 pfade:
 CHANGELOG.md
 crates/depot_berater/src/frage.rs
 crates/depot_berater/src/ki.rs
 crates/depot_berater/tests/berater.rs
+crates/depot_dienst/src/analyse.rs
+crates/depot_lage/src/belegauswahl.rs
+crates/depot_lage/src/lib.rs
 crates/depot_lage/src/vetoschatten.rs
 crates/depot_lage/tests/lage.rs
+crates/depot_sim/src/belegrang.rs
 crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/lib.rs
 crates/depot_sim/src/mindesteinsatz.rs
 crates/depot_sim/src/szenario.rs
 crates/depot_sim/src/teilveto.rs
+crates/depot_sim/tests/belegrang.rs
 crates/depot_sim/tests/invarianten.rs
 crates/depot_sim/tests/papiertag.rs
 crates/depot_sim/tests/vorbereitung.rs
