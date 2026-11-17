@@ -11,8 +11,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use depot_kern::{
-    BP_GANZ, BeraterId, Cent, Grenzen, Herkunft, Isin, Kurse, Preis, Rundung, Topf, TopfId,
-    Universum, Vorschlag,
+    BP_GANZ, BeraterId, Cent, Grenzen, Herkunft, Isin, Kurse, Parkwunsch, Preis, Rundung, Topf,
+    TopfId, Universum, Vorschlag,
 };
 
 use crate::auftrag::{Anlass, Auftrag, GenehmigterAuftrag, Kennungsvergabe, RegelBeleg, Richtung};
@@ -88,6 +88,13 @@ pub enum Befund {
         isin: Isin,
         gefragt: Option<i64>,
     },
+    /// Bargeld über der Reserve geht in den Parkwert: neues Zielgewicht (#311 H3).
+    Parkwert {
+        isin: Isin,
+        ziel_bp: i64,
+    },
+    /// Der Parkwert ist kein handelbarer ETF mit frischem Kurs; es wird nicht geparkt.
+    ParkwertUngueltig(Isin),
     /// Freiwilliger Verkauf vor der Valuta des Erloeses, mit dem der Wert gekauft wurde (#311 H1a).
     VorValuta(Isin),
     LimitabstandAusserhalb {
@@ -694,6 +701,16 @@ fn abbau_positionen(
         let wert = e.kurse.kurs(isin)?.mal_stueck_exakt(*gehalten)?;
         bleiben.push((wert, isin.clone(), *gehalten));
     }
+    // Der größte gehaltene ETF ist der Parkplatz und zählt nicht gegen die Werteanzahl (#311 H3).
+    if let Some(platz) = bleiben
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, isin, _))| e.universum.ist_etf(isin))
+        .max_by(|(_, a), (_, b)| a.cmp(b))
+        .map(|(i, _)| i)
+    {
+        bleiben.remove(platz);
+    }
     let zu_viel = bleiben.len().saturating_sub(g.max_werte());
     if zu_viel == 0 {
         return Some(());
@@ -751,7 +768,9 @@ fn pruefe_vorschlag(
         summe = summe.saturating_add(*gewicht);
         ziele.insert(isin.clone(), *gewicht);
     }
-    if ziele.len() > e.grenzen.max_werte() {
+    // Ein ETF als Parkplatz zählt nicht gegen die Werteanzahl (#311 H3).
+    let park = usize::from(ziele.keys().any(|i| e.universum.ist_etf(i)));
+    if ziele.len().saturating_sub(park) > e.grenzen.max_werte() {
         return Err(VerwerfGrund::ZuVieleWerte(ziele.len()));
     }
     if summe > BP_GANZ {
@@ -767,7 +786,63 @@ fn pruefe_vorschlag(
             *gewicht = e.grenzen.max_anteil_bp();
         }
     }
+    if let Some(p) = &v.park {
+        parke(e, p, &mut ziele, befunde);
+    }
     Ok(ziele)
+}
+
+/// Frühestens so viele Handelstage bis zum nächsten anderen Kauf, damit sich das Parken lohnt.
+pub const PARK_MIN_TAGE: i64 = 5;
+/// Kleinster Zukauf in den Parkwert; darunter fressen die Gebühren den Ertrag.
+pub const PARK_MIN_ZUKAUF: Cent = Cent(100_000);
+
+/// Setzt das Zielgewicht des Parkwerts auf das Bargeld über der Reserve, höchstens den
+/// Höchstanteil (#311 H3). Erwartet die KI bald einen anderen Kauf oder lohnt der Zukauf nicht,
+/// wächst der Parkwert nicht; brauchen andere Ziele das Bargeld, schrumpft er zuerst.
+fn parke(
+    e: &Eingabe<'_>,
+    p: &Parkwunsch,
+    ziele: &mut BTreeMap<Isin, i64>,
+    befunde: &mut Vec<Befund>,
+) {
+    let g = e.grenzen;
+    if !e.universum.ist_etf(&p.isin)
+        || !e.universum.handelbar(&p.isin, g)
+        || frischer_kurs(g, e.kurse, &p.isin).is_none()
+        || !(0..=BP_GANZ).contains(&p.reserve_bp)
+    {
+        befunde.push(Befund::ParkwertUngueltig(p.isin.clone()));
+        return;
+    }
+    let andere: i64 = ziele
+        .iter()
+        .filter(|(isin, _)| **isin != p.isin)
+        .map(|(_, bp)| *bp)
+        .sum();
+    let ist = if e.topf.stueck(&p.isin) == 0 {
+        0
+    } else {
+        ist_gewicht_bp(e.topf, e.kurse, &p.isin).unwrap_or(0)
+    };
+    let mut ziel = BP_GANZ
+        .saturating_sub(andere)
+        .saturating_sub(p.reserve_bp)
+        .clamp(0, g.max_anteil_bp());
+    let zukauf = e
+        .topf
+        .wert_exakt(e.kurse)
+        .and_then(|w| w.mal_bp(ziel.saturating_sub(ist), Rundung::Ab));
+    if ziel > ist
+        && (p.naechster_kauf_tage < PARK_MIN_TAGE || zukauf.is_none_or(|z| z < PARK_MIN_ZUKAUF))
+    {
+        ziel = ist;
+    }
+    ziele.insert(p.isin.clone(), ziel);
+    befunde.push(Befund::Parkwert {
+        isin: p.isin.clone(),
+        ziel_bp: ziel,
+    });
 }
 
 /// Freiwillige Auftraege. Umschlag und Orderzahl gelten fuer das, was die zwingenden
@@ -918,16 +993,20 @@ fn kaufe(
         .filter(|k| k.komplett)
         .map(|k| &k.isin)
         .collect();
-    let mut positionen = e
+    let bleiben: Vec<&Isin> = e
         .topf
         .positionen()
         .keys()
         .filter(|i| !ganz_verkauft.contains(i))
-        .count();
+        .collect();
+    // Ein ETF ist der Parkplatz und zählt nicht gegen die Werteanzahl (#311 H3).
+    let mut park_frei = !bleiben.iter().any(|i| e.universum.ist_etf(i));
+    let mut positionen = bleiben.len().saturating_sub(usize::from(!park_frei));
 
     for k in geplant {
         let gehalten = e.topf.stueck(&k.isin);
-        if gehalten == 0 && positionen >= g.max_werte() {
+        let als_park = gehalten == 0 && park_frei && e.universum.ist_etf(&k.isin);
+        if gehalten == 0 && !als_park && positionen >= g.max_werte() {
             befunde.push(Befund::PositionsgrenzeErreicht(k.isin));
             continue;
         }
@@ -951,7 +1030,9 @@ fn kaufe(
             continue;
         }
         budget = budget.checked_sub(volumen.checked_add(g.gebuehren().fuer(volumen)?)?)?;
-        if gehalten == 0 {
+        if als_park {
+            park_frei = false;
+        } else if gehalten == 0 {
             positionen = positionen.checked_add(1)?;
         }
         kaeufe.push(Kandidat { stueck, ..k });
@@ -1239,6 +1320,7 @@ mod grenzrahmen_tests {
             begruendung: BTreeMap::new(),
             limit_bp: [(isin, abstand)].into_iter().collect(),
             stopp_bp: std::collections::BTreeMap::new(),
+            park: None,
         };
         Ok(entscheide_mit_kaufbudget(
             &Eingabe {
@@ -1373,6 +1455,7 @@ mod stopp_tests {
             begruendung: BTreeMap::new(),
             limit_bp: BTreeMap::new(),
             stopp_bp: BTreeMap::new(),
+            park: None,
         };
         let e = entscheide(
             &Eingabe {
@@ -1528,6 +1611,7 @@ mod vor_valuta_tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp: BTreeMap::new(),
             begruendung: BTreeMap::new(),
+            park: None,
         };
         let sperre = if gesperrt { vec![isin] } else { Vec::new() };
         Ok(entscheide(
@@ -1573,6 +1657,216 @@ mod vor_valuta_tests {
             Some(Anlass::Abbau),
             "{e:?}"
         );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod park_tests {
+    use super::*;
+    use depot_kern::{Datum, Instrument, InstrumentArt, Kurs, Zeitpunkt};
+
+    const SAP: &str = "DE0007164600";
+    const ALV: &str = "DE0008404005";
+    const BASF: &str = "DE000BASF111";
+    const BAYER: &str = "DE000BAY0017";
+    const ETF: &str = "IE00B4L5Y983";
+
+    fn isin(s: &str) -> Result<Isin, String> {
+        Isin::neu(s).map_err(|e| format!("{e:?}"))
+    }
+
+    /// Alle Werte zu 100 €. `bestand` in Stück, `ziele` in bp, `park` als (Reserve, Tage).
+    fn lauf(
+        bargeld: i64,
+        bestand: &[(&str, u64)],
+        ziele: &[(&str, i64)],
+        park: Option<(&str, i64, i64)>,
+        kaufbudget: Option<i64>,
+    ) -> Result<Entscheidung, String> {
+        let tag = Datum::neu(2026, 11, 17).ok_or("Tag")?;
+        let zeit = Zeitpunkt::neu(tag, 12, 0, 0).ok_or("Zeit")?;
+        let alle = [SAP, ALV, BASF, BAYER, ETF];
+        let mut kurse = Vec::new();
+        let mut instrumente = Vec::new();
+        for s in alle {
+            let kurs = Kurs::neu(Cent(10_000), "EUR", tag, zeit, Herkunft::Simulation)
+                .map_err(|e| format!("{e:?}"))?;
+            kurse.push((isin(s)?, kurs));
+            instrumente.push(Instrument {
+                isin: isin(s)?,
+                name: s.into(),
+                art: if s == ETF {
+                    InstrumentArt::EtfPhysischUcits
+                } else {
+                    InstrumentArt::Aktie
+                },
+            });
+        }
+        let kurse = Kurse::neu(zeit, kurse).map_err(|e| format!("{e:?}"))?;
+        let mut topf = Topf::neu(TopfId::A, Cent(bargeld)).map_err(|e| format!("{e:?}"))?;
+        for (s, stueck) in bestand {
+            topf.setze_bestand(isin(s)?, *stueck);
+        }
+        let mut zielgewichte_bp = BTreeMap::new();
+        let mut begruendung = BTreeMap::new();
+        for (s, bp) in ziele {
+            zielgewichte_bp.insert(isin(s)?, *bp);
+            begruendung.insert(isin(s)?, "beobachtet".to_owned());
+        }
+        let park = match park {
+            Some((s, reserve_bp, naechster_kauf_tage)) => Some(Parkwunsch {
+                isin: isin(s)?,
+                reserve_bp,
+                naechster_kauf_tage,
+                begruendung: "nichts in Sicht".into(),
+            }),
+            None => None,
+        };
+        let vorschlag = Vorschlag {
+            erwartung_bp: BTreeMap::new(),
+            limit_bp: BTreeMap::new(),
+            stopp_bp: BTreeMap::new(),
+            berater: BeraterId::Dachs,
+            zielgewichte_bp,
+            begruendung,
+            park,
+        };
+        let universum = Universum::neu(instrumente);
+        let e = Eingabe {
+            grenzen: &Grenzen::standard(),
+            universum: &universum,
+            topf: &topf,
+            kurse: &kurse,
+            vorschlag: Some(&vorschlag),
+            halt: false,
+            vor_valuta: &[],
+        };
+        let mut vergabe = Kennungsvergabe::nach(0);
+        Ok(match kaufbudget {
+            Some(frei) => entscheide_mit_kaufbudget(&e, &mut vergabe, Cent(frei)),
+            None => entscheide(&e, &mut vergabe),
+        })
+    }
+
+    fn kauf(e: &Entscheidung, s: &str) -> Result<Option<u64>, String> {
+        let i = isin(s)?;
+        Ok(e.kaeufe
+            .iter()
+            .find(|k| k.auftrag().isin == i)
+            .map(|k| k.auftrag().stueck))
+    }
+
+    /// Gegenprobe (a): Topf 10.000 €, Reserve 10 %, Bargeld 6.000 €: Parkziel 50 % auf 40 %
+    /// gekappt; der Kauf bleibt unter 40 % des kleinsten Topfwerts nach Limit und Gebühr.
+    #[test]
+    fn parkt_bargeld_ueber_reserve_bis_hoechstanteil() -> Result<(), String> {
+        let e = lauf(
+            600_000,
+            &[(SAP, 40)],
+            &[(SAP, 4_000)],
+            Some((ETF, 1_000, 5)),
+            None,
+        )?;
+        assert!(e.befunde.contains(&Befund::Parkwert {
+            isin: isin(ETF)?,
+            ziel_bp: 4_000
+        }));
+        let stueck = kauf(&e, ETF)?.ok_or("Parkkauf fehlt")?;
+        assert!((38..=40).contains(&stueck), "{stueck}");
+        Ok(())
+    }
+
+    /// Gegenprobe (b): Erwartet die KI in 2 Handelstagen einen Kauf, wird nicht geparkt.
+    #[test]
+    fn kein_parken_bei_baldigem_kauf() -> Result<(), String> {
+        let e = lauf(
+            600_000,
+            &[(SAP, 40)],
+            &[(SAP, 4_000)],
+            Some((ETF, 1_000, 2)),
+            None,
+        )?;
+        assert_eq!(kauf(&e, ETF)?, None);
+        assert!(e.befunde.contains(&Befund::Parkwert {
+            isin: isin(ETF)?,
+            ziel_bp: 0
+        }));
+        Ok(())
+    }
+
+    /// Unter 1.000 € Zukauf lohnt das Parken nicht.
+    #[test]
+    fn kein_parken_unter_mindestzukauf() -> Result<(), String> {
+        // 1.500 € Bargeld, Reserve 6 %: nur 900 € wären zu parken.
+        let bestand = [(SAP, 40), (ALV, 40), (BASF, 5)];
+        let ziele = [(SAP, 4_000), (ALV, 4_000), (BASF, 500)];
+        let e = lauf(150_000, &bestand, &ziele, Some((ETF, 600, 5)), None)?;
+        assert_eq!(kauf(&e, ETF)?, None);
+        Ok(())
+    }
+
+    /// Gegenprobe (c): Zielkauf 3.000 € bei 500 € Bargeld: zuerst wird der Parkwert verkauft,
+    /// der Kauf ist bis zum Erlös auf das Bargeld begrenzt.
+    #[test]
+    fn parkwert_wird_zuerst_verkauft() -> Result<(), String> {
+        let e = lauf(
+            50_000,
+            &[(SAP, 30), (ALV, 30), (ETF, 35)],
+            &[(SAP, 3_000), (ALV, 3_000), (BASF, 3_000)],
+            Some((ETF, 500, 5)),
+            Some(50_000),
+        )?;
+        let etf = isin(ETF)?;
+        let verkauf = e
+            .verkaeufe
+            .iter()
+            .find(|v| v.auftrag().isin == etf)
+            .ok_or("Parkverkauf fehlt")?;
+        assert_eq!(verkauf.auftrag().stueck, 30);
+        assert_eq!(verkauf.beleg().anlass, Anlass::Umschichtung);
+        assert!(kauf(&e, BASF)?.is_none_or(|s| s <= 4), "{e:?}");
+        Ok(())
+    }
+
+    /// Der Parkplatz zählt nicht gegen die Werteanzahl: Kauf neben vier Aktien, kein Abbau.
+    #[test]
+    fn parkwert_zaehlt_nicht_gegen_werteanzahl() -> Result<(), String> {
+        let vier = [(SAP, 15), (ALV, 15), (BASF, 15), (BAYER, 15)];
+        let ziele = [(SAP, 1_500), (ALV, 1_500), (BASF, 1_500), (BAYER, 1_500)];
+        let e = lauf(400_000, &vier, &ziele, Some((ETF, 0, 10)), None)?;
+        assert!(kauf(&e, ETF)?.is_some(), "{e:?}");
+        let gehalten = [(SAP, 15), (ALV, 15), (BASF, 15), (BAYER, 15), (ETF, 20)];
+        let mit_etf = [
+            (SAP, 1_500),
+            (ALV, 1_500),
+            (BASF, 1_500),
+            (BAYER, 1_500),
+            (ETF, 2_000),
+        ];
+        let e = lauf(200_000, &gehalten, &mit_etf, None, None)?;
+        assert!(
+            !e.befunde
+                .iter()
+                .any(|b| matches!(b, Befund::ZuVielePositionen { .. })),
+            "{e:?}"
+        );
+        assert!(e.verkaeufe.is_empty(), "{e:?}");
+        Ok(())
+    }
+
+    /// Ein Parkwert, der kein ETF ist, wird nicht verwendet.
+    #[test]
+    fn aktie_ist_kein_parkwert() -> Result<(), String> {
+        let e = lauf(
+            600_000,
+            &[(SAP, 40)],
+            &[(SAP, 4_000)],
+            Some((ALV, 1_000, 5)),
+            None,
+        )?;
+        assert!(e.befunde.contains(&Befund::ParkwertUngueltig(isin(ALV)?)));
+        assert_eq!(kauf(&e, ALV)?, None);
         Ok(())
     }
 }

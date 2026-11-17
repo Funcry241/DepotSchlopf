@@ -189,7 +189,8 @@ pub(crate) fn gleiche_ziele(a: Option<&Vorschlag>, b: Option<&Vorschlag>) -> boo
 
 pub(crate) fn nur_verkleinerung(topf: &Topf, kurse: &Kurse, v: &Vorschlag) -> bool {
     use depot_regelwerk::entscheidung::ist_gewicht_bp;
-    if v.berater != topf.id().berater() {
+    // Ein Parkwert kann kaufen: Er braucht wie jeder Kauf die Zweitmeinung (#311 H3).
+    if v.berater != topf.id().berater() || v.park.is_some() {
         return false;
     }
     let mut reduziert = false;
@@ -421,6 +422,7 @@ mod tests {
                         erwartung_bp: std::collections::BTreeMap::new(),
                         limit_bp: std::collections::BTreeMap::new(),
                         stopp_bp: std::collections::BTreeMap::new(),
+                        park: None,
                     };
                     let ohne_zustimmung = nur_verkleinerung(&topf, &kurse, &v);
                     assert_eq!(
@@ -467,6 +469,7 @@ mod tests {
             berater: BeraterId::Dachs,
             zielgewichte_bp: std::collections::BTreeMap::new(),
             begruendung: std::collections::BTreeMap::new(),
+            park: None,
         };
         let mut alt = neu.clone();
         alt.zielgewichte_bp.insert(sap.clone(), 2_000);

@@ -128,7 +128,7 @@ fn zweitmeinung(
     let Some(v) = stand.vorschlag.as_ref() else {
         return Ok(());
     };
-    if v.zielgewichte_bp.is_empty() && lage.topf.positionen().is_empty() {
+    if v.zielgewichte_bp.is_empty() && v.park.is_none() && lage.topf.positionen().is_empty() {
         return Ok(());
     }
     let phase = format!("Zweitmeinung zu {:?}", stand.id.berater());
@@ -159,7 +159,7 @@ fn bargeld(s: &Stand) -> bool {
     s.verwertbar
         && s.vorschlag
             .as_ref()
-            .is_some_and(|v| v.zielgewichte_bp.is_empty())
+            .is_some_and(|v| v.zielgewichte_bp.is_empty() && v.park.is_none())
 }
 
 struct Dialog<'a> {
@@ -270,7 +270,9 @@ fn plan(
     let v = s.vorschlag.as_ref().filter(|v| {
         s.zugestimmt
             || s.ersatzkauf
-            || (lage.topf.positionen().is_empty() && v.zielgewichte_bp.is_empty())
+            || (lage.topf.positionen().is_empty()
+                && v.zielgewichte_bp.is_empty()
+                && v.park.is_none())
     });
     let vor_valuta: Vec<_> = j
         .stand()

@@ -1,13 +1,13 @@
 klasse: Funktion
-zweck: Verkaufserlös vor Valuta für Käufe nutzen, freiwilliger Verkauf des damit Gekauften erst nach der Valuta (#311 H1a)
+zweck: Parkwert-ETF: Bargeld über der Reserve parken, höchstens 40 %, zählt nicht gegen die Werteanzahl (#311 H3)
 pfade:
 CHANGELOG.md
-crates/depot_dienst/src/depotseite.rs
-crates/depot_journal/src/konto.rs
-crates/depot_journal/src/stand.rs
+crates/depot_berater/src/frage.rs
+crates/depot_berater/tests/berater.rs
 crates/depot_journal/tests/konto.rs
-crates/depot_lage/src/depot.rs
-crates/depot_lage/tests/lage.rs
+crates/depot_kern/src/depot.rs
+crates/depot_kern/src/grenzen.rs
+crates/depot_kern/src/lib.rs
 crates/depot_regelwerk/src/entscheidung.rs
 crates/depot_regelwerk/tests/befunde.rs
 crates/depot_regelwerk/tests/regelwerk.rs
@@ -15,6 +15,8 @@ crates/depot_regelwerk/tests/rundung.rs
 crates/depot_sim/src/abstimmung.rs
 crates/depot_sim/src/ausgelassen.rs
 crates/depot_sim/src/lauf.rs
-crates/depot_sim/src/papier.rs
+crates/depot_sim/src/szenario.rs
 crates/depot_sim/src/vorschau.rs
+crates/depot_sim/tests/invarianten.rs
 crates/depot_sim/tests/papiertag.rs
+crates/depot_sim/tests/vorbereitung.rs

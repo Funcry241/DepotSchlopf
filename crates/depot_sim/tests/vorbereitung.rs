@@ -384,6 +384,7 @@ impl Berater for VorschauModell {
                 begruendung: std::collections::BTreeMap::new(),
                 limit_bp: std::collections::BTreeMap::new(),
                 stopp_bp: std::collections::BTreeMap::new(),
+                park: None,
             }),
         }
     }
