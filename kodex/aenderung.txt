@@ -1,8 +1,10 @@
 klasse: Funktion
-zweck: Parkwert zählt nicht zum Mindesteinsatz (#311 H3); Bausteine für P35, P37 und P43 mit Gegenproben
+zweck: Abstimmung nur bei offenem Punkt (#312-1, P35)
 pfade:
+CHANGELOG.md
+crates/depot_berater/tests/berater.rs
+crates/depot_sim/src/abstimmung.rs
 crates/depot_sim/src/lauf.rs
-crates/depot_sim/src/lib.rs
-crates/depot_sim/src/mindesteinsatz.rs
 crates/depot_sim/src/offener_punkt.rs
-crates/depot_sim/src/teilveto.rs
+crates/depot_sim/tests/invarianten.rs
+crates/depot_sim/tests/papiertag.rs

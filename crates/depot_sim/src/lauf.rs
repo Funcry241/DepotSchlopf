@@ -1107,6 +1107,10 @@ pub(crate) struct TopfAntwort {
 }
 
 impl TopfAntwort {
+    pub(crate) fn ersatzkauf_offen(&self) -> bool {
+        self.ersatzkauf
+    }
+
     pub(crate) fn verwerfe_ersatzkauf(&mut self) {
         if self.ersatzkauf {
             self.vorschlag = None;

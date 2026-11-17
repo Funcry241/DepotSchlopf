@@ -897,18 +897,13 @@ fn weltmodell_attrappen() -> (Attrappe, Attrappe) {
         10_000,
         800,
     ));
-    netz_dachs.antworten.push_back(claude("{\"einschaetzung\":\"Zahlen gut\",\"ziele\":[{\"isin\":\"DE0007164600\",\"gewicht_bp\":3000,\"begruendung\":\"Zahlen gut\"}],\"zustimmung_fremd\":true}",100,100,0));
-    netz_maus.antworten.push_back(gpt(
-        "{\"einschaetzung\":\"Abwarten\",\"ziele\":null,\"zustimmung_fremd\":true}",
-        100,
-        100,
-    ));
     (netz_dachs, netz_maus)
 }
 
 /// Ein ganzer Papiertag mit beiden KIs: Dachs (Claude) schlaegt SAP vor, Maus (GPT) stimmt zu,
-/// das Papierkonto kauft. Maus will nichts aendern, Dachs muss also nichts pruefen. Jede
-/// Antwort steht mit ihren Kosten im Journal.
+/// das Papierkonto kauft. Maus will nichts aendern, Dachs muss also nichts pruefen. Ohne
+/// offenen Punkt entfaellt die Abstimmung (#312-1). Jede Antwort steht mit ihren Kosten im
+/// Journal.
 #[test]
 fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
     use depot_journal::{KursBeleg, NachrichtBeleg};
@@ -991,15 +986,15 @@ fn papiertag_mit_dachs_und_maus() -> Result<(), String> {
             .first()
             .is_some_and(|(_, _, f)| !f.contains("Zahlen gut"))
     );
-    assert_eq!(dachs.netz().gesendet.len(), 2);
-    assert_eq!(maus.netz().gesendet.len(), 3);
+    assert_eq!(dachs.netz().gesendet.len(), 1);
+    assert_eq!(maus.netz().gesendet.len(), 2);
     let mit_kosten = j
         .stand()
         .begruendungen()
         .iter()
         .filter(|(_, _, t)| t.contains("Cent reserviert"))
         .count();
-    assert_eq!(mit_kosten, 5, "jede Antwort mit Kosten im Journal");
+    assert_eq!(mit_kosten, 3, "jede Antwort mit Kosten im Journal");
     pruefe_aufrufe_vor_abrechnung(j)?;
     pruefe_weltprognosen(j)?;
     assert!(!sperre.exists());
