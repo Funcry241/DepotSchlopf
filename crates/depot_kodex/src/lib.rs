@@ -41,6 +41,7 @@ pub mod lexer;
 pub mod manifest;
 pub mod pfade;
 pub mod pr;
+mod pruefdateien;
 pub mod quellscan;
 pub mod rust;
 pub mod toml;
@@ -77,15 +78,28 @@ pub fn pruefe(wurzel: &Path, basis: &str) -> Vec<String> {
     if diff.pfade.is_empty() {
         return pruefe_ohne_diff(wurzel);
     }
-    let deklaration = match std::fs::read_to_string(wurzel.join(DEKLARATION)) {
+    let basis_pfade = match git::baum_pfade(wurzel, &diff.basis) {
+        Ok(pfade) => pfade,
+        Err(e) => return vec![format!("Prüfdateien der Basis nicht bestimmbar: {e}")],
+    };
+    let dateien = match pruefdateien::waehle(&diff.pfade, &basis_pfade) {
+        Ok(dateien) => dateien,
+        Err(e) => return vec![e],
+    };
+    let pfad = dateien.deklaration;
+    let deklaration = match std::fs::read_to_string(wurzel.join(pfad)) {
         Ok(t) => match deklaration::lies(&t) {
             Ok(d) => d,
-            Err(e) => return vec![format!("{DEKLARATION}: {e}")],
+            Err(e) => return vec![format!("{pfad}: {e}")],
         },
-        Err(e) => return vec![format!("{DEKLARATION} fehlt: {e}")],
+        Err(e) => return vec![format!("{pfad} fehlt: {e}")],
     };
 
-    fehler.extend(deklaration::vergleiche(&deklaration, &diff.pfade));
+    fehler.extend(deklaration::vergleiche_mit_pfad(
+        &deklaration,
+        &diff.pfade,
+        pfad,
+    ));
     fehler.extend(pfade::pruefe_rollen(
         deklaration.klasse,
         &diff.pfade,
@@ -96,7 +110,11 @@ pub fn pruefe(wurzel: &Path, basis: &str) -> Vec<String> {
         deklaration.klasse,
         &diff.pfade,
     ));
-    fehler.extend(freigabe::pruefe(wurzel, &diff.pfade));
+    fehler.extend(freigabe::pruefe_mit_pfad(
+        wurzel,
+        &diff.pfade,
+        dateien.freigabe,
+    ));
     fehler.extend(quellscan::pruefe(wurzel));
     fehler.extend(geheimnis::pruefe(wurzel));
     fehler.extend(essenz::pruefe(wurzel));

@@ -31,13 +31,13 @@ const WERKZEUG: [&str; 8] = [
 ];
 
 pub fn rolle(pfad: &str) -> Rolle {
-    if pfad == crate::DEKLARATION {
+    if pfad == crate::DEKLARATION || crate::pruefdateien::ist_deklaration(pfad) {
         return Rolle::Deklaration;
     }
     if pfad == crate::FESTSCHREIBUNG {
         return Rolle::Festschreibung;
     }
-    if pfad == crate::freigabe::FREIGABE {
+    if pfad == crate::freigabe::FREIGABE || crate::pruefdateien::ist_freigabe(pfad) {
         return Rolle::Freigabe;
     }
     if pfad.starts_with("kodex/")

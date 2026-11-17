@@ -175,3 +175,29 @@ fn pruefe_pr_abschalten_abgelehnt() -> Result<(), String> {
     assert!(p.pruefe().is_err_and(|e| e.contains("ohne Grenzfreigabe")));
     Ok(())
 }
+
+#[test]
+fn freigabe_je_zweig_bindet_diff() -> Result<(), String> {
+    let p = Probe::neu()?;
+    let deklaration = "kodex/aenderungen/kodex-kommentar.txt";
+    let freigabepfad = "kodex/freigaben/kodex-kommentar.txt";
+    p.schreibe(QUELLTEXT, "// danach")?;
+    p.schreibe(FESTSCHREIBUNG, "kodex: danach")?;
+    p.schreibe(
+        deklaration,
+        &format!(
+            "klasse: KodexAenderung\nzweck: Gegenprobe\npfade:\n{QUELLTEXT}\n{FESTSCHREIBUNG}\n{freigabepfad}\n"
+        ),
+    )?;
+    let diff = depot_kodex::git::aenderungen(&p.wurzel, &p.basis)?;
+    let (datei, text) = freigabe::vorlage_fuer_diff(&p.wurzel, &diff)?;
+    assert_eq!(datei, freigabepfad);
+    p.schreibe(&datei, &text)?;
+    p.pruefe()?;
+    p.schreibe(QUELLTEXT, "// erneut geändert")?;
+    assert!(
+        p.pruefe()
+            .is_err_and(|e| e.contains("passt nicht zum Diff"))
+    );
+    Ok(())
+}
