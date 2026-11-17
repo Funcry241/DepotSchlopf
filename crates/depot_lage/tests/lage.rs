@@ -788,6 +788,7 @@ impl Berater for Antwortet {
             verwertbar: true,
             zustimmung: false,
             begruendung: "nein".into(),
+            abgelehnt: None,
         }
     }
 }
@@ -816,6 +817,7 @@ impl Berater for Verwirft {
             verwertbar: false,
             zustimmung: false,
             begruendung: "keine verwertbare Antwort: Limit".into(),
+            abgelehnt: None,
         }
     }
 }
@@ -852,6 +854,7 @@ impl Berater for OhneSchluessel {
             verwertbar: false,
             zustimmung: false,
             begruendung: "nicht angebunden".into(),
+            abgelehnt: None,
         }
     }
 }

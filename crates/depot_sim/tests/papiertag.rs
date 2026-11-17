@@ -565,6 +565,7 @@ fn kaeufer(d: Datum, sap: &Isin) -> (Drehbuch, Drehbuch) {
             verwertbar: true,
             zustimmung: true,
             begruendung: "passt".into(),
+            abgelehnt: None,
         },
     );
     (dachs, maus)
@@ -715,6 +716,7 @@ fn neues_kontingent_erlaubt_regulaere_beratung_nach_46_aufrufen() -> Result<(), 
                     verwertbar: true,
                     zustimmung: false,
                     begruendung: "abwarten".into(),
+                    abgelehnt: None,
                 },
             );
         }
@@ -1054,6 +1056,7 @@ impl depot_sim::Berater for Leser {
             verwertbar: true,
             zustimmung: false,
             begruendung: "nicht gefragt".into(),
+            abgelehnt: None,
         }
     }
 }
@@ -1797,6 +1800,7 @@ fn reduktion_pruefen(
             verwertbar: true,
             zustimmung: false,
             begruendung: "Veto zum Vorschlag".into(),
+            abgelehnt: None,
         },
     );
     let (_ort, j) = reduktionslauf(&reduktionsbestand(bestand)?, &mut dachs, &mut maus)?;
@@ -1940,6 +1944,7 @@ fn diskutant(wer: BeraterId, runden: Vec<Option<i64>>, veto: bool) -> Result<Dis
             // offen und die Abstimmung läuft (#312-1, P35).
             zustimmung: wer != BeraterId::Maus,
             begruendung: format!("Unabhängige Zweitmeinung {wer:?}"),
+            abgelehnt: None,
         },
     );
     Ok(Diskutant {
@@ -4013,5 +4018,81 @@ fn schattenzahlen_kauft_nach_positiver_reaktion_ohne_papierorder_aenderung() -> 
         }
     }
     assert_eq!(j.stand().auftraege(), vorher.as_slice());
+    Ok(())
+}
+
+/// P43 (#311 H4): Lehnt die Zweitmeinung nur Allianz ab, kauft Topf A trotzdem SAP. Das Journal
+/// nennt das Teilveto lesbar wie ein Veto, mit den abgelehnten Werten.
+#[test]
+fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let d = tag(5)?;
+    let mut dachs = Drehbuch::default();
+    let mut maus = Drehbuch::default();
+    dachs.antworten.insert(
+        d,
+        Antwort {
+            halten: std::collections::BTreeMap::new(),
+            prognose: None,
+            verwertbar: true,
+            einschaetzung: "SAP und Allianz".into(),
+            vorschlag: Some(Vorschlag {
+                erwartung_bp: std::collections::BTreeMap::new(),
+                limit_bp: std::collections::BTreeMap::new(),
+                stopp_bp: std::collections::BTreeMap::new(),
+                berater: BeraterId::Dachs,
+                zielgewichte_bp: [(sap.clone(), 2_000), (allianz.clone(), 2_000)]
+                    .into_iter()
+                    .collect(),
+                begruendung: [
+                    (sap.clone(), "beobachtet".to_string()),
+                    (allianz.clone(), "beobachtet".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+                park: None,
+            }),
+        },
+    );
+    maus.urteile.insert(
+        d,
+        Urteil {
+            verwertbar: true,
+            zustimmung: false,
+            begruendung: "Allianz zu teuer".into(),
+            abgelehnt: Some(vec![allianz.clone()]),
+        },
+    );
+    let mut j = ort.oeffnen()?;
+    belege(&mut j, 5, &[(&sap, "229", "230"), (&allianz, "350", "351")])?;
+    let mut k = konto(&ort, &j)?;
+    let aus = papiertag(
+        &mut j,
+        d,
+        &universum()?,
+        &start()?,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let isins: Vec<&Isin> = j
+        .stand()
+        .auftraege()
+        .iter()
+        .filter(|l| l.beleg.topf == TopfId::A)
+        .map(|l| &l.beleg.isin)
+        .collect();
+    assert_eq!(isins, vec![&sap]);
+    let zeile = format!("Topf A: Veto: nur {allianz}: Allianz zu teuer");
+    assert!(
+        j.stand()
+            .begruendungen()
+            .iter()
+            .any(|(_, wer, t)| wer == "Maus" && t.starts_with(&zeile)),
+        "{:?}",
+        j.stand().begruendungen()
+    );
     Ok(())
 }

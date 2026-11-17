@@ -21,6 +21,7 @@
     clippy::cast_sign_loss
 )]
 
+pub mod belegauswahl;
 pub mod betrieb;
 /// Das Anbieterprotokoll, fuer die Oberflaeche.
 pub use depot_journal::{abrufkontingent, anbieter, gespraeche, kurssperre};

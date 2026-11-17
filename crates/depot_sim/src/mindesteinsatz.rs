@@ -1,4 +1,4 @@
-//! Mindesteinsatz ohne Nachfrage (#312-3, P37). Vorarbeit für Maus, noch nicht eingebaut.
+//! Mindesteinsatz ohne Nachfrage (#312-3, P37).
 //!
 //! Die Frage nennt `unter_mindesteinsatz` als Pflichtfeld, eine zweite Anfrage gibt es nicht.
 //! Fehlt der Grund, trennt der Vermerk, wer den Plan unter das Minimum gebracht hat:
@@ -7,8 +7,8 @@
 //! - „fehlt, Regelwerk kürzte“: Die Zielgewichte der KI erreichen das Minimum, das Regelwerk hat
 //!   gekürzt (Budget, Anteil, Mindestorder). Das zählt nicht als Versäumnis.
 //!
-//! Einbau in `lauf::mindesteinsatz`: Nachfrage samt Reservierung `KiZweck::Abstimmung` entfernen,
-//! `status` mit [`vermerk`] bilden; `gehalten` über `entscheidung::ist_gewicht_bp`.
+//! Eingebaut in `lauf::mindesteinsatz`. Die frühere Nachfrage war als `KiZweck::Abstimmung`
+//! gebucht und verfälschte die Kosten je Zweck; sie entfällt.
 
 use std::collections::BTreeMap;
 
