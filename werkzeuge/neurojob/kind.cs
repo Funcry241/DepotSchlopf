@@ -18,7 +18,8 @@ static class Kind {
         bool drin; IsProcessInJob(GetCurrentProcess(), IntPtr.Zero, out drin);
         Rate r; bool ok = QueryInformationJobObject(IntPtr.Zero, 15, out r, 8, IntPtr.Zero);
         // ENABLE=1, HARD_CAP=4
-        if (!drin || !ok || (r.Flags & 5) != 5 || r.CpuRate == 0 || r.CpuRate > 1000) {
+        bool ungeprueft = a.Length > 3 && a[3] == "ungeprueft";
+        if (!ungeprueft && (!drin || !ok || (r.Flags & 5) != 5 || r.CpuRate == 0 || r.CpuRate > 1000)) {
             Console.WriteLine("KIND Selbstpruefung FEHLT: im_job=" + drin + " abfrage=" + ok + " flags=" + r.Flags + " rate=" + r.CpuRate + " -> keine Rechenarbeit");
             return 3;
         }

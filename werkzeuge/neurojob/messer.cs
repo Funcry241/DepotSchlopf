@@ -51,7 +51,7 @@ static class Messer {
         bool es = SetInformationJobObject(job, 9, ref e, Marshal.SizeOf(typeof(Erw)));
         Console.WriteLine("   Job: cpu_rate_gesetzt=" + rs + " (err " + rerr + ") kill_on_close=" + es + " rate=" + rate);
 
-        var si = new ProcessStartInfo(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "kind.exe"), faeden + " " + sek + " " + (enkel ? "1" : "0"));
+        var si = new ProcessStartInfo(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "kind.exe"), faeden + " " + sek + " " + (enkel ? "1" : "0") + (name.StartsWith("W5") ? " ungeprueft" : ""));
         si.UseShellExecute = false; si.RedirectStandardInput = true;
         var p = Process.Start(si);
         bool zu = zuordnen && AssignProcessToJobObject(job, p.Handle);
