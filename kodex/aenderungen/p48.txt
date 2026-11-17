@@ -1,8 +1,8 @@
 klasse: RefactorOnly
 zweck: Unveränderte Oberflächeninhalte aus separaten Dateien laden
 pfade:
-crates/depot_dienst/assets/app.js
-crates/depot_dienst/assets/stil.css
+crates/depot_dienst/src/assets/app.js
+crates/depot_dienst/src/assets/stil.css
 crates/depot_dienst/src/lib.rs
 crates/depot_dienst/src/seiten.rs
 crates/depot_dienst/tests/dienst.rs
