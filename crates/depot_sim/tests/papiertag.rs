@@ -4145,3 +4145,31 @@ fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// #325 Frage 53: Viele Meldungen zu einem gehaltenen Wert verdrängen heute die einzige
+/// Meldung zu einem anderen Wert der Liste. Es gibt keine Obergrenze je Wert, nur 20
+/// priorisierte Plätze insgesamt. Der Test hält den Ist-Stand fest; eine Kappung je Wert
+/// müsste ihn umdrehen.
+#[test]
+fn viele_meldungen_eines_werts_verdraengen_anderen_wert() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let mut topf = vorbedingung(Topf::neu(TopfId::A, Cent(100_000)), "Topf")?;
+    topf.setze_bestand(sap()?, 1);
+    vorbedingung(j.setze_topf(&topf), "Bestand")?;
+    let d = tag(5)?;
+    let abruf = some(Zeitpunkt::neu(d, 17, 0, 0), "Abruf")?;
+    // Die Siemens-Meldung ist neuer als alle SAP-Meldungen und trotzdem nicht dabei.
+    let zeit = some(Zeitpunkt::neu(d, 16, 0, 0), "Publikation")?;
+    let b = NachrichtBeleg::neu("rss-test", abruf, b"Quelle", zeit, "Siemens Gewinnwarnung")?;
+    vorbedingung(j.belege_nachricht(&b), "Nachricht")?;
+    let jetzt = belege_schlagzeilen(&mut j, 25, 0)?;
+    let n = depot_sim::papiertag::nachrichtenbelege_am(j.stand(), d, jetzt);
+    let sap = n
+        .iter()
+        .filter(|n| n.text().starts_with("SAP Meldung"))
+        .count();
+    let siemens = n.iter().filter(|n| n.text().starts_with("Siemens")).count();
+    assert_eq!((n.len(), sap, siemens), (20, 20, 0));
+    Ok(())
+}
