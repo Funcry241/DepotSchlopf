@@ -231,7 +231,7 @@ impl<N: Netz> KiBerater<N> {
         if erlaubnis.eingabe_passt(&inhalt) {
             ergaenzt
         } else {
-            frage
+            verdichtet
         }
     }
 
@@ -810,7 +810,8 @@ impl<N: Netz> KiBerater<N> {
         };
         let v = gelesen.verbrauch;
         spur.verbrauch = Some(v);
-        let ist = deckel.kosten_ist(v.token_ein, v.token_aus);
+        let ist =
+            deckel.kosten_mit_cache(v.token_ein, v.token_aus, v.cache_schreiben, v.cache_lesen);
         let kosten = kostenzeile(ist.map(|c| c.0), reserviert.0, v);
         let ueber = ueberschreitung(ist, reserviert, v, &deckel);
         let art = if ueber.is_some() {
@@ -833,7 +834,12 @@ impl<N: Netz> KiBerater<N> {
                 kosten,
             };
         }
-        self.abrechnung = erlaubnis.abrechnung(v.token_ein, v.token_aus);
+        self.abrechnung = erlaubnis.abrechnung_mit_cache(
+            v.token_ein,
+            v.token_aus,
+            v.cache_schreiben,
+            v.cache_lesen,
+        );
         if geheim {
             return Ergebnis {
                 text: Err(GEHEIMNIS.into()),
@@ -893,8 +899,8 @@ const GEHEIMNIS: &str = "Antwort enthielt den Schlüssel des Anbieters; verworfe
 fn kostenzeile(ist: Option<i64>, reserviert: i64, v: Verbrauch) -> String {
     let ist = ist.map_or_else(|| "?".into(), |c| c.to_string());
     format!(
-        "Kosten {ist} von {reserviert} Cent reserviert, {} Token rein, {} raus, {} Suchen",
-        v.token_ein, v.token_aus, v.suchen
+        "Kosten {ist} von {reserviert} Cent reserviert, {} Token rein (Cache: {} geschrieben, {} gelesen), {} raus, {} Suchen",
+        v.token_ein, v.cache_schreiben, v.cache_lesen, v.token_aus, v.suchen
     )
 }
 
@@ -944,8 +950,18 @@ impl<N: Netz> Berater for KiBerater<N> {
         lage: &Lage<'_>,
         stand: &depot_sim::abstimmung::AbstimmungsStand,
     ) -> depot_sim::abstimmung::AbstimmungsAntwort {
+        self.abstimmen_mit_bilanz(erlaubnis, lage, stand, &[])
+    }
+
+    fn abstimmen_mit_bilanz(
+        &mut self,
+        erlaubnis: AufrufErlaubnis,
+        lage: &Lage<'_>,
+        stand: &depot_sim::abstimmung::AbstimmungsStand,
+        bilanz: &[(BeraterId, depot_journal::Auswertung)],
+    ) -> depot_sim::abstimmung::AbstimmungsAntwort {
         let system = frage::system(self.wer, &self.grenzen);
-        let f = frage::abstimmungs_frage(lage, &self.universum, stand);
+        let f = frage::abstimmungs_frage_mit_bilanz(lage, &self.universum, stand, bilanz);
         let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
         self.mindesteinsatz_grund = None;
         let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Abstimmung, None);

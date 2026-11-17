@@ -40,7 +40,7 @@ fn bestaetigte_minderkosten_bleiben_ueber_neustart_erhalten() -> Result<(), Stri
     let erlaubnis = buch
         .reserviere(BeraterId::Dachs, tag(8)?, 1)
         .map_err(|erlaubnis| format!("{erlaubnis:?}"))?;
-    assert_eq!(erlaubnis.buchung().reserviert, Cent(24));
+    assert_eq!(erlaubnis.buchung().reserviert, Cent(26));
     let abrechnung = erlaubnis.abrechnung(100, 100).ok_or("Abrechnung")?;
     assert_eq!(abrechnung.kosten(), Cent(1));
     buch.rechne_ki_ab(&abrechnung)
@@ -74,20 +74,20 @@ fn fehlende_oder_unplausible_abrechnung_bleibt_voll_gebucht() -> Result<(), Stri
     let buch = offen(&pfad)?;
     assert_eq!(
         buch.stand().ki().buchungen().first().map(|b| b.reserviert),
-        Some(Cent(24))
+        Some(Cent(26))
     );
     Ok(())
 }
 #[test]
 fn journal_lehnt_falsche_und_doppelte_abrechnung_ab() -> Result<(), String> {
     let hash = depot_ki::grenzabdruck();
-    for text in ["0;24;-1", "0;24;25", "1;24;1", "0;12;1", "+0;24;1"] {
+    for text in ["0;26;-1", "0;26;27", "1;26;1", "0;12;1", "+0;26;1"] {
         let pfad = ort()?;
         schreibe(
             &pfad,
             &[
                 (Art::KiGrenzen, &hash),
-                (Art::Ki, "Dachs;2026-11-08;1;24"),
+                (Art::Ki, "Dachs;2026-11-08;1;26"),
                 (Art::KiAbrechnung, text),
             ],
         )?;
@@ -101,9 +101,9 @@ fn journal_lehnt_falsche_und_doppelte_abrechnung_ab() -> Result<(), String> {
         &pfad,
         &[
             (Art::KiGrenzen, &hash),
-            (Art::Ki, "Dachs;2026-11-08;1;24"),
-            (Art::KiAbrechnung, "0;24;1"),
-            (Art::KiAbrechnung, "0;24;1"),
+            (Art::Ki, "Dachs;2026-11-08;1;26"),
+            (Art::KiAbrechnung, "0;26;1"),
+            (Art::KiAbrechnung, "0;26;1"),
         ],
     )?;
     assert!(matches!(
@@ -209,7 +209,7 @@ fn vorbereitungen_verbrauchen_nicht_die_kosten_der_restlichen_erstmeinungen() ->
     let pfad = ort()?;
     let datum = tag(8)?;
     let tage = depot_ki::handelstage_rest(datum);
-    let reserve = i64::from(tage).saturating_mul(24);
+    let reserve = i64::from(tage).saturating_mul(26);
     let alt = format!("Dachs;2026-11-01;1;{}", 2000_i64.saturating_sub(reserve));
     schreibe(&pfad, &[(Art::KiGrenzen, &"0".repeat(64)), (Art::Ki, &alt)])?;
     let mut buch = offen(&pfad)?;

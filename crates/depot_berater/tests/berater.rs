@@ -482,7 +482,7 @@ fn dachs_schlaegt_vor_und_die_kosten_stehen_dabei() -> Result<(), String> {
     assert!(
         antwort
             .einschaetzung
-            .contains("Kosten 6 von 24 Cent reserviert"),
+            .contains("Kosten 6 von 26 Cent reserviert"),
         "{}",
         antwort.einschaetzung
     );
@@ -537,7 +537,7 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
     assert!(u.zustimmung, "{u:?}");
     // 10.000 x 1 $ + 800 x 5 $ je Mio. = 1,4 Cent, aufgerundet 2.
-    assert!(u.begruendung.contains("Kosten 2 von 12 Cent"), "{u:?}");
+    assert!(u.begruendung.contains("Kosten 2 von 13 Cent"), "{u:?}");
     let e = ort.erlaubnis(BeraterId::Maus, 1)?;
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
     assert!(!u.zustimmung, "\"ja\" ist keine Zustimmung: {u:?}");
@@ -564,7 +564,7 @@ fn maus_prueft_mit_gpt_und_nur_true_ist_zustimmung() -> Result<(), String> {
 fn kosten_ueber_der_reservierung_sperren_alle_kis() -> Result<(), String> {
     let mut ort = Ort::neu()?;
     let mut netz = Attrappe::default();
-    // 200.000 x 2 $ + 1.500 x 10 $ = 41,5 Cent, aufgerundet 42 > 24 reserviert.
+    // 200.000 x 2 $ + 1.500 x 10 $ = 41,5 Cent, aufgerundet 42 > 26 reserviert.
     netz.antworten
         .push_back(claude(VORSCHLAG, 200_000, 1_500, 0));
     let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
@@ -572,7 +572,7 @@ fn kosten_ueber_der_reservierung_sperren_alle_kis() -> Result<(), String> {
     let antwort = mit_lage(|l| dachs.vorschlagen(e, l))?;
     assert!(antwort.vorschlag.is_none(), "{antwort:?}");
     assert!(
-        antwort.einschaetzung.contains("42 Cent über 24"),
+        antwort.einschaetzung.contains("42 Cent über 26"),
         "{antwort:?}"
     );
     assert!(ort.sperre().exists(), "Sperrdatei geschrieben");
@@ -1043,8 +1043,8 @@ fn pruefe_weltprognosen(j: &Journal) -> Result<(), String> {
     assert_eq!(
         prognosen,
         [
-            (BeraterId::Dachs, Prognoserichtung::Steigt, 3, ausgangskurs),
             (BeraterId::Maus, Prognoserichtung::Faellt, 3, ausgangskurs),
+            (BeraterId::Dachs, Prognoserichtung::Steigt, 3, ausgangskurs),
         ]
     );
     let erste_pruefung = j
@@ -1180,7 +1180,7 @@ fn verworfene_antwort_wird_trotzdem_auf_kosten_geprueft() -> Result<(), String> 
     let a = mit_lage(|l| dachs.vorschlagen(e, l))?;
     assert!(a.vorschlag.is_none(), "{a:?}");
     assert!(!format!("{a:?}").contains(SCHLUESSEL), "{a:?}");
-    assert!(a.einschaetzung.contains("42 Cent über 24"), "{a:?}");
+    assert!(a.einschaetzung.contains("42 Cent über 26"), "{a:?}");
     assert!(ort.sperre().exists(), "Sperrdatei geschrieben");
     // Verbrauch unlesbar: sperren.
     let mut ort = Ort::neu()?;
@@ -1677,7 +1677,7 @@ fn schluessel_hinter_escapes_gelangt_nie_ins_ergebnis() -> Result<(), String> {
             "{a:?}"
         );
         assert!(a.einschaetzung.contains("Schlüssel des Anbieters"), "{a:?}");
-        assert!(a.einschaetzung.contains("Kosten 1 von 24"), "{a:?}");
+        assert!(a.einschaetzung.contains("Kosten 1 von 26"), "{a:?}");
         let tag = some(
             uhr().and_then(Zeitpunkt::in_frankfurt).map(|(d, ..)| d),
             "Frankfurter Tag",
@@ -1773,7 +1773,7 @@ fn mehrdeutiger_oder_zusaetzlicher_verbrauch_ist_keine_kostenabrechnung() -> Res
         ),
         basis.replace(
             "\"cache_creation_input_tokens\":0",
-            "\"cache_creation_input_tokens\":100",
+            "\"cache_creation_input_tokens\":-1",
         ),
         basis.replace(
             "\"cache_read_input_tokens\":0",
@@ -1787,6 +1787,70 @@ fn mehrdeutiger_oder_zusaetzlicher_verbrauch_ist_keine_kostenabrechnung() -> Res
             "{text}"
         );
     }
+    Ok(())
+}
+
+#[test]
+fn anthropic_cache_wird_gesendet_und_gebucht() -> Result<(), String> {
+    for (feld, kosten) in [
+        ("cache_creation_input_tokens", 8),
+        ("cache_read_input_tokens", 1),
+    ] {
+        let mut ort = Ort::neu()?;
+        let mut netz = Attrappe::default();
+        let antwort = vorbedingung(claude(VORSCHLAG, 100, 100, 0), "Anbieterantwort")?;
+        let text = String::from_utf8(antwort.inhalt).map_err(|e| e.to_string())?;
+        netz.antworten.push_back(ok(
+            &text.replace(&format!("\"{feld}\":0"), &format!("\"{feld}\":30000"))
+        ));
+        let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+        let erlaubnis = ort.erlaubnis(BeraterId::Dachs, 1)?;
+        let _ = mit_lage(|lage| dachs.vorschlagen(erlaubnis, lage))?;
+        assert_eq!(dachs.abrechnung().map(|a| a.kosten()), Some(Cent(kosten)));
+        assert!(!ort.sperre().exists());
+        let (_, _, frage) = some(dachs.netz().gesendet.first(), "gesendet")?;
+        assert!(frage.contains(r#""cache_control":{"type":"ephemeral"}"#));
+    }
+    Ok(())
+}
+
+#[test]
+fn cache_summe_ueber_deckel_sperrt() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let mut netz = Attrappe::default();
+    let antwort = vorbedingung(claude(VORSCHLAG, 10000, 100, 0), "Anbieterantwort")?;
+    let text = String::from_utf8(antwort.inhalt).map_err(|e| e.to_string())?;
+    netz.antworten.push_back(ok(&text.replace(
+        r#""cache_read_input_tokens":0"#,
+        r#""cache_read_input_tokens":31000"#,
+    )));
+    let mut dachs = berater(&ort, BeraterId::Dachs, netz)?;
+    let erlaubnis = ort.erlaubnis(BeraterId::Dachs, 1)?;
+    let antwort = mit_lage(|lage| dachs.vorschlagen(erlaubnis, lage))?;
+    assert!(antwort.einschaetzung.contains("41000 Eingabe-Token"));
+    assert!(ort.sperre().exists());
+    assert!(dachs.abrechnung().is_none());
+    Ok(())
+}
+
+#[test]
+fn openai_cached_tokens() -> Result<(), String> {
+    let json = br#"{"usage":{"input_tokens":30000,"output_tokens":0,"input_tokens_details":{"cached_tokens":20000}}}"#;
+    let gelesen = depot_berater::Anbieter::OpenAi.lies(json)?;
+    let v = gelesen.verbrauch;
+    assert_eq!(
+        (v.token_ein, v.cache_lesen, v.cache_schreiben),
+        (30_000, 20_000, 0)
+    );
+    assert_eq!(
+        depot_ki::KiDeckel::standard(BeraterId::Maus).kosten_mit_cache(
+            v.token_ein,
+            v.token_aus,
+            v.cache_schreiben,
+            v.cache_lesen
+        ),
+        Some(Cent(2))
+    );
     Ok(())
 }
 

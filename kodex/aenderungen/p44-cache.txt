@@ -1,0 +1,19 @@
+klasse: FestschreibungAenderung
+zweck: Gemeinsamen Tagesblock zwischenspeichern und tatsächliche Anbieterpreise buchen
+pfade:
+CHANGELOG.md
+crates/depot_berater/src/anbieter.rs
+crates/depot_berater/src/frage.rs
+crates/depot_berater/src/ki.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_journal/src/kasse.rs
+crates/depot_journal/tests/abrechnung.rs
+crates/depot_journal/tests/budget.rs
+crates/depot_ki/src/budget.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/szenario.rs
+crates/depot_sim/src/vorschau.rs
+crates/depot_sim/tests/papiertag.rs
+kodex/festschreibung.txt
+kodex/freigaben/p44-cache.txt

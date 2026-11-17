@@ -13,31 +13,41 @@ pub use depot_kern::Datum;
 /// gezaehlt; das ueberschaetzt die Kosten, solange der Euro mehr wert ist als der Dollar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Preise {
-    cent_je_mio_ein: i64,
-    cent_je_mio_aus: i64,
+    eingabe: i64,
+    ausgabe: i64,
+    cache_schreiben: i64,
+    cache_lesen: i64,
 }
 
 impl Preise {
     /// `None`, wenn ein Preis nicht positiv ist.
-    pub(crate) fn neu(cent_je_mio_ein: i64, cent_je_mio_aus: i64) -> Option<Preise> {
-        (cent_je_mio_ein > 0 && cent_je_mio_aus > 0).then_some(Preise {
-            cent_je_mio_ein,
-            cent_je_mio_aus,
-        })
+    pub(crate) fn neu(
+        eingabe: i64,
+        ausgabe: i64,
+        cache_schreiben: i64,
+        cache_lesen: i64,
+    ) -> Option<Preise> {
+        (ausgabe > 0 && cache_lesen > 0 && eingabe >= cache_lesen && cache_schreiben >= eingabe)
+            .then_some(Self {
+                eingabe,
+                ausgabe,
+                cache_schreiben,
+                cache_lesen,
+            })
     }
 
     pub fn cent_je_mio_ein(&self) -> i64 {
-        self.cent_je_mio_ein
+        self.eingabe
     }
 
     pub fn cent_je_mio_aus(&self) -> i64 {
-        self.cent_je_mio_aus
+        self.ausgabe
     }
 
     /// Was so viele Token zu diesen Preisen kosten, aufgerundet auf ganze Cent (R21).
     pub fn kosten(&self, token_ein: u32, token_aus: u32) -> Option<Cent> {
-        let ein = i64::from(token_ein).checked_mul(self.cent_je_mio_ein)?;
-        let aus = i64::from(token_aus).checked_mul(self.cent_je_mio_aus)?;
+        let ein = i64::from(token_ein).checked_mul(self.eingabe)?;
+        let aus = i64::from(token_aus).checked_mul(self.ausgabe)?;
         let cent = ein
             .checked_add(aus)?
             .checked_add(999_999)?
@@ -64,18 +74,22 @@ impl KiDeckel {
     /// - Dachs = Claude Sonnet 5.5: 40.000 Token rein, 16.000 raus, 2 $ / 10 $ je Mio.
     /// - Maus = GPT-6.1 Terra: 40.000 Token rein, 16.000 raus, 1 $ / 5 $ je Mio.
     pub fn standard(berater: BeraterId) -> KiDeckel {
-        let (max_token_ein, max_token_aus, ein, aus) = match berater {
-            BeraterId::Dachs => (40_000, 16_000, 200, 1_000),
-            BeraterId::Maus => (40_000, 16_000, 100, 500),
+        let (ein, aus, schreiben, lesen) = match berater {
+            // https://platform.claude.com/docs/en/about-claude/pricing (17.11.2026), 5 Minuten.
+            BeraterId::Dachs => (200, 1_000, 250, 10),
+            // https://developers.openai.com/api/docs/models/gpt-6.1-terra (17.11.2026), 30 Minuten.
+            BeraterId::Maus => (100, 500, 125, 5),
         };
         KiDeckel {
-            max_token_ein,
-            max_token_aus,
+            max_token_ein: 40_000,
+            max_token_aus: 16_000,
             // Ein ungueltiger Festwert sperrt jeden Aufruf: Mit Hoechstpreisen laesst sich keine
             // Reservierung berechnen, `pruefe` meldet `Rechenfehler` (fail-closed).
-            preise: Preise::neu(ein, aus).unwrap_or(Preise {
-                cent_je_mio_ein: i64::MAX,
-                cent_je_mio_aus: i64::MAX,
+            preise: Preise::neu(ein, aus, schreiben, lesen).unwrap_or(Preise {
+                eingabe: i64::MAX,
+                ausgabe: i64::MAX,
+                cache_schreiben: i64::MAX,
+                cache_lesen: i64::MAX,
             }),
         }
     }
@@ -100,21 +114,40 @@ impl KiDeckel {
         self.preise
     }
 
-    /// Was ein Aufruf schlimmstenfalls kostet, aufgerundet auf ganze Cent.
+    /// Was ein Aufruf schlimmstenfalls kostet, wenn alle Eingabetoken geschrieben werden.
     pub fn hoechstkosten(&self) -> Option<Cent> {
-        self.kosten_ist(u64::from(self.max_token_ein), u64::from(self.max_token_aus))
+        let ein = u64::from(self.max_token_ein);
+        self.kosten_mit_cache(ein, u64::from(self.max_token_aus), ein, 0)
     }
 
-    /// Was ein Aufruf nach Angabe des Anbieters gekostet hat, aufgerundet auf ganze Cent.
+    /// Was ein Aufruf ohne Cache gekostet hat, aufgerundet auf ganze Cent.
     pub fn kosten_ist(&self, token_ein: u64, token_aus: u64) -> Option<Cent> {
-        let ein = i64::try_from(token_ein)
-            .ok()?
-            .checked_mul(self.preise.cent_je_mio_ein)?;
-        let aus = i64::try_from(token_aus)
-            .ok()?
-            .checked_mul(self.preise.cent_je_mio_aus)?;
-        let mio = ein.checked_add(aus)?;
-        Some(Cent(mio.checked_add(999_999)?.checked_div(1_000_000)?))
+        self.kosten_mit_cache(token_ein, token_aus, 0, 0)
+    }
+
+    /// Die Cache-Mengen sind disjunkte Anteile der gesamten Eingabe.
+    pub fn kosten_mit_cache(
+        &self,
+        token_ein: u64,
+        token_aus: u64,
+        cache_schreiben: u64,
+        cache_lesen: u64,
+    ) -> Option<Cent> {
+        let voll = token_ein
+            .checked_sub(cache_schreiben)?
+            .checked_sub(cache_lesen)?;
+        let anteile = [
+            (voll, self.preise.eingabe),
+            (token_aus, self.preise.ausgabe),
+            (cache_schreiben, self.preise.cache_schreiben),
+            (cache_lesen, self.preise.cache_lesen),
+        ];
+        let kosten = anteile
+            .into_iter()
+            .try_fold(0_i64, |summe, (menge, preis)| {
+                summe.checked_add(i64::try_from(menge).ok()?.checked_mul(preis)?)
+            })?;
+        Some(Cent(kosten.checked_add(999_999)?.checked_div(1_000_000)?))
     }
 }
 
@@ -313,7 +346,7 @@ mod tests {
             let d = KiDeckel::standard(b);
             let p = d.preise;
             assert_eq!(
-                Preise::neu(p.cent_je_mio_ein, p.cent_je_mio_aus),
+                Preise::neu(p.eingabe, p.ausgabe, p.cache_schreiben, p.cache_lesen),
                 Some(p),
                 "{b:?}"
             );
@@ -325,10 +358,10 @@ mod tests {
     /// 1·K02: Ein Preis, der nicht positiv ist, entsteht nicht.
     #[test]
     fn preise_sind_positiv() {
-        assert!(Preise::neu(-1_000_000, 2_000).is_none());
-        assert!(Preise::neu(400, -1).is_none());
-        assert!(Preise::neu(0, 1).is_none());
-        assert!(Preise::neu(1, 1).is_some());
+        assert!(Preise::neu(-1_000_000, 2_000, 1, 1).is_none());
+        assert!(Preise::neu(400, -1, 500, 20).is_none());
+        assert!(Preise::neu(0, 1, 1, 1).is_none());
+        assert!(Preise::neu(1, 1, 1, 1).is_some());
     }
 
     /// Ein ungueltiger Festwert sperrt: Mit den Ersatzpreisen gibt es keine Reservierung.
@@ -336,8 +369,10 @@ mod tests {
     fn ersatzpreise_sperren() -> Result<(), String> {
         let mut d = KiDeckel::standard(MAUS);
         d.preise = Preise {
-            cent_je_mio_ein: i64::MAX,
-            cent_je_mio_aus: i64::MAX,
+            eingabe: i64::MAX,
+            ausgabe: i64::MAX,
+            cache_schreiben: i64::MAX,
+            cache_lesen: i64::MAX,
         };
         assert_eq!(
             pruefe(&KiGrenzen::standard(), &d, &[], MAUS, tag(5)?, 1),
@@ -389,9 +424,9 @@ mod tests {
         assert!(g.kosten_je_monat.0 <= 2_000);
         assert_eq!(
             KiDeckel::standard(BeraterId::Dachs).hoechstkosten(),
-            Some(Cent(24))
+            Some(Cent(26))
         );
-        assert_eq!(KiDeckel::standard(MAUS).hoechstkosten(), Some(Cent(12)));
+        assert_eq!(KiDeckel::standard(MAUS).hoechstkosten(), Some(Cent(13)));
     }
 
     /// Tatsaechliche Kosten: aufgerundet.

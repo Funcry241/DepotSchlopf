@@ -27,6 +27,8 @@ pub enum Anbieter {
 pub struct Verbrauch {
     pub token_ein: u64,
     pub token_aus: u64,
+    pub cache_schreiben: u64,
+    pub cache_lesen: u64,
     pub suchen: u64,
 }
 
@@ -113,7 +115,7 @@ impl Anbieter {
                 zitiere(self.modell()),
                 deckel.max_token_aus(),
                 zitiere(system),
-                zitiere(frage)
+                anthropic_inhalt(frage)
             ),
             Anbieter::OpenAi => format!(
                 concat!(
@@ -149,6 +151,18 @@ impl Anbieter {
     }
 }
 
+fn anthropic_inhalt(frage: &str) -> String {
+    let Some((tag, rest)) = frage.split_once(crate::frage::TOPFBLOCK) else {
+        return zitiere(frage);
+    };
+    let rest = format!("{}{rest}", crate::frage::TOPFBLOCK);
+    format!(
+        r#"[{{"type":"text","text":{},"cache_control":{{"type":"ephemeral"}}}},{{"type":"text","text":{}}}]"#,
+        zitiere(tag),
+        zitiere(&rest)
+    )
+}
+
 fn zahl(w: &Json, pfad: &[&str]) -> Option<u64> {
     let mut x = w;
     for p in pfad {
@@ -167,16 +181,19 @@ fn optionale_anzahl(w: &Json, feld: &str) -> Result<u64, String> {
 fn lies_anthropic(w: &Json) -> Result<Gelesen, String> {
     let usage = w.feld("usage").ok_or("Antwort ohne Verbrauch")?;
     let ein = zahl(usage, &["input_tokens"]).ok_or("Verbrauch ohne input_tokens")?;
-    // Cache-Erstellung wird nicht angefordert. Unerwartete Zusatzabrechnung bleibt unklar.
-    if optionale_anzahl(usage, "cache_creation_input_tokens")? != 0 {
-        return Err("Unerwartete Cache-Abrechnung; Höchstkosten bleiben reserviert".into());
-    }
-    let cache = optionale_anzahl(usage, "cache_read_input_tokens")?;
+    let cache_schreiben = optionale_anzahl(usage, "cache_creation_input_tokens")?;
+    let cache_lesen = optionale_anzahl(usage, "cache_read_input_tokens")?;
+    let token_ein = ein
+        .checked_add(cache_schreiben)
+        .and_then(|summe| summe.checked_add(cache_lesen))
+        .ok_or("Eingabe-Token überlaufen")?;
     let aus = zahl(usage, &["output_tokens"]).ok_or("Verbrauch ohne output_tokens")?;
     let suchen = zahl(usage, &["server_tool_use", "web_search_requests"]).unwrap_or(0);
     let verbrauch = Verbrauch {
-        token_ein: ein.saturating_add(cache),
+        token_ein,
         token_aus: aus,
+        cache_schreiben,
+        cache_lesen,
         suchen,
     };
     let grund = w.feld("stop_reason").and_then(Json::text).unwrap_or("");
@@ -204,6 +221,22 @@ fn lies_openai(w: &Json) -> Result<Gelesen, String> {
     let usage = w.feld("usage").ok_or("Antwort ohne Verbrauch")?;
     let ein = zahl(usage, &["input_tokens"]).ok_or("Verbrauch ohne input_tokens")?;
     let aus = zahl(usage, &["output_tokens"]).ok_or("Verbrauch ohne output_tokens")?;
+    let mut cache_schreiben = 0;
+    let mut cache_lesen = 0;
+    if let Some(details) = usage.feld("input_tokens_details") {
+        if details.doppelte_felder() || !matches!(details, Json::Objekt(_)) {
+            return Err("Mehrdeutige OpenAI-Eingabeabrechnung".into());
+        }
+        cache_schreiben = optionale_anzahl(details, "cache_write_tokens")?;
+        cache_lesen = optionale_anzahl(details, "cached_tokens")?;
+        if ein
+            .checked_sub(cache_schreiben)
+            .and_then(|n| n.checked_sub(cache_lesen))
+            .is_none()
+        {
+            return Err("Cache-Anteile sind größer als die Eingabe".into());
+        }
+    }
     let ausgabe = w.feld("output").and_then(Json::liste).unwrap_or(&[]);
     let suchen = ausgabe
         .iter()
@@ -212,6 +245,8 @@ fn lies_openai(w: &Json) -> Result<Gelesen, String> {
     let verbrauch = Verbrauch {
         token_ein: ein,
         token_aus: aus,
+        cache_schreiben,
+        cache_lesen,
         suchen: u64::try_from(suchen).unwrap_or(u64::MAX),
     };
     let status = w.feld("status").and_then(Json::text).unwrap_or("");
