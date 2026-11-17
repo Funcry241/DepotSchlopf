@@ -14,7 +14,47 @@ permissions:
   contents: read
 
 jobs:
+  kodex-nachweis:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    outputs:
+      wiederverwendet: ${{ steps.ergebnis.outputs.wiederverwendet }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Geprüften Export für identischen Baum suchen
+        id: suche
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -B .github/scripts/kodex_nachweis.py export
+      - name: Geprüften Assistenten-Export übernehmen
+        id: export
+        if: steps.suche.outputs.lauf != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: assistant_export_latest
+          path: ${{ runner.temp }}/kodex-export/assistant_export_latest.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Lauf dokumentieren
+        id: ergebnis
+        if: steps.export.outcome == 'success'
+        env:
+          PR_LAUF: ${{ steps.suche.outputs.lauf }}
+        run: |
+          printf 'Vollständige Prüfung und Export aus PR-Lauf [%s](%s/%s/actions/runs/%s) übernommen. Die ZIP-Datei nennt den geprüften PR-Commit.\n' \
+            "$PR_LAUF" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$PR_LAUF" >> "$GITHUB_STEP_SUMMARY"
+          echo 'wiederverwendet=ja' >> "$GITHUB_OUTPUT"
+
   windows-update-filter:
+    needs: kodex-nachweis
+    if: ${{ !cancelled() && needs.kodex-nachweis.outputs.wiederverwendet != 'ja' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -24,7 +64,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Gegenproben für den Windows-Update-Filter
-        run: python -B .github/scripts/test_windows_update.py
+        run: |
+          python -B .github/scripts/test_windows_update.py
+          python -B .github/scripts/test_kodex_nachweis.py
       - name: Windows-Update-Gegenprobe einplanen
         id: filter
         env:
@@ -34,6 +76,8 @@ jobs:
         run: python -B .github/scripts/windows_update.py filter "$EREIGNIS" "$BASIS" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
   kodex-linux-gate:
+    needs: kodex-nachweis
+    if: ${{ !cancelled() && needs.kodex-nachweis.outputs.wiederverwendet != 'ja' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -43,13 +87,9 @@ jobs:
       - name: Rust-Werkzeugkette aus rust-toolchain.toml
         run: rustup toolchain install
       - name: Gate und Assistenten-Export (wie run.cmd)
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASIS="origin/${{ github.base_ref }}"
-          else
-            BASIS="${{ github.event.before }}"
-          fi
-          cargo run --locked -p depot_lauf -- alles --basis "$BASIS"
+        env:
+          BASIS: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: cargo run --locked -p depot_lauf -- alles --basis "$BASIS"
       - name: Assistenten-Export bereitstellen
         if: always()
         uses: actions/upload-artifact@v4
@@ -60,6 +100,8 @@ jobs:
           retention-days: 30
 
   kodex-linux-update:
+    needs: kodex-nachweis
+    if: ${{ !cancelled() && needs.kodex-nachweis.outputs.wiederverwendet != 'ja' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -107,11 +149,15 @@ jobs:
 
   kodex:
     # Der bisherige Linux-Check bleibt das gemeinsame Ergebnis beider Prüfungen.
-    needs: [kodex-linux-gate, kodex-linux-update]
+    needs: [kodex-nachweis, kodex-linux-gate, kodex-linux-update]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Identischen grünen PR-Lauf übernehmen
+        if: needs.kodex-nachweis.outputs.wiederverwendet == 'ja'
+        run: echo "Linux-Prüfungen aus vollständig grünem PR-Lauf übernommen."
       - name: Beide Linux-Prüfungen bestätigen
+        if: needs.kodex-nachweis.outputs.wiederverwendet != 'ja'
         env:
           GATE: ${{ needs.kodex-linux-gate.result }}
           UPDATE: ${{ needs.kodex-linux-update.result }}
@@ -120,6 +166,8 @@ jobs:
           test "$GATE" = success && test "$UPDATE" = success
 
   kodex-windows-gate:
+    needs: kodex-nachweis
+    if: ${{ !cancelled() && needs.kodex-nachweis.outputs.wiederverwendet != 'ja' }}
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -137,13 +185,10 @@ jobs:
         run: rustup toolchain install
       - name: Gate und Assistenten-Export unter Windows
         shell: pwsh
+        env:
+          BASIS: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if ("${{ github.event_name }}" -eq "pull_request") {
-            $basis = "origin/${{ github.base_ref }}"
-          } else {
-            $basis = "${{ github.event.before }}"
-          }
-          cargo run --locked -p depot_lauf -- alles --basis $basis
+          cargo run --locked -p depot_lauf -- alles --basis "$env:BASIS"
           exit $LASTEXITCODE
       - name: Windows-Assistenten-Export bereitstellen
         if: always()
@@ -213,15 +258,41 @@ jobs:
 
   kodex-windows:
     # Der bisherige Windows-Check bleibt das gemeinsame Ergebnis beider Prüfungen.
-    needs: [windows-update-filter, kodex-windows-gate, kodex-windows-update]
+    needs: [kodex-nachweis, windows-update-filter, kodex-windows-gate, kodex-windows-update]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Identischen grünen PR-Lauf übernehmen
+        if: needs.kodex-nachweis.outputs.wiederverwendet == 'ja'
+        run: echo "Windows-Prüfungen aus vollständig grünem PR-Lauf übernommen."
       - uses: actions/checkout@v4
+        if: needs.kodex-nachweis.outputs.wiederverwendet != 'ja'
       - name: Beide Windows-Prüfungen bestätigen
+        if: needs.kodex-nachweis.outputs.wiederverwendet != 'ja'
         env:
           FILTER: ${{ needs.windows-update-filter.result }}
           UPDATE_NOETIG: ${{ needs.windows-update-filter.outputs.update }}
           GATE: ${{ needs.kodex-windows-gate.result }}
           UPDATE: ${{ needs.kodex-windows-update.result }}
         run: python -B .github/scripts/windows_update.py sammelcheck
+
+  kodex-pr-nachweis:
+    needs: [kodex, kodex-windows]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Geprüften Baum und seine Vergleichsbasis binden
+        id: nachweis
+        run: python -B .github/scripts/kodex_nachweis.py beleg
+      - name: Geprüften Baum vermerken
+        if: steps.nachweis.outputs.name != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.nachweis.outputs.name }}
+          path: ${{ runner.temp }}/kodex-nachweis.txt
+          if-no-files-found: error
+          retention-days: 30
