@@ -776,7 +776,9 @@ fn updatesuche_zeigt_warteschlange_und_update_sperre_getrennt() -> Result<(), St
     d.sperre().update_meldung = Some((true, "Probe fehlgeschlagen".into()));
     let fehlgeschlagen = get(&d, "/teil/update")?;
     assert!(fehlgeschlagen.contains("Der Start der neuen Version konnte nicht bestätigt werden."));
-    assert!(fehlgeschlagen.contains("Falls es geschlossen ist, starte DepotSchlopf.cmd einmal neu."));
+    assert!(
+        fehlgeschlagen.contains("Falls es geschlossen ist, starte DepotSchlopf.cmd einmal neu.")
+    );
 
     fs::write(rueckfall::offen_pfad(&wurzel), "unlesbarer Stand").map_err(|e| e.to_string())?;
     assert!(get(&d, "/teil/live")?.contains("Der offene Update-Stand lässt sich nicht prüfen."));

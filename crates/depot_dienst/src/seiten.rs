@@ -1259,7 +1259,10 @@ impl UpdateSperre {
                 "offen",
                 "Update eingespielt. Der Dienst startet neu. Neustart noch nicht bestätigt.",
             ),
-            Self::Probe => ("offen", "Die neue Version läuft zur Probe. Die Bestätigung steht aus."),
+            Self::Probe => (
+                "offen",
+                "Die neue Version läuft zur Probe. Die Bestätigung steht aus.",
+            ),
             Self::Unbestaetigt => ("offen", "Neustart noch nicht bestätigt."),
             Self::NichtPruefbar => ("halt", "Der offene Update-Stand lässt sich nicht prüfen."),
             Self::BestaetigungFehlgeschlagen => (
