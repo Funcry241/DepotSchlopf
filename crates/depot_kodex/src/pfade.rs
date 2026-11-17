@@ -56,6 +56,13 @@ pub fn rolle(pfad: &str) -> Rolle {
     if WERKZEUG.contains(&pfad) {
         return Rolle::Werkzeug;
     }
+    // Die beiden eingebundenen Oberflächendateien liegen außerhalb des Rust-Quellbaums.
+    if matches!(
+        pfad,
+        "crates/depot_dienst/assets/app.js" | "crates/depot_dienst/assets/stil.css"
+    ) {
+        return Rolle::Produktiv;
+    }
     if let Some(rest) = pfad.strip_prefix("crates/") {
         let mut teile = rest.splitn(3, '/');
         let _crate = teile.next();
@@ -133,6 +140,24 @@ mod tests {
         assert_eq!(rolle("DepotSchlopf.cmd"), Rolle::Werkzeug);
         assert_eq!(rolle("geheim.sh"), Rolle::Unbekannt);
         assert_eq!(rolle("anders.cmd"), Rolle::Unbekannt);
+    }
+
+    #[test]
+    fn nur_die_beiden_dienst_assets_sind_produktivcode() {
+        for pfad in [
+            "crates/depot_dienst/assets/app.js",
+            "crates/depot_dienst/assets/stil.css",
+        ] {
+            assert_eq!(rolle(pfad), Rolle::Produktiv);
+            assert!(erlaubt(Klasse::RefactorOnly, rolle(pfad)));
+        }
+        for pfad in [
+            "crates/depot_dienst/assets/anderes.js",
+            "crates/depot_dienst/assets/mod.rs",
+            "crates/depot_ki/assets/app.js",
+        ] {
+            assert_eq!(rolle(pfad), Rolle::Unbekannt);
+        }
     }
 
     #[test]

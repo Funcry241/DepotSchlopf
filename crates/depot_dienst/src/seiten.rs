@@ -17,7 +17,7 @@ use crate::werkbank::{Anlass, Art, Auftrag, Frueher, ZeitplanAbgelehnt, Zustand}
 use crate::zeitplan::{Zeitplan, geplante_abrufe, lies_uhrzeit, naechster_fuer, uhrzeit_text};
 use crate::zeitstrahl_ki::{self, Aufrufe};
 
-const STIL_DIENST: &str = include_str!("assets/stil.css");
+const STIL_DIENST: &str = include_str!("../assets/stil.css");
 
 /// Ein Bedienelement zu einem Auftrag und seinem aktuellen Stand.
 fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str, primaer: bool) -> String {
@@ -2445,7 +2445,7 @@ pub(crate) fn einrichtung_mit_update(
 /// aufgeklappte Protokolle offen und zeigt, wenn der Dienst nicht antwortet. Antwortet ein neu
 /// gestarteter Dienst (andere `data-start`), laedt es die ganze Seite neu: Ihre Formulare
 /// tragen dann das Token des neuen Starts.
-pub const APP_JS: &str = include_str!("assets/app.js");
+pub const APP_JS: &str = include_str!("../assets/app.js");
 
 #[cfg(test)]
 mod speicherleiste_tests {
