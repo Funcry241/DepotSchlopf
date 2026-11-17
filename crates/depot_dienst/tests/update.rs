@@ -769,7 +769,10 @@ fn update_neustart_und_probe_zeigen_neutrales_warten() -> Result<(), String> {
     assert!(d.schritt(mittag()?).is_none());
     assert!(get(&d, "/teil/update")?.contains("Laufender Programmstand: aaaaaaaaaa"));
     for pfad in ["/", "/teil/live", "/einrichtung", "/teil/update"] {
-        assert!(get(&d, pfad)?.contains("Neustart noch nicht bestätigt"), "{pfad}");
+        assert!(
+            get(&d, pfad)?.contains("Neustart noch nicht bestätigt"),
+            "{pfad}"
+        );
     }
     d.sperre().neustart = true;
     let html = get(&d, "/teil/live")?;
@@ -862,8 +865,7 @@ fn fremde_update_markierung_verlangt_eine_pruefung_von_hand() -> Result<(), Stri
 fn abgelehnter_stand_ist_sichtbar_und_blockiert_keine_suche() -> Result<(), String> {
     let wurzel = ordner()?;
     let neu = "b".repeat(40);
-    fs::write(rueckfall::abgelehnt_pfad(&wurzel), format!("{neu}\n"))
-        .map_err(|e| e.to_string())?;
+    fs::write(rueckfall::abgelehnt_pfad(&wurzel), format!("{neu}\n")).map_err(|e| e.to_string())?;
     let mut d = dienst(wurzel);
     some(Arc::get_mut(&mut d), "Alter Dienst")?.version = Some("a".repeat(40));
     let html = get(&d, "/einrichtung")?;

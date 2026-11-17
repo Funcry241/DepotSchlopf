@@ -1272,8 +1272,12 @@ impl UpdateSperre {
             ),
         };
         let weiter = match self {
-            Self::NichtPruefbar => "Prüfe die Update-Markierung von Hand. DepotSchlopf wartet auf einen verlässlichen Update-Stand.",
-            Self::BestaetigungFehlgeschlagen(_) => "Prüfe das schwarze DepotSchlopf-Fenster auf eine Fehlermeldung. Falls es geschlossen ist, starte DepotSchlopf.cmd einmal neu.",
+            Self::NichtPruefbar => {
+                "Prüfe die Update-Markierung von Hand. DepotSchlopf wartet auf einen verlässlichen Update-Stand."
+            }
+            Self::BestaetigungFehlgeschlagen(_) => {
+                "Prüfe das schwarze DepotSchlopf-Fenster auf eine Fehlermeldung. Falls es geschlossen ist, starte DepotSchlopf.cmd einmal neu."
+            }
             _ => "Du musst nichts tun. Die Seite lädt sich nach dem Neustart von selbst neu.",
         };
         let mut html = format!("<p class=\"kopf {klasse}\">{grund} {weiter}</p>");
@@ -1284,7 +1288,9 @@ impl UpdateSperre {
                 offen.vorher, offen.neu
             );
         }
-        html.push_str("<p>DepotSchlopf startet bis zum Abschluss des Updates keine neuen Aufträge.</p>");
+        html.push_str(
+            "<p>DepotSchlopf startet bis zum Abschluss des Updates keine neuen Aufträge.</p>",
+        );
         if let Some((h, m)) = jetzt.and_then(|jetzt| morgenlauf_faellig(z, jetzt)) {
             let _ = write!(
                 html,
