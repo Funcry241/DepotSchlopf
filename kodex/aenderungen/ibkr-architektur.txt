@@ -1,0 +1,4 @@
+klasse: DokuOnly
+zweck: Freigegebenes SmartRouting und Geltungsbereich der Reife-Ampel dokumentieren
+pfade:
+docs/ARCHITEKTUR.md

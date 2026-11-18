@@ -350,7 +350,7 @@ Der Kontowächter ist reiner Rust-Code ohne KI. Er läuft in der Handelszeit in 
 
 ## 10 Ausführung beim Broker
 
-**Broker:** Interactive Brokers Ireland, reines Cash-Konto, Basiswährung Euro, Handel nur in Euro an Xetra. Die Verbindung läuft über das IB Gateway auf Wolfgangs Rechner. Es verlangt in Abständen eine neue Anmeldung mit Zwei-Faktor-Bestätigung auf dem Handy.
+**Broker:** Interactive Brokers Ireland, reines Cash-Konto, Basiswährung Euro, Handel nur in Euro über SmartRouting. Das Journal erfasst Ausführungsplatz und Gebühr je Ausführung (E7 in #356). Die Verbindung läuft über das IB Gateway auf Wolfgangs Rechner. Es verlangt in Abständen eine neue Anmeldung mit Zwei-Faktor-Bestätigung auf dem Handy.
 
 **Adapter:** Eine Schnittstelle `Broker` mit drei Umsetzungen: Simulation (für Tests und einen späteren Backtest), IBKR-Papierkonto und IBKR-Echtkonto. Lesen dürfen alle. Senden nimmt ausschließlich `GenehmigterAuftrag` an (R3).
 
@@ -370,7 +370,7 @@ Der Kontowächter ist reiner Rust-Code ohne KI. Er läuft in der Handelszeit in 
 
 | Aktionsgrund | Ordertyp | Auslöser und Limit | Handelszeit | Teilausführung und Rest |
 | --- | --- | --- | --- | --- |
-| freiwilliger Kauf | Limit, gültig für den Tag | Limit höchstens um den Limit-Abstand über dem letzten Kurs | fortlaufender Handel an Xetra | gefüllte Menge bekommt sofort ihren Schutzstopp; der Rest verfällt am Tagesende oder wird storniert, wenn der Schutz nicht fristgerecht bestätigt wird |
+| freiwilliger Kauf | Limit, gültig für den Tag | Limit höchstens um den Limit-Abstand über dem letzten Kurs | fortlaufender Handel über SmartRouting | gefüllte Menge bekommt sofort ihren Schutzstopp; der Rest verfällt am Tagesende oder wird storniert, wenn der Schutz nicht fristgerecht bestätigt wird |
 | Schutzstopp Kurzfrist | Stopp-Order, die bei Auslösung zur Marktorder wird, gültig bis zur Aufhebung | Stopp-Abstand aus dem Spielraum der Festschreibung | wie vom Broker unterstützt | immer genau die gehaltene Menge; jede Mengenänderung wird bestätigt |
 | freiwilliger Verkauf | Limit, gültig für den Tag, mit dem Stopp in einer Gruppe | Limit höchstens um den Limit-Abstand unter dem letzten Kurs | fortlaufender Handel | Rest verfällt; der Stopp deckt weiter genau den Restbestand |
 | zwingender Ausstieg | marktnahes Limit | Limit um den Limit-Abstand unter dem letzten Kurs; ein Rest wird in festen Schritten nachgezogen, höchstens bis zur Schrittgrenze | fortlaufender Handel, nur mit plausiblen und frischen Kursen | nach der Schrittgrenze bleibt der Rest stehen, und Wolfgang bekommt eine Nachricht |
@@ -492,7 +492,7 @@ Solange Kurzfrist nur auf Papier läuft, entstehen dort keine Handelskosten, abe
 | Ereignisregister | 0 € | amtliche Quellen und Pflichtveröffentlichungen: Kalender von Zentralbanken, Unternehmen und Börsen, Pflichtmitteilungen der Unternehmen, Warnungen und Vorhersagen amtlicher Wetterdienste; eine kostenpflichtige Quelle nur mit Zustimmung |
 | Nachrichten | 0 € | RSS; KI-Websuche aus |
 | Rechner und Strom | etwa 0 € zusätzlich | Wolfgangs Rechner läuft ohnehin |
-| Währungstausch | 0 € geplant | nur Euro an Xetra; eine Umrechnung durch den Broker kostet Gebühr, wird als eigene Kostenart gebucht und gemeldet |
+| Währungstausch | 0 € geplant | nur Euro über SmartRouting; eine Umrechnung durch den Broker kostet Gebühr, wird als eigene Kostenart gebucht und gemeldet |
 | Fehlbetrag auf dem Konto | Zinsen und mögliche Beitreibungskosten laut Kundenvereinbarung | darf nicht entstehen; wenn doch: Halt, Nachricht, Ausgleich durch Wolfgang; die Kosten zählen voll in die Bewertung |
 | Kontoführung, Papierkonto | 0 € | bei IBKR derzeit kostenlos |
 | Nicht ausgeführte Limits | 0 € | verfallen am Tagesende |
@@ -548,7 +548,7 @@ Das ist eine sorgfältige Zusammenstellung, keine Steuerberatung. Für das erste
 
 **Grundsatz:** IBKR führt keine deutsche Abgeltungsteuer auf Veräußerungsgewinne ab. Wolfgang gibt jedes Jahr die Anlage KAP ab. IBKR Ireland meldet Erträge und Verkaufserlöse über den automatischen Informationsaustausch an das Bundeszentralamt für Steuern. Wer vollständig angibt, hat nichts zu befürchten.
 
-**Einmal beim Einrichten:** Basiswährung Euro und nur Euro-Handel an Xetra (keine Währungsgewinne). Kostenbasis-Methode bei IBKR auf FIFO stellen, wie im deutschen Recht. Wer kirchensteuerpflichtig ist, zahlt sie über die Erklärung.
+**Einmal beim Einrichten:** Basiswährung Euro und ausschließlich Euro-Handel über SmartRouting. Kostenbasis-Methode bei IBKR auf FIFO stellen, wie im deutschen Recht. Wer kirchensteuerpflichtig ist, zahlt sie über die Erklärung.
 
 **Was wohin gehört:**
 
@@ -702,6 +702,8 @@ Alle Zahlen dieser Architektur stehen hier und später nur in `kodex/festschreib
 | Kurse | Spreadgrenze | höchstens 0,5 % der Mitte zwischen Bid und Ask, Bid und Ask nicht älter als das Höchstalter; ohne Bid oder Ask kein freiwilliger Auftrag |
 | Freigaben | Handelszustimmung von Maus | gültig 15 Minuten und nur bis zum nächsten Lagebild |
 | Rundung | Reservierungen und Kosten | auf ganze Cent aufgerundet; verfügbares Geld abgerundet |
+
+**Geltungsbereich der Freigabe:** Für den ersten Langfrist-Bereich am IBKR-Papierkonto gilt das freigegebene [1.000-€-Paket](https://github.com/Funcry241/DepotSchlopf/issues/357). Es gilt auch für den späteren Echtgeldbetrieb nach technischer und gesonderter Echtgeldfreigabe. Das interne Papierdepot mit zwei Töpfen liefert weiterhin die Praxisbelege für die Reife-Ampel V8. Die Echtgeldfreigabe richtet sich nach diesem Kapitel und Kapitel 19. Der Analyse-Export berichtet das Wilson-Vertrauensintervall zur Trefferquote der KIs als Messwert (E1 in #356).
 
 **Startwerte für Freigaben, Kosten und Maßstäbe** (stehen vor Beginn des Papierbetriebs fest und ändern sich danach nicht mehr):
 
