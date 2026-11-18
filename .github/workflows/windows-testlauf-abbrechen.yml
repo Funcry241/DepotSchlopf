@@ -1,0 +1,58 @@
+name: K2 Windows-Lauf abbrechen
+on:
+  pull_request:
+    branches: [maus/362-windows-testbasis]
+    types: [edited]
+permissions: {}
+jobs:
+  abbrechen:
+    if: >-
+      github.repository == 'Funcry241/DepotSchlopf' &&
+      github.event.pull_request.number == 363 &&
+      github.event.pull_request.head.ref == 'maus/362-windows-gegenprobe' &&
+      contains(github.event.pull_request.body, 'K2: Abbruch jetzt auslösen')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      actions: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Exakt den laufenden K2-Test abbrechen und GitHub-Status prüfen
+        shell: bash
+        run: |
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/windows-regel-gegenprobe.yml/runs?event=pull_request&head_sha=$HEAD_SHA&status=in_progress" --jq '.workflow_runs[0].id // empty')
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          jobs_api="repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs"
+          gh api "$jobs_api" --jq '.jobs[] | {name,status,conclusion}'
+          test "$(gh api "$jobs_api" --jq '.jobs[] | select(.name == "vorjob") | .status')" = in_progress
+          endpoint="repos/$GITHUB_REPOSITORY/actions/runs/$run_id"
+          gh api --method POST "$endpoint/cancel"
+          echo "GitHub hat den Abbruch des Laufs $run_id angenommen."
+          for attempt in {1..24}; do
+            result=$(gh api "$endpoint" --jq '.conclusion // ""')
+            if [[ "$result" == cancelled ]]; then
+              gh api "$jobs_api" --jq '.jobs[] | {id,name,status,conclusion}'
+              for poll in {1..12}; do
+                pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/363" --jq '{head: .head.sha, base: .base.ref, draft, mergeable, mergeable_state}')
+                echo "$pr"
+                test "$(jq -r .head <<< "$pr")" = "$HEAD_SHA"
+                test "$(jq -r .base <<< "$pr")" = "maus/362-windows-testbasis"
+                test "$(jq -r .draft <<< "$pr")" = false
+                if [[ $(jq -r .mergeable_state <<< "$pr") = blocked ]]; then
+                  exit 0
+                fi
+                sleep 5
+              done
+              exit 1
+            fi
+            if [[ -n "$result" ]]; then
+              echo "::error::Lauf endete mit $result"
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "::error::GitHub hat den Abbruch nicht rechtzeitig bestätigt."
+          exit 1
