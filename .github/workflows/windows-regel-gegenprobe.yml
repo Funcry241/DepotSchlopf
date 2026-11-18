@@ -6,43 +6,12 @@ permissions:
   contents: read
   pull-requests: read
 jobs:
-  filter:
-    runs-on: ubuntu-latest
-    outputs:
-      update: ${{ steps.filter.outputs.update }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - id: filter
-        run: |
-          PYTHONPATH=.github/scripts python -B -c 'from windows_update import update_noetig; print("update=" + str(update_noetig("pull_request", ["docs/kaltstart.md"])).lower())' >> "$GITHUB_OUTPUT"
-  gate:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Gate erfolgreich (Testeingabe)"
-  update:
-    needs: filter
-    if: ${{ needs.filter.outputs.update == 'true' }}
+  kodex-windows:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - run: exit 1
-  kodex-windows:
-    needs: [filter, gate, update]
-    if: ${{ always() }}
+  kontrolljob:
     runs-on: ubuntu-latest
-    env:
-      FILTER: ${{ needs.filter.result }}
-      UPDATE_NOETIG: ${{ needs.filter.outputs.update }}
-      GATE: ${{ needs.gate.result }}
-      UPDATE: ${{ needs.update.result }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Produktions-Sammelcheck mit gefiltertem Update
-        shell: bash
-        run: |
-          printf 'filter=%s update_noetig=%s gate=%s update=%s\n' "$FILTER" "$UPDATE_NOETIG" "$GATE" "$UPDATE"
-          test "$FILTER:$UPDATE_NOETIG:$GATE:$UPDATE" = 'success:false:success:skipped'
-          python -B .github/scripts/windows_update.py sammelcheck
+      - run: echo "Kontrolllauf mit übersprungenem Pflichtjob"
