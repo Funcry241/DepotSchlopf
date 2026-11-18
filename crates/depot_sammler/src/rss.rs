@@ -65,6 +65,7 @@ fn nachricht(f: &BTreeMap<String, String>, quelle: &str, abruf: Zeitpunkt) -> Op
     let erlaubt = match quelle {
         "tagesschau" => host == "www.tagesschau.de",
         "bbc-world" => matches!(host, "www.bbc.co.uk" | "www.bbc.com"),
+        "finanznachrichten-adhoc" => host == "www.finanznachrichten.de",
         _ => false,
     };
     if !erlaubt
