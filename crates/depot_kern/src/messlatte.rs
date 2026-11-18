@@ -88,7 +88,7 @@ pub mod ibkr {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Vergleich {
-        pub vergleich_etf_nach_kosten: bool,
+        pub etf_kaufen_und_halten_nach_kosten: bool,
         pub estr_daneben_berichten: bool,
     }
 
@@ -201,7 +201,7 @@ pub mod ibkr {
             schutzstopp_beim_broker: false,
         },
         vergleich: Vergleich {
-            vergleich_etf_nach_kosten: true,
+            etf_kaufen_und_halten_nach_kosten: true,
             estr_daneben_berichten: true,
         },
         echtgeldkriterien: Echtgeldkriterien {
