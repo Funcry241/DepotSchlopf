@@ -53,63 +53,91 @@ jobs:
 
           repo = os.environ["GITHUB_REPOSITORY"]
           server = os.environ["GITHUB_SERVER_URL"]
+          api_url = os.environ["GITHUB_API_URL"]
           head = os.environ["HEAD_SHA"]
           basis = os.environ["BASE_SHA"]
           if not all(re.fullmatch(r"[a-f0-9]{40}", sha) for sha in (head, basis)):
               raise ValueError("Vollständige Head- und Basis-SHA erforderlich")
           frist = time.monotonic() + 90
+          hinweise = set()
 
-          def api(pfad, *, protokoll=False):
+          def hinweis(text):
+              if text not in hinweise:
+                  hinweise.add(text)
+                  print(text, flush=True)
+
+          def api(pfad, vorgang, *, protokoll=False):
               rest = frist - time.monotonic()
               if rest <= 0:
                   return None
               try:
+                  # curl sendet Authorization bei einer Weiterleitung auf einen
+                  # anderen Host nicht mit. Das Log liegt hinter einer solchen URL.
+                  frist_abruf = min(15 if protokoll else 8, rest)
                   abruf = subprocess.run(
-                      ["gh", "api", f"repos/{repo}/{pfad}"], capture_output=True,
-                      text=True, check=True, timeout=min(8, rest),
+                      ["curl", "--silent", "--show-error", "--fail", "--location",
+                       "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "2",
+                       "--header", "@-", f"{api_url}/repos/{repo}/{pfad}"],
+                      input=f'Authorization: Bearer {os.environ["GH_TOKEN"]}\n',
+                      capture_output=True, text=True, encoding="utf-8", errors="replace",
+                      check=True, timeout=frist_abruf,
                   )
                   return abruf.stdout if protokoll else json.loads(abruf.stdout)
-              except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
-                  return None
+              except subprocess.CalledProcessError as fehler:
+                  status = re.search(r"returned error: ([0-9]{3})", fehler.stderr)
+                  hinweis(f"{vorgang}: HTTP {status[1]}" if status else f"{vorgang}: curl {fehler.returncode}")
+              except subprocess.TimeoutExpired:
+                  hinweis(f"{vorgang}: Abrufzeit überschritten")
+              except ValueError:
+                  hinweis(f"{vorgang}: ungültige API-Antwort")
+              return None
 
           def alter_nachweis(pfad, versuch, zustand):
               # Der erste Tor-PR sieht noch den Basisworkflow vor dieser Änderung.
-              jobs = api(f"{pfad}/attempts/{versuch}/jobs") or {}
+              jobs = api(f"{pfad}/attempts/{versuch}/jobs", "Basisjobs") or {}
               job = next((j for j in jobs.get("jobs", []) if j["name"] == "pruefe"), {})
               if not isinstance(job.get("id"), int) or job.get("conclusion") != zustand:
+                  hinweis("Basisjobs: kein passender abgeschlossener Prüfjob")
                   return None
-              log = api(f"actions/jobs/{job['id']}/logs", protokoll=True) or ""
+              log = api(f"actions/jobs/{job['id']}/logs", "Basisprotokoll", protokoll=True)
+              if log is None:
+                  return None
+              log = re.sub(r"\x1b\[[0-9;]*m", "", log)
               binaufruf = re.search(
                   r"Running \`target/debug/depot_kodex pruefe-pr --basis ([a-f0-9]{40}) "
                   r"--kandidat ([a-f0-9]{40})\`", log,
               )
               if not binaufruf or binaufruf[2] != head:
+                  hinweis("Basisprotokoll: kein Basis-Kodex-Aufruf für diesen Head")
                   return None
-              meldungen = re.findall(r"(?m)^\S+ \[Kodex\] (.+)$", log)
+              meldungen = re.findall(r"(?m)^(?:\S+ )?\[Kodex\] (.+)$", log)
               offen = meldungen == ['Grenzfreigabe: erteilt ist "offen"']
               return binaufruf[1], "ok" if zustand == "success" else ("offen" if offen else "fehler")
 
           def basisnachweis():
-              statuses = api(f"commits/{head}/statuses?per_page=100") or []
+              statuses = api(f"commits/{head}/statuses?per_page=100", "Basisstatus") or []
               status = next((s for s in statuses if s["context"] == "kodex-basis"), {})
               zustand = status.get("state")
               if zustand not in ("success", "failure"):
                   return None
               if (status.get("creator") or {}).get("login") != "github-actions[bot]":
+                  hinweis("Basisstatus: unerwarteter Herausgeber")
                   return None
               ziel = re.fullmatch(
                   re.escape(f"{server}/{repo}/actions/runs/") + r"([0-9]+)",
                   status.get("target_url") or "",
               )
               if not ziel:
+                  hinweis("Basisstatus: unerwarteter Lauf-Link")
                   return None
               pfad = f"actions/runs/{ziel[1]}"
-              lauf = api(pfad) or {}
+              lauf = api(pfad, "Basislauf") or {}
               if (lauf.get("event"), lauf.get("path"), lauf.get("head_sha"),
                   lauf.get("status"), lauf.get("conclusion")) != (
                   "pull_request_target", ".github/workflows/kodex-basis.yml", head,
                   "completed", zustand,
               ):
+                  hinweis("Basislauf: Laufmetadaten passen noch nicht zum Basisstatus")
                   return None
               versuch = lauf["run_attempt"]
               beschreibung = status.get("description")
