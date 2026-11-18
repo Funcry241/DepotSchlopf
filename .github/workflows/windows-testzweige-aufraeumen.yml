@@ -1,0 +1,39 @@
+name: K2 Testzweige aufräumen
+on:
+  pull_request:
+    types: [closed]
+    branches: [maus/362-windows-testbasis]
+permissions: {}
+jobs:
+  testzweige-loeschen:
+    if: >-
+      github.repository == 'Funcry241/DepotSchlopf' &&
+      github.event.pull_request.number == 363 &&
+      github.event.pull_request.merged == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'maus/362-windows-gegenprobe' &&
+      github.event.pull_request.base.ref == 'maus/362-windows-testbasis'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TEST_HEAD: ${{ github.event.pull_request.head.sha }}
+      TEST_BASE: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: Eintrag für main prüfen und beide geschlossenen Testzweige löschen
+        shell: bash
+        run: |
+          repo="repos/$GITHUB_REPOSITORY"
+          main_rules=$(gh api "$repo/rules/branches/main")
+          jq -e 'any(.[]; .ruleset_id == 26317636 and .type == "required_status_checks" and any(.parameters.required_status_checks[]; .context == "kodex-windows" and .integration_id == 15368))' <<< "$main_rules"
+          test_rules=$(gh api "$repo/rules/branches/maus%2F362-windows-testbasis")
+          jq -e 'all(.[]; .ruleset_id != 27572286)' <<< "$test_rules"
+          head_ref=maus/362-windows-gegenprobe
+          base_ref=maus/362-windows-testbasis
+          test "$(gh api "$repo/git/ref/heads/$head_ref" --jq .object.sha)" = "$TEST_HEAD"
+          test "$(gh api "$repo/git/ref/heads/$base_ref" --jq .object.sha)" = "$TEST_BASE"
+          gh api --method DELETE "$repo/git/refs/heads/$head_ref"
+          echo "Gelöscht: $head_ref"
+          gh api --method DELETE "$repo/git/refs/heads/$base_ref"
+          echo "Gelöscht: $base_ref"
