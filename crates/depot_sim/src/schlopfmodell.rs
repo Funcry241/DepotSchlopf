@@ -121,6 +121,17 @@ fn pruefung_anzeige(p: &Protokoll) -> String {
     )
 }
 
+/// Journalbelegte Thesenprüfungen nach dem Tag der Prüfung, mit der protokollierten Entscheidung.
+pub fn belegte_pruefungen(s: &Stand) -> impl Iterator<Item = (Datum, &'static str)> + '_ {
+    s.begruendungen().iter().filter_map(|(datum, zweck, text)| {
+        if zweck != ZWECK {
+            return None;
+        }
+        let p = Protokoll::lies(text)?;
+        (p.tag < *datum && p.pruefung.beleg >= 2).then_some((*datum, p.pruefung.status))
+    })
+}
+
 /// Thesenprüfung einer Vorschau lesbar ausgeben, ohne das Journal zu verändern.
 pub fn pruefung_text(zeile: &str) -> Option<String> {
     Protokoll::lies(zeile).as_ref().map(pruefung_anzeige)

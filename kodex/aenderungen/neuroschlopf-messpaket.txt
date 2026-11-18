@@ -1,0 +1,12 @@
+klasse: Funktion
+zweck: Verworfene Belege und protokollierte Thesenprüfungen im NeuroSchlopf-Vergleich nachvollziehen
+pfade:
+crates/depot_berater/src/frage.rs
+crates/depot_berater/src/ki.rs
+crates/depot_dienst/src/analyse/entscheidungsgrundlage.rs
+crates/depot_lage/src/belegauswahl.rs
+crates/depot_sim/src/belegrang.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/schlopfmodell.rs
+crates/depot_sim/src/szenario.rs
+crates/depot_sim/tests/belegrang.rs

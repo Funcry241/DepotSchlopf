@@ -52,6 +52,7 @@ fn kaufbelege_zaehlen_in_der_messung() -> Result<(), String> {
     for (wer, text) in [
         (KAUFBELEG, "7 Dachs 5"),
         (KAUFBELEG, "8 Maus 0"),
+        (KAUFBELEG, "20 Maus 90"),
         (KAUFBELEG, "9 Igel 1"),
         (KAUFBELEG, "x Maus 1"),
         (KAUFBELEG, "10 Maus 1 mehr"),
@@ -62,12 +63,20 @@ fn kaufbelege_zaehlen_in_der_messung() -> Result<(), String> {
     }
     assert_eq!(
         kaufbelege(j.stand()),
-        vec![Kaufbeleg {
-            datum: tag(16)?,
-            auftrag: 7,
-            berater: BeraterId::Dachs,
-            nummern: vec![5],
-        }]
+        vec![
+            Kaufbeleg {
+                datum: tag(16)?,
+                auftrag: 7,
+                berater: BeraterId::Dachs,
+                nummern: vec![5]
+            },
+            Kaufbeleg {
+                datum: tag(16)?,
+                auftrag: 20,
+                berater: BeraterId::Maus,
+                nummern: vec![90]
+            },
+        ]
     );
     let woche = tag(16)?..=tag(20)?;
     let kauf = |kauf_unter_drei| Messung {
@@ -156,6 +165,7 @@ fn grundrang_findet_den_beleg_zur_these() -> Result<(), String> {
         unter_drei,
         kauf_faelle: 1,
         kauf_unter_drei: unter_drei,
+        ..Messung::default()
     };
     let woche = tag(16)?..=tag(20)?;
     assert_eq!(messe(j.stand(), &universum, &Heute, woche.clone()), alle(0));

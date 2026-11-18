@@ -9,20 +9,25 @@ use std::{collections::BTreeMap, fmt::Write as _};
 use depot_journal::Stand;
 use depot_kern::Datum;
 use depot_sim::belegrang::{
-    Grundrang, Heute, Sortierer, hat_fragebeleg, kandidatenanzahl, kaufbelege, messe,
-    tage_mit_zielbelegen,
+    BELEGPRUEFUNG, Grundrang, Heute, Sortierer, hat_fragebeleg, kandidatenanzahl, kaufbelege,
+    messe, tage_mit_zielbelegen,
 };
 
 pub fn bericht(stand: &Stand, von: Datum, bis: Datum) -> String {
     let mut text = String::from(
-        "\n### Belegauswahl (Vorbereitung NeuroSchlopf)\n\nWie oft der Beleg einer Weltprognose unter den ersten drei steht. Kandidaten sind die Belege, die die Frage am Prognosetag gesehen hat; Thesen sind die Werte, die der Berater in den fünf Tagen davor genannt hat. Käufe zählen, wenn die KI ihre Belegnummern genannt hat (Kaufbeleg). Nur lesend, die Frage ändert sich nicht.\n\n| Sortierer | Prognosen | unter den ersten drei | Quote | Käufe mit Beleg | unter den ersten drei | Quote |\n|---|---:|---:|---:|---:|---:|---:|\n",
+        "\n### Belegauswahl (Vorbereitung NeuroSchlopf)\n\nDer Vergleich misst, ob ein zitierter Prognose- oder Kaufbeleg im Frageabschnitt des Journals unter den ersten drei steht. Welche Ereignisse im Wortlaut oder als Titel gesendet wurden, steht bei gespeicherten Aufrufen in den KI-Gesprächen. Unabhängige Relevanzurteile fehlen. nDCG@3 bleibt unbewertet.\n\n| Sortierer | Prognosen | unter den ersten drei | Quote | Käufe mit Beleg | unter den ersten drei | Quote |\n|---|---:|---:|---:|---:|---:|---:|\n",
     );
     let werte = depot_kern::liste::beobachtungsliste().unwrap_or_default();
     let universum = depot_kern::liste::als_universum(&werte);
     let grundrang = Grundrang::neu(&werte);
     let sortierer: [&dyn Sortierer; 2] = [&Heute, &grundrang];
+    let mut kurze_listen = None;
     for s in sortierer {
         let m = messe(stand, &universum, s, von..=bis);
+        kurze_listen.get_or_insert((
+            m.prognosen_ohne_rangunterschied,
+            m.kaeufe_ohne_rangunterschied,
+        ));
         let _ = writeln!(
             text,
             "| {} | {} | {} | {} | {} | {} | {} |",
@@ -35,7 +40,14 @@ pub fn bericht(stand: &Stand, von: Datum, bis: Datum) -> String {
             quote(m.kauf_unter_drei, m.kauf_faelle)
         );
     }
+    if let Some((prognosen, kaeufe)) = kurze_listen {
+        let _ = writeln!(
+            text,
+            "\nFälle mit höchstens drei Kandidaten (Prognosen / Käufe): {prognosen} / {kaeufe}. Bei diesen Fällen führt jede Reihenfolge zu einem Treffer unter den ersten drei."
+        );
+    }
     datenbasis(&mut text, stand, von, bis);
+    belegpruefungen(&mut text, stand, von, bis);
     text
 }
 
@@ -105,6 +117,41 @@ fn datenbasis(text: &mut String, stand: &Stand, von: Datum, bis: Datum) {
     }
 }
 
+fn belegpruefungen(text: &mut String, stand: &Stand, von: Datum, bis: Datum) {
+    let zeitraum = von..=bis;
+    let mut thesen = BTreeMap::<_, usize>::new();
+    for (tag, status) in depot_sim::schlopfmodell::belegte_pruefungen(stand) {
+        if zeitraum.contains(&tag) {
+            let anzahl = thesen.entry((tag, status)).or_default();
+            *anzahl = anzahl.saturating_add(1);
+        }
+    }
+    let mut verwerfungen = BTreeMap::<_, usize>::new();
+    for (tag, zweck, grund) in stand.begruendungen() {
+        if zweck == BELEGPRUEFUNG
+            && zeitraum.contains(tag)
+            && let Some((anzahl, grund)) = grund.split_once(' ')
+            && let Ok(anzahl) = anzahl.parse::<usize>()
+            && anzahl > 0
+        {
+            let summe = verwerfungen.entry((*tag, grund)).or_default();
+            *summe = summe.saturating_add(anzahl);
+        }
+    }
+    text.push_str("\n#### Thesenprüfungen und verworfene Belege\n\n");
+    if thesen.is_empty() && verwerfungen.is_empty() {
+        text.push_str("Im Zeitraum sind keine Thesenprüfungen mit Quelle und keine Belegverwerfungen protokolliert. Ältere Stände protokollieren die neuen Verwerfungsgründe noch nicht.\n");
+        return;
+    }
+    text.push_str("| Tag | Protokollierte Prüfung oder Verwerfung | Anzahl |\n|---|---|---:|\n");
+    for ((tag, status), anzahl) in thesen {
+        let _ = writeln!(text, "| {tag} | These {status} | {anzahl} |");
+    }
+    for ((tag, grund), anzahl) in verwerfungen {
+        let _ = writeln!(text, "| {tag} | {grund} | {anzahl} |");
+    }
+}
+
 fn quote(treffer: u64, faelle: u64) -> String {
     treffer
         .saturating_mul(100)
@@ -162,11 +209,29 @@ mod tests {
                 j.begruende(danach, depot_sim::belegrang::ZIELBELEG, text)
                     .map_err(fehler)?;
             }
+            j.begruende(
+                danach,
+                BELEGPRUEFUNG,
+                "2 Dachs Zielbeleg nicht in der Frage sichtbar",
+            )
+            .map_err(fehler)?;
+            j.begruende(danach, "SchlopfModell",
+                r#"These v1 {"wer":"Maus","tag":"2026-11-16","isin":"DE0007164600","stand":1794898800,"status":"zurückziehen","begründung":"Gegenbeleg","beleg":2}"#)
+                .map_err(fehler)?;
             j.beobachte(ausserhalb, "Außerhalb").map_err(fehler)?;
             let t = bericht(j.stand(), tag, danach);
             assert!(t.contains("Tage mit verknüpften Belegen: 2 von 2"), "{t}");
             assert!(t.contains("| 2026-11-16 | 2 | 0 | 1 | 0 |"), "{t}");
             assert!(t.contains("| 2026-11-17 | 1 | 0 | 0 | 1 |"), "{t}");
+            assert!(t.contains("| 2026-11-17 | These zurückziehen | 1 |"), "{t}");
+            assert!(
+                t.contains("| 2026-11-17 | Dachs Zielbeleg nicht in der Frage sichtbar | 2 |"),
+                "{t}"
+            );
+            assert!(
+                t.contains("höchstens drei Kandidaten (Prognosen / Käufe): 0 / 1"),
+                "{t}"
+            );
             assert!(!t.contains("| 2026-11-18 |"), "{t}");
             Ok(())
         })();

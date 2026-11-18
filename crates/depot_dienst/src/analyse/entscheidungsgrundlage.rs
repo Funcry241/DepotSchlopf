@@ -18,6 +18,15 @@ pub(super) fn schreibe(aus: &mut String, e: &Gespraech) {
         return;
     }
 
+    if e.http == Some(200)
+        && let Some((sichtbar, ausgeblendet, ausgelassen)) = ereignisumfang(frage)
+    {
+        let _ = writeln!(
+            aus,
+            "\nEreignisse in der gesendeten Frage: {sichtbar} sichtbar, {ausgeblendet} ausgeblendet, {ausgelassen} wegen Platzgrenze ausgelassen."
+        );
+    }
+
     let mut belege = frage.lines().filter_map(beleg).peekable();
     if belege.peek().is_none() {
         aus.push_str(
@@ -29,6 +38,33 @@ pub(super) fn schreibe(aus: &mut String, e: &Gespraech) {
     for beleg in belege {
         schreibe_zeile(aus, beleg);
     }
+}
+
+fn ereignisumfang(frage: &str) -> Option<(usize, usize, usize)> {
+    let (vorspann, _) = frage.split_once("\nTopflage:\n")?;
+    let mut zeilen = vorspann.lines();
+    let kopf = zeilen.find(|z| z.starts_with("Belegte Termine und Nachrichten"))?;
+    if kopf == "Belegte Termine und Nachrichten: keine" {
+        return Some((0, 0, 0));
+    }
+    let (mut sichtbar, mut ausgeblendet) = (0_usize, 0_usize);
+    for zeile in zeilen {
+        if ereignis(zeile).is_some() {
+            if zeile.ends_with(": (Relevanz 0, ausgeblendet)") {
+                ausgeblendet = ausgeblendet.saturating_add(1);
+            } else {
+                sichtbar = sichtbar.saturating_add(1);
+            }
+        } else if let Some(anzahl) = zeile
+            .strip_prefix("- (")
+            .and_then(|z| z.strip_suffix(" weitere ausgelassen, Platz erschöpft)"))
+        {
+            return Some((sichtbar, ausgeblendet, anzahl.parse().ok()?));
+        } else {
+            break;
+        }
+    }
+    Some((sichtbar, ausgeblendet, 0))
 }
 
 fn beleg(zeile: &str) -> Option<&str> {
@@ -108,6 +144,27 @@ fn schreibe_zeile(aus: &mut String, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ereignisumfang_zaehlt_nur_den_gesendeten_frageabschnitt() {
+        let frage = concat!(
+            "Belegte Termine und Nachrichten (Beobachtung):\n",
+            "- Ereignis 1: Wenn der Titel gesendet wurde\n",
+            "- Ereignis 2: (Relevanz 0, ausgeblendet)\n",
+            "- (4 weitere ausgelassen, Platz erschöpft)\n",
+            "Topflage:\n",
+            "- Ereignis 3: Kommentar außerhalb des Frageabschnitts\n",
+        );
+        assert_eq!(ereignisumfang(frage), Some((1, 1, 4)));
+        assert_eq!(
+            ereignisumfang("Alte Frage ohne erkennbaren Abschnitt"),
+            None
+        );
+        assert_eq!(
+            ereignisumfang("Belegte Termine und Nachrichten: keine\nTopflage:\n"),
+            Some((0, 0, 0))
+        );
+    }
 
     #[test]
     fn gemini_exportiert_meldung_und_zugeordnete_vorsortierung() {

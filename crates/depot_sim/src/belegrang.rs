@@ -17,6 +17,31 @@ use crate::nachrichtenbezug::Wortsuche;
 /// Absender der Kaufbelege (#325): `"{auftrag} {Berater} {n},{m}"`, Nummern der Beobachtungen
 /// des Kauftags als Tagesnummern ab 1.
 pub const KAUFBELEG: &str = "Kaufbeleg";
+/// Journalzweck für verworfene Belege zur NeuroSchlopf-Messung.
+pub const BELEGPRUEFUNG: &str = "Belegprüfung";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verwerfungsgrund {
+    PrognoseUngueltig,
+    PrognoseAusserhalbUniversum,
+    PrognoseNichtSichtbar,
+    PrognoseOhneKurs,
+    ZielNichtSichtbar,
+    ZielOhneJournalbeleg,
+}
+
+impl Verwerfungsgrund {
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::PrognoseUngueltig => "Prognose unvollständig oder ungültig",
+            Self::PrognoseAusserhalbUniversum => "Prognosewert außerhalb der Beobachtungsliste",
+            Self::PrognoseNichtSichtbar => "Prognoseereignis nicht in der Frage sichtbar",
+            Self::PrognoseOhneKurs => "Prognosewert ohne Kurs",
+            Self::ZielNichtSichtbar => "Zielbeleg nicht in der Frage sichtbar",
+            Self::ZielOhneJournalbeleg => "Zielbeleg ohne passende Journalbeobachtung",
+        }
+    }
+}
 
 /// Ein Kauf mit den Ereignissen, auf die die KI ihn gestützt hat.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -243,10 +268,14 @@ pub struct Messung {
     pub faelle: u64,
     /// Davon stand der gestützte Beleg unter den ersten drei.
     pub unter_drei: u64,
+    /// Prognosefälle mit höchstens drei Kandidaten, bei denen jeder Rang trifft.
+    pub prognosen_ohne_rangunterschied: u64,
     /// Käufe mit genannten Belegen (#325, Beleg↔These).
     pub kauf_faelle: u64,
     /// Davon stand mindestens einer der genannten Belege unter den ersten drei.
     pub kauf_unter_drei: u64,
+    /// Kauffälle mit höchstens drei Kandidaten, bei denen jeder Rang trifft.
+    pub kaeufe_ohne_rangunterschied: u64,
 }
 
 pub(crate) const FRAGELISTE: &str = "Frageliste";
@@ -376,6 +405,9 @@ pub fn messe(
             continue;
         };
         m.faelle = m.faelle.saturating_add(1);
+        if kandidaten.len() <= 3 {
+            m.prognosen_ohne_rangunterschied = m.prognosen_ohne_rangunterschied.saturating_add(1);
+        }
         let thesen = thesen_vor(stand, universum, p.berater, p.datum);
         if sortierer
             .ordne(&kandidaten, &thesen)
@@ -395,18 +427,26 @@ pub fn messe(
         };
         let start = abschnitt.start;
         let kandidaten = kandidaten_im(stand, k.datum, abschnitt);
-        let thesen = thesen_vor(stand, universum, k.berater, k.datum);
-        let oben: Vec<usize> = sortierer
-            .ordne(&kandidaten, &thesen)
-            .into_iter()
-            .take(3)
-            .collect();
-        m.kauf_faelle = m.kauf_faelle.saturating_add(1);
-        if k.nummern
+        let belege: BTreeSet<_> = k
+            .nummern
             .iter()
             .filter_map(|n| n.checked_sub(1))
             .filter_map(|i| i.checked_sub(start))
-            .any(|i| oben.contains(&i))
+            .filter(|i| *i < kandidaten.len())
+            .collect();
+        if belege.is_empty() {
+            continue;
+        }
+        m.kauf_faelle = m.kauf_faelle.saturating_add(1);
+        if kandidaten.len() <= 3 {
+            m.kaeufe_ohne_rangunterschied = m.kaeufe_ohne_rangunterschied.saturating_add(1);
+        }
+        let thesen = thesen_vor(stand, universum, k.berater, k.datum);
+        if sortierer
+            .ordne(&kandidaten, &thesen)
+            .iter()
+            .take(3)
+            .any(|i| belege.contains(i))
         {
             m.kauf_unter_drei = m.kauf_unter_drei.saturating_add(1);
         }
