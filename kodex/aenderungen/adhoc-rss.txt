@@ -9,3 +9,4 @@ crates/depot_sammler/src/rss_quellen.rs
 crates/depot_sammler/tests/nachrichten.rs
 docs/befunde/nachrichten.md
 kodex/festschreibung.txt
+kodex/freigaben/adhoc-rss.txt
