@@ -886,7 +886,8 @@ fn journalpaket(
                 )
                 + &depot_lage::belegauswahl::bericht(stand, zeitraum.von, zeitraum.bis)
                 + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege)
-                + &nachher.bericht;
+                + &nachher.bericht
+                + &depot_lage::rueckschau::bericht(stand, jetzt);
             Journalpaket {
                 pruefbericht,
                 betrieb: betrieb.ablauf.bericht(Some(stand))

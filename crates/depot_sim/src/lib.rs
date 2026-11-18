@@ -45,6 +45,7 @@ pub mod papierlauf;
 pub mod papiertag;
 mod positionskauf;
 pub mod relative_staerke;
+pub mod rueckschau;
 pub mod ruecktest;
 pub mod schatten;
 pub mod schlopfmodell;

@@ -312,14 +312,18 @@ fn normaler_lauf_belegt_und_prueft() -> Result<(), String> {
         );
         rohdateien.push(rohdatei.clone());
     }
-    // Nach einem Neustart: vier Belege, je Wert Vortag und heute, alle aus ihrer Antwort.
+    // Nach einem Neustart: fünf Belege einschließlich der historischen SAP-Zeile.
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
     let k = j.stand().kurse();
-    assert_eq!(k.len(), 4);
-    for (beleg, (antwort, abruf)) in
-        k.iter()
-            .zip([(ROH_SAP, a1), (ROH_SAP, a1), (ROH_MBG, a2), (ROH_MBG, a2)])
-    {
+    assert_eq!(k.len(), 5);
+    assert_eq!(k.first().map(|b| b.kurs().handelstag()), Some(tag(11, 2)?));
+    for (beleg, (antwort, abruf)) in k.iter().zip([
+        (ROH_SAP, a1),
+        (ROH_SAP, a1),
+        (ROH_SAP, a1),
+        (ROH_MBG, a2),
+        (ROH_MBG, a2),
+    ]) {
         assert_eq!(beleg.quelle(), QUELLE);
         assert_eq!(beleg.abruf(), abruf);
         assert_eq!(beleg.roh(), sha256_hex(antwort.as_bytes()));
@@ -346,7 +350,7 @@ fn am_naechsten_morgen_sind_frisch_abgerufene_schlusskurse_verwendbar() -> Resul
     assert!(b.pruefung.is_empty() && b.ausgelassen.is_empty(), "{b:?}");
     assert!(b.verwendbar());
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
-    assert_eq!(j.stand().kurse().len(), 4);
+    assert_eq!(j.stand().kurse().len(), 5);
     Ok(())
 }
 
@@ -608,7 +612,7 @@ fn uhr_haelt_den_lauf() -> Result<(), String> {
         "{r:?}"
     );
     let j = vorbedingung(Journal::oeffnen(&journal), "erneut oeffnen")?;
-    assert_eq!(j.stand().kurse().len(), 2);
+    assert_eq!(j.stand().kurse().len(), 3);
     drop(j);
 
     let (journal, roh) = ordner()?;

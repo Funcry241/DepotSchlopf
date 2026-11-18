@@ -54,6 +54,7 @@ fn eingefrorene_vorbereitung_entspricht_auch_bei_langen_texten_der_gesendeten_au
         verlauf: &[],
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         relative_staerke: &[],
+        relativ_kurz: false,
         positionskaeufe: &[],
         ereignisse: &aus,
     };
@@ -100,6 +101,7 @@ fn vorbereitungsclient_akzeptiert_these_ohne_kurs_aber_keine_handelsziele() -> R
         verlauf: &[],
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         relative_staerke: &[],
+        relativ_kurz: false,
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -330,6 +332,7 @@ fn mit_lage<T>(f: impl FnOnce(&Lage<'_>) -> T) -> Result<T, String> {
         verlauf: &[],
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         relative_staerke: &[],
+        relativ_kurz: false,
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -542,6 +545,7 @@ fn gehalten_seit() -> Result<(), String> {
             &Lage {
                 topf: &topf,
                 relative_staerke: &[],
+                relativ_kurz: false,
                 positionskaeufe: &kaufe,
                 ..*lage
             },
@@ -1680,6 +1684,7 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
         verlauf: &verlauf,
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         relative_staerke: &relative_staerke,
+        relativ_kurz: false,
         positionskaeufe: &[],
         ereignisse: &ereignisse,
     };
@@ -1973,6 +1978,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
         verlauf: &[],
         kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
         relative_staerke: &[],
+        relativ_kurz: false,
         positionskaeufe: &[],
         ereignisse: &[],
     };

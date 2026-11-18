@@ -978,6 +978,9 @@ fn frage(
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag", frager)? {
         let mut antwort = frager.vorschlagen_mit_bilanz(e, lage, &prognosebilanz(j.stand()));
         belege_ki(j, frager).map_err(journal)?;
+        if z.uhr.is_some() {
+            belege_kursprognosen(j, lage.datum, wer, &frager.kursprognosen())?;
+        }
         verwertbar = antwort.verwertbar;
         let wie = if antwort.verwertbar {
             for (grund, anzahl) in frager.belegverwerfungen() {
@@ -1075,6 +1078,30 @@ fn pruefe_fristen(
         }
     }
     Ok(verkaeufe)
+}
+
+fn belege_kursprognosen(
+    j: &mut Journal,
+    datum: depot_kern::Datum,
+    berater: BeraterId,
+    prognosen: &[depot_journal::weltprognose::Fuenftagesprognose],
+) -> Result<(), LaufFehler> {
+    use depot_journal::weltprognose::FUENFTAGES_PREFIX;
+    let wer = name(berater);
+    if j.stand()
+        .begruendungen()
+        .iter()
+        .rev()
+        .any(|(tag, autor, text)| {
+            *tag == datum && autor == wer && text.starts_with(FUENFTAGES_PREFIX)
+        })
+    {
+        return Ok(());
+    }
+    for p in prognosen.iter().take(3) {
+        j.begruende(datum, wer, &p.text()).map_err(journal)?;
+    }
+    Ok(())
 }
 
 fn belege_prognose(
@@ -1245,8 +1272,8 @@ fn frage_topf(
     let t = topf_name(id);
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
-    let relative_staerke =
-        crate::relative_staerke::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
+    let (relative_staerke, relativ_kurz) =
+        crate::relative_staerke::fuer_frage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let mut lage = Lage {
         anlass: None,
         datum: tag.datum,
@@ -1256,6 +1283,7 @@ fn frage_topf(
         verlauf: &verlauf,
         kaufbilanz: crate::ausfuehrung::kaufbilanz(j.stand(), topf.id(), tag.datum),
         relative_staerke: &relative_staerke,
+        relativ_kurz,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -1371,8 +1399,8 @@ fn zweite_meinung(
     let t = topf_name(id);
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
-    let relative_staerke =
-        crate::relative_staerke::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
+    let (relative_staerke, relativ_kurz) =
+        crate::relative_staerke::fuer_frage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let lage = Lage {
         anlass: None,
         datum: tag.datum,
@@ -1382,6 +1410,7 @@ fn zweite_meinung(
         verlauf: &verlauf,
         kaufbilanz: crate::ausfuehrung::kaufbilanz(j.stand(), topf.id(), tag.datum),
         relative_staerke: &relative_staerke,
+        relativ_kurz,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -2482,6 +2511,7 @@ mod tests {
             verlauf: &[],
             kaufbilanz: crate::ausfuehrung::Kennzahlen::default(),
             relative_staerke: &[],
+            relativ_kurz: false,
             positionskaeufe: &[],
             ereignisse: &["Meldung".into()],
         };

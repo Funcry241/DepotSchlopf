@@ -1,0 +1,24 @@
+klasse: Funktion
+zweck: Kursverlauf, getrennte historische Rückschau und messbare Erstmeinungen gemeinsam bereitstellen
+pfade:
+CHANGELOG.md
+crates/depot_berater/src/frage.rs
+crates/depot_berater/src/ki.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/analyse/nachher.rs
+crates/depot_journal/src/weltprognose.rs
+crates/depot_kern/src/quelle.rs
+crates/depot_lage/src/lib.rs
+crates/depot_sammler/src/sammeln.rs
+crates/depot_sammler/tests/sammler.rs
+crates/depot_sammler/tests/tiingo.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/src/kursverlauf.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/lib.rs
+crates/depot_sim/src/relative_staerke.rs
+crates/depot_sim/src/rueckschau.rs
+crates/depot_sim/src/szenario.rs
+crates/depot_sim/src/vorbereitung.rs
+crates/depot_sim/src/vorschau.rs

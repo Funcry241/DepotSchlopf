@@ -112,7 +112,7 @@ fn frage(
         zyklus.universum,
         zyklus.tag.datum,
     );
-    let relative_staerke = crate::relative_staerke::fuer_lage(
+    let (relative_staerke, relativ_kurz) = crate::relative_staerke::fuer_frage(
         buch.stand(),
         &zyklus.tag.kurse,
         zyklus.universum,
@@ -127,6 +127,7 @@ fn frage(
         verlauf: &verlauf,
         kaufbilanz: crate::ausfuehrung::kaufbilanz(buch.stand(), topf.topf.id(), zyklus.tag.datum),
         relative_staerke: &relative_staerke,
+        relativ_kurz,
         positionskaeufe: &positionskaeufe,
         ereignisse: &zyklus.tag.ereignisse,
     };

@@ -3,7 +3,11 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use depot_journal::{KursBeleg, Stand, aufloesung::zieltag, weltprognose::Prognoserichtung};
+use depot_journal::{
+    KursBeleg, Stand,
+    aufloesung::{wilson_bp, zieltag},
+    weltprognose::{Fuenftagesprognose, Prognoserichtung},
+};
 use depot_kern::{BeraterId, Datum, Herkunft, Isin, Preis, TopfId, Zeitpunkt};
 use depot_lage::ausfuehrung::{OrderZeile, Richtung};
 
@@ -182,7 +186,6 @@ pub(super) fn auswertung(
     }
     if entscheidungen.is_empty() {
         aus.bericht.push_str("| – | Kein datierter Orderversand und keine Kursprognose im Zeitraum belegt | – | – | – | – | – |\n");
-        return aus;
     }
 
     let mut kurse = Schlusskurse::new();
@@ -203,7 +206,91 @@ pub(super) fn auswertung(
     for entscheidung in entscheidungen {
         aus.zeile(&entscheidung, &kurse, jetzt);
     }
+    kursprognosebericht(&mut aus.bericht, stand, zeitraum, jetzt, &kurse);
     aus
+}
+
+#[derive(Default)]
+struct Prognosezaehler {
+    treffer: u64,
+    verfehlt: u64,
+    ausstehend: u64,
+    ohne_kurs: u64,
+}
+
+fn kursprognosebericht(
+    bericht: &mut String,
+    stand: &Stand,
+    zeitraum: Zeitraum,
+    jetzt: Zeitpunkt,
+    kurse: &Schlusskurse<'_>,
+) {
+    bericht.push_str("\n### Kursprognosen der Erstmeinung (5 Handelstage)\n\n");
+    bericht.push_str("Bewertet wird der belegte Schlusskurs genau am fünften Handelstag nach der Erstmeinung. Ein Gleichstand zählt als verfehlt. Offene Fälle und fehlende Schlusskurse zählen nicht zur Quote.\n\n");
+    bericht.push_str("| KI | Treffer | Verfehlt | Offen | Kurs fehlt | Trefferquote | Wilson 95 % |\n|---|---:|---:|---:|---:|---:|---:|\n");
+    for wer in ["Dachs", "Maus"] {
+        let mut n = Prognosezaehler::default();
+        for (tag, autor, text) in stand.begruendungen() {
+            if autor == wer
+                && (zeitraum.von..=zeitraum.bis).contains(tag)
+                && let Some(prognose) = Fuenftagesprognose::lies(text)
+            {
+                n.zaehle(&prognose, *tag, jetzt, kurse);
+            }
+        }
+        let (quote, intervall) = n.ergebnis();
+        let _ = writeln!(
+            bericht,
+            "| {wer} | {} | {} | {} | {} | {quote} | {intervall} |",
+            n.treffer, n.verfehlt, n.ausstehend, n.ohne_kurs
+        );
+    }
+}
+
+impl Prognosezaehler {
+    fn zaehle(
+        &mut self,
+        prognose: &Fuenftagesprognose,
+        datum: Datum,
+        jetzt: Zeitpunkt,
+        kurse: &Schlusskurse<'_>,
+    ) {
+        let faellig = zieltag(&prognose.isin, datum, 5).and_then(|tag| {
+            let schluss = depot_kern::liste::boerse_von(&prognose.isin)?.schluss(tag)?;
+            Some((tag, schluss))
+        });
+        let zaehler = match faellig {
+            Some((_, schluss)) if schluss > jetzt => &mut self.ausstehend,
+            Some((tag, _)) => match kurse.get(&(&prognose.isin, tag)) {
+                Some(kurs) if prognose.getroffen(kurs.kurs().preis()) => &mut self.treffer,
+                Some(_) => &mut self.verfehlt,
+                None => &mut self.ohne_kurs,
+            },
+            None => &mut self.ohne_kurs,
+        };
+        *zaehler = zaehler.saturating_add(1);
+    }
+
+    fn ergebnis(&self) -> (String, String) {
+        let bewertet = self.treffer.saturating_add(self.verfehlt);
+        let Some((von, bis)) = wilson_bp(bewertet, self.treffer) else {
+            return ("–".into(), "–".into());
+        };
+        let quote = prozent(
+            self.treffer
+                .saturating_mul(10_000)
+                .checked_div(bewertet)
+                .and_then(|bp| i64::try_from(bp).ok()),
+        );
+        (
+            quote,
+            format!(
+                "{} bis {}",
+                prozent(Some(i64::from(von))),
+                prozent(Some(i64::from(bis)))
+            ),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -232,6 +319,50 @@ mod tests {
             anlass: depot_lage::ausfuehrung::Anlass::Umschichtung,
             ausgefuehrt_am: None,
         }
+    }
+
+    #[test]
+    fn kursprognose_braucht_genau_den_fuenften_schluss() -> Result<(), String> {
+        let datum = Datum::neu(2030, 1, 11).ok_or("Datum")?;
+        let faellig = Datum::neu(2030, 1, 18).ok_or("Zieltag")?;
+        let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let grundkurs = Preis::aus_cent(Cent(10_000)).ok_or("Grundkurs")?;
+        let prognose = Fuenftagesprognose {
+            isin: isin.clone(),
+            richtung: Prognoserichtung::Steigt,
+            ausgangskurs: grundkurs,
+        };
+        assert_eq!(
+            Fuenftagesprognose::lies(&prognose.text()),
+            Some(prognose.clone())
+        );
+        let schlusszeit = Boerse::Xetra.schluss(faellig).ok_or("Schluss")?;
+        let abruf = Zeitpunkt::frankfurt(faellig, 18, 0, 0).ok_or("Zeit")?;
+        let davor = Zeitpunkt::frankfurt(faellig, 16, 0, 0).ok_or("Zeit vorher")?;
+        let kurs = Kurs::neu(Cent(10_100), "EUR", faellig, schlusszeit, Herkunft::Quelle)
+            .map_err(|e| format!("{e:?}"))?;
+        let beleg = KursBeleg::neu("probe", abruf, b"Schlusskurs", isin.clone(), kurs)?;
+        let mut n = Prognosezaehler::default();
+        let mut kurse = Schlusskurse::new();
+        n.zaehle(&prognose, datum, davor, &kurse);
+        n.zaehle(&prognose, datum, abruf, &kurse);
+        kurse.insert((&isin, faellig), &beleg);
+        n.zaehle(&prognose, datum, abruf, &kurse);
+        n.zaehle(
+            &Fuenftagesprognose {
+                richtung: Prognoserichtung::Faellt,
+                ..prognose
+            },
+            datum,
+            abruf,
+            &kurse,
+        );
+        assert_eq!(
+            (n.treffer, n.verfehlt, n.ausstehend, n.ohne_kurs),
+            (1, 1, 1, 1)
+        );
+        assert_eq!(n.ergebnis().0, prozent(Some(5_000)));
+        Ok(())
     }
 
     #[test]

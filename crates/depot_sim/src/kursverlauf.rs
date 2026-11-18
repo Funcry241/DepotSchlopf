@@ -174,6 +174,47 @@ mod tests {
     }
 
     #[test]
+    fn nachgeladene_historie_zaehlt_erst_ab_abruf() -> Result<(), String> {
+        use depot_journal::{Journal, KursBeleg};
+        use depot_kern::{Boerse, Cent, Kurs};
+
+        let ordner = std::env::temp_dir().join(format!("depot-kursverlauf-{}", std::process::id()));
+        std::fs::create_dir(&ordner).map_err(|e| e.to_string())?;
+        let probe = || -> Result<(), String> {
+            let pfad = ordner.join("journal.txt");
+            Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+            let mut journal = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+            let isin = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+            let bis = Datum::neu(2026, 11, 13).ok_or("Datum")?;
+            let vorher = Zeitpunkt::frankfurt(bis, 18, 0, 0).ok_or("Wissen vorher")?;
+            let abruf = Zeitpunkt::frankfurt(bis, 19, 0, 0).ok_or("Abruf")?;
+            let mut tag = bis;
+            for i in 0_i64..21 {
+                let schluss = Boerse::Xetra.schluss(tag).ok_or("Schluss")?;
+                let preis = 10_000_i64
+                    .checked_sub(i.checked_mul(100).ok_or("Schritt")?)
+                    .ok_or("Preis")?;
+                let kurs = Kurs::neu(Cent(preis), "EUR", tag, schluss, Herkunft::Quelle)
+                    .map_err(|e| format!("{e:?}"))?;
+                let beleg = KursBeleg::neu("probe", abruf, b"Historie", isin.clone(), kurs)?;
+                journal.belege_kurs(&beleg).map_err(|e| format!("{e:?}"))?;
+                tag = Boerse::Xetra.bezugstag(tag).ok_or("Vortag")?;
+            }
+            assert_eq!(
+                kursverlauf(journal.stand(), &isin, bis, vorher),
+                Verlauf::ZuWenig
+            );
+            assert!(matches!(
+                kursverlauf(journal.stand(), &isin, bis, abruf),
+                Verlauf::Da { t20_bp: 2500, .. }
+            ));
+            Ok(())
+        }();
+        std::fs::remove_dir_all(&ordner).map_err(|e| e.to_string())?;
+        probe
+    }
+
+    #[test]
     fn kursverlauf_ohne_belege() -> Result<(), String> {
         let sap = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
         let tag = Datum::neu(2026, 11, 13).ok_or("Datum")?;

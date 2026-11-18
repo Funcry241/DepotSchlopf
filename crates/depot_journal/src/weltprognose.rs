@@ -24,6 +24,46 @@ impl Prognoserichtung {
     }
 }
 
+/// Kursprognosen der Erstmeinung stehen als gewöhnliche Begründungszeilen im Journal.
+pub const FUENFTAGES_PREFIX: &str = "Kursprognose 5: ";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fuenftagesprognose {
+    pub isin: Isin,
+    pub richtung: Prognoserichtung,
+    pub ausgangskurs: Preis,
+}
+
+impl Fuenftagesprognose {
+    pub fn text(&self) -> String {
+        format!(
+            "{FUENFTAGES_PREFIX}{} {} {}",
+            self.isin,
+            self.richtung.name(),
+            self.ausgangskurs.cent_text()
+        )
+    }
+
+    pub fn lies(text: &str) -> Option<Self> {
+        let mut teile = text
+            .strip_prefix(FUENFTAGES_PREFIX)?
+            .split_ascii_whitespace();
+        let p = Self {
+            isin: Isin::neu(teile.next()?).ok()?,
+            richtung: Prognoserichtung::lies(teile.next()?)?,
+            ausgangskurs: Preis::lies_cent_text(teile.next()?)?,
+        };
+        (p.ausgangskurs.fein() > 0 && p.text() == text).then_some(p)
+    }
+
+    pub fn getroffen(&self, schluss: Preis) -> bool {
+        match self.richtung {
+            Prognoserichtung::Steigt => schluss > self.ausgangskurs,
+            Prognoserichtung::Faellt => schluss < self.ausgangskurs,
+        }
+    }
+}
+
 /// Ein unabhaengiger, optionaler Befund. Die Ereignisnummer bezieht sich auf die Frage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Weltprognose {

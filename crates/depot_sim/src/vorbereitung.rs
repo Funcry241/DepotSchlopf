@@ -101,7 +101,6 @@ pub fn vorbereiten<'a>(
     j.starte_vorbereitung(zeit, fuer, ereignisse.clone())
         .map_err(|e| format!("{e:?}"))?;
     let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
-    let positiv = universum.isins();
     for (wer, id, b) in [
         (BeraterId::Dachs, TopfId::A, dachs),
         (BeraterId::Maus, TopfId::B, maus),
@@ -143,6 +142,7 @@ pub fn vorbereiten<'a>(
                             verlauf: &[],
                             kaufbilanz: crate::ausfuehrung::Kennzahlen::default(),
                             relative_staerke: &[],
+                            relativ_kurz: false,
                             positionskaeufe: &[],
                             ereignisse: &ereignisse,
                         },
@@ -155,7 +155,7 @@ pub fn vorbereiten<'a>(
                         a.prognose = antwort.prognose.filter(|p| {
                             p.gueltig()
                                 && p.ereignis_nr <= ereignisse.len()
-                                && positiv.contains(&p.isin)
+                                && universum.isins().contains(&p.isin)
                         });
                     } else if antwort.vorschlag.is_some() {
                         a.text =

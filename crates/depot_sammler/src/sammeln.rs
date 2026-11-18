@@ -31,6 +31,7 @@
 //! (`Error Message`) betrifft nur diesen Wert. Jeder andere Hinweis, etwa das erreichte
 //! Tageskontingent, beendet den Lauf, damit kein weiterer Abruf das Kontingent belastet.
 
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -52,9 +53,8 @@ pub const ADRESSE_DEVISEN: &str =
     "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml";
 /// Ordner der rohen Referenzkurse unter `daten/roh/`.
 pub const ABLAGE_DEVISEN: &str = "ezb-referenzkurse";
-/// So viele Tage vor dem Abruf beginnt die Reihe bei Tiingo: genug fuer heute und den Vortag
-/// auch ueber Feiertage.
-const TAGE_ZURUECK: i64 = 14;
+/// Der vorhandene EZB-Abruf deckt 90 Kalendertage mit datierten Umrechnungskursen ab.
+const TAGE_ZURUECK: i64 = 90;
 
 /// Was ein Wert ergeben hat.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -542,6 +542,7 @@ enum Schritt {
         rohdatei: PathBuf,
         normalisierungen: Vec<(Datum, String)>,
         kapitalmeldungen: Vec<Kapitalmeldung>,
+        historie: Vec<Kurs>,
         heute: Kurse,
         vortag: Kurse,
     },
@@ -640,18 +641,16 @@ fn lies_wert(
             marktdaten = gelesen.marktdaten;
             Ok(gelesen.kurse)
         })
-        .and_then(|tage| {
-            schlusskurse_in_euro(abruf, vec![(wert.isin.clone(), wert.boerse, tage)], devisen)
-                .map_err(|e| format!("Schlusskurse: {e:?}"))
-        });
+        .and_then(|tage| kursreihe(wert, abruf, &tage, devisen));
     Ok(match gelesen {
-        Ok((heute, vortag)) => {
-            // Nur tatsächlich verwendete Tage belegen, nicht die ganze Abrufhistorie.
+        Ok((heute, vortag, historie)) => {
+            // Nur Schlusskurse belegen, die der Sammler in diesem Lauf verwenden kann.
             normalisierungen.retain(|(tag, _)| {
-                [&heute, &vortag].iter().any(|k| {
-                    k.eintrag(&wert.isin)
-                        .is_some_and(|kurs| kurs.handelstag() == *tag)
-                })
+                historie.iter().any(|kurs| kurs.handelstag() == *tag)
+                    || [&heute, &vortag].iter().any(|k| {
+                        k.eintrag(&wert.isin)
+                            .is_some_and(|kurs| kurs.handelstag() == *tag)
+                    })
             });
             let mut kapitalmeldungen =
                 kapitalmeldungen(wert, &marktdaten, [&heute, &vortag], abruf, &roh)?;
@@ -662,12 +661,42 @@ fn lies_wert(
                 rohdatei,
                 normalisierungen,
                 kapitalmeldungen,
+                historie,
                 heute,
                 vortag,
             }
         }
         Err(text) => Schritt::Fehler(text),
     })
+}
+
+fn kursreihe(
+    wert: &Wert,
+    abruf: Zeitpunkt,
+    tage: &[depot_kern::quelle::Tageskurs],
+    devisen: &Devisen,
+) -> Result<(Kurse, Kurse, Vec<Kurs>), String> {
+    let (heute, vortag) = schlusskurse_in_euro(
+        abruf,
+        vec![(wert.isin.clone(), wert.boerse, tage.to_vec())],
+        devisen,
+    )
+    .map_err(|e| format!("Schlusskurse: {e:?}"))?;
+    let historie = vortag
+        .eintrag(&wert.isin)
+        .map_or_else(
+            || Ok(Vec::new()),
+            |kurs| {
+                depot_kern::quelle::aeltere_schlusskurse(
+                    wert.boerse,
+                    tage,
+                    kurs.handelstag(),
+                    devisen,
+                )
+            },
+        )
+        .map_err(|e| format!("Historische Schlusskurse: {e:?}"))?;
+    Ok((heute, vortag, historie))
 }
 
 /// Ein Lauf ueber alle Werte. `takt` liefert die Zeit des Rechners in UTC, wartet und meldet
@@ -725,7 +754,7 @@ pub fn sammle(
             (takt.schlafe)(pause);
         }
         abgerufen = true;
-        let (abruf, roh, rohdatei, h, v, notizen, kapitalmeldungen) =
+        let (abruf, roh, rohdatei, h, v, historie, notizen, kapitalmeldungen) =
             match lies_wert(netz, zugang, schluessel, wert, &vorbereitung, takt, ablage)? {
                 Schritt::Gelesen {
                     abruf,
@@ -733,6 +762,7 @@ pub fn sammle(
                     rohdatei,
                     normalisierungen,
                     kapitalmeldungen,
+                    historie,
                     heute,
                     vortag,
                 } => (
@@ -741,6 +771,7 @@ pub fn sammle(
                     rohdatei,
                     heute,
                     vortag,
+                    historie,
                     normalisierungen,
                     kapitalmeldungen,
                 ),
@@ -775,20 +806,26 @@ pub fn sammle(
         gelesen
             .offen
             .extend(kapitalmeldungen.into_iter().map(Sammelbeleg::Kapital));
-        gelesen.belege(wert, abruf, &roh, &h, &v)?;
-        let ergebnis = if fehlt_nyse_vergleich(wert, &h, &v) {
-            Ergebnis::Fehler("Nicht belegt: kein NYSE-Vergleichskurs mit EZB-Referenzkurs".into())
-        } else {
-            Ergebnis::Belegt {
-                heute: tag_und_preis(h.eintrag(&wert.isin)),
-                vortag: tag_und_preis(v.eintrag(&wert.isin)),
-                rohdatei,
-            }
-        };
-        bericht.werte.push((wert.clone(), ergebnis));
+        gelesen.belege(wert, abruf, &roh, (&h, &v), &historie)?;
+        bericht
+            .werte
+            .push((wert.clone(), kursergebnis(wert, &h, &v, rohdatei)));
     }
 
     abschliessen(bericht, journal, werte, gelesen)
+}
+
+fn kursergebnis(wert: &Wert, heute: &Kurse, vortag: &Kurse, rohdatei: PathBuf) -> Ergebnis {
+    if fehlt_nyse_vergleich(wert, heute, vortag) {
+        return Ergebnis::Fehler(
+            "Nicht belegt: kein NYSE-Vergleichskurs mit EZB-Referenzkurs".into(),
+        );
+    }
+    Ergebnis::Belegt {
+        heute: tag_und_preis(heute.eintrag(&wert.isin)),
+        vortag: tag_und_preis(vortag.eintrag(&wert.isin)),
+        rohdatei,
+    }
 }
 
 fn fehlt_nyse_vergleich(wert: &Wert, heute: &Kurse, vortag: &Kurse) -> bool {
@@ -798,7 +835,7 @@ fn fehlt_nyse_vergleich(wert: &Wert, heute: &Kurse, vortag: &Kurse) -> bool {
 }
 
 enum Sammelbeleg {
-    Kurs(KursBeleg),
+    Kurs(KursBeleg, bool),
     Kapital(Kapitalmeldung),
 }
 
@@ -818,19 +855,23 @@ impl Gelesen {
         wert: &Wert,
         abruf: Zeitpunkt,
         roh: &[u8],
-        heute: &Kurse,
-        vortag: &Kurse,
+        schluss: (&Kurse, &Kurse),
+        historie: &[Kurs],
     ) -> Result<(), SammelFehler> {
+        let (heute, vortag) = schluss;
         let quelle = Anbieter::fuer(wert.boerse).dienst();
-        // Erst den Vortag, dann den aktuellen Kurs zur Belegung vormerken.
-        for kurs in [vortag.eintrag(&wert.isin), heute.eintrag(&wert.isin)]
-            .into_iter()
-            .flatten()
-            .filter(|_| !fehlt_nyse_vergleich(wert, heute, vortag))
-        {
+        for kurs in historie.iter().chain(
+            [vortag.eintrag(&wert.isin), heute.eintrag(&wert.isin)]
+                .into_iter()
+                .flatten()
+                .filter(|_| !fehlt_nyse_vergleich(wert, heute, vortag)),
+        ) {
             let beleg = KursBeleg::neu(quelle, abruf, roh, wert.isin.clone(), kurs.clone())
                 .map_err(|e| SammelFehler::Journal(JournalFehler::Abgelehnt(e)))?;
-            self.offen.push(Sammelbeleg::Kurs(beleg));
+            let historisch = vortag
+                .eintrag(&wert.isin)
+                .is_some_and(|v| kurs.handelstag() < v.handelstag());
+            self.offen.push(Sammelbeleg::Kurs(beleg, historisch));
         }
         if let Some(k) = heute.eintrag(&wert.isin) {
             self.heute.push((wert.isin.clone(), k.clone(), abruf));
@@ -873,10 +914,33 @@ fn abschliessen(
             .map_err(SammelFehler::Journal)?;
     }
     let gehalten = journal.stand().gehalten();
+    let mut letzte_preise: BTreeMap<_, _> = journal
+        .stand()
+        .kurse()
+        .iter()
+        .map(|b| {
+            (
+                (
+                    b.isin().clone(),
+                    b.kurs().handelstag(),
+                    b.quelle().to_owned(),
+                ),
+                b.kurs().preis(),
+            )
+        })
+        .collect();
     for beleg in g.offen {
         match beleg {
-            Sammelbeleg::Kurs(b) => {
-                journal.belege_kurs(&b).map_err(SammelFehler::Journal)?;
+            Sammelbeleg::Kurs(b, historisch) => {
+                let key = (
+                    b.isin().clone(),
+                    b.kurs().handelstag(),
+                    b.quelle().to_owned(),
+                );
+                let alt = letzte_preise.insert(key, b.kurs().preis());
+                if !historisch || alt != Some(b.kurs().preis()) {
+                    journal.belege_kurs(&b).map_err(SammelFehler::Journal)?;
+                }
             }
             Sammelbeleg::Kapital(m) if journal.stand().format() == depot_journal::FORMAT => {
                 if m.beleg.quelle() == depot_kern::quelle::QUELLE_XETRA_SPLITVERDACHT

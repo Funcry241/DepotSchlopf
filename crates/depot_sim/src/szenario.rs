@@ -43,6 +43,8 @@ pub struct Lage<'a> {
     pub kaufbilanz: crate::ausfuehrung::Kennzahlen,
     pub ereignisse: &'a [String],
     pub relative_staerke: &'a [(Isin, i64)],
+    /// Nur bei zu kurzer Historie: 20 gemeinsame Handelstage.
+    pub relativ_kurz: bool,
     pub positionskaeufe: &'a [crate::Positionskauf],
 }
 
@@ -91,6 +93,10 @@ pub trait Berater {
 
     fn thesenpruefung(&mut self) -> Option<String> {
         None
+    }
+
+    fn kursprognosen(&mut self) -> Vec<depot_journal::weltprognose::Fuenftagesprognose> {
+        Vec::new()
     }
 
     fn belegverwerfungen(&mut self) -> Vec<(crate::belegrang::Verwerfungsgrund, usize)> {
