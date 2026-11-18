@@ -1,4 +1,4 @@
-//! Zwei feste kostenlose RSS-Quellen. Keine Artikelseiten, keine KI-Aufrufe, keine API-Schluessel.
+//! Feste kostenlose RSS-Quellen, nur Schlagzeilen.
 //! Alle Antworten werden vor Speicherung auf hinterlegte Schluessel geprueft, auch XML-dekodiert.
 use std::path::{Path, PathBuf};
 
@@ -102,7 +102,7 @@ fn enthaelt_schluessel(text: &str, zugang: &Zugang) -> bool {
 
 /// Ein GET je Quelle, mindestens 90 Minuten Abstand. Erst nach allen Sicherheitspruefungen
 /// werden Rohantworten abgelegt und hoechstens 15 Nachrichten belegt; keine Teilnachrichten
-/// nach einem Sicherheitsabbruch. Der Ausfall einer Quelle laesst die andere verwendbar.
+/// nach einem Sicherheitsabbruch. Der Ausfall einer Quelle lässt die übrigen verwendbar.
 ///
 /// # Errors
 /// Fehler beim dauerhaften Journal, der Uhr oder der Rohablage.

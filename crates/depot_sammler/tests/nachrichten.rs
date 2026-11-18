@@ -12,6 +12,8 @@ use std::{
 
 static NR: AtomicU32 = AtomicU32::new(0);
 const KEY: &str = "TESTSCHLUESSEL42";
+const ADHOC: &str = "finanznachrichten-adhoc";
+const QUELLEN: [&str; 3] = ["tagesschau", "bbc-world", ADHOC];
 fn um(h: u8, m: u8) -> Result<Zeitpunkt, String> {
     Datum::neu(2026, 11, 7)
         .and_then(|d| Zeitpunkt::neu(d, h, m, 0))
@@ -28,10 +30,10 @@ fn ordner() -> Result<PathBuf, String> {
     Ok(p)
 }
 fn item(titel: &str, zeit: &str, quelle: &str) -> String {
-    let host = if quelle == "tagesschau" {
-        "www.tagesschau.de"
-    } else {
-        "www.bbc.com"
+    let host = match quelle {
+        "tagesschau" => "www.tagesschau.de",
+        ADHOC => "www.finanznachrichten.de",
+        _ => "www.bbc.com",
     };
     format!(
         "<item><title>{titel}</title><link>https://{host}/artikel</link><pubDate>{zeit}</pubDate><description>Nur Titel speichern</description></item>"
@@ -62,7 +64,11 @@ impl Netz for Fake {
 }
 fn netz(a: &str, b: &str) -> Fake {
     Fake {
-        antworten: vec![Ok(a.as_bytes().to_vec()), Ok(b.as_bytes().to_vec())],
+        antworten: vec![
+            Ok(a.as_bytes().to_vec()),
+            Ok(b.as_bytes().to_vec()),
+            Ok(feed("").into_bytes()),
+        ],
         adressen: Vec::new(),
     }
 }
@@ -78,6 +84,8 @@ fn kostenlos_ohne_schluessel_mit_quelle_link_zeit_und_rohhash() -> Result<(), St
     let p = ordner()?;
     let mut j = oeffnen(&p)?;
     let mut n = netz(&normal("tagesschau"), &normal("bbc-world"));
+    let dritte = n.antworten.last_mut().ok_or("Ad-hoc-Testantwort fehlt")?;
+    *dritte = Ok(normal(ADHOC).into_bytes());
     let b = sammle_nachrichten(
         &mut j,
         &mut n,
@@ -86,15 +94,21 @@ fn kostenlos_ohne_schluessel_mit_quelle_link_zeit_und_rohhash() -> Result<(), St
         &p.join("roh"),
     )
     .map_err(|e| format!("{e:?}"))?;
-    assert_eq!(b.neu, 2);
-    assert_eq!(n.adressen.len(), 2);
+    assert_eq!(b.neu, 3);
+    assert_eq!(n.adressen.len(), 3);
+    assert_eq!(
+        n.adressen.get(2).map(String::as_str),
+        Some("https://www.finanznachrichten.de/rss-aktien-adhoc")
+    );
     assert_eq!(
         j.stand().seit_abschluss(),
         0,
         "RSS-Abrufe beginnen keinen Papiertag"
     );
-    assert!(j.stand().rss_abruf("tagesschau").is_some());
-    assert!(j.stand().rss_abruf("bbc-world").is_some());
+    for quelle in QUELLEN {
+        assert!(j.stand().rss_abruf(quelle).is_some());
+        assert!(j.stand().nachrichten().iter().any(|n| n.quelle() == quelle));
+    }
     assert!(
         n.adressen
             .iter()
@@ -114,7 +128,7 @@ fn kostenlos_ohne_schluessel_mit_quelle_link_zeit_und_rohhash() -> Result<(), St
 #[test]
 fn abrufpause_ueberlebt_neustart_und_uhrsprung_nach_hinten() -> Result<(), String> {
     let p = ordner()?;
-    for (h, m, erwartet) in [(14, 0, 2), (14, 1, 0), (13, 0, 0), (15, 29, 0), (15, 30, 2)] {
+    for (h, m, erwartet) in [(14, 0, 3), (14, 1, 0), (13, 0, 0), (15, 29, 0), (15, 30, 3)] {
         let mut j = oeffnen(&p)?;
         let mut n = netz(&normal("tagesschau"), &normal("bbc-world"));
         let b = sammle_nachrichten(
@@ -195,7 +209,7 @@ fn eine_quelle_faellt_aus_und_fehler_werden_maskiert() -> Result<(), String> {
 }
 
 #[test]
-fn beide_quellen_kommen_unter_dem_gemeinsamen_limit_vor() -> Result<(), String> {
+fn alle_quellen_kommen_unter_dem_gemeinsamen_limit_vor() -> Result<(), String> {
     let p = ordner()?;
     let mut j = oeffnen(&p)?;
     let items = |q: &str| {
@@ -204,6 +218,8 @@ fn beide_quellen_kommen_unter_dem_gemeinsamen_limit_vor() -> Result<(), String> 
             .collect::<String>()
     };
     let mut n = netz(&feed(&items("tagesschau")), &feed(&items("bbc-world")));
+    let dritte = n.antworten.last_mut().ok_or("Ad-hoc-Testantwort fehlt")?;
+    *dritte = Ok(feed(&items(ADHOC)).into_bytes());
     let b = sammle_nachrichten(
         &mut j,
         &mut n,
@@ -213,7 +229,7 @@ fn beide_quellen_kommen_unter_dem_gemeinsamen_limit_vor() -> Result<(), String> 
     )
     .map_err(|e| format!("{e:?}"))?;
     assert_eq!(b.neu, MAX_NACHRICHTEN);
-    for q in ["tagesschau", "bbc-world"] {
+    for q in QUELLEN {
         assert!(j.stand().nachrichten().iter().any(|n| n.quelle() == q));
     }
     Ok(())
@@ -224,6 +240,8 @@ fn kaputter_feed_wird_als_ganzes_verworfen() -> Result<(), String> {
     let p = ordner()?;
     let mut j = oeffnen(&p)?;
     let mut n = netz(&normal("tagesschau").replace("</rss>", ""), "kein XML");
+    let dritte = n.antworten.last_mut().ok_or("Ad-hoc-Testantwort fehlt")?;
+    *dritte = Ok(b"kein XML".to_vec());
     let b = sammle_nachrichten(
         &mut j,
         &mut n,
@@ -246,7 +264,15 @@ fn verschiedene_abrufzeiten_fallen_im_journal_nicht_zurueck() -> Result<(), Stri
         &normal("tagesschau"),
         &normal("bbc-world").replace("12:00:00", "11:00:00"),
     );
-    let mut zeiten = [um(14, 0)?, um(14, 1)?, um(14, 2)?, um(14, 3)?].into_iter();
+    let mut zeiten = [
+        um(14, 0)?,
+        um(14, 1)?,
+        um(14, 2)?,
+        um(14, 3)?,
+        um(14, 4)?,
+        um(14, 5)?,
+    ]
+    .into_iter();
     let b = sammle_nachrichten(
         &mut j,
         &mut n,
@@ -275,7 +301,7 @@ fn ferner_zukunftsbeleg_erklaert_die_pause_ohne_netzabruf() -> Result<(), String
     let heute = um(14, 0)?;
     let zukunft =
         Zeitpunkt::aus_sekunden(heute.sekunden().saturating_add(172_800)).ok_or("Zeit")?;
-    for q in ["tagesschau", "bbc-world"] {
+    for q in QUELLEN {
         j.belege_rss_abruf(q, zukunft)
             .map_err(|e| format!("{e:?}"))?;
     }
@@ -290,7 +316,7 @@ fn ferner_zukunftsbeleg_erklaert_die_pause_ohne_netzabruf() -> Result<(), String
     )
     .map_err(|e| format!("{e:?}"))?;
     assert!(n.adressen.is_empty());
-    assert_eq!(b.quellen.len(), 2);
+    assert_eq!(b.quellen.len(), QUELLEN.len());
     assert!(
         b.quellen
             .iter()

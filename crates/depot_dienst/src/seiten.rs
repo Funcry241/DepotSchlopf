@@ -1864,7 +1864,7 @@ pub(crate) fn quellen_teil(
         (Art::Termine, "Termine von EZB und Fed (ohne Schlüssel)"),
         (
             Art::Nachrichten,
-            "Schlagzeilen: tagesschau und BBC World (kostenlos, ohne Schlüssel; mindestens 90 Minuten Abrufpause)",
+            "Schlagzeilen und Ad-hoc-Meldungen: tagesschau, BBC World und FinanzNachrichten.de (kostenlos, ohne Schlüssel; mindestens 90 Minuten Abrufpause)",
         ),
     ] {
         // Ein Kursabruf je Boerse zaehlt fuer die Kursquellen mit.

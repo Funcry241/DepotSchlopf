@@ -1,9 +1,10 @@
 # Kostenlose RSS-Schlagzeilen (Stand 07.11.2026)
 
-Der Sammler ersetzt die im Gratiszugang abgelehnte Alpha-Vantage-Premiumabfrage durch genau zwei feste, nur lesende RSS-Feeds:
+Der Sammler ersetzt die im Gratiszugang abgelehnte Alpha-Vantage-Premiumabfrage durch feste, nur lesende RSS-Feeds:
 
 - tagesschau: https://www.tagesschau.de/infoservices/alle-meldungen-100~rss2.xml
 - BBC World: https://feeds.bbci.co.uk/news/world/rss.xml
+- FinanzNachrichten.de, Ad-hoc-Meldungen (#356 S4b): https://www.finanznachrichten.de/rss-aktien-adhoc
 
 Quellenliste: `crates/depot_sammler/src/rss_quellen.rs`, gegen Änderung und Entfernung durch die Festschreibung geschützt. Kein Schlüssel für Nachrichten, keine Artikelseiten, Bilder oder anderen Links werden abgerufen. RSS-Hinweise: https://www.tagesschau.de/infoservices/rssfeeds und https://support.bbc.co.uk/platform/feeds/NewsFeeds.htm . Die Feedformate wurden am 07.11.2026 über HTTPS abgerufen und mit dem Leser geprüft. Nutzung lokal und privat; Quellen und Originallinks bleiben zugeordnet.
 
@@ -15,7 +16,7 @@ Der XML-Leser quick-xml (ohne Zusatzfeatures; transitive Abhängigkeit memchr) p
 
 Vor jeder Ablage werden alle hinterlegten Schlüssel roh, XML-dekodiert (einschließlich ignorierter Felder/Attribute) und im fertigen Nachrichtentext gesucht. Bei einem Treffer bleibt keine Rohantwort oder Nachricht dieses Laufs liegen, auch nicht die erste Quelle nach einem Treffer in der zweiten. Die bereits belegten Abrufversuche enthalten keine Antwort und keinen Schlüssel. Ein normaler Ausfall einer Quelle lässt die andere verwendbar; das Protokoll nennt den Ausfall.
 
-Die Originalfeeds liegen unter `daten/roh/tagesschau` bzw. `daten/roh/bbc-world`, unverändert mit SHA-256-Bezug im bestehenden Nachrichtenbeleg. Insgesamt höchstens 15 Meldungen je Lauf, abwechselnd aus beiden Quellen ausgewählt, maximal 400 Zeichen je Text mit erhaltenem Link. Abrufzeiten fallen im Journal nie zurück, auch wenn die zweite Quelle ältere Meldungen liefert. Bereits bekannte Meldungen werden nicht doppelt belegt. Bestehende Alpha-Vantage-Belege bleiben lesbar.
+Die Originalfeeds liegen unter `daten/roh/tagesschau`, `daten/roh/bbc-world` bzw. `daten/roh/finanznachrichten-adhoc`, unverändert mit SHA-256-Bezug im bestehenden Nachrichtenbeleg. Insgesamt höchstens 15 Meldungen je Lauf, abwechselnd aus den verfügbaren Quellen ausgewählt, maximal 400 Zeichen je Text mit erhaltenem Link. Abrufzeiten fallen im Journal nie zurück, auch wenn die zweite Quelle ältere Meldungen liefert. Bereits bekannte Meldungen werden nicht doppelt belegt. Bestehende Alpha-Vantage-Belege bleiben lesbar.
 
 ## Oberfläche und Automatik
 
@@ -23,7 +24,7 @@ Einrichtung → Datenquellen: eigener Prüfknopf. Der Verlauf zeigt Abrufpause, 
 
 ## Nachweise
 
-`depot_sammler/tests/nachrichten.rs`: ohne Schlüssel, zwei feste GETs, Herkunft/Link/Zeit/Hash, dauerhafte Pause und Uhrsprung, gleichbleibende Belege nach Wiederabruf, globaler Sicherheitsabbruch im zweiten Feed einschließlich mehrfacher XML-Escapes, maskierte Netzfehler, Teilverfügbarkeit, gemeinsames Limit und beide Quellen, Trunkierung ohne Teilbelege, Abrufreihenfolge bei verschiedener Veröffentlichungsreihenfolge.
+`depot_sammler/tests/nachrichten.rs`: ohne Schlüssel, ein fester GET je Quelle, Herkunft/Link/Zeit/Hash, dauerhafte Pause und Uhrsprung, gleichbleibende Belege nach Wiederabruf, globaler Sicherheitsabbruch im zweiten Feed einschließlich mehrfacher XML-Escapes, maskierte Netzfehler, Teilverfügbarkeit, gemeinsames Limit und alle Quellen, Trunkierung ohne Teilbelege, Abrufreihenfolge bei verschiedener Veröffentlichungsreihenfolge.
 
 `depot_sammler/tests/rss.rs`: UTC-Umrechnung beider Offsetrichtungen, fehlende/ungültige Zeitzone, CDATA und Referenzen, zukünftige/alte/unvollständige Meldungen, DTD, Trunkierung, doppelte Felder/Attribute, falsche Verschachtelung, mehrere Wurzeln, Nullzeichen und fremde oder aktive Links.
 
@@ -35,7 +36,7 @@ Dies liefert zeitgestempelte Belege an das vorhandene Weltmodell. Automatische n
 
 ## Korrektur: RSS-Verwaltung und offener Papiertag (08.11.2026)
 
-Der bisherige Sammler schrieb seine Abrufpause als freie Beobachtung. Dadurch galt bereits ein RSS-Abruf als offener Papiertag und blockierte die Vorbereitung. Neue Versuche verwenden den eigenen Journaltyp `rss-abruf`. Nur exakt kanonische alte Beobachtungen mit `rss-abruf: `, einer der beiden festen Quellen und einem zum Belegdatum passenden Zeitpunkt werden ebenfalls als Verwaltung gelesen. Andere Beobachtungen zählen unverändert als Handelszustand. Keine Datei wird migriert, umgeschrieben oder zurückgesetzt.
+Der bisherige Sammler schrieb seine Abrufpause als freie Beobachtung. Dadurch galt bereits ein RSS-Abruf als offener Papiertag und blockierte die Vorbereitung. Neue Versuche verwenden den eigenen Journaltyp `rss-abruf`. Nur exakt kanonische alte Beobachtungen mit `rss-abruf: `, einer der beiden damaligen Quellen (tagesschau und BBC World) und einem zum Belegdatum passenden Zeitpunkt werden ebenfalls als Verwaltung gelesen. Andere Beobachtungen zählen unverändert als Handelszustand. Keine Datei wird migriert, umgeschrieben oder zurückgesetzt.
 
 Die letzte Abrufzeit je Quelle ist das Maximum der gültigen alten und neuen Belege. Neustart und rückwärts gestellte Uhr verkürzen die bestehende 90-Minuten-Pause nicht. Verwaltungsbelege löschen oder bestätigen keinen offenen Handelslauf.
 
