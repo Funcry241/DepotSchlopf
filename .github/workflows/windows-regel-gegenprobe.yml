@@ -1,0 +1,87 @@
+name: Windows-Sammelcheck Gegenprobe
+on:
+  pull_request:
+    branches: [maus/362-windows-testbasis]
+permissions:
+  contents: read
+jobs:
+  gate-fehler:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+  gate-fehlt:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+  gate-gefiltert:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Gate erfolgreich (Testeingabe)"
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      update: ${{ steps.filter.outputs.update }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: filter
+        run: |
+          PYTHONPATH=.github/scripts python -B -c 'from windows_update import update_noetig; print("update=" + str(update_noetig("pull_request", ["docs/kaltstart.md"])).lower())' >> "$GITHUB_OUTPUT"
+  update:
+    needs: filter
+    if: ${{ needs.filter.outputs.update == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+  sammelcheck:
+    name: Sammelcheck (${{ matrix.fall }})
+    if: ${{ always() }}
+    needs: [gate-fehler, gate-fehlt, gate-gefiltert, filter, update]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fall: [fehler, abgebrochen, fehlt, gefiltert]
+    env:
+      FALL: ${{ matrix.fall }}
+      GATE_FEHLER: ${{ needs.gate-fehler.result }}
+      GATE_FEHLT: ${{ needs.gate-fehlt.result }}
+      GATE_GEFILTERT: ${{ needs.gate-gefiltert.result }}
+      FILTER: ${{ needs.filter.result }}
+      UPDATE_NOETIG: ${{ needs.filter.outputs.update }}
+      UPDATE: ${{ needs.update.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Unveränderten Produktions-Sammelcheck prüfen
+        shell: bash
+        run: |
+          test "$FILTER:$UPDATE_NOETIG:$UPDATE" = 'success:false:skipped'
+          pruefe() {
+            local ergebnis=0
+            GATE="$1" python -B .github/scripts/windows_update.py sammelcheck || ergebnis=$?
+            printf 'GATE=%s, Exitcode=%s, erwartet=%s\n' "$1" "$ergebnis" "$2"
+            test "$ergebnis" = "$2"
+          }
+          case "$FALL" in
+            fehler)
+              test "$GATE_FEHLER" = failure
+              pruefe "$GATE_FEHLER" 1
+              ;;
+            abgebrochen)
+              echo "Testeingabe: cancelled. Dieser Lauf wurde nicht abgebrochen."
+              pruefe cancelled 1
+              ;;
+            fehlt)
+              test "$GATE_FEHLT" = skipped
+              pruefe "$GATE_FEHLT" 1
+              pruefe '' 1
+              ;;
+            gefiltert)
+              test "$GATE_GEFILTERT" = success
+              pruefe "$GATE_GEFILTERT" 0
+              ;;
+          esac
