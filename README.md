@@ -14,6 +14,8 @@ Rust-Rahmen, in dem zwei KIs je einen Topf eines echten Aktiendepots beraten: **
 
 Neu hier? Zuerst [docs/kaltstart.md](docs/kaltstart.md) lesen.
 
+Die Seite [Mathematik in DepotSchlopf](docs/MATHEMATIK.md) erläutert die Berechnungen und ihre Grenzen.
+
 ## Schutzregeln im derzeitigen Papierbetrieb (Standardwerte)
 
 | Gefahr | Was im Code dagegen steht |
