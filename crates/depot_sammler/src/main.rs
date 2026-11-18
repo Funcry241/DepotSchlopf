@@ -423,7 +423,9 @@ fn nachrichten_holen(
     schluessel: &Zugang,
     wurzel: &Path,
 ) -> NachrichtenAusgang {
-    println!("[Sammler] Hole kostenlose Schlagzeilen von tagesschau und BBC World ...");
+    println!(
+        "[Sammler] Hole kostenlose Schlagzeilen von tagesschau, BBC World und FinanzNachrichten.de (Ad hoc) ..."
+    );
     match sammle_nachrichten(
         journal,
         &mut Https::neu(),
