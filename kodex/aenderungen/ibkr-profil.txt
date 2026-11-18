@@ -3,3 +3,4 @@ zweck: Freigegebene IBKR-Langfristwerte aus #357 separat festschreiben
 pfade:
 crates/depot_kern/src/messlatte.rs
 kodex/festschreibung.txt
+kodex/freigaben/ibkr-profil.txt

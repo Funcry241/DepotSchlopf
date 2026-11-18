@@ -1,0 +1,4 @@
+typ: Grenzfreigabe
+diff: 814c2f736f5227c9a28f71eaa6e80d213711aaa93bd28bd744baa4114115978b
+festschreibung: c5b4bcf1f3cf0ff054ccfe90fc70e1645b95aedc3d7a00fef742e310f750285e
+erteilt: offen
