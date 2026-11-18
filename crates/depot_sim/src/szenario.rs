@@ -95,6 +95,10 @@ pub trait Berater {
         None
     }
 
+    fn kursprognosen(&mut self) -> Vec<depot_journal::weltprognose::Fuenftagesprognose> {
+        Vec::new()
+    }
+
     fn belegverwerfungen(&mut self) -> Vec<(crate::belegrang::Verwerfungsgrund, usize)> {
         Vec::new()
     }

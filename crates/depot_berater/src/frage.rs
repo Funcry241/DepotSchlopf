@@ -504,6 +504,10 @@ Bargeld. Für Käufe und Zukäufe enthält \"begruendung\" den Kurstreiber, den 
 die Positionsgröße und das Ausstiegskriterium. Beginne jede Kaufbegründung mit genau einer Anlassmarke und einem Leerzeichen: [Zahlen], [Notenbank], [Meldung], [Kursbewegung] oder [Sonstiges]. Verwende [Zahlen-Überraschung] statt [Zahlen], wenn für denselben Wert „Zahlen-Überraschung (Kaufanlass)“ belegt ist und du deshalb kaufen willst. Prüfe die Richtung und ob der Impuls nach Kosten noch trägt. Setze direkt danach den Plan im Format [Ausstieg +GEWINNbp HANDELSTAGE], zum Beispiel [Ausstieg +800bp 10]. Gib bei einem Kauf den erwarteten Kursgewinn zusätzlich als erwartung_bp im Ziel an (400 entspricht +4 %). Nenne bei jedem ausdrücklich genannten Ziel in \"belege\" die Nummern der Ereignisse oben, auf die sich deine Einschätzung stützt, zum Beispiel [2, 5]. Das gilt auch beim Halten und beim Abbau. Ohne passendes Ereignis lass das Feld weg. Begründe, warum er die Gebührenhürde für die geplante Kaufgröße übersteigt. Willst du Bargeld behalten oder sonst nichts ändern, setze \"ziele\": null. Nur wenn du den gesamten Bestand ausdrücklich verkaufen willst, setze \"ziele\": [] und nenne den Grund in \"verkaufsgrund\".\n\
 Optional kannst du Bargeld parken, auch mit \"ziele\": null: \"parkwert\": {{\"isin\": \"ETF der Liste\", \"reserve_bp\": 1000, \"naechster_kauf_tage\": 5, \"begruendung\": \"...\"}}. Bargeld über der Reserve (Anteil am Topfwert) geht dann in diesen ETF, höchstens 40 % des Topfs; er zählt nicht gegen die Zahl der Werte. Das Regelwerk parkt nur, wenn naechster_kauf_tage mindestens 5 ist (frühester erwarteter anderer Kauf in Handelstagen), und erst ab 1.000 € Zukauf, weil sich die Gebühren sonst nicht lohnen. Hältst du einen Parkwert, nenne ihn bei jedem Vorschlag wieder als parkwert: Dann verkleinert das Regelwerk ihn zuerst, wenn andere Ziele das Bargeld brauchen. Ohne parkwert bleibt er wie jeder nicht genannte Wert unverändert.\n\
 Wenn du eine Position mit abgelaufener Frist weiter hältst, nenne die ISIN mit aktueller Begründung im Feld \"halten\": [{{\"isin\":\"…\",\"begruendung\":\"…\"}}]. Bei Verkauf setze ihr gewicht_bp auf 0. Für fällige Positionen ohne Haltebegründung wird ein Verkauf geprüft. Gib immer das Feld \"unter_mindesteinsatz\" an: den Grund, wenn dein Vorschlag den in der Frage genannten Mindesteinsatz unterschreitet, sonst null. Es gibt keine Nachfrage.\n\
+Gib unabhängig von deinen Handelszielen das Feld \"kursprognosen\": [{{\"isin\": \"...\", \"richtung\": \"steigt\"}}] an. \n\
+Wähle bis zu drei verschiedene Kandidaten mit Schlusskurs in der Frage, auch wenn du Bargeld empfiehlst. \n\
+Die Richtung steigt/faellt gilt vom gezeigten Schlusskurs bis zum Schluss des fünften Handelstags nach dem Fragendatum. \n\
+Wenn kein Kandidat einen Schlusskurs hat, sende eine leere Liste. \n\
 Zusätzlich kannst du getrennt vom Handel eine nachprüfbare Weltprognose abgeben. Füge dazu \n\
 das Feld \"prognose\": {{\"ereignis_nr\": 1, \"isin\": \"...\", \"richtung\": \"steigt\", \n\
 \"handelstage\": 3, \"begruendung\": \"konkrete Wirkung\", \"widerlegung\": \"was würde dich widerlegen?\"}} hinzu. \n\
@@ -511,6 +515,44 @@ Wähle genau ein nummeriertes Ereignis und einen Wert mit Kurs. Richtung ist \"s
 Horizont 1 bis 20 Handelstage, Texte je ein kurzer Satz. Wenn keine These tragfähig ist, setze \"prognose\": null.",
         lage_text(lage, universum, bilanz)
     )
+}
+
+pub(crate) fn lies_kursprognosen(
+    text: &str,
+    lage: &Lage<'_>,
+    universum: &Universum,
+) -> Vec<depot_journal::weltprognose::Fuenftagesprognose> {
+    let Ok(objekt) = erstes_objekt(text) else {
+        return Vec::new();
+    };
+    let Some(liste) = objekt
+        .feld("kursprognosen")
+        .and_then(Json::liste)
+        .filter(|liste| !objekt.doppelte_felder() && liste.len() <= 3)
+    else {
+        return Vec::new();
+    };
+    let erlaubt = universum.isins();
+    let mut gesehen = std::collections::BTreeSet::new();
+    liste
+        .iter()
+        .filter_map(|eintrag| {
+            if eintrag.doppelte_felder() {
+                return None;
+            }
+            let isin = Isin::neu(eintrag.feld("isin")?.text()?).ok()?;
+            let richtung = Prognoserichtung::lies(eintrag.feld("richtung")?.text()?)?;
+            let kurs = lage.kurse.eintrag(&isin)?;
+            (kurs.herkunft() == depot_kern::Herkunft::Quelle
+                && erlaubt.contains(&isin)
+                && gesehen.insert(isin.clone()))
+            .then_some(depot_journal::weltprognose::Fuenftagesprognose {
+                isin,
+                richtung,
+                ausgangskurs: kurs.preis(),
+            })
+        })
+        .collect()
 }
 
 pub fn lies_mindesteinsatz(text: &str) -> Option<String> {

@@ -978,6 +978,9 @@ fn frage(
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag", frager)? {
         let mut antwort = frager.vorschlagen_mit_bilanz(e, lage, &prognosebilanz(j.stand()));
         belege_ki(j, frager).map_err(journal)?;
+        if z.uhr.is_some() {
+            belege_kursprognosen(j, lage.datum, wer, &frager.kursprognosen())?;
+        }
         verwertbar = antwort.verwertbar;
         let wie = if antwort.verwertbar {
             for (grund, anzahl) in frager.belegverwerfungen() {
@@ -1075,6 +1078,30 @@ fn pruefe_fristen(
         }
     }
     Ok(verkaeufe)
+}
+
+fn belege_kursprognosen(
+    j: &mut Journal,
+    datum: depot_kern::Datum,
+    berater: BeraterId,
+    prognosen: &[depot_journal::weltprognose::Fuenftagesprognose],
+) -> Result<(), LaufFehler> {
+    use depot_journal::weltprognose::FUENFTAGES_PREFIX;
+    let wer = name(berater);
+    if j.stand()
+        .begruendungen()
+        .iter()
+        .rev()
+        .any(|(tag, autor, text)| {
+            *tag == datum && autor == wer && text.starts_with(FUENFTAGES_PREFIX)
+        })
+    {
+        return Ok(());
+    }
+    for p in prognosen.iter().take(3) {
+        j.begruende(datum, wer, &p.text()).map_err(journal)?;
+    }
+    Ok(())
 }
 
 fn belege_prognose(

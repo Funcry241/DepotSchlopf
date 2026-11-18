@@ -76,6 +76,7 @@ pub struct KiBerater<N: Netz> {
     mindesteinsatz_bp: Option<i64>,
     schlopfmodell: Option<depot_sim::schlopfmodell::Beratung>,
     thesenpruefung: Option<String>,
+    kursprognosen: Vec<depot_journal::weltprognose::Fuenftagesprognose>,
     belegverwerfungen: Vec<(Verwerfungsgrund, usize)>,
 }
 
@@ -130,6 +131,7 @@ impl<N: Netz> KiBerater<N> {
             mindesteinsatz_bp: None,
             schlopfmodell: None,
             thesenpruefung: None,
+            kursprognosen: Vec::new(),
             belegverwerfungen: Vec::new(),
         }
     }
@@ -1073,6 +1075,10 @@ impl<N: Netz> Berater for KiBerater<N> {
         std::mem::take(&mut self.belegverwerfungen)
     }
 
+    fn kursprognosen(&mut self) -> Vec<depot_journal::weltprognose::Fuenftagesprognose> {
+        std::mem::take(&mut self.kursprognosen)
+    }
+
     fn thesenpruefung(&mut self) -> Option<String> {
         self.thesenpruefung.take()
     }
@@ -1150,6 +1156,14 @@ impl<N: Netz> Berater for KiBerater<N> {
             .ok()
             .and_then(|text| frage::lies_mindesteinsatz(text))
             .filter(|grund| !self.enthaelt_schluessel(grund));
+        self.kursprognosen = e
+            .text
+            .as_ref()
+            .ok()
+            .filter(|_| self.vorbereitung.is_none())
+            .map_or_else(Vec::new, |t| {
+                frage::lies_kursprognosen(t, lage, &self.universum)
+            });
         let mut prognose_verworfen = None;
         match e
             .text
