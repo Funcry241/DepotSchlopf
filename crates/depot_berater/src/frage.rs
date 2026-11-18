@@ -1305,6 +1305,66 @@ mod handelssystem_tests {
     }
 
     #[test]
+    fn grundrang_holt_einen_gegenbeleg_vor_die_platzgrenze_der_frage() -> Result<(), String> {
+        use depot_sim::belegrang::{Grundrang, Sortierer, These};
+
+        let datum = Datum::neu(2026, 11, 10).ok_or("Datum")?;
+        let zeit = Zeitpunkt::neu(datum, 20, 0, 0).ok_or("Zeit")?;
+        let kurse = Kurse::neu(zeit, Vec::new()).map_err(|e| format!("{e:?}"))?;
+        let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+        let werte = depot_kern::liste::beobachtungsliste()?;
+        let universum = depot_kern::liste::als_universum(&werte);
+        let these = These {
+            isin: Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?,
+            name: Some("SAP SE".into()),
+        };
+        let fuelltext = "x".repeat(600);
+        let mut heute: Vec<_> = (1..45)
+            .map(|nr| format!("Nachricht {nr}: {fuelltext}"))
+            .collect();
+        let gegenbeleg = "Nachricht: SAP senkt die Jahresprognose.";
+        heute.push(gegenbeleg.into());
+
+        let lage = Lage {
+            anlass: None,
+            datum,
+            topf: &topf,
+            kaufbar: topf.bargeld(),
+            kurse: &kurse,
+            verlauf: &[],
+            kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
+            relative_staerke: &[],
+            positionskaeufe: &[],
+            ereignisse: &heute,
+        };
+        let frage = vorschlag_frage(&lage, &universum, &[]);
+        assert!(frage.contains("weitere ausgelassen, Platz erschöpft"));
+        assert!(!frage.contains(gegenbeleg));
+
+        let rang = Grundrang::neu(&werte);
+        let sortiert: Vec<_> = rang
+            .ordne(&heute, &[these])
+            .into_iter()
+            .map(|index| heute.get(index).cloned().ok_or("Ungültiger Rangindex"))
+            .collect::<Result<_, _>>()?;
+        assert_eq!(sortiert.len(), heute.len());
+        assert_eq!(sortiert.first().map(String::as_str), Some(gegenbeleg));
+        let testlage = Lage {
+            ereignisse: &sortiert,
+            ..lage
+        };
+        let testfrage = vorschlag_frage(&testlage, &universum, &[]);
+        assert!(testfrage.contains("weitere ausgelassen, Platz erschöpft"));
+        assert!(ereignis_sichtbar(1, &testlage, &testfrage));
+        assert!(
+            testfrage
+                .lines()
+                .any(|zeile| zeile == ereignis_zeile(1, gegenbeleg))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn handelssystem_verlangt_kurze_thesen_und_begruendet_bargeld() {
         let grenzen = Grenzen::standard();
         for wer in [BeraterId::Dachs, BeraterId::Maus] {

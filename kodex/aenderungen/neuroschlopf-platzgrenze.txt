@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Sichtbarkeit eines synthetischen Gegenbelegs vor und nach der Platzgrenze der KI-Frage prüfen
+pfade:
+crates/depot_berater/src/frage.rs
+docs/neuroschlopf/prueffaelle.md
