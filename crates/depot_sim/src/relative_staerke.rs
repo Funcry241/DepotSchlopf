@@ -55,6 +55,21 @@ pub(crate) fn kurzrang(
     rangfolge(stand, kurse, universum, lauf_tag, AUSLASSEN, 0)
 }
 
+/// Für die KI-Frage: den vorläufigen 20-Tage-Rang nur verwenden, wenn der lange Rang fehlt.
+pub(crate) fn fuer_frage(
+    stand: &Stand,
+    kurse: &Kurse,
+    universum: &Universum,
+    lauf_tag: Datum,
+) -> (Vec<(Isin, i64)>, bool) {
+    let lang = fuer_lage(stand, kurse, universum, lauf_tag);
+    if lang.is_empty() {
+        (kurzrang(stand, kurse, universum, lauf_tag), true)
+    } else {
+        (lang, false)
+    }
+}
+
 fn rangfolge(
     stand: &Stand,
     kurse: &Kurse,

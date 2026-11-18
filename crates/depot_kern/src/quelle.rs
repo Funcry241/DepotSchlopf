@@ -222,6 +222,26 @@ fn kurs_in_euro(
     Kurs::exakt(preis, waehrung, tag.datum, zeit, Herkunft::Quelle).map_err(QuellenFehler::Kurs)
 }
 
+/// Für bereits auf Reihenfolge und Handelstage geprüfte Rohdaten: ältere Schlusskurse
+/// mit passendem EZB-Tageskurs, ausschließlich vor dem aktuellen Vergleichsschluss.
+pub fn aeltere_schlusskurse(
+    boerse: Boerse,
+    tage: &[Tageskurs],
+    vor: Datum,
+    devisen: &Devisen,
+) -> Result<Vec<Kurs>, QuellenFehler> {
+    tage.iter()
+        .take_while(|tag| tag.datum < vor)
+        .filter_map(|tag| {
+            let zeit = boerse.schluss(tag.datum)?;
+            match kurs_in_euro(boerse, *tag, zeit, Some(devisen)) {
+                Err(QuellenFehler::KeinDevisenkurs(_)) => None,
+                ergebnis => Some(ergebnis),
+            }
+        })
+        .collect()
+}
+
 fn schlusskurse_mit(
     abruf: Zeitpunkt,
     werte: Vec<(Isin, Boerse, Vec<Tageskurs>)>,

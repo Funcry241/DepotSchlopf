@@ -43,6 +43,8 @@ pub struct Lage<'a> {
     pub kaufbilanz: crate::ausfuehrung::Kennzahlen,
     pub ereignisse: &'a [String],
     pub relative_staerke: &'a [(Isin, i64)],
+    /// Nur bei zu kurzer Historie: 20 gemeinsame Handelstage.
+    pub relativ_kurz: bool,
     pub positionskaeufe: &'a [crate::Positionskauf],
 }
 

@@ -255,7 +255,13 @@ fn ausstiegsplan_text(
 }
 
 fn kursliste(t: &mut String, lage: &Lage<'_>, universum: &Universum) {
-    if !lage.relative_staerke.is_empty() {
+    if lage.relativ_kurz && !lage.relative_staerke.is_empty() {
+        let _ = writeln!(
+            t,
+            "Kursstärke: vorläufiger Rang nach Abstand zum gleich gewichteten Vergleichskorb in Prozentpunkten über die letzten {} gemeinsamen Handelstage.",
+            depot_sim::relative_staerke::AUSLASSEN
+        );
+    } else if !lage.relative_staerke.is_empty() {
         let _ = writeln!(
             t,
             "Kursstärke: Rang nach Abstand zum gleich gewichteten Vergleichskorb in Prozentpunkten, über {} gemeinsame Handelstage; die letzten {} bleiben außen vor.",
@@ -977,6 +983,7 @@ mod prognosebilanz_tests {
             verlauf: &[],
             kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
             relative_staerke: &[],
+            relativ_kurz: false,
             positionskaeufe: &[],
             ereignisse: &[],
         };
@@ -1159,6 +1166,7 @@ mod prognosebilanz_tests {
             kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
             ereignisse: &[],
             relative_staerke: &[],
+            relativ_kurz: false,
             positionskaeufe: &[],
         };
         let universum = Universum::neu(Vec::new());
@@ -1197,6 +1205,7 @@ mod prognosebilanz_tests {
             verlauf: &[],
             kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
             relative_staerke: &[],
+            relativ_kurz: false,
             positionskaeufe: &[],
             ereignisse: &["Termin".into()],
         };
@@ -1259,6 +1268,7 @@ mod handelssystem_tests {
             verlauf: &[],
             kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
             relative_staerke: &[],
+            relativ_kurz: false,
             positionskaeufe: &[],
             ereignisse: &[],
         };
@@ -1294,6 +1304,7 @@ mod handelssystem_tests {
             kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
             ereignisse: &ereignisse,
             relative_staerke: &[],
+            relativ_kurz: false,
             positionskaeufe: &[],
         };
         let frage = "- Ereignis 1: Termin 11.11.2026: EZB\n- Ereignis 2: (Relevanz 0, ausgeblendet)\n- Ereignis 3: Nachricht 2";
@@ -1334,6 +1345,7 @@ mod handelssystem_tests {
             verlauf: &[],
             kaufbilanz: depot_sim::ausfuehrung::Kennzahlen::default(),
             relative_staerke: &[],
+            relativ_kurz: false,
             positionskaeufe: &[],
             ereignisse: &heute,
         };

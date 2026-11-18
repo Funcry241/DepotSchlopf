@@ -6,6 +6,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Versionen 
 
 ## [Unveröffentlicht]
 
+- Kursverlauf und vorläufiger 20-Tage-Rang für die KI-Frage (#356 S1). Der Sammler belegt aus denselben Kursabrufen auch ältere Schlüsse mit dem tatsächlichen Abrufzeitpunkt. Tiingo reicht bis zum Beginn des vorhandenen 90-Tage-Fensters der EZB zurück. Ohne belegten Referenzkurs desselben Tages entfällt der betreffende US-Schluss. Die Tageskursprüfung vergleicht weiter die beiden jüngsten geeigneten Schlüsse. Ältere Stände können die zusätzlichen Kursbelege lesen.
+
 - Kodex-Befunde aufgeteilt (#190, nach C1): `depot_kodex/tests/befunde.rs` ist auf drei Testprogramme verteilt (`befunde.rs`, `befunde_regeln.rs`, `befunde_compiler.rs`, gemeinsame Prüfkopie in `befunde_gemeinsam/mod.rs`), damit das Windows-Gate sie parallel startet. Dieselben 22 Tests, unverändert. Die Festschreibung ändert sich nur im Kodex-Abdruck (Grenzfreigabe Wolfgang 17.11.2026).
 
 - Füllquote je Limitabstand in der KI-Frage (#311 H2c): Dachs und Maus sehen im Topfteil der Frage, wie viele ihrer KI-Orders der letzten 20 Handelstage je Richtung und Abstandsstufe (bis 100, 101–200, 201–300 bp) gefüllt wurden, mit der Zahl der beobachteten Orders. Gezählt werden beide Töpfe, nur gefüllte oder verfallene Orders aus KI-Vorschlägen mit belegtem Abstand; Stopp, Notbremse, Frist und andere erzwungene Ausstiege nicht. Ohne Daten sagt die Frage ausdrücklich, dass es noch keinen Messwert gibt. Die Zahlen sind ein Hinweis, `limit_bp` wählt die KI weiter selbst. Sie stehen hinter dem gemeinsamen Tagesblock, der Prompt-Cache aus P44 bleibt bytegleich. Kein Journaleintrag, Rückweg ohne Sicherung.

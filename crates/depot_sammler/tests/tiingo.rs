@@ -286,7 +286,7 @@ fn nyse_von_tiingo_in_euro() -> Result<(), String> {
     assert!(
         netz.abgerufen
             .get(1)
-            .is_some_and(|a| a.contains("/aapl/prices?startDate=2026-10-21&")),
+            .is_some_and(|a| a.contains("/aapl/prices?startDate=2026-08-06&")),
         "{:?}",
         netz.abgerufen
     );
@@ -724,8 +724,8 @@ fn normalisierung_steht_vor_dem_kurs_im_journal_und_nie_nach_sicherheitsabbruch(
                 0,
                 "Kursabruf beginnt keinen Papiertag"
             );
-            assert_eq!(belege.len(), 2, "Nur heute und Vortag belegen");
-            assert!(belege.iter().all(|(_, t)| !t.contains("zeile=4;")));
+            assert_eq!(belege.len(), 3, "Auch den historischen Kurs belegen");
+            assert!(belege.iter().any(|(_, t)| t.contains("zeile=4;")));
             let index = notiz.ok_or("Normalisierungsbeleg fehlt")?;
             let text = &j.eintraege().get(index).ok_or("Beleg fehlt")?.1;
             for teil in [

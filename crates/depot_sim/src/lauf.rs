@@ -1245,8 +1245,8 @@ fn frage_topf(
     let t = topf_name(id);
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
-    let relative_staerke =
-        crate::relative_staerke::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
+    let (relative_staerke, relativ_kurz) =
+        crate::relative_staerke::fuer_frage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let mut lage = Lage {
         anlass: None,
         datum: tag.datum,
@@ -1256,6 +1256,7 @@ fn frage_topf(
         verlauf: &verlauf,
         kaufbilanz: crate::ausfuehrung::kaufbilanz(j.stand(), topf.id(), tag.datum),
         relative_staerke: &relative_staerke,
+        relativ_kurz,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -1371,8 +1372,8 @@ fn zweite_meinung(
     let t = topf_name(id);
     let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
     let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
-    let relative_staerke =
-        crate::relative_staerke::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
+    let (relative_staerke, relativ_kurz) =
+        crate::relative_staerke::fuer_frage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let lage = Lage {
         anlass: None,
         datum: tag.datum,
@@ -1382,6 +1383,7 @@ fn zweite_meinung(
         verlauf: &verlauf,
         kaufbilanz: crate::ausfuehrung::kaufbilanz(j.stand(), topf.id(), tag.datum),
         relative_staerke: &relative_staerke,
+        relativ_kurz,
         positionskaeufe: &positionskaeufe,
         ereignisse: &tag.ereignisse,
     };
@@ -2482,6 +2484,7 @@ mod tests {
             verlauf: &[],
             kaufbilanz: crate::ausfuehrung::Kennzahlen::default(),
             relative_staerke: &[],
+            relativ_kurz: false,
             positionskaeufe: &[],
             ereignisse: &["Meldung".into()],
         };
