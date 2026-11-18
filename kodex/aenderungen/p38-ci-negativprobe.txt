@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Ausgabe der CI-Kurzfassung mit einem absichtlich fehlgeschlagenen Rust-Test belegen
+pfade:
+crates/depot_lauf/tests/p38_negativprobe.rs
