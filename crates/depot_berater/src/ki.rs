@@ -31,6 +31,7 @@ use depot_journal::{
     gespraeche::{self, Gespraech},
 };
 use depot_kern::{BeraterId, Cent, Grenzen, Universum, Vorschlag, Zeitpunkt};
+use depot_sim::belegrang::Verwerfungsgrund;
 use depot_sim::{Antwort, Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Urteil};
 
 use crate::anbieter::{Anbieter, Verbrauch};
@@ -75,6 +76,7 @@ pub struct KiBerater<N: Netz> {
     mindesteinsatz_bp: Option<i64>,
     schlopfmodell: Option<depot_sim::schlopfmodell::Beratung>,
     thesenpruefung: Option<String>,
+    belegverwerfungen: Vec<(Verwerfungsgrund, usize)>,
 }
 
 impl<N: Netz> fmt::Debug for KiBerater<N> {
@@ -128,6 +130,7 @@ impl<N: Netz> KiBerater<N> {
             mindesteinsatz_bp: None,
             schlopfmodell: None,
             thesenpruefung: None,
+            belegverwerfungen: Vec::new(),
         }
     }
 
@@ -533,6 +536,40 @@ impl<N: Netz> KiBerater<N> {
                     return Err((Some(Ausgang::Unklar), m));
                 }
             }
+        }
+    }
+
+    fn pruefe_belege(
+        &mut self,
+        a: &mut Antwort,
+        lage: &Lage<'_>,
+        frage: &str,
+        mut prognose_verworfen: Option<Verwerfungsgrund>,
+    ) {
+        // Belege zählen nur für Ereignisse, die die Frage gezeigt hat (#325, #312-4).
+        if let Some(v) = a.vorschlag.as_mut() {
+            let mut verworfen = 0_usize;
+            for nummern in v.belege.values_mut() {
+                let vorher = nummern.len();
+                nummern.retain(|nr| frage::ereignis_sichtbar(*nr, lage, frage));
+                verworfen = verworfen.saturating_add(vorher.saturating_sub(nummern.len()));
+            }
+            v.belege.retain(|_, nummern| !nummern.is_empty());
+            if verworfen != 0 {
+                self.belegverwerfungen
+                    .push((Verwerfungsgrund::ZielNichtSichtbar, verworfen));
+            }
+        }
+        a.prognose = a.prognose.take().filter(|p| {
+            if !frage::prognose_ereignis_sichtbar(p, lage, frage) {
+                prognose_verworfen = Some(Verwerfungsgrund::PrognoseNichtSichtbar);
+            } else if self.vorbereitung.is_none() && lage.kurse.kurs(&p.isin).is_none() {
+                prognose_verworfen = Some(Verwerfungsgrund::PrognoseOhneKurs);
+            }
+            prognose_verworfen.is_none()
+        });
+        if let Some(grund) = prognose_verworfen {
+            self.belegverwerfungen.push((grund, 1));
         }
     }
 
@@ -1032,6 +1069,10 @@ impl<N: Netz> Berater for KiBerater<N> {
         self.schlopfmodell = stand;
     }
 
+    fn belegverwerfungen(&mut self) -> Vec<(Verwerfungsgrund, usize)> {
+        std::mem::take(&mut self.belegverwerfungen)
+    }
+
     fn thesenpruefung(&mut self) -> Option<String> {
         self.thesenpruefung.take()
     }
@@ -1086,6 +1127,7 @@ impl<N: Netz> Berater for KiBerater<N> {
         let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
         self.mindesteinsatz_grund = None;
         self.thesenpruefung = None;
+        self.belegverwerfungen.clear();
         let e = self.fragen(
             &erlaubnis,
             &system,
@@ -1108,10 +1150,16 @@ impl<N: Netz> Berater for KiBerater<N> {
             .ok()
             .and_then(|text| frage::lies_mindesteinsatz(text))
             .filter(|grund| !self.enthaelt_schluessel(grund));
+        let mut prognose_verworfen = None;
         match e
             .text
             .and_then(|t| {
-                let mut antwort = frage::lies_vorschlag(&t, self.wer, &self.universum)?;
+                let mut antwort = frage::lies_vorschlag_mit_belegpruefung(
+                    &t,
+                    self.wer,
+                    &self.universum,
+                    &mut prognose_verworfen,
+                )?;
                 frage::belege_gesamtverkauf(&t, lage, &mut antwort)?;
                 Ok(antwort)
             })
@@ -1125,20 +1173,7 @@ impl<N: Netz> Berater for KiBerater<N> {
             Ok(mut a) => {
                 self.thesenpruefung = thesenpruefung;
                 self.mindesteinsatz_grund = mindesteinsatz_grund.map(|grund| (lage.datum, grund));
-                // Belege zählen nur für Ereignisse, die die Frage gezeigt hat (#325, #312-4).
-                if let Some(v) = a.vorschlag.as_mut() {
-                    for nummern in v.belege.values_mut() {
-                        nummern.retain(|nr| frage::ereignis_sichtbar(*nr, lage, &f));
-                    }
-                    v.belege.retain(|_, nummern| !nummern.is_empty());
-                }
-                a.prognose = a.prognose.filter(|p| {
-                    if self.vorbereitung.is_some() {
-                        frage::prognose_ereignis_sichtbar(p, lage, &f)
-                    } else {
-                        frage::prognose_sichtbar(p, lage, &f)
-                    }
-                });
+                self.pruefe_belege(&mut a, lage, &f, prognose_verworfen);
                 a.einschaetzung = format!("{} [{}]", a.einschaetzung, e.kosten);
                 a
             }

@@ -401,10 +401,6 @@ pub(crate) fn ereignis_zeile(nr: usize, text: &str) -> String {
     format!("- Ereignis {nr}: {}", sauber(text))
 }
 
-pub(crate) fn prognose_sichtbar(p: &Weltprognose, lage: &Lage<'_>, frage: &str) -> bool {
-    prognose_ereignis_sichtbar(p, lage, frage) && lage.kurse.kurs(&p.isin).is_some()
-}
-
 pub(crate) fn prognose_ereignis_sichtbar(p: &Weltprognose, lage: &Lage<'_>, frage: &str) -> bool {
     ereignis_sichtbar(p.ereignis_nr, lage, frage)
 }
@@ -578,8 +574,7 @@ fn text_feld(w: &Json, name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("Feld {name} fehlt oder ist kein Text"))
 }
 
-fn lies_prognose(w: &Json, universum: &Universum) -> Option<Weltprognose> {
-    let p = w.feld("prognose")?;
+fn lies_prognose(p: &Json) -> Option<Weltprognose> {
     if p.doppelte_felder() {
         return None;
     }
@@ -592,7 +587,25 @@ fn lies_prognose(w: &Json, universum: &Universum) -> Option<Weltprognose> {
         begruendung: text_feld(p, "begruendung").ok()?,
         widerlegung: text_feld(p, "widerlegung").ok()?,
     };
-    (prognose.gueltig() && universum.isins().contains(&prognose.isin)).then_some(prognose)
+    prognose.gueltig().then_some(prognose)
+}
+
+fn pruefe_prognose(
+    antwort: &Json,
+    universum: &Universum,
+) -> Result<Option<Weltprognose>, depot_sim::belegrang::Verwerfungsgrund> {
+    use depot_sim::belegrang::Verwerfungsgrund;
+    let Some(objekt) = antwort
+        .feld("prognose")
+        .filter(|p| !matches!(p, Json::Null))
+    else {
+        return Ok(None);
+    };
+    let prognose = lies_prognose(objekt).ok_or(Verwerfungsgrund::PrognoseUngueltig)?;
+    if !universum.isins().contains(&prognose.isin) {
+        return Err(Verwerfungsgrund::PrognoseAusserhalbUniversum);
+    }
+    Ok(Some(prognose))
 }
 
 /// Hält einen ausdrücklich begründeten Gesamtverkauf als einzelne Nullziele fest.
@@ -663,12 +676,24 @@ pub fn lies_vorschlag(
     wer: BeraterId,
     universum: &Universum,
 ) -> Result<Antwort, String> {
+    lies_vorschlag_mit_belegpruefung(text, wer, universum, &mut None)
+}
+
+pub(crate) fn lies_vorschlag_mit_belegpruefung(
+    text: &str,
+    wer: BeraterId,
+    universum: &Universum,
+    verwerfung: &mut Option<depot_sim::belegrang::Verwerfungsgrund>,
+) -> Result<Antwort, String> {
     let w = erstes_objekt(text)?;
     if w.doppelte_felder() {
         return Err("Feld doppelt".into());
     }
     let einschaetzung = text_feld(&w, "einschaetzung")?;
-    let prognose = lies_prognose(&w, universum);
+    let prognose = pruefe_prognose(&w, universum).unwrap_or_else(|grund| {
+        *verwerfung = Some(grund);
+        None
+    });
     let halten = lies_halten(&w, universum)?;
     let park = lies_park(&w, universum);
     let ziele = match w.feld("ziele") {
@@ -1022,6 +1047,34 @@ mod prognosebilanz_tests {
                 .vorschlag
                 .ok_or("Vorschlag fehlt")?;
             assert_eq!(vorschlag.erwartung_bp.get(&isin).copied(), erwartet);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn prognosepruefung_unterscheidet_null_und_verwerfungen() -> Result<(), String> {
+        use depot_sim::belegrang::Verwerfungsgrund;
+        let werte = depot_kern::liste::beobachtungsliste()?;
+        let universum = depot_kern::liste::als_universum(&werte);
+        let fremd = "US4592001014";
+        let prognose = format!(
+            r#"{{"ereignis_nr":1,"isin":"{fremd}","richtung":"steigt","handelstage":3,"begruendung":"Wirkung","widerlegung":"Gegenbeleg"}}"#
+        );
+        assert!(universum.isins().iter().all(|isin| isin.als_str() != fremd));
+        for (wert, erwartet) in [
+            ("null", None),
+            ("{}", Some(Verwerfungsgrund::PrognoseUngueltig)),
+            (
+                &prognose,
+                Some(Verwerfungsgrund::PrognoseAusserhalbUniversum),
+            ),
+        ] {
+            let text = format!(r#"{{"einschaetzung":"Probe","ziele":null,"prognose":{wert}}}"#);
+            let mut grund = None;
+            let antwort =
+                lies_vorschlag_mit_belegpruefung(&text, BeraterId::Dachs, &universum, &mut grund)?;
+            assert!(antwort.verwertbar && antwort.prognose.is_none());
+            assert_eq!(grund, erwartet);
         }
         Ok(())
     }

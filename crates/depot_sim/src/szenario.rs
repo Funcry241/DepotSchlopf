@@ -93,6 +93,10 @@ pub trait Berater {
         None
     }
 
+    fn belegverwerfungen(&mut self) -> Vec<(crate::belegrang::Verwerfungsgrund, usize)> {
+        Vec::new()
+    }
+
     fn setze_mindesteinsatz(&mut self, _bp: i64) {}
 
     fn mindesteinsatz_begruendung(&mut self, _tag: Datum) -> Option<String> {

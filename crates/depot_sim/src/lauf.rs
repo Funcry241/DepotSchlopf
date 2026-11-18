@@ -980,6 +980,11 @@ fn frage(
         belege_ki(j, frager).map_err(journal)?;
         verwertbar = antwort.verwertbar;
         let wie = if antwort.verwertbar {
+            for (grund, anzahl) in frager.belegverwerfungen() {
+                if anzahl != 0 {
+                    belege_verwerfung(j, tag.datum, wer, grund, anzahl)?;
+                }
+            }
             if let Some(pruefung) = frager.thesenpruefung() {
                 crate::schlopfmodell::belege_pruefung(j, tag.datum, wer, &pruefung)
                     .map_err(journal)?;
@@ -1887,6 +1892,21 @@ fn gelesene_belegnummern(
         .collect()
 }
 
+fn belege_verwerfung(
+    j: &mut Journal,
+    datum: depot_kern::Datum,
+    wer: BeraterId,
+    grund: crate::belegrang::Verwerfungsgrund,
+    anzahl: usize,
+) -> Result<(), LaufFehler> {
+    j.begruende(
+        datum,
+        crate::belegrang::BELEGPRUEFUNG,
+        &format!("{anzahl} {} {}", name(wer), grund.text()),
+    )
+    .map_err(journal)
+}
+
 /// Die Erstmeinung ist ein Beobachtungsbeleg, unabhängig von späteren Orders.
 fn belege_erstmeinungsziele(
     j: &mut Journal,
@@ -1899,6 +1919,16 @@ fn belege_erstmeinungsziele(
             continue;
         };
         let gueltig = gelesene_belegnummern(j.stand(), tag, nummern);
+        let verworfen = nummern.len().saturating_sub(gueltig.len());
+        if verworfen != 0 {
+            belege_verwerfung(
+                j,
+                tag.datum,
+                wer,
+                crate::belegrang::Verwerfungsgrund::ZielOhneJournalbeleg,
+                verworfen,
+            )?;
+        }
         if !gueltig.is_empty() {
             begruende(
                 j,
