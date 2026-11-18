@@ -14,6 +14,163 @@ permissions:
   contents: read
 
 jobs:
+  kodex-tor:
+    permissions:
+      actions: read
+      statuses: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      start: ${{ steps.beobachten.outputs.start }}
+      reason: ${{ steps.beobachten.outputs.reason }}
+    steps:
+      - name: Basisprüfung beobachten
+        id: beobachten
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import time
+
+          def ergebnis(start, grund):
+              print(f"start={start} reason={grund}")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as ausgabe:
+                  print(f"start={start}\nreason={grund}", file=ausgabe)
+
+          if os.environ["GITHUB_EVENT_NAME"] == "push":
+              ergebnis("true", "push")
+              raise SystemExit
+          if os.environ["BASE_REF"] != "main":
+              ergebnis("false", "basis-nicht-main")
+              raise SystemExit
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          server = os.environ["GITHUB_SERVER_URL"]
+          api_url = os.environ["GITHUB_API_URL"]
+          head = os.environ["HEAD_SHA"]
+          basis = os.environ["BASE_SHA"]
+          if not all(re.fullmatch(r"[a-f0-9]{40}", sha) for sha in (head, basis)):
+              raise ValueError("Vollständige Head- und Basis-SHA erforderlich")
+          frist = time.monotonic() + 90
+          hinweise = set()
+
+          def hinweis(text):
+              if text not in hinweise:
+                  hinweise.add(text)
+                  print(text, flush=True)
+
+          def api(pfad, vorgang, *, protokoll=False):
+              rest = frist - time.monotonic()
+              if rest <= 0:
+                  return None
+              try:
+                  # curl sendet Authorization bei einer Weiterleitung auf einen
+                  # anderen Host nicht mit. Das Log liegt hinter einer solchen URL.
+                  frist_abruf = min(15 if protokoll else 8, rest)
+                  abruf = subprocess.run(
+                      ["curl", "--silent", "--show-error", "--fail", "--location",
+                       "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "2",
+                       "--header", "@-", f"{api_url}/repos/{repo}/{pfad}"],
+                      input=f'Authorization: Bearer {os.environ["GH_TOKEN"]}\n',
+                      capture_output=True, text=True, encoding="utf-8", errors="replace",
+                      check=True, timeout=frist_abruf,
+                  )
+                  return abruf.stdout if protokoll else json.loads(abruf.stdout)
+              except subprocess.CalledProcessError as fehler:
+                  status = re.search(r"returned error: ([0-9]{3})", fehler.stderr)
+                  hinweis(f"{vorgang}: HTTP {status[1]}" if status else f"{vorgang}: curl {fehler.returncode}")
+              except subprocess.TimeoutExpired:
+                  hinweis(f"{vorgang}: Abrufzeit überschritten")
+              except ValueError:
+                  hinweis(f"{vorgang}: ungültige API-Antwort")
+              return None
+
+          def alter_nachweis(pfad, versuch, zustand):
+              # Der erste Tor-PR sieht noch den Basisworkflow vor dieser Änderung.
+              jobs = api(f"{pfad}/attempts/{versuch}/jobs", "Basisjobs") or {}
+              job = next((j for j in jobs.get("jobs", []) if j["name"] == "pruefe"), {})
+              if not isinstance(job.get("id"), int) or job.get("conclusion") != zustand:
+                  hinweis("Basisjobs: kein passender abgeschlossener Prüfjob")
+                  return None
+              log = api(f"actions/jobs/{job['id']}/logs", "Basisprotokoll", protokoll=True)
+              if log is None:
+                  return None
+              log = re.sub(r"\x1b\[[0-9;]*m", "", log)
+              binaufruf = re.search(
+                  r"Running \`target/debug/depot_kodex pruefe-pr --basis ([a-f0-9]{40}) "
+                  r"--kandidat ([a-f0-9]{40})\`", log,
+              )
+              if not binaufruf or binaufruf[2] != head:
+                  hinweis("Basisprotokoll: kein Basis-Kodex-Aufruf für diesen Head")
+                  return None
+              meldungen = re.findall(r"(?m)^(?:\S+ )?\[Kodex\] (.+)$", log)
+              offen = meldungen == ['Grenzfreigabe: erteilt ist "offen"']
+              return binaufruf[1], "ok" if zustand == "success" else ("offen" if offen else "fehler")
+
+          def basisnachweis():
+              statuses = api(f"commits/{head}/statuses?per_page=100", "Basisstatus") or []
+              status = next((s for s in statuses if s["context"] == "kodex-basis"), {})
+              zustand = status.get("state")
+              if zustand not in ("success", "failure"):
+                  return None
+              if (status.get("creator") or {}).get("login") != "github-actions[bot]":
+                  hinweis("Basisstatus: unerwarteter Herausgeber")
+                  return None
+              ziel = re.fullmatch(
+                  re.escape(f"{server}/{repo}/actions/runs/") + r"([0-9]+)",
+                  status.get("target_url") or "",
+              )
+              if not ziel:
+                  hinweis("Basisstatus: unerwarteter Lauf-Link")
+                  return None
+              pfad = f"actions/runs/{ziel[1]}"
+              lauf = api(pfad, "Basislauf") or {}
+              if (lauf.get("event"), lauf.get("path"), lauf.get("head_sha"),
+                  lauf.get("status"), lauf.get("conclusion")) != (
+                  "pull_request_target", ".github/workflows/kodex-basis.yml", head,
+                  "completed", zustand,
+              ):
+                  hinweis("Basislauf: Laufmetadaten passen noch nicht zum Basisstatus")
+                  return None
+              versuch = lauf["run_attempt"]
+              beschreibung = status.get("description")
+              if not beschreibung:
+                  return alter_nachweis(pfad, versuch, zustand)
+              nachweis = re.fullmatch(
+                  r"head=([a-f0-9]{40}) basis=([a-f0-9]{40}) R30=(ok|offen|fehler) versuch=([0-9]+)",
+                  beschreibung,
+              )
+              if (nachweis and nachweis[1] == head and nachweis[4] == str(versuch)
+                  and (nachweis[3] == "ok") == (zustand == "success")):
+                  return nachweis[2], nachweis[3]
+              return None
+
+          grund = "basis-unbestimmt"
+          while time.monotonic() < frist:
+              nachweis = basisnachweis()
+              if nachweis:
+                  verwendete_basis, r30 = nachweis
+                  if verwendete_basis == basis:
+                      resultate = {
+                          "ok": ("true", "basis-gruen"),
+                          "offen": ("false", "R30-offen"),
+                          "fehler": ("false", "basis-fehler"),
+                      }
+                      ergebnis(*resultate[r30])
+                      break
+                  grund = "basis-bewegt"
+              time.sleep(max(0, min(5, frist - time.monotonic())))
+          else:
+              ergebnis("false", grund)
+          PY
+
   kodex-nachweis:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -159,10 +316,16 @@ jobs:
 
   kodex:
     # Der bisherige Linux-Check bleibt das gemeinsame Ergebnis beider Prüfungen.
-    needs: [kodex-nachweis, kodex-linux-gate, kodex-linux-update]
+    needs: [kodex-tor, kodex-nachweis, kodex-linux-gate, kodex-linux-update]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Ergebnis des Tor-Jobs prüfen
+        env:
+          TOR: ${{ needs.kodex-tor.result }}
+        run: |
+          printf 'Kodex-Tor: %s\n' "$TOR"
+          test "$TOR" = success
       - name: Identischen grünen PR-Lauf übernehmen
         if: needs.kodex-nachweis.outputs.wiederverwendet == 'ja'
         run: echo "Linux-Prüfungen aus vollständig grünem PR-Lauf übernommen."
@@ -316,10 +479,16 @@ jobs:
 
   kodex-windows:
     # Der bisherige Windows-Check bleibt das gemeinsame Ergebnis beider Prüfungen.
-    needs: [kodex-nachweis, windows-update-filter, kodex-windows-gate, kodex-windows-update]
+    needs: [kodex-tor, kodex-nachweis, windows-update-filter, kodex-windows-gate, kodex-windows-update]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Ergebnis des Tor-Jobs prüfen
+        env:
+          TOR: ${{ needs.kodex-tor.result }}
+        run: |
+          printf 'Kodex-Tor: %s\n' "$TOR"
+          test "$TOR" = success
       - name: Identischen grünen PR-Lauf übernehmen
         if: needs.kodex-nachweis.outputs.wiederverwendet == 'ja'
         run: echo "Windows-Prüfungen aus vollständig grünem PR-Lauf übernommen."

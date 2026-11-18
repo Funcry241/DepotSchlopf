@@ -37,14 +37,35 @@ jobs:
         run: rustup show
 
       - name: Kandidaten mit Basis-Kodex prüfen
-        run: cargo run --locked -p depot_kodex -- pruefe-pr --basis "$BASE_SHA" --kandidat "$HEAD_SHA"
+        id: kandidat
+        shell: bash
+        run: |
+          cargo build --locked -p depot_kodex
+          protokoll="$RUNNER_TEMP/kodex-basis.txt"
+          if target/debug/depot_kodex pruefe-pr --basis "$BASE_SHA" --kandidat "$HEAD_SHA" > "$protokoll" 2>&1; then
+            cat "$protokoll"
+            echo 'r30=ok' >> "$GITHUB_OUTPUT"
+          else
+            cat "$protokoll"
+            if [[ $(<"$protokoll") == '[Kodex] Grenzfreigabe: erteilt ist "offen"' ]]; then
+              echo 'r30=offen' >> "$GITHUB_OUTPUT"
+            fi
+            exit 1
+          fi
 
       - name: Ergebnis am Kandidaten vermerken
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_STATUS: ${{ job.status }}
+          R30: ${{ steps.kandidat.outputs.r30 }}
         run: |
-          if [ "$JOB_STATUS" = success ]; then state=success; else state=failure; fi
+          state=failure
+          if [ "$JOB_STATUS:$R30" = success:ok ]; then
+            state=success
+          elif [ "$R30" != offen ]; then
+            R30=fehler
+          fi
           gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" \
-            -f state="$state" -f context=kodex-basis -f target_url="$RUN_URL"
+            -f state="$state" -f context=kodex-basis -f target_url="$RUN_URL" \
+            -f description="head=$HEAD_SHA basis=$BASE_SHA R30=$R30 versuch=$GITHUB_RUN_ATTEMPT"

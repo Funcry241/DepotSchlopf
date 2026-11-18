@@ -1,0 +1,7 @@
+klasse: KodexAenderung
+zweck: Basisprüfung für genaue Head- und Basisrevision im Kodex-Tor beobachten
+pfade:
+.github/workflows/kodex-basis.yml
+.github/workflows/kodex.yml
+kodex/festschreibung.txt
+kodex/freigaben/kodex-tor.txt
