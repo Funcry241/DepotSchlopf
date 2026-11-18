@@ -46,29 +46,3 @@ jobs:
           printf 'filter=%s update_noetig=%s gate=%s update=%s\n' "$FILTER" "$UPDATE_NOETIG" "$GATE" "$UPDATE"
           test "$FILTER:$UPDATE_NOETIG:$GATE:$UPDATE" = 'success:false:success:skipped'
           python -B .github/scripts/windows_update.py sammelcheck
-  merge-status:
-    needs: kodex-windows
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
-      EXPECTED_STATE: clean
-    steps:
-      - name: GitHub-Merge-Status erfassen
-        shell: bash
-        run: |
-          for attempt in {1..12}; do
-            data=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '{head: .head.sha, base: .base.ref, draft, mergeable, mergeable_state}')
-            echo "$data"
-            test "$(jq -r .head <<< "$data")" = "$EXPECTED_HEAD"
-            test "$(jq -r .base <<< "$data")" = "maus/362-windows-testbasis"
-            test "$(jq -r .draft <<< "$data")" = false
-            if [[ $(jq -r .mergeable_state <<< "$data") = "$EXPECTED_STATE" ]]; then
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "::error::Erwarteter GitHub-Status: $EXPECTED_STATE"
-          exit 1
