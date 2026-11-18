@@ -37,6 +37,7 @@ pub mod html;
 pub mod leerlauf;
 pub mod messlatte;
 pub mod reife;
+pub mod relevanzmessung;
 pub mod tage;
 pub mod vergleich;
 pub mod vetoschatten;

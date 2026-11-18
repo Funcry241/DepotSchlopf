@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Belegreihenfolgen mit unabhängigen Relevanzurteilen und sichtbaren Gegenbelegen vergleichen
+pfade:
+crates/depot_lage/src/lib.rs
+crates/depot_lage/src/relevanzmessung.rs
