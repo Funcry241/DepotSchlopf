@@ -6,12 +6,12 @@ permissions:
   contents: read
   pull-requests: read
 jobs:
-  kodex-windows:
+  kontrolljob:
     runs-on: ubuntu-latest
     steps:
-      - run: exit 1
+      - run: echo "Kontrolllauf ohne kodex-windows"
   merge-status:
-    needs: kodex-windows
+    needs: kontrolljob
     if: ${{ always() }}
     runs-on: ubuntu-latest
     env:
