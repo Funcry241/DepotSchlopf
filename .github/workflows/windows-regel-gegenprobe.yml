@@ -6,12 +6,15 @@ permissions:
   contents: read
   pull-requests: read
 jobs:
+  vorjob:
+    runs-on: ubuntu-latest
+    steps:
+      - run: sleep 300
   kodex-windows:
-    if: ${{ false }}
+    needs: vorjob
+    if: ${{ always() }}
     runs-on: ubuntu-latest
+    env:
+      VORJOB: ${{ needs.vorjob.result }}
     steps:
-      - run: exit 1
-  kontrolljob:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Kontrolllauf mit übersprungenem Pflichtjob"
+      - run: test "$VORJOB" = success
