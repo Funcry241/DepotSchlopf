@@ -17,10 +17,10 @@ pub fn bericht(stand: &Stand, von: Datum, bis: Datum) -> String {
     let mut text = String::from(
         "\n### Belegauswahl (Vorbereitung NeuroSchlopf)\n\nWie oft der Beleg einer Weltprognose unter den ersten drei steht. Kandidaten sind die Belege, die die Frage am Prognosetag gesehen hat; Thesen sind die Werte, die der Berater in den fünf Tagen davor genannt hat. Käufe zählen, wenn die KI ihre Belegnummern genannt hat (Kaufbeleg). Nur lesend, die Frage ändert sich nicht.\n\n| Sortierer | Prognosen | unter den ersten drei | Quote | Käufe mit Beleg | unter den ersten drei | Quote |\n|---|---:|---:|---:|---:|---:|---:|\n",
     );
-    let universum = depot_kern::liste::beobachtungsliste()
-        .map(|w| depot_kern::liste::als_universum(&w))
-        .unwrap_or_default();
-    let sortierer: [&dyn Sortierer; 2] = [&Heute, &Grundrang];
+    let werte = depot_kern::liste::beobachtungsliste().unwrap_or_default();
+    let universum = depot_kern::liste::als_universum(&werte);
+    let grundrang = Grundrang::neu(&werte);
+    let sortierer: [&dyn Sortierer; 2] = [&Heute, &grundrang];
     for s in sortierer {
         let m = messe(stand, &universum, s, von..=bis);
         let _ = writeln!(
@@ -125,7 +125,10 @@ mod tests {
             t.contains("| heutige Reihenfolge | 0 | 0 | – | 0 | 0 | – |"),
             "{t}"
         );
-        assert!(t.contains("| Grundrang | 0 | 0 | – | 0 | 0 | – |"), "{t}");
+        assert!(
+            t.contains("| Grundrang v2 | 0 | 0 | – | 0 | 0 | – |"),
+            "{t}"
+        );
         assert!(
             t.contains("Im Zeitraum sind keine Kandidaten im Journal belegt."),
             "{t}"
