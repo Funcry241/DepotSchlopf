@@ -106,7 +106,15 @@ fn salden(zeilen: &[AccountSummary], konto: &str) -> Result<Salden, &'static str
     let mut summen = BTreeMap::new();
     let mut waehrungen = BTreeSet::new();
     for a in zeilen {
-        if a.account != konto {
+        let kontosumme = matches!(
+            a.tag.as_str(),
+            AccountSummaryTags::TOTAL_CASH_VALUE
+                | AccountSummaryTags::SETTLED_CASH
+                | AccountSummaryTags::AVAILABLE_FUNDS
+        );
+        // $LEDGER:ALL kann Währungszeilen für "All" liefern. Der Aufrufer hat
+        // bereits geprüft, dass die Sitzung genau das konfigurierte Konto verwaltet.
+        if a.account != konto && (a.account != "All" || kontosumme) {
             return Err("Gateway meldet Daten eines anderen Kontos.");
         }
         if a.tag == "CashBalance" {
@@ -121,12 +129,7 @@ fn salden(zeilen: &[AccountSummary], konto: &str) -> Result<Salden, &'static str
             if a.currency != "EUR" && cent != Cent::NULL {
                 return Err("Gateway meldet einen Fremdwährungssaldo.");
             }
-        } else if matches!(
-            a.tag.as_str(),
-            AccountSummaryTags::TOTAL_CASH_VALUE
-                | AccountSummaryTags::SETTLED_CASH
-                | AccountSummaryTags::AVAILABLE_FUNDS
-        ) {
+        } else if kontosumme {
             if a.currency != "EUR" {
                 return Err("Kontosummen sind nicht in Euro gemeldet.");
             }
@@ -347,6 +350,65 @@ mod tests {
             value: "0.01".into(),
         });
         assert!(salden(&zeilen, "DU1234").is_err());
+    }
+
+    #[test]
+    fn all_ist_nur_fuer_waehrungszeilen_zulaessig() {
+        let mut zeilen = [
+            AccountSummaryTags::TOTAL_CASH_VALUE,
+            AccountSummaryTags::SETTLED_CASH,
+            AccountSummaryTags::AVAILABLE_FUNDS,
+        ]
+        .map(|tag| AccountSummary {
+            account: "DUR1234".into(),
+            currency: "EUR".into(),
+            tag: tag.into(),
+            value: "1000".into(),
+        })
+        .to_vec();
+        zeilen.push(AccountSummary {
+            account: "All".into(),
+            currency: "EUR".into(),
+            tag: "CashBalance".into(),
+            value: "1000".into(),
+        });
+        assert_eq!(
+            salden(&zeilen, "DUR1234"),
+            Ok(Salden {
+                gesamt: Cent(100_000),
+                abgerechnet: Cent(100_000),
+                verfuegbar: Cent(100_000),
+            }),
+        );
+
+        zeilen.push(AccountSummary {
+            account: "All".into(),
+            currency: "USD".into(),
+            tag: "CashBalance".into(),
+            value: "0.01".into(),
+        });
+        assert_eq!(
+            salden(&zeilen, "DUR1234"),
+            Err("Gateway meldet einen Fremdwährungssaldo."),
+        );
+        let _ = zeilen.pop();
+
+        for (account, tag) in [
+            ("All", AccountSummaryTags::SETTLED_CASH),
+            ("DUR1235", "CashBalance"),
+        ] {
+            zeilen.push(AccountSummary {
+                account: account.into(),
+                currency: "EUR".into(),
+                tag: tag.into(),
+                value: "1000".into(),
+            });
+            assert_eq!(
+                salden(&zeilen, "DUR1234"),
+                Err("Gateway meldet Daten eines anderen Kontos."),
+            );
+            let _ = zeilen.pop();
+        }
     }
 
     #[test]
