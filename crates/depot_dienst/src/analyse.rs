@@ -23,6 +23,7 @@ mod journal;
 mod ki_kosten;
 mod leerlauf;
 mod leistung;
+mod massstab;
 mod nachher;
 mod orders;
 mod pruefbericht;
@@ -876,6 +877,7 @@ fn journalpaket(
                 betrieb.fehler.ampel(true),
                 nachher.ampel(),
             ) + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
+                + &massstab::bericht(daten, stand, &historie.depotwerte)
                 + &leerlauf::bericht(
                     stand,
                     &buch,
