@@ -2,5 +2,6 @@ klasse: Funktion
 zweck: Abdeckung der beobachteten Aktien durch belegte Schlagzeilen im Analyse-Export messen
 pfade:
 crates/depot_dienst/src/analyse.rs
+crates/depot_lage/src/belegauswahl.rs
 crates/depot_sim/src/papiertag.rs
 crates/depot_sim/tests/papiertag.rs

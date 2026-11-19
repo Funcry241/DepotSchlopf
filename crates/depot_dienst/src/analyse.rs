@@ -850,23 +850,6 @@ struct Betrieb {
     fehler: fehler::Belege,
 }
 
-fn schlagzeilen_abdeckung(stand: &Stand, zeitraum: Zeitraum, jetzt: Zeitpunkt) -> String {
-    let Ok((aktien, anzahl)) =
-        depot_sim::papiertag::schlagzeilen_abdeckung(stand, zeitraum.von, zeitraum.bis, jetzt)
-    else {
-        return "\n### Schlagzeilenabdeckung\n\nBeobachtungsliste nicht verfügbar.\n".into();
-    };
-    let mut text = format!(
-        "\n### Schlagzeilenabdeckung\n\n**{} von {anzahl} beobachteten Aktien** hatten im Exportzeitraum mindestens eine belegte Schlagzeile mit erkanntem Wertbezug. Gezählt wird je Aktie einmal nach dem Frankfurter Abrufdatum. Das Wochenziel aus S4 liegt bei 10 Aktien.\n",
-        aktien.len()
-    );
-    if !aktien.is_empty() {
-        let isin = aktien.iter().map(Isin::als_str).collect::<Vec<_>>();
-        let _ = writeln!(text, "\nErkannte ISINs im Zeitraum · {}", isin.join(", "));
-    }
-    text
-}
-
 fn journalpaket(
     daten: &Path,
     jetzt: Zeitpunkt,
@@ -902,7 +885,12 @@ fn journalpaket(
                     zeitraum,
                 )
                 + &depot_lage::belegauswahl::bericht(stand, zeitraum.von, zeitraum.bis)
-                + &schlagzeilen_abdeckung(stand, zeitraum, jetzt)
+                + &depot_lage::belegauswahl::schlagzeilen_abdeckung(
+                    stand,
+                    zeitraum.von,
+                    zeitraum.bis,
+                    jetzt,
+                )
                 + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege)
                 + &nachher.bericht
                 + &depot_lage::rueckschau::bericht(stand, jetzt);
