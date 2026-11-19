@@ -16,6 +16,29 @@ use depot_sim::{
     gefragt, papiertag,
 };
 
+#[test]
+fn schlagzeilenabdeckung_zaehlt_aktien_nach_abruf_einmal() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut journal = ort.oeffnen()?;
+    let tag = tag(16)?;
+    let frueh = some(Zeitpunkt::frankfurt(tag, 9, 0, 0), "Abruf")?;
+    let spaet = some(Zeitpunkt::frankfurt(tag, 11, 0, 0), "Späterer Abruf")?;
+    for (zeit, text) in [
+        (frueh, "SAP meldet Zahlen"),
+        (frueh, "SAP nennt Ausblick"),
+        (frueh, "EUNL im Überblick"),
+        (frueh, "Meldung ohne Bezug | https://example.test/allianz"),
+        (spaet, "NVIDIA meldet Zahlen"),
+    ] {
+        let beleg = NachrichtBeleg::neu("rss-test", zeit, b"Testdaten", zeit, text)?;
+        vorbedingung(journal.belege_nachricht(&beleg), "Nachrichtenbeleg")?;
+    }
+    let (aktien, anzahl) = papiertag::schlagzeilen_abdeckung(journal.stand(), tag, tag, frueh)?;
+    assert_eq!(anzahl, 20);
+    assert_eq!(aktien.into_iter().collect::<Vec<_>>(), [sap()?]);
+    Ok(())
+}
+
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 
 fn vorbedingung<T, E: std::fmt::Debug>(r: Result<T, E>, was: &str) -> Result<T, String> {

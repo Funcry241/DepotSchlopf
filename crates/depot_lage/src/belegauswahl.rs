@@ -7,7 +7,7 @@
 use std::{collections::BTreeMap, fmt::Write as _};
 
 use depot_journal::Stand;
-use depot_kern::Datum;
+use depot_kern::{Datum, Isin, Zeitpunkt};
 use depot_sim::belegrang::{
     BELEGPRUEFUNG, Grundrang, Heute, Sortierer, hat_fragebeleg, kandidatenanzahl, kaufbelege,
     messe, tage_mit_zielbelegen,
@@ -48,6 +48,22 @@ pub fn bericht(stand: &Stand, von: Datum, bis: Datum) -> String {
     }
     datenbasis(&mut text, stand, von, bis);
     belegpruefungen(&mut text, stand, von, bis);
+    text
+}
+
+pub fn schlagzeilen_abdeckung(stand: &Stand, von: Datum, bis: Datum, jetzt: Zeitpunkt) -> String {
+    let Ok((aktien, anzahl)) = depot_sim::papiertag::schlagzeilen_abdeckung(stand, von, bis, jetzt)
+    else {
+        return "\n### Schlagzeilenabdeckung\n\nBeobachtungsliste nicht verfügbar.\n".into();
+    };
+    let mut text = format!(
+        "\n### Schlagzeilenabdeckung\n\n**{} von {anzahl} beobachteten Aktien** hatten im Exportzeitraum mindestens eine belegte Schlagzeile mit erkanntem Wertbezug. Gezählt wird je Aktie einmal nach dem Frankfurter Abrufdatum. Das Wochenziel aus S4 liegt bei 10 Aktien.\n",
+        aktien.len()
+    );
+    if !aktien.is_empty() {
+        let isin = aktien.iter().map(Isin::als_str).collect::<Vec<_>>();
+        let _ = writeln!(text, "\nErkannte ISINs im Zeitraum · {}", isin.join(", "));
+    }
     text
 }
 

@@ -885,6 +885,12 @@ fn journalpaket(
                     zeitraum,
                 )
                 + &depot_lage::belegauswahl::bericht(stand, zeitraum.von, zeitraum.bis)
+                + &depot_lage::belegauswahl::schlagzeilen_abdeckung(
+                    stand,
+                    zeitraum.von,
+                    zeitraum.bis,
+                    jetzt,
+                )
                 + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege)
                 + &nachher.bericht
                 + &depot_lage::rueckschau::bericht(stand, jetzt);
