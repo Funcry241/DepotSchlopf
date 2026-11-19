@@ -1,0 +1,62 @@
+name: EZB-CSV live im Export prüfen
+on:
+  push:
+    branches: [maus/370-estr-live-gegenprobe]
+permissions:
+  contents: read
+jobs:
+  estr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: EZB-Index mit begrenzten Wiederholungen abrufen
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/estr-ezb"
+          curl --ipv4 --fail --silent --show-error --location --connect-timeout 8 --max-time 25 --retry 2 --retry-delay 2 --retry-max-time 65 \
+            -H 'Accept: text/csv' \
+            'https://data-api.ecb.europa.eu/service/data/EST/B.EU000A2QQF08.CI?format=csvdata&detail=dataonly&lastNObservations=5' \
+            -o "$RUNNER_TEMP/estr-ezb/estr-index.csv"
+      - name: Originaldatei mit dem DepotSchlopf-Import prüfen
+        shell: bash
+        run: |
+          python - <<'PY'
+          import csv, os
+          from decimal import Decimal
+          from pathlib import Path
+          daten = Path(os.environ["RUNNER_TEMP"]) / "estr-ezb"
+          with (daten / "estr-index.csv").open(encoding="utf-8-sig", newline="") as f:
+              rows = list(csv.DictReader(f))
+          assert len(rows) >= 2 and all(r["KEY"] == "EST.B.EU000A2QQF08.CI" for r in rows)
+          rows.sort(key=lambda r: r["TIME_PERIOD"])
+          first, last = rows[0], rows[-1]
+          cent = int(100_000 * Decimal(last["OBS_VALUE"]) / Decimal(first["OBS_VALUE"]))
+          print(f'EZB: {len(rows)} Beobachtungen, {first["TIME_PERIOD"]} bis {last["TIME_PERIOD"]}; {cent} Cent unabhängig berechnet.')
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"ESTR_ORDNER={daten}\nESTR_ERWARTET={cent}\n")
+          PY
+          cat >> crates/depot_dienst/src/analyse/massstab.rs <<'RS'
+
+          #[cfg(test)]
+          #[test]
+          fn ezb_originaldatei_im_analyse_export() -> Result<(), String> {
+              let daten = std::env::var("ESTR_ORDNER").map_err(|e| e.to_string())?;
+              let daten = Path::new(&daten);
+              let csv = std::fs::read_to_string(daten.join("estr-index.csv"))
+                  .map_err(|e| e.to_string())?;
+              let reihe = indexreihe(&csv).ok_or("Das echte EZB-CSV lässt sich nicht importieren.")?;
+              let (&von, _) = reihe.first_key_value().ok_or("Starttag fehlt")?;
+              let (&bis, _) = reihe.last_key_value().ok_or("Endtag fehlt")?;
+              assert!(von < bis);
+              let erwartet = std::env::var("ESTR_ERWARTET").map_err(|e| e.to_string())?;
+              let erwartet = Cent(erwartet.parse::<i64>().map_err(|e| e.to_string())?);
+              assert_eq!(estr(&csv, von, bis), Some(erwartet));
+              let text = bericht(daten, &Stand::default(), &[(von, Cent(100_000)), (bis, Cent(100_000))].into());
+              assert!(text.lines().any(|line| line.starts_with(&format!("| €STR (EZB-Zinsindex) | {erwartet} |"))));
+              Ok(())
+          }
+          RS
+          cargo test --locked -p depot_dienst ezb_originaldatei_im_analyse_export
