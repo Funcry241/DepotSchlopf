@@ -223,9 +223,45 @@ pub fn vergleich_bis(s: &Stand, werte: &[Wert], bis: Option<Datum>) -> Option<Ve
     })
 }
 
+/// Modellierter Wert bei Verkauf am Ende des Zeitraums, mit ganzen Stücken und Restbargeld.
+pub fn eunl(stand: &Stand, von: Datum, bis: Datum) -> Option<Cent> {
+    let profil = depot_kern::messlatte::ibkr::LANGFRIST;
+    let isin = Isin::neu(profil.etf_isin).ok()?;
+    let mut liste = depot_kern::liste::beobachtungsliste().ok()?;
+    liste.retain(|wert| wert.isin == isin);
+    let universum = als_universum(&liste);
+    let kurs = |tag| tageskurse_am(stand, &universum, tag).ok()?.heute.kurs(&isin);
+    eunl_modell(kurs(von)?, kurs(bis)?)
+}
+
+fn eunl_modell(einstieg: Preis, ausstieg: Preis) -> Option<Cent> {
+    use depot_kern::Boerse;
+    let profil = depot_kern::messlatte::ibkr::LANGFRIST;
+    let grenzen = Grenzen::standard();
+    let kaufkurs = grenzen.papierkurs(Boerse::Xetra, einstieg, Rundung::Auf)?;
+    let verkaufskurs = grenzen.papierkurs(Boerse::Xetra, ausstieg, Rundung::Ab)?;
+    let frei = profil.startkapital.checked_sub(profil.ordergebuehr_max)?;
+    let stueck = Preis::aus_cent(kaufkurs)?.stueck_fuer(Preis::aus_cent(frei)?)?;
+    if stueck == 0 {
+        return Some(profil.startkapital);
+    }
+    frei.checked_sub(kaufkurs.mal_stueck(stueck)?)?
+        .checked_add(verkaufskurs.mal_stueck(stueck)?)?
+        .checked_sub(profil.ordergebuehr_max)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eunl_modell_behaelt_restbargeld_und_zieht_beide_orderkosten_ab() -> Result<(), String> {
+        let start = Preis::aus_cent(Cent(12_000)).ok_or("Startkurs")?;
+        let ende = Preis::aus_cent(Cent(12_000)).ok_or("Endkurs")?;
+        // 8 Stück, Spread 6 Cent je Seite, zwei Gebühren zu 218 Cent.
+        assert_eq!(eunl_modell(start, ende), Some(Cent(99_468)));
+        Ok(())
+    }
 
     fn isin(s: &str) -> Result<Isin, String> {
         Isin::neu(s).map_err(|e| format!("{e:?}"))

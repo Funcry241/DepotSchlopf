@@ -1,0 +1,31 @@
+name: Vergleichsmaßstäbe vorbereiten
+on:
+  push:
+    branches: [maus/356-vergleichsmassstaebe-vorbereitung]
+permissions:
+  contents: read
+jobs:
+  pruefen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Rust-Dateien formatieren
+        run: |
+          cargo fmt --all
+          mkdir -p "$RUNNER_TEMP/massstab"
+          cp --parents crates/depot_dienst/src/analyse.rs crates/depot_dienst/src/analyse/massstab.rs crates/depot_lage/src/vergleich.rs "$RUNNER_TEMP/massstab"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vergleichsmassstaebe
+          path: ${{ runner.temp }}/massstab
+      - name: Vergleichsmaßstäbe testen
+        run: |
+          cargo clippy --locked -p depot_lage -p depot_dienst --all-targets -- -D warnings
+          cargo test --locked -p depot_lage -p depot_dienst
+      - name: Öffentliches EZB-CSV-Format prüfen
+        run: |
+          curl --fail --silent --show-error --max-time 12 'https://data-api.ecb.europa.eu/service/data/EST/B.EU000A2QQF08.CI?format=csvdata&detail=dataonly&lastNObservations=2' -o "$RUNNER_TEMP/estr.csv"
+          head -n 3 "$RUNNER_TEMP/estr.csv"
