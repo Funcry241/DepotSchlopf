@@ -149,7 +149,7 @@ fn main() -> ExitCode {
     };
 
     // Der Sammler laeuft fuer sich: kein Gate, kein Export. Netz hat nur er (Kodex).
-    if befehl == "kurse" || befehl == "nachrichten" || befehl == "termine" {
+    if matches!(befehl, "kurse" | "nachrichten" | "termine" | "ibkr") {
         return sammler(&wurzel, &args);
     }
     // Der Papiertag laeuft fuer sich: kein Netz, nur Papiergeld.

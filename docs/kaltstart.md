@@ -36,3 +36,9 @@ Diese Datei zuerst lesen, wenn ein neuer Bearbeiter (Mensch oder KI) ohne Vorges
 | `FestschreibungAenderung` | Festschreibung mit Grenzfreigabe, Produktivcode, Tests, Werkzeug, Dokumentation – nie das Gate |
 
 Die Festschreibung gilt in jeder Klasse: Weicht der Baum davon ab, ist das Gate geschlossen. Die Essenz-Regeln D00 bis D17 stehen im festen Register `kodex/essenz_register.txt`.
+
+### Lesender IBKR-Papierabruf
+
+Melde im IB Gateway das Papierkonto an. Aktiviere unter den API-Einstellungen die lokalen Socket-Verbindungen auf Port 4002 und lass „Read-Only API“ eingeschaltet. Lege in `daten/ibkr-papierkonto.txt` ausschließlich die Nummer dieses Papierkontos ab. Die Datei bleibt lokal.
+
+`run.cmd ibkr papier` liest Bargeld, abgerechnetes Bargeld, verfügbare Mittel, Positionen und offene Orders. Der Befehl zeigt die Werte in der Konsole an. Fehlende Daten, ein anderes Konto oder nicht erlaubte Währungsbestände führen zu einem Fehler. Der Abruf prüft die Kontoart und Handelsrechte noch nicht und führt keinen Journalabgleich durch.
