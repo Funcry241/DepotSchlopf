@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 
 use depot_kern::{Datum, Zeitpunkt};
 use depot_lage::html::{STIL, maskiere};
-use depot_lage::{Abhilfe, Grenzwert, SchluesselStand, datum_text, ortszeit, zeit_text};
+use depot_lage::{Abhilfe, Ampel, Grenzwert, SchluesselStand, datum_text, ortszeit, zeit_text};
 
 use crate::autostart;
 use crate::http::feld;
@@ -2321,11 +2321,7 @@ pub(crate) fn journal_teil(token: &str, start: &str, z: &Zustand) -> String {
     s.push_str(
         "<section id=\"journal\"><h2>Journal</h2><p>Hier hält DepotSchlopf seine Läufe und Papierdaten dauerhaft fest.</p>",
     );
-    match z
-        .lage
-        .as_ref()
-        .and_then(|l| l.bild.punkte.iter().find(|p| p.name == "Journal"))
-    {
+    match journal_punkt(z) {
         Some(p) => {
             if let Some(stand) = z.auftrag_stand(Art::Einrichten) {
                 let _ = write!(
@@ -2346,52 +2342,86 @@ pub(crate) fn journal_teil(token: &str, start: &str, z: &Zustand) -> String {
     s
 }
 
-fn erste_schritte(z: &Zustand, e: &Einrichtung) -> String {
-    let schluessel = if e.schluessel.is_empty()
-        || e.schluessel
-            .iter()
-            .any(|(_, st)| *st == SchluesselStand::Unbekannt)
-    {
-        "unbekannt"
-    } else if e
-        .schluessel
+fn journal_punkt(z: &Zustand) -> Option<&depot_lage::Punkt> {
+    z.lage
+        .as_ref()?
+        .bild
+        .punkte
         .iter()
-        .all(|(_, st)| matches!(st, SchluesselStand::Geprueft(_)))
-    {
-        "alle Schlüssel wurden vom jeweiligen Anbieter angenommen"
-    } else if e.schluessel.iter().all(|(_, st)| {
-        matches!(
-            st,
-            SchluesselStand::Geprueft(_) | SchluesselStand::Hinterlegt
-        )
-    }) {
-        "alle Schlüssel sind hinterlegt. Der jeweilige Prüfstand steht bei den Zugangsdaten"
-    } else {
-        "bitte ergänzen oder prüfen"
+        .find(|p| p.name == "Journal")
+}
+
+fn erste_abrufe(z: &Zustand, liste: &mut String) {
+    let daten = z.lage.as_ref().map(|l| &l.bild.datenbelege);
+    let erfolgreich = |art| {
+        z.verlauf
+            .iter()
+            .any(|a| a.art == art && a.erfolg == Some(true) && a.frueher != Frueher::Unterbrochen)
     };
-    let plan = if z.automatik_fehler().is_some() {
-        "angehalten; den Grund findest du im Zeitplan"
-    } else if z.zeitplan.an {
-        "eingeschaltet"
-    } else {
-        "aus; erst nach dem manuellen Test empfohlen"
-    };
-    let autostart = match e.autostart {
-        autostart::Stand::An => "eingeschaltet",
-        autostart::Stand::Aus => "aus; optional für den Dauerbetrieb",
-        _ => "bitte unten prüfen",
-    };
-    format!(
-        "<section id=\"erste-schritte\"><h2>Erste Schritte</h2><ol>\
-        <li><a href=\"#journal\">Journal einrichten</a>: Der Stand wird dort automatisch aktualisiert.</li>\
-        <li><a href=\"#schluessel\">Zugangsdaten</a>: {schluessel}.</li>\
-        <li><a href=\"#quellen\">Datenquellen prüfen</a>: Termine kannst du jederzeit abrufen. \
-        Aktuelle Schlusskurse gibt es erst nach dem jeweiligen Börsenschluss. \
-        Ein hinterlegter Schlüssel und ein erfolgreicher Kursabruf werden getrennt angezeigt.</li>\
-        <li><a href=\"#zeitplan\">Zeitplan</a>: {plan}.</li>\
-        <li><a href=\"#autostart\">Autostart</a>: {autostart}.</li></ol>\
-        <p><a href=\"#update\">Zum Update</a> · <a href=\"#werkzeuge\">Zu den Werkzeugen</a></p></section>"
-    )
+    let kurse = !z.boersen.is_empty()
+        && z.boersen.iter().all(|&boerse| {
+            daten.is_some_and(|d| d.kurse.contains(&boerse)) || erfolgreich(Art::KurseVon(boerse))
+        });
+    if !kurse && !erfolgreich(Art::Kurse) {
+        liste.push_str("<li><a href=\"#quellen\">Schlusskurse abrufen</a> nach dem jeweiligen Börsenschluss.</li>");
+    }
+    if !daten.is_some_and(|d| d.termine) && !erfolgreich(Art::Termine) {
+        liste.push_str("<li><a href=\"#quellen\">Termine abrufen</a>.</li>");
+    }
+    if !daten.is_some_and(|d| d.nachrichten) && !erfolgreich(Art::Nachrichten) {
+        liste.push_str("<li><a href=\"#quellen\">Schlagzeilen abrufen</a>.</li>");
+    }
+}
+
+pub(crate) fn erste_schritte(start: &str, z: &Zustand, autostart: &autostart::Stand) -> String {
+    let mut s = marke(start);
+    let mut liste = String::new();
+    if let Some(journal) = journal_punkt(z) {
+        match journal.abhilfe {
+            Some(Abhilfe::JournalEinrichten) => {
+                liste.push_str("<li><a href=\"#journal\">Journal einrichten</a>.</li>");
+            }
+            _ if journal.ampel == Ampel::Halt => {
+                liste.push_str("<li><a href=\"#journal\">Journal prüfen</a>.</li>");
+            }
+            _ => {}
+        }
+    }
+    if let Some(lage) = &z.lage {
+        for (wer, stand) in &lage.bild.schluessel {
+            let aktion = match stand {
+                SchluesselStand::Fehlt => "Schlüssel hinterlegen",
+                SchluesselStand::Abgelehnt(_) => "Schlüssel erneuern",
+                SchluesselStand::Unbekannt => "Schlüssel prüfen",
+                SchluesselStand::Hinterlegt | SchluesselStand::Geprueft(_) => continue,
+            };
+            let name = maskiere(wer.anzeigename());
+            let _ = write!(
+                liste,
+                "<li><a href=\"#schluessel\">{name} · {aktion}</a>.</li>"
+            );
+        }
+    }
+    erste_abrufe(z, &mut liste);
+    if z.automatik_fehler().is_some() {
+        liste.push_str("<li><a href=\"#zeitplan\">Zeitplan prüfen</a>.</li>");
+    } else if !z.zeitplan.an {
+        liste.push_str("<li><a href=\"#zeitplan\">Zeitplan einschalten</a>, wenn nach dem manuellen Test automatische Läufe gewünscht sind.</li>");
+    }
+    match autostart {
+        autostart::Stand::Aus => liste.push_str("<li><a href=\"#autostart\">Autostart einschalten</a>, wenn DepotSchlopf mit Windows starten soll.</li>"),
+        autostart::Stand::Veraltet { .. } | autostart::Stand::Fremd => {
+            liste.push_str("<li><a href=\"#autostart\">Autostart prüfen</a>.</li>");
+        }
+        autostart::Stand::An | autostart::Stand::NichtVerfuegbar => {}
+    }
+    if !liste.is_empty() {
+        let _ = write!(
+            s,
+            "<section id=\"erste-schritte\"><h2>Erste Schritte</h2><ol>{liste}</ol></section>"
+        );
+    }
+    s
 }
 
 /// Der Inhalt der Einrichtung.
@@ -2435,8 +2465,12 @@ pub(crate) fn einrichtung_mit_update(
         "<div id=\"stand\" data-teil=\"/teil/status\">{}</div>",
         status(token, start, z, heute)
     );
+    let _ = write!(
+        s,
+        "<div data-teil=\"/teil/erste-schritte\">{}</div>",
+        erste_schritte(start, z, &e.autostart)
+    );
     if !z.zeitplan.an {
-        s.push_str(&erste_schritte(z, e));
         journal_und_zugaenge(token, start, z, e, &mut s);
     }
     if !matches!(&e.ki_halt, Ok(None)) {
@@ -2454,7 +2488,6 @@ pub(crate) fn einrichtung_mit_update(
     update_teil(token, start, z, e, &mut s, update);
     s.push_str("<section id=\"selten\" class=\"einstellungsgruppe\" aria-labelledby=\"selten-titel\"><h2 id=\"selten-titel\">Seltene Einstellungen</h2><p>Für die erste Einrichtung oder wenn sich etwas ändert: Zugangsdaten, Datenspeicherung, Windows-Start und technische Prüfungen.</p>");
     if z.zeitplan.an {
-        s.push_str(&erste_schritte(z, e));
         journal_und_zugaenge(token, start, z, e, &mut s);
     }
     autostart_teil(token, e, &mut s);
