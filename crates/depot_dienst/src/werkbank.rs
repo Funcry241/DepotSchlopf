@@ -1275,6 +1275,24 @@ impl Dienst {
             let _ = einreihen(z, Art::Wochenrueckschau, Anlass::Zeitplan, None);
             return;
         }
+        if z.zeitplan.an
+            && z.zeitplan.papier_danach
+            && z.erledigt.termine == Some(tag)
+            && z.erledigt.papier != Some(tag)
+            && z.laufend.is_none()
+            && z.warteschlange.is_empty()
+            && z.verlauf_fehler.is_none()
+            && z.verlauf_vermerkfehler.is_none()
+            && z.zeitplan_fehler.is_none()
+            && crate::zeitplan::gemini_zeitfenster(&z.zeitplan, tag, (h, m), &z.boersen)
+            && !z.verlauf.iter().any(|a| {
+                a.art == Art::Gemini && a.start.frankfurt_tag() == Some(tag)
+            })
+            && depot_lage::gespraeche::gemini_aktiv(&self.wurzel.join("daten"))
+        {
+            let _ = einreihen(z, Art::Gemini, Anlass::Zeitplan, None);
+            return;
+        }
         let Some(art) = zeitplan_faellig(z, tag, (h, m)) else {
             if z.laufend.is_none() && z.warteschlange.is_empty() && vorbereitung_faellig(z, jetzt) {
                 let _ = einreihen(z, Art::Vorbereiten, Anlass::Zeitplan, None);

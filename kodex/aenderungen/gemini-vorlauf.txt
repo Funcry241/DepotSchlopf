@@ -1,0 +1,6 @@
+klasse: Funktion
+zweck: Gemini nach dem Terminabruf vorziehen und vorübergehende Überlastung im bestehenden Kontingent erneut versuchen
+pfade:
+crates/depot_berater/src/zusatz.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/src/zeitplan.rs

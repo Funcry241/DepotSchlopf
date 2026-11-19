@@ -569,6 +569,24 @@ pub(crate) fn faellig_mit_bestand(
     .then_some(Art::Papier)
 }
 
+/// Der optionale Vorlauf bekommt nur das freie Fenster vor dem ersten Kursabruf.
+pub(crate) fn gemini_zeitfenster(
+    plan: &Zeitplan,
+    tag: Datum,
+    zeit: (u8, u8),
+    boersen: &[Boerse],
+) -> bool {
+    let minuten = |(h, m): (u8, u8)| {
+        u16::from(h).saturating_mul(60).saturating_add(u16::from(m))
+    };
+    zeit >= plan.termine
+        && abrufe_fuer(plan, tag, boersen)
+            .iter()
+            .map(|&(_, u)| minuten(u))
+            .min()
+            .is_some_and(|kursbeginn| kursbeginn.saturating_sub(minuten(zeit)) >= 4)
+}
+
 fn tag_danach(d: Datum) -> Option<Datum> {
     let z = depot_kern::Zeitpunkt::neu(d, 12, 0, 0)?;
     depot_kern::Zeitpunkt::aus_sekunden(z.sekunden().checked_add(86_400)?)?.datum()
@@ -633,6 +651,18 @@ mod tests {
 
     fn donnerstag() -> Result<Datum, String> {
         Datum::neu(2026, 11, 5).ok_or_else(|| "Donnerstag fehlt".into())
+    }
+
+    #[test]
+    fn gemini_hat_ein_fenster_zwischen_terminen_und_kursen() -> Result<(), String> {
+        let plan = Zeitplan::default();
+        let tag = donnerstag()?;
+        let boersen = [Boerse::Xetra];
+        assert!(!gemini_zeitfenster(&plan, tag, (7, 19), &boersen));
+        assert!(gemini_zeitfenster(&plan, tag, (7, 20), &boersen));
+        assert!(gemini_zeitfenster(&plan, tag, (7, 26), &boersen));
+        assert!(!gemini_zeitfenster(&plan, tag, (7, 27), &boersen));
+        Ok(())
     }
 
     fn zustand(tag: Datum, ausgang: AbrufAusgang) -> Result<Erledigt, String> {
