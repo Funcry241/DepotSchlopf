@@ -423,6 +423,39 @@ pub fn nachrichtenbelege_am(
         .collect()
 }
 
+/// Belegte Schlagzeilenbezüge je Aktie im Frankfurter Abrufzeitraum.
+pub fn schlagzeilen_abdeckung(
+    stand: &Stand,
+    erster_tag: Datum,
+    letzter_tag: Datum,
+    wissen_bis: Zeitpunkt,
+) -> Result<(BTreeSet<Isin>, usize), String> {
+    let mut werte = depot_kern::liste::beobachtungsliste()?;
+    werte.retain(|w| !depot_kern::liste::ETF_ISIN.contains(&w.isin.als_str()));
+    let zeitraum = erster_tag..=letzter_tag;
+    let abgedeckt = stand
+        .nachrichten()
+        .iter()
+        .filter(|n| {
+            n.abruf() <= wissen_bis
+                && n.abruf()
+                    .frankfurt_tag()
+                    .is_some_and(|d| zeitraum.contains(&d))
+                && !depot_kern::quelle::kapitalmeldung(n.quelle())
+                && n.quelle() != depot_journal::splitverdacht::ENTWARNUNG
+        })
+        .flat_map(|n| {
+            let titel = n
+                .text()
+                .rsplit_once(" | https://")
+                .map_or(n.text(), |(titel, _)| titel);
+            crate::nachrichtenbezug::bezug(titel, &werte).werte
+        })
+        .map(|w| w.isin.clone())
+        .collect();
+    Ok((abgedeckt, werte.len()))
+}
+
 pub fn nachricht_text(n: &NachrichtBeleg) -> Option<String> {
     nachricht_anzeige(n.zeit(), n.quelle(), n.text())
 }
