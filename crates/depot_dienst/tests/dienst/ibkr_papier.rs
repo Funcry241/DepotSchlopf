@@ -35,7 +35,8 @@ fn ibkr_papierkonto_in_der_oberflaeche_speichern_und_lesen() -> Result<(), Strin
         ))
     };
     let seite = get(&d, "/einrichtung", jetzt);
-    assert!(seite.contains("IBKR-Papierkonto einrichten und testen"));
+    assert!(seite.contains("href=\"#ibkr-papier\">IBKR-Papierkonto einrichten</a>"));
+    assert!(!seite.contains("href=\"#ibkr-papier\">IBKR-Papierabruf testen</a>"));
     assert!(seite.contains("Schreibgeschützte API") && seite.contains("4002"));
     assert!(!seite.contains("<summary>Papierkontonummer ändern</summary>"));
     assert!(post("/ausfuehren", "art=ibkr_papier").contains("ibkr=format"));
@@ -47,6 +48,8 @@ fn ibkr_papierkonto_in_der_oberflaeche_speichern_und_lesen() -> Result<(), Strin
         "DUR1234567\n"
     );
     let seite = get(&d, "/einrichtung", jetzt);
+    assert!(seite.contains("href=\"#ibkr-papier\">IBKR-Papierabruf testen</a>"));
+    assert!(!seite.contains("href=\"#ibkr-papier\">IBKR-Papierkonto einrichten"));
     let (_, ibkr) = some(seite.split_once("id=\"ibkr-papier\""), "IBKR-Abschnitt")?;
     let (status, details) = some(ibkr.split_once("<details>"), "eingeklappte Bearbeitung")?;
     assert!(status.contains("class=\"gut\">✓ Papierkontonummer lokal gespeichert"));
