@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Fehlende IBKR-Kontosummen einzeln melden und Währungsbargeld mit optionalem Feldpräfix lesen
+pfade:
+crates/depot_sammler/src/ibkr.rs
