@@ -19,6 +19,7 @@ depot_kern.workspace = true
 depot_journal.workspace = true
 depot_regelwerk.workspace = true
 ureq.workspace = true
+ibapi = { version = "=5.3.0", default-features = false, features = ["sync"] }
 
 [target.'cfg(windows)'.dependencies]
 keyring-core.workspace = true
