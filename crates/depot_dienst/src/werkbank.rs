@@ -1285,9 +1285,10 @@ impl Dienst {
             && z.verlauf_vermerkfehler.is_none()
             && z.zeitplan_fehler.is_none()
             && crate::zeitplan::gemini_zeitfenster(&z.zeitplan, tag, (h, m), &z.boersen)
-            && !z.verlauf.iter().any(|a| {
-                a.art == Art::Gemini && a.start.frankfurt_tag() == Some(tag)
-            })
+            && !z
+                .verlauf
+                .iter()
+                .any(|a| a.art == Art::Gemini && a.start.frankfurt_tag() == Some(tag))
             && depot_lage::gespraeche::gemini_aktiv(&self.wurzel.join("daten"))
         {
             let _ = einreihen(z, Art::Gemini, Anlass::Zeitplan, None);

@@ -741,7 +741,10 @@ mod tests {
                 inhalt: Vec::new(),
                 warten: Some(9),
             }));
-            assert_eq!(senden(&mut netz, &schluessel, &frage, &liste, &mut e), erwartet);
+            assert_eq!(
+                senden(&mut netz, &schluessel, &frage, &liste, &mut e),
+                erwartet
+            );
         }
         Ok(())
     }

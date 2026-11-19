@@ -576,9 +576,7 @@ pub(crate) fn gemini_zeitfenster(
     zeit: (u8, u8),
     boersen: &[Boerse],
 ) -> bool {
-    let minuten = |(h, m): (u8, u8)| {
-        u16::from(h).saturating_mul(60).saturating_add(u16::from(m))
-    };
+    let minuten = |(h, m): (u8, u8)| u16::from(h).saturating_mul(60).saturating_add(u16::from(m));
     zeit >= plan.termine
         && abrufe_fuer(plan, tag, boersen)
             .iter()
