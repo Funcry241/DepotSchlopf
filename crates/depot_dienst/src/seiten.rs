@@ -1164,12 +1164,24 @@ fn taetigkeit(
 }
 
 fn letzter_fehler_hinweis(s: &mut String, z: &Zustand) {
-    if let Some(a) = z
-        .verlauf
-        .iter()
-        .find(|a| a.erfolg == Some(false) && a.update_pause.is_none())
-        && let Some(fehler) = crate::protokoll::letzter_fehler(&a.protokoll)
-    {
+    let offen = z.verlauf.iter().enumerate().find_map(|(i, a)| {
+        if a.erfolg != Some(false)
+            || a.update_pause.is_some()
+            || z.verlauf
+                .iter()
+                .take(i)
+                .any(|neu| neu.art == a.art && neu.erfolg == Some(true))
+            || (a.art == Art::Update
+                && z.update_ergebnisse.iter().any(|e| {
+                    e.phase == crate::aktualisierung::Phase::Bestaetigt
+                        && e.zeit > a.ende.unwrap_or(a.start)
+                }))
+        {
+            return None;
+        }
+        crate::protokoll::letzter_fehler(&a.protokoll).map(|fehler| (a, fehler))
+    });
+    if let Some((a, fehler)) = offen {
         let _ = write!(
             s,
             "<p class=\"halt\"><b>Letzter fehlgeschlagener Lauf</b> · {} · {}\

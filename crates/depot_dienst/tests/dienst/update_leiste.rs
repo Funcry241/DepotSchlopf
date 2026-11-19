@@ -1,4 +1,91 @@
 use super::*;
+use depot_dienst::werkbank::Auftrag;
+
+fn verlaufslauf(nr: u64, art: Art, zeit: Zeitpunkt, erfolg: bool) -> Auftrag {
+    Auftrag {
+        nr,
+        kennung: format!("{}-{nr}", zeit.sekunden()),
+        art,
+        anlass: Anlass::Hand,
+        start: zeit,
+        ende: Some(zeit),
+        erfolg: Some(erfolg),
+        protokoll: if erfolg {
+            Vec::new()
+        } else {
+            vec!["FEHLER: Beispiel".into()]
+        },
+        hinweis: None,
+        frueher: Frueher::Nein,
+        update_pause: None,
+    }
+}
+
+#[test]
+fn roter_fehlerhinweis_verschwindet_nur_nach_erfolg_derselben_art() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(12, 0)?;
+    let fehler = verlaufslauf(1, Art::Termine, t, false);
+    d.sperre().verlauf.push_front(fehler.clone());
+    let neu = donnerstag(12, 1)?;
+    d.sperre()
+        .verlauf
+        .push_front(verlaufslauf(2, Art::Nachrichten, neu, true));
+    assert!(get(&d, "/", neu).contains("Letzter fehlgeschlagener Lauf"));
+    d.sperre()
+        .verlauf
+        .push_front(verlaufslauf(3, Art::Termine, neu, true));
+    let live = get(&d, "/", neu);
+    assert!(!live.contains("Letzter fehlgeschlagener Lauf"));
+    assert!(live.contains(&fehler.kennung) && live.contains("FEHLER: Beispiel"));
+    Ok(())
+}
+
+#[test]
+fn bestaetigtes_update_erledigt_aelteren_updatefehler() -> Result<(), String> {
+    use depot_dienst::aktualisierung::{Ergebnis, Phase};
+    let d = dienst(ordner()?, true);
+    let alt = donnerstag(12, 0)?;
+    let neu = donnerstag(12, 1)?;
+    d.sperre()
+        .verlauf
+        .push_front(verlaufslauf(1, Art::Update, alt, false));
+    assert!(get(&d, "/", neu).contains("Letzter fehlgeschlagener Lauf"));
+    d.sperre().update_ergebnisse.push(Ergebnis {
+        vorher: "a".repeat(40),
+        neu: "b".repeat(40),
+        lauf: "-".into(),
+        phase: Phase::Bestaetigt,
+        zeit: neu,
+        grund: "Neuer Dienst geprüft.".into(),
+    });
+    assert!(!get(&d, "/", neu).contains("Letzter fehlgeschlagener Lauf"));
+    let spaeter = donnerstag(12, 2)?;
+    d.sperre()
+        .verlauf
+        .push_front(verlaufslauf(2, Art::Update, spaeter, false));
+    assert!(get(&d, "/", spaeter).contains("Letzter fehlgeschlagener Lauf"));
+    Ok(())
+}
+
+#[test]
+fn neustart_erwartet_aktivierungsbeleg_nur_nach_einem_erfolgreichen_einspielen()
+-> Result<(), String> {
+    let t = donnerstag(12, 0)?;
+    for erfolg in [false, true] {
+        let wurzel = ordner()?;
+        let lauf = verlaufslauf(1, Art::Update, t, erfolg);
+        depot_dienst::verlauf::vermerke(&wurzel, &depot_dienst::verlauf::ende_zeile(&lauf))?;
+        let neu = dienst(wurzel, true);
+        let html = get(&neu, "/teil/update", t);
+        assert_eq!(
+            html.contains("keine bestätigte Aktivierung"),
+            erfolg,
+            "{html}"
+        );
+    }
+    Ok(())
+}
 
 #[test]
 fn verlauf_uebersteht_neustart_und_zeigt_unterbrochenes() -> Result<(), String> {

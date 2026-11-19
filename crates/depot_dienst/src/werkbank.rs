@@ -753,8 +753,8 @@ impl Dienst {
             Err(e) => (Vec::new(), Some((true, e))),
         };
         if let Some(a) = verlauf.iter().find(|a| a.art == Art::Update)
+            && a.erfolg == Some(true)
             && !update_ergebnisse.iter().any(|e| e.lauf == a.kennung)
-            && a.update_pause.is_none()
         {
             update_meldung = Some((true, "Für das letzte Update liegt keine bestätigte Aktivierung vor. Details stehen unter Tätigkeit im Protokoll.".into()));
         }
