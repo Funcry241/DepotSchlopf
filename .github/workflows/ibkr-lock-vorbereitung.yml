@@ -1,0 +1,24 @@
+name: IBKR Lockdatei vorbereiten
+on:
+  push:
+    branches: [maus/356-ibkr-vorbereitung]
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Abhängigkeiten auflösen und prüfen
+        run: |
+          cargo check -p depot_sammler
+          cargo metadata --locked --format-version 1 > "$RUNNER_TEMP/ibkr-metadata.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ibkr-lock
+          path: |
+            Cargo.lock
+            ${{ runner.temp }}/ibkr-metadata.json
