@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use depot_kern::Cent;
 use ibapi::Client;
-use ibapi::accounts::{AccountSummary, AccountSummaryResult, AccountSummaryTags, PositionUpdate};
 use ibapi::accounts::types::AccountGroup;
+use ibapi::accounts::{AccountSummary, AccountSummaryResult, AccountSummaryTags, PositionUpdate};
 use ibapi::orders::{Action, Orders};
 use ibapi::subscriptions::SubscriptionItem;
 
@@ -48,7 +48,10 @@ fn eurocent(text: &str) -> Option<Cent> {
     let (negativ, text) = text.strip_prefix('-').map_or((false, text), |t| (true, t));
     let (euro, nachkomma) = text.split_once('.').unwrap_or((text, ""));
     if euro.is_empty()
-        || !euro.bytes().chain(nachkomma.bytes()).all(|b| b.is_ascii_digit())
+        || !euro
+            .bytes()
+            .chain(nachkomma.bytes())
+            .all(|b| b.is_ascii_digit())
     {
         return None;
     }
@@ -61,7 +64,11 @@ fn eurocent(text: &str) -> Option<Cent> {
         1 => cent.parse::<i64>().ok()?.checked_mul(10)?,
         _ => cent.parse().ok()?,
     };
-    let gesamt = euro.parse::<i64>().ok()?.checked_mul(100)?.checked_add(cent)?;
+    let gesamt = euro
+        .parse::<i64>()
+        .ok()?
+        .checked_mul(100)?
+        .checked_add(cent)?;
     if negativ {
         gesamt.checked_neg().map(Cent)
     } else {
@@ -73,9 +80,9 @@ fn lese_bis<T>(
     mut naechster: impl FnMut(Duration) -> Option<Result<SubscriptionItem<T>, ibapi::Error>>,
     mut belege: impl FnMut(T) -> Result<bool, &'static str>,
 ) -> Result<(), &'static str> {
-    let ende = Instant::now() + FRIST;
+    let beginn = Instant::now();
     loop {
-        let rest = ende.saturating_duration_since(Instant::now());
+        let rest = FRIST.saturating_sub(beginn.elapsed());
         match naechster(rest) {
             Some(Ok(SubscriptionItem::Data(datensatz))) => {
                 if belege(datensatz)? {
@@ -100,7 +107,8 @@ fn salden(zeilen: &[AccountSummary], konto: &str) -> Result<Salden, &'static str
             if a.currency == "BASE" {
                 continue;
             }
-            let cent = eurocent(&a.value).ok_or("Ungültiger oder nicht centgenauer Währungssaldo.")?;
+            let cent =
+                eurocent(&a.value).ok_or("Ungültiger oder nicht centgenauer Währungssaldo.")?;
             if !waehrungen.insert(a.currency.as_str()) || a.currency.is_empty() {
                 return Err("Währungssaldo fehlt oder kommt mehrfach vor.");
             }
@@ -125,7 +133,12 @@ fn salden(zeilen: &[AccountSummary], konto: &str) -> Result<Salden, &'static str
     if !waehrungen.contains("EUR") {
         return Err("Der einzelne EUR-Saldo im Währungsledger fehlt.");
     }
-    let wert = |tag| summen.get(tag).copied().ok_or("Erforderliche Kontosumme fehlt.");
+    let wert = |tag| {
+        summen
+            .get(tag)
+            .copied()
+            .ok_or("Erforderliche Kontosumme fehlt.")
+    };
     Ok(Salden {
         gesamt: wert(AccountSummaryTags::TOTAL_CASH_VALUE)?,
         abgerechnet: wert(AccountSummaryTags::SETTLED_CASH)?,
@@ -141,7 +154,9 @@ fn stueck(menge: f64) -> Result<u64, &'static str> {
 }
 
 fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
-    let konten = client.managed_accounts().map_err(|_| "Konten nicht lesbar.")?;
+    let konten = client
+        .managed_accounts()
+        .map_err(|_| "Konten nicht lesbar.")?;
     if !matches!(konten.as_slice(), [gemeldet] if gemeldet == konto) {
         return Err("Im Gateway muss genau das konfigurierte IBKR-Papierkonto angemeldet sein.");
     }
@@ -157,13 +172,16 @@ fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
         )
         .map_err(|_| "Kontosummen konnten nicht angefragt werden.")?;
     let mut summen = Vec::new();
-    lese_bis(|rest| zeilen.next_timeout(rest), |zeile| match zeile {
-        AccountSummaryResult::End => Ok(true),
-        AccountSummaryResult::Summary(a) => {
-            summen.push(a);
-            Ok(false)
-        }
-    })?;
+    lese_bis(
+        |rest| zeilen.next_timeout(rest),
+        |zeile| match zeile {
+            AccountSummaryResult::End => Ok(true),
+            AccountSummaryResult::Summary(a) => {
+                summen.push(a);
+                Ok(false)
+            }
+        },
+    )?;
     zeilen.cancel();
     let salden = salden(&summen, konto)?;
 
@@ -171,19 +189,25 @@ fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
         .positions()
         .map_err(|_| "Positionen konnten nicht angefragt werden.")?;
     let mut positionen = BTreeMap::new();
-    lese_bis(|rest| meldungen.next_timeout(rest), |meldung| match meldung {
-        PositionUpdate::PositionEnd => Ok(true),
-        PositionUpdate::Position(p) => {
-            if p.account != konto || p.contract.currency.0 != "EUR" || p.contract.contract_id <= 0 {
-                return Err("Position ohne eindeutige Zuordnung zum EUR-Papierkonto.");
+    lese_bis(
+        |rest| meldungen.next_timeout(rest),
+        |meldung| match meldung {
+            PositionUpdate::PositionEnd => Ok(true),
+            PositionUpdate::Position(p) => {
+                if p.account != konto
+                    || p.contract.currency.0 != "EUR"
+                    || p.contract.contract_id <= 0
+                {
+                    return Err("Position ohne eindeutige Zuordnung zum EUR-Papierkonto.");
+                }
+                let anzahl = stueck(p.position)?;
+                if anzahl != 0 && positionen.insert(p.contract.contract_id, anzahl).is_some() {
+                    return Err("Position für einen Kontrakt mehrfach gemeldet.");
+                }
+                Ok(false)
             }
-            let anzahl = stueck(p.position)?;
-            if anzahl != 0 && positionen.insert(p.contract.contract_id, anzahl).is_some() {
-                return Err("Position für einen Kontrakt mehrfach gemeldet.");
-            }
-            Ok(false)
-        }
-    })?;
+        },
+    )?;
     meldungen.cancel();
 
     let mut orders = Vec::new();
@@ -282,17 +306,33 @@ mod tests {
 
     #[test]
     fn fremde_waehrungen_und_falsches_konto_werden_abgelehnt() {
-        let mut zeilen = vec![
-            AccountSummary { account: "DU1234".into(), currency: "EUR".into(), tag: "CashBalance".into(), value: "1000".into() },
-        ];
-        zeilen.extend([
-            AccountSummaryTags::TOTAL_CASH_VALUE,
-            AccountSummaryTags::SETTLED_CASH,
-            AccountSummaryTags::AVAILABLE_FUNDS,
-        ].map(|tag| AccountSummary { account: "DU1234".into(), currency: "EUR".into(), tag: tag.into(), value: "1000".into() }));
+        let mut zeilen = vec![AccountSummary {
+            account: "DU1234".into(),
+            currency: "EUR".into(),
+            tag: "CashBalance".into(),
+            value: "1000".into(),
+        }];
+        zeilen.extend(
+            [
+                AccountSummaryTags::TOTAL_CASH_VALUE,
+                AccountSummaryTags::SETTLED_CASH,
+                AccountSummaryTags::AVAILABLE_FUNDS,
+            ]
+            .map(|tag| AccountSummary {
+                account: "DU1234".into(),
+                currency: "EUR".into(),
+                tag: tag.into(),
+                value: "1000".into(),
+            }),
+        );
         assert!(salden(&zeilen, "DU1234").is_ok());
         assert!(salden(&zeilen, "DU1235").is_err());
-        zeilen.push(AccountSummary { account: "DU1234".into(), currency: "USD".into(), tag: "CashBalance".into(), value: "0.01".into() });
+        zeilen.push(AccountSummary {
+            account: "DU1234".into(),
+            currency: "USD".into(),
+            tag: "CashBalance".into(),
+            value: "0.01".into(),
+        });
         assert!(salden(&zeilen, "DU1234").is_err());
     }
 
