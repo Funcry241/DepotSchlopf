@@ -256,6 +256,79 @@ fn lock_freigabe_zeigt_pakete_in_der_einrichtung() -> Result<(), String> {
 }
 
 #[test]
+fn update_freigabe_zeigt_den_grund_und_bietet_nur_nach_fristablauf_dieselbe_version_an()
+-> Result<(), String> {
+    let t = mittag()?;
+    for (code, klasse, titel) in [
+        (10, "offen", "Freigabe abgelaufen"),
+        (11, "leise", "Update abgelehnt"),
+        (12, "offen", "Update-Stand geändert"),
+        (1, "halt", "Update fehlgeschlagen"),
+    ] {
+        let wurzel = ordner()?;
+        let standard = echo_starter();
+        let starter: Starter = Box::new(move |art, wurzel| {
+            if art != Art::Update {
+                return standard(art, wurzel);
+            }
+            #[cfg(windows)]
+            let mut c = Command::new("cmd");
+            #[cfg(windows)]
+            c.args([
+                "/C",
+                &format!("echo [Update] Testlauf& exit /b {code}& rem"),
+            ]);
+            #[cfg(not(windows))]
+            let mut c = Command::new("sh");
+            #[cfg(not(windows))]
+            c.args(["-c", &format!("printf '[Update] Testlauf\\n'; exit {code}")]);
+            c
+        });
+        let d = Arc::new(Dienst::neu(
+            wurzel.clone(),
+            TOKEN.into(),
+            starter,
+            leeres_lagebild(),
+        ));
+        suche_update(&d, t)?;
+        assert!(bestaetige_update(&d)?.contains("m=update#update"));
+        assert_eq!(lauf_ab(&d, t)?, Art::Update);
+        let html = get(&d, "/teil/update")?;
+        assert!(
+            html.contains(&format!("<p class=\"kopf {klasse}\">")),
+            "{html}"
+        );
+        assert!(html.contains(titel), "{html}");
+        assert_eq!(
+            html.contains(&format!("sha={UPDATE_SHA}\">Erneut zur Freigabe</a>")),
+            code == 10,
+            "{html}"
+        );
+        assert!(!rueckfall::offen_pfad(&wurzel).exists());
+
+        if code != 1 {
+            let live = get(&d, "/teil/live")?;
+            assert!(live.contains(&format!("class=\"{klasse}\">{titel}")));
+            assert!(!live.contains("Letzter fehlgeschlagener Lauf"));
+            let neustart = dienst(wurzel);
+            let html = get(&neustart, "/teil/update")?;
+            assert!(html.contains(titel), "{html}");
+            assert!(html.contains("„Nach Update suchen“"));
+        }
+        if code == 10 {
+            assert!(
+                get(&d, &format!("/bestaetigen?art=update&sha={UPDATE_SHA}"))?
+                    .contains("Ich spiele diese Version ein.")
+            );
+            assert!(bestaetige_update(&d)?.contains("m=update#update"));
+            assert_eq!(lauf_ab(&d, t)?, Art::Update);
+            assert!(get(&d, "/teil/update")?.contains("Erneut zur Freigabe"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn einrichtung_zeigt_update_und_sperrt_den_knopf_bis_alle_auftraege_fertig_sind()
 -> Result<(), String> {
     let d = dienst(ordner()?);

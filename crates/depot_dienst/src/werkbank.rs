@@ -171,6 +171,47 @@ pub struct Auftrag {
     /// Mensch etwas tun muss. Die Oberflaeche zeigt sie gross.
     pub hinweis: Option<String>,
     pub frueher: Frueher,
+    /// Grund eines beendeten Updates ohne Installationsversuch.
+    pub update_pause: Option<UpdatePause>,
+}
+
+/// Warum ein Update ohne Fehler beendet wurde, bevor die Installation begann.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdatePause {
+    FreigabeAbgelaufen,
+    FreigabeAbgelehnt,
+    StandGeaendert,
+}
+
+impl UpdatePause {
+    fn aus_exitcode(code: Option<i32>) -> Option<Self> {
+        // Abschlusscodes aus depot_lauf::update.
+        match code {
+            Some(10) => Some(Self::FreigabeAbgelaufen),
+            Some(11) => Some(Self::FreigabeAbgelehnt),
+            Some(12) => Some(Self::StandGeaendert),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn ergebnis(self) -> (&'static str, &'static str) {
+        match self {
+            Self::FreigabeAbgelaufen => ("offen", "Freigabe abgelaufen"),
+            Self::FreigabeAbgelehnt => ("leise", "Update abgelehnt"),
+            Self::StandGeaendert => ("offen", "Update-Stand geändert"),
+        }
+    }
+
+    fn aus_abschlusszeile(zeile: &str) -> Option<Self> {
+        let (_, text) = zeile.split_once("] ")?;
+        [
+            Self::FreigabeAbgelaufen,
+            Self::FreigabeAbgelehnt,
+            Self::StandGeaendert,
+        ]
+        .into_iter()
+        .find(|pause| pause.ergebnis().1 == text)
+    }
 }
 
 /// Das zuletzt gerechnete Lagebild.
@@ -311,9 +352,12 @@ impl Zustand {
         self.laufend.is_some() || !self.warteschlange.is_empty()
     }
 
-    /// Der letzte erfolgreiche Suchlauf kann einen konkreten Commit anbieten.
+    /// Nach abgelaufener Freigabe kann derselbe Suchlauf den Commit erneut anbieten.
     pub(crate) fn update_angebot(&self) -> Option<(&str, &[String])> {
-        let a = self.letzter_update_lauf()?;
+        let a = self.verlauf.iter().find(|a| {
+            matches!(a.art, Art::Update | Art::UpdatePruefen)
+                && a.update_pause != Some(UpdatePause::FreigabeAbgelaufen)
+        })?;
         if a.art != Art::UpdatePruefen
             || a.erfolg != Some(true)
             || a.frueher != Frueher::Nein
@@ -590,6 +634,12 @@ fn kuerze(mut z: String) -> String {
 
 fn lade_protokoll(wurzel: &Path, a: &mut Auftrag, schutz: &crate::protokoll::Schutz) {
     if let Ok(text) = crate::protokoll::lesen(wurzel, &a.kennung) {
+        if a.art == Art::Update && a.erfolg == Some(false) && a.frueher == Frueher::Beendet {
+            a.update_pause = text
+                .lines()
+                .next_back()
+                .and_then(UpdatePause::aus_abschlusszeile);
+        }
         a.protokoll = text
             .lines()
             .rev()
@@ -698,6 +748,7 @@ impl Dienst {
         };
         if let Some(a) = verlauf.iter().find(|a| a.art == Art::Update)
             && !update_ergebnisse.iter().any(|e| e.lauf == a.kennung)
+            && a.update_pause.is_none()
         {
             update_meldung = Some((true, "Für das letzte Update liegt keine bestätigte Aktivierung vor. Details stehen unter Tätigkeit im Protokoll.".into()));
         }
@@ -860,7 +911,9 @@ impl Dienst {
             {
                 z.verlauf_hinweis = Some(e);
             }
-            let ende = if a.erfolg == Some(true) {
+            let ende = if let Some(pause) = a.update_pause {
+                pause.ergebnis().1
+            } else if a.erfolg == Some(true) {
                 "Lauf erfolgreich beendet."
             } else if matches!(a.art, Art::Kurse | Art::KurseVon(_)) {
                 "Lauf ohne verwendbare Kurse beendet."
@@ -1036,6 +1089,7 @@ impl Dienst {
                 protokoll: Vec::new(),
                 hinweis: None,
                 frueher: Frueher::Nein,
+                update_pause: None,
             };
             // Erst dauerhaft vermerken, dann starten (Maus zu #32): Ein Lauf, der nicht im
             // Verlauf steht, startet nicht, und die Oberflaeche zeigt den Grund.
@@ -1222,6 +1276,7 @@ impl Dienst {
             protokoll: Vec::new(),
             hinweis: None,
             frueher: Frueher::Nein,
+            update_pause: None,
         };
         if let Err(e) = crate::verlauf::vermerke(&self.wurzel, &crate::verlauf::ende_zeile(&a)) {
             z.verlauf_vermerkfehler = Some(format!("Ausgelassenen Papiertag nicht vermerkt: {e}"));
@@ -1327,9 +1382,8 @@ impl Dienst {
         crate::protokoll::zeilen(BufReader::new(ausgabe), |t| {
             self.protokolliere(nr, &t, uhr());
         });
-        let ausgang = kind.wait().map_or(AbrufAusgang::Abgebrochen, |s| {
-            AbrufAusgang::aus_exitcode(s.code())
-        });
+        let code = kind.wait().ok().and_then(|s| s.code());
+        let ausgang = AbrufAusgang::aus_exitcode(code);
         let erfolg = ausgang == AbrufAusgang::Ok;
         let mut z = self.sperre();
         let Some(mut a) = z.laufend.take() else {
@@ -1337,6 +1391,9 @@ impl Dienst {
         };
         a.ende = uhr();
         a.erfolg = Some(erfolg);
+        if a.art == Art::Update {
+            a.update_pause = UpdatePause::aus_exitcode(code);
+        }
         let ende = a.ende;
         let nachrichten_lauf = (erfolg && a.art == Art::Nachrichten).then_some(a.anlass);
         self.kursausgang_vermerken(&mut z, &a, ausgang);
@@ -1361,7 +1418,19 @@ impl Dienst {
             }
         }
         if a.art == Art::Update && !eingespielt {
-            z.update_meldung = Some((!erfolg, if erfolg { "Keine neue Version eingespielt. Der bisherige Stand läuft weiter." } else { "Update abgebrochen. Der bisherige Stand läuft weiter; Details stehen im Protokoll." }.into()));
+            z.update_meldung = if a.update_pause.is_some() {
+                None
+            } else if erfolg {
+                Some((
+                    false,
+                    "Keine neue Version eingespielt. Dein bisheriger Stand läuft weiter.".into(),
+                ))
+            } else {
+                Some((
+                    true,
+                    "Update fehlgeschlagen. Dein bisheriger Stand läuft weiter. Details stehen im Protokoll.".into(),
+                ))
+            };
         }
         self.protokoll_beenden(&mut z, &mut a);
         ende_vermerken(&self.wurzel, &mut z, &a);

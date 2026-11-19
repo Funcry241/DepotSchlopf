@@ -1,0 +1,10 @@
+klasse: Funktion
+zweck: Abgelaufene und abgelehnte Windows-Updatefreigaben erkennbar anzeigen und denselben Stand nach Fristablauf erneut anbieten
+pfade:
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/verlauf.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/tests/dienst/ki_gespraeche.rs
+crates/depot_dienst/tests/update.rs
+crates/depot_lauf/src/update.rs
+crates/depot_lauf/src/update/update_dialog.rs

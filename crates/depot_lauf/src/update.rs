@@ -21,6 +21,7 @@ use std::process::ExitCode;
 use crate::abbild;
 
 mod update_dialog;
+use update_dialog::Freigabe;
 
 /// Der einzige Zweig, dem das Update folgt.
 pub const ZWEIG: &str = "main";
@@ -343,11 +344,38 @@ fn lock_pakete(a: &LockAenderung) -> String {
     }
 }
 
+#[derive(Debug)]
+enum EinspielFehler {
+    Technik(String),
+    FreigabeAbgelaufen,
+    FreigabeAbgelehnt,
+}
+
+impl From<String> for EinspielFehler {
+    fn from(fehler: String) -> Self {
+        Self::Technik(fehler)
+    }
+}
+
+impl std::fmt::Display for EinspielFehler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Technik(text) => text,
+            Self::FreigabeAbgelaufen => {
+                "Die Freigabe ist abgelaufen. Der bisherige Stand läuft weiter."
+            }
+            Self::FreigabeAbgelehnt => {
+                "Du hast das Update abgelehnt. Der bisherige Stand läuft weiter."
+            }
+        })
+    }
+}
+
 fn pruefe_lock(
     wurzel: &Path,
     k: &Kandidat,
-    bestaetigen: impl FnOnce(&str) -> bool,
-) -> Result<(), String> {
+    bestaetigen: impl FnOnce(&str) -> Freigabe,
+) -> Result<(), EinspielFehler> {
     let Some(a) = lock_aenderung(wurzel, k)? else {
         return Ok(());
     };
@@ -357,15 +385,21 @@ fn pruefe_lock(
         Ok(text) if text.lines().any(|z| z == zeile) => return Ok(()),
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("{}: {e}", p.display())),
+        Err(e) => return Err(format!("{}: {e}", p.display()).into()),
     }
     let hinweis = format!("Neue Abhängigkeiten: {}", lock_pakete(&a));
-    if !bestaetigen(&format!(
+    match bestaetigen(&format!(
         "{hinweis}\nUpdate mit geändertem Cargo.lock freigeben?"
     )) {
-        return Err(format!(
-            "{hinweis} Bitte von Hand freigeben. Das Update wurde nicht gebaut."
-        ));
+        Freigabe::Ja => {}
+        Freigabe::Nein => return Err(EinspielFehler::FreigabeAbgelehnt),
+        Freigabe::Abgelaufen => return Err(EinspielFehler::FreigabeAbgelaufen),
+        Freigabe::NichtVerfuegbar => {
+            return Err(format!(
+                "{hinweis} Der Freigabedialog am Windows-Desktop ist nicht verfügbar. Das Update wurde nicht gebaut."
+            )
+            .into());
+        }
     }
     OpenOptions::new()
         .create(true)
@@ -375,15 +409,15 @@ fn pruefe_lock(
             writeln!(f, "{zeile}")?;
             f.sync_all()
         })
-        .map_err(|e| format!("{}: {e}", p.display()))
+        .map_err(|e| format!("{}: {e}", p.display()).into())
 }
 
 /// Prueft den neuen Stand in seiner Kopie mit dem ganzen Gate.
 fn pruefe_kopie(
     wurzel: &Path,
     k: &Kandidat,
-    bestaetigen: impl FnOnce(&str) -> bool,
-) -> Result<abbild::Abbild, String> {
+    bestaetigen: impl FnOnce(&str) -> Freigabe,
+) -> Result<abbild::Abbild, EinspielFehler> {
     pruefe_baumpfade(wurzel, &k.neu)?;
     pruefe_lock(wurzel, k, bestaetigen)?;
     let ablage = abbild::ablage(wurzel);
@@ -401,7 +435,9 @@ fn pruefe_kopie(
         .status()
         .map_err(|e| format!("cargo nicht startbar: {e}"))?;
     if !status.success() {
-        return Err("Das Gate hat den neuen Stand abgelehnt. Der alte Stand bleibt.".into());
+        return Err(EinspielFehler::Technik(
+            "Das Gate hat den neuen Stand abgelehnt. Der alte Stand bleibt.".into(),
+        ));
     }
     let probleme = abbild::vergleiche(wurzel, &abbild);
     if !probleme.is_empty() {
@@ -409,7 +445,8 @@ fn pruefe_kopie(
             "Die Kopie hat sich während des Gates verändert; der neue Stand gilt als \
              ungeprüft:\n{}",
             probleme.join("\n")
-        ));
+        )
+        .into());
     }
     Ok(abbild)
 }
@@ -507,6 +544,10 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
     let ergebnis = vorbedingungen(wurzel).and_then(|()| hole(wurzel));
     let k = match ergebnis {
         Ok(Some(k)) => k,
+        Ok(None) if erwartet.is_some() => {
+            eprintln!("[Update] Seit der Suche hat sich der Stand geändert. Bitte suche erneut.");
+            return ExitCode::from(12);
+        }
         Ok(None) => {
             println!("[Update] Schon aktuell: nichts Neues auf {ZWEIG}.");
             return ExitCode::SUCCESS;
@@ -518,7 +559,7 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
     };
     if erwartet.is_some_and(|sha| sha != &k.neu) {
         eprintln!("[Update] Seit der Suche gibt es einen anderen Stand. Bitte suche erneut.");
-        return ExitCode::FAILURE;
+        return ExitCode::from(12);
     }
     zeige(&k);
     if nur_pruefen {
@@ -554,6 +595,15 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
                 kurz(&k.neu)
             );
             ExitCode::SUCCESS
+        }
+        Err(e @ (EinspielFehler::FreigabeAbgelaufen | EinspielFehler::FreigabeAbgelehnt)) => {
+            println!("[Update] {e}");
+            // Abschlusscodes für die Update-Anzeige in depot_dienst::werkbank.
+            ExitCode::from(if matches!(e, EinspielFehler::FreigabeAbgelaufen) {
+                10
+            } else {
+                11
+            })
         }
         Err(e) => {
             eprintln!("[Update] FEHLER: {e}");
@@ -766,10 +816,10 @@ mod tests {
 
     fn manifest_abgelehnt(pfad: &str, inhalt: &str) -> Result<(), String> {
         let (a, k) = manifest_stand(pfad, inhalt)?;
-        let fehler = pruefe_kopie(&a.andere, &k, |_| false)
+        let fehler = pruefe_kopie(&a.andere, &k, |_| Freigabe::Nein)
             .err()
             .ok_or("Manifest hätte abgelehnt werden müssen")?;
-        assert!(fehler.contains(pfad), "{fehler}");
+        assert!(fehler.to_string().contains(pfad), "{fehler}");
         assert!(!abbild::ablage(&a.andere).join("bau-update").exists());
         Ok(())
     }
@@ -839,19 +889,20 @@ mod tests {
         let mut gefragt = false;
         pruefe_lock(&a.andere, &k, |_| {
             gefragt = true;
-            false
-        })?;
+            Freigabe::Nein
+        })
+        .map_err(|e| e.to_string())?;
         assert!(!gefragt);
         Ok(())
     }
 
     #[test]
-    fn lock_geaendert_abgelehnt() -> Result<(), String> {
+    fn lock_freigabe_abgelaufen() -> Result<(), String> {
         let (a, k) = lock_stand(LOCK_NEU)?;
-        let fehler = pruefe_kopie(&a.andere, &k, |_| false)
-            .err()
-            .ok_or("Update hätte abgelehnt werden müssen")?;
-        assert!(fehler.contains("Bitte von Hand freigeben"), "{fehler}");
+        assert!(matches!(
+            pruefe_kopie(&a.andere, &k, |_| Freigabe::Abgelaufen),
+            Err(EinspielFehler::FreigabeAbgelaufen)
+        ));
         assert!(!abbild::ablage(&a.andere).join("bau-update").exists());
         assert!(!a.andere.join("daten/update_abhaengigkeiten.txt").exists());
         Ok(())
@@ -860,7 +911,11 @@ mod tests {
     #[test]
     fn lock_freigabe_dialog_ja() -> Result<(), String> {
         let (a, k) = lock_stand(LOCK_NEU)?;
-        pruefe_lock(&a.andere, &k, |hinweis| hinweis.contains("foo 1.2.3"))?;
+        pruefe_lock(&a.andere, &k, |hinweis| {
+            assert!(hinweis.contains("foo 1.2.3"));
+            Freigabe::Ja
+        })
+        .map_err(|e| e.to_string())?;
         let text = fs::read_to_string(a.andere.join("daten/update_abhaengigkeiten.txt"))
             .map_err(|e| e.to_string())?;
         let aenderung = lock_aenderung(&a.andere, &k)?.ok_or("Lock geändert")?;
@@ -868,16 +923,16 @@ mod tests {
             text,
             format!("update-lock-v1;{};{}\n", k.neu, aenderung.abdruck)
         );
-        pruefe_lock(&a.andere, &k, |_| false)
+        pruefe_lock(&a.andere, &k, |_| Freigabe::Nein).map_err(|e| e.to_string())
     }
 
     #[test]
     fn lock_freigabe_dialog_nein() -> Result<(), String> {
         let (a, k) = lock_stand(LOCK_NEU)?;
-        let fehler = pruefe_lock(&a.andere, &k, |_| false)
-            .err()
-            .ok_or("Update hätte abgelehnt werden müssen")?;
-        assert!(fehler.contains("Bitte von Hand freigeben"), "{fehler}");
+        assert!(matches!(
+            pruefe_lock(&a.andere, &k, |_| Freigabe::Nein),
+            Err(EinspielFehler::FreigabeAbgelehnt)
+        ));
         assert!(!a.andere.join("daten/update_abhaengigkeiten.txt").exists());
         Ok(())
     }
@@ -893,13 +948,13 @@ mod tests {
     #[test]
     fn lock_freigabe_gilt_nicht_fuer_anderen_commit() -> Result<(), String> {
         let (a, mut k) = lock_stand(LOCK_NEU)?;
-        pruefe_lock(&a.andere, &k, |_| true)?;
+        pruefe_lock(&a.andere, &k, |_| Freigabe::Ja).map_err(|e| e.to_string())?;
         g(
             &a.andere,
             &["commit", "--allow-empty", "-qm", "Anderer Commit"],
         )?;
         k.neu = g(&a.andere, &["rev-parse", "HEAD"])?;
-        assert!(pruefe_lock(&a.andere, &k, |_| false).is_err());
+        assert!(pruefe_lock(&a.andere, &k, |_| Freigabe::Nein).is_err());
         Ok(())
     }
 
@@ -929,10 +984,10 @@ mod tests {
                 neu: g(&a.andere, &["rev-parse", "HEAD"])?,
                 staende: Vec::new(),
             };
-            let fehler = pruefe_kopie(&a.andere, &k, |_| false)
+            let fehler = pruefe_kopie(&a.andere, &k, |_| Freigabe::Nein)
                 .err()
                 .ok_or("Update hätte abgelehnt werden müssen")?;
-            assert!(fehler.contains(pfad), "{fehler}");
+            assert!(fehler.to_string().contains(pfad), "{fehler}");
             assert!(!abbild::ablage(&a.andere).join("update").exists());
             g(&a.andere, &["reset", "--hard", &alt])?;
         }
@@ -978,7 +1033,7 @@ mod tests {
         let alt = g(&a.projekt, &["rev-parse", "HEAD"])?;
         let erwartet = neuer_stand(&a, "zwei")?;
         neuer_stand(&a, "drei")?;
-        assert_eq!(lauf(&a.projekt, &[erwartet]), ExitCode::FAILURE);
+        assert_eq!(lauf(&a.projekt, &[erwartet]), ExitCode::from(12));
         assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, alt);
         assert!(!offen_pfad(&a.projekt).exists());
         Ok(())
