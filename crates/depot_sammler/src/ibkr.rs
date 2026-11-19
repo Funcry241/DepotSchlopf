@@ -117,7 +117,7 @@ fn salden(zeilen: &[AccountSummary], konto: &str) -> Result<Salden, &'static str
         if a.account != konto && (a.account != "All" || kontosumme) {
             return Err("Gateway meldet Daten eines anderen Kontos.");
         }
-        if a.tag == "CashBalance" {
+        if matches!(a.tag.as_str(), "CashBalance" | "$LEDGER-CashBalance") {
             if a.currency == "BASE" {
                 continue;
             }
@@ -142,16 +142,19 @@ fn salden(zeilen: &[AccountSummary], konto: &str) -> Result<Salden, &'static str
     if !waehrungen.contains("EUR") {
         return Err("Der einzelne EUR-Saldo im Währungsledger fehlt.");
     }
-    let wert = |tag| {
-        summen
-            .get(tag)
-            .copied()
-            .ok_or("Erforderliche Kontosumme fehlt.")
-    };
     Ok(Salden {
-        gesamt: wert(AccountSummaryTags::TOTAL_CASH_VALUE)?,
-        abgerechnet: wert(AccountSummaryTags::SETTLED_CASH)?,
-        verfuegbar: wert(AccountSummaryTags::AVAILABLE_FUNDS)?,
+        gesamt: summen
+            .get(AccountSummaryTags::TOTAL_CASH_VALUE)
+            .copied()
+            .ok_or("Gesamtbargeld (TotalCashValue) fehlt in der Gateway-Antwort.")?,
+        abgerechnet: summen
+            .get(AccountSummaryTags::SETTLED_CASH)
+            .copied()
+            .ok_or("Abgerechnetes Bargeld (SettledCash) fehlt in der Gateway-Antwort.")?,
+        verfuegbar: summen
+            .get(AccountSummaryTags::AVAILABLE_FUNDS)
+            .copied()
+            .ok_or("Verfügbare Mittel (AvailableFunds) fehlen in der Gateway-Antwort.")?,
     })
 }
 
@@ -163,9 +166,16 @@ fn stueck(menge: f64) -> Result<u64, &'static str> {
 }
 
 fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
-    let konten = client
-        .managed_accounts()
-        .map_err(|_| "Konten nicht lesbar.")?;
+    let konten = client.managed_accounts().map_err(|e| match e {
+        ibapi::Error::Timeout => "Gateway antwortet nicht auf die Anfrage nach verwalteten Konten.",
+        ibapi::Error::ConnectionReset | ibapi::Error::ConnectionFailed | ibapi::Error::Io(_) => {
+            "Verbindungsfehler beim Abruf der verwalteten Konten."
+        }
+        ibapi::Error::UnexpectedWireFormat(_) | ibapi::Error::ProtobufDecode(_) => {
+            "Antwortformat der verwalteten Konten ist nicht lesbar."
+        }
+        _ => "Verwaltete Konten konnten beim Gateway nicht abgerufen werden.",
+    })?;
     if !matches!(konten.as_slice(), [gemeldet] if gemeldet == konto) {
         return Err("Im Gateway muss genau das konfigurierte IBKR-Papierkonto angemeldet sein.");
     }
@@ -343,6 +353,15 @@ mod tests {
         );
         assert!(salden(&zeilen, "DU1234").is_ok());
         assert!(salden(&zeilen, "DU1235").is_err());
+        let ohne_abgerechnetes_bargeld = zeilen
+            .iter()
+            .filter(|zeile| zeile.tag != AccountSummaryTags::SETTLED_CASH)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            salden(&ohne_abgerechnetes_bargeld, "DU1234"),
+            Err("Abgerechnetes Bargeld (SettledCash) fehlt in der Gateway-Antwort."),
+        );
         zeilen.push(AccountSummary {
             account: "DU1234".into(),
             currency: "USD".into(),
@@ -369,7 +388,7 @@ mod tests {
         zeilen.push(AccountSummary {
             account: "All".into(),
             currency: "EUR".into(),
-            tag: "CashBalance".into(),
+            tag: "$LEDGER-CashBalance".into(),
             value: "1000".into(),
         });
         assert_eq!(
@@ -384,7 +403,7 @@ mod tests {
         zeilen.push(AccountSummary {
             account: "All".into(),
             currency: "USD".into(),
-            tag: "CashBalance".into(),
+            tag: "$LEDGER-CashBalance".into(),
             value: "0.01".into(),
         });
         assert_eq!(
