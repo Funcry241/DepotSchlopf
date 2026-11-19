@@ -1,0 +1,6 @@
+klasse: Funktion
+zweck: Fehlende IBKR-Zusatzsalden melden und Gesamtbargeld, Positionen und Orders weiterhin mit dem Papierjournal abgleichen
+pfade:
+crates/depot_sammler/src/ibkr.rs
+crates/depot_sammler/src/ibkr/abgleich.rs
+docs/kaltstart.md
