@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Die von IBKR dokumentierten Währungszeilen für All in einer Sitzung mit genau dem konfigurierten Papierkonto prüfen
+pfade:
+crates/depot_sammler/src/ibkr.rs
