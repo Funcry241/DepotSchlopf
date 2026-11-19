@@ -1,0 +1,6 @@
+klasse: Funktion
+zweck: Rote Hinweise auf erledigte Fehler ausblenden und bei einem gescheiterten Update keinen Aktivierungsbeleg erwarten
+pfade:
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/tests/dienst/update_leiste.rs
