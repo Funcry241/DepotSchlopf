@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use depot_kern::Cent;
+use depot_kern::ibkr_papier::{KONTO_DATEI, kontonummer_gueltig};
 use ibapi::Client;
 use ibapi::accounts::types::AccountGroup;
 use ibapi::accounts::{AccountSummary, AccountSummaryResult, AccountSummaryTags, PositionUpdate};
@@ -17,6 +18,17 @@ use ibapi::subscriptions::SubscriptionItem;
 const ADRESSE: &str = "127.0.0.1:4002";
 const CLIENT_ID: i32 = 356;
 const FRIST: Duration = Duration::from_secs(15);
+const GATEWAY_NICHT_BEREIT: &str =
+    "Lokales IB Gateway auf Port 4002 nicht erreichbar oder nicht bereit.";
+const KONTO_NICHT_PASSEND: &str =
+    "Im Gateway muss genau das konfigurierte IBKR-Papierkonto angemeldet sein.";
+const KONTOLISTE_FEHLT: &str = "Verwaltete Konten konnten beim Gateway nicht abgerufen werden.";
+const KONTOLISTE_TIMEOUT: &str = "Gateway antwortet nicht auf die Anfrage nach verwalteten Konten.";
+const KONTOLISTE_VERBINDUNG: &str = "Verbindungsfehler beim Abruf der verwalteten Konten.";
+const KONTOLISTE_FORMAT: &str = "Antwortformat der verwalteten Konten ist nicht lesbar.";
+const EUR_FEHLT: &str = "Der einzelne EUR-Saldo im Währungsledger fehlt.";
+const KONTO_DATEI_FEHLT: &str = "Lokale Datei daten/ibkr-papierkonto.txt fehlt oder ist unlesbar.";
+const KONTO_FORMAT: &str = "In daten/ibkr-papierkonto.txt wird eine Papierkontonummer mit DU oder DUR und danach nur Ziffern erwartet.";
 
 #[derive(Debug, PartialEq, Eq)]
 struct Salden {
@@ -39,15 +51,6 @@ struct Auszug {
     salden: Salden,
     positionen: BTreeMap<i32, u64>,
     orders: Vec<OffeneOrder>,
-}
-
-fn papierkonto(konto: &str) -> bool {
-    konto
-        .strip_prefix("DUR")
-        .or_else(|| konto.strip_prefix("DU"))
-        .is_some_and(|nr| {
-            !nr.is_empty() && nr.len() <= 20 && nr.bytes().all(|b| b.is_ascii_digit())
-        })
 }
 
 fn eurocent(text: &str) -> Option<Cent> {
@@ -140,7 +143,7 @@ fn salden(zeilen: &[AccountSummary], konto: &str) -> Result<Salden, &'static str
         }
     }
     if !waehrungen.contains("EUR") {
-        return Err("Der einzelne EUR-Saldo im Währungsledger fehlt.");
+        return Err(EUR_FEHLT);
     }
     Ok(Salden {
         gesamt: summen
@@ -167,17 +170,17 @@ fn stueck(menge: f64) -> Result<u64, &'static str> {
 
 fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
     let konten = client.managed_accounts().map_err(|e| match e {
-        ibapi::Error::Timeout => "Gateway antwortet nicht auf die Anfrage nach verwalteten Konten.",
+        ibapi::Error::Timeout => KONTOLISTE_TIMEOUT,
         ibapi::Error::ConnectionReset | ibapi::Error::ConnectionFailed | ibapi::Error::Io(_) => {
-            "Verbindungsfehler beim Abruf der verwalteten Konten."
+            KONTOLISTE_VERBINDUNG
         }
         ibapi::Error::UnexpectedWireFormat(_) | ibapi::Error::ProtobufDecode(_) => {
-            "Antwortformat der verwalteten Konten ist nicht lesbar."
+            KONTOLISTE_FORMAT
         }
-        _ => "Verwaltete Konten konnten beim Gateway nicht abgerufen werden.",
+        _ => KONTOLISTE_FEHLT,
     })?;
     if !matches!(konten.as_slice(), [gemeldet] if gemeldet == konto) {
-        return Err("Im Gateway muss genau das konfigurierte IBKR-Papierkonto angemeldet sein.");
+        return Err(KONTO_NICHT_PASSEND);
     }
     let zeilen = client
         .account_summary(
@@ -269,21 +272,69 @@ fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
 }
 
 fn kontonummer(wurzel: &Path) -> Result<String, &'static str> {
-    let konto = std::fs::read_to_string(wurzel.join("daten").join("ibkr-papierkonto.txt"))
-        .map_err(|_| "Lokale Datei daten/ibkr-papierkonto.txt fehlt oder ist unlesbar.")?;
+    let konto = std::fs::read_to_string(wurzel.join("daten").join(KONTO_DATEI))
+        .map_err(|_| KONTO_DATEI_FEHLT)?;
     let konto = konto.trim();
-    if !papierkonto(konto) {
-        return Err(
-            "In daten/ibkr-papierkonto.txt wird eine Papierkontonummer mit DU oder DUR und danach nur Ziffern erwartet.",
-        );
+    if !kontonummer_gueltig(konto) {
+        return Err(KONTO_FORMAT);
     }
     Ok(konto.to_owned())
 }
 
 fn hole(konto: &str) -> Result<Auszug, &'static str> {
-    let client = Client::connect(ADRESSE, CLIENT_ID)
-        .map_err(|_| "Lokales IB Gateway auf Port 4002 nicht erreichbar oder nicht bereit.")?;
+    let client = Client::connect(ADRESSE, CLIENT_ID).map_err(|_| GATEWAY_NICHT_BEREIT)?;
     auszug(&client, konto)
+}
+
+/// Meldet das Ergebnis des lesenden Tests an die Oberfläche, ohne Kontostand oder Kontonummer auszugeben.
+pub fn pruefe_papier(wurzel: &Path) -> ExitCode {
+    let ergebnis = kontonummer(wurzel).and_then(|konto| hole(&konto));
+    let text = match &ergebnis {
+        Ok(a) => {
+            let start = depot_kern::messlatte::ibkr::LANGFRIST.startkapital;
+            if [a.salden.gesamt, a.salden.abgerechnet, a.salden.verfuegbar] == [start; 3]
+                && a.positionen.is_empty()
+                && a.orders.is_empty()
+            {
+                format!(
+                    "Papierkonto lesbar. Salden, Positionen und offene Orders passen zum vorgesehenen Journalstart mit {start}."
+                )
+            } else {
+                format!(
+                    "Papierkonto lesbar. Der gemeldete Bestand weicht vom vorgesehenen Journalstart mit {start} ab."
+                )
+            }
+        }
+        Err(grund) => {
+            let weiter = match *grund {
+                KONTO_DATEI_FEHLT | KONTO_FORMAT | KONTO_NICHT_PASSEND => {
+                    "Vergleiche die Nummer unter „Paper Trading Account“ im Client Portal und speichere sie hier erneut."
+                }
+                GATEWAY_NICHT_BEREIT => {
+                    "Öffne das lokale IB Gateway mit „IB API“ und „Paper-Trading“. Prüfe Port 4002 und warte auf „verbunden“."
+                }
+                KONTOLISTE_FEHLT
+                | KONTOLISTE_TIMEOUT
+                | KONTOLISTE_VERBINDUNG
+                | KONTOLISTE_FORMAT => {
+                    "Beende das Gateway vollständig, melde dich erneut im Paper-Trading-Modus an und starte den Test, sobald der API-Server „verbunden“ meldet."
+                }
+                EUR_FEHLT => {
+                    "Prüfe im Client Portal im Paper-Modus, ob das Papierkonto Bargeld in EUR führt. Wenn dort EUR steht, prüfe den Schalter „Use $LEDGER- prefix for per-currency keys“ testweise ohne Haken."
+                }
+                _ => {
+                    "Prüfe die gemeldete Angabe am Papierkonto. Starte den Test erneut, sobald IBKR die Daten bereitstellt."
+                }
+            };
+            format!("{grund} {weiter}")
+        }
+    };
+    println!("{}", depot_kern::hinweis::zeile(&text));
+    if ergebnis.is_ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 pub fn zeige_papier(wurzel: &Path) -> ExitCode {
@@ -432,13 +483,13 @@ mod tests {
 
     #[test]
     fn nur_exakt_konfigurierte_papierkontonummern() {
-        assert!(papierkonto("DU1234"));
-        assert!(papierkonto("DUR1234"));
-        assert!(!papierkonto("U1234"));
-        assert!(!papierkonto("DU"));
-        assert!(!papierkonto("DUR"));
-        assert!(!papierkonto("DURR1234"));
-        assert!(!papierkonto("DUR123456789012345678901"));
-        assert!(!papierkonto("DU123\nU456"));
+        assert!(kontonummer_gueltig("DU1234"));
+        assert!(kontonummer_gueltig("DUR1234"));
+        assert!(!kontonummer_gueltig("U1234"));
+        assert!(!kontonummer_gueltig("DU"));
+        assert!(!kontonummer_gueltig("DUR"));
+        assert!(!kontonummer_gueltig("DURR1234"));
+        assert!(!kontonummer_gueltig("DUR123456789012345678901"));
+        assert!(!kontonummer_gueltig("DU123\nU456"));
     }
 }

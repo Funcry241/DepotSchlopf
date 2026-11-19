@@ -27,6 +27,7 @@ mod gemini;
 mod gespraeche;
 pub mod hinweis;
 pub mod http;
+mod ibkr_papier;
 pub mod kostenschutz;
 mod neuroschlopf;
 mod otter;
@@ -384,6 +385,7 @@ fn einrichtungsseite(
     ));
     zusatz.push_str(&mindesteinsatz_formular(d));
     zusatz.push_str(&splitverdacht::formular(d));
+    zusatz.push_str(&ibkr_papier::einrichtung(d, &a.abfrage));
     let zustand = d.sperre();
     let gespeichert = seiten::Einrichtung {
         zeitplan_gespeichert: match datei {
@@ -475,6 +477,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/export" => seiten::fehler(405, "Verwende das Analyse-Exportformular."),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
         "/teil/sicherung" => antwort(200, HTML, sicherungsinfo(d, jetzt).as_bytes()),
+        "/teil/ibkr-papier" => antwort(200, HTML, ibkr_papier::status(d).as_bytes()),
         "/teil/live" => antwort(200, HTML, live_inhalt(d, jetzt).as_bytes()),
         "/teil/journal" => antwort(
             200,
@@ -659,6 +662,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/ausfuehren" => auftrag_einreihen(d, &f, jetzt),
         "/export" => analyse::exportieren(d, u, jetzt, &f),
         "/gemini" => gemini::speichern(d, &f),
+        "/ibkr-papier" => ibkr_papier::speichern(d, feld(&f, "konto").unwrap_or_default()),
         "/neuroschlopf" => neuroschlopf::speichern(d, &f),
         "/schluessel" => {
             let (Some(wer), Some(wert)) =
@@ -883,6 +887,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
                 "/einrichtung?m=updatesuche_belegt#update"
             }
         }
+        Art::IbkrPapier => return ibkr_papier::testen(d),
         Art::Einrichten if feld(f, "ziel") == Some("einrichtung") => {
             if d.von_hand(art, jetzt).is_ok() {
                 "/einrichtung?m=auftrag#journal"

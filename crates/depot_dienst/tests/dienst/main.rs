@@ -503,6 +503,7 @@ mod depot;
 mod dienstbetrieb;
 mod einrichtung;
 mod http_schnittstelle;
+mod ibkr_papier;
 mod ki_gespraeche;
 mod live;
 mod update_leiste;

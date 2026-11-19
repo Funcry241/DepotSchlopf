@@ -1,0 +1,15 @@
+klasse: Funktion
+zweck: Papierkontonummer lokal im Browser speichern und den lesenden IBKR-Abruf mit Hilfe für bekannte Gateway-Probleme testen
+pfade:
+crates/depot_dienst/src/ibkr_papier.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/programmstand.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/tests/dienst/ibkr_papier.rs
+crates/depot_dienst/tests/dienst/main.rs
+crates/depot_kern/src/ibkr_papier.rs
+crates/depot_kern/src/lib.rs
+crates/depot_sammler/src/ibkr.rs
+crates/depot_sammler/src/main.rs
+docs/kaltstart.md

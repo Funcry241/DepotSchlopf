@@ -34,6 +34,7 @@ pub enum Art {
     KurseVon(Boerse),
     Termine,
     Nachrichten,
+    IbkrPapier,
     /// Interner Auftrag für die optionale Nachrichtensortierung.
     Gemini,
     Vorbereiten,
@@ -49,7 +50,7 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 14] = [
+const ALLE_ARTEN: [Art; 15] = [
     Art::Einrichten,
     Art::Kurse,
     Art::Kursdiagnose,
@@ -57,6 +58,7 @@ const ALLE_ARTEN: [Art; 14] = [
     Art::KurseVon(Boerse::Nyse),
     Art::Termine,
     Art::Nachrichten,
+    Art::IbkrPapier,
     Art::Vorbereiten,
     Art::Wochenrueckschau,
     Art::Simulation,
@@ -76,6 +78,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => "Kurse US-Börsen abrufen",
             Art::Termine => "Termine abrufen",
             Art::Nachrichten => "Schlagzeilen abrufen",
+            Art::IbkrPapier => "IBKR-Papierabruf testen",
             Art::Gemini => "Gemini-Zuarbeit",
             Art::Vorbereiten => "Nächsten Handelstag vorbereiten",
             Art::Wochenrueckschau => "KI-Wochenrückschau",
@@ -98,6 +101,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => "kurse_nyse",
             Art::Termine => "termine",
             Art::Nachrichten => "nachrichten",
+            Art::IbkrPapier => "ibkr_papier",
             Art::Gemini => "gemini-vorlauf",
             Art::Vorbereiten => "vorbereiten",
             Art::Wochenrueckschau => "wochenrueckschau",
@@ -124,6 +128,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => &["kurse", "nyse"],
             Art::Termine => &["termine"],
             Art::Nachrichten => &["nachrichten"],
+            Art::IbkrPapier => &["ibkr", "papier", "pruefen"],
             Art::Gemini => &["gemini-vorlauf"],
             Art::Vorbereiten => &["vorbereiten"],
             Art::Wochenrueckschau => &["wochenrueckschau"],
@@ -246,6 +251,7 @@ pub struct WartenderAuftrag {
 #[derive(Debug)]
 pub struct Zustand {
     pub naechste_nr: u64,
+    pub(crate) ibkr_pruefung_ab_nr: u64,
     pub laufend: Option<Auftrag>,
     pub warteschlange: VecDeque<WartenderAuftrag>,
     pub verlauf: VecDeque<Auftrag>,
@@ -517,7 +523,7 @@ pub fn cargo_starter() -> Starter {
     Box::new(|art: Art, wurzel: &Path| {
         let mut c = Command::new("cargo");
         let (paket, argumente) = match art {
-            Art::KurseVon(_) => ("depot_sammler", art.argumente()),
+            Art::KurseVon(_) | Art::IbkrPapier => ("depot_sammler", art.argumente()),
             _ => ("depot_lauf", art.argumente()),
         };
         c.current_dir(wurzel)
@@ -760,6 +766,7 @@ impl Dienst {
             version: None,
             zustand: Mutex::new(Zustand {
                 naechste_nr,
+                ibkr_pruefung_ab_nr: naechste_nr,
                 laufend: None,
                 warteschlange: VecDeque::new(),
                 verlauf,

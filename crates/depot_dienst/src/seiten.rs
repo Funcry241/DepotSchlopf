@@ -20,7 +20,13 @@ use crate::zeitstrahl_ki::{self, Aufrufe};
 const STIL_DIENST: &str = include_str!("assets/stil.css");
 
 /// Ein Bedienelement zu einem Auftrag und seinem aktuellen Stand.
-fn auftrag_knopf(token: &str, z: &Zustand, art: Art, text: &str, primaer: bool) -> String {
+pub(crate) fn auftrag_knopf(
+    token: &str,
+    z: &Zustand,
+    art: Art,
+    text: &str,
+    primaer: bool,
+) -> String {
     let passt = |a: Art| a == art || (art == Art::Kurse && matches!(a, Art::KurseVon(_)));
     let lauf = z
         .laufend
@@ -2426,6 +2432,7 @@ pub(crate) fn einrichtung_mit_update(
     }
     kurssperre_teil(token, z, e, &mut s);
     papierfreigabe_teil(token, e, &mut s);
+    s.push_str("<p><a href=\"#ibkr-papier\">IBKR-Papierkonto einrichten und testen</a></p>");
     let _ = write!(
         s,
         "<div data-teil=\"/teil/quellen\">{}</div>",
