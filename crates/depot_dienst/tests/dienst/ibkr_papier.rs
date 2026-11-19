@@ -12,11 +12,14 @@ fn ibkr_papierkonto_in_der_oberflaeche_speichern_und_lesen() -> Result<(), Strin
             let (programm, option, skript) = (
                 "cmd",
                 "/C",
-                "echo [Hinweis] Gateway neu starten.& exit /b 1",
+                "echo [IBKR-Diagnose] Zeilen fuer SettledCash: 0& echo [Hinweis] Gateway neu starten.& exit /b 1",
             );
             #[cfg(not(windows))]
-            let (programm, option, skript) =
-                ("sh", "-c", "echo '[Hinweis] Gateway neu starten.'; exit 1");
+            let (programm, option, skript) = (
+                "sh",
+                "-c",
+                "echo '[IBKR-Diagnose] Zeilen fuer SettledCash: 0'; echo '[Hinweis] Gateway neu starten.'; exit 1",
+            );
             let mut c = Command::new(programm);
             c.args([option, skript]);
             c
@@ -53,6 +56,8 @@ fn ibkr_papierkonto_in_der_oberflaeche_speichern_und_lesen() -> Result<(), Strin
     d.verfolge(nr, kind, || donnerstag(12, 0).ok());
     let status = get(&d, "/teil/ibkr-papier", jetzt);
     assert!(status.contains("Gateway neu starten."));
+    assert!(status.contains("Gateway-Diagnose"));
+    assert!(status.contains("Zeilen fuer SettledCash: 0"));
     assert!(status.contains("Papierabruf testen"));
     assert!(!status.contains("DUR1234567"));
     assert!(post("/ibkr-papier", "konto=DU7654321").contains("ibkr=gespeichert"));

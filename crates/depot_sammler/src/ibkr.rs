@@ -1,6 +1,7 @@
 //! Lesender Einzelabruf beim lokalen IB Gateway für das ausdrücklich angegebene Papierkonto.
 
 pub(super) mod abgleich;
+mod diagnose;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -88,6 +89,7 @@ fn eurocent(text: &str) -> Option<Cent> {
 fn lese_bis<T>(
     mut naechster: impl FnMut(Duration) -> Option<Result<SubscriptionItem<T>, ibapi::Error>>,
     mut belege: impl FnMut(T) -> Result<bool, &'static str>,
+    diagnose_aktiv: bool,
 ) -> Result<(), &'static str> {
     let beginn = Instant::now();
     loop {
@@ -98,8 +100,15 @@ fn lese_bis<T>(
                     return Ok(());
                 }
             }
-            Some(Ok(SubscriptionItem::Notice(_))) => (),
-            Some(Err(_)) => return Err("Gateway meldet einen Fehler beim Lesen."),
+            Some(Ok(SubscriptionItem::Notice(meldung))) => {
+                if diagnose_aktiv {
+                    diagnose::zeile(&format!("Gateway-Code {}", meldung.code));
+                }
+            }
+            Some(Err(e)) => {
+                diagnose::fehler(diagnose_aktiv, &e);
+                return Err("Gateway meldet einen Fehler beim Lesen.");
+            }
             None => return Err("Gateway-Auszug unvollständig oder Frist abgelaufen."),
         }
     }
@@ -168,33 +177,56 @@ fn stueck(menge: f64) -> Result<u64, &'static str> {
         .map_err(|_| "Gateway meldet keine nichtnegative ganze Stückzahl.")
 }
 
-fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
-    let konten = client.managed_accounts().map_err(|e| match e {
-        ibapi::Error::Timeout => KONTOLISTE_TIMEOUT,
-        ibapi::Error::ConnectionReset | ibapi::Error::ConnectionFailed | ibapi::Error::Io(_) => {
-            KONTOLISTE_VERBINDUNG
+fn konten_pruefen(client: &Client, konto: &str, diagnose_aktiv: bool) -> Result<(), &'static str> {
+    let konten = client.managed_accounts().map_err(|e| {
+        diagnose::fehler(diagnose_aktiv, &e);
+        match e {
+            ibapi::Error::Timeout => KONTOLISTE_TIMEOUT,
+            ibapi::Error::ConnectionReset
+            | ibapi::Error::ConnectionFailed
+            | ibapi::Error::Io(_) => KONTOLISTE_VERBINDUNG,
+            ibapi::Error::UnexpectedWireFormat(_) | ibapi::Error::ProtobufDecode(_) => {
+                KONTOLISTE_FORMAT
+            }
+            _ => KONTOLISTE_FEHLT,
         }
-        ibapi::Error::UnexpectedWireFormat(_) | ibapi::Error::ProtobufDecode(_) => {
-            KONTOLISTE_FORMAT
-        }
-        _ => KONTOLISTE_FEHLT,
     })?;
-    if !matches!(konten.as_slice(), [gemeldet] if gemeldet == konto) {
+    let passend = matches!(konten.as_slice(), [gemeldet] if gemeldet == konto);
+    if diagnose_aktiv {
+        diagnose::zeile(&format!(
+            "Verwaltete Konten: {} | genau das konfigurierte Konto: {}",
+            konten.len(),
+            diagnose::passt_zum_start(passend)
+        ));
+    }
+    if !passend {
         return Err(KONTO_NICHT_PASSEND);
     }
+    Ok(())
+}
+
+fn summen_lesen(
+    client: &Client,
+    konto: &str,
+    diagnose_aktiv: bool,
+) -> Result<Salden, &'static str> {
+    let mut tags = vec![
+        AccountSummaryTags::TOTAL_CASH_VALUE,
+        AccountSummaryTags::SETTLED_CASH,
+        AccountSummaryTags::AVAILABLE_FUNDS,
+        AccountSummaryTags::LEDGER_ALL,
+    ];
+    if diagnose_aktiv {
+        tags.push(AccountSummaryTags::ACCOUNT_TYPE);
+    }
     let zeilen = client
-        .account_summary(
-            &AccountGroup("All".into()),
-            &[
-                AccountSummaryTags::TOTAL_CASH_VALUE,
-                AccountSummaryTags::SETTLED_CASH,
-                AccountSummaryTags::AVAILABLE_FUNDS,
-                AccountSummaryTags::LEDGER_ALL,
-            ],
-        )
-        .map_err(|_| "Kontosummen konnten nicht angefragt werden.")?;
+        .account_summary(&AccountGroup("All".into()), &tags)
+        .map_err(|e| {
+            diagnose::fehler(diagnose_aktiv, &e);
+            "Kontosummen konnten nicht angefragt werden."
+        })?;
     let mut summen = Vec::new();
-    lese_bis(
+    let gelesen = lese_bis(
         |rest| zeilen.next_timeout(rest),
         |zeile| match zeile {
             AccountSummaryResult::End => Ok(true),
@@ -203,13 +235,25 @@ fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
                 Ok(false)
             }
         },
-    )?;
+        diagnose_aktiv,
+    );
     zeilen.cancel();
-    let salden = salden(&summen, konto)?;
+    if diagnose_aktiv {
+        diagnose::summen(&summen, konto);
+    }
+    gelesen?;
+    salden(&summen, konto)
+}
 
-    let meldungen = client
-        .positions()
-        .map_err(|_| "Positionen konnten nicht angefragt werden.")?;
+fn positionen_lesen(
+    client: &Client,
+    konto: &str,
+    diagnose_aktiv: bool,
+) -> Result<BTreeMap<i32, u64>, &'static str> {
+    let meldungen = client.positions().map_err(|e| {
+        diagnose::fehler(diagnose_aktiv, &e);
+        "Positionen konnten nicht angefragt werden."
+    })?;
     let mut positionen = BTreeMap::new();
     lese_bis(
         |rest| meldungen.next_timeout(rest),
@@ -229,15 +273,26 @@ fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
                 Ok(false)
             }
         },
+        diagnose_aktiv,
     )?;
     meldungen.cancel();
+    Ok(positionen)
+}
 
+fn orders_lesen(
+    client: &Client,
+    konto: &str,
+    diagnose_aktiv: bool,
+) -> Result<Vec<OffeneOrder>, &'static str> {
     let mut orders = Vec::new();
     let mut ids = BTreeSet::new();
     for meldung in client
         .all_open_orders()
         .and_then(|sub| sub.collect_to_end_within(FRIST))
-        .map_err(|_| "Offene Orders wurden nicht vollständig gelesen.")?
+        .map_err(|e| {
+            diagnose::fehler(diagnose_aktiv, &e);
+            "Offene Orders wurden nicht vollständig gelesen."
+        })?
     {
         let Orders::OrderData(o) = meldung else {
             continue;
@@ -264,10 +319,44 @@ fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
         });
     }
     orders.sort_unstable();
+    Ok(orders)
+}
+
+fn auszug(client: &Client, konto: &str, diagnose_aktiv: bool) -> Result<Auszug, &'static str> {
+    konten_pruefen(client, konto, diagnose_aktiv)?;
+    let salden = summen_lesen(client, konto, diagnose_aktiv);
+    if !diagnose_aktiv && let Err(e) = salden {
+        return Err(e);
+    }
+    let positionen = positionen_lesen(client, konto, diagnose_aktiv);
+    if !diagnose_aktiv && let Err(e) = &positionen {
+        return Err(e);
+    }
+    let orders = orders_lesen(client, konto, diagnose_aktiv);
+    if diagnose_aktiv {
+        diagnose::zeile(&format!(
+            "Positionen: {} | Offene Orders: {}",
+            positionen
+                .as_ref()
+                .map_or_else(|_| "unbekannt".into(), |p| p.len().to_string()),
+            orders
+                .as_ref()
+                .map_or_else(|_| "unbekannt".into(), |o| o.len().to_string()),
+        ));
+        diagnose::zeile(&format!(
+            "Positionen passen zum Journalstart: {} | Offene Orders passen zum Journalstart: {}",
+            positionen
+                .as_ref()
+                .map_or("unbekannt", |p| diagnose::passt_zum_start(p.is_empty())),
+            orders
+                .as_ref()
+                .map_or("unbekannt", |o| diagnose::passt_zum_start(o.is_empty())),
+        ));
+    }
     Ok(Auszug {
-        salden,
-        positionen,
-        orders,
+        salden: salden?,
+        positionen: positionen?,
+        orders: orders?,
     })
 }
 
@@ -282,13 +371,20 @@ fn kontonummer(wurzel: &Path) -> Result<String, &'static str> {
 }
 
 fn hole(konto: &str) -> Result<Auszug, &'static str> {
-    let client = Client::connect(ADRESSE, CLIENT_ID).map_err(|_| GATEWAY_NICHT_BEREIT)?;
-    auszug(&client, konto)
+    hole_mit_diagnose(konto, false)
+}
+
+fn hole_mit_diagnose(konto: &str, diagnose_aktiv: bool) -> Result<Auszug, &'static str> {
+    let client = Client::connect(ADRESSE, CLIENT_ID).map_err(|e| {
+        diagnose::fehler(diagnose_aktiv, &e);
+        GATEWAY_NICHT_BEREIT
+    })?;
+    auszug(&client, konto, diagnose_aktiv)
 }
 
 /// Meldet das Ergebnis des lesenden Tests an die Oberfläche, ohne Kontostand oder Kontonummer auszugeben.
 pub fn pruefe_papier(wurzel: &Path) -> ExitCode {
-    let ergebnis = kontonummer(wurzel).and_then(|konto| hole(&konto));
+    let ergebnis = kontonummer(wurzel).and_then(|konto| hole_mit_diagnose(&konto, true));
     let text = match &ergebnis {
         Ok(a) => {
             let start = depot_kern::messlatte::ibkr::LANGFRIST.startkapital;
@@ -301,7 +397,7 @@ pub fn pruefe_papier(wurzel: &Path) -> ExitCode {
                 )
             } else {
                 format!(
-                    "Papierkonto lesbar. Der gemeldete Bestand weicht vom vorgesehenen Journalstart mit {start} ab."
+                    "Papierkonto lesbar. Der Bestand weicht vom vorgesehenen Journalstart mit {start} ab. Prüfe unten die Gateway-Diagnose und im Paper Client Portal den verfügbaren Reset-Betrag. Teste erneut, sobald IBKR den passenden Bestand zeigt."
                 )
             }
         }
@@ -320,10 +416,10 @@ pub fn pruefe_papier(wurzel: &Path) -> ExitCode {
                     "Beende das Gateway vollständig, melde dich erneut im Paper-Trading-Modus an und starte den Test, sobald der API-Server „verbunden“ meldet."
                 }
                 EUR_FEHLT => {
-                    "Prüfe im Client Portal im Paper-Modus, ob das Papierkonto Bargeld in EUR führt. Wenn dort EUR steht, prüfe den Schalter „Use $LEDGER- prefix for per-currency keys“ testweise ohne Haken."
+                    "Prüfe im Client Portal im Paper-Modus, ob das Papierkonto Bargeld in EUR führt."
                 }
                 _ => {
-                    "Prüfe die gemeldete Angabe am Papierkonto. Starte den Test erneut, sobald IBKR die Daten bereitstellt."
+                    "Öffne die Gateway-Diagnose unter dem Ergebnis. Die Zeilen zeigen, welche Angaben IBKR geliefert hat."
                 }
             };
             format!("{grund} {weiter}")
@@ -378,7 +474,7 @@ mod tests {
     #[test]
     fn unvollstaendiger_auszug_wird_verworfen() {
         let mut daten = [Ok(SubscriptionItem::Data(17_u8))].into_iter();
-        assert!(lese_bis(|_| daten.next(), |_| Ok(false)).is_err());
+        assert!(lese_bis(|_| daten.next(), |_| Ok(false), false).is_err());
     }
 
     #[test]

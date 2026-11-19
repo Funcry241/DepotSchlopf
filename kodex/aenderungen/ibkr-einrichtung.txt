@@ -11,5 +11,6 @@ crates/depot_dienst/tests/dienst/main.rs
 crates/depot_kern/src/ibkr_papier.rs
 crates/depot_kern/src/lib.rs
 crates/depot_sammler/src/ibkr.rs
+crates/depot_sammler/src/ibkr/diagnose.rs
 crates/depot_sammler/src/main.rs
 docs/kaltstart.md
