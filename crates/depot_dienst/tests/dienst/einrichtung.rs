@@ -432,23 +432,88 @@ fn neuer_schluessel_ist_wieder_nur_hinterlegt() -> Result<(), String> {
 }
 
 #[test]
-fn erste_schritte_zeigen_bereits_angenommene_zugangsdaten() -> Result<(), String> {
+fn erste_schritte_zeigen_nur_offene_einrichtungspunkte() -> Result<(), String> {
     let wurzel = ordner()?;
-    let d = dienst(wurzel.clone(), true);
+    let umw = Arc::new(Attrappe::default());
+    let d = Arc::new(Dienst::neu(
+        wurzel.clone(),
+        TOKEN.into(),
+        echo_starter(true),
+        depot_dienst::lagerechner(umw.clone()),
+    ));
     let t = donnerstag(12, 0)?;
-    let datei = wurzel.join("daten").join(depot_lage::anbieter::DATEI);
-    for wer in depot_dienst::schluessel::ALLE {
-        let eintrag = depot_lage::anbieter::Eintrag::neu(
-            t,
-            wer.protokoll(),
-            depot_lage::anbieter::Ergebnis::Ok,
-            Some(200),
-        );
-        depot_lage::anbieter::anhaengen(&datei, &eintrag)?;
-    }
-    let seite = get(&d, "/einrichtung", t);
-    assert!(seite.contains("alle Schlüssel wurden vom jeweiligen Anbieter angenommen"));
+    let daten = wurzel.join("daten");
+    let protokoll = daten.join(depot_lage::anbieter::DATEI);
+    let wer = depot_lage::anbieter::Wer::Maus;
+    let abgelehnt = depot_lage::anbieter::Eintrag::neu(
+        t,
+        wer,
+        depot_lage::anbieter::Ergebnis::Abgelehnt,
+        Some(401),
+    );
+    depot_lage::anbieter::anhaengen(&protokoll, &abgelehnt)?;
+    assert!(d.schritt(t).is_none());
+    let schritte = || get(&d, "/teil/erste-schritte", t);
+    let offen = schritte();
+    assert!(offen.contains("Journal einrichten"));
+    assert!(offen.contains("Maus (GPT) · Schlüssel erneuern"));
+    assert!(!offen.contains("Dachs (Claude)"));
+    assert!(offen.contains("Zeitplan einschalten"));
+    assert!(offen.contains("Autostart einschalten"));
+
+    depot_journal::Journal::einrichten(&daten.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
+    let akzeptiert =
+        depot_lage::anbieter::Eintrag::neu(t, wer, depot_lage::anbieter::Ergebnis::Ok, Some(200));
+    depot_lage::anbieter::anhaengen(&protokoll, &akzeptiert)?;
+    assert!(d.schritt(donnerstag(12, 1)?).is_none());
+    assert!(!schritte().contains("Journal einrichten"));
+    assert!(!schritte().contains("Maus (GPT)"));
+
+    let laufen = |art| {
+        d.einreihen(art, Anlass::Hand)?;
+        let (nr, kind) = some(d.schritt(t), art.name())?;
+        d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+        Ok::<_, String>(())
+    };
+    laufen(Art::KurseVon(Boerse::Xetra))?;
+    assert!(schritte().contains("Schlusskurse abrufen"));
+    laufen(Art::KurseVon(Boerse::Nyse))?;
+    assert!(!schritte().contains("Schlusskurse abrufen"));
+    laufen(Art::Termine)?;
+    assert!(!schritte().contains("Termine abrufen"));
+    assert!(schritte().contains("Schlagzeilen abrufen"));
+    laufen(Art::Nachrichten)?;
+    d.sperre().zeitplan.an = true;
+    umw.autostart_setzen(&wurzel, true)?;
+    let aktualisiert = behandle(
+        &d,
+        &*umw,
+        &anfrage("GET", "/teil/erste-schritte", &[("Host", HOST)], ""),
+        t,
+    );
+    assert!(!text(&aktualisiert).contains("Erste Schritte"));
+    let seite = text(&behandle(
+        &d,
+        &*umw,
+        &anfrage("GET", "/einrichtung", &[("Host", HOST)], ""),
+        t,
+    ));
+    assert!(!seite.contains("id=\"erste-schritte\""));
     assert!(seite.contains("geprüft (angenommen"));
+    assert!(seite.contains("id=\"journal\""));
+    assert!(seite.contains("id=\"quellen\""));
+
+    let mut journal = depot_journal::Journal::oeffnen(&daten.join("journal.txt"))
+        .map_err(|e| format!("{e:?}"))?;
+    let nachricht = depot_journal::NachrichtBeleg::neu("tagesschau", t, b"Test", t, "Schlagzeile")?;
+    journal
+        .belege_nachricht(&nachricht)
+        .map_err(|e| format!("{e:?}"))?;
+    drop(journal);
+    d.sperre().verlauf.clear();
+    d.sperre().zeitplan.an = false;
+    assert!(d.schritt(donnerstag(12, 2)?).is_none());
+    assert!(!schritte().contains("Schlagzeilen abrufen"));
     Ok(())
 }
 

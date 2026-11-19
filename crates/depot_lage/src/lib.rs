@@ -84,7 +84,7 @@ pub use zugang::{
 use depot_journal::Stand;
 use depot_journal::anbieter::{Eintrag, Wer};
 use depot_kern::liste::{self, Wert, als_universum, beobachtungsliste};
-use depot_kern::{BeraterId, Cent, Datum, Grenzen, Zeitpunkt};
+use depot_kern::{BeraterId, Boerse, Cent, Datum, Grenzen, Zeitpunkt};
 use depot_ki::KiGrenzen;
 use depot_regelwerk::{waehle_morgenwerte, waehle_tageswerte};
 use depot_sim::{LaufFehler, Tageslage, kurse_von_heute, morgenkurse, tageskurse, tageslage};
@@ -224,6 +224,36 @@ pub struct GeminiBudget {
     pub aufrufe: Option<usize>,
 }
 
+/// Vorhandene Abrufbelege für die Ersteinrichtung, unabhängig vom Handelstag.
+#[derive(Clone, Debug, Default)]
+pub struct Datenbelege {
+    pub kurse: Vec<Boerse>,
+    pub termine: bool,
+    pub nachrichten: bool,
+}
+
+impl Datenbelege {
+    fn aus_journal(journal: Zugang<'_>) -> Self {
+        let Zugang::Offen(s) = journal else {
+            return Self::default();
+        };
+        let kurse = liste::boersen()
+            .into_iter()
+            .filter(|&boerse| {
+                s.kurse()
+                    .iter()
+                    .rev()
+                    .any(|k| liste::boerse_von(k.isin()) == Some(boerse))
+            })
+            .collect();
+        Self {
+            kurse,
+            termine: !s.termine().is_empty(),
+            nachrichten: !s.nachrichten().is_empty(),
+        }
+    }
+}
+
 /// Das ganze Lagebild.
 #[derive(Clone, Debug)]
 pub struct Lagebild {
@@ -233,6 +263,7 @@ pub struct Lagebild {
     /// Ein Satz: was als Naechstes geschieht oder fehlt.
     pub naechster_schritt: String,
     pub punkte: Vec<Punkt>,
+    pub datenbelege: Datenbelege,
     pub budget: Vec<KiBudget>,
     pub gemini_budget: Option<GeminiBudget>,
     pub wiederanlauf: Option<wiederanlauf::Diagnose>,
@@ -1035,17 +1066,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
             depot_lage = Some(depot);
             tage = tage::tage(s, &als_universum(werte), &u.anbieter, heute);
             beratungsanlaesse = beratungsanlass_am(s, heute);
-            gespraech = s
-                .begruendungen()
-                .iter()
-                .rev()
-                .take(GESPRAECH_MAX)
-                .map(|(datum, wer, text)| Beitrag {
-                    datum: *datum,
-                    wer: wer.clone(),
-                    text: text.clone(),
-                })
-                .collect();
+            gespraech = letzte_beitraege(s);
         }
         (_, None, _) => punkte.push(punkt(
             "Uhr",
@@ -1087,6 +1108,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         gesamt,
         naechster_schritt: naechster_schritt(&punkte),
         punkte,
+        datenbelege: Datenbelege::aus_journal(u.journal),
         budget,
         gemini_budget: None,
         wiederanlauf: None,
@@ -1103,6 +1125,19 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
         prognosen,
         messlatte,
     }
+}
+
+fn letzte_beitraege(s: &Stand) -> Vec<Beitrag> {
+    s.begruendungen()
+        .iter()
+        .rev()
+        .take(GESPRAECH_MAX)
+        .map(|(datum, wer, text)| Beitrag {
+            datum: *datum,
+            wer: wer.clone(),
+            text: text.clone(),
+        })
+        .collect()
 }
 
 /// Die Sperre des Kostenschutzes: Halt mit dem Grund aus der Datei.

@@ -169,7 +169,16 @@ impl Umwelt for Attrappe {
     }
 
     fn autostart(&self, _wurzel: &Path) -> depot_dienst::autostart::Stand {
-        depot_dienst::autostart::Stand::Aus
+        if *self
+            .autostart
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            == Some(true)
+        {
+            depot_dienst::autostart::Stand::An
+        } else {
+            depot_dienst::autostart::Stand::Aus
+        }
     }
 
     fn papierfreigabe_bestaetigen(
