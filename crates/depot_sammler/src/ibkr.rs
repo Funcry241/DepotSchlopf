@@ -217,7 +217,10 @@ fn summen_lesen(
         AccountSummaryTags::LEDGER_ALL,
     ];
     if diagnose_aktiv {
-        tags.push(AccountSummaryTags::ACCOUNT_TYPE);
+        tags.extend([
+            AccountSummaryTags::ACCOUNT_TYPE,
+            AccountSummaryTags::BUYING_POWER,
+        ]);
     }
     let zeilen = client
         .account_summary(&AccountGroup("All".into()), &tags)

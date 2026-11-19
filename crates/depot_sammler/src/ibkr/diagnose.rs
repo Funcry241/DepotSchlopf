@@ -21,6 +21,7 @@ fn tag(tag: &str) -> &str {
             | AccountSummaryTags::TOTAL_CASH_VALUE
             | AccountSummaryTags::SETTLED_CASH
             | AccountSummaryTags::AVAILABLE_FUNDS
+            | AccountSummaryTags::BUYING_POWER
             | "CashBalance"
             | "TotalCashBalance"
             | "SettledCashByDate"
@@ -71,15 +72,61 @@ fn form(a: &AccountSummary, konto: &str) -> String {
     };
     let name = tag(&a.tag);
     let wert = if name == AccountSummaryTags::ACCOUNT_TYPE
-        && matches!(
-            a.value.as_str(),
-            "CASH" | "MARGIN" | "INDIVIDUAL" | "LLC" | "Cash" | "Margin"
-        ) {
+        && a.account == konto
+        && (1..=20).contains(&a.value.len())
+        && a.value.bytes().all(|b| b.is_ascii_uppercase())
+    {
         a.value.clone()
     } else {
         wertform(&a.value)
     };
     format!("{name} | {waehrung} | {klasse} | {wert}")
+}
+
+fn eur_wert<'a>(
+    zeilen: &'a [AccountSummary],
+    konto: &str,
+    tags: &[&str],
+    waehrungszeile: bool,
+) -> Option<&'a str> {
+    let mut treffend = zeilen.iter().filter(|a| {
+        a.currency == "EUR"
+            && (a.account == konto || (waehrungszeile && a.account == "All"))
+            && tags.contains(&a.tag.as_str())
+    });
+    let wert = treffend.next()?;
+    treffend.next().is_none().then_some(wert.value.as_str())
+}
+
+fn dezimal_normalisiert(wert: &str) -> Option<(bool, &str, &str)> {
+    let negativ = wert.starts_with('-');
+    let zahl = wert.strip_prefix(['-', '+']).unwrap_or(wert);
+    let (ganz, dezimal) = zahl.split_once('.').unwrap_or((zahl, ""));
+    if ganz.is_empty()
+        || !ganz
+            .bytes()
+            .chain(dezimal.bytes())
+            .all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let ganz = ganz.trim_start_matches('0');
+    let dezimal = dezimal.trim_end_matches('0');
+    Some((
+        negativ && !(ganz.is_empty() && dezimal.is_empty()),
+        ganz,
+        dezimal,
+    ))
+}
+
+fn werte_gleich(links: Option<&str>, rechts: Option<&str>) -> &'static str {
+    match (
+        links.and_then(dezimal_normalisiert),
+        rechts.and_then(dezimal_normalisiert),
+    ) {
+        (Some(a), Some(b)) => passt_zum_start(a == b),
+        _ => "unbekannt",
+    }
 }
 
 pub(super) fn summen(zeilen: &[AccountSummary], konto: &str) {
@@ -102,23 +149,37 @@ pub(super) fn summen(zeilen: &[AccountSummary], konto: &str) {
         AccountSummaryTags::SETTLED_CASH,
         AccountSummaryTags::AVAILABLE_FUNDS,
         AccountSummaryTags::ACCOUNT_TYPE,
+        AccountSummaryTags::BUYING_POWER,
     ] {
         if zeilen.iter().all(|a| a.tag != tag) {
             zeile(&format!("Zeilen für {tag}: 0"));
         }
     }
-    let mut gesamt = zeilen.iter().filter(|a| {
-        a.account == konto && a.tag == AccountSummaryTags::TOTAL_CASH_VALUE && a.currency == "EUR"
-    });
-    let passt = match (
-        gesamt.next().and_then(|a| super::eurocent(&a.value)),
-        gesamt.next(),
-    ) {
-        (Some(gesamt), None) => {
-            passt_zum_start(gesamt == depot_kern::messlatte::ibkr::LANGFRIST.startkapital)
-        }
-        _ => "unbekannt",
-    };
+    let kontowert = |tag| eur_wert(zeilen, konto, &[tag], false);
+    let gesamt = kontowert(AccountSummaryTags::TOTAL_CASH_VALUE);
+    let verfuegbar = kontowert(AccountSummaryTags::AVAILABLE_FUNDS);
+    let ledger = eur_wert(zeilen, konto, &["CashBalance", "$LEDGER-CashBalance"], true);
+    for (name, links, rechts) in [
+        (
+            "BuyingPower gleich AvailableFunds",
+            kontowert(AccountSummaryTags::BUYING_POWER),
+            verfuegbar,
+        ),
+        (
+            "SettledCash gleich TotalCashValue",
+            kontowert(AccountSummaryTags::SETTLED_CASH),
+            gesamt,
+        ),
+        ("AvailableFunds gleich TotalCashValue", verfuegbar, gesamt),
+        ("EUR-CashBalance gleich TotalCashValue", ledger, gesamt),
+    ] {
+        zeile(&format!("{name}: {}", werte_gleich(links, rechts)));
+    }
+    let passt = gesamt
+        .and_then(super::eurocent)
+        .map_or("unbekannt", |betrag| {
+            passt_zum_start(betrag == depot_kern::messlatte::ibkr::LANGFRIST.startkapital)
+        });
     zeile(&format!("Gesamtbargeld passt zum Journalstart: {passt}"));
 }
 
@@ -149,5 +210,39 @@ mod tests {
             form(&zeile, "DUR1234"),
             "sonstiger Tag | unbekannt | fremd | Text oder anderes Format"
         );
+        zeile.account = "DUR1234".into();
+        zeile.tag = AccountSummaryTags::ACCOUNT_TYPE.into();
+        zeile.currency.clear();
+        zeile.value = "PARTNERSHIP".into();
+        assert_eq!(
+            form(&zeile, "DUR1234"),
+            "AccountType | leer | eigen | PARTNERSHIP"
+        );
+        zeile.value = "DUR8675309".into();
+        assert_eq!(
+            form(&zeile, "DUR1234"),
+            "AccountType | leer | eigen | Text oder anderes Format"
+        );
+    }
+
+    #[test]
+    fn vergleicht_dezimalwerte_exakt_und_doppelte_werden_nicht_gewaehlt() {
+        assert_eq!(werte_gleich(Some("+001.23400"), Some("1.234")), "ja");
+        assert_eq!(werte_gleich(Some("-0.00"), Some("0")), "ja");
+        assert_eq!(werte_gleich(Some("1.234"), Some("1.235")), "nein");
+        assert_eq!(werte_gleich(Some("1E3"), Some("1000")), "unbekannt");
+        assert_eq!(werte_gleich(None, Some("1000")), "unbekannt");
+        let a = AccountSummary {
+            account: "All".into(),
+            currency: "EUR".into(),
+            tag: "$LEDGER-CashBalance".into(),
+            value: "1.234".into(),
+        };
+        let tags = ["CashBalance", "$LEDGER-CashBalance"];
+        assert_eq!(
+            eur_wert(std::slice::from_ref(&a), "DUR1234", &tags, true),
+            Some("1.234")
+        );
+        assert_eq!(eur_wert(&[a.clone(), a], "DUR1234", &tags, true), None);
     }
 }

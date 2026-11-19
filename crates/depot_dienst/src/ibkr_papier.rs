@@ -128,7 +128,7 @@ pub(crate) fn einrichtung(d: &Dienst, abfrage: &str) -> String {
          Falls es noch nicht installiert ist, <a href=\"https://ndcdyn.interactivebrokers.com/en/trading/ibgateway-latest.php\">lade das Gateway bei IBKR herunter</a>.</li>\
          <li>Prüfe im Gateway unter <b>Konfigurieren → Einstellungen → API → Einstellungen</b> den Socket-Port <b>4002</b>. \
          Aktiviere <b>Schreibgeschützte API</b> und <b>Nur Verbindungen vom lokalen Host zulassen</b>. Lass das Gateway geöffnet und warte auf <b>verbunden</b>.</li>\
-         <li>Für den Journalstart sind <b>1.000 €</b> vorgesehen. Bei einem abweichenden Bargeldbestand findest du im Client Portal im <b>Paper-Modus</b> unter <b>Einstellungen → Kontoeinstellungen → Paper Trading Account Reset</b> die von IBKR angebotenen Beträge. Prüfe dort, ob 1.000 € in EUR auswählbar sind.</li>\
+         <li>Für den Journalstart sind <b>1.000 €</b> vorgesehen. Öffne bei abweichendem Bargeldbestand im Client Portal den <b>Paper-Modus</b> und suche in den <b>Einstellungen</b> nach <b>Paper Trading Account Reset</b>. Prüfe dort, ob IBKR 1.000 € in EUR anbietet.</li>\
          <li>Speichere unten die Kontonummer aus dem Client Portal und klicke auf <b>Papierabruf testen</b>.</li></ol>\
          {meldung}<form method=\"post\" action=\"/ibkr-papier\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
