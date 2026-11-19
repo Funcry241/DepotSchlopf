@@ -80,9 +80,9 @@ fn lese_bis<T>(
     mut naechster: impl FnMut(Duration) -> Option<Result<SubscriptionItem<T>, ibapi::Error>>,
     mut belege: impl FnMut(T) -> Result<bool, &'static str>,
 ) -> Result<(), &'static str> {
-    let ende = Instant::now() + FRIST;
+    let beginn = Instant::now();
     loop {
-        let rest = ende.saturating_duration_since(Instant::now());
+        let rest = FRIST.saturating_sub(beginn.elapsed());
         match naechster(rest) {
             Some(Ok(SubscriptionItem::Data(datensatz))) => {
                 if belege(datensatz)? {
