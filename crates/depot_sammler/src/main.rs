@@ -705,6 +705,7 @@ fn main() -> ExitCode {
         ["termine"] => termine(&wurzel, &journal),
         ["nachrichten"] => nachrichten(&wurzel, &journal),
         ["ibkr", "papier"] => ibkr::zeige_papier(&wurzel),
+        ["ibkr", "papier", "pruefen"] => ibkr::pruefe_papier(&wurzel),
         ["ibkr", "journal-einrichten"] => ibkr::abgleich::einrichten(&wurzel),
         ["ibkr", "abgleichen"] => ibkr::abgleich::abgleichen(&wurzel),
         _ => {

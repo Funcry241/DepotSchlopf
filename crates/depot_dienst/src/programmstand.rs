@@ -307,6 +307,7 @@ pub fn starter(stand: &Stand) -> Starter {
             | Art::KurseVon(_)
             | Art::Termine
             | Art::Nachrichten
+            | Art::IbkrPapier
             | Art::Einrichten => (&sammler, art.argumente()),
             Art::Papier
             | Art::Vorbereiten

@@ -29,6 +29,7 @@ pub mod geld;
 pub mod gemini;
 pub mod grenzen;
 pub mod hinweis;
+pub mod ibkr_papier;
 pub mod instrument;
 pub mod json;
 pub mod kurs;
