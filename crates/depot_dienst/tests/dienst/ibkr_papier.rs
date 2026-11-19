@@ -37,6 +37,7 @@ fn ibkr_papierkonto_in_der_oberflaeche_speichern_und_lesen() -> Result<(), Strin
     let seite = get(&d, "/einrichtung", jetzt);
     assert!(seite.contains("IBKR-Papierkonto einrichten und testen"));
     assert!(seite.contains("Schreibgeschützte API") && seite.contains("4002"));
+    assert!(!seite.contains("<summary>Papierkontonummer ändern</summary>"));
     assert!(post("/ausfuehren", "art=ibkr_papier").contains("ibkr=format"));
     assert!(post("/ibkr-papier", "konto=U1234").contains("ibkr=format"));
     assert!(post("/ibkr-papier", "konto=DUR1234567").contains("ibkr=gespeichert"));
@@ -46,8 +47,16 @@ fn ibkr_papierkonto_in_der_oberflaeche_speichern_und_lesen() -> Result<(), Strin
         "DUR1234567\n"
     );
     let seite = get(&d, "/einrichtung", jetzt);
-    assert!(seite.contains("Papierabruf testen"));
+    let (_, ibkr) = some(seite.split_once("id=\"ibkr-papier\""), "IBKR-Abschnitt")?;
+    let (status, details) = some(ibkr.split_once("<details>"), "eingeklappte Bearbeitung")?;
+    assert!(status.contains("class=\"gut\">✓ Papierkontonummer lokal gespeichert"));
+    assert!(status.contains("Papierabruf testen"));
+    assert!(!status.contains("name=\"konto\""));
+    assert!(details.starts_with("<summary>Papierkontonummer ändern</summary>"));
+    assert!(details.contains("<details><summary>Hilfe zur Einrichtung</summary>"));
     assert!(!seite.contains("DUR1234567"));
+    let formatfehler = get(&d, "/einrichtung?ibkr=format", jetzt);
+    assert!(formatfehler.contains("<details open><summary>Papierkontonummer ändern</summary>"));
     assert_eq!(Art::IbkrPapier.argumente(), ["ibkr", "papier", "pruefen"]);
     assert!(post("/ausfuehren", "art=ibkr_papier").contains("/einrichtung#ibkr-papier"));
     assert_eq!(wartend(&d), vec![(Art::IbkrPapier, Anlass::Hand)]);

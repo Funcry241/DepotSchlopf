@@ -63,7 +63,7 @@ pub(crate) fn status(d: &Dienst) -> String {
         s.push_str("<p>Speichere zuerst die Nummer des Papierkontos.</p>");
         return s;
     }
-    s.push_str("<p>Papierkontonummer lokal gespeichert.</p>");
+    s.push_str("<p class=\"gut\">✓ Papierkontonummer lokal gespeichert</p>");
     if let Some(stand) = z.auftrag_stand(Art::IbkrPapier) {
         let _ = write!(s, "<p role=\"status\">Papierabruf {stand}</p>");
         return s;
@@ -90,7 +90,8 @@ pub(crate) fn status(d: &Dienst) -> String {
         if !diagnose.is_empty() {
             let _ = write!(
                 s,
-                "<details id=\"ibkr-gateway-diagnose\"><summary>Gateway-Diagnose</summary>+                 <pre class=\"konsole\">{}</pre></details>",
+                "<details id=\"ibkr-gateway-diagnose\"><summary>Gateway-Diagnose</summary>\
+                 <pre class=\"konsole\">{}</pre></details>",
                 maskiere(&diagnose)
             );
         }
@@ -106,38 +107,42 @@ pub(crate) fn status(d: &Dienst) -> String {
 }
 
 pub(crate) fn einrichtung(d: &Dienst, abfrage: &str) -> String {
-    let meldung = formular(abfrage.as_bytes())
-        .and_then(|f| {
-            Some(match feld(&f, "ibkr")? {
-                "gespeichert" => ("gut", "Gespeichert. Jetzt kannst du den Papierabruf testen."),
-                "format" => ("offen", "Gib die Kontonummer aus dem Client Portal ein. Nach DU oder DUR folgen nur Ziffern."),
-                "schreibfehler" => ("halt", "Die Papierkontonummer konnte nicht gespeichert werden. Prüfe, ob der DepotSchlopf-Datenordner beschreibbar ist."),
-                "belegt" => ("offen", "Warte, bis der aktuelle Auftrag oder das Update beendet ist, und versuche es erneut."),
-                _ => return None,
-            })
-        })
-        .map_or_else(String::new, |(klasse, text)| {
-            format!("<p class=\"{klasse}\" role=\"status\">{text}</p>")
-        });
-    format!(
-        "<section id=\"ibkr-papier\"><h2>IBKR-Papierkonto</h2>\
-         <p>Prüft auf diesem Rechner den lesenden Abruf des Papierkontos.</p>\
-         <ol><li>Melde dich im <a href=\"https://www.interactivebrokers.com/sso/Login\">IBKR Client Portal</a> mit deinem normalen IBKR-Zugang an. \
+    let felder = formular(abfrage.as_bytes());
+    let kennung = felder.as_ref().and_then(|f| feld(f, "ibkr"));
+    let meldung = match kennung {
+        Some("format") => Some(("offen", "Gib die Kontonummer aus dem Client Portal ein. Nach DU oder DUR folgen nur Ziffern.")),
+        Some("schreibfehler") => Some(("halt", "Die Papierkontonummer konnte nicht gespeichert werden. Prüfe, ob der DepotSchlopf-Datenordner beschreibbar ist.")),
+        Some("belegt") => Some(("offen", "Warte, bis der aktuelle Auftrag oder das Update beendet ist, und versuche es erneut.")),
+        _ => None,
+    }
+    .map_or_else(String::new, |(klasse, text)| {
+        format!("<p class=\"{klasse}\" role=\"status\">{text}</p>")
+    });
+    let hilfe = "<ol><li>Melde dich im <a href=\"https://www.interactivebrokers.com/sso/Login\">IBKR Client Portal</a> mit deinem normalen IBKR-Zugang an. \
          Unter <b>Einstellungen → Kontokonfiguration → Paper Trading Account</b> findest du die Kontonummer und kannst den Papierzugang einrichten.</li>\
          <li>Öffne das IBKR Gateway und wähle <b>IB API</b> und <b>Paper-Trading</b>. Melde dich dort mit dem Papierzugang an. \
          Falls es noch nicht installiert ist, <a href=\"https://ndcdyn.interactivebrokers.com/en/trading/ibgateway-latest.php\">lade das Gateway bei IBKR herunter</a>.</li>\
          <li>Prüfe im Gateway unter <b>Konfigurieren → Einstellungen → API → Einstellungen</b> den Socket-Port <b>4002</b>. \
          Aktiviere <b>Schreibgeschützte API</b> und <b>Nur Verbindungen vom lokalen Host zulassen</b>. Lass das Gateway geöffnet und warte auf <b>verbunden</b>.</li>\
-         <li>Für den Journalstart sind <b>1.000 €</b> vorgesehen. Öffne bei abweichendem Bargeldbestand im Client Portal den <b>Paper-Modus</b> und suche in den <b>Einstellungen</b> nach <b>Paper Trading Account Reset</b>. Prüfe dort, ob IBKR 1.000 € in EUR anbietet.</li>\
-         <li>Speichere unten die Kontonummer aus dem Client Portal und klicke auf <b>Papierabruf testen</b>.</li></ol>\
-         {meldung}<form method=\"post\" action=\"/ibkr-papier\">\
+         <li>Für den Journalstart sind <b>1.000 €</b> vorgesehen. Öffne bei abweichendem Bargeldbestand im Client Portal den <b>Paper-Modus</b> und suche in den <b>Einstellungen</b> nach <b>Paper Trading Account Reset</b>. Prüfe dort, ob IBKR 1.000 € in EUR anbietet.</li></ol>";
+    let formular = format!(
+        "<form method=\"post\" action=\"/ibkr-papier\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <div class=\"formularfelder\"><label>Papierkontonummer \
          <input name=\"konto\" required autocomplete=\"off\" spellcheck=\"false\" maxlength=\"23\" pattern=\"DUR?[0-9]{{1,20}}\"></label>\
          <button type=\"submit\">Papierkontonummer speichern</button></div></form>\
-         <p class=\"leise\">Die Nummer bleibt lokal. Benutzername und Passwort gibst du im Gateway ein.</p>\
-         <div data-teil=\"/teil/ibkr-papier\">{}</div></section>",
+         <p class=\"leise\">Die Nummer bleibt lokal. Benutzername und Passwort gibst du im Gateway ein.</p>",
         maskiere(&d.token),
-        status(d)
-    )
+    );
+    let status = format!("<div data-teil=\"/teil/ibkr-papier\">{}</div>", status(d));
+    let inhalt = if gespeichert(d) {
+        let offen = if meldung.is_empty() { "" } else { " open" };
+        format!(
+            "{status}<details{offen}><summary>Papierkontonummer ändern</summary>{meldung}{formular}</details>\
+             <details><summary>Hilfe zur Einrichtung</summary>{hilfe}</details>"
+        )
+    } else {
+        format!("{hilfe}{meldung}{formular}{status}")
+    };
+    format!("<section id=\"ibkr-papier\"><h2>IBKR-Papierkonto</h2>{inhalt}</section>")
 }

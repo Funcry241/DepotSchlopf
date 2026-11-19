@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Die gespeicherte IBKR-Papierkontonummer in der Einrichtung als erledigt anzeigen und Eingabefeld und Hilfe bei Bedarf öffnen
+pfade:
+crates/depot_dienst/src/ibkr_papier.rs
+crates/depot_dienst/tests/dienst/ibkr_papier.rs
