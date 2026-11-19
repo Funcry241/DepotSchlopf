@@ -18,6 +18,8 @@
     clippy::cast_sign_loss
 )]
 
+mod ibkr;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -702,9 +704,10 @@ fn main() -> ExitCode {
         ["einrichten"] | ["kurse", "einrichten"] => einrichten(&journal),
         ["termine"] => termine(&wurzel, &journal),
         ["nachrichten"] => nachrichten(&wurzel, &journal),
+        ["ibkr", "papier"] => ibkr::zeige_papier(&wurzel),
         _ => {
             eprintln!(
-                "Aufruf: run.cmd kurse [xetra|nyse|diagnose] | run.cmd kurse einrichten | run.cmd nachrichten | run.cmd termine"
+                "Aufruf: run.cmd kurse [xetra|nyse|diagnose] | run.cmd kurse einrichten | run.cmd nachrichten | run.cmd termine | run.cmd ibkr papier"
             );
             ExitCode::from(2)
         }

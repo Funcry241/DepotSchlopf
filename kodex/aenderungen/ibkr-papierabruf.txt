@@ -1,0 +1,11 @@
+klasse: FestschreibungAenderung
+zweck: Das lokale IBKR-Papierkonto per lesendem Einzelabruf prüfen
+pfade:
+Cargo.lock
+crates/depot_lauf/src/main.rs
+crates/depot_sammler/Cargo.toml
+crates/depot_sammler/src/ibkr.rs
+crates/depot_sammler/src/main.rs
+docs/kaltstart.md
+kodex/festschreibung.txt
+kodex/freigaben/ibkr-papierabruf.txt
