@@ -1,6 +1,9 @@
 //! Bestätigung eines Updates mit geändertem Cargo.lock am Windows-Desktop.
 
-#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+#[cfg_attr(
+    not(any(windows, test)),
+    allow(dead_code, reason = "Nur der Windows-Dialog erzeugt die drei Bedienergebnisse")
+)]
 #[derive(Debug)]
 pub(super) enum Freigabe {
     Ja,

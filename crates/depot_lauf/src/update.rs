@@ -1033,7 +1033,7 @@ mod tests {
         let alt = g(&a.projekt, &["rev-parse", "HEAD"])?;
         let erwartet = neuer_stand(&a, "zwei")?;
         neuer_stand(&a, "drei")?;
-        assert_eq!(lauf(&a.projekt, &[erwartet]), ExitCode::FAILURE);
+        assert_eq!(lauf(&a.projekt, &[erwartet]), ExitCode::from(12));
         assert_eq!(g(&a.projekt, &["rev-parse", "HEAD"])?, alt);
         assert!(!offen_pfad(&a.projekt).exists());
         Ok(())

@@ -199,9 +199,7 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
     use depot_dienst::werkbank::{Auftrag, Frueher};
     use depot_lage::gespraeche::{Gespraech, anhaengen};
 
-    let wurzel = ordner()?;
-    let daten = wurzel.join("daten");
-    let d = dienst(wurzel, true);
+    let d = dienst(ordner()?, true);
     let zeit = donnerstag(17, 50)?;
     let tag = some(zeit.in_frankfurt().map(|(d, ..)| d), "Frankfurter Tag")?;
     let kennung = format!("{}-1", zeit.sekunden());
@@ -281,7 +279,7 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
             antwort: Some(frage.into()),
             fehler: None,
         };
-        anhaengen(&daten, &e).map_err(|e| e.to_string())?;
+        anhaengen(&d.wurzel.join("daten"), &e).map_err(|e| e.to_string())?;
     }
     let html = get(&d, "/teil/live", zeit);
     assert!(html.contains("Dachs (Dachs-alt&lt;script&gt;)"));
