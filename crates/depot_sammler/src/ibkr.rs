@@ -1,5 +1,7 @@
 //! Lesender Einzelabruf beim lokalen IB Gateway für das ausdrücklich angegebene Papierkonto.
 
+pub(super) mod abgleich;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::ExitCode;
@@ -26,6 +28,7 @@ struct Salden {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct OffeneOrder {
     dauerhafte_id: i64,
+    referenz: String,
     kontrakt: i32,
     richtung: &'static str,
     stueck: u64,
@@ -235,6 +238,7 @@ fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
         };
         orders.push(OffeneOrder {
             dauerhafte_id: o.order.perm_id,
+            referenz: o.order.order_ref,
             kontrakt: o.contract.contract_id,
             richtung,
             stueck: stueck(o.order.total_quantity)?,
@@ -248,20 +252,24 @@ fn auszug(client: &Client, konto: &str) -> Result<Auszug, &'static str> {
     })
 }
 
-fn hole(wurzel: &Path) -> Result<Auszug, &'static str> {
+fn kontonummer(wurzel: &Path) -> Result<String, &'static str> {
     let konto = std::fs::read_to_string(wurzel.join("daten").join("ibkr-papierkonto.txt"))
         .map_err(|_| "Lokale Datei daten/ibkr-papierkonto.txt fehlt oder ist unlesbar.")?;
     let konto = konto.trim();
     if !papierkonto(konto) {
         return Err("In daten/ibkr-papierkonto.txt wird nur eine DU-Papierkontonummer erwartet.");
     }
+    Ok(konto.to_owned())
+}
+
+fn hole(konto: &str) -> Result<Auszug, &'static str> {
     let client = Client::connect(ADRESSE, CLIENT_ID)
         .map_err(|_| "Lokales IB Gateway auf Port 4002 nicht erreichbar oder nicht bereit.")?;
     auszug(&client, konto)
 }
 
 pub fn zeige_papier(wurzel: &Path) -> ExitCode {
-    let a = match hole(wurzel) {
+    let a = match kontonummer(wurzel).and_then(|konto| hole(&konto)) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("[IBKR-Papier] {e}");
