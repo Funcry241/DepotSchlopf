@@ -1,0 +1,4 @@
+klasse: DokuOnly
+zweck: Die Mathe-Seite auf der GitHub-Startseite verlinken
+pfade:
+README.md
