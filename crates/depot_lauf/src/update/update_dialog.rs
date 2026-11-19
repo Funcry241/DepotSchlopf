@@ -2,7 +2,10 @@
 
 #[cfg_attr(
     not(any(windows, test)),
-    allow(dead_code, reason = "Nur der Windows-Dialog erzeugt die drei Bedienergebnisse")
+    allow(
+        dead_code,
+        reason = "Nur der Windows-Dialog erzeugt die drei Bedienergebnisse"
+    )
 )]
 #[derive(Debug)]
 pub(super) enum Freigabe {
