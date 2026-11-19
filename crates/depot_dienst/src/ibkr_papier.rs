@@ -13,7 +13,7 @@ fn datei(d: &Dienst) -> PathBuf {
     d.wurzel.join("daten").join(KONTO_DATEI)
 }
 
-fn gespeichert(d: &Dienst) -> bool {
+pub(crate) fn gespeichert(d: &Dienst) -> bool {
     lies_falls_da(&datei(d))
         .ok()
         .flatten()
@@ -106,7 +106,7 @@ pub(crate) fn status(d: &Dienst) -> String {
     s
 }
 
-pub(crate) fn einrichtung(d: &Dienst, abfrage: &str) -> String {
+pub(crate) fn einrichtung(d: &Dienst, abfrage: &str, konto_gespeichert: bool) -> String {
     let felder = formular(abfrage.as_bytes());
     let kennung = felder.as_ref().and_then(|f| feld(f, "ibkr"));
     let meldung = match kennung {
@@ -135,7 +135,7 @@ pub(crate) fn einrichtung(d: &Dienst, abfrage: &str) -> String {
         maskiere(&d.token),
     );
     let status = format!("<div data-teil=\"/teil/ibkr-papier\">{}</div>", status(d));
-    let inhalt = if gespeichert(d) {
+    let inhalt = if konto_gespeichert {
         let offen = if meldung.is_empty() { "" } else { " open" };
         format!(
             "{status}<details{offen}><summary>Papierkontonummer ändern</summary>{meldung}{formular}</details>\

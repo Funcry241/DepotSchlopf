@@ -1,0 +1,7 @@
+klasse: Funktion
+zweck: Den Sprunglink zum IBKR-Papierkonto nach dem Speichern der Kontonummer auf den Papierabruf umstellen
+pfade:
+crates/depot_dienst/src/ibkr_papier.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/dienst/ibkr_papier.rs

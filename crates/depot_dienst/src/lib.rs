@@ -361,6 +361,7 @@ fn einrichtungsseite(
             .map(|f| seiten::Entwurf::aus_formular(&f))
             .unwrap_or_default(),
         autostart: u.autostart(&d.wurzel),
+        ibkr_konto_gespeichert: ibkr_papier::gespeichert(d),
         wurzel: d.wurzel.display().to_string(),
         grenzen: grenzwerte(),
         abgelehnt: werkbank::lies_falls_da(&rueckfall::abgelehnt_pfad(&d.wurzel)).map(|t| {
@@ -385,7 +386,11 @@ fn einrichtungsseite(
     ));
     zusatz.push_str(&mindesteinsatz_formular(d));
     zusatz.push_str(&splitverdacht::formular(d));
-    zusatz.push_str(&ibkr_papier::einrichtung(d, &a.abfrage));
+    zusatz.push_str(&ibkr_papier::einrichtung(
+        d,
+        &a.abfrage,
+        gespeichert.ibkr_konto_gespeichert,
+    ));
     let zustand = d.sperre();
     let gespeichert = seiten::Einrichtung {
         zeitplan_gespeichert: match datei {
