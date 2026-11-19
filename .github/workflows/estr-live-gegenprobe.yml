@@ -35,9 +35,10 @@ jobs:
           first, last = rows[0], rows[-1]
           cent = int(100_000 * Decimal(last["OBS_VALUE"]) / Decimal(first["OBS_VALUE"]))
           print(f'EZB: {len(rows)} Beobachtungen, {first["TIME_PERIOD"]} bis {last["TIME_PERIOD"]}; {cent} Cent unabhängig berechnet.')
-          with open(os.environ["GITHUB_ENV"], "a") as env:
-              env.write(f"ESTR_ORDNER={daten}\nESTR_ERWARTET={cent}\n")
+          (daten / "erwartet.txt").write_text(str(cent), encoding="ascii")
           PY
+          export ESTR_ORDNER="$RUNNER_TEMP/estr-ezb"
+          export ESTR_ERWARTET="$(cat "$ESTR_ORDNER/erwartet.txt")"
           cat >> crates/depot_dienst/src/analyse/massstab.rs <<'RS'
 
           #[cfg(test)]
