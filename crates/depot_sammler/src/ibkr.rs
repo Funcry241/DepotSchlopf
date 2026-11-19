@@ -42,9 +42,12 @@ struct Auszug {
 }
 
 fn papierkonto(konto: &str) -> bool {
-    konto.strip_prefix("DU").is_some_and(|nr| {
-        !nr.is_empty() && nr.len() <= 20 && nr.bytes().all(|b| b.is_ascii_digit())
-    })
+    konto
+        .strip_prefix("DUR")
+        .or_else(|| konto.strip_prefix("DU"))
+        .is_some_and(|nr| {
+            !nr.is_empty() && nr.len() <= 20 && nr.bytes().all(|b| b.is_ascii_digit())
+        })
 }
 
 fn eurocent(text: &str) -> Option<Cent> {
@@ -257,7 +260,9 @@ fn kontonummer(wurzel: &Path) -> Result<String, &'static str> {
         .map_err(|_| "Lokale Datei daten/ibkr-papierkonto.txt fehlt oder ist unlesbar.")?;
     let konto = konto.trim();
     if !papierkonto(konto) {
-        return Err("In daten/ibkr-papierkonto.txt wird nur eine DU-Papierkontonummer erwartet.");
+        return Err(
+            "In daten/ibkr-papierkonto.txt wird eine Papierkontonummer mit DU oder DUR und danach nur Ziffern erwartet.",
+        );
     }
     Ok(konto.to_owned())
 }
@@ -347,8 +352,12 @@ mod tests {
     #[test]
     fn nur_exakt_konfigurierte_papierkontonummern() {
         assert!(papierkonto("DU1234"));
+        assert!(papierkonto("DUR1234"));
         assert!(!papierkonto("U1234"));
         assert!(!papierkonto("DU"));
+        assert!(!papierkonto("DUR"));
+        assert!(!papierkonto("DURR1234"));
+        assert!(!papierkonto("DUR123456789012345678901"));
         assert!(!papierkonto("DU123\nU456"));
     }
 }

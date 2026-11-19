@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: IBKR-Papierkontonummern mit Präfix DUR unverändert für den Abruf und den Journalabgleich zulassen
+pfade:
+crates/depot_sammler/src/ibkr.rs
+docs/kaltstart.md
