@@ -34,8 +34,15 @@ const KONTO_FORMAT: &str = "In daten/ibkr-papierkonto.txt wird eine Papierkonton
 #[derive(Debug, PartialEq, Eq)]
 struct Salden {
     gesamt: Cent,
-    abgerechnet: Cent,
-    verfuegbar: Cent,
+    abgerechnet: Option<Cent>,
+    verfuegbar: Option<Cent>,
+}
+
+fn saldo_text(wert: Option<Cent>) -> String {
+    wert.map_or_else(
+        || "nicht geliefert".into(),
+        |cent| format!("{} Cent", cent.0),
+    )
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -159,14 +166,8 @@ fn salden(zeilen: &[AccountSummary], konto: &str) -> Result<Salden, &'static str
             .get(AccountSummaryTags::TOTAL_CASH_VALUE)
             .copied()
             .ok_or("Gesamtbargeld (TotalCashValue) fehlt in der Gateway-Antwort.")?,
-        abgerechnet: summen
-            .get(AccountSummaryTags::SETTLED_CASH)
-            .copied()
-            .ok_or("Abgerechnetes Bargeld (SettledCash) fehlt in der Gateway-Antwort.")?,
-        verfuegbar: summen
-            .get(AccountSummaryTags::AVAILABLE_FUNDS)
-            .copied()
-            .ok_or("Verfügbare Mittel (AvailableFunds) fehlen in der Gateway-Antwort.")?,
+        abgerechnet: summen.get(AccountSummaryTags::SETTLED_CASH).copied(),
+        verfuegbar: summen.get(AccountSummaryTags::AVAILABLE_FUNDS).copied(),
     })
 }
 
@@ -391,12 +392,21 @@ pub fn pruefe_papier(wurzel: &Path) -> ExitCode {
     let text = match &ergebnis {
         Ok(a) => {
             let start = depot_kern::messlatte::ibkr::LANGFRIST.startkapital;
-            if [a.salden.gesamt, a.salden.abgerechnet, a.salden.verfuegbar] == [start; 3]
-                && a.positionen.is_empty()
-                && a.orders.is_empty()
-            {
+            let vorhanden = |wert: Option<Cent>| {
+                if wert.is_some() {
+                    "geliefert"
+                } else {
+                    "nicht geliefert"
+                }
+            };
+            diagnose::zeile(&format!(
+                "Abgerechnetes Bargeld: {} | Verfügbare Mittel: {}",
+                vorhanden(a.salden.abgerechnet),
+                vorhanden(a.salden.verfuegbar),
+            ));
+            if a.salden.gesamt == start && a.positionen.is_empty() && a.orders.is_empty() {
                 format!(
-                    "Papierkonto lesbar. Salden, Positionen und offene Orders passen zum vorgesehenen Journalstart mit {start}."
+                    "Papierkonto lesbar. Gesamtbargeld, Positionen und offene Orders passen zum vorgesehenen Journalstart mit {start}."
                 )
             } else {
                 format!(
@@ -445,8 +455,10 @@ pub fn zeige_papier(wurzel: &Path) -> ExitCode {
         }
     };
     println!(
-        "[IBKR-Papier] Bargeld {} Cent, abgerechnet {} Cent, verfügbar {} Cent.",
-        a.salden.gesamt.0, a.salden.abgerechnet.0, a.salden.verfuegbar.0
+        "[IBKR-Papier] Bargeld {} Cent, abgerechnet {}, verfügbar {}.",
+        a.salden.gesamt.0,
+        saldo_text(a.salden.abgerechnet),
+        saldo_text(a.salden.verfuegbar)
     );
     for (kontrakt, menge) in a.positionen {
         println!("Position {kontrakt}: {menge} Stück");
@@ -510,8 +522,36 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             salden(&ohne_abgerechnetes_bargeld, "DU1234"),
-            Err("Abgerechnetes Bargeld (SettledCash) fehlt in der Gateway-Antwort."),
+            Ok(Salden {
+                gesamt: Cent(100_000),
+                abgerechnet: None,
+                verfuegbar: Some(Cent(100_000)),
+            }),
         );
+        let nur_gesamt = zeilen
+            .iter()
+            .filter(|zeile| {
+                matches!(
+                    zeile.tag.as_str(),
+                    AccountSummaryTags::TOTAL_CASH_VALUE | "CashBalance"
+                )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            salden(&nur_gesamt, "DU1234"),
+            Ok(Salden {
+                gesamt: Cent(100_000),
+                abgerechnet: None,
+                verfuegbar: None,
+            })
+        );
+        let ohne_gesamt = zeilen
+            .iter()
+            .filter(|zeile| zeile.tag != AccountSummaryTags::TOTAL_CASH_VALUE)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(salden(&ohne_gesamt, "DU1234").is_err());
         zeilen.push(AccountSummary {
             account: "DU1234".into(),
             currency: "USD".into(),
@@ -545,8 +585,8 @@ mod tests {
             salden(&zeilen, "DUR1234"),
             Ok(Salden {
                 gesamt: Cent(100_000),
-                abgerechnet: Cent(100_000),
-                verfuegbar: Cent(100_000),
+                abgerechnet: Some(Cent(100_000)),
+                verfuegbar: Some(Cent(100_000)),
             }),
         );
 

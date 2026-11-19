@@ -11,7 +11,7 @@ use depot_kern::messlatte::ibkr::LANGFRIST;
 use depot_kern::{Isin, Topf, TopfId};
 use depot_regelwerk::Richtung;
 
-use super::{Auszug, hole, kontonummer};
+use super::{Auszug, hole, kontonummer, saldo_text};
 
 fn ordner(wurzel: &Path, konto: &str) -> PathBuf {
     wurzel.join("daten").join("ibkr-papier").join(konto)
@@ -90,7 +90,7 @@ fn kontrakte(text: &str) -> Result<BTreeMap<i32, Isin>, &'static str> {
 }
 
 fn vergleiche(stand: &Stand, a: &Auszug, karte: &BTreeMap<i32, Isin>) -> Result<(), String> {
-    let topf = bereich(stand)?;
+    bereich(stand)?;
     let isin_von = |id| {
         karte
             .get(id)
@@ -137,28 +137,6 @@ fn vergleiche(stand: &Stand, a: &Auszug, karte: &BTreeMap<i32, Isin>) -> Result<
         return Err(format!("Abweichung vom IBKR-Papierjournal: {fehler:?}"));
     }
 
-    let abgerechnet = stand
-        .nicht_gutgeschrieben(TopfId::A)
-        .and_then(|offen| topf.bargeld().checked_sub(offen))
-        .ok_or("Abgerechnetes Bargeld aus Journal nicht berechenbar.")?;
-    let frei = stand
-        .offene_auftraege()
-        .filter(|l| l.zustand.beim_broker() && l.beleg.richtung == Richtung::Kauf)
-        .try_fold(abgerechnet, |saldo, l| {
-            let bindung = l
-                .beleg
-                .limit
-                .mal_stueck(l.offen_stueck())?
-                .checked_add(LANGFRIST.ordergebuehr_max)?;
-            saldo.checked_sub(bindung)
-        })
-        .ok_or("Verfügbare Mittel aus Journal nicht berechenbar.")?;
-    if a.salden.abgerechnet != abgerechnet || a.salden.verfuegbar != frei {
-        return Err(format!(
-            "Abgerechnetes Bargeld, verfügbare Mittel (Cent): Soll {}/{}, IBKR {}/{}.",
-            abgerechnet.0, frei.0, a.salden.abgerechnet.0, a.salden.verfuegbar.0
-        ));
-    }
     Ok(())
 }
 
@@ -171,6 +149,7 @@ pub(crate) fn abgleichen(wurzel: &Path) -> ExitCode {
         let tag = crate::jetzt()
             .and_then(depot_kern::Zeitpunkt::frankfurt_tag)
             .ok_or("Datum nicht verfügbar.")?;
+        let mut saldenbericht = None;
         let vergleich = (|| {
             let text = match std::fs::read_to_string(ordner.join("kontrakte.txt")) {
                 Ok(t) => t,
@@ -178,14 +157,26 @@ pub(crate) fn abgleichen(wurzel: &Path) -> ExitCode {
                 Err(_) => return Err("Kontraktzuordnung unlesbar.".into()),
             };
             let karte = kontrakte(&text)?;
-            vergleiche(journal.stand(), &hole(&konto)?, &karte)
+            let auszug = hole(&konto)?;
+            saldenbericht = Some(format!(
+                "Abgerechnetes Bargeld: {}. Verfügbare Mittel: {}.",
+                saldo_text(auszug.salden.abgerechnet),
+                saldo_text(auszug.salden.verfuegbar),
+            ));
+            vergleiche(journal.stand(), &auszug, &karte)
         })();
-        let beleg = if vergleich.is_ok() {
+        let mut beleg = if vergleich.is_ok() {
             "IBKR-Papierabgleich: ohne Abweichung"
         } else {
             "IBKR-Papierabgleich: Halt"
-        };
-        if journal.beobachte(tag, beleg).is_err() {
+        }
+        .to_owned();
+        if let Some(bericht) = saldenbericht {
+            println!("[IBKR-Papier] {bericht}");
+            beleg.push_str(". ");
+            beleg.push_str(&bericht);
+        }
+        if journal.beobachte(tag, &beleg).is_err() {
             return Err(vergleich.err().map_or_else(
                 || "Der Abgleich konnte nicht im Journal belegt werden.".into(),
                 |e| format!("{e} Der Halt konnte nicht im Journal belegt werden."),
@@ -204,7 +195,7 @@ mod tests {
     use depot_kern::Cent;
 
     #[test]
-    fn erkennt_bargeld_mittel_position_und_fremde_order() -> Result<(), String> {
+    fn nur_gesamtbargeld_positionen_und_orders_muessen_uebereinstimmen() -> Result<(), String> {
         let ordner = std::env::temp_dir().join(format!("depot-ibkr-test-{}", std::process::id()));
         std::fs::create_dir(&ordner).map_err(|e| e.to_string())?;
         let ergebnis = (|| {
@@ -219,8 +210,8 @@ mod tests {
             let mut a = Auszug {
                 salden: Salden {
                     gesamt: start,
-                    abgerechnet: start,
-                    verfuegbar: start,
+                    abgerechnet: Some(start),
+                    verfuegbar: Some(start),
                 },
                 positionen: BTreeMap::new(),
                 orders: Vec::new(),
@@ -230,9 +221,9 @@ mod tests {
             a.salden.gesamt = Cent::NULL;
             assert!(vergleiche(journal.stand(), &a, &karte).is_err());
             a.salden.gesamt = start;
-            a.salden.verfuegbar = Cent::NULL;
-            assert!(vergleiche(journal.stand(), &a, &karte).is_err());
-            a.salden.verfuegbar = start;
+            a.salden.abgerechnet = None;
+            a.salden.verfuegbar = Some(Cent::NULL);
+            assert!(vergleiche(journal.stand(), &a, &karte).is_ok());
             a.positionen.insert(123, 1);
             assert!(vergleiche(journal.stand(), &a, &karte).is_err());
             a.positionen.clear();
