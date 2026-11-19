@@ -2177,7 +2177,8 @@ pub(crate) fn update_aktionen(
     } else if z.auftrag_stand(Art::UpdatePruefen).is_some() {
         s.push_str("<p>Hier erscheint das Ergebnis der Suche.</p>");
     } else if let Some((sha, protokoll)) = z.update_angebot() {
-        let erneut = letzte_update_pause(z) == Some(crate::werkbank::UpdatePause::FreigabeAbgelaufen);
+        let erneut =
+            letzte_update_pause(z) == Some(crate::werkbank::UpdatePause::FreigabeAbgelaufen);
         let knopf = if erneut {
             "Erneut zur Freigabe"
         } else {
@@ -2229,7 +2230,9 @@ pub(crate) fn update_aktionen(
         .letzter_update_lauf()
         .is_some_and(|a| a.art == Art::Update && a.erfolg == Some(false))
     {
-        s.push_str("<p>Details zum fehlgeschlagenen Update stehen unter <a href=\"/\">Live</a>.</p>");
+        s.push_str(
+            "<p>Details zum fehlgeschlagenen Update stehen unter <a href=\"/\">Live</a>.</p>",
+        );
     } else {
         s.push_str("<p>Suche zuerst nach einer neuen Version.</p>");
     }

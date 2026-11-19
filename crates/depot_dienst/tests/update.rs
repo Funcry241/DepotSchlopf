@@ -294,7 +294,10 @@ fn update_freigabe_zeigt_den_grund_und_bietet_nur_nach_fristablauf_dieselbe_vers
         assert!(bestaetige_update(&d)?.contains("m=update#update"));
         assert_eq!(lauf_ab(&d, t)?, Art::Update);
         let html = get(&d, "/teil/update")?;
-        assert!(html.contains(&format!("<p class=\"kopf {klasse}\">")), "{html}");
+        assert!(
+            html.contains(&format!("<p class=\"kopf {klasse}\">")),
+            "{html}"
+        );
         assert!(html.contains(titel), "{html}");
         assert_eq!(
             html.contains(&format!("sha={UPDATE_SHA}\">Erneut zur Freigabe</a>")),
