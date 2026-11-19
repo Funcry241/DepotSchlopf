@@ -93,7 +93,7 @@ fn vergleiche(stand: &Stand, a: &Auszug, karte: &BTreeMap<i32, Isin>) -> Result<
     let topf = bereich(stand)?;
     let isin_von = |id| {
         karte
-            .get(&id)
+            .get(id)
             .ok_or("Für einen Broker-Kontrakt fehlt die ISIN.")
     };
     let bestand = a
