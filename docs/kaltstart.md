@@ -39,7 +39,7 @@ Die Festschreibung gilt in jeder Klasse: Weicht der Baum davon ab, ist das Gate 
 
 ### Lesender IBKR-Papierabruf
 
-Melde im IB Gateway das Papierkonto an. Aktiviere unter den API-Einstellungen die lokalen Socket-Verbindungen auf Port 4002 und lass „Read-Only API“ eingeschaltet. Lege in `daten/ibkr-papierkonto.txt` ausschließlich die Nummer dieses Papierkontos ab. Die Datei bleibt lokal.
+Melde im IB Gateway das Papierkonto an. Aktiviere unter den API-Einstellungen die lokalen Socket-Verbindungen auf Port 4002 und lass „Read-Only API“ eingeschaltet. Lege in `daten/ibkr-papierkonto.txt` ausschließlich die unveränderte Nummer dieses Papierkontos ab. DepotSchlopf akzeptiert `DU` oder `DUR` mit anschließenden Ziffern. Die Datei bleibt lokal.
 
 `run.cmd ibkr papier` liest Bargeld, abgerechnetes Bargeld, verfügbare Mittel, Positionen und offene Orders. Der Befehl zeigt die Werte in der Konsole an. Fehlende Daten, ein anderes Konto oder nicht erlaubte Währungsbestände führen zu einem Fehler. Der Abruf prüft die Kontoart und Handelsrechte noch nicht und führt keinen Journalabgleich durch.
 
