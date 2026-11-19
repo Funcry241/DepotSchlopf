@@ -1,0 +1,7 @@
+klasse: Funktion
+zweck: IBKR-Papierabruf mit einem getrennten Journal abgleichen und das Ergebnis belegen
+pfade:
+crates/depot_sammler/src/ibkr.rs
+crates/depot_sammler/src/ibkr/abgleich.rs
+crates/depot_sammler/src/main.rs
+docs/kaltstart.md

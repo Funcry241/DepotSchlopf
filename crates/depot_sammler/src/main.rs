@@ -705,9 +705,11 @@ fn main() -> ExitCode {
         ["termine"] => termine(&wurzel, &journal),
         ["nachrichten"] => nachrichten(&wurzel, &journal),
         ["ibkr", "papier"] => ibkr::zeige_papier(&wurzel),
+        ["ibkr", "journal-einrichten"] => ibkr::abgleich::einrichten(&wurzel),
+        ["ibkr", "abgleichen"] => ibkr::abgleich::abgleichen(&wurzel),
         _ => {
             eprintln!(
-                "Aufruf: run.cmd kurse [xetra|nyse|diagnose] | run.cmd kurse einrichten | run.cmd nachrichten | run.cmd termine | run.cmd ibkr papier"
+                "Aufruf: run.cmd kurse [xetra|nyse|diagnose] | run.cmd kurse einrichten | run.cmd nachrichten | run.cmd termine | run.cmd ibkr [papier|journal-einrichten|abgleichen]"
             );
             ExitCode::from(2)
         }
