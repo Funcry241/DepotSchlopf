@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use depot_journal::anbieter::{self, Eintrag, Ergebnis, Wer};
 use depot_journal::gespraeche::{self, Gespraech};
@@ -182,7 +182,12 @@ fn antwort(text: &str, e: &mut Gespraech) -> Option<String> {
     (!t.is_empty()).then_some(t)
 }
 
-fn reserviere(daten: &Path, tag: Datum, digest: &str, vorrang: bool) -> Result<File, &'static str> {
+fn reserviere(
+    daten: &Path,
+    tag: Datum,
+    digest: &str,
+    vorrang: bool,
+) -> Result<(File, usize), &'static str> {
     let pfad = gespraeche::gemini_kontingent(daten, tag);
     let mut f = OpenOptions::new()
         .read(true)
@@ -214,13 +219,18 @@ fn reserviere(daten: &Path, tag: Datum, digest: &str, vorrang: bool) -> Result<F
     } else {
         TAGESGRENZE.saturating_sub(RUECKLAGE)
     };
-    if bisher.lines().count() >= grenze {
+    let frei = grenze.saturating_sub(bisher.lines().count());
+    if frei == 0 {
         return Err("Tagesgrenze erreicht");
     }
+    vermerke_aufruf(&mut f, digest)?;
+    Ok((f, frei.saturating_sub(1)))
+}
+
+fn vermerke_aufruf(f: &mut File, digest: &str) -> Result<(), &'static str> {
     writeln!(f, "{digest}")
         .and_then(|()| f.sync_all())
-        .map_err(|_| "Kontingent nicht gespeichert")?;
-    Ok(f)
+        .map_err(|_| "Kontingent nicht gespeichert")
 }
 
 fn sauber(text: &str, schluessel: &Schluessel) -> bool {
@@ -233,7 +243,10 @@ fn senden(
     frage: &str,
     liste: &Universum,
     e: &mut Gespraech,
-) {
+) -> Option<Duration> {
+    e.http = None;
+    e.fehler = None;
+    e.kosten_cent = None;
     let adresse = format!("{HOST}/v1beta/models/{MODELL}:generateContent");
     let kopf = [
         ("x-goog-api-key", schluessel.als_str()),
@@ -242,7 +255,7 @@ fn senden(
     let Ok(r) = netz.sende(&adresse, &kopf, anfrage(frage).as_bytes()) else {
         e.ergebnis = "netz".into();
         e.fehler = Some("Keine Gemini-Antwort erhalten.".into());
-        return;
+        return None;
     };
     e.http = Some(r.status);
     e.kosten_cent = Some(0);
@@ -274,6 +287,25 @@ fn senden(
             .kurz()
             .into();
         e.fehler = Some(format!("Gemini meldet HTTP {}.", r.status));
+        if r.status == 503 {
+            return Some(Duration::from_secs(r.warten.unwrap_or(2).max(2)));
+        }
+    }
+    None
+}
+
+fn vermerke_anbieter(daten: &Path, e: &Gespraech) {
+    let Some(http) = e.http else {
+        return;
+    };
+    let ergebnis = if http == 200 {
+        Ergebnis::Ok
+    } else {
+        Ergebnis::aus_kurz(&e.ergebnis).unwrap_or(Ergebnis::Fehler)
+    };
+    let eintrag = Eintrag::neu(e.zeit, Wer::Gemini, ergebnis, Some(http));
+    if let Err(f) = anbieter::anhaengen(&daten.join(anbieter::DATEI), &eintrag) {
+        eprintln!("[Hinweis] Gemini-Anbieterstatus nicht gespeichert: {f}");
     }
 }
 
@@ -335,16 +367,41 @@ pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum
         if !sauber(&frage, &schluessel) {
             return Err("Nachrichten enthalten Zugangsdaten".into());
         }
-        let mut kontingent = reserviere(daten, tag, &kennung(&frage), vorrang)?;
+        let digest = kennung(&frage);
+        let (mut kontingent, weitere) = reserviere(daten, tag, &digest, vorrang)?;
         e.system = Some(SYSTEM.into());
         e.frage = Some(frage.clone());
-        senden(
-            &mut Https::mit_zeitgrenze(FRIST),
-            &schluessel,
-            &frage,
-            universum,
-            &mut e,
-        );
+        let beginn = Instant::now();
+        let mut rest = FRIST;
+        let wiederholungen = weitere.min(2);
+        for versuch in 0..=wiederholungen {
+            let warten = senden(
+                &mut Https::mit_zeitgrenze(rest),
+                &schluessel,
+                &frage,
+                universum,
+                &mut e,
+            );
+            vermerke_anbieter(daten, &e);
+            let Some(warten) = warten.filter(|&d| {
+                versuch < wiederholungen && d < FRIST.saturating_sub(beginn.elapsed())
+            }) else {
+                break;
+            };
+            std::thread::sleep(warten);
+            rest = FRIST.saturating_sub(beginn.elapsed());
+            if rest.is_zero()
+                || jetzt
+                    .sekunden()
+                    .checked_add(i64::try_from(beginn.elapsed().as_secs()).unwrap_or(i64::MAX))
+                    .and_then(Zeitpunkt::aus_sekunden)
+                    .and_then(Zeitpunkt::frankfurt_tag)
+                    != Some(tag)
+            {
+                break;
+            }
+            vermerke_aufruf(&mut kontingent, &digest)?;
+        }
         if matches!(e.ergebnis.as_str(), "guthaben" | "kosten")
             && writeln!(kontingent, "anbietersperre")
                 .and_then(|()| kontingent.sync_all())
@@ -356,17 +413,6 @@ pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum
     })();
     if let Err(grund) = resultat {
         e.fehler = Some(grund);
-    }
-    if let Some(http) = e.http {
-        let ergebnis = if http == 200 {
-            Ergebnis::Ok
-        } else {
-            Ergebnis::aus_kurz(&e.ergebnis).unwrap_or(Ergebnis::Fehler)
-        };
-        let eintrag = Eintrag::neu(e.zeit, Wer::Gemini, ergebnis, Some(http));
-        if let Err(f) = anbieter::anhaengen(&daten.join(anbieter::DATEI), &eintrag) {
-            eprintln!("[Hinweis] Gemini-Anbieterstatus nicht gespeichert: {f}");
-        }
     }
     if let Err(f) = gespraeche::anhaengen(daten, &e) {
         eprintln!("[Hinweis] Gemini-Gespräch nicht gespeichert: {f}");
@@ -681,13 +727,25 @@ mod tests {
             warten: None,
         }));
         let schluessel = Schluessel::fuer_gemini(concat!("AQ.", "erfundener-schluessel-12345"))?;
-        senden(&mut netz, &schluessel, &frage, &liste, &mut e);
+        assert_eq!(senden(&mut netz, &schluessel, &frage, &liste, &mut e), None);
         assert!(netz.0.is_none());
         assert_eq!(e.modell, "gemini-test");
         assert_eq!(e.ergebnis, "ok");
         assert_eq!(e.token_aus, Some(100));
         assert_eq!(e.kosten_cent, Some(0));
         assert_eq!(e.antwort.as_deref(), Some(text.as_str()));
+
+        for (status, erwartet) in [(503, Some(Duration::from_secs(9))), (429, None)] {
+            let mut netz = Netzprobe(Some(Rueckmeldung {
+                status,
+                inhalt: Vec::new(),
+                warten: Some(9),
+            }));
+            assert_eq!(
+                senden(&mut netz, &schluessel, &frage, &liste, &mut e),
+                erwartet
+            );
+        }
         Ok(())
     }
 
@@ -699,9 +757,13 @@ mod tests {
         std::fs::create_dir(&daten).map_err(|e| e.to_string())?;
         let ergebnis = (|| {
             let tag = Datum::lies("2026-11-10").ok_or("Datum")?;
-            drop(reserviere(&daten, tag, &kennung("0"), false)?);
-            assert!(reserviere(&daten, tag, &kennung("0"), false).is_err());
-            for n in 1..5 {
+            let digest = kennung("0");
+            let (mut kontingent, weitere) = reserviere(&daten, tag, &digest, false)?;
+            assert_eq!(weitere, 2);
+            vermerke_aufruf(&mut kontingent, &digest)?;
+            drop(kontingent);
+            assert!(reserviere(&daten, tag, &digest, false).is_err());
+            for n in 2..5 {
                 if n == 3 {
                     assert_eq!(
                         reserviere(&daten, tag, &kennung("3"), false).err(),
