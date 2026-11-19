@@ -221,6 +221,7 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
             protokoll: Vec::new(),
             hinweis: None,
             frueher: Frueher::Nein,
+            update_pause: None,
         });
     }
     let html = get(&d, "/teil/live", zeit);
@@ -319,6 +320,7 @@ fn gemini_ohne_anfrage_hat_eigenen_lauf_und_keine_erfolgsmeldung() -> Result<(),
         protokoll: Vec::new(),
         hinweis: None,
         frueher: Frueher::Nein,
+        update_pause: None,
     });
     anhaengen(
         &d.wurzel.join("daten"),

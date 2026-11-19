@@ -218,6 +218,7 @@ fn lies_bis(text: &[u8], max: usize) -> Geladen {
                 protokoll: vec![protokoll.to_string()],
                 hinweis: None,
                 frueher,
+                update_pause: None,
             }
         })
         .collect();

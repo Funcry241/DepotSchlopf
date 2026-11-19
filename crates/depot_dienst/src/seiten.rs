@@ -1005,6 +1005,9 @@ fn protokoll(a: &Auftrag, offen: bool) -> String {
 
 fn ergebnis(a: &Auftrag, z: &Zustand) -> (&'static str, &'static str) {
     if a.art == Art::Update {
+        if let Some(pause) = a.update_pause {
+            return pause.ergebnis();
+        }
         if let Some(e) = z
             .update_ergebnisse
             .iter()
@@ -1155,7 +1158,10 @@ fn taetigkeit(
 }
 
 fn letzter_fehler_hinweis(s: &mut String, z: &Zustand) {
-    if let Some(a) = z.verlauf.iter().find(|a| a.erfolg == Some(false))
+    if let Some(a) = z
+        .verlauf
+        .iter()
+        .find(|a| a.erfolg == Some(false) && a.update_pause.is_none())
         && let Some(fehler) = crate::protokoll::letzter_fehler(&a.protokoll)
     {
         let _ = write!(
@@ -1265,6 +1271,12 @@ fn update_hinweis(z: &Zustand, sperre: Option<&UpdateSperre>, jetzt: Option<Zeit
     if let Some(sperre) = sperre {
         return sperre.hinweis(z, jetzt);
     }
+    if let Some(pause) = letzte_update_pause(z) {
+        let (klasse, titel) = pause.ergebnis();
+        return format!(
+            "<p class=\"kopf {klasse}\"><strong>{titel}</strong>. Dein bisheriger Stand läuft weiter.</p>"
+        );
+    }
     match &z.update_meldung {
         Some((fehler, text)) => format!(
             "<p class=\"kopf {}\">{}</p>",
@@ -1285,6 +1297,13 @@ fn update_hinweis(z: &Zustand, sperre: Option<&UpdateSperre>, jetzt: Option<Zeit
         ),
         None => String::new(),
     }
+}
+
+fn letzte_update_pause(z: &Zustand) -> Option<crate::werkbank::UpdatePause> {
+    if z.auftrag_stand(Art::Update).is_some() || z.auftrag_stand(Art::UpdatePruefen).is_some() {
+        return None;
+    }
+    z.letzter_update_lauf()?.update_pause
 }
 
 fn gesamtstatus_teil(token: &str, z: &Zustand, einrichtung: bool) -> String {
@@ -2158,6 +2177,12 @@ pub(crate) fn update_aktionen(
     } else if z.auftrag_stand(Art::UpdatePruefen).is_some() {
         s.push_str("<p>Hier erscheint das Ergebnis der Suche.</p>");
     } else if let Some((sha, protokoll)) = z.update_angebot() {
+        let erneut = letzte_update_pause(z) == Some(crate::werkbank::UpdatePause::FreigabeAbgelaufen);
+        let knopf = if erneut {
+            "Erneut zur Freigabe"
+        } else {
+            "Update einspielen"
+        };
         s.push_str("<p>Eine neue Version ist verfügbar.</p><ul>");
         for titel in protokoll.iter().filter_map(|z| z.strip_prefix("  ")) {
             let _ = write!(s, "<li>{}</li>", maskiere(titel));
@@ -2169,20 +2194,24 @@ pub(crate) fn update_aktionen(
         {
             let _ = write!(
                 s,
-                "<p>Neue Abhängigkeiten: {}</p><p>Beim Einspielen ist eine Bestätigung am Windows-Desktop nötig.</p>",
+                "<p>Neue Abhängigkeiten: {}</p><p>Beim Einspielen hast du zwei Minuten für die Bestätigung am Windows-Desktop.</p>",
                 maskiere(hinweis)
             );
         }
+        if erneut {
+            s.push_str("<p>DepotSchlopf prüft vor der erneuten Freigabe, ob dieselbe Version noch verfügbar ist.</p>");
+        }
         if z.update_wartet_auf_ruhe() {
-            s.push_str(
-                "<p><button type=\"button\" disabled>Update einspielen</button> \
-                 Möglich, sobald kein anderer Auftrag mehr läuft oder wartet.</p>",
+            let _ = write!(
+                s,
+                "<p><button type=\"button\" disabled>{knopf}</button> \
+                 Möglich, sobald kein anderer Auftrag mehr läuft oder wartet.</p>"
             );
         } else {
             let _ = write!(
                 s,
                 "<p>{}</p>",
-                bestaetigungslink(Art::Update, "Update einspielen", Some(sha), true)
+                bestaetigungslink(Art::Update, knopf, Some(sha), true)
             );
         }
     } else if let Some(a) = z
@@ -2194,11 +2223,13 @@ pub(crate) fn update_aktionen(
         } else {
             s.push_str("<p>Die Suche konnte nicht abgeschlossen werden. Details stehen unter <a href=\"/\">Live</a>.</p>");
         }
+    } else if letzte_update_pause(z).is_some() {
+        s.push_str("<p>Klicke auf „Nach Update suchen“, um die aktuelle Version zu prüfen.</p>");
     } else if z
         .letzter_update_lauf()
         .is_some_and(|a| a.art == Art::Update && a.erfolg == Some(false))
     {
-        s.push_str("<p>Das Update wurde abgebrochen. Sieh unter <a href=\"/\">Live</a> nach und starte bei Bedarf eine neue Suche.</p>");
+        s.push_str("<p>Details zum fehlgeschlagenen Update stehen unter <a href=\"/\">Live</a>.</p>");
     } else {
         s.push_str("<p>Suche zuerst nach einer neuen Version.</p>");
     }
