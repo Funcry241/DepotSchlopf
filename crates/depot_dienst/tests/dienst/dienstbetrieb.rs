@@ -231,6 +231,90 @@ fn bestaetigter_dialog_hebt_keine_inzwischen_geaenderte_sperre_auf() -> Result<(
     Ok(())
 }
 
+#[test]
+fn desktopdialog_gibt_http_frei_und_verwirft_einen_geaenderten_stand() -> Result<(), String> {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let t = donnerstag(18, 0)?;
+    let limit = Duration::from_secs(5);
+    for ordnerwahl in [false, true] {
+        let wurzel = ordner()?;
+        let d = dienst(wurzel.clone(), true);
+        let halt = kostenschutz::pfad(&wurzel);
+        let neues_ziel = format!("{}\n", wurzel.join("neues-ziel").display());
+        let ziel_datei = wurzel.join("daten/sicherung_ziel.txt");
+        let post = if ordnerwahl {
+            formular_post("/sicherung-ziel", &format!("t={TOKEN}&aktion=waehlen"))
+        } else {
+            fs::write(&halt, "Alte Sperre").map_err(|e| e.to_string())?;
+            aufheben(&kostenschutz::abdruck("Alte Sperre"), true)
+        };
+        let (offen, gestartet) = mpsc::channel();
+        let (freigeben, weiter) = mpsc::channel();
+        let u: Arc<dyn Umwelt> = Arc::new(Attrappe {
+            sperrfreigabe: true,
+            sicherungsziel: Some(wurzel.join("dialog-ziel").to_string_lossy().into_owned()),
+            dialogpause: Some(Dialogpause {
+                offen,
+                weiter: Mutex::new(weiter),
+            }),
+            ..Attrappe::default()
+        });
+        let (http_senden, http_antwort) = mpsc::channel();
+        let (dienst, umwelt, formular) = (Arc::clone(&d), Arc::clone(&u), post.clone());
+        std::thread::spawn(move || {
+            let antwort = depot_dienst::behandle_am_desktop(&dienst, &umwelt, &formular, t);
+            let _ = http_senden.send(text(&antwort));
+        });
+
+        gestartet.recv_timeout(limit).map_err(|e| e.to_string())?;
+        let antwort = http_antwort
+            .recv_timeout(limit)
+            .map_err(|e| e.to_string())?;
+        let ziel = ort(&antwort);
+        assert!(ziel.starts_with("/desktop-dialog?id="), "{antwort}");
+        assert!(get(&d, &ziel, t).contains("Die Antwort steht aus."));
+        let doppelt = depot_dienst::behandle_am_desktop(&d, &u, &post, t);
+        assert_eq!(ort(&text(&doppelt)), ziel);
+        assert!(d.einreihen(Art::Termine, Anlass::Hand).is_ok());
+        let (nr, kind) = some(d.schritt(t), "Auftrag trotz offenem Windows-Dialog")?;
+        d.verfolge(nr, kind, || donnerstag(18, 0).ok());
+
+        if ordnerwahl {
+            fs::write(&ziel_datei, &neues_ziel).map_err(|e| e.to_string())?;
+        } else {
+            fs::write(&halt, "Neue Sperre").map_err(|e| e.to_string())?;
+        }
+        freigeben.send(()).map_err(|e| e.to_string())?;
+        let teil = format!("/teil{ziel}");
+        let bis = std::time::Instant::now() + limit;
+        loop {
+            let html = get(&d, &teil, t);
+            if !html.contains("Die Antwort steht aus.") {
+                assert!(html.contains("hat sich inzwischen geändert"), "{html}");
+                break;
+            }
+            if std::time::Instant::now() >= bis {
+                return Err("Die Dialogantwort fehlt".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if ordnerwahl {
+            assert_eq!(
+                fs::read_to_string(&ziel_datei).map_err(|e| e.to_string())?,
+                neues_ziel
+            );
+        } else {
+            assert_eq!(
+                fs::read_to_string(&halt).map_err(|e| e.to_string())?,
+                "Neue Sperre"
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Die Kurssperre nach einem Sicherheitsabbruch wird wie die Sperre des Kostenschutzes gefuehrt
 /// aufgehoben, nie von Hand geloescht (Hinweis zu #34).
 #[test]

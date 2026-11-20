@@ -20,7 +20,7 @@ Stellen und bestehenden Regressionstests kontrolliert; die neue Oberfläche
 | Kurze Journalsperre wird erneut versucht | `bestaetigung_wiederholt_eine_voruebergehende_journalsperre` |
 | Bestätigung bleibt aus, auch bei Exitcode 0 | `ende_vor_der_bestaetigung_faellt_zurueck_auch_mit_code_0` |
 | Dialogtest ohne Schreiben | `testdialog_ist_ohne_sperre_verfuegbar_und_schreibt_nichts`: unveränderte Journal-, Vermerk- und Konto-Bytes |
-| Nein als Voreinstellung, Abbruch nach 120 Sekunden | `depot_dienst/src/papierdialog.rs`; der echte Windows-Dialog benötigt weiterhin einen sichtbaren Praxistest nach normalem Start und Autostart |
+| Nein als Voreinstellung, Entscheidung ohne Zeitlimit | `depot_dienst/src/papierdialog.rs`; der echte Windows-Dialog benötigt weiterhin einen sichtbaren Praxistest nach normalem Start und Autostart |
 
 Die [externe Sicherung](sicherung.md) kann einen zweiten Datenträger nutzen und räumt
 unfertige Sicherungen nach einem Absturz auf. Für den Windows-Dialog bleibt der sichtbare

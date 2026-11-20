@@ -13,12 +13,14 @@ fn zielpfad(wurzel: &Path) -> PathBuf {
 }
 
 pub fn ziel(wurzel: &Path) -> String {
-    lies_falls_da(&zielpfad(wurzel))
-        .ok()
-        .flatten()
+    ziel_lesen(wurzel).unwrap_or_default()
+}
+
+pub(crate) fn ziel_lesen(wurzel: &Path) -> Result<String, String> {
+    Ok(lies_falls_da(&zielpfad(wurzel))?
         .unwrap_or_default()
         .trim_end_matches(['\r', '\n'])
-        .to_owned()
+        .to_owned())
 }
 
 /// Das Ziel war gestern um 23:30 eingerichtet, und es gab keinen Versuch.

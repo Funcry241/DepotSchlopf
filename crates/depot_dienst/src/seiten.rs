@@ -228,8 +228,8 @@ fn sperr_meldung(code: &str) -> Option<(&'static str, &'static str)> {
              geprüft und bei Bedarf erneuert hast.",
         ),
         ("dialog_unbestaetigt", _) => (
-            "offen",
-            "Nicht aufgehoben: Der Windows-Dialog wurde nicht innerhalb von zwei Minuten mit Ja bestätigt.",
+            "leise",
+            "Die Sperre bleibt aktiv. Im Windows-Dialog wurde kein Ja erfasst.",
         ),
         ("dialog_belegt", _) => (
             "offen",
@@ -366,9 +366,9 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         ),
         "dialogtest_ja" => ("gut", "Dialogtest: Ja. Es wurde nichts freigegeben."),
         "dialogtest_nein" => ("gut", "Dialogtest: Nein. Es wurde nichts freigegeben."),
-        "dialogtest_zeit" => (
-            "gut",
-            "Dialogtest: Zeit abgelaufen. Es wurde nichts freigegeben.",
+        "sicherung_dialog_abgebrochen" => (
+            "leise",
+            "Die Ordnerwahl wurde geschlossen. Das Sicherungsziel bleibt unverändert.",
         ),
         "dialogtest_fehler" => ("offen", "Der Windows-Dialog konnte nicht geöffnet werden."),
         "dialogtest_belegt" => ("offen", "Es ist bereits ein Freigabedialog geöffnet."),
@@ -377,8 +377,8 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
             "Papierhandel freigegeben. Die neue Verlustmessung beginnt beim bestätigten Bargeld. Der nächste reguläre Papiertag kann wieder handeln.",
         ),
         "papierfreigabe_unbestaetigt" => (
-            "halt",
-            "Die Sperre gilt weiter. Bitte bestätige die neue Verlustmessung ausdrücklich.",
+            "leise",
+            "Die Sperre bleibt aktiv. Zur Freigabe bestätigst du im Formular und im Windows-Dialog.",
         ),
         "papierfreigabe_belegt" => (
             "offen",
@@ -1806,7 +1806,7 @@ fn kostenschutz_teil(token: &str, e: &Einrichtung, s: &mut String) {
          <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
          <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
          Ich habe die Kosten beim Anbieter geprüft.</label>\
-         <p>Bestätige das Aufheben innerhalb von zwei Minuten im Windows-Dialog.</p>\
+         <p>Das Aufheben braucht ein Ja im Windows-Dialog. Du kannst dir Zeit lassen.</p>\
          <button type=\"submit\">Sperre aufheben</button></form></section>",
         maskiere(inhalt),
         KI_VERBINDUNG,
@@ -1879,7 +1879,7 @@ fn kurssperre_teil(token: &str, z: &Zustand, e: &Einrichtung, s: &mut String) {
          <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
          <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> \
          Ich habe den Schlüssel der Kursquelle geprüft und bei Bedarf erneuert.</label>\
-         <p>Bestätige das Aufheben innerhalb von zwei Minuten im Windows-Dialog.</p>\
+         <p>Das Aufheben braucht ein Ja im Windows-Dialog. Du kannst dir Zeit lassen.</p>\
          <button type=\"submit\">Kurssperre aufheben</button></form></section>",
         maskiere(inhalt),
         auftrag_knopf(
@@ -2345,7 +2345,7 @@ fn papierfreigabe_teil(token: &str, e: &Einrichtung, s: &mut String) {
          <p>Die neue Verlustmessung beginnt nach dem Kontenabgleich bei <strong>{}</strong>. \
          Gesamtverlust seit dem historischen Höchststand: <strong>{}</strong>. \
          Der historische Höchststand bleibt erhalten. Nach dem Absenden musst du die Freigabe \
-         innerhalb von zwei Minuten im separaten Windows-Dialog bestätigen.</p>\
+         im separaten Windows-Dialog bestätigen. Du kannst dir Zeit lassen.</p>\
          <form method=\"post\" action=\"/papierfreigabe\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
