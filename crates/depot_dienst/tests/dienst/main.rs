@@ -526,6 +526,7 @@ fn depot_mit_order() -> Result<Arc<Dienst>, String> {
     Ok(dienst(wurzel, true))
 }
 
+mod belegpruefung;
 mod depot;
 mod dienstbetrieb;
 mod einrichtung;

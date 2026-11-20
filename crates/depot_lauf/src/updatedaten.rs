@@ -113,6 +113,7 @@ pub fn lies_sicherung(daten: &Path) -> Result<Datenstand, String> {
             "dienst_erledigt.txt",
             "kurse.halt",
             "gemini.txt",
+            "neuro2026-belegurteile.tsv",
         ],
     )
 }

@@ -42,6 +42,14 @@ Die folgende Tabelle ist der Lösungsschlüssel für den Trockenlauf. Beim Blind
 
 Die automatisierte Gegenprobe `grundrang_holt_einen_gegenbeleg_vor_die_platzgrenze_der_frage` prüft die Sichtbarkeit eines synthetischen Gegenbelegs mit dem vorhandenen Fragegenerator. Sie läuft lokal und verwendet dieselben 45 Kandidaten in beiden Fragen.
 
+## Einen Prüftag in DepotSchlopf bewerten
+
+Unter **Live → NeuroSchlopf** öffnest du die Belegprüfung. Wähle einen Prüftag. DepotSchlopf zeigt dir für jede Bewertung den damaligen Thesentext und einen in der gespeicherten Frage sichtbaren Beleg. Die Reihenfolge ist für denselben Datenstand reproduzierbar gemischt. So kannst du die Prüfung unterbrechen und später beim nächsten offenen Paar fortsetzen.
+
+Entscheide anhand des angezeigten Wortlauts. Stufe 1 genügt, wenn die Meldung einen Treiber der These erwähnt, die Behauptung aber weder bestätigt noch widerlegt. Bei Stufe 2 gibst du zusätzlich die Richtung an. Kannst du den Zusammenhang anhand der Unterlagen nicht beurteilen, wählst du **Unbewertet**. Diese Entscheidung zählt zum Bearbeitungsfortschritt und bleibt für die spätere Messung von Stufe 0 unterscheidbar.
+
+DepotSchlopf speichert die Urteile auf dem Rechner. Die externe Sicherung enthält auch die Bewertungsdatei `daten/neuro2026-belegurteile.tsv`. Darin verweist jede Bewertung auf ihre konkrete historische These und auf den Beleg im Analyse-Export. Die manuelle Prüfung lässt sich auch bei ausgeschaltetem Hintergrundvergleich öffnen.
+
 [Bewertungsregeln in #325](https://github.com/Funcry241/DepotSchlopf/issues/325#issuecomment-6958388675) · [Messplan in #325](https://github.com/Funcry241/DepotSchlopf/issues/325#issuecomment-6958343353)
 
 ## Belegte Modelleingaben im Analyse-Export

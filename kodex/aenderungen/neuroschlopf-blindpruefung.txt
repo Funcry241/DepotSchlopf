@@ -1,0 +1,16 @@
+klasse: Funktion
+zweck: Historische Thesen und sichtbare Quellenbelege in NeuroSchlopf blind bewerten und lokal zuordnen
+pfade:
+crates/depot_dienst/src/belegpruefung.rs
+crates/depot_dienst/src/belegurteile.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/neuroschlopf.rs
+crates/depot_dienst/src/prueftag.rs
+crates/depot_dienst/tests/dienst/belegpruefung.rs
+crates/depot_dienst/tests/dienst/main.rs
+crates/depot_lage/src/blindpruefung.rs
+crates/depot_lage/src/lib.rs
+crates/depot_lauf/src/sicherung.rs
+crates/depot_lauf/src/updatedaten.rs
+crates/depot_sim/src/papiertag.rs
+docs/neuroschlopf/prueffaelle.md

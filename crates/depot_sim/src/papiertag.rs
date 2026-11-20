@@ -263,6 +263,16 @@ pub fn weltbelege_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) ->
     aus
 }
 
+/// Wortlaut eines Termins in der Frage; die Veröffentlichung selbst ist nicht datiert.
+pub fn termin_text(t: &depot_kern::Termin) -> Option<String> {
+    Some(format!(
+        "Termin {}: {} ({})",
+        datum_text(t.zeit().tag()?),
+        t.titel(),
+        t.verlaesslichkeit().name()
+    ))
+}
+
 fn termine_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<String> {
     let Some(von) = tagesbeginn(handelstag) else {
         return Vec::new();
@@ -282,17 +292,8 @@ fn termine_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<St
             let t = b.termin();
             let tag = t.zeit().tag()?;
             let s = tagesbeginn(tag)?;
-            (s >= von && bis.is_some_and(|bis| s <= bis)).then(|| {
-                (
-                    tag,
-                    format!(
-                        "Termin {}: {} ({})",
-                        datum_text(tag),
-                        t.titel(),
-                        t.verlaesslichkeit().name()
-                    ),
-                )
-            })
+            (s >= von && bis.is_some_and(|bis| s <= bis)).then_some(())?;
+            Some((tag, termin_text(t)?))
         })
         .collect();
     aus.sort();
@@ -463,10 +464,18 @@ pub fn nachricht_text(n: &NachrichtBeleg) -> Option<String> {
 pub fn nachricht_anzeige(zeit: Zeitpunkt, quelle: &str, text: &str) -> Option<String> {
     let werte = depot_kern::liste::beobachtungsliste().unwrap_or_default();
     let markierung = crate::nachrichtenbezug::bezug(text, &werte).markierung();
+    Some(format!(
+        "{}{markierung}",
+        nachricht_ohne_markierung(zeit, quelle, text)?
+    ))
+}
+
+/// Unveränderlicher Quellenwortlaut einschließlich Zeit und Quelle, vor der veränderlichen Wertezuordnung.
+pub fn nachricht_ohne_markierung(zeit: Zeitpunkt, quelle: &str, text: &str) -> Option<String> {
     let (h, m, _) = zeit.uhrzeit()?;
     let d = zeit.datum()?;
     Some(format!(
-        "Nachricht {} {h:02}:{m:02} UTC ({quelle}): {text}{markierung}",
+        "Nachricht {} {h:02}:{m:02} UTC ({quelle}): {text}",
         datum_text(d)
     ))
 }
