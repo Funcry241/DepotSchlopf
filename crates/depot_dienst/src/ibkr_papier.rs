@@ -135,6 +135,11 @@ pub(crate) fn status(d: &Dienst) -> String {
             );
         }
     }
+    s.push_str(
+        "<p class=\"leise\">Lass das IBKR Gateway im Paper-Trading geöffnet. Empfohlen ist ein \
+         automatischer Neustart um <b>03:00 Uhr Ortszeit</b>. Nach dem wöchentlichen IBKR-Reset \
+         am Wochenende meldest du dich wieder von Hand an.</p>",
+    );
     s.push_str(&crate::seiten::auftrag_knopf(
         &d.token,
         &z,
@@ -163,6 +168,8 @@ pub(crate) fn einrichtung(d: &Dienst, abfrage: &str, konto_gespeichert: bool) ->
          Falls es noch nicht installiert ist, <a href=\"https://ndcdyn.interactivebrokers.com/en/trading/ibgateway-latest.php\">lade das Gateway bei IBKR herunter</a>.</li>\
          <li>Prüfe im Gateway unter <b>Konfigurieren → Einstellungen → API → Einstellungen</b> den Socket-Port <b>4002</b>. \
          Aktiviere <b>Schreibgeschützte API</b> und <b>Nur Verbindungen vom lokalen Host zulassen</b>. Lass das Gateway geöffnet und warte auf <b>verbunden</b>.</li>\
+         <li>Wähle im Gateway <b>Konfigurieren → Einstellungen → Sperren und schließen → Automatischer Neustart</b>. \
+         Stelle <b>03:00 Uhr Ortszeit</b> ein. Im 12-Stunden-Format wählst du <b>03:00 AM</b>. Klicke auf <b>Übernehmen</b>.</li>\
          <li>Für den Journalstart sind <b>1.000 €</b> vorgesehen. Öffne bei abweichendem Bargeldbestand im Client Portal den <b>Paper-Modus</b> und suche in den <b>Einstellungen</b> nach <b>Paper Trading Account Reset</b>. Prüfe dort, ob IBKR 1.000 € in EUR anbietet.</li></ol>";
     let formular = format!(
         "<form method=\"post\" action=\"/ibkr-papier\">\

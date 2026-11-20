@@ -441,7 +441,7 @@ pub fn pruefe_papier(wurzel: &Path) -> ExitCode {
                     "Vergleiche die Nummer unter „Paper Trading Account“ im Client Portal und speichere sie hier erneut."
                 }
                 GATEWAY_NICHT_BEREIT => {
-                    "Öffne das lokale IB Gateway mit „IB API“ und „Paper-Trading“. Prüfe Port 4002 und warte auf „verbunden“."
+                    "Öffne das IBKR Gateway mit „IB API“ und melde dich im „Paper-Trading“ an. Prüfe Port 4002. Sobald „verbunden“ angezeigt wird, klicke in DepotSchlopf erneut auf „Papierabruf testen“."
                 }
                 KONTOLISTE_FEHLT
                 | KONTOLISTE_TIMEOUT
