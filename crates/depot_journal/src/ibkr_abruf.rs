@@ -105,6 +105,18 @@ pub fn vermerken(wurzel: &Path, konto: &str, abruf: Option<(Zeitpunkt, Cent)>) -
         .truncate(false)
         .open(sperrpfad)?;
     sperre.try_lock().map_err(io::Error::from)?;
+    let ergebnis = vermerken_gesperrt(wurzel, konto, abruf, &ziel);
+    // Ein gleichzeitig gestarteter Kindprozess kann die Datei bis zum exec erben.
+    let _ = sperre.unlock();
+    ergebnis
+}
+
+fn vermerken_gesperrt(
+    wurzel: &Path,
+    konto: &str,
+    abruf: Option<(Zeitpunkt, Cent)>,
+    ziel: &Path,
+) -> io::Result<()> {
     let erfolg = match abruf {
         Some(neu) => Some(neu),
         None => lesen(wurzel, konto)?.and_then(|alt| alt.erfolg),
@@ -127,5 +139,5 @@ pub fn vermerken(wurzel: &Path, konto: &str, abruf: Option<(Zeitpunkt, Cent)>) -
     datei.write_all(text.as_bytes())?;
     datei.sync_all()?;
     drop(datei);
-    crate::dateiersatz::ersetze(&neben, &ziel)
+    crate::dateiersatz::ersetze(&neben, ziel)
 }

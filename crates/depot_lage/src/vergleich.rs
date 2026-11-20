@@ -224,19 +224,24 @@ pub fn vergleich_bis(s: &Stand, werte: &[Wert], bis: Option<Datum>) -> Option<Ve
 }
 
 /// Modellierter Wert bei Verkauf am Ende des Zeitraums, mit ganzen Stücken und Restbargeld.
-pub fn eunl(stand: &Stand, von: Datum, bis: Datum) -> Option<Cent> {
+///
+/// # Errors
+/// Wenn ein Kurs zum Stichtag fehlt oder das Modell nicht berechnet werden kann.
+pub fn eunl(stand: &Stand, von: Datum, bis: Datum) -> Result<Cent, String> {
     let profil = depot_kern::messlatte::ibkr::LANGFRIST;
-    let isin = Isin::neu(profil.etf_isin).ok()?;
-    let mut liste = depot_kern::liste::beobachtungsliste().ok()?;
+    let isin = Isin::neu(profil.etf_isin).map_err(|_| "Die EUNL-ISIN ist ungültig.")?;
+    let mut liste = depot_kern::liste::beobachtungsliste()
+        .map_err(|_| "Die Beobachtungsliste ist nicht lesbar.")?;
     liste.retain(|wert| wert.isin == isin);
     let universum = als_universum(&liste);
     let kurs = |tag| {
         tageskurse_am(stand, &universum, tag)
-            .ok()?
-            .heute
-            .kurs(&isin)
+            .ok()
+            .and_then(|kurse| kurse.heute.kurs(&isin))
+            .ok_or_else(|| format!("Zum Depotabschluss am {tag} fehlt ein belegter EUNL-Kurs."))
     };
     eunl_modell(kurs(von)?, kurs(bis)?)
+        .ok_or_else(|| "Der EUNL-Modellwert kann nicht berechnet werden.".into())
 }
 
 fn eunl_modell(einstieg: Preis, ausstieg: Preis) -> Option<Cent> {
