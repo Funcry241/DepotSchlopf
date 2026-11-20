@@ -101,14 +101,7 @@ fn unabhaengiges_urteil_bleibt_nach_neustart_einmalig_erhalten() -> Result<(), S
     let anfang = get(&d, PFAD, zeit);
     assert!(anfang.contains("Bearbeitet <b>0 von 2</b>"));
     assert!(anfang.contains("Das SAP-Cloudgeschäft wächst."));
-    for urteil in [
-        "0",
-        "1",
-        "2-stützt",
-        "2-widerlegt",
-        "2-offen",
-        "unbewertet",
-    ] {
+    for urteil in ["0", "1", "2-stützt", "2-widerlegt", "2-offen", "unbewertet"] {
         assert!(anfang.contains(&format!("name=\"urteil\" value=\"{urteil}\"")));
     }
     assert!(anfang.contains("testquelle") && anfang.contains("Institut meldet &lt;"));
