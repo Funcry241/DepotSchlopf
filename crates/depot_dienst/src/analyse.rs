@@ -23,7 +23,7 @@ mod journal;
 mod ki_kosten;
 mod leerlauf;
 mod leistung;
-mod massstab;
+pub(crate) mod massstab;
 mod nachher;
 mod orders;
 mod pruefbericht;

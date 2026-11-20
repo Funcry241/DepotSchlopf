@@ -185,14 +185,14 @@ fn konsole_stil_hell_dunkel() -> Result<(), String> {
 }
 
 #[test]
-fn app_js_unveraendert() -> Result<(), String> {
+fn app_js_liefert_die_gepruefte_fassung() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let antwort = get(&d, "/app.js", donnerstag(12, 0)?);
     let (_, js) = some(antwort.split_once("\r\n\r\n"), "HTTP-Antwort")?;
-    // SHA-256 des ausgelieferten Skripts vor dem Umzug.
+    // SHA-256 der geprüften Fassung mit €STR-Import.
     assert_eq!(
         depot_kern::abdruck::sha256_hex(js.as_bytes()),
-        "5828f6e0ee97f749dada24041aaf3cc7304484b38d252f54a3cbdf7191a64fd2"
+        "7ec79ee72f2eb9fffcde340e9172a9778e5429bf70aefdd856969ae819330028"
     );
     Ok(())
 }

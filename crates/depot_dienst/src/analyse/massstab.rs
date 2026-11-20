@@ -7,11 +7,18 @@ use std::path::Path;
 use depot_journal::Stand;
 use depot_kern::messlatte::ibkr::LANGFRIST;
 use depot_kern::{Cent, Datum};
-use depot_lage::vergleich::{eunl, rendite_bp};
+use depot_lage::{
+    html::maskiere,
+    vergleich::{eunl, rendite_bp},
+};
 
 use super::{geld, prozent, textdatei};
+use crate::http::{self, Anfrage};
+use crate::werkbank::{Art, Dienst, schreibe_ganz};
 
 const ESTR_SERIE: &str = "EST.B.EU000A2QQF08.CI";
+const ESTR_DATEI: &str = "estr-index.csv";
+const EZB_CSV: &str = "https://data-api.ecb.europa.eu/service/data/EST/B.EU000A2QQF08.CI?format=csvdata&amp;detail=dataonly";
 
 fn indexwert(text: &str) -> Option<i128> {
     let (ganz, nachkomma) = text.split_once('.').unwrap_or((text, ""));
@@ -60,6 +67,9 @@ fn indexreihe(csv: &str) -> Result<BTreeMap<Datum, i128>, &'static str> {
             return Err("Ein Stichtag kommt mehrfach vor.");
         }
     }
+    if reihe.is_empty() {
+        return Err("Die Datei enthält keine Indexstände.");
+    }
     Ok(reihe)
 }
 
@@ -82,11 +92,87 @@ fn estr(csv: &str, von: Datum, bis: Datum) -> Result<Cent, String> {
     Ok(Cent(cent))
 }
 
-fn estr_aus_datei(daten: &Path, von: Datum, bis: Datum) -> Result<Cent, String> {
-    let csv = textdatei(&daten.join("estr-index.csv"))
+fn estr_datei(daten: &Path) -> Result<String, String> {
+    textdatei(&daten.join(ESTR_DATEI))
         .map_err(|grund| format!("daten/estr-index.csv konnte nicht gelesen werden ({grund})."))?
-        .ok_or("Die lokale Datei daten/estr-index.csv fehlt.")?;
-    estr(&csv, von, bis)
+        .ok_or_else(|| "Die lokale Datei daten/estr-index.csv fehlt.".into())
+}
+
+fn zeitraum(reihe: &BTreeMap<Datum, i128>) -> Option<String> {
+    let ((von, _), (bis, _)) = reihe.first_key_value().zip(reihe.last_key_value())?;
+    Some(format!(
+        "{} Indexstände vom {von} bis {bis} gespeichert.",
+        reihe.len()
+    ))
+}
+
+pub(crate) fn einrichtung(d: &Dienst) -> String {
+    let stand = estr_datei(&d.wurzel.join("daten")).and_then(|csv| {
+        let reihe = indexreihe(&csv)?;
+        zeitraum(&reihe).ok_or_else(|| "Die Datei enthält keine Indexstände.".into())
+    });
+    let (klasse, stand) = match stand {
+        Ok(stand) => ("gut", stand),
+        Err(grund) => ("leise", grund),
+    };
+    format!(
+        "<section id=\"estr-index\"><h2>€STR für den Analyse-Export</h2>\
+         <p><a href=\"{EZB_CSV}\" target=\"_blank\" rel=\"noopener\">EZB-Indexreihe als CSV herunterladen</a> und die Datei hier auswählen.</p>\
+         <form action=\"{}\" method=\"post\" data-estr-import=\"{}\">\
+         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <label>EZB-CSV <input type=\"file\" accept=\".csv,text/csv\" required></label>\
+         <button type=\"submit\">€STR-CSV importieren</button>\
+         <p class=\"{klasse}\" role=\"status\">{}</p></form></section>",
+        http::ESTR_IMPORT,
+        http::ESTR_MAX,
+        maskiere(&d.token),
+        maskiere(&stand),
+    )
+}
+
+pub(crate) fn importieren(d: &Dienst, a: &Anfrage) -> Vec<u8> {
+    let antwort =
+        |code, text: &str| http::antwort(code, "text/plain; charset=utf-8", text.as_bytes());
+    if !http::herkunft_erlaubt(a.kopf("origin")) {
+        return antwort(403, "Abgelehnt: fremde Herkunft.");
+    }
+    if !a
+        .kopf("x-depotschlopf-token")
+        .is_some_and(|t| http::gleich(t, &d.token))
+    {
+        return antwort(
+            403,
+            "Diese Seite ist veraltet. Öffne die Einrichtung erneut.",
+        );
+    }
+    if a.rumpf.len() > http::ESTR_MAX {
+        return antwort(413, "Die CSV ist größer als 2 MiB.");
+    }
+    if a.kopf("content-type") != Some("text/csv") {
+        return antwort(400, "Wähle die EZB-CSV in der Einrichtung aus.");
+    }
+    let Ok(csv) = std::str::from_utf8(&a.rumpf) else {
+        return antwort(400, "Die CSV ist nicht als UTF-8 lesbar.");
+    };
+    let reihe = match indexreihe(csv) {
+        Ok(reihe) => reihe,
+        Err(grund) => return antwort(400, grund),
+    };
+    let Some(stand) = zeitraum(&reihe) else {
+        return antwort(400, "Die Datei enthält keine Indexstände.");
+    };
+    let ziel = d.wurzel.join("daten").join(ESTR_DATEI);
+    let zustand = d.sperre();
+    if zustand.neustart || zustand.auftrag_stand(Art::Update).is_some() || d.update_offen() {
+        return antwort(
+            409,
+            "Warte, bis das Update abgeschlossen ist, und importiere die CSV erneut.",
+        );
+    }
+    if schreibe_ganz(&ziel, csv).is_err() {
+        return antwort(409, "Die €STR-CSV konnte nicht gespeichert werden.");
+    }
+    antwort(200, &stand)
 }
 
 pub(super) fn bericht(daten: &Path, stand: &Stand, werte: &BTreeMap<Datum, Cent>) -> String {
@@ -101,7 +187,7 @@ pub(super) fn bericht(daten: &Path, stand: &Stand, werte: &BTreeMap<Datum, Cent>
         return text;
     };
     let etf = eunl(stand, von, bis);
-    let geldmarkt = estr_aus_datei(daten, von, bis);
+    let geldmarkt = estr_datei(daten).and_then(|csv| estr(&csv, von, bis));
     let render = |wert: Option<Cent>| {
         format!(
             "{} | {}",

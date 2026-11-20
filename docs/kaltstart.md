@@ -49,4 +49,4 @@ Mit `run.cmd ibkr journal-einrichten` legst du je Papierkonto ein separates Jour
 
 ### Vergleichsmaßstäbe im Analyse-Export
 
-Der Analyse-Export zeigt EUNL und den verzinsten €STR-Vergleich zwischen dem ersten und letzten belegten Depotabschluss im gewählten Zeitraum. EUNL nutzt die vorhandenen Journal-Kursbelege. Lege für €STR die [EZB-Indexreihe im CSV-Format](https://data-api.ecb.europa.eu/service/data/EST/B.EU000A2QQF08.CI?format=csvdata&detail=dataonly) als `daten/estr-index.csv` ab. Der Export erwartet die Spalten `KEY`, `TIME_PERIOD` und `OBS_VALUE` und braucht für beide Stichtage einen Indexstand. Die Datei bleibt lokal.
+Der Analyse-Export zeigt EUNL und den verzinsten €STR-Vergleich zwischen dem ersten und letzten belegten Depotabschluss im gewählten Zeitraum. EUNL nutzt die vorhandenen Journal-Kursbelege. Öffne für €STR **Einrichtung → €STR für den Analyse-Export**. Lade dort die EZB-Indexreihe als CSV herunter, wähle die Datei aus und klicke auf **€STR-CSV importieren**. DepotSchlopf prüft die Indexreihe, speichert sie lokal und zeigt den verfügbaren Zeitraum. Für den Vergleich braucht der Export an beiden Stichtagen einen Indexstand.

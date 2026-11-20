@@ -1,0 +1,11 @@
+klasse: Funktion
+zweck: Die veröffentlichte EZB-Indexreihe in der Einrichtung als CSV importieren und den belegten Zeitraum anzeigen
+pfade:
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/analyse/massstab.rs
+crates/depot_dienst/src/assets/app.js
+crates/depot_dienst/src/http.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/tests/dienst/einrichtung.rs
+crates/depot_dienst/tests/dienst/live.rs
+docs/kaltstart.md
