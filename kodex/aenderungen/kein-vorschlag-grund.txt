@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Im Analyse-Prüfbericht den belegten Grund für einen ausgebliebenen Vorschlag lesbar ausweisen
+pfade:
+crates/depot_dienst/src/analyse/pruefbericht.rs
+crates/depot_dienst/src/analyse/pruefbericht/abstimmung.rs

@@ -8,6 +8,8 @@ use depot_kern::{Datum, TopfId};
 
 use super::Zeitraum;
 
+mod abstimmung;
+
 pub(super) fn bericht(
     stand: Option<&Stand>,
     zeitraum: Zeitraum,
@@ -204,8 +206,30 @@ fn entscheidungsbelege(
     tage
 }
 
+fn grund_ohne_vorschlag(eigen: &Entscheidung<'_>, fremd: &Entscheidung<'_>) -> String {
+    const UNBELEGT: &str = "Kein Vorschlag. Der Grund ist im Journal nicht eindeutig belegt.";
+    if eigen.zweitmeinung_ausgefallen {
+        return "ZweitmeinungAusgefallen".into();
+    }
+    let (runde, eigene, andere) = if eigen.runde_zwei.is_empty() && fremd.runde_zwei.is_empty() {
+        (1, &eigen.runde_eins, &fremd.runde_eins)
+    } else {
+        (2, &eigen.runde_zwei, &fremd.runde_zwei)
+    };
+    if !eigene.is_empty() || !andere.is_empty() {
+        return abstimmung::grund(runde, eigene, andere).unwrap_or_else(|| UNBELEGT.into());
+    }
+    if let [urteil] = eigen.zweitmeinung.as_slice()
+        && urteil.starts_with("Veto: ")
+        && !urteil.starts_with("Veto: nur ")
+    {
+        return "Der andere Berater legte in der Zweitmeinung ein Veto ein.".into();
+    }
+    UNBELEGT.into()
+}
+
 fn entscheidungsbericht(stand: &Stand, zeitraum: Zeitraum) -> (String, bool, String) {
-    let mut tage = entscheidungsbelege(stand, zeitraum);
+    let tage = entscheidungsbelege(stand, zeitraum);
     let mut text = String::from(
         "\n## Nicht-Handeln\n\n| Tag | Topf | Vorschlag | Abstimmung | Regelwerk | Order |\n|---|---|---|---|---|---|\n",
     );
@@ -218,15 +242,25 @@ fn entscheidungsbericht(stand: &Stand, zeitraum: Zeitraum) -> (String, bool, Str
             let _ = writeln!(text, "| {tag} | – | Börsenfrei | – | – | – |");
             continue;
         }
-        for (topf, name) in [(TopfId::A, "A"), (TopfId::B, "B")] {
-            let mut eintrag = tage.remove(&(tag, topf)).unwrap_or_default();
-            if eintrag.zweitmeinung_ausgefallen {
-                for grund in &mut eintrag.regelwerk {
-                    if *grund == "KeinVorschlag" {
-                        *grund = "ZweitmeinungAusgefallen";
+        let leer = Entscheidung::default();
+        for (topf, name, peer) in [(TopfId::A, "A", TopfId::B), (TopfId::B, "B", TopfId::A)] {
+            let eintrag = tage.get(&(tag, topf)).unwrap_or(&leer);
+            let fremd = tage.get(&(tag, peer)).unwrap_or(&leer);
+            let grund = eintrag
+                .regelwerk
+                .contains(&"KeinVorschlag")
+                .then(|| grund_ohne_vorschlag(eintrag, fremd));
+            let regelwerk: Vec<_> = eintrag
+                .regelwerk
+                .iter()
+                .map(|&beleg| {
+                    if beleg == "KeinVorschlag" {
+                        grund.as_deref().unwrap_or(beleg)
+                    } else {
+                        beleg
                     }
-                }
-            }
+                })
+                .collect();
             let abgeschlossen = stand.schlussbeleg(tag).is_some();
             let abstimmung: Vec<_> = eintrag
                 .zweitmeinung
@@ -267,7 +301,7 @@ fn entscheidungsbericht(stand: &Stand, zeitraum: Zeitraum) -> (String, bool, Str
                 "| {tag} | {name} | {} | {} | {} | {order} |",
                 zelle(&eintrag.vorschlag),
                 zelle(&abstimmung),
-                zelle(&eintrag.regelwerk),
+                zelle(&regelwerk),
             );
         }
     }
@@ -497,5 +531,92 @@ mod tests {
         assert!(text.contains("| Nachher-Blick | Rot (keine auswertbaren Belege) |"));
         assert!(text.contains("| Orders | Gelb |"));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod grundtests {
+    use super::*;
+    use depot_journal::Journal;
+    use depot_kern::Cent;
+
+    #[test]
+    fn bericht_erklaert_kein_vorschlag_je_topf_aus_der_letzten_runde() -> Result<(), String> {
+        let ordner = std::env::temp_dir().join(format!("depot-grund-{}", crate::neues_token()));
+        std::fs::create_dir(&ordner).map_err(|e| e.to_string())?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+        let mut journal = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 20).ok_or("Datum")?;
+        let aussagen = [
+            ("Dachs", "Topf A: Antwort verwendet: Bargeld halten."),
+            ("Maus", "Topf B: Antwort verwendet: SAP als Kauf prüfen."),
+            (
+                "Dachs",
+                "Abstimmung Runde 1: verwertbar=true; Änderung=false; Ziele=None; Zustimmung zum fremden Stand=true; Grund: Erster Stand.",
+            ),
+            (
+                "Maus",
+                "Abstimmung Runde 1: verwertbar=true; Änderung=true; Ziele=Some({Isin(\"DE0007164600\"): 3500}); Zustimmung zum fremden Stand=false; Grund: Erster Stand.",
+            ),
+            (
+                "Dachs",
+                "Abstimmung Runde 2: verwertbar=true; Änderung=false; Ziele=None; Zustimmung zum fremden Stand=false; Grund: Bargeld.",
+            ),
+            (
+                "Maus",
+                "Abstimmung Runde 2: verwertbar=true; Änderung=true; Ziele=Some({Isin(\"DE0007164600\"): 3000}); Zustimmung zum fremden Stand=false; Grund: Geänderte Ziele.",
+            ),
+            (
+                "Maus",
+                "Abstimmung Runde 2: DE0007164600 3000 bp: Beispielthese.",
+            ),
+            ("Regelwerk", "Topf A: KeinVorschlag"),
+            (
+                "Regelwerk",
+                "Topf B: unter_mindesteinsatz 0 von 3000 bp · fehlt",
+            ),
+            ("Regelwerk", "Topf B: KeinVorschlag"),
+        ];
+        for (wer, text) in aussagen {
+            journal
+                .begruende(tag, wer, text)
+                .map_err(|e| format!("{e:?}"))?;
+        }
+        journal
+            .schliesse_ab(tag, Cent(1_000_000), &"0".repeat(64))
+            .map_err(|e| format!("{e:?}"))?;
+        let text = bericht(
+            Some(journal.stand()),
+            Zeitraum { von: tag, bis: tag },
+            "Gelb",
+            "Gelb",
+            "Rot",
+        );
+        drop(journal);
+        std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
+
+        assert!(text.lines().any(|l| l.starts_with("| 2026-11-20 | A |")
+            && l.ends_with("| Runde 2: Eigene Entscheidung ohne Vorschlag. | Kein Versand |")));
+        assert!(text.lines().any(|l| l.starts_with("| 2026-11-20 | B |")
+            && l.ends_with("Runde 2: Eigene Ziele geändert. Für den vorgelegten Stand fehlte die Zustimmung des anderen Beraters. | Kein Versand |")));
+        assert!(text.contains("unter_mindesteinsatz 0 von 3000 bp · fehlt"));
+        Ok(())
+    }
+
+    #[test]
+    fn auswertung_bleibt_bei_einer_unvollstaendigen_letzten_runde_offen() {
+        let letzte = "Abstimmung Runde 2: verwertbar=true; Änderung=true; Ziele=None; Zustimmung zum fremden Stand=false; Grund: Vorschlag zurückgezogen.";
+        let alt = "Abstimmung Runde 1: verwertbar=true; Änderung=false; Ziele=None; Zustimmung zum fremden Stand=false; Grund: Bargeld.";
+        let eigen = Entscheidung {
+            runde_eins: vec![alt],
+            runde_zwei: vec![letzte],
+            ..Entscheidung::default()
+        };
+        let fremd = Entscheidung {
+            runde_eins: vec![alt],
+            ..Entscheidung::default()
+        };
+        assert!(grund_ohne_vorschlag(&eigen, &fremd).contains("nicht eindeutig belegt"));
     }
 }
