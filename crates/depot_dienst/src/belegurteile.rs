@@ -32,7 +32,7 @@ pub(super) fn aus_form(stufe: &str, richtung: &str) -> Result<Option<Urteil>, Sp
         ("unbewertet", "") => Ok(None),
         ("0", "") => Ok(Some(Urteil::KeinBezug)),
         ("1", "") => Ok(Some(Urteil::Bezug)),
-        ("2", "stuetzt") => Ok(Some(Urteil::Entscheidend(Richtung::Stuetzt))),
+        ("2", "stützt") => Ok(Some(Urteil::Entscheidend(Richtung::Stuetzt))),
         ("2", "widerlegt") => Ok(Some(Urteil::Entscheidend(Richtung::Widerlegt))),
         ("2", "offen") => Ok(Some(Urteil::Entscheidend(Richtung::Offen))),
         _ => Err(Speicherfehler::Ungueltig),
@@ -44,7 +44,7 @@ fn felder(urteil: Option<Urteil>) -> &'static str {
         None => "unbewertet\t",
         Some(Urteil::KeinBezug) => "0\t",
         Some(Urteil::Bezug) => "1\t",
-        Some(Urteil::Entscheidend(Richtung::Stuetzt)) => "2\tstuetzt",
+        Some(Urteil::Entscheidend(Richtung::Stuetzt)) => "2\tstützt",
         Some(Urteil::Entscheidend(Richtung::Widerlegt)) => "2\twiderlegt",
         Some(Urteil::Entscheidend(Richtung::Offen)) => "2\toffen",
     }
@@ -281,7 +281,7 @@ mod tests {
             ("unbewertet", ""),
             ("0", ""),
             ("1", ""),
-            ("2", "stuetzt"),
+            ("2", "stützt"),
             ("2", "widerlegt"),
             ("2", "offen"),
         ] {
@@ -301,7 +301,7 @@ mod tests {
             ("", ""),
             ("02", "offen"),
             ("2", ""),
-            ("0", "stuetzt"),
+            ("0", "stützt"),
             ("unbewertet", "offen"),
             ("2", "falsch"),
         ] {
@@ -363,7 +363,7 @@ mod tests {
         for defekt in [
             String::new(),
             format!("{KOPF}{zeile}"),
-            abschliessen(format!("{KOPF}{zeile}")).replace("widerlegt", "stuetzt"),
+            abschliessen(format!("{KOPF}{zeile}")).replace("widerlegt", "stützt"),
             abschliessen(format!("{KOPF}{zeile}{zeile}")),
             abschliessen(format!("{KOPF}{}", zeile.replace("widerlegt", ""))),
             abschliessen(format!("{KOPF}{}", zeile.replace("Maus", "Dachs"))),

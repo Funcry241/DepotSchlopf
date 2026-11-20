@@ -17,7 +17,7 @@ const ANTWORTEN: [(&str, &str); 6] = [
         "1",
         "1 · Bezug zur These, liefert keinen entscheidenden Hinweis",
     ),
-    ("2-stuetzt", "2 · Entscheidender Hinweis, stützt die These"),
+    ("2-stützt", "2 · Entscheidender Hinweis, stützt die These"),
     (
         "2-widerlegt",
         "2 · Entscheidender Hinweis, widerlegt die These",

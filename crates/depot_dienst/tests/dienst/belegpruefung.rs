@@ -104,7 +104,7 @@ fn unabhaengiges_urteil_bleibt_nach_neustart_einmalig_erhalten() -> Result<(), S
     for urteil in [
         "0",
         "1",
-        "2-stuetzt",
+        "2-stützt",
         "2-widerlegt",
         "2-offen",
         "unbewertet",
@@ -124,7 +124,7 @@ fn unabhaengiges_urteil_bleibt_nach_neustart_einmalig_erhalten() -> Result<(), S
     }
     let id = paar_id(&anfang)?;
     assert!(anfang.contains(&format!("name=\"tag\" value=\"{TAG}\"")));
-    let felder = format!("id={id}&tag={TAG}&urteil=2-offen");
+    let felder = format!("id={id}&tag={TAG}&urteil=2-st%C3%BCtzt");
     let post = formular_post(PFAD, &format!("t={TOKEN}&{felder}"));
     let antwort = behandle(&d, &Attrappe::default(), &post, zeit);
     assert_eq!(status(&antwort)?, 303);
