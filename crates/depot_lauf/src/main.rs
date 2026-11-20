@@ -40,7 +40,7 @@ run.cmd papier           Papiertag mit Dachs und Maus und den heute belegten Sch
 run.cmd \"ruecktest\"       Schattenstrategien anhand des Journals rückwärts prüfen\n  run.cmd lage             Lagebild nach daten/lage.html: Bereitschaft, KI-Budget, Depot, Gespräch\n  \
 run.cmd sichern          Daten am eingestellten Ziel sichern und prüfen\n  \
 run.cmd sicherungsprobe <Ordner>  Sicherung in einer temporären Kopie prüfen\n  \
-run.cmd update prüfen   neue Stände auf main nennen (git fetch, ändert nichts)\n  \
+run.cmd update prüfen   neue Stände auf main suchen und das Angebot speichern\n  \
 run.cmd update           neuen Stand im Prüfordner mit dem Gate prüfen, nur dann vorwärts einspielen\n  \
 run.cmd hilfe            diese Hilfe\nOptionen: --basis <ref> (Standard origin/main)";
 

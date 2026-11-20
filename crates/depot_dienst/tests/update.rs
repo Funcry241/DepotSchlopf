@@ -16,6 +16,8 @@ use depot_lage::{Hinterlegt, Umgebung, Zugang, lagebild};
 static ZAEHLER: AtomicU32 = AtomicU32::new(0);
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
 const UPDATE_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const UPDATE_ALT: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const UPDATE_LOCK: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const HOST: &str = "127.0.0.1:47410";
 const HERKUNFT: &str = "http://127.0.0.1:47410";
 
@@ -39,33 +41,36 @@ fn mittag() -> Result<Zeitpunkt, String> {
 }
 
 fn echo_starter() -> Starter {
-    Box::new(|art, _wurzel| {
-        let zeile = if art == Art::UpdatePruefen {
-            format!("[Update] Kandidat: {UPDATE_SHA}")
-        } else {
-            format!("lauf {}", art.kurz())
-        };
+    Box::new(|art, wurzel| {
+        let mut ok = true;
+        if art == Art::UpdatePruefen && !wurzel.join("daten/update_angebot.txt").exists() {
+            ok = fs::write(
+                wurzel.join("daten/update_angebot.txt"),
+                format!("update-angebot-v1;{UPDATE_ALT};{UPDATE_SHA};-\nEin neuer Stand\n"),
+            )
+            .is_ok();
+        }
+        let zeile = format!("lauf {}", art.kurz());
         #[cfg(windows)]
         let mut c = Command::new("cmd");
         #[cfg(windows)]
         {
-            let befehl = if art == Art::UpdatePruefen {
-                format!("echo [Update] Cargo.lock: foo 1.2.3& echo {zeile}")
-            } else {
+            let befehl = if ok {
                 format!("echo {zeile}")
+            } else {
+                "exit /b 1".into()
             };
             c.args(["/C", &befehl]);
         }
         #[cfg(not(windows))]
         let mut c = Command::new("sh");
         #[cfg(not(windows))]
-        {
-            c.args(["-c", "printf '%s\\n' \"$@\"", "test"]);
-            if art == Art::UpdatePruefen {
-                c.arg("[Update] Cargo.lock: foo 1.2.3");
-            }
-            c.arg(&zeile);
-        }
+        c.args([
+            "-c",
+            if ok { "printf '%s\n' \"$@\"" } else { "exit 1" },
+            "test",
+            &zeile,
+        ]);
         c
     })
 }
@@ -136,9 +141,13 @@ fn get_um(d: &Dienst, pfad: &str, jetzt: Zeitpunkt) -> String {
 }
 
 fn post_auftrag(d: &Dienst, art: &str) -> Result<String, String> {
+    post(d, "/ausfuehren", &format!("art={art}"))
+}
+
+fn post(d: &Dienst, pfad: &str, felder: &str) -> Result<String, String> {
     let a = depot_dienst::http::Anfrage {
         methode: "POST".into(),
-        pfad: "/ausfuehren".into(),
+        pfad: pfad.into(),
         abfrage: String::new(),
         kopf: vec![
             ("Host".into(), HOST.into()),
@@ -148,7 +157,7 @@ fn post_auftrag(d: &Dienst, art: &str) -> Result<String, String> {
                 "application/x-www-form-urlencoded".into(),
             ),
         ],
-        rumpf: format!("t={TOKEN}&art={art}").into_bytes(),
+        rumpf: format!("t={TOKEN}&{felder}").into_bytes(),
     };
     Ok(String::from_utf8_lossy(&behandle(d, &Leer, &a, mittag()?)).into_owned())
 }
@@ -246,21 +255,73 @@ fn gefundenes_update_ist_global_sichtbar_und_braucht_weiter_bestaetigung() -> Re
 }
 
 #[test]
-fn lock_freigabe_zeigt_pakete_in_der_einrichtung() -> Result<(), String> {
-    let d = dienst(ordner()?);
-    suche_update(&d, mittag()?)?;
+fn lock_freigabe_bleibt_ueber_neustart_offen_und_bindet_commit_und_abdruck() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let p = wurzel.join("daten/update_angebot.txt");
+    let mut paketliste = String::new();
+    for n in 0..60 {
+        use std::fmt::Write as _;
+        let _ = writeln!(paketliste, "foo-{n} 1.2.3");
+    }
+    fs::write(
+        &p,
+        format!("update-angebot-v1;{UPDATE_ALT};{UPDATE_SHA};{UPDATE_LOCK}\n{paketliste}"),
+    )
+    .map_err(|e| e.to_string())?;
+    let d = dienst(wurzel.clone());
     let html = get(&d, "/teil/update")?;
-    assert!(html.contains("Neue Abhängigkeiten: foo 1.2.3"), "{html}");
-    assert!(html.contains("Bestätigung am Windows-Desktop"), "{html}");
+    assert!(html.contains("Text kopieren") && html.contains("foo-59 1.2.3"));
+    assert!(html.contains("Freigabe steht aus."));
+    assert!(!html.contains("Update einspielen"));
+    assert!(bestaetige_update(&d)?.contains("m=update_freigabe_fehlt"));
+    assert!(
+        post(
+            &d,
+            "/update-freigabe",
+            &format!("sha={UPDATE_SHA}&abdruck=falsch")
+        )?
+        .contains("m=update_suche")
+    );
+    assert!(d.sperre().warteschlange.is_empty());
+
+    let sperre = fs::File::options()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(wurzel.join(format!("daten/update-dialog-{UPDATE_SHA}.lock")))
+        .map_err(|e| e.to_string())?;
+    sperre.try_lock().map_err(|e| e.to_string())?;
+    let d = dienst(wurzel.clone());
+    assert!(get(&d, "/teil/update")?.contains("Das Fenster am Windows-Desktop wartet auf dich"));
+    d.einreihen(Art::Nachrichten, Anlass::Hand)?;
+    assert_eq!(lauf_ab(&d, mittag()?)?, Art::Nachrichten);
+    drop(sperre);
+
+    fs::write(
+        wurzel.join("daten/update_abhaengigkeiten.txt"),
+        format!(
+            "update-lock-v1;{UPDATE_ALT};{UPDATE_LOCK}\nupdate-lock-v1;{UPDATE_SHA};{}\n",
+            "d".repeat(64)
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    assert!(bestaetige_update(&d)?.contains("m=update_freigabe_fehlt"));
+    fs::write(
+        wurzel.join("daten/update_abhaengigkeiten.txt"),
+        format!("update-lock-v1;{UPDATE_SHA};{UPDATE_LOCK}\n"),
+    )
+    .map_err(|e| e.to_string())?;
+    assert!(get(&d, "/teil/update")?.contains("Abhängigkeiten freigegeben."));
+    assert!(bestaetige_update(&d)?.contains("m=update#update"));
     Ok(())
 }
 
 #[test]
-fn update_freigabe_zeigt_den_grund_und_bietet_nur_nach_fristablauf_dieselbe_version_an()
--> Result<(), String> {
+fn neutrale_updateabschluesse_bleiben_im_verlauf_lesbar() -> Result<(), String> {
     let t = mittag()?;
     for (code, klasse, titel) in [
         (10, "offen", "Freigabe abgelaufen"),
+        (13, "leise", "Freigabe fehlt noch"),
         (11, "leise", "Update abgelehnt"),
         (12, "offen", "Update-Stand geändert"),
         (1, "halt", "Update fehlgeschlagen"),
@@ -299,11 +360,7 @@ fn update_freigabe_zeigt_den_grund_und_bietet_nur_nach_fristablauf_dieselbe_vers
             "{html}"
         );
         assert!(html.contains(titel), "{html}");
-        assert_eq!(
-            html.contains(&format!("sha={UPDATE_SHA}\">Erneut zur Freigabe</a>")),
-            code == 10,
-            "{html}"
-        );
+        assert!(!html.contains("Erneut zur Freigabe"), "{html}");
         assert!(!rueckfall::offen_pfad(&wurzel).exists());
 
         if code != 1 {
@@ -313,7 +370,7 @@ fn update_freigabe_zeigt_den_grund_und_bietet_nur_nach_fristablauf_dieselbe_vers
             let neustart = dienst(wurzel);
             let html = get(&neustart, "/teil/update")?;
             assert!(html.contains(titel), "{html}");
-            assert!(html.contains("„Nach Update suchen“"));
+            assert!(html.contains("Nach Update suchen"));
         }
         if code == 10 {
             assert!(
@@ -322,7 +379,7 @@ fn update_freigabe_zeigt_den_grund_und_bietet_nur_nach_fristablauf_dieselbe_vers
             );
             assert!(bestaetige_update(&d)?.contains("m=update#update"));
             assert_eq!(lauf_ab(&d, t)?, Art::Update);
-            assert!(get(&d, "/teil/update")?.contains("Erneut zur Freigabe"));
+            assert!(get(&d, "/teil/update")?.contains("Freigabe abgelaufen"));
         }
     }
     Ok(())
