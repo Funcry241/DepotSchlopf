@@ -16,6 +16,9 @@ use crate::werkbank::{Dienst, lies_falls_da, schreibe_ganz};
 
 const LERNLAUF_LINK: &str = r#"<p><a href="/neuroschlopf/lernlauf">Neuro2026 · Lernkurve und Vorhersagen des Referenzlaufs</a></p>"#;
 
+const BLINDPRUEFUNG_LINK: &str =
+    r#"<p><a href="/neuroschlopf/belegpruefung">Belege für NeuroSchlopf blind bewerten</a></p>"#;
+
 const AUSGABE_MAX: usize = 16;
 const JOURNAL_MAX: u64 = 32 * 1024 * 1024;
 const CPU_PROZENT: u32 = 10;
@@ -56,7 +59,7 @@ pub(crate) fn formular(d: &Dienst) -> String {
         <form method=\"post\" action=\"/neuroschlopf\"><input type=\"hidden\" name=\"t\" value=\"{}\">\
         <button type=\"submit\" name=\"an\" value=\"ja\"{an}>NeuroSchlopf einschalten</button> \
         <button type=\"submit\" name=\"an\" value=\"nein\"{aus}>NeuroSchlopf ausschalten</button>\
-        </form>{LERNLAUF_LINK}</section>",
+        </form>{BLINDPRUEFUNG_LINK}{LERNLAUF_LINK}</section>",
         maskiere(&d.token)
     )
 }
@@ -303,6 +306,7 @@ pub(crate) fn live(d: &Dienst, aufrufe: &crate::zeitstrahl_ki::Aufrufe) -> Strin
         }
         html.push_str("</ul>");
     }
+    html.push_str(BLINDPRUEFUNG_LINK);
     html.push_str(LERNLAUF_LINK);
     html.push_str("</section>");
     html

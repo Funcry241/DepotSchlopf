@@ -576,6 +576,9 @@ mod status_tests {
             "gemini.txt",
             "anbieter.txt",
             "zeitplan.txt",
+            "neuro2026-belegurteile.tsv",
+            "neuro2026-belegurteile.neu",
+            "neuro2026-belegurteile.lock",
             "sec_kontakt.txt",
             "update_abhaengigkeiten.txt",
             "fremd.txt",
@@ -590,6 +593,7 @@ mod status_tests {
                 "gemini.txt",
                 "journal.txt",
                 "kurse.halt",
+                "neuro2026-belegurteile.tsv",
                 "zeitplan.txt"
             ]
         );
