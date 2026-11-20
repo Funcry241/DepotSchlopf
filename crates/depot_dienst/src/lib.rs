@@ -31,6 +31,7 @@ pub mod http;
 mod ibkr_abgleich;
 mod ibkr_papier;
 pub mod kostenschutz;
+mod neuro2026;
 mod neuroschlopf;
 mod otter;
 mod papierdialog;
@@ -496,6 +497,8 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/" => live_seite(d, a, jetzt),
         "/depot" | "/teil/depot" => depot_seite(d, a, jetzt),
         "/gespraeche" => gespraechsseite(d, a, tag),
+        "/neuroschlopf/lernlauf" => neuro2026::seite(d, tag),
+        "/neuroschlopf/lernlauf.json" => neuro2026::daten(),
         "/gespraeche/rohtext" => gespraechsrohtext(d, a),
         "/export" => seiten::fehler(405, "Verwende das Analyse-Exportformular."),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
