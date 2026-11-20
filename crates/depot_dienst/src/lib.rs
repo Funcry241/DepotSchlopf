@@ -319,6 +319,16 @@ fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {
     )
 }
 
+fn update_leiste(d: &Dienst) -> String {
+    let z = d.sperre();
+    seiten::update_leiste(
+        &d.start,
+        &z,
+        d.version.as_deref(),
+        update_sperre(d, &z).is_some(),
+    )
+}
+
 fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let export = analyse::formular(d, heute(jetzt));
     let live = live_inhalt(d, jetzt);
@@ -329,7 +339,7 @@ fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         seiten::meldung(&a.abfrage),
         &inhalt,
         d.version.as_deref(),
-        &betriebsleiste(d, heute(jetzt)),
+        (&betriebsleiste(d, heute(jetzt)), &update_leiste(d)),
         seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, s.as_bytes())
@@ -426,7 +436,7 @@ fn einrichtungsseite(
         gemini::seiten_meldung(&a.abfrage),
         &inhalt,
         d.version.as_deref(),
-        &betriebsleiste(d, tag),
+        (&betriebsleiste(d, tag), &update_leiste(d)),
         seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, seite.as_bytes())
@@ -474,7 +484,7 @@ fn depot_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         None,
         &inhalt,
         d.version.as_deref(),
-        &betriebsleiste(d, heute(jetzt)),
+        (&betriebsleiste(d, heute(jetzt)), &update_leiste(d)),
         seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, html.as_bytes())
@@ -516,6 +526,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             .as_bytes(),
         ),
         "/teil/kopf" => antwort(200, HTML, betriebsleiste(d, tag).as_bytes()),
+        "/teil/update-hinweis" => antwort(200, HTML, update_leiste(d).as_bytes()),
         "/teil/update" => {
             let z = d.sperre();
             let sperre = update_sperre(d, &z);
@@ -574,7 +585,7 @@ fn gespraechsseite(d: &Dienst, a: &Anfrage, heute: Option<depot_kern::Datum>) ->
         None,
         &inhalt,
         d.version.as_deref(),
-        &betriebsleiste(d, heute),
+        (&betriebsleiste(d, heute), &update_leiste(d)),
         ("", ""),
     );
     antwort(200, HTML, seite.as_bytes())
@@ -626,7 +637,7 @@ fn protokoll_lesen(d: &Dienst, a: &Anfrage, tag: Option<depot_kern::Datum>) -> V
                 None,
                 &inhalt,
                 d.version.as_deref(),
-                &betriebsleiste(d, tag),
+                (&betriebsleiste(d, tag), &update_leiste(d)),
                 seiten::meldungs_aktion(&a.abfrage),
             );
             antwort(200, HTML, html.as_bytes())
@@ -671,7 +682,7 @@ fn desktopdialog_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 "<section><h2>Windows-Dialog</h2><div data-teil=\"/teil/desktop-dialog?id={id}\">{inhalt}</div></section>"
             ),
             d.version.as_deref(),
-            &betriebsleiste(d, heute(jetzt)),
+            (&betriebsleiste(d, heute(jetzt)), &update_leiste(d)),
             ("", ""),
         )
     } else {
@@ -843,7 +854,7 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         None,
         &inhalt,
         d.version.as_deref(),
-        &betriebsleiste(d, heute(jetzt)),
+        (&betriebsleiste(d, heute(jetzt)), &update_leiste(d)),
         seiten::meldungs_aktion(&a.abfrage),
     );
     antwort(200, HTML, seite.as_bytes())

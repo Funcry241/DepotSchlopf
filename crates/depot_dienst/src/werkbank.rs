@@ -157,6 +157,7 @@ impl Art {
 pub enum Anlass {
     Hand,
     Zeitplan,
+    Hintergrund,
 }
 
 /// Ob ein Auftrag aus einem frueheren Start des Dienstes stammt (`daten/dienst_verlauf.txt`).
@@ -284,6 +285,7 @@ pub struct Zustand {
     pub update_meldung: Option<(bool, String)>,
     pub update_ergebnisse: Vec<crate::aktualisierung::Ergebnis>,
     update_angebot: Option<crate::update_angebot::Angebot>,
+    letzte_updatesuche: Option<Zeitpunkt>,
     /// Woher die Programme kommen und ob der Stand fuer einen Start ohne Cargo gesichert ist;
     /// `true` heisst Fehler.
     pub programm_meldung: Option<(bool, String)>,
@@ -374,7 +376,7 @@ impl Zustand {
     }
 
     pub(crate) fn update_angebot(&self) -> Option<&crate::update_angebot::Angebot> {
-        if self.neustart || self.auftrag_stand(Art::UpdatePruefen).is_some() {
+        if self.neustart {
             return None;
         }
         self.update_angebot.as_ref()
@@ -479,6 +481,7 @@ pub struct Dienst {
     pub(crate) neuro: Mutex<crate::neuroschlopf::Anzeige>,
     protokoll_schutz: Mutex<crate::protokoll::Schutz>,
     starter: Starter,
+    automatische_updatesuche: bool,
     lagerechner: Lagerechner,
     hinweise: Hinweise,
 }
@@ -766,6 +769,10 @@ impl Dienst {
             update_meldung = Some((true, "Für das letzte Update liegt keine bestätigte Aktivierung vor. Details stehen unter Tätigkeit im Protokoll.".into()));
         }
         let update_angebot = crate::update_angebot::Angebot::laden(&wurzel);
+        let letzte_updatesuche = verlauf
+            .iter()
+            .find(|a| a.art == Art::UpdatePruefen)
+            .map(|a| a.start);
         Dienst {
             hinweise: Hinweise::laden(&wurzel),
             wurzel,
@@ -788,6 +795,7 @@ impl Dienst {
                 update_meldung,
                 update_ergebnisse,
                 update_angebot,
+                letzte_updatesuche,
                 programm_meldung: None,
                 verlauf_hinweis,
                 verlauf_fehler: None,
@@ -804,6 +812,7 @@ impl Dienst {
             neuro: Mutex::default(),
             protokoll_schutz: Mutex::new(protokoll_schutz),
             starter,
+            automatische_updatesuche: false,
             lagerechner,
         }
     }
@@ -1159,6 +1168,28 @@ impl Dienst {
         Ok(())
     }
 
+    /// Prüft im laufenden Dienst auch ohne manuelle Anforderung auf neue Versionen.
+    #[must_use]
+    pub fn mit_automatischer_updatesuche(mut self) -> Self {
+        self.automatische_updatesuche = true;
+        self
+    }
+
+    fn updatesuche_einreihen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
+        const ABSTAND_SEKUNDEN: i64 = 3600;
+        if self.automatische_updatesuche
+            && z.lage.is_some()
+            && !z.update_wartet_auf_ruhe()
+            && !z.neustart
+            && z.verlauf_fehler.is_none()
+            && z.letzte_updatesuche
+                .and_then(|letzte| jetzt.sekunden_seit(letzte))
+                .is_none_or(|sekunden| sekunden >= ABSTAND_SEKUNDEN)
+        {
+            let _ = einreihen(z, Art::UpdatePruefen, Anlass::Hintergrund, None);
+        }
+    }
+
     /// Ein Schritt des Arbeiters: Zeitplan pruefen, dann den naechsten Auftrag starten, sonst das
     /// Lagebild auffrischen. Gibt einen gestarteten Prozess zurueck; `verfolge` liest ihn aus.
     /// Nur der eine Arbeiter ruft `schritt`: So startet kein Auftrag, waehrend das Lagebild liest.
@@ -1168,6 +1199,7 @@ impl Dienst {
         self.vermerke_ausgelassen(&mut z, jetzt);
         self.zeitplan_pruefen(&mut z, jetzt);
         self.ibkr_zeitplan_pruefen(&mut z, jetzt);
+        self.updatesuche_einreihen(&mut z, jetzt);
         if z.laufend.is_none()
             && let Some(wartend) = z.warteschlange.pop_front()
         {
@@ -1180,6 +1212,9 @@ impl Dienst {
             } = self.gemini_vorschalten(&mut z, wartend, jetzt);
             if anlass == Anlass::Zeitplan && !zeitplan_auftrag_erlaubt(&z, art, jetzt) {
                 return None;
+            }
+            if art == Art::UpdatePruefen {
+                z.letzte_updatesuche = Some(jetzt);
             }
             let nr = z.naechste_nr;
             z.naechste_nr = nr.saturating_add(1);
@@ -1338,7 +1373,16 @@ impl Dienst {
             ));
         }
         let (ausgabe, schreiber) = pipe()?;
-        let kind = (self.starter)(art, &self.wurzel)
+        let mut befehl = (self.starter)(art, &self.wurzel);
+        if anlass == Anlass::Hintergrund {
+            befehl.envs([
+                ("GIT_TERMINAL_PROMPT", "0"),
+                ("GCM_INTERACTIVE", "Never"),
+                ("GIT_HTTP_LOW_SPEED_LIMIT", "1"),
+                ("GIT_HTTP_LOW_SPEED_TIME", "15"),
+            ]);
+        }
+        let kind = befehl
             .args(update_commit)
             .args(
                 (matches!(art, Art::Sicherung | Art::Papier) && anlass == Anlass::Zeitplan)
