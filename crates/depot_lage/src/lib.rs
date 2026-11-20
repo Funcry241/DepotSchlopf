@@ -22,6 +22,7 @@
 )]
 
 pub mod belegauswahl;
+pub mod belegauswahl_neuro;
 pub mod betrieb;
 /// Das Anbieterprotokoll, fuer die Oberflaeche.
 pub use depot_journal::{abrufkontingent, anbieter, gespraeche, kurssperre};

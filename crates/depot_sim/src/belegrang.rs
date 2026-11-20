@@ -157,15 +157,32 @@ impl<'a> Grundrang<'a> {
         Self { werte }
     }
 
-    fn punkte(&self, beleg: &str, thesen: &[These]) -> u32 {
-        // Von der bisherigen Sortierung angehängte Wertmarkierungen und der Quellenlink
-        // sind selbst kein Hinweis auf einen Wertbezug.
+    fn beleginhalt(beleg: &str) -> String {
+        // Quellenlink und angehängte Wertmarkierungen begründen selbst keinen Bezug.
         let inhalt = beleg.split(" | ").next().unwrap_or(beleg);
-        let inhalt = inhalt
+        inhalt
             .split(" [betrifft: ")
             .next()
             .unwrap_or(inhalt)
-            .to_lowercase();
+            .to_lowercase()
+    }
+
+    fn ist_termin(beleg: &str) -> bool {
+        beleg.starts_with("Termin ")
+    }
+
+    /// Vorbereitungsformat grundrang-paar-v1: Wertbezug, Termin, einsbasierter Fragenplatz.
+    pub fn paarmerkmale(&self, beleg: &str, these: &These, platz: usize) -> [usize; 3] {
+        let inhalt = Self::beleginhalt(beleg);
+        [
+            usize::from(self.trifft(&Wortsuche::neu(&inhalt), these)),
+            usize::from(Self::ist_termin(beleg)),
+            platz,
+        ]
+    }
+
+    fn punkte(&self, beleg: &str, thesen: &[These]) -> u32 {
+        let inhalt = Self::beleginhalt(beleg);
         let suche = Wortsuche::neu(&inhalt);
         let isins: BTreeSet<&Isin> = thesen
             .iter()
@@ -175,7 +192,7 @@ impl<'a> Grundrang<'a> {
         let bezug = u32::try_from(isins.len().min(2))
             .unwrap_or(2)
             .saturating_mul(4);
-        let termin = if beleg.starts_with("Termin ") { 2 } else { 0 };
+        let termin = if Self::ist_termin(beleg) { 2 } else { 0 };
         bezug.saturating_add(termin)
     }
 
@@ -227,13 +244,23 @@ impl Sortierer for Grundrang<'_> {
 /// mit einem Zielgewicht über 0 genannt hat. Der Stichtag selbst zählt nicht, sonst spräche
 /// die Antwort des Tages für sich selbst.
 pub fn thesen_vor(stand: &Stand, universum: &Universum, wer: BeraterId, tag: Datum) -> Vec<These> {
+    thesen_aus(stand.begruendungen(), universum, wer, tag)
+}
+
+/// Positive Zielvorschläge aus den fünf vorausgehenden Kalendertagen im übergebenen Journalpräfix.
+pub fn thesen_aus(
+    begruendungen: &[(Datum, String, String)],
+    universum: &Universum,
+    wer: BeraterId,
+    tag: Datum,
+) -> Vec<These> {
     let name = match wer {
         BeraterId::Dachs => "Dachs",
         BeraterId::Maus => "Maus",
     };
     let fenster: BTreeSet<Datum> = (-5..=-1).filter_map(|n: i64| tag.plus_tage(n)).collect();
     let mut isins = BTreeSet::new();
-    for (d, w, text) in stand.begruendungen() {
+    for (d, w, text) in begruendungen {
         if w != name || !fenster.contains(d) {
             continue;
         }
@@ -289,10 +316,32 @@ fn abschnitte(stand: &Stand, tag: Datum) -> impl Iterator<Item = std::ops::Range
             if *datum != tag || wer != FRAGELISTE {
                 return None;
             }
-            let (start, anzahl) = text.split_once(' ')?;
-            let start: usize = start.parse().ok()?;
-            Some(start..start.checked_add(anzahl.parse().ok()?)?)
+            lese_abschnitt(text)
         })
+}
+
+fn lese_abschnitt(text: &str) -> Option<std::ops::Range<usize>> {
+    let (start, anzahl) = text.split_once(' ')?;
+    let start: usize = start.parse().ok()?;
+    Some(start..start.checked_add(anzahl.parse().ok()?)?)
+}
+
+/// Genau ein vollständig belegter Frageabschnitt. Für Modelldaten sind Tageslisten ohne
+/// Marker und Mehrfachläufe ohne Zuordnung ungeeignet.
+pub fn eindeutige_frageliste(stand: &Stand, tag: Datum) -> Result<Vec<String>, &'static str> {
+    let mut marker = stand
+        .begruendungen()
+        .iter()
+        .filter(|(d, wer, _)| *d == tag && wer == FRAGELISTE);
+    let (_, _, text) = marker.next().ok_or("Frageabschnitt fehlt")?;
+    if marker.next().is_some() {
+        return Err("Frageabschnitt mehrdeutig");
+    }
+    let abschnitt = lese_abschnitt(text).ok_or("Frageabschnitt ungültig")?;
+    if abschnitt.end > beobachtungen_am(stand, tag).count() {
+        return Err("Frageabschnitt unvollständig");
+    }
+    Ok(kandidaten_im(stand, tag, abschnitt))
 }
 
 fn beobachtungen_am(stand: &Stand, tag: Datum) -> impl Iterator<Item = &String> {

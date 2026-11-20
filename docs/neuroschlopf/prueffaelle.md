@@ -43,3 +43,13 @@ Die folgende Tabelle ist der Lösungsschlüssel für den Trockenlauf. Beim Blind
 Die automatisierte Gegenprobe `grundrang_holt_einen_gegenbeleg_vor_die_platzgrenze_der_frage` prüft die Sichtbarkeit eines synthetischen Gegenbelegs mit dem vorhandenen Fragegenerator. Sie läuft lokal und verwendet dieselben 45 Kandidaten in beiden Fragen.
 
 [Bewertungsregeln in #325](https://github.com/Funcry241/DepotSchlopf/issues/325#issuecomment-6958388675) · [Messplan in #325](https://github.com/Funcry241/DepotSchlopf/issues/325#issuecomment-6958343353)
+
+## Belegte Modelleingaben im Analyse-Export
+
+`neuro2026_eingaben.jsonl` liefert für den ausgewählten Zeitraum Zahlenvektoren vor der Kürzung der KI-Frage. Der Kopf nennt Zeitraum, Länge und SHA-256 des bestätigten Exportjournals sowie das Merkmalsschema mit SHA-256 über dessen UTF-8-Text. Der Programmstand steht im selben Analyse-Archiv.
+
+Eine Datenzeile gehört zu einem Tag, dem Wissensstichtag in UTC, einem Berater und dessen These zu einer ISIN. Die These folgt der bestehenden Grundrang-Regel für positive Vorschlagsziele in den fünf vorangegangenen Kalendertagen. Es zählen nur Begründungen, die beim Festhalten des Stichtags bereits im Journal standen. Das Feld `ref` verbindet Datum, einsbasierte Nummer im Frageabschnitt und SHA-256 des dort gespeicherten Belegtexts. Für die Sicht des Beraters nach Auswahl und Kürzung bleibt sein gespeicherter Fragetext maßgeblich.
+
+Im Vorbereitungsformat `grundrang-paar-v1` enthält `x` in fester Reihenfolge den Wertbezug zur einzelnen These (0 oder 1), das Terminmerkmal (0 oder 1) und den ursprünglichen Fragenplatz (ab 1). Beispiel für einen SAP-Termin an zweiter Stelle bei einer SAP-These ist `[1,1,2]`. Das Feld `grundrang` nennt den einsbasierten Vergleichsplatz unter denselben Kandidaten für diese einzelne These. Rohtexte, Beträge und Zielwerte werden für diese Vektoren nicht benötigt. Ein unabhängiges Relevanzurteil ist für überwachte Trainingsbeispiele separat zu erheben. Das Multiplikationsmodell von Neuro2026 hat zwei Eingänge und gehört zu einem anderen Lernversuch.
+
+Tage mit fehlendem Stichtag sowie fehlende, mehrfache, leere oder unvollständige Frageabschnitte erhalten Statuszeilen. Überschreiten die Eingaben die Textgrenze des Exports, enthält die Datei den Größenhinweis. Wähle dann einen kürzeren Zeitraum.

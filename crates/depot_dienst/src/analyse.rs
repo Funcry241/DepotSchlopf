@@ -753,6 +753,7 @@ fn programmstand(version: Option<&str>) -> String {
 }
 
 struct Journalpaket {
+    neuroeingaben: String,
     pruefbericht: String,
     betrieb: String,
     kurz: String,
@@ -863,7 +864,7 @@ fn journalpaket(
     match Journal::pruefe_lesend_mit_eintraegen(
         &daten.join("journal.txt"),
         JOURNAL_MAX,
-        |stand, eintraege, _| {
+        |stand, eintraege, original| {
             let (kurz, depotdetails) = depot(stand, jetzt, tag, sperren);
             let buch = depot_lage::ausfuehrung::ausfuehrungsbuch(stand);
             let orders = orders::bericht(stand, eintraege, &buch, zeitraum);
@@ -897,6 +898,12 @@ fn journalpaket(
                 + &nachher.bericht
                 + &depot_lage::rueckschau::bericht(stand, jetzt);
             Journalpaket {
+                neuroeingaben: depot_lage::belegauswahl_neuro::eingaben(
+                    stand,
+                    original,
+                    zeitraum.von..=zeitraum.bis,
+                    usize::try_from(TEXT_MAX).unwrap_or(0),
+                ),
                 pruefbericht,
                 betrieb: betrieb.ablauf.bericht(Some(stand))
                     + &betrieb.fehler.bericht(
@@ -922,6 +929,7 @@ fn journalpaket(
             );
             let (ki, gespraechsbelege) = ki(daten, zeitraum, None, luecken);
             Ok(Journalpaket {
+                neuroeingaben: "{\"status\":\"Journalstand nicht bestätigt\"}\n".into(),
                 pruefbericht: pruefbericht::bericht(
                     None,
                     zeitraum,
@@ -1000,6 +1008,7 @@ pub(crate) fn exportieren(
     let konfiguration = konfiguration(d, u, &daten);
     let sperren = sperrentext(&daten);
     let Ok(Journalpaket {
+        neuroeingaben,
         pruefbericht,
         betrieb: betriebsbericht,
         kurz,
@@ -1051,6 +1060,7 @@ pub(crate) fn exportieren(
         ("06_konfiguration.md", konfiguration),
         ("07_version.md", programmstand(d.version.as_deref())),
         ("ausfuehrungen.csv", ausfuehrungen),
+        ("neuro2026_eingaben.jsonl", neuroeingaben),
     ];
     zip_antwort(
         &schutz::Exportschutz::neu(&schutz, sec_kontakt.as_deref()),

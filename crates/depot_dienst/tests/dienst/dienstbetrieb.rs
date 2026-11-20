@@ -1432,6 +1432,8 @@ fn export_enthaelt_nie_rohdaten() -> Result<(), String> {
     let antwort = behandle(&d, &Attrappe::default(), &post, donnerstag(12, 0)?);
     assert_eq!(status(&antwort)?, 200);
     let archiv = text(&antwort);
+    assert!(archiv.contains("neuro2026_eingaben.jsonl"));
+    let archiv = archiv.replace("neuro2026_eingaben.jsonl", "");
     assert!(archiv.contains("MANIFEST.txt") && archiv.contains("03_journal.md"));
     for muster in [
         "rohdaten/",
@@ -1724,5 +1726,52 @@ fn simulation_verlangt_kostenbestaetigung_und_reiht_doppelklick_nur_einmal_ein()
     assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=auftrag#ki-simulation"));
     assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=simulation_belegt"));
     assert_eq!(wartend(&d), vec![(Art::Simulation, Anlass::Hand)]);
+    Ok(())
+}
+
+#[test]
+fn neuroeingaben_erreichen_das_geschwaerzte_exportarchiv_vollstaendig() -> Result<(), String> {
+    use depot_export::Zip;
+    use depot_journal::Journal;
+    use depot_kern::Cent;
+    let wurzel = ordner()?;
+    let pfad = wurzel.join("daten/journal.txt");
+    let fehler = |e| format!("{e:?}");
+    Journal::einrichten(&pfad).map_err(fehler)?;
+    let zeit = donnerstag(9, 0)?;
+    let tag = some(zeit.frankfurt_tag(), "Prüftag")?;
+    let gestern = some(tag.plus_tage(-1), "Vortag")?;
+    let mut j = Journal::oeffnen(&pfad).map_err(fehler)?;
+    j.begruende(gestern, "Dachs", "Topf A: DE0007164600 2000 bp: These")
+        .map_err(fehler)?;
+    j.schliesse_ab(gestern, Cent(1000), &j.bestaetigt().1)
+        .map_err(fehler)?;
+    j.belege_wissensstichtag(tag, zeit).map_err(fehler)?;
+    j.beobachte(tag, "Termin SAP veröffentlicht Quartalszahlen")
+        .map_err(fehler)?;
+    j.begruende(tag, "Frageliste", "0 1").map_err(fehler)?;
+    let original = fs::read_to_string(&pfad).map_err(|e| e.to_string())?;
+    let eingaben = depot_lage::belegauswahl_neuro::eingaben(j.stand(), &original, tag..=tag, 8192);
+    assert!(eingaben.contains("\"x\":[1,1,1]"));
+    drop(j);
+    let name = "neuro2026_eingaben.jsonl";
+    let mut vergleich = Zip::default();
+    vergleich.datei_gepackt(name, eingaben.as_bytes())?;
+    let vergleich = vergleich.fertig()?;
+    // Lokalen ZIP-Eintrag bis zum Zentralverzeichnis vergleichen: Name, CRC und sämtliche Daten.
+    let ende = vergleich
+        .windows(4)
+        .position(|w| w == b"PK\x01\x02")
+        .ok_or("Eintrag fehlt")?;
+    let eintrag = vergleich.get(..ende).ok_or("ZIP-Eintrag unlesbar")?;
+    let post = formular_post("/export", &format!("t={TOKEN}&zeitraum=heute"));
+    let antwort = behandle(
+        &dienst(wurzel, true),
+        &Attrappe::default(),
+        &post,
+        donnerstag(12, 0)?,
+    );
+    assert_eq!(status(&antwort)?, 200);
+    assert!(antwort.windows(eintrag.len()).any(|w| w == eintrag));
     Ok(())
 }

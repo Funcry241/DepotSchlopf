@@ -1,0 +1,11 @@
+klasse: Funktion
+zweck: Historische Belegmerkmale für Neuro2026 mit Bezug zum Wissensstichtag exportieren
+pfade:
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/tests/dienst/dienstbetrieb.rs
+crates/depot_journal/src/stand.rs
+crates/depot_lage/src/belegauswahl_neuro.rs
+crates/depot_lage/src/lib.rs
+crates/depot_lage/tests/lage.rs
+crates/depot_sim/src/belegrang.rs
+docs/neuroschlopf/prueffaelle.md

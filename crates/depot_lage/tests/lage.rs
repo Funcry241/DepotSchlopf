@@ -2315,3 +2315,81 @@ fn verlauf_abgelehnte_kurse_sind_unbestaetigt() -> Result<(), String> {
     assert!(some(punkt.grund.as_ref(), "Grund")?.contains("Kursprüfung"));
     Ok(())
 }
+
+#[test]
+fn neuroeingaben_binden_these_beleg_und_rang_an_den_journalstand() -> Result<(), String> {
+    use depot_kern::abdruck::sha256_hex;
+    use depot_kern::json::{self, Json};
+    use depot_lage::belegauswahl_neuro::eingaben;
+    let ort = Ort::neu()?;
+    let mut journal = ort.oeffnen()?;
+    let (vorher, tag) = (tag(13)?, tag(16)?);
+    let vorschlag = "Topf A: DE0007164600 2000 bp: Testthese";
+    vorbedingung(journal.begruende(vorher, "Dachs", vorschlag), "These")?;
+    let abdruck = journal.bestaetigt().1;
+    vorbedingung(
+        journal.schliesse_ab(vorher, Cent(1000), &abdruck),
+        "Abschluss",
+    )?;
+    let zeit = some(Zeitpunkt::frankfurt(tag, 9, 0, 0), "Stichtag")?;
+    vorbedingung(journal.belege_wissensstichtag(tag, zeit), "Wissensstichtag")?;
+    // Gleicher Text und Vortagsdatum, aber erst nach dem Stichtag protokolliert.
+    vorbedingung(journal.begruende(vorher, "Maus", vorschlag), "Nachtrag")?;
+    let termin = "Termin SAP legt Zahlen vor";
+    let meldung = "Nachricht ohne Wertbezug | SAP";
+    let rueckblick = "SAP aus der späteren Normalisierung";
+    for text in ["Normalisierung davor", meldung, termin, "SAP gewinnt"] {
+        vorbedingung(journal.beobachte(tag, text), "Beobachtung")?;
+    }
+    let aus = |j: &Journal| eingaben(j.stand(), "synthetisch", tag..=tag, 8192);
+    assert!(aus(&journal).contains("Frageabschnitt fehlt"));
+    vorbedingung(
+        journal.begruende(tag, "Frageliste", "1 3"),
+        "Frageabschnitt",
+    )?;
+    vorbedingung(journal.beobachte(tag, rueckblick), "Nachlauf")?;
+    let output = aus(&journal);
+    let zeilen: Vec<Json> = output.lines().map(json::lies).collect::<Result<_, _>>()?;
+    let kopf = zeilen.first().ok_or("Kopf fehlt")?;
+    assert_eq!(
+        kopf.feld("merkmale_sha").and_then(Json::text),
+        Some("d92b454395ce322c89aba0c46a4c32e4a4b204763485158d74a24919df184b33")
+    );
+    let paare: Vec<_> = zeilen.iter().filter(|z| z.feld("x").is_some()).collect();
+    assert_eq!(paare.len(), 3);
+    for (zeile, (nummer, text, vektor, rang)) in paare.iter().zip([
+        (2, termin, [1, 1, 2], 1),
+        (3, "SAP gewinnt", [1, 0, 3], 2),
+        (1, meldung, [0, 0, 1], 3),
+    ]) {
+        let referenz = format!("{tag}#{nummer}:{}", sha256_hex(text.as_bytes()));
+        assert_eq!(
+            zeile.feld("ref").and_then(Json::text),
+            Some(referenz.as_str())
+        );
+        assert_eq!(zeile.feld("berater").and_then(Json::text), Some("Dachs"));
+        assert_eq!(
+            zeile.feld("isin").and_then(Json::text),
+            Some("DE0007164600")
+        );
+        assert_eq!(zeile.feld("grundrang").and_then(Json::anzahl), Some(rang));
+        assert_eq!(
+            zeile
+                .feld("x")
+                .and_then(Json::liste)
+                .map(|w| w.iter().filter_map(Json::anzahl).collect::<Vec<_>>()),
+            Some(vektor.to_vec())
+        );
+        assert!(zeile.feld("targets").is_none());
+        assert!(!output.contains(text));
+    }
+    let klein = eingaben(journal.stand(), "synthetisch", tag..=tag, 64);
+    assert!(klein.contains("Größenlimit") && !klein.contains("\"x\""));
+    vorbedingung(
+        journal.begruende(tag, "Frageliste", "1 3"),
+        "zweiter Abschnitt",
+    )?;
+    let doppelt = aus(&journal);
+    assert!(doppelt.contains("mehrdeutig") && !doppelt.contains("\"x\""));
+    Ok(())
+}
