@@ -1,0 +1,6 @@
+klasse: Funktion
+zweck: Die Einrichtung des automatischen IBKR-Gateway-Neustarts und die nächsten Schritte bei einem Verbindungsfehler erklären
+pfade:
+crates/depot_dienst/src/ibkr_papier.rs
+crates/depot_dienst/tests/dienst/ibkr_papier.rs
+crates/depot_sammler/src/ibkr.rs

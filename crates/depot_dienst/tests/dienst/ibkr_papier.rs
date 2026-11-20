@@ -54,9 +54,15 @@ fn ibkr_papierkonto_in_der_oberflaeche_speichern_und_lesen() -> Result<(), Strin
     let (status, details) = some(ibkr.split_once("<details>"), "eingeklappte Bearbeitung")?;
     assert!(status.contains("class=\"gut\">✓ Papierkontonummer lokal gespeichert"));
     assert!(status.contains("Papierabruf testen"));
+    assert!(status.contains("03:00 Uhr Ortszeit"));
+    assert!(status.contains("am Wochenende meldest du dich wieder von Hand an"));
     assert!(!status.contains("name=\"konto\""));
     assert!(details.starts_with("<summary>Papierkontonummer ändern</summary>"));
     assert!(details.contains("<details><summary>Hilfe zur Einrichtung</summary>"));
+    assert!(details.contains(
+        "Konfigurieren → Einstellungen → Sperren und schließen → Automatischer Neustart"
+    ));
+    assert!(details.contains("03:00 AM"));
     assert!(!seite.contains("DUR1234567"));
     let formatfehler = get(&d, "/einrichtung?ibkr=format", jetzt);
     assert!(formatfehler.contains("<details open><summary>Papierkontonummer ändern</summary>"));
