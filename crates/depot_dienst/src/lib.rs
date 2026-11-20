@@ -23,6 +23,7 @@ pub mod aktualisierung;
 mod analyse;
 pub mod autostart;
 mod depotseite;
+mod desktopdialog;
 mod gemini;
 mod gespraeche;
 pub mod hinweis;
@@ -530,6 +531,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 seiten::update_aktionen(&d.token, &d.start, &z, update).as_bytes(),
             )
         }
+        "/desktop-dialog" | "/teil/desktop-dialog" => desktopdialog_seite(d, a, jetzt),
         "/bestaetigen" => auftrag_bestaetigen(d, a, jetzt),
         "/protokoll" | "/protokoll.txt" => protokoll_lesen(d, a, tag),
         "/einrichtung" => einrichtungsseite(d, u, a, jetzt, tag),
@@ -653,6 +655,31 @@ fn zeitplan_aus_formular(f: &[(String, String)]) -> Option<Zeitplan> {
     })
 }
 
+fn desktopdialog_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
+    let id = a
+        .abfrage
+        .strip_prefix("id=")
+        .filter(|id| id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+        .unwrap_or_default();
+    let inhalt = desktopdialog::inhalt(d, id);
+    let seite = if a.pfad == "/desktop-dialog" {
+        seiten::rahmen(
+            "/einrichtung",
+            None,
+            None,
+            &format!(
+                "<section><h2>Windows-Dialog</h2><div data-teil=\"/teil/desktop-dialog?id={id}\">{inhalt}</div></section>"
+            ),
+            d.version.as_deref(),
+            &betriebsleiste(d, heute(jetzt)),
+            ("", ""),
+        )
+    } else {
+        inhalt
+    };
+    antwort(200, HTML, seite.as_bytes())
+}
+
 fn ist_formular(a: &Anfrage) -> bool {
     a.kopf("content-type")
         .and_then(|typ| typ.split(';').next())
@@ -662,7 +689,13 @@ fn ist_formular(a: &Anfrage) -> bool {
         })
 }
 
-fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
+fn post(
+    d: &Dienst,
+    u: &dyn Umwelt,
+    a: &Anfrage,
+    jetzt: Zeitpunkt,
+    hintergrund: Option<desktopdialog::Umgebung<'_>>,
+) -> Vec<u8> {
     if !herkunft_erlaubt(a.kopf("origin")) {
         return seiten::fehler(403, "Abgelehnt: fremde Herkunft");
     }
@@ -677,6 +710,9 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             403,
             "Diese Seite ist veraltet. Öffne Live oder die Einrichtung erneut und wiederhole die Aktion.",
         );
+    }
+    if let Some(antwort) = desktopdialog::post(d, u, hintergrund, &a.pfad, &f, jetzt) {
+        return antwort;
     }
     match a.pfad.as_str() {
         "/ausfuehren" => auftrag_einreihen(d, &f, jetzt),
@@ -738,12 +774,8 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 Err(_) => seiten::fehler(409, "Mindesteinsatz konnte nicht gespeichert werden."),
             }
         }
-        "/sicherung-ziel" => sicherung_einstellen(d, u, &f, jetzt),
-        "/kostenschutz" => kostenschutz_aufheben(d, u, &f, Sperre::Kostenschutz),
-        "/kurssperre" => kostenschutz_aufheben(d, u, &f, Sperre::Kurse),
+        "/sicherung-ziel" => sicherung_einstellen(d, &f, jetzt),
         "/splitverdacht" => splitverdacht::aktion(d, &f, jetzt),
-        "/papierfreigabe" => papier_freigeben(d, u, &f),
-        "/papierdialog-test" => papierdialog_testen(d, u),
         "/autostart" => {
             let an = match feld(&f, "an") {
                 Some("an") => true,
@@ -830,19 +862,9 @@ fn mindesteinsatz_formular(d: &Dienst) -> String {
     )
 }
 
-fn sicherung_einstellen(
-    d: &Dienst,
-    u: &dyn Umwelt,
-    f: &[(String, String)],
-    jetzt: Zeitpunkt,
-) -> Vec<u8> {
+fn sicherung_einstellen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {
     let aktion = feld(f, "aktion").unwrap_or("speichern");
     let (ziel, meldung) = match aktion {
-        "waehlen" => match u.sicherungsziel_waehlen() {
-            Ok(Some(ziel)) if !ziel.trim().is_empty() => (ziel, "sicherung_ziel"),
-            Ok(_) => return http::umleitung("/einrichtung#sicherung"),
-            Err(fehler) => return seiten::fehler(503, &fehler),
-        },
         "speichern" | "starten" => {
             let Some(ziel) = feld(f, "ziel") else {
                 return seiten::fehler(400, "Sicherungsziel fehlt");
@@ -856,7 +878,7 @@ fn sicherung_einstellen(
         }
         _ => return seiten::fehler(400, "Unbekannte Sicherungsaktion"),
     };
-    match d.sicherung_einstellen(&ziel, aktion == "starten", jetzt) {
+    match d.sicherung_einstellen(&ziel, aktion == "starten", jetzt, None) {
         Ok(()) => http::umleitung(&format!("/einrichtung?m={meldung}#sicherung")),
         Err((code, fehler)) => seiten::fehler(code, &fehler),
     }
@@ -999,47 +1021,6 @@ fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
     http::umleitung(&format!("/einrichtung?m={fehler}{entwurf}#zeitplan"))
 }
 
-fn papierdialog_testen(d: &Dienst, u: &dyn Umwelt) -> Vec<u8> {
-    let meldung = if let Ok(_dialog) = d.papierdialog.try_lock() {
-        match u.papierdialog_testen() {
-            DialogErgebnis::Ja => "dialogtest_ja",
-            DialogErgebnis::Nein => "dialogtest_nein",
-            DialogErgebnis::ZeitAbgelaufen => "dialogtest_zeit",
-            DialogErgebnis::NichtVerfuegbar => "dialogtest_fehler",
-        }
-    } else {
-        "dialogtest_belegt"
-    };
-    http::umleitung(&format!("/einrichtung?m={meldung}#papierdialog-test"))
-}
-
-fn papier_freigeben(d: &Dienst, u: &dyn Umwelt, f: &[(String, String)]) -> Vec<u8> {
-    let zurueck = |code| http::umleitung(&format!("/einrichtung?m={code}#papierfreigabe"));
-    if feld(f, "geprueft") != Some("ja") {
-        return zurueck("papierfreigabe_unbestaetigt");
-    }
-    let Some(gesehen) =
-        feld(f, "abdruck").filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-    else {
-        return seiten::fehler(
-            400,
-            "Die Freigabe ist veraltet. Öffne die Einrichtung und prüfe den aktuellen Stand.",
-        );
-    };
-    let Ok(_dialog) = d.papierdialog.try_lock() else {
-        return zurueck("papierfreigabe_belegt");
-    };
-    let Some(angebot) =
-        depot_lage::papier_freigabe_angebot(&d.wurzel).filter(|angebot| angebot.abdruck == gesehen)
-    else {
-        return zurueck("papierfreigabe_geaendert");
-    };
-    let Some(bestaetigt_am) = u.papierfreigabe_bestaetigen(&angebot) else {
-        return zurueck("papierfreigabe_unbestaetigt");
-    };
-    zurueck(d.papier_freigeben(gesehen, bestaetigt_am))
-}
-
 /// Welche Sperrdatei ein Formular aufhebt.
 #[derive(Clone, Copy, Debug)]
 pub enum Sperre {
@@ -1047,78 +1028,34 @@ pub enum Sperre {
     Kurse,
 }
 
-/// Hebt eine Sperre gefuehrt auf (siehe `kostenschutz`): die des Kostenschutzes oder die
-/// Kurssperre.
-fn kostenschutz_aufheben(
-    d: &Dienst,
-    u: &dyn Umwelt,
-    f: &[(String, String)],
-    sperre: Sperre,
-) -> Vec<u8> {
-    let (name, anker) = match sperre {
-        Sperre::Kostenschutz => ("kostenschutz", "kostenschutz"),
-        Sperre::Kurse => ("kurssperre", "kurssperre"),
-    };
-    let ziel = |m: &str| http::umleitung(&format!("/einrichtung?m={name}_{m}#{anker}"));
-    if feld(f, "geprueft") != Some("ja") {
-        return ziel("unbestaetigt");
-    }
-    let Some(gesehen) = feld(f, "abdruck") else {
-        return seiten::fehler(
-            400,
-            "Die Sperre hat sich möglicherweise geändert. Öffne die Einrichtung erneut.",
-        );
-    };
-    let Ok(_dialog) = d.papierdialog.try_lock() else {
-        return ziel("dialog_belegt");
-    };
-    {
-        let z = d.sperre();
-        if z.laufend.is_some() || !z.warteschlange.is_empty() {
-            return ziel("belegt");
-        }
-        let pfad = match sperre {
-            Sperre::Kostenschutz => kostenschutz::pfad(&d.wurzel),
-            Sperre::Kurse => kostenschutz::kurse_pfad(&d.wurzel),
-        };
-        match werkbank::lies_falls_da(&pfad) {
-            Ok(Some(inhalt)) if kostenschutz::abdruck(&inhalt) == gesehen => {}
-            Ok(Some(_)) => return ziel("geaendert"),
-            Ok(None) => return ziel("frei"),
-            Err(_) => return ziel("fehler"),
-        }
-    }
-    let Some(jetzt) = u.sperre_bestaetigen(sperre) else {
-        return ziel("dialog_unbestaetigt");
-    };
-    // Unter der Sperre des Zustands: Waehrenddessen startet kein Auftrag.
-    let mut z = d.sperre();
-    if z.laufend.is_some() || !z.warteschlange.is_empty() {
-        return ziel("belegt");
-    }
-    let ausgang = match sperre {
-        Sperre::Kostenschutz => kostenschutz::aufheben(&d.wurzel, gesehen, jetzt),
-        Sperre::Kurse => kostenschutz::kurse_aufheben(&d.wurzel, gesehen, jetzt),
-    };
-    match ausgang {
-        Ok(kostenschutz::Aufheben::Aufgehoben) => {
-            z.lage_veraltet = true;
-            ziel("aufgehoben")
-        }
-        Ok(kostenschutz::Aufheben::Frei) => ziel("frei"),
-        Ok(kostenschutz::Aufheben::Geaendert) => ziel("geaendert"),
-        Err(_) => ziel("fehler"),
-    }
-}
-
 /// Beantwortet eine gelesene Anfrage. Erst der Host, dann je nach Methode.
 pub fn behandle(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
+    behandle_anfrage(d, u, a, jetzt, None)
+}
+
+/// Antwortet sofort auf Aufrufe eines Windows-Dialogs. Dessen Ergebnis wird separat angezeigt.
+pub fn behandle_am_desktop(
+    d: &std::sync::Arc<Dienst>,
+    u: &std::sync::Arc<dyn Umwelt>,
+    a: &Anfrage,
+    jetzt: Zeitpunkt,
+) -> Vec<u8> {
+    behandle_anfrage(d, u.as_ref(), a, jetzt, Some((d, u)))
+}
+
+fn behandle_anfrage(
+    d: &Dienst,
+    u: &dyn Umwelt,
+    a: &Anfrage,
+    jetzt: Zeitpunkt,
+    hintergrund: Option<desktopdialog::Umgebung<'_>>,
+) -> Vec<u8> {
     if !host_erlaubt(a.kopf("host")) {
         return seiten::fehler(403, "Abgelehnt: fremder Host");
     }
     match a.methode.as_str() {
         "GET" => get(d, u, a, jetzt),
-        "POST" => post(d, u, a, jetzt),
+        "POST" => post(d, u, a, jetzt, hintergrund),
         _ => seiten::fehler(405, "Nur GET und POST"),
     }
 }

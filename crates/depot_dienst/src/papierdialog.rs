@@ -2,49 +2,11 @@
 
 use depot_lage::PapierFreigabeAngebot;
 
-#[cfg(any(windows, test))]
-use std::{
-    process::Child,
-    time::{Duration, Instant},
-};
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DialogErgebnis {
     Ja,
     Nein,
-    ZeitAbgelaufen,
     NichtVerfuegbar,
-}
-
-#[cfg(any(windows, test))]
-fn warte_auf_bestaetigung(kind: &mut Child, zeitlimit: Duration) -> DialogErgebnis {
-    let start = Instant::now();
-    while let Some(rest) = zeitlimit.checked_sub(start.elapsed()) {
-        match kind.try_wait() {
-            Ok(Some(_)) if start.elapsed() >= zeitlimit => return DialogErgebnis::ZeitAbgelaufen,
-            Ok(Some(status)) => {
-                return match status.code() {
-                    Some(0) => DialogErgebnis::Ja,
-                    Some(2) => DialogErgebnis::Nein,
-                    _ => DialogErgebnis::NichtVerfuegbar,
-                };
-            }
-            Ok(None) => std::thread::sleep(rest.min(Duration::from_millis(100))),
-            Err(_) => {
-                beende(kind);
-                return DialogErgebnis::NichtVerfuegbar;
-            }
-        }
-    }
-    beende(kind);
-    DialogErgebnis::ZeitAbgelaufen
-}
-
-#[cfg(any(windows, test))]
-fn beende(kind: &mut Child) {
-    if kind.kill().is_ok() {
-        let _ = kind.wait();
-    }
 }
 
 pub fn bestaetigen(angebot: &PapierFreigabeAngebot) -> bool {
@@ -78,16 +40,19 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 $text = $env:DEPOTSCHLOPF_PAPIER_DIALOG
 $wahl = [System.Windows.Forms.MessageBox]::Show(
-    $text, 'DepotSchlopf - Freigabe', 'YesNo', 'Warning', 'Button2', 'DefaultDesktopOnly')
+    $text, 'DepotSchlopf - Freigabe', 'YesNoCancel', 'Question', 'Button2', 'DefaultDesktopOnly')
 if ($wahl -eq [System.Windows.Forms.DialogResult]::Yes) { exit 0 }
 exit 2
 ";
-    let Ok(mut kind) = powershell_dialog(DIALOG)
-        .and_then(|mut befehl| befehl.env("DEPOTSCHLOPF_PAPIER_DIALOG", text).spawn())
-    else {
-        return DialogErgebnis::NichtVerfuegbar;
-    };
-    warte_auf_bestaetigung(&mut kind, Duration::from_secs(120))
+    match powershell_dialog(DIALOG)
+        .and_then(|mut befehl| befehl.env("DEPOTSCHLOPF_PAPIER_DIALOG", text).status())
+        .ok()
+        .and_then(|status| status.code())
+    {
+        Some(0) => DialogErgebnis::Ja,
+        Some(2) => DialogErgebnis::Nein,
+        _ => DialogErgebnis::NichtVerfuegbar,
+    }
 }
 
 #[cfg(windows)]
@@ -118,7 +83,6 @@ fn powershell_dialog(skript: &str) -> std::io::Result<std::process::Command> {
 
 #[cfg(windows)]
 pub(crate) fn sicherungsziel_waehlen() -> Result<Option<String>, String> {
-    use std::io::Read as _;
     use std::process::Stdio;
 
     const DIALOG: &str = "
@@ -141,64 +105,19 @@ try {
 }
 ";
     let fehler = || "Der Windows-Ordnerdialog konnte nicht geöffnet werden.".to_owned();
-    let mut kind = powershell_dialog(DIALOG)
-        .and_then(|mut befehl| befehl.stdout(Stdio::piped()).stderr(Stdio::null()).spawn())
+    let ergebnis = powershell_dialog(DIALOG)
+        .and_then(|mut befehl| befehl.stderr(Stdio::null()).output())
         .map_err(|_| fehler())?;
-    let mut ausgabe = kind.stdout.take().ok_or_else(fehler)?;
-    // Die Pipe parallel lesen, damit auch lange Pfade den Dialogprozess nicht blockieren.
-    let leser = std::thread::spawn(move || {
-        let mut pfad = String::new();
-        ausgabe.read_to_string(&mut pfad).map(|_| pfad)
-    });
-    match warte_auf_bestaetigung(&mut kind, Duration::from_secs(120)) {
-        DialogErgebnis::Ja => leser
-            .join()
-            .map_err(|_| fehler())?
+    match ergebnis.status.code() {
+        Some(0) => String::from_utf8(ergebnis.stdout)
             .map(Some)
             .map_err(|_| fehler()),
-        DialogErgebnis::Nein => Ok(None),
-        DialogErgebnis::ZeitAbgelaufen => {
-            Err("Der Ordnerdialog wurde nach zwei Minuten geschlossen.".into())
-        }
-        DialogErgebnis::NichtVerfuegbar => Err(fehler()),
+        Some(2) => Ok(None),
+        _ => Err(fehler()),
     }
 }
 
 #[cfg(not(windows))]
 fn zeige(_text: &str) -> DialogErgebnis {
     DialogErgebnis::NichtVerfuegbar
-}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use super::{DialogErgebnis, Duration, warte_auf_bestaetigung};
-    use std::process::Command;
-
-    #[test]
-    fn dialogantwort_gilt_nur_rechtzeitig_und_bei_ja() -> Result<(), String> {
-        for (code, erwartet) in [
-            ("exit 0", DialogErgebnis::Ja),
-            ("exit 2", DialogErgebnis::Nein),
-            ("exit 1", DialogErgebnis::NichtVerfuegbar),
-        ] {
-            let mut kind = Command::new("sh")
-                .args(["-c", code])
-                .spawn()
-                .map_err(|e| e.to_string())?;
-            assert_eq!(
-                warte_auf_bestaetigung(&mut kind, Duration::from_secs(2)),
-                erwartet
-            );
-        }
-        let mut kind = Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        assert_eq!(
-            warte_auf_bestaetigung(&mut kind, Duration::from_millis(20)),
-            DialogErgebnis::ZeitAbgelaufen
-        );
-        assert!(kind.try_wait().map_err(|e| e.to_string())?.is_some());
-        Ok(())
-    }
 }

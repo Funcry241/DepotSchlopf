@@ -137,6 +137,22 @@ struct Attrappe {
     gemini_schluessel: Option<Hinterlegt>,
     gemini_speicherprobe: bool,
     sicherungsziel: Option<String>,
+    dialogpause: Option<Dialogpause>,
+}
+
+struct Dialogpause {
+    offen: std::sync::mpsc::Sender<()>,
+    weiter: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl Attrappe {
+    fn warte_im_dialog(&self) -> Option<()> {
+        if let Some(pause) = &self.dialogpause {
+            pause.offen.send(()).ok()?;
+            pause.weiter.lock().ok()?.recv().ok()?;
+        }
+        Some(())
+    }
 }
 
 impl Umwelt for Attrappe {
@@ -165,6 +181,7 @@ impl Umwelt for Attrappe {
     }
 
     fn sicherungsziel_waehlen(&self) -> Result<Option<String>, String> {
+        self.warte_im_dialog().ok_or("Testdialog abgebrochen")?;
         Ok(self.sicherungsziel.clone())
     }
 
@@ -191,6 +208,7 @@ impl Umwelt for Attrappe {
     }
 
     fn sperre_bestaetigen(&self, _: depot_dienst::Sperre) -> Option<Zeitpunkt> {
+        self.warte_im_dialog()?;
         if let Some(pfad) = &self.sperrdatei_wechsel {
             fs::write(pfad, "Neue Sperre").ok()?;
         }

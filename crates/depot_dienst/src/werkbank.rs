@@ -474,6 +474,7 @@ pub struct Dienst {
     pub(crate) depot_lesecache: Mutex<depot_journal::Lesecache>,
     pub(crate) gespraechscache: crate::zeitstrahl_ki::Cache,
     pub(crate) papierdialog: Mutex<()>,
+    pub(crate) desktopdialog: Mutex<Option<crate::desktopdialog::Stand>>,
     update_dialog: Mutex<Option<(String, Child)>>,
     pub(crate) neuro: Mutex<crate::neuroschlopf::Anzeige>,
     protokoll_schutz: Mutex<crate::protokoll::Schutz>,
@@ -798,6 +799,7 @@ impl Dienst {
             depot_lesecache: Mutex::default(),
             gespraechscache: crate::zeitstrahl_ki::Cache::default(),
             papierdialog: Mutex::new(()),
+            desktopdialog: Mutex::new(None),
             update_dialog: Mutex::new(None),
             neuro: Mutex::default(),
             protokoll_schutz: Mutex::new(protokoll_schutz),
@@ -993,6 +995,7 @@ impl Dienst {
         ziel: &str,
         starten: bool,
         jetzt: Zeitpunkt,
+        bisheriges_ziel: Option<&str>,
     ) -> Result<(), (u16, String)> {
         let ziel = ziel.trim();
         if starten && ziel.is_empty() {
@@ -1002,7 +1005,16 @@ impl Dienst {
             ));
         }
         let mut z = self.sperre();
-        let geaendert = crate::sicherung::ziel(&self.wurzel) != ziel;
+        let gespeichert = crate::sicherung::ziel_lesen(&self.wurzel);
+        if let Some(bisher) = bisheriges_ziel
+            && gespeichert.as_deref() != Ok(bisher)
+        {
+            return Err((
+                409,
+                "Das Sicherungsziel hat sich inzwischen geändert oder ist nicht lesbar. Öffne die Ordnerwahl erneut.".into(),
+            ));
+        }
+        let geaendert = gespeichert.unwrap_or_default() != ziel;
         if geaendert
             && (z.laufend.iter().any(|a| a.art == Art::Sicherung)
                 || z.warteschlange.iter().any(|a| a.art == Art::Sicherung))

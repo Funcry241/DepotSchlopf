@@ -8,7 +8,7 @@ Für den Windows-Dialog im laufenden DepotSchlopf gibt es in der Einrichtung den
 2. Starte `DepotSchlopf.cmd` aus dem Prüfordner. Prüfe in der Einrichtung unter **Dienst**, dass der angezeigte Projektordner wirklich der Prüfordner ist. Beende den Prüfdienst wieder.
 3. Lade [`journal.txt`](daten/journal.txt), [`journal.vermerk`](daten/journal.vermerk) und [`papierkonto.txt`](daten/papierkonto.txt) einzeln über **Raw** herunter. Speichere sie unverändert unter diesen Namen in `daten\` des Prüfordners. Öffne und speichere sie dabei nicht in einem Texteditor. Das Prüfjournal muss genau 606 Byte lang sein. Bei 612 Byte wurden die Zeilenenden umgeschrieben.
 4. Starte den Prüfdienst erneut und öffne nur **Einrichtung**. Lass den Zeitplan ausgeschaltet und starte weder einen Papiertag noch einen Abruf. Im selben Windows-Konto können die hinterlegten API-Schlüssel auch im Prüfordner verfügbar sein. Das Freigabeformular zeigt 10.000 € Bargeld und 33,33 % Gesamtverlust.
-5. Öffne die Freigabe. Prüfe, ob der Windows-Dialog sichtbar ist und **Nein** vorausgewählt ist. Drücke Enter. Die Sperre bleibt aktiv. Öffne den Dialog erneut und warte zwei Minuten. Auch dann bleibt die Sperre aktiv.
+5. Öffne die Freigabe. Prüfe, ob der Windows-Dialog sichtbar ist und **Nein** vorausgewählt ist. Drücke Enter. Die Sperre bleibt aktiv. Öffne den Dialog erneut und warte länger als zwei Minuten. Der Dialog bleibt offen, die Webseite bleibt bedienbar und die Sperre bleibt aktiv. Schließe den Dialog. Die Sperre bleibt weiterhin aktiv.
 6. Wähle zuletzt ausdrücklich **Ja**. Im Prüfjournal erscheint ein Eintrag `papier-freigabe` mit dem Weg `einrichtung;dialog` und dem UTC-Zeitpunkt. Nach einem Neustart bleibt die Freigabe erhalten.
 
 ## Zweiter Durchlauf über den Autostart

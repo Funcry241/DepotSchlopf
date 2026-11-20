@@ -27,18 +27,19 @@ use depot_dienst::programmstand;
 use depot_dienst::rueckfall::{self, NEUSTART};
 use depot_dienst::werkbank::{Dienst, cargo_starter};
 use depot_dienst::{
-    System, Umwelt, behandle, finde_wurzel, http, jetzt, lagerechner, neues_token, oeffne_browser,
+    System, Umwelt, behandle_am_desktop, finde_wurzel, http, jetzt, lagerechner, neues_token,
+    oeffne_browser,
 };
 
 /// So viele Verbindungen werden hoechstens zugleich bedient; weitere werden geschlossen.
 const VERBINDUNGEN_MAX: usize = 32;
 
-fn bediene(d: &Dienst, u: &dyn Umwelt, mut strom: TcpStream) {
+fn bediene(d: &Arc<Dienst>, u: &Arc<dyn Umwelt>, mut strom: TcpStream) {
     let _ = strom.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = strom.set_write_timeout(Some(Duration::from_secs(10)));
     let antwort = match http::lies(&mut strom) {
         Ok(anfrage) => match jetzt() {
-            Some(t) => behandle(d, u, &anfrage, t),
+            Some(t) => behandle_am_desktop(d, u, &anfrage, t),
             None => depot_dienst::seiten::fehler(500, "Uhr liefert keinen Zeitpunkt"),
         },
         Err(http::LeseFehler::ZuGross) => depot_dienst::seiten::fehler(413, "Anfrage zu groß"),
@@ -316,7 +317,7 @@ fn main() -> ExitCode {
         }
         let (d, u, o) = (Arc::clone(&dienst), Arc::clone(&umwelt), Arc::clone(&offen));
         thread::spawn(move || {
-            bediene(&d, u.as_ref(), s);
+            bediene(&d, &u, s);
             o.fetch_sub(1, Ordering::SeqCst);
         });
     }
