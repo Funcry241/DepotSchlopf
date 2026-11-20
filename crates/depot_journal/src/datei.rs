@@ -191,7 +191,7 @@ pub fn vermerk_fuer(inhalt: &[u8], geplant: u64) -> Option<String> {
 /// Kein Teil des uebergebenen Pfads darf ein Link sein (R24, K12-02). Unter Windows meldet
 /// `is_symlink` auch Verzeichnisverknuepfungen (Junctions). Ein Teil, den es noch nicht gibt,
 /// beendet die Pruefung. `..` ist verboten.
-fn kein_link_im_pfad(pfad: &Path) -> Result<(), JournalFehler> {
+pub(crate) fn kein_link_im_pfad(pfad: &Path) -> Result<(), JournalFehler> {
     let mut bisher = PathBuf::new();
     for teil in pfad.components() {
         bisher.push(teil);
@@ -215,7 +215,7 @@ fn kein_link_im_pfad(pfad: &Path) -> Result<(), JournalFehler> {
 }
 
 /// Gibt es die Datei? Ein Link oder etwas anderes als eine gewoehnliche Datei ist ein Fehler.
-fn datei_da(pfad: &Path) -> Result<bool, JournalFehler> {
+pub(crate) fn datei_da(pfad: &Path) -> Result<bool, JournalFehler> {
     match fs::symlink_metadata(pfad) {
         Ok(m) if m.file_type().is_symlink() => {
             Err(halt(format!("{}: Link verboten", pfad.display())))

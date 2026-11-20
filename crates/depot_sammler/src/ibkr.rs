@@ -386,9 +386,30 @@ fn hole_mit_diagnose(konto: &str, diagnose_aktiv: bool) -> Result<Auszug, &'stat
     auszug(&client, konto, diagnose_aktiv)
 }
 
+fn vermerke_abruf(wurzel: &Path, konto: &str, auszug: Option<&Auszug>) -> Result<(), &'static str> {
+    let abruf = auszug
+        .map(|a| {
+            crate::jetzt()
+                .map(|zeit| (zeit, a.salden.gesamt))
+                .ok_or("Die Uhrzeit des Papierabrufs ist nicht verfügbar.")
+        })
+        .transpose()?;
+    depot_journal::ibkr_abruf::vermerken(wurzel, konto, abruf)
+        .map_err(|_| "Der Papierabrufstand konnte lokal nicht gespeichert werden.")
+}
+
 /// Meldet das Ergebnis des lesenden Tests an die Oberfläche, ohne Kontostand oder Kontonummer auszugeben.
 pub fn pruefe_papier(wurzel: &Path) -> ExitCode {
-    let ergebnis = kontonummer(wurzel).and_then(|konto| hole_mit_diagnose(&konto, true));
+    let ergebnis = kontonummer(wurzel).and_then(|konto| {
+        let ergebnis = hole_mit_diagnose(&konto, true);
+        if let Err(grund) = vermerke_abruf(wurzel, &konto, ergebnis.as_ref().ok()) {
+            diagnose::zeile(grund);
+            if ergebnis.is_ok() {
+                return Err(grund);
+            }
+        }
+        ergebnis
+    });
     let text = match &ergebnis {
         Ok(a) => {
             let start = depot_kern::messlatte::ibkr::LANGFRIST.startkapital;

@@ -13,11 +13,50 @@ fn datei(d: &Dienst) -> PathBuf {
     d.wurzel.join("daten").join(KONTO_DATEI)
 }
 
-pub(crate) fn gespeichert(d: &Dienst) -> bool {
+fn konto(d: &Dienst) -> Option<String> {
     lies_falls_da(&datei(d))
         .ok()
         .flatten()
-        .is_some_and(|wert| kontonummer_gueltig(wert.trim()))
+        .map(|wert| wert.trim().to_owned())
+        .filter(|wert| kontonummer_gueltig(wert))
+}
+
+pub(crate) fn gespeichert(d: &Dienst) -> bool {
+    konto(d).is_some()
+}
+
+pub(crate) fn depot(d: &Dienst) -> String {
+    use depot_lage::zeit_text;
+
+    let mut s = crate::seiten::marke(&d.start);
+    s.push_str("<section id=\"ibkr-depot\"><h2>IBKR-Papierkonto</h2>");
+    let stand = konto(d)
+        .map(|konto| depot_journal::ibkr_abruf::lesen(&d.wurzel, &konto))
+        .transpose()
+        .map(Option::flatten);
+    match stand {
+        Ok(Some(stand)) => {
+            if let Some((zeit, betrag)) = stand.erfolg {
+                let _ = write!(
+                    s,
+                    "<p>Bargeld <strong class=\"gross\">{betrag}</strong></p>\
+                     <p class=\"leise\">Letzter erfolgreicher Papierabruf {}</p>",
+                    zeit_text(zeit)
+                );
+            } else {
+                s.push_str("<p>Noch kein erfolgreicher Papierabruf.</p>");
+            }
+            if stand.fehlgeschlagen {
+                s.push_str("<p class=\"offen\">Der jüngste Papierabruf ist fehlgeschlagen.</p>");
+            }
+        }
+        Ok(None) => s.push_str("<p>Noch kein Papierabruf.</p>"),
+        Err(_) => {
+            s.push_str("<p class=\"offen\">Der gespeicherte Papierabrufstand ist unlesbar.</p>");
+        }
+    }
+    s.push_str("<p><a href=\"/einrichtung#ibkr-papier\">Zum Papierabruf in den Einstellungen</a></p></section>");
+    s
 }
 
 fn zurueck(meldung: &str) -> Vec<u8> {

@@ -53,6 +53,7 @@ pub mod auftrag;
 pub mod datei;
 pub mod dateiersatz;
 pub mod gespraeche;
+pub mod ibkr_abruf;
 pub mod kasse;
 mod ki_abrechnung;
 mod ki_aufruf;
