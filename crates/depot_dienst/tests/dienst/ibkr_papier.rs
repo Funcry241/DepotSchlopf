@@ -138,3 +138,90 @@ fn depot_zeigt_letzten_ibkr_abruf_getrennt_von_der_simulation() -> Result<(), St
     assert!(!abschnitt(&neu).contains(&Cent(105_000).to_string()));
     Ok(())
 }
+
+#[test]
+fn ibkr_journalabgleich_laesst_sich_einrichten_und_je_handelstag_planen() -> Result<(), String> {
+    use depot_journal::Journal;
+    use depot_kern::ibkr_papier::{ABGLEICH_OK, KONTO_DATEI};
+    use depot_kern::{Cent, Topf, TopfId};
+
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(9, 0)?;
+    let zeitpunkt = |tag, h, m| {
+        some(
+            Datum::neu(2026, 11, tag).and_then(|d| Zeitpunkt::frankfurt(d, h, m, 0)),
+            "Zeitpunkt",
+        )
+    };
+    let post = |ziel: &str, felder: &str| {
+        let a = formular_post(ziel, &format!("t={TOKEN}&{felder}"));
+        text(&behandle(&d, &Attrappe::default(), &a, t))
+    };
+    let konto = "DUR123456";
+    fs::write(wurzel.join("daten").join(KONTO_DATEI), konto).map_err(|e| e.to_string())?;
+    let schalter = "aktiv=ja&uhrzeit=09%3A00";
+    assert!(post("/ibkr-abgleich", schalter).contains("ibkrabgleich=journal"));
+    let teil = || get(&d, "/teil/ibkr-abgleich", t);
+    assert!(teil().contains("IBKR-Papierjournal einrichten"));
+    assert!(post("/ausfuehren", "art=ibkr_journal").contains("ibkrabgleich=eingereiht"));
+    let (nr, kind) = some(d.schritt(t), "Manuelle Journaleinrichtung")?;
+    d.verfolge(nr, kind, || donnerstag(9, 0).ok());
+
+    let daten = wurzel.join("daten/ibkr-papier").join(konto);
+    fs::create_dir_all(&daten).map_err(|e| e.to_string())?;
+    let pfad = daten.join("journal.txt");
+    Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+    let mut j = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+    let topf = Topf::neu(TopfId::A, Cent(100_000)).map_err(|e| format!("{e:?}"))?;
+    j.setze_topf(&topf).map_err(|e| format!("{e:?}"))?;
+    let vortag = some(zeitpunkt(4, 9, 0)?.frankfurt_tag(), "Erster Handelstag")?;
+    for _ in 0..2 {
+        j.beobachte(vortag, ABGLEICH_OK)
+            .map_err(|e| format!("{e:?}"))?;
+    }
+    drop(j);
+    assert!(teil().contains("1 von 5 Handelstagen belegt."));
+    assert!(teil().contains("Jetzt abgleichen"));
+    assert!(!teil().contains(konto));
+    let vorher = get(&d, "/einrichtung", t);
+    assert!(!vorher.contains("name=\"aktiv\" value=\"ja\" checked"));
+
+    assert!(post("/ibkr-abgleich", "aktiv=ja&uhrzeit=25%3A00").contains("ibkrabgleich=uhrzeit"));
+    assert!(post("/ibkr-abgleich", schalter).contains("ibkrabgleich=gespeichert"));
+    assert!(d.schritt(t).is_none()); // Hauptzeitplan aus.
+    let vorbereiten = |d: &Dienst| {
+        let mut z = d.sperre();
+        z.zeitplan.an = true;
+        z.zeitplan.termine = (23, 0);
+        z.zeitplan.kurse = (23, 1);
+        z.zeitplan.papier_danach = false;
+    };
+    vorbereiten(&d);
+    assert!(d.schritt(donnerstag(8, 59)?).is_none());
+    let (nr, kind) = some(d.schritt(t), "Geplanter IBKR-Abgleich")?;
+    assert!(
+        d.sperre()
+            .laufend
+            .as_ref()
+            .is_some_and(|a| a.art == Art::IbkrAbgleich && a.anlass == Anlass::Zeitplan)
+    );
+    d.verfolge(nr, kind, || donnerstag(9, 0).ok());
+    assert!(d.schritt(donnerstag(9, 1)?).is_none());
+
+    let neu = dienst(wurzel, true);
+    vorbereiten(&neu);
+    assert!(neu.schritt(donnerstag(9, 2)?).is_none());
+    let freitag = zeitpunkt(6, 8, 30)?;
+    let freitag_tag = some(freitag.frankfurt_tag(), "Manuell belegter Freitag")?;
+    let mut j = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+    j.beobachte(freitag_tag, ABGLEICH_OK)
+        .map_err(|e| format!("{e:?}"))?;
+    drop(j);
+    assert!(neu.schritt(zeitpunkt(6, 9, 0)?).is_none());
+    assert!(teil().contains("2 von 5 Handelstagen belegt."));
+    assert!(neu.schritt(zeitpunkt(7, 9, 0)?).is_none());
+    assert!(post("/ibkr-abgleich", "uhrzeit=09%3A00").contains("ibkrabgleich=gespeichert"));
+    assert!(neu.schritt(zeitpunkt(9, 9, 0)?).is_none());
+    Ok(())
+}

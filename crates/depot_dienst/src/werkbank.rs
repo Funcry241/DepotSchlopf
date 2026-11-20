@@ -35,6 +35,8 @@ pub enum Art {
     Termine,
     Nachrichten,
     IbkrPapier,
+    IbkrJournal,
+    IbkrAbgleich,
     /// Interner Auftrag für die optionale Nachrichtensortierung.
     Gemini,
     Vorbereiten,
@@ -50,7 +52,7 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 15] = [
+const ALLE_ARTEN: [Art; 17] = [
     Art::Einrichten,
     Art::Kurse,
     Art::Kursdiagnose,
@@ -59,6 +61,8 @@ const ALLE_ARTEN: [Art; 15] = [
     Art::Termine,
     Art::Nachrichten,
     Art::IbkrPapier,
+    Art::IbkrJournal,
+    Art::IbkrAbgleich,
     Art::Vorbereiten,
     Art::Wochenrueckschau,
     Art::Simulation,
@@ -79,6 +83,8 @@ impl Art {
             Art::Termine => "Termine abrufen",
             Art::Nachrichten => "Schlagzeilen abrufen",
             Art::IbkrPapier => "IBKR-Papierabruf testen",
+            Art::IbkrJournal => "IBKR-Papierjournal einrichten",
+            Art::IbkrAbgleich => "IBKR-Papierjournal abgleichen",
             Art::Gemini => "Gemini-Zuarbeit",
             Art::Vorbereiten => "Nächsten Handelstag vorbereiten",
             Art::Wochenrueckschau => "KI-Wochenrückschau",
@@ -102,6 +108,8 @@ impl Art {
             Art::Termine => "termine",
             Art::Nachrichten => "nachrichten",
             Art::IbkrPapier => "ibkr_papier",
+            Art::IbkrJournal => "ibkr_journal",
+            Art::IbkrAbgleich => "ibkr_abgleich",
             Art::Gemini => "gemini-vorlauf",
             Art::Vorbereiten => "vorbereiten",
             Art::Wochenrueckschau => "wochenrueckschau",
@@ -129,6 +137,8 @@ impl Art {
             Art::Termine => &["termine"],
             Art::Nachrichten => &["nachrichten"],
             Art::IbkrPapier => &["ibkr", "papier", "pruefen"],
+            Art::IbkrJournal => &["ibkr", "journal-einrichten"],
+            Art::IbkrAbgleich => &["ibkr", "abgleichen"],
             Art::Gemini => &["gemini-vorlauf"],
             Art::Vorbereiten => &["vorbereiten"],
             Art::Wochenrueckschau => &["wochenrueckschau"],
@@ -523,7 +533,9 @@ pub fn cargo_starter() -> Starter {
     Box::new(|art: Art, wurzel: &Path| {
         let mut c = Command::new("cargo");
         let (paket, argumente) = match art {
-            Art::KurseVon(_) | Art::IbkrPapier => ("depot_sammler", art.argumente()),
+            Art::KurseVon(_) | Art::IbkrPapier | Art::IbkrJournal | Art::IbkrAbgleich => {
+                ("depot_sammler", art.argumente())
+            }
             _ => ("depot_lauf", art.argumente()),
         };
         c.current_dir(wurzel)
@@ -1070,6 +1082,7 @@ impl Dienst {
         (!self.update_offen()).then_some(())?;
         self.vermerke_ausgelassen(&mut z, jetzt);
         self.zeitplan_pruefen(&mut z, jetzt);
+        self.ibkr_zeitplan_pruefen(&mut z, jetzt);
         if z.laufend.is_none()
             && let Some(wartend) = z.warteschlange.pop_front()
         {
@@ -1294,6 +1307,19 @@ impl Dienst {
         z.lage_veraltet = true;
         // Der Verlauf schützt auch dann vor Wiederholungen, wenn diese zweite Datei ausfällt.
         let _ = self.zeitplan_start_vermerken(z, Art::Papier, jetzt);
+    }
+
+    fn ibkr_zeitplan_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
+        if z.zeitplan.an
+            && z.automatik_fehler().is_none()
+            && z.verlauf_vermerkfehler.is_none()
+            && z.laufend.is_none()
+            && z.warteschlange.is_empty()
+            && !z.neustart
+            && crate::ibkr_abgleich::zum_zeitplan_faellig(self, jetzt)
+        {
+            let _ = einreihen(z, Art::IbkrAbgleich, Anlass::Zeitplan, None);
+        }
     }
 
     fn zeitplan_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
@@ -1779,7 +1805,7 @@ fn zeitplan_auftrag_erlaubt(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> bool {
         Art::Termine | Art::KurseVon(_) | Art::Papier => ortszeit(jetzt)
             .is_some_and(|(tag, h, m, _, _)| zeitplan_faellig(z, tag, (h, m)) == Some(art)),
         Art::Nachrichten => rss_zeitplan_an(z, jetzt),
-        Art::Gemini | Art::Sicherung => true,
+        Art::Gemini | Art::Sicherung | Art::IbkrAbgleich => true,
         Art::Vorbereiten => vorbereitung_faellig(z, jetzt),
         _ => false,
     }

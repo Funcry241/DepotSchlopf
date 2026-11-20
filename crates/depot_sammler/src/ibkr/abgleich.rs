@@ -7,6 +7,7 @@ use std::process::ExitCode;
 
 use depot_journal::konto::{Kontoauszug, abweichungen};
 use depot_journal::{Journal, Stand};
+use depot_kern::ibkr_papier::{ABGLEICH_HALT, ABGLEICH_OK};
 use depot_kern::messlatte::ibkr::LANGFRIST;
 use depot_kern::{Isin, Topf, TopfId};
 use depot_regelwerk::Richtung;
@@ -166,9 +167,9 @@ pub(crate) fn abgleichen(wurzel: &Path) -> ExitCode {
             vergleiche(journal.stand(), &auszug, &karte)
         })();
         let mut beleg = if vergleich.is_ok() {
-            "IBKR-Papierabgleich: ohne Abweichung"
+            ABGLEICH_OK
         } else {
-            "IBKR-Papierabgleich: Halt"
+            ABGLEICH_HALT
         }
         .to_owned();
         if let Some(bericht) = saldenbericht {

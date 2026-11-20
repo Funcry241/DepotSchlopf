@@ -27,6 +27,7 @@ mod gemini;
 mod gespraeche;
 pub mod hinweis;
 pub mod http;
+mod ibkr_abgleich;
 mod ibkr_papier;
 pub mod kostenschutz;
 mod neuroschlopf;
@@ -486,6 +487,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/export" => seiten::fehler(405, "Verwende das Analyse-Exportformular."),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
         "/teil/sicherung" => antwort(200, HTML, sicherungsinfo(d, jetzt).as_bytes()),
+        "/teil/ibkr-abgleich" => antwort(200, HTML, ibkr_abgleich::status(d).as_bytes()),
         "/teil/ibkr-depot" => antwort(200, HTML, ibkr_papier::depot(d).as_bytes()),
         "/teil/ibkr-papier" => antwort(200, HTML, ibkr_papier::status(d).as_bytes()),
         "/teil/live" => antwort(200, HTML, live_inhalt(d, jetzt).as_bytes()),
@@ -677,6 +679,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/ausfuehren" => auftrag_einreihen(d, &f, jetzt),
         "/export" => analyse::exportieren(d, u, jetzt, &f),
         "/gemini" => gemini::speichern(d, &f),
+        "/ibkr-abgleich" => ibkr_abgleich::speichern(d, &f),
         "/ibkr-papier" => ibkr_papier::speichern(d, feld(&f, "konto").unwrap_or_default()),
         "/neuroschlopf" => neuroschlopf::speichern(d, &f),
         "/schluessel" => {
@@ -903,6 +906,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
             }
         }
         Art::IbkrPapier => return ibkr_papier::testen(d),
+        Art::IbkrJournal | Art::IbkrAbgleich => return ibkr_abgleich::starten(d, art, jetzt),
         Art::Einrichten if feld(f, "ziel") == Some("einrichtung") => {
             if d.von_hand(art, jetzt).is_ok() {
                 "/einrichtung?m=auftrag#journal"
