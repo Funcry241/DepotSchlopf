@@ -381,3 +381,99 @@
   });
   starte();
 })();
+
+// Die Referenzansicht zeigt den gemessenen Lauf des separaten Lernkerns.
+(async function neuroLernlauf() {
+  const bereich = document.querySelector("[data-messung]");
+  if (!bereich) { return; }
+  const feld = (id) => document.getElementById(id);
+  const zahl = (wert) => wert.toLocaleString("de-DE", { maximumSignificantDigits: 5 });
+  const stand = feld("lernstand");
+  stand.textContent = "Messwerte werden geladen …";
+  try {
+    const antwort = await fetch(bereich.dataset.messung);
+    if (!antwort.ok) { throw new Error("Messwerte nicht lesbar"); }
+    const lauf = await antwort.json();
+    const netz = lauf.model;
+    const training = lauf.train_report;
+    const schichten = [netz.input_size, netz.hidden_width, netz.hidden_width, netz.output_size];
+    const gewichte = schichten.slice(1).reduce((summe, anzahl, i) => summe + anzahl * schichten[i], 0);
+    const bias = schichten.slice(1).reduce((summe, anzahl) => summe + anzahl, 0);
+    feld("lernnetz").textContent = "Neuro2026 v" + lauf.version + " · " + schichten.join(" → ") +
+      " Neuronen. Die beiden inneren Schichten verwenden SiLU, der Ausgang ist linear. Beim Training verändert das Netz " +
+      (gewichte + bias) + " Parameter (" + gewichte + " Gewichte und " + bias + " Biaswerte).";
+    zeichneLernnetz(feld("lernaufbau"), schichten);
+    feld("lernplan").textContent = training.samples + " Trainingspaare · " + training.epochs +
+      " Epochen · AdamW auf der CPU · Startwert " + lauf.seed + ".";
+    feld("lernfehler").textContent = "Auf dem vollständigen Trainingssatz fiel der mittlere quadratische Fehler von " +
+      zahl(training.initial_loss) + " auf " + zahl(training.final_loss) + ".";
+    feld("lernvergleich").textContent = "Mittlere absolute Abweichung auf " + lauf.test_rows.length +
+      " untrainierten Zwischenwerten: " + zahl(lauf.scores.mae) + ". Die einfache Regel „immer den Trainingsmittelwert " +
+      zahl(lauf.baseline.value) + " vorhersagen“ erreichte " + zahl(lauf.baseline.scores.mae) + ".";
+    feld("lernladen").textContent = "Nach Speichern und Laden änderte sich eine Vorhersage um höchstens " +
+      zahl(lauf.reload.max_abs_difference) + " (Toleranz " + zahl(lauf.reload.tolerance) + ").";
+    const auswahl = feld("lernpunkt");
+    for (const fall of lauf.test_rows) {
+      auswahl.add(new Option(fall.features.map(zahl).join(" × ")));
+    }
+    function zeigeVorhersage() {
+      const fall = lauf.test_rows[auswahl.selectedIndex];
+      feld("lernantwort").textContent = "Sollwert " + zahl(fall.target) + " · Vorhersage " + zahl(fall.prediction) +
+        " · absoluter Fehler " + zahl(Math.abs(fall.target - fall.prediction)) + ".";
+    }
+    auswahl.addEventListener("change", zeigeVorhersage);
+    zeigeVorhersage();
+    zeichneLernkurve(feld("lernkurve"), training.metrics);
+    bereich.hidden = false;
+    stand.hidden = true;
+  } catch (_) {
+    stand.textContent = "Die Laufansicht konnte die Messwerte nicht anzeigen. Du kannst die Originalmesswerte oben öffnen.";
+  }
+})();
+
+function svgElement(svg, name, merkmale, text) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [schluessel, wert] of Object.entries(merkmale)) { e.setAttribute(schluessel, wert); }
+  if (text !== undefined) { e.textContent = text; }
+  svg.append(e);
+}
+
+function zeichneLernnetz(svg, groessen) {
+  const gruppen = groessen.map((anzahl, schicht) => Array.from({length:anzahl}, (_, i) => ({
+    x:45 + 130 * schicht, y:94 + (i - (anzahl - 1) / 2) * (schicht === 0 ? 55 : 11)
+  })));
+  const linien = [];
+  for (let schicht = 1; schicht < gruppen.length; schicht++) {
+    for (const von of gruppen[schicht - 1]) {
+      for (const bis of gruppen[schicht]) { linien.push("M" + von.x + " " + von.y + "L" + bis.x + " " + bis.y); }
+    }
+  }
+  svgElement(svg, "path", {d:linien.join(" "), fill:"none", stroke:"currentColor", opacity:0.13});
+  const namen = ["Eingaben", "SiLU", "SiLU", "Ausgang"];
+  gruppen.forEach((punkte, i) => {
+    for (const punkt of punkte) {
+      svgElement(svg, "circle", {cx:punkt.x, cy:punkt.y, r:4, fill:"var(--nav-akzent)"});
+    }
+    svgElement(svg, "text", {x:punkte[0].x, y:203, fill:"currentColor", "text-anchor":"middle", "font-size":13},
+      namen[i] + " · " + punkte.length);
+  });
+}
+
+function zeichneLernkurve(svg, epochen) {
+  const werte = epochen.map((m) => Math.log10(m.mean_loss));
+  const unten = Math.floor(Math.min(...werte));
+  const oben = Math.ceil(Math.max(...werte));
+  const y = (wert) => 175 - (wert - unten) / (oben - unten) * 155;
+  const x = (i) => 68 + i / (epochen.length - 1) * 500;
+  for (let stufe = unten; stufe <= oben; stufe++) {
+    svgElement(svg, "line", {x1:68, y1:y(stufe), x2:568, y2:y(stufe), stroke:"currentColor", opacity:"0.25"});
+    svgElement(svg, "text", {x:58, y:y(stufe) + 4, "text-anchor":"end", fill:"currentColor", "font-size":13},
+      (10 ** stufe).toLocaleString("de-DE", { maximumSignificantDigits: 2 }));
+  }
+  svgElement(svg, "polyline", {points:werte.map((wert, i) => x(i) + "," + y(wert)).join(" "),
+    fill:"none", stroke:"var(--nav-akzent)", "stroke-width":2.5});
+  for (const i of [0, Math.floor(epochen.length / 2) - 1, epochen.length - 1]) {
+    svgElement(svg, "text", {x:x(i), y:196, "text-anchor":"middle", fill:"currentColor", "font-size":13}, epochen[i].epoch);
+  }
+  svgElement(svg, "text", {x:425, y:196, fill:"currentColor", "font-size":13}, "Epoche");
+}

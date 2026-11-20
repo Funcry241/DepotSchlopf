@@ -189,10 +189,10 @@ fn app_js_liefert_die_gepruefte_fassung() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let antwort = get(&d, "/app.js", donnerstag(12, 0)?);
     let (_, js) = some(antwort.split_once("\r\n\r\n"), "HTTP-Antwort")?;
-    // SHA-256 der geprüften Fassung mit €STR-Import.
+    // SHA-256 der geprüften Fassung mit €STR-Import und Neuro2026-Laufansicht.
     assert_eq!(
         depot_kern::abdruck::sha256_hex(js.as_bytes()),
-        "7ec79ee72f2eb9fffcde340e9172a9778e5429bf70aefdd856969ae819330028"
+        "8c64ce9eaddd81d99f28c03bfeacd5b072967fc5157fa3697286940285527abd"
     );
     Ok(())
 }
@@ -323,5 +323,34 @@ fn live_zustand_in_worten() -> Result<(), String> {
         "{html}"
     );
     assert!(!html.contains("Angenommen"));
+    Ok(())
+}
+
+#[test]
+fn neuro_lernlauf_zeigt_den_referenzstand_unabhaengig_vom_belegvergleich() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let t = donnerstag(12, 0)?;
+    let link = "href=\"/neuroschlopf/lernlauf\"";
+    assert!(get(&d, "/teil/live", t).contains(link));
+    assert!(get(&d, "/einrichtung", t).contains(link));
+    let seite = get(&d, "/neuroschlopf/lernlauf", t);
+    assert!(seite.starts_with("HTTP/1.1 200 OK"));
+    assert!(seite.contains("Der lokale Belegvergleich ist ausgeschaltet."));
+    assert!(seite.contains("Referenzlauf Multiplikation"));
+    assert!(seite.contains("data-messung=\"/neuroschlopf/lernlauf.json\""));
+    let antwort = get(&d, "/neuroschlopf/lernlauf.json", t);
+    assert!(antwort.contains("Content-Type: application/json"));
+    let (_, messdaten) = antwort.split_once("\r\n\r\n").ok_or("HTTP-Rumpf fehlt")?;
+    assert_eq!(
+        depot_kern::abdruck::sha256_hex(messdaten.as_bytes()),
+        "025649b4417e88eb92f6484914ff60280a510a30b797045e8bb92dbe57a2ddb4"
+    );
+    let post = formular_post("/neuroschlopf", &format!("t={TOKEN}&an=ja"));
+    assert!(text(&behandle(&d, &Attrappe::default(), &post, t)).contains("303 See Other"));
+    assert!(
+        get(&d, "/neuroschlopf/lernlauf", t)
+            .contains("Der lokale Belegvergleich ist eingeschaltet.")
+    );
+    assert_eq!(get(&d, "/neuroschlopf/lernlauf.json", t), antwort);
     Ok(())
 }
