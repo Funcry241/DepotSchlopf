@@ -308,6 +308,8 @@ pub fn starter(stand: &Stand) -> Starter {
             | Art::Termine
             | Art::Nachrichten
             | Art::IbkrPapier
+            | Art::IbkrJournal
+            | Art::IbkrAbgleich
             | Art::Einrichten => (&sammler, art.argumente()),
             Art::Papier
             | Art::Vorbereiten

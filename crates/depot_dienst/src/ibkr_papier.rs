@@ -13,7 +13,7 @@ fn datei(d: &Dienst) -> PathBuf {
     d.wurzel.join("daten").join(KONTO_DATEI)
 }
 
-fn konto(d: &Dienst) -> Option<String> {
+pub(crate) fn konto(d: &Dienst) -> Option<String> {
     lies_falls_da(&datei(d))
         .ok()
         .flatten()
@@ -74,7 +74,9 @@ pub(crate) fn speichern(d: &Dienst, wert: &str) -> Vec<u8> {
     let mut z = d.sperre();
     if z.neustart
         || z.auftrag_stand(Art::Update).is_some()
-        || z.auftrag_stand(Art::IbkrPapier).is_some()
+        || [Art::IbkrPapier, Art::IbkrJournal, Art::IbkrAbgleich]
+            .into_iter()
+            .any(|art| z.auftrag_stand(art).is_some())
     {
         return zurueck("belegt");
     }
@@ -190,5 +192,10 @@ pub(crate) fn einrichtung(d: &Dienst, abfrage: &str, konto_gespeichert: bool) ->
     } else {
         format!("{hilfe}{meldung}{formular}{status}")
     };
-    format!("<section id=\"ibkr-papier\"><h2>IBKR-Papierkonto</h2>{inhalt}</section>")
+    let abgleich = if konto_gespeichert {
+        crate::ibkr_abgleich::einrichtung(d, felder.as_deref().unwrap_or_default())
+    } else {
+        String::new()
+    };
+    format!("<section id=\"ibkr-papier\"><h2>IBKR-Papierkonto</h2>{inhalt}{abgleich}</section>")
 }

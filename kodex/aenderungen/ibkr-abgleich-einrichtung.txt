@@ -1,0 +1,11 @@
+klasse: Funktion
+zweck: Den lesenden IBKR-Papierjournalabgleich in der Einrichtung starten und für Handelstage planen
+pfade:
+crates/depot_dienst/src/ibkr_abgleich.rs
+crates/depot_dienst/src/ibkr_papier.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/programmstand.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/tests/dienst/ibkr_papier.rs
+crates/depot_kern/src/ibkr_papier.rs
+crates/depot_sammler/src/ibkr/abgleich.rs
