@@ -13,7 +13,7 @@
 //! `daten/update_abgelehnt.txt`. Einen abgelehnten Stand spielt das Update nie wieder ein.
 //! Bestaetigt wird ein Update erst, wenn der neue Dienst eine Weile laeuft (`depot_dienst`).
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -178,7 +178,10 @@ fn kurz(c: &str) -> &str {
 
 /// Schreibt `daten/update_offen.txt` ganz und auf den Datentraeger.
 fn offen_schreiben(wurzel: &Path, text: &str) -> Result<(), String> {
-    let p = offen_pfad(wurzel);
+    schreibe_update_datei(&offen_pfad(wurzel), text)
+}
+
+fn schreibe_update_datei(p: &Path, text: &str) -> Result<(), String> {
     if let Some(o) = p.parent() {
         fs::create_dir_all(o).map_err(|e| format!("{}: {e}", o.display()))?;
     }
@@ -193,7 +196,7 @@ fn offen_schreiben(wurzel: &Path, text: &str) -> Result<(), String> {
             f.sync_all()
         })
         .map_err(|e| format!("{}: {e}", neben.display()))?;
-    crate::dateiersatz::ersetze(&neben, &p).map_err(|e| format!("{}: {e}", p.display()))
+    crate::dateiersatz::ersetze(&neben, p).map_err(|e| format!("{}: {e}", p.display()))
 }
 
 /// Haelt fest, dass dieser Baum das ganze Gate bestanden hat: `daten/geprueft.txt`, eine Zeile
@@ -277,7 +280,7 @@ fn pruefe_manifest(wurzel: &Path, commit: &str, pfad: &str) -> Result<(), String
 #[derive(Debug, PartialEq, Eq)]
 struct LockAenderung {
     abdruck: String,
-    pakete: Vec<String>,
+    pakete: Vec<(String, String)>,
 }
 
 fn lock_aenderung(wurzel: &Path, k: &Kandidat) -> Result<Option<LockAenderung>, String> {
@@ -329,26 +332,154 @@ fn lock_aenderung(wurzel: &Path, k: &Kandidat) -> Result<Option<LockAenderung>, 
         abdruck: depot_kodex::festschreibung::sha_bytes(&neu),
         pakete: neu_pakete
             .difference(&alt_pakete)
-            .map(|(name, _, _)| name.clone())
+            .map(|(name, quelle, _)| (name.clone(), quelle.clone()))
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect(),
     }))
 }
 
-fn lock_pakete(a: &LockAenderung) -> String {
-    if a.pakete.is_empty() {
-        "Cargo.lock geändert; keine zusätzlichen Paketversionen".into()
-    } else {
-        a.pakete.join(", ")
+impl LockAenderung {
+    fn freigabetext(&self, k: &Kandidat) -> String {
+        use std::fmt::Write as _;
+        let mut text = format!(
+            "DepotSchlopf möchte ein Update einspielen. Beim Bauen können die unten genannten Rust-Pakete heruntergeladen werden und auf meinem Rechner laufen.\n\n             Stand: {}\nSHA-256 von Cargo.lock: {}\n\nÄnderungen:\n{}\n\nNeue oder geänderte Paketversionen ({}):\n",
+            k.neu,
+            self.abdruck,
+            k.staende.join("\n"),
+            self.pakete.len(),
+        );
+        for (name, quelle) in &self.pakete {
+            let quelle = match quelle.as_str() {
+                "registry+https://github.com/rust-lang/crates.io-index" => "crates.io",
+                "" => "Arbeitsbereich",
+                sonst => sonst,
+            };
+            let _ = writeln!(text, "- {name} ({quelle})");
+        }
+        text.push_str(
+            "\nJa: Ich gebe die Abhängigkeiten für genau diesen Stand frei. Anschließend kann ich das Update einspielen.\n             Nein: Der bisherige Stand läuft weiter. Das Angebot bleibt verfügbar.\n             Es gibt keine Frist.\n",
+        );
+        text
     }
+
+    fn zeile(&self, k: &Kandidat) -> String {
+        format!("update-lock-v1;{};{}", k.neu, self.abdruck)
+    }
+}
+
+fn angebot_pfad(wurzel: &Path) -> PathBuf {
+    wurzel.join("daten/update_angebot.txt")
+}
+
+fn vermerke_angebot(wurzel: &Path, k: Option<&Kandidat>) -> Result<(), String> {
+    let pfad = angebot_pfad(wurzel);
+    let Some(k) = k else {
+        return match fs::remove_file(&pfad) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("{}: {e}", pfad.display())),
+        };
+    };
+    let a = lock_aenderung(wurzel, k)?;
+    let abdruck = a.as_ref().map_or("-", |a| a.abdruck.as_str());
+    let text = a
+        .as_ref()
+        .map_or_else(|| k.staende.join("\n"), |a| a.freigabetext(k));
+    schreibe_update_datei(
+        &pfad,
+        &format!("update-angebot-v1;{};{};{abdruck}\n{text}", k.alt, k.neu),
+    )
+}
+
+fn freigabe_pfad(wurzel: &Path) -> PathBuf {
+    wurzel.join("daten/update_abhaengigkeiten.txt")
+}
+
+fn freigegeben(wurzel: &Path, zeile: &str) -> Result<bool, String> {
+    let pfad = freigabe_pfad(wurzel);
+    match fs::read_to_string(&pfad) {
+        Ok(text) => Ok(text.lines().any(|z| z == zeile)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("{}: {e}", pfad.display())),
+    }
+}
+
+fn freigabe_dialog(
+    wurzel: &Path,
+    k: &Kandidat,
+    a: &LockAenderung,
+    bestaetigen: impl FnOnce(&str) -> Freigabe,
+) -> Result<(), String> {
+    let sperrpfad = wurzel.join(format!("daten/update-dialog-{}.lock", k.neu));
+    let sperre = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(sperrpfad)
+        .map_err(|e| format!("Update-Dialog: {e}"))?;
+    match sperre.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => return Ok(()),
+        Err(e) => return Err(format!("Update-Dialog: {e}")),
+    }
+
+    let zeile = a.zeile(k);
+    if freigegeben(wurzel, &zeile)? {
+        return Ok(());
+    }
+    match bestaetigen(&format!(
+        "DepotSchlopf bittet um Freigabe für ein Update mit {} neuen oder geänderten Paketversionen.\n\n         Stand: {}\nDie vollständige Liste steht zum Kopieren unter Einrichtung → Update.\n\n         Ja: Abhängigkeiten für diesen Stand freigeben. Du kannst das Update anschließend einspielen.\n         Nein: Dein bisheriger Stand läuft weiter.\n\nNimm dir die Zeit, die du brauchst. Es gibt keine Frist.",
+        a.pakete.len(),
+        k.neu
+    )) {
+        Freigabe::Ja => {}
+        Freigabe::Nein => return Ok(()),
+        Freigabe::NichtVerfuegbar => {
+            return Err(
+                "Das Freigabefenster am Windows-Desktop konnte nicht geöffnet werden.".into(),
+            );
+        }
+    }
+    let p = freigabe_pfad(wurzel);
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&p)
+        .and_then(|mut f| {
+            f.write_all(format!("{zeile}\n").as_bytes())?;
+            f.sync_all()
+        })
+        .map_err(|e| format!("{}: {e}", p.display()))
+}
+
+fn freigabe_starten(wurzel: &Path, alt: &str, neu: &str, abdruck: &str) -> Result<(), String> {
+    let angebot = fs::read_to_string(angebot_pfad(wurzel)).map_err(|e| e.to_string())?;
+    if angebot.lines().next() != Some(format!("update-angebot-v1;{alt};{neu};{abdruck}").as_str())
+        || git(wurzel, &["rev-parse", "--verify", "HEAD^{commit}"])? != alt
+    {
+        return Err(
+            "Das Update-Angebot hat sich geändert. Bitte sieh es erneut in der Einrichtung an."
+                .into(),
+        );
+    }
+    let k = Kandidat {
+        alt: alt.into(),
+        neu: neu.into(),
+        staende: Vec::new(),
+    };
+    let a = lock_aenderung(wurzel, &k)?
+        .filter(|a| a.abdruck == abdruck)
+        .ok_or("Die Abhängigkeiten stimmen nicht mehr mit dem Angebot überein.")?;
+    pruefe_baumpfade(wurzel, neu)?;
+    freigabe_dialog(wurzel, &k, &a, update_dialog::bestaetigen)
 }
 
 #[derive(Debug)]
 enum EinspielFehler {
     Technik(String),
-    FreigabeAbgelaufen,
-    FreigabeAbgelehnt,
+    FreigabeFehlt,
 }
 
 impl From<String> for EinspielFehler {
@@ -361,65 +492,24 @@ impl std::fmt::Display for EinspielFehler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Technik(text) => text,
-            Self::FreigabeAbgelaufen => {
-                "Die Freigabe ist abgelaufen. Der bisherige Stand läuft weiter."
-            }
-            Self::FreigabeAbgelehnt => {
-                "Du hast das Update abgelehnt. Der bisherige Stand läuft weiter."
-            }
+            Self::FreigabeFehlt => "Freigabe fehlt noch. Öffne Einrichtung → Update.",
         })
     }
 }
 
-fn pruefe_lock(
-    wurzel: &Path,
-    k: &Kandidat,
-    bestaetigen: impl FnOnce(&str) -> Freigabe,
-) -> Result<(), EinspielFehler> {
-    let Some(a) = lock_aenderung(wurzel, k)? else {
-        return Ok(());
-    };
-    let p = wurzel.join("daten").join("update_abhaengigkeiten.txt");
-    let zeile = format!("update-lock-v1;{};{}", k.neu, a.abdruck);
-    match fs::read_to_string(&p) {
-        Ok(text) if text.lines().any(|z| z == zeile) => return Ok(()),
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("{}: {e}", p.display()).into()),
+fn pruefe_lock(wurzel: &Path, k: &Kandidat) -> Result<(), EinspielFehler> {
+    if let Some(a) = lock_aenderung(wurzel, k)?
+        && !freigegeben(wurzel, &a.zeile(k))?
+    {
+        return Err(EinspielFehler::FreigabeFehlt);
     }
-    let hinweis = format!("Neue Abhängigkeiten: {}", lock_pakete(&a));
-    match bestaetigen(&format!(
-        "{hinweis}\nUpdate mit geändertem Cargo.lock freigeben?"
-    )) {
-        Freigabe::Ja => {}
-        Freigabe::Nein => return Err(EinspielFehler::FreigabeAbgelehnt),
-        Freigabe::Abgelaufen => return Err(EinspielFehler::FreigabeAbgelaufen),
-        Freigabe::NichtVerfuegbar => {
-            return Err(format!(
-                "{hinweis} Der Freigabedialog am Windows-Desktop ist nicht verfügbar. Das Update wurde nicht gebaut."
-            )
-            .into());
-        }
-    }
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&p)
-        .and_then(|mut f| {
-            writeln!(f, "{zeile}")?;
-            f.sync_all()
-        })
-        .map_err(|e| format!("{}: {e}", p.display()).into())
+    Ok(())
 }
 
 /// Prueft den neuen Stand in seiner Kopie mit dem ganzen Gate.
-fn pruefe_kopie(
-    wurzel: &Path,
-    k: &Kandidat,
-    bestaetigen: impl FnOnce(&str) -> Freigabe,
-) -> Result<abbild::Abbild, EinspielFehler> {
+fn pruefe_kopie(wurzel: &Path, k: &Kandidat) -> Result<abbild::Abbild, EinspielFehler> {
     pruefe_baumpfade(wurzel, &k.neu)?;
-    pruefe_lock(wurzel, k, bestaetigen)?;
+    pruefe_lock(wurzel, k)?;
     let ablage = abbild::ablage(wurzel);
     println!("[Update] Kopie von {} anlegen", kurz(&k.neu));
     let abbild = abbild::festhalten_commit(wurzel, &ablage, "update", &k.neu)?;
@@ -532,6 +622,21 @@ fn einspielen(wurzel: &Path, k: &Kandidat) -> Result<(), String> {
 
 /// `run.cmd update [pruefen]`.
 pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
+    if let [aktion, alt, neu, abdruck] = optionen
+        && aktion == "freigabe"
+        && ist_commit(alt)
+        && ist_commit(neu)
+        && abdruck.len() == 64
+        && ist_commit(abdruck)
+    {
+        return match freigabe_starten(wurzel, alt, neu, abdruck) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("[Update] {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let (nur_pruefen, erwartet) = match optionen {
         [] => (false, None),
         [o] if matches!(o.as_str(), "pruefen" | "prüfen") => (true, None),
@@ -541,7 +646,14 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let ergebnis = vorbedingungen(wurzel).and_then(|()| hole(wurzel));
+    let ergebnis: Result<_, String> = (|| {
+        vorbedingungen(wurzel)?;
+        let k = hole(wurzel)?;
+        if nur_pruefen || erwartet.is_some_and(|sha| k.as_ref().is_none_or(|k| sha != &k.neu)) {
+            vermerke_angebot(wurzel, k.as_ref())?;
+        }
+        Ok(k)
+    })();
     let k = match ergebnis {
         Ok(Some(k)) => k,
         Ok(None) if erwartet.is_some() => {
@@ -563,23 +675,26 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
     }
     zeige(&k);
     if nur_pruefen {
-        match lock_aenderung(wurzel, &k) {
-            Ok(Some(a)) => println!("[Update] Cargo.lock: {}", lock_pakete(&a)),
-            Ok(None) => {}
-            Err(e) => {
-                eprintln!("[Update] FEHLER: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
-        println!("[Update] Nur geprüft; eingespielt wird mit `run.cmd update`.");
+        println!("[Update] Nur geprüft. Angebot und Freigabe stehen unter Einrichtung → Update.");
         println!("[Update] Kandidat: {}", k.neu);
         return ExitCode::SUCCESS;
     }
+    einspielen_oder_melden(wurzel, &k)
+}
+
+fn einspielen_oder_melden(wurzel: &Path, k: &Kandidat) -> ExitCode {
     let daten = wurzel.join("daten");
     let ergebnis = (|| {
         let _sperren = sperren_zum_einspielen(&daten)?;
-        pruefe_kopie(wurzel, &k, update_dialog::bestaetigen).and_then(|kopie| {
-            einspielen_mit_datenprobe(wurzel, &k, &abbild::ablage(wurzel), |probe| {
+        if git(wurzel, &["rev-parse", "--verify", "HEAD^{commit}"])? != k.alt {
+            return Err(
+                "Seit der Suche hat sich der lokale Stand geändert. Bitte suche erneut."
+                    .to_owned()
+                    .into(),
+            );
+        }
+        pruefe_kopie(wurzel, k).and_then(|kopie| {
+            einspielen_mit_datenprobe(wurzel, k, &abbild::ablage(wurzel), |probe| {
                 pruefe_datenkopie(wurzel, &kopie, probe)
             })?;
             vermerke_geprueft(wurzel, &kopie.baum);
@@ -588,6 +703,9 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
     })();
     match ergebnis {
         Ok(()) => {
+            if let Err(e) = vermerke_angebot(wurzel, None) {
+                eprintln!("[Update] Altes Angebot nicht gelöscht: {e}");
+            }
             println!(
                 "[Update] Eingespielt: {} -> {}. Der Dienst startet neu und bestätigt es; \
                  kommt er nicht hoch, setzt DepotSchlopf.cmd den alten Stand zurück.",
@@ -596,14 +714,13 @@ pub fn lauf(wurzel: &Path, optionen: &[String]) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        Err(e @ (EinspielFehler::FreigabeAbgelaufen | EinspielFehler::FreigabeAbgelehnt)) => {
+        Err(e @ EinspielFehler::FreigabeFehlt) => {
+            if let Err(fehler) = vermerke_angebot(wurzel, Some(k)) {
+                eprintln!("[Update] FEHLER: {fehler}");
+                return ExitCode::FAILURE;
+            }
             println!("[Update] {e}");
-            // Abschlusscodes für die Update-Anzeige in depot_dienst::werkbank.
-            ExitCode::from(if matches!(e, EinspielFehler::FreigabeAbgelaufen) {
-                10
-            } else {
-                11
-            })
+            ExitCode::from(13)
         }
         Err(e) => {
             eprintln!("[Update] FEHLER: {e}");
@@ -816,7 +933,7 @@ mod tests {
 
     fn manifest_abgelehnt(pfad: &str, inhalt: &str) -> Result<(), String> {
         let (a, k) = manifest_stand(pfad, inhalt)?;
-        let fehler = pruefe_kopie(&a.andere, &k, |_| Freigabe::Nein)
+        let fehler = pruefe_kopie(&a.andere, &k)
             .err()
             .ok_or("Manifest hätte abgelehnt werden müssen")?;
         assert!(fehler.to_string().contains(pfad), "{fehler}");
@@ -886,75 +1003,86 @@ mod tests {
     #[test]
     fn lock_unveraendert_geht_durch() -> Result<(), String> {
         let (a, k) = lock_stand("")?;
-        let mut gefragt = false;
-        pruefe_lock(&a.andere, &k, |_| {
-            gefragt = true;
-            Freigabe::Nein
-        })
-        .map_err(|e| e.to_string())?;
-        assert!(!gefragt);
-        Ok(())
+        pruefe_lock(&a.andere, &k).map_err(|e| e.to_string())
     }
 
     #[test]
-    fn lock_freigabe_abgelaufen() -> Result<(), String> {
+    fn lock_ohne_freigabe_baut_nicht() -> Result<(), String> {
         let (a, k) = lock_stand(LOCK_NEU)?;
         assert!(matches!(
-            pruefe_kopie(&a.andere, &k, |_| Freigabe::Abgelaufen),
-            Err(EinspielFehler::FreigabeAbgelaufen)
+            pruefe_kopie(&a.andere, &k),
+            Err(EinspielFehler::FreigabeFehlt)
         ));
         assert!(!abbild::ablage(&a.andere).join("bau-update").exists());
-        assert!(!a.andere.join("daten/update_abhaengigkeiten.txt").exists());
         Ok(())
     }
 
     #[test]
-    fn lock_freigabe_dialog_ja() -> Result<(), String> {
-        let (a, k) = lock_stand(LOCK_NEU)?;
-        pruefe_lock(&a.andere, &k, |hinweis| {
-            assert!(hinweis.contains("foo 1.2.3"));
-            Freigabe::Ja
-        })
-        .map_err(|e| e.to_string())?;
-        let text = fs::read_to_string(a.andere.join("daten/update_abhaengigkeiten.txt"))
-            .map_err(|e| e.to_string())?;
-        let aenderung = lock_aenderung(&a.andere, &k)?.ok_or("Lock geändert")?;
-        assert_eq!(
-            text,
-            format!("update-lock-v1;{};{}\n", k.neu, aenderung.abdruck)
-        );
-        pruefe_lock(&a.andere, &k, |_| Freigabe::Nein).map_err(|e| e.to_string())
-    }
-
-    #[test]
-    fn lock_freigabe_dialog_nein() -> Result<(), String> {
-        let (a, k) = lock_stand(LOCK_NEU)?;
-        assert!(matches!(
-            pruefe_lock(&a.andere, &k, |_| Freigabe::Nein),
-            Err(EinspielFehler::FreigabeAbgelehnt)
-        ));
-        assert!(!a.andere.join("daten/update_abhaengigkeiten.txt").exists());
-        Ok(())
-    }
-
-    #[test]
-    fn lock_freigabe_zeigt_pakete() -> Result<(), String> {
-        let (a, k) = lock_stand(LOCK_NEU)?;
-        let aenderung = lock_aenderung(&a.andere, &k)?.ok_or("Lock geändert")?;
-        assert_eq!(lock_pakete(&aenderung), "foo 1.2.3");
-        Ok(())
-    }
-
-    #[test]
-    fn lock_freigabe_gilt_nicht_fuer_anderen_commit() -> Result<(), String> {
+    fn lock_freigabe_gilt_fuer_genau_einen_stand() -> Result<(), String> {
         let (a, mut k) = lock_stand(LOCK_NEU)?;
-        pruefe_lock(&a.andere, &k, |_| Freigabe::Ja).map_err(|e| e.to_string())?;
+        let aenderung = lock_aenderung(&a.andere, &k)?.ok_or("Lock geändert")?;
+        freigabe_dialog(&a.andere, &k, &aenderung, |_| Freigabe::Nein)?;
+        assert!(!freigabe_pfad(&a.andere).exists());
+
+        freigabe_dialog(&a.andere, &k, &aenderung, |hinweis| {
+            assert!(hinweis.contains(&k.neu));
+            // Solange die Entscheidung offen ist, bleiben Update und Sicherung frei.
+            assert!(sperren_zum_einspielen(&a.andere.join("daten")).is_ok());
+            Freigabe::Ja
+        })?;
+        assert!(freigegeben(&a.andere, &aenderung.zeile(&k))?);
+        assert!(pruefe_lock(&a.andere, &k).is_ok());
+
         g(
             &a.andere,
             &["commit", "--allow-empty", "-qm", "Anderer Commit"],
         )?;
         k.neu = g(&a.andere, &["rev-parse", "HEAD"])?;
-        assert!(pruefe_lock(&a.andere, &k, |_| Freigabe::Nein).is_err());
+        assert!(matches!(
+            pruefe_lock(&a.andere, &k),
+            Err(EinspielFehler::FreigabeFehlt)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn einspielen_baut_keinen_juengeren_stand_mit_alter_freigabe() -> Result<(), String> {
+        let (a, k) = lock_stand(LOCK_NEU)?;
+        let aenderung = lock_aenderung(&a.andere, &k)?.ok_or("Lock geändert")?;
+        freigabe_dialog(&a.projekt, &k, &aenderung, |_| Freigabe::Ja)?;
+        g(
+            &a.andere,
+            &["commit", "--allow-empty", "-qm", "Jüngerer Stand"],
+        )?;
+        let juenger = g(&a.andere, &["rev-parse", "HEAD"])?;
+        g(
+            &a.andere,
+            &["bundle", "create", "../ursprung.bundle", "main"],
+        )?;
+        assert_eq!(lauf(&a.projekt, &[k.neu]), ExitCode::from(12));
+        assert_eq!(git(&a.projekt, &["rev-parse", "HEAD"])?, k.alt);
+        assert!(!abbild::ablage(&a.projekt).join("bau-update").exists());
+        let angebot = fs::read_to_string(angebot_pfad(&a.projekt)).map_err(|e| e.to_string())?;
+        assert!(angebot.starts_with(&format!("update-angebot-v1;{};{juenger};", k.alt)));
+        Ok(())
+    }
+
+    #[test]
+    fn angebot_enthaelt_alle_paketversionen_und_quellen() -> Result<(), String> {
+        let mut pakete = String::new();
+        for n in 0..60 {
+            use std::fmt::Write as _;
+            let _ = writeln!(
+                pakete,
+                "[[package]]\nname = \"paket-{n}\"\nversion = \"1.2.3\"\nsource = \"registry+https://andere-quelle.invalid/{n}\""
+            );
+        }
+        let (a, k) = lock_stand(&pakete)?;
+        vermerke_angebot(&a.andere, Some(&k))?;
+        let text = fs::read_to_string(angebot_pfad(&a.andere)).map_err(|e| e.to_string())?;
+        assert!(text.starts_with(&format!("update-angebot-v1;{};{};", k.alt, k.neu)));
+        assert_eq!(text.matches("- paket-").count(), 60);
+        assert!(text.contains("registry+https://andere-quelle.invalid/59"));
         Ok(())
     }
 
@@ -984,7 +1112,7 @@ mod tests {
                 neu: g(&a.andere, &["rev-parse", "HEAD"])?,
                 staende: Vec::new(),
             };
-            let fehler = pruefe_kopie(&a.andere, &k, |_| Freigabe::Nein)
+            let fehler = pruefe_kopie(&a.andere, &k)
                 .err()
                 .ok_or("Update hätte abgelehnt werden müssen")?;
             assert!(fehler.to_string().contains(pfad), "{fehler}");

@@ -42,6 +42,7 @@ mod schmuck;
 pub mod seiten;
 mod sicherung;
 mod splitverdacht;
+mod update_angebot;
 pub mod verlauf;
 pub mod waechter;
 pub mod werkbank;
@@ -406,6 +407,7 @@ fn einrichtungsseite(
         sperre: sperre.as_ref(),
         version: d.version.as_deref(),
         jetzt: Some(jetzt),
+        freigabe: d.update_freigabe(&zustand),
     };
     let inhalt = seiten::einrichtung_mit_update(
         &d.token,
@@ -520,6 +522,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 sperre: sperre.as_ref(),
                 version: d.version.as_deref(),
                 jetzt: Some(jetzt),
+                freigabe: d.update_freigabe(&z),
             };
             antwort(
                 200,
@@ -677,6 +680,7 @@ fn post(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     }
     match a.pfad.as_str() {
         "/ausfuehren" => auftrag_einreihen(d, &f, jetzt),
+        "/update-freigabe" => update_freigabe_starten(d, &f),
         "/export" => analyse::exportieren(d, u, jetzt, &f),
         "/gemini" => gemini::speichern(d, &f),
         "/ibkr-abgleich" => ibkr_abgleich::speichern(d, &f),
@@ -781,16 +785,18 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         }
         Some(Art::Update) => {
             let z = d.sperre();
-            let Some((sha, _)) = z
-                .update_angebot()
-                .filter(|(sha, _)| feld(&f, "sha") == Some(*sha))
-            else {
+            let Some(angebot) = z.update_angebot().filter(|angebot| {
+                angebot.passt(d.version.as_deref()) && feld(&f, "sha") == Some(angebot.neu.as_str())
+            }) else {
                 return http::umleitung("/einrichtung?m=update_suche#update");
             };
             if z.update_wartet_auf_ruhe() {
                 return http::umleitung("/einrichtung?m=update_belegt#update");
             }
-            (Art::Update, Some(sha.to_string()), "/einrichtung")
+            if d.update_freigabe(&z) != update_angebot::Freigabe::Erteilt {
+                return http::umleitung("/einrichtung?m=update_freigabe_fehlt#update");
+            }
+            (Art::Update, Some(angebot.neu.clone()), "/einrichtung")
         }
         _ => return seiten::fehler(404, "Diese Aktion gibt es nicht."),
     };
@@ -923,6 +929,16 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
         }
     };
     http::umleitung(ort)
+}
+
+fn update_freigabe_starten(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {
+    let sha = feld(f, "sha").unwrap_or_default();
+    let abdruck = feld(f, "abdruck").unwrap_or_default();
+    let meldung = d
+        .update_dialog_starten(sha, abdruck)
+        .err()
+        .unwrap_or("update_dialog");
+    http::umleitung(&format!("/einrichtung?m={meldung}#update"))
 }
 
 fn zeitplan_aendern(d: &Dienst, f: &[(String, String)]) -> Vec<u8> {

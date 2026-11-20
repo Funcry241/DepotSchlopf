@@ -196,6 +196,7 @@ pub enum UpdatePause {
     FreigabeAbgelaufen,
     FreigabeAbgelehnt,
     StandGeaendert,
+    FreigabeFehlt,
 }
 
 impl UpdatePause {
@@ -205,6 +206,7 @@ impl UpdatePause {
             Some(10) => Some(Self::FreigabeAbgelaufen),
             Some(11) => Some(Self::FreigabeAbgelehnt),
             Some(12) => Some(Self::StandGeaendert),
+            Some(13) => Some(Self::FreigabeFehlt),
             _ => None,
         }
     }
@@ -214,6 +216,7 @@ impl UpdatePause {
             Self::FreigabeAbgelaufen => ("offen", "Freigabe abgelaufen"),
             Self::FreigabeAbgelehnt => ("leise", "Update abgelehnt"),
             Self::StandGeaendert => ("offen", "Update-Stand geändert"),
+            Self::FreigabeFehlt => ("leise", "Freigabe fehlt noch"),
         }
     }
 
@@ -223,6 +226,7 @@ impl UpdatePause {
             Self::FreigabeAbgelaufen,
             Self::FreigabeAbgelehnt,
             Self::StandGeaendert,
+            Self::FreigabeFehlt,
         ]
         .into_iter()
         .find(|pause| pause.ergebnis().1 == text)
@@ -279,6 +283,7 @@ pub struct Zustand {
     /// Stand des letzten Updates fuer die Seite; `true` heisst Fehler.
     pub update_meldung: Option<(bool, String)>,
     pub update_ergebnisse: Vec<crate::aktualisierung::Ergebnis>,
+    update_angebot: Option<crate::update_angebot::Angebot>,
     /// Woher die Programme kommen und ob der Stand fuer einen Start ohne Cargo gesichert ist;
     /// `true` heisst Fehler.
     pub programm_meldung: Option<(bool, String)>,
@@ -368,23 +373,11 @@ impl Zustand {
         self.laufend.is_some() || !self.warteschlange.is_empty()
     }
 
-    /// Nach abgelaufener Freigabe kann derselbe Suchlauf den Commit erneut anbieten.
-    pub(crate) fn update_angebot(&self) -> Option<(&str, &[String])> {
-        let a = self.verlauf.iter().find(|a| {
-            matches!(a.art, Art::Update | Art::UpdatePruefen)
-                && a.update_pause != Some(UpdatePause::FreigabeAbgelaufen)
-        })?;
-        if a.art != Art::UpdatePruefen
-            || a.erfolg != Some(true)
-            || a.frueher != Frueher::Nein
-            || self.auftrag_stand(Art::UpdatePruefen).is_some()
-            || self.neustart
-        {
+    pub(crate) fn update_angebot(&self) -> Option<&crate::update_angebot::Angebot> {
+        if self.neustart || self.auftrag_stand(Art::UpdatePruefen).is_some() {
             return None;
         }
-        let (kandidat, titel) = a.protokoll.split_last()?;
-        let sha = kandidat.strip_prefix("[Update] Kandidat: ")?;
-        crate::rueckfall::ist_commit(sha).then_some((sha, titel))
+        self.update_angebot.as_ref()
     }
 
     /// Der Gesamtstatus: der des Lagebilds, ergaenzt um den Zeitplan des Dienstes. `None`,
@@ -481,6 +474,7 @@ pub struct Dienst {
     pub(crate) depot_lesecache: Mutex<depot_journal::Lesecache>,
     pub(crate) gespraechscache: crate::zeitstrahl_ki::Cache,
     pub(crate) papierdialog: Mutex<()>,
+    update_dialog: Mutex<Option<(String, Child)>>,
     pub(crate) neuro: Mutex<crate::neuroschlopf::Anzeige>,
     protokoll_schutz: Mutex<crate::protokoll::Schutz>,
     starter: Starter,
@@ -770,6 +764,7 @@ impl Dienst {
         {
             update_meldung = Some((true, "Für das letzte Update liegt keine bestätigte Aktivierung vor. Details stehen unter Tätigkeit im Protokoll.".into()));
         }
+        let update_angebot = crate::update_angebot::Angebot::laden(&wurzel);
         Dienst {
             hinweise: Hinweise::laden(&wurzel),
             wurzel,
@@ -791,6 +786,7 @@ impl Dienst {
                 neustart: false,
                 update_meldung,
                 update_ergebnisse,
+                update_angebot,
                 programm_meldung: None,
                 verlauf_hinweis,
                 verlauf_fehler: None,
@@ -802,6 +798,7 @@ impl Dienst {
             depot_lesecache: Mutex::default(),
             gespraechscache: crate::zeitstrahl_ki::Cache::default(),
             papierdialog: Mutex::new(()),
+            update_dialog: Mutex::new(None),
             neuro: Mutex::default(),
             protokoll_schutz: Mutex::new(protokoll_schutz),
             starter,
@@ -1033,10 +1030,86 @@ impl Dienst {
         Ok(())
     }
 
+    pub(crate) fn update_freigabe(&self, z: &Zustand) -> crate::update_angebot::Freigabe {
+        use crate::update_angebot::Freigabe;
+        let Some(angebot) = z
+            .update_angebot()
+            .filter(|a| a.passt(self.version.as_deref()))
+        else {
+            return Freigabe::Offen;
+        };
+        let stand = angebot.freigabe(&self.wurzel);
+        let Ok(mut prozess) = self.update_dialog.lock() else {
+            return Freigabe::Fehler;
+        };
+        if let Some((sha, kind)) = prozess.as_mut()
+            && sha == &angebot.neu
+            && stand == Freigabe::Offen
+        {
+            return match kind.try_wait() {
+                Ok(None) => Freigabe::Wartet,
+                Ok(Some(status)) if status.success() => Freigabe::Offen,
+                _ => Freigabe::Fehler,
+            };
+        }
+        if let Some((_, kind)) = prozess.as_mut() {
+            let _ = kind.try_wait();
+        }
+        stand
+    }
+
+    pub(crate) fn update_dialog_starten(
+        &self,
+        sha: &str,
+        abdruck: &str,
+    ) -> Result<(), &'static str> {
+        use crate::update_angebot::Freigabe;
+        let z = self.sperre();
+        let angebot = z
+            .update_angebot()
+            .filter(|a| {
+                a.passt(self.version.as_deref())
+                    && a.neu == sha
+                    && a.abdruck.as_deref() == Some(abdruck)
+            })
+            .ok_or("update_suche")?;
+        if self.update_offen() || z.auftrag_stand(Art::Update).is_some() {
+            return Err("update_belegt");
+        }
+        if matches!(
+            self.update_freigabe(&z),
+            Freigabe::Erteilt | Freigabe::Wartet
+        ) {
+            return Ok(());
+        }
+        let mut prozess = self
+            .update_dialog
+            .lock()
+            .map_err(|_| "update_dialog_fehler")?;
+        if let Some((_, kind)) = prozess.as_mut()
+            && matches!(kind.try_wait(), Ok(None))
+        {
+            return Err("update_dialog_belegt");
+        }
+        let kind = (self.starter)(Art::Update, &self.wurzel)
+            .args(["freigabe", angebot.alt.as_str(), sha, abdruck])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .map_err(|_| "update_dialog_fehler")?;
+        *prozess = Some((sha.into(), kind));
+        Ok(())
+    }
+
     pub(crate) fn update_von_hand(&self, sha: &str) -> Result<(), &'static str> {
         let mut z = self.sperre();
-        if z.update_angebot().is_none_or(|(angebot, _)| angebot != sha) {
+        if z.update_angebot()
+            .is_none_or(|angebot| angebot.neu != sha || !angebot.passt(self.version.as_deref()))
+        {
             return Err("update_suche");
+        }
+        if self.update_freigabe(&z) != crate::update_angebot::Freigabe::Erteilt {
+            return Err("update_freigabe_fehlt");
         }
         einreihen(&mut z, Art::Update, Anlass::Hand, Some(sha.to_owned()))
             .map_err(|_| "update_belegt")
@@ -1464,6 +1537,12 @@ impl Dienst {
                     "Update fehlgeschlagen. Dein bisheriger Stand läuft weiter. Details stehen im Protokoll.".into(),
                 ))
             };
+        }
+        if matches!(a.art, Art::Update | Art::UpdatePruefen) {
+            z.update_angebot = crate::update_angebot::Angebot::laden(&self.wurzel);
+            if eingespielt || (a.art == Art::Update && erfolg) {
+                z.update_angebot = None;
+            }
         }
         self.protokoll_beenden(&mut z, &mut a);
         ende_vermerken(&self.wurzel, &mut z, &a);

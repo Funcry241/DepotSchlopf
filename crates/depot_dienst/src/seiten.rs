@@ -418,6 +418,19 @@ fn auftrags_meldung(code: &str) -> Option<(&'static str, &'static str)> {
             "offen",
             "Kein passendes Update zur Bestätigung. Suche erneut nach einem Update.",
         ),
+        "update_dialog" => (
+            "leise",
+            "Den Stand der Freigabe siehst du im Abschnitt Update.",
+        ),
+        "update_dialog_fehler" => (
+            "offen",
+            "Das Freigabefenster konnte nicht gestartet werden.",
+        ),
+        "update_dialog_belegt" => (
+            "leise",
+            "Ein anderes Freigabefenster ist noch offen. Schließe es, bevor du dieses Angebot freigibst.",
+        ),
+        "update_freigabe_fehlt" => ("leise", "Gib zuerst die Abhängigkeiten unter Update frei."),
         "update" => (
             "gut",
             "Auftrag eingereiht. Sein Protokoll steht auf Live unter Tätigkeit.",
@@ -1282,6 +1295,7 @@ pub(crate) struct UpdateAnzeige<'a> {
     pub sperre: Option<&'a UpdateSperre>,
     pub version: Option<&'a str>,
     pub jetzt: Option<Zeitpunkt>,
+    pub freigabe: crate::update_angebot::Freigabe,
 }
 
 /// Hinweis zum Update, falls es einen gibt.
@@ -1466,14 +1480,14 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
     s.push_str("</div>");
     if update_sperre.is_none()
         && z.auftrag_stand(Art::Update).is_none()
-        && let Some((sha, _)) = z.update_angebot()
+        && let Some(angebot) = z.update_angebot()
     {
         let _ = write!(
             s,
             "<div class=\"update-angebot\"><p><strong>Update verfügbar</strong> · Version {}</p>\
             <a class=\"aktion primaer\" href=\"/einrichtung#update\">Update ansehen</a> \
             <span>Einspielen erst nach deiner Bestätigung.</span></div>",
-            maskiere(crate::rueckfall::kurz(sha))
+            maskiere(crate::rueckfall::kurz(&angebot.neu))
         );
     }
     if update_sperre.is_none() {
@@ -2196,45 +2210,8 @@ pub(crate) fn update_aktionen(
         );
     } else if z.auftrag_stand(Art::UpdatePruefen).is_some() {
         s.push_str("<p>Hier erscheint das Ergebnis der Suche.</p>");
-    } else if let Some((sha, protokoll)) = z.update_angebot() {
-        let erneut =
-            letzte_update_pause(z) == Some(crate::werkbank::UpdatePause::FreigabeAbgelaufen);
-        let knopf = if erneut {
-            "Erneut zur Freigabe"
-        } else {
-            "Update einspielen"
-        };
-        s.push_str("<p>Eine neue Version ist verfügbar.</p><ul>");
-        for titel in protokoll.iter().filter_map(|z| z.strip_prefix("  ")) {
-            let _ = write!(s, "<li>{}</li>", maskiere(titel));
-        }
-        s.push_str("</ul>");
-        for hinweis in protokoll
-            .iter()
-            .filter_map(|z| z.strip_prefix("[Update] Cargo.lock: "))
-        {
-            let _ = write!(
-                s,
-                "<p>Neue Abhängigkeiten: {}</p><p>Beim Einspielen hast du zwei Minuten für die Bestätigung am Windows-Desktop.</p>",
-                maskiere(hinweis)
-            );
-        }
-        if erneut {
-            s.push_str("<p>DepotSchlopf prüft vor der erneuten Freigabe, ob dieselbe Version noch verfügbar ist.</p>");
-        }
-        if z.update_wartet_auf_ruhe() {
-            let _ = write!(
-                s,
-                "<p><button type=\"button\" disabled>{knopf}</button> \
-                 Möglich, sobald kein anderer Auftrag mehr läuft oder wartet.</p>"
-            );
-        } else {
-            let _ = write!(
-                s,
-                "<p>{}</p>",
-                bestaetigungslink(Art::Update, knopf, Some(sha), true)
-            );
-        }
+    } else if let Some(angebot) = z.update_angebot().filter(|a| a.passt(update.version)) {
+        zeige_update_angebot(&mut s, token, z, angebot, update.freigabe);
     } else if let Some(a) = z
         .letzter_update_lauf()
         .filter(|a| a.art == Art::UpdatePruefen)
@@ -2257,6 +2234,71 @@ pub(crate) fn update_aktionen(
         s.push_str("<p>Suche zuerst nach einer neuen Version.</p>");
     }
     s
+}
+
+fn zeige_update_angebot(
+    s: &mut String,
+    token: &str,
+    z: &Zustand,
+    angebot: &crate::update_angebot::Angebot,
+    freigabe: crate::update_angebot::Freigabe,
+) {
+    use crate::update_angebot::Freigabe;
+    s.push_str("<p>Eine neue Version ist verfügbar.</p>");
+    if let Some(abdruck) = &angebot.abdruck {
+        let _ = write!(
+            s,
+            "<details open><summary>Abhängigkeiten und Freigabetext</summary>\
+                 <button type=\"button\" data-protokoll-kopieren>Text kopieren</button>\
+                  <span role=\"status\"></span><pre class=\"konsole\" tabindex=\"0\">{}</pre></details>",
+            maskiere(&angebot.text)
+        );
+        match freigabe {
+            Freigabe::Erteilt => s.push_str("<p class=\"gut\">Abhängigkeiten freigegeben.</p>"),
+            Freigabe::Wartet => {
+                s.push_str("<p>Das Fenster am Windows-Desktop wartet auf dich. Nimm dir Zeit.</p>");
+            }
+            Freigabe::Offen | Freigabe::Fehler => {
+                let status = if freigabe == Freigabe::Fehler {
+                    "Das Freigabefenster oder der Freigabebeleg konnte nicht verwendet werden."
+                } else {
+                    "Freigabe steht aus."
+                };
+                let _ = write!(
+                    s,
+                    "<p>{status}</p><form method=\"post\" action=\"/update-freigabe\">\
+                         <input type=\"hidden\" name=\"t\" value=\"{}\">\
+                         <input type=\"hidden\" name=\"sha\" value=\"{}\">\
+                         <input type=\"hidden\" name=\"abdruck\" value=\"{}\">\
+                         <button class=\"primaer\" type=\"submit\">Freigabefenster öffnen</button></form>",
+                    maskiere(token),
+                    maskiere(&angebot.neu),
+                    maskiere(abdruck),
+                );
+            }
+        }
+        if freigabe != Freigabe::Erteilt {
+            return;
+        }
+    } else {
+        s.push_str("<ul>");
+        for titel in angebot.text.lines().take(30) {
+            let _ = write!(s, "<li>{}</li>", maskiere(titel));
+        }
+        s.push_str("</ul>");
+    }
+    if z.update_wartet_auf_ruhe() {
+        s.push_str(
+            "<p><button type=\"button\" disabled>Update einspielen</button>\
+                  Möglich, sobald kein anderer Auftrag mehr läuft oder wartet.</p>",
+        );
+    } else {
+        let _ = write!(
+            s,
+            "<p>{}</p>",
+            bestaetigungslink(Art::Update, "Update einspielen", Some(&angebot.neu), true)
+        );
+    }
 }
 
 fn update_teil(
