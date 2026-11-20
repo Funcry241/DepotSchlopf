@@ -14,6 +14,59 @@ fn formular_entschluesselt_streng() {
 }
 
 #[test]
+fn estr_import_prueft_csv_und_bewahrt_gespeicherten_index() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let datei = wurzel.join("daten/estr-index.csv");
+    let d = dienst(wurzel, true);
+    let t = donnerstag(12, 0)?;
+    let csv = "KEY,FREQ,ISIN,TIME_PERIOD,OBS_VALUE\r\nEST.B.EU000A2QQF08.CI,B,EU000A2QQF08,2026-11-16,110.00000000\r\nEST.B.EU000A2QQF08.CI,B,EU000A2QQF08,2026-11-20,110.01100000\r\n";
+    let download = format!("{csv}{}", "\r\n".repeat(http::RUMPF_MAX / 2));
+    let http_anfrage = |ziel| {
+        format!(
+            "POST {ziel} HTTP/1.1\r\nHost: {HOST}\r\nOrigin: {HERKUNFT}\r\nContent-Type: text/csv\r\nX-DepotSchlopf-Token: {TOKEN}\r\nContent-Length: {}\r\n\r\n{download}",
+            download.len()
+        )
+    };
+    assert_eq!(
+        http::lies(&mut http_anfrage("/schluessel").as_bytes()),
+        Err(http::LeseFehler::ZuGross)
+    );
+    let import = |csv: &str, token, origin| {
+        let a = anfrage(
+            "POST",
+            "/estr-import",
+            &[
+                ("Host", HOST),
+                ("Origin", origin),
+                ("Content-Type", "text/csv"),
+                ("X-DepotSchlopf-Token", token),
+            ],
+            csv,
+        );
+        text(&behandle(&d, &Attrappe::default(), &a, t))
+    };
+    assert!(get(&d, "/einrichtung", t).contains("EZB-Indexreihe als CSV herunterladen"));
+    assert!(import(csv, "", HERKUNFT).starts_with("HTTP/1.1 403 "));
+    assert!(import(csv, TOKEN, "https://fremd.invalid").starts_with("HTTP/1.1 403 "));
+    assert!(!datei.exists());
+    let a = http::lies(&mut http_anfrage("/estr-import").as_bytes())
+        .map_err(|e| format!("CSV-Importanfrage: {e:?}"))?;
+    let antwort = text(&behandle(&d, &Attrappe::default(), &a, t));
+    assert!(antwort.starts_with("HTTP/1.1 200 "));
+    let zeitraum = "2 Indexstände vom 2026-11-16 bis 2026-11-20 gespeichert.";
+    assert!(antwort.contains(zeitraum));
+    assert!(get(&d, "/einrichtung", t).contains(zeitraum));
+    let fehler = import("KEY,TIME_PERIOD,OBS_VALUE\n", TOKEN, HERKUNFT);
+    assert!(fehler.starts_with("HTTP/1.1 400 "));
+    assert!(fehler.contains("keine Indexstände"));
+    assert_eq!(
+        fs::read_to_string(datei).map_err(|e| e.to_string())?,
+        download
+    );
+    Ok(())
+}
+
+#[test]
 fn schluessel_wird_geprueft_abgelegt_und_nie_gezeigt() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let umw = Attrappe::default();

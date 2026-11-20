@@ -400,6 +400,7 @@ fn einrichtungsseite(
     ));
     zusatz.push_str(&mindesteinsatz_formular(d));
     zusatz.push_str(&splitverdacht::formular(d));
+    zusatz.push_str(&analyse::massstab::einrichtung(d));
     zusatz.push_str(&ibkr_papier::einrichtung(
         d,
         &a.abfrage,
@@ -1070,6 +1071,7 @@ fn behandle_anfrage(
     }
     match a.methode.as_str() {
         "GET" => get(d, u, a, jetzt),
+        "POST" if a.pfad == http::ESTR_IMPORT => analyse::massstab::importieren(d, a),
         "POST" => post(d, u, a, jetzt, hintergrund),
         _ => seiten::fehler(405, "Nur GET und POST"),
     }

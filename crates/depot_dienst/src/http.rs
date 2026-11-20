@@ -17,6 +17,8 @@ pub const PORT: u16 = 47_410;
 pub const KOPF_MAX: usize = 16 * 1024;
 /// Groesster Rumpf (Formular).
 pub const RUMPF_MAX: usize = 16 * 1024;
+pub(crate) const ESTR_IMPORT: &str = "/estr-import";
+pub(crate) const ESTR_MAX: usize = 2 * 1024 * 1024;
 
 /// Eine gelesene Anfrage.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,7 +123,15 @@ pub fn lies(r: &mut impl Read) -> Result<Anfrage, LeseFehler> {
         [l] => l.parse::<usize>().map_err(|_| LeseFehler::Kaputt)?,
         _ => return Err(LeseFehler::Kaputt),
     };
-    if laenge > RUMPF_MAX {
+    let rumpf_max = if a.methode == "POST" && a.pfad == ESTR_IMPORT {
+        if !host_erlaubt(a.kopf("host")) || !herkunft_erlaubt(a.kopf("origin")) {
+            return Err(LeseFehler::Kaputt);
+        }
+        ESTR_MAX
+    } else {
+        RUMPF_MAX
+    };
+    if laenge > rumpf_max {
         return Err(LeseFehler::ZuGross);
     }
     let start = kopf_ende.checked_add(4).ok_or(LeseFehler::Kaputt)?;

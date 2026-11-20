@@ -56,10 +56,43 @@
       }
     }
   });
+  async function estrImport(form, knopf) {
+    var datei = form.querySelector('input[type="file"]').files[0];
+    var status = form.querySelector('[role="status"]');
+    if (!datei || knopf.disabled) { return; }
+    if (datei.size > Number(form.dataset.estrImport)) {
+      status.className = "offen";
+      status.textContent = "Die CSV ist größer als 2 MiB.";
+      return;
+    }
+    knopf.disabled = true;
+    status.textContent = "CSV wird geprüft …";
+    try {
+      var r = await fetch(form.action, {
+        method: "POST",
+        headers: { "Content-Type": "text/csv", "X-DepotSchlopf-Token": form.elements.t.value },
+        body: datei
+      });
+      status.className = r.ok ? "gut" : "offen";
+      status.textContent = (r.headers.get("content-type") || "").startsWith("text/plain")
+        ? await r.text() : "Import abgelehnt. Öffne die Einrichtung erneut.";
+      if (r.ok) { form.reset(); }
+    } catch (_) {
+      status.className = "offen";
+      status.textContent = "Der Dienst ist nicht erreichbar. Versuche den Import erneut.";
+    } finally {
+      knopf.disabled = false;
+    }
+  }
   // Doppelklicks: Ein abgesendetes Formular sperrt seinen Knopf. Der Dienst lehnt doppelte
   // Aufträge ohnehin ab; so sieht man sofort, dass der Klick angekommen ist.
   document.addEventListener("submit", function (e) {
     if (andererStart) { e.preventDefault(); return; }
+    if (e.target.dataset.estrImport !== undefined) {
+      e.preventDefault();
+      void estrImport(e.target, e.submitter || e.target.querySelector("button[type=submit]"));
+      return;
+    }
     if (offen(e.target) && !window.confirm("In einem anderen Formular stehen noch ungespeicherte Änderungen. Sie werden bei dieser Aktion verworfen. Trotzdem fortfahren?")) {
       e.preventDefault(); return;
     }
