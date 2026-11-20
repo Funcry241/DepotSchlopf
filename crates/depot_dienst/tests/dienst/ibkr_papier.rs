@@ -78,3 +78,63 @@ fn ibkr_papierkonto_in_der_oberflaeche_speichern_und_lesen() -> Result<(), Strin
     assert!(!status.contains("DU7654321"));
     Ok(())
 }
+
+#[test]
+fn depot_zeigt_letzten_ibkr_abruf_getrennt_von_der_simulation() -> Result<(), String> {
+    use depot_journal::{Journal, ibkr_abruf::vermerken};
+    use depot_kern::{Cent, Topf, TopfId};
+
+    let wurzel = ordner()?;
+    let journal = wurzel.join("daten/journal.txt");
+    Journal::einrichten(&journal).map_err(|e| format!("{e:?}"))?;
+    let mut journal = Journal::oeffnen(&journal).map_err(|e| format!("{e:?}"))?;
+    for id in [TopfId::A, TopfId::B] {
+        let topf = Topf::neu(id, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
+        journal.setze_topf(&topf).map_err(|e| format!("{e:?}"))?;
+    }
+    drop(journal);
+    let t = donnerstag(12, 0)?;
+    let d = dienst(wurzel.clone(), true);
+    let datei = wurzel.join("daten/ibkr-papierkonto.txt");
+    let abschnitt = |d| get(d, "/teil/ibkr-depot", t);
+    assert!(abschnitt(&d).contains("Noch kein Papierabruf"));
+    assert!(abschnitt(&d).contains("/einrichtung#ibkr-papier"));
+
+    let konto = "DUR1234567";
+    fs::write(&datei, konto).map_err(|e| e.to_string())?;
+    let vermerke = |abruf| vermerken(&wurzel, konto, abruf).map_err(|e| e.to_string());
+    vermerke(None)?;
+    assert!(abschnitt(&d).contains("Der jüngste Papierabruf ist fehlgeschlagen."));
+    assert!(!abschnitt(&d).contains("<strong"));
+
+    vermerke(Some((t, Cent(100_000))))?;
+    let seite = get(&d, "/depot", t);
+    let (ibkr, intern) = some(
+        seite.split_once("<h2>Interne Simulation</h2>"),
+        "interne Simulation",
+    )?;
+    assert!(ibkr.contains("data-teil=\"/teil/ibkr-depot\""));
+    assert!(ibkr.contains("<h2>IBKR-Papierkonto</h2>"));
+    assert!(ibkr.contains(&format!(
+        "<strong class=\"gross\">{}</strong>",
+        Cent(100_000)
+    )));
+    assert!(ibkr.contains(&depot_lage::zeit_text(t)));
+    assert!(intern.contains("10.000,00"));
+    assert!(!intern.contains(&Cent(100_000).to_string()));
+    assert!(!seite.contains(konto));
+
+    vermerke(None)?;
+    let neu = dienst(wurzel.clone(), true);
+    let html = abschnitt(&neu);
+    assert!(html.contains("Der jüngste Papierabruf ist fehlgeschlagen."));
+    assert!(html.contains(&Cent(100_000).to_string()));
+
+    vermerke(Some((t, Cent(105_000))))?;
+    assert!(abschnitt(&neu).contains(&Cent(105_000).to_string()));
+    assert!(!abschnitt(&neu).contains("fehlgeschlagen"));
+    fs::write(&datei, "DU7654321").map_err(|e| e.to_string())?;
+    assert!(abschnitt(&neu).contains("Noch kein Papierabruf"));
+    assert!(!abschnitt(&neu).contains(&Cent(105_000).to_string()));
+    Ok(())
+}

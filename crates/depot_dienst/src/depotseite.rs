@@ -327,7 +327,7 @@ fn reifeampel(
 pub fn inhalt(d: &crate::Dienst, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (String, bool) {
     let daten = d.wurzel.join("daten");
     let mut text = format!(
-        "<section><h2>Depot</h2><p class=\"leise\">Stand {}</p></section>",
+        "<section><h2>Interne Simulation</h2><p class=\"leise\">Stand {}</p></section>",
         zeit_text(jetzt)
     );
     let mut cache = d

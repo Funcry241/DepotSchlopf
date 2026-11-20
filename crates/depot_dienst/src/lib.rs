@@ -460,9 +460,13 @@ fn depot_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         return antwort(200, HTML, inhalt);
     }
     let url = format!("/teil/depot?zeitraum={}", zeitraum.als_abfrage());
+    let inhalt = format!(
+        "<div data-teil=\"/teil/ibkr-depot\">{}</div><div data-teil=\"{url}\">{inhalt}</div>",
+        ibkr_papier::depot(d),
+    );
     let html = seiten::rahmen(
         "/depot",
-        Some(&url),
+        None,
         None,
         &inhalt,
         d.version.as_deref(),
@@ -482,6 +486,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/export" => seiten::fehler(405, "Verwende das Analyse-Exportformular."),
         "/teil/verbindung" | "/teil/status" => verbindungsstatus(d, tag),
         "/teil/sicherung" => antwort(200, HTML, sicherungsinfo(d, jetzt).as_bytes()),
+        "/teil/ibkr-depot" => antwort(200, HTML, ibkr_papier::depot(d).as_bytes()),
         "/teil/ibkr-papier" => antwort(200, HTML, ibkr_papier::status(d).as_bytes()),
         "/teil/live" => antwort(200, HTML, live_inhalt(d, jetzt).as_bytes()),
         "/teil/erste-schritte" => {
