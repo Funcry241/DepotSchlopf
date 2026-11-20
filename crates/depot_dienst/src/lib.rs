@@ -374,7 +374,7 @@ fn einrichtungsseite(
             .map(|f| seiten::Entwurf::aus_formular(&f))
             .unwrap_or_default(),
         autostart: u.autostart(&d.wurzel),
-        ibkr_konto_gespeichert: ibkr_papier::gespeichert(d),
+        ibkr_einstiegslink: ibkr_papier::einstiegslink(d),
         wurzel: d.wurzel.display().to_string(),
         grenzen: grenzwerte(),
         abgelehnt: werkbank::lies_falls_da(&rueckfall::abgelehnt_pfad(&d.wurzel)).map(|t| {
@@ -402,7 +402,7 @@ fn einrichtungsseite(
     zusatz.push_str(&ibkr_papier::einrichtung(
         d,
         &a.abfrage,
-        gespeichert.ibkr_konto_gespeichert,
+        ibkr_papier::gespeichert(d),
     ));
     let zustand = d.sperre();
     let gespeichert = seiten::Einrichtung {
@@ -502,6 +502,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/teil/sicherung" => antwort(200, HTML, sicherungsinfo(d, jetzt).as_bytes()),
         "/teil/ibkr-abgleich" => antwort(200, HTML, ibkr_abgleich::status(d).as_bytes()),
         "/teil/ibkr-depot" => antwort(200, HTML, ibkr_papier::depot(d).as_bytes()),
+        "/teil/ibkr-einstiegslink" => antwort(200, HTML, ibkr_papier::einstiegslink(d).as_bytes()),
         "/teil/ibkr-papier" => antwort(200, HTML, ibkr_papier::status(d).as_bytes()),
         "/teil/live" => antwort(200, HTML, live_inhalt(d, jetzt).as_bytes()),
         "/teil/erste-schritte" => {

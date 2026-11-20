@@ -25,6 +25,25 @@ pub(crate) fn gespeichert(d: &Dienst) -> bool {
     konto(d).is_some()
 }
 
+pub(crate) fn einstiegslink(d: &Dienst) -> String {
+    let mut s = crate::seiten::marke(&d.start);
+    let text = match konto(d) {
+        None => "IBKR-Papierkonto einrichten",
+        Some(konto) => {
+            let erfolgreich = depot_journal::ibkr_abruf::lesen(&d.wurzel, &konto)
+                .ok()
+                .flatten()
+                .is_some_and(|stand| stand.erfolg.is_some() && !stand.fehlgeschlagen);
+            if erfolgreich {
+                return s;
+            }
+            "IBKR-Papierabruf testen"
+        }
+    };
+    let _ = write!(s, "<p><a href=\"#ibkr-papier\">{text}</a></p>");
+    s
+}
+
 pub(crate) fn depot(d: &Dienst) -> String {
     use depot_lage::zeit_text;
 
