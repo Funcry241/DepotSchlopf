@@ -273,7 +273,7 @@ pub struct Stand {
     prueft_wiederanlauf: bool,
     seit_abschluss: usize,
     abrechnungstag: Option<Datum>,
-    wissensstichtage: BTreeMap<Datum, Zeitpunkt>,
+    wissensstichtage: BTreeMap<Datum, (Zeitpunkt, usize)>,
     abrechnungen: Abrechnungen,
     /// Je abgeschlossenem Tag die Toepfe zum Abschluss, aufsteigend (#118). Entsteht nur beim
     /// Lesen; das Journal schreibt dafuer nichts.
@@ -713,7 +713,18 @@ impl Stand {
     }
 
     pub fn wissensstichtag(&self, tag: Datum) -> Option<Zeitpunkt> {
-        self.wissensstichtage.get(&tag).copied()
+        self.wissensstichtage.get(&tag).map(|(zeit, _)| *zeit)
+    }
+
+    /// Handelstage mit eigenem belegtem Wissensstichtag.
+    pub fn tage_mit_wissensstichtag(&self) -> impl Iterator<Item = Datum> + '_ {
+        self.wissensstichtage.keys().copied()
+    }
+
+    /// Journalbegründungen, die beim Schreiben des Wissensstichtags bereits vorlagen.
+    pub fn begruendungen_bis_stichtag(&self, tag: Datum) -> Option<&[(Datum, String, String)]> {
+        let (_, anzahl) = self.wissensstichtage.get(&tag)?;
+        self.begruendungen.get(..*anzahl)
     }
 
     pub fn abrechnungstag(&self) -> Option<Datum> {
@@ -1240,7 +1251,8 @@ impl Stand {
         {
             return Err("Wissensstichtag unzulässig".into());
         }
-        self.wissensstichtage.insert(tag, zeit);
+        self.wissensstichtage
+            .insert(tag, (zeit, self.begruendungen.len()));
         Ok(())
     }
 
