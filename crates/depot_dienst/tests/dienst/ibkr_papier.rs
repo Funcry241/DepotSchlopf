@@ -109,11 +109,18 @@ fn depot_zeigt_letzten_ibkr_abruf_getrennt_von_der_simulation() -> Result<(), St
     let konto = "DUR1234567";
     fs::write(&datei, konto).map_err(|e| e.to_string())?;
     let vermerke = |abruf| vermerken(&wurzel, konto, abruf).map_err(|e| e.to_string());
+    let testlink = "href=\"#ibkr-papier\">IBKR-Papierabruf testen</a>";
+    let einstieg = |d| get(d, "/teil/ibkr-einstiegslink", t);
+    assert!(einstieg(&d).contains(testlink));
     vermerke(None)?;
     assert!(abschnitt(&d).contains("Der jüngste Papierabruf ist fehlgeschlagen."));
     assert!(!abschnitt(&d).contains("<strong"));
 
     vermerke(Some((t, Cent(100_000))))?;
+    assert!(!einstieg(&d).contains(testlink));
+    let einrichtung = get(&d, "/einrichtung", t);
+    assert!(!einrichtung.contains(testlink));
+    assert!(einrichtung.contains(">Papierabruf testen</button>"));
     let seite = get(&d, "/depot", t);
     let (ibkr, intern) = some(
         seite.split_once("<h2>Interne Simulation</h2>"),
@@ -132,6 +139,7 @@ fn depot_zeigt_letzten_ibkr_abruf_getrennt_von_der_simulation() -> Result<(), St
 
     vermerke(None)?;
     let neu = dienst(wurzel.clone(), true);
+    assert!(einstieg(&neu).contains(testlink));
     let html = abschnitt(&neu);
     assert!(html.contains("Der jüngste Papierabruf ist fehlgeschlagen."));
     assert!(html.contains(&Cent(100_000).to_string()));
@@ -140,6 +148,7 @@ fn depot_zeigt_letzten_ibkr_abruf_getrennt_von_der_simulation() -> Result<(), St
     assert!(abschnitt(&neu).contains(&Cent(105_000).to_string()));
     assert!(!abschnitt(&neu).contains("fehlgeschlagen"));
     fs::write(&datei, "DU7654321").map_err(|e| e.to_string())?;
+    assert!(einstieg(&neu).contains(testlink));
     assert!(abschnitt(&neu).contains("Noch kein Papierabruf"));
     assert!(!abschnitt(&neu).contains(&Cent(105_000).to_string()));
     Ok(())

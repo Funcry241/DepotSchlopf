@@ -1701,7 +1701,7 @@ pub struct Einrichtung {
     pub entwurf: Entwurf,
     pub autostart: autostart::Stand,
     /// Eine gültige IBKR-Papierkontonummer ist lokal gespeichert.
-    pub ibkr_konto_gespeichert: bool,
+    pub ibkr_einstiegslink: String,
     pub wurzel: String,
     pub grenzen: Vec<Grenzwert>,
     /// Staende, die nach einem Update zurueckgesetzt wurden (`daten/update_abgelehnt.txt`),
@@ -2540,12 +2540,11 @@ pub(crate) fn einrichtung_mit_update(
     }
     kurssperre_teil(token, z, e, &mut s);
     papierfreigabe_teil(token, e, &mut s);
-    let ibkr_link = if e.ibkr_konto_gespeichert {
-        "IBKR-Papierabruf testen"
-    } else {
-        "IBKR-Papierkonto einrichten"
-    };
-    let _ = write!(s, "<p><a href=\"#ibkr-papier\">{ibkr_link}</a></p>");
+    let _ = write!(
+        s,
+        "<div data-teil=\"/teil/ibkr-einstiegslink\">{}</div>",
+        e.ibkr_einstiegslink
+    );
     let _ = write!(
         s,
         "<div data-teil=\"/teil/quellen\">{}</div>",
