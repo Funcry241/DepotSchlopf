@@ -291,8 +291,9 @@ fn main() -> ExitCode {
         let u = Arc::clone(&umwelt);
         Box::new(move |titel: &str, text: &str| u.hinweis(titel, text))
     };
-    let mut dienst =
-        Dienst::neu(wurzel, token, starter, lagerechner(Arc::clone(&umwelt))).mit_melder(melder);
+    let mut dienst = Dienst::neu(wurzel, token, starter, lagerechner(Arc::clone(&umwelt)))
+        .mit_melder(melder)
+        .mit_automatischer_updatesuche();
     dienst.version = version;
     let dienst = Arc::new(dienst);
     dienst.sperre().programm_meldung = Some(meldung);

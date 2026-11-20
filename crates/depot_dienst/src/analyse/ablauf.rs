@@ -247,7 +247,7 @@ impl Ablauf {
             };
             let anlass = match lauf.anlass {
                 Anlass::Hand => "manuell",
-                Anlass::Zeitplan => "automatisch",
+                Anlass::Zeitplan | Anlass::Hintergrund => "automatisch",
             };
             let _ = writeln!(
                 text,

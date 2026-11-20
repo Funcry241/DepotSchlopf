@@ -529,9 +529,10 @@ pub fn rahmen(
     meldung: Option<(&str, &str)>,
     inhalt: &str,
     commit: Option<&str>,
-    betrieb: &str,
+    kopf: (&str, &str),
     hilfe: (&str, &str),
 ) -> String {
+    let (betrieb, update) = kopf;
     let mut s = String::with_capacity(inhalt.len().saturating_add(4096));
     let nav = |pfad: &str, text: &str| {
         let aktuell = if pfad == hier {
@@ -569,6 +570,7 @@ pub fn rahmen(
          beim Neustart nach einem Update. Die Seite verbindet sich von selbst neu. Wenn du das schwarze \
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div>\
          <p id=\"neuverbinden\" hidden><a id=\"neuverbinden-link\" class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
+         <div id=\"update-hinweis\" data-teil=\"/teil/update-hinweis\" role=\"status\" aria-live=\"polite\">{update}</div>\
          <nav aria-label=\"Hauptnavigation\"><h1>{herz}DepotSchlopf</h1>{}{}{}{}\
          <span class=\"leise\">Nur Papiergeld.</span>{figuren}{version}</nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit DepotSchlopf läuft. \
@@ -633,6 +635,7 @@ fn anlass_text(a: Anlass) -> &'static str {
     match a {
         Anlass::Hand => "von Hand",
         Anlass::Zeitplan => "Zeitplan",
+        Anlass::Hintergrund => "Hintergrund",
     }
 }
 
@@ -980,7 +983,7 @@ pub fn fehler(status: u16, text: &str) -> Vec<u8> {
     crate::http::antwort(
         status,
         "text/html; charset=utf-8",
-        rahmen("", None, None, &inhalt, None, "", ("", "")).as_bytes(),
+        rahmen("", None, None, &inhalt, None, ("", ""), ("", "")).as_bytes(),
     )
 }
 
@@ -1038,6 +1041,9 @@ fn ergebnis(a: &Auftrag, z: &Zustand) -> (&'static str, &'static str) {
         if a.erfolg == Some(true) {
             return ("offen", "Einspielen beendet; Abschluss unbekannt");
         }
+    }
+    if a.anlass == Anlass::Hintergrund && a.erfolg == Some(false) {
+        return ("leise", "Suche nicht abgeschlossen");
     }
     if a.frueher == Frueher::Unterbrochen {
         return ("halt", "unterbrochen");
@@ -1179,6 +1185,7 @@ fn taetigkeit(
 fn letzter_fehler_hinweis(s: &mut String, z: &Zustand) {
     let offen = z.verlauf.iter().enumerate().find_map(|(i, a)| {
         if a.erfolg != Some(false)
+            || a.anlass == Anlass::Hintergrund
             || a.update_pause.is_some()
             || z.verlauf
                 .iter()
@@ -1455,7 +1462,7 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
     } else {
         s.push_str("<div class=\"betrieb\"><strong>Im Moment läuft kein Auftrag.</strong>");
         s.push_str(&naechster_abschnitt(z, heute, true));
-        if let Some(a) = z.verlauf.front() {
+        if let Some(a) = z.verlauf.iter().find(|a| a.anlass != Anlass::Hintergrund) {
             let (_, ergebnis) = ergebnis(a, z);
             let _ = write!(
                 s,
@@ -1478,23 +1485,32 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
         }
     }
     s.push_str("</div>");
-    if update_sperre.is_none()
-        && z.auftrag_stand(Art::Update).is_none()
-        && let Some(angebot) = z.update_angebot()
-    {
-        let _ = write!(
-            s,
-            "<div class=\"update-angebot\"><p><strong>Update verfügbar</strong> · Version {}</p>\
-            <a class=\"aktion primaer\" href=\"/einrichtung#update\">Update ansehen</a> \
-            <span>Einspielen erst nach deiner Bestätigung.</span></div>",
-            maskiere(crate::rueckfall::kurz(&angebot.neu))
-        );
-    }
     if update_sperre.is_none() {
         s.push_str(&update_hinweis(z, None, None));
     }
     if let Some(text) = kurssperre {
         s.push_str(text);
+    }
+    s
+}
+
+pub(crate) fn update_leiste(
+    start: &str,
+    z: &Zustand,
+    version: Option<&str>,
+    gesperrt: bool,
+) -> String {
+    let mut s = marke(start);
+    if !gesperrt
+        && z.auftrag_stand(Art::Update).is_none()
+        && let Some(angebot) = z.update_angebot().filter(|a| a.passt(version))
+    {
+        let _ = write!(
+            s,
+            "<p class=\"update-angebot\" title=\"Version {}\">Neue Version verfügbar · \
+             <a href=\"/einrichtung#update\">Ansehen</a></p>",
+            maskiere(crate::rueckfall::kurz(&angebot.neu))
+        );
     }
     s
 }
@@ -2208,16 +2224,18 @@ pub(crate) fn update_aktionen(
             s,
             "<p>Update {status} Unter <a href=\"/\">Live</a> siehst du den Fortschritt.</p>"
         );
-    } else if z.auftrag_stand(Art::UpdatePruefen).is_some() {
-        s.push_str("<p>Hier erscheint das Ergebnis der Suche.</p>");
     } else if let Some(angebot) = z.update_angebot().filter(|a| a.passt(update.version)) {
         zeige_update_angebot(&mut s, token, z, angebot, update.freigabe);
+    } else if z.auftrag_stand(Art::UpdatePruefen).is_some() {
+        s.push_str("<p>Hier erscheint das Ergebnis der Suche.</p>");
     } else if let Some(a) = z
         .letzter_update_lauf()
         .filter(|a| a.art == Art::UpdatePruefen)
     {
-        if a.erfolg == Some(true) && a.frueher == Frueher::Nein {
+        if a.erfolg == Some(true) && a.frueher != Frueher::Unterbrochen {
             s.push_str("<p>Die Suche hat keine neue Version gefunden.</p>");
+        } else if a.anlass == Anlass::Hintergrund {
+            s.push_str("<p class=\"leise\">Die automatische Suche konnte nicht abgeschlossen werden. DepotSchlopf prüft später erneut.</p>");
         } else {
             s.push_str("<p>Die Suche konnte nicht abgeschlossen werden. Details stehen unter <a href=\"/\">Live</a>.</p>");
         }
@@ -2312,7 +2330,7 @@ fn update_teil(
     let _ = write!(
         s,
         "<section id=\"update\"><h2>Update</h2>\
-         <p>Holt eine neue Version. Vor dem Einspielen prüft DepotSchlopf die Version und sichert deine Papierdaten. \
+         <p>Du entscheidest, wann du eine neue Version einspielst. Vor dem Einspielen prüft DepotSchlopf die Version und sichert deine Papierdaten. \
          Das dauert ein paar Minuten.</p><div data-teil=\"/teil/update\">{}</div>\
          <details><summary>Technische Details</summary><p>Der Dienst prüft die Version aus <code>main</code> \
          in einem eigenen Ordner. Deine Sicherung liegt unter <code>daten/sicherung</code>. \
@@ -2588,7 +2606,7 @@ mod speicherleiste_tests {
 
     #[test]
     fn herz_steht_ausserhalb_der_aktualisierten_betriebsleiste() {
-        let seite = super::rahmen("/", None, None, "", None, "", ("", ""));
+        let seite = super::rahmen("/", None, None, "", None, ("", ""), ("", ""));
         let nav = seite.split_once("</nav>").map_or("", |(nav, _)| nav);
         assert!(nav.contains("id=\"herz\""));
         assert!(!nav.contains("id=\"betriebsleiste\""));

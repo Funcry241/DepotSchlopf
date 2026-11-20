@@ -224,16 +224,17 @@ fn betriebsleiste_zeigt_auftrag_wartehinweis_und_abschluss_auf_beiden_seiten() -
 #[test]
 fn gefundenes_update_ist_global_sichtbar_und_braucht_weiter_bestaetigung() -> Result<(), String> {
     let d = dienst(ordner()?);
-    assert!(!get(&d, "/teil/kopf")?.contains("Update verfügbar"));
+    assert!(!get(&d, "/teil/update-hinweis")?.contains("Neue Version verfügbar"));
     suche_update(&d, mittag()?)?;
-    for pfad in ["/", "/einrichtung", "/teil/kopf"] {
+    let hinweis = "Neue Version verfügbar";
+    for pfad in ["/", "/depot", "/einrichtung"] {
         let html = get(&d, pfad)?;
-        assert!(html.contains("<strong>Update verfügbar</strong>"), "{pfad}");
-        assert!(
-            html.contains("class=\"aktion primaer\" href=\"/einrichtung#update\">Update ansehen")
-        );
-        assert!(html.contains("Einspielen erst nach deiner Bestätigung."));
+        assert!(html.contains("data-teil=\"/teil/update-hinweis\""));
+        let kopf = some(html.split_once("<nav"), "Navigation")?.0;
+        assert!(kopf.contains(hinweis), "{pfad}");
+        assert!(kopf.contains("href=\"/einrichtung#update\">Ansehen"));
     }
+    assert!(get(&d, "/teil/update-hinweis")?.contains(hinweis));
     assert!(d.sperre().warteschlange.is_empty());
     d.einreihen(Art::Nachrichten, Anlass::Hand)?;
     let blockiert = get(&d, "/teil/update")?;
@@ -250,7 +251,87 @@ fn gefundenes_update_ist_global_sichtbar_und_braucht_weiter_bestaetigung() -> Re
         post_auftrag(&d, &format!("update&sha={UPDATE_SHA}"))?.contains("m=update_bestaetigen")
     );
     assert!(bestaetige_update(&d)?.contains("m=update#update"));
-    assert!(!get(&d, "/teil/kopf")?.contains("Update verfügbar"));
+    assert!(!get(&d, "/teil/update-hinweis")?.contains("Neue Version verfügbar"));
+    Ok(())
+}
+
+#[test]
+fn automatische_updatesuche_wartet_auf_auftraege_und_vermerkt_den_abstand() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let automatisch = || {
+        Arc::new(
+            Dienst::neu(
+                wurzel.clone(),
+                TOKEN.into(),
+                echo_starter(),
+                leeres_lagebild(),
+            )
+            .mit_automatischer_updatesuche(),
+        )
+    };
+    let t = mittag()?;
+    let spaeter = |sekunden| {
+        some(
+            t.sekunden()
+                .checked_add(sekunden)
+                .and_then(Zeitpunkt::aus_sekunden),
+            "späterer Prüfzeitpunkt",
+        )
+    };
+    let d = automatisch();
+    d.einreihen(Art::Termine, Anlass::Hand)?;
+    assert_eq!(lauf_ab(&d, t)?, Art::Termine);
+    assert!(d.schritt(t).is_none(), "zuerst entsteht das Lagebild");
+    assert_eq!(lauf_ab(&d, t)?, Art::UpdatePruefen);
+    assert_eq!(
+        d.sperre().verlauf.front().map(|a| a.anlass),
+        Some(Anlass::Hintergrund)
+    );
+    assert!(get(&d, "/teil/update-hinweis")?.contains("Neue Version verfügbar"));
+    assert!(d.schritt(spaeter(3599)?).is_none());
+
+    let neu = automatisch();
+    assert!(get(&neu, "/teil/update-hinweis")?.contains("Neue Version verfügbar"));
+    assert!(neu.schritt(spaeter(3599)?).is_none());
+    assert_eq!(lauf_ab(&neu, spaeter(3600)?)?, Art::UpdatePruefen);
+    Ok(())
+}
+
+#[test]
+fn automatische_updatesuche_haelt_ein_angebot_bei_ausfall_sichtbar() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let angebot = wurzel.join("daten/update_angebot.txt");
+    fs::write(
+        &angebot,
+        format!("update-angebot-v1;{UPDATE_ALT};{UPDATE_SHA};-\nVorhandenes Angebot\n"),
+    )
+    .map_err(|e| e.to_string())?;
+    let starter: Starter = Box::new(|_, _| {
+        #[cfg(windows)]
+        let mut c = Command::new("cmd");
+        #[cfg(windows)]
+        c.args(["/C", "echo FEHLER: Netzwerk nicht erreichbar& exit /b 1"]);
+        #[cfg(not(windows))]
+        let mut c = Command::new("sh");
+        #[cfg(not(windows))]
+        c.args(["-c", "echo 'FEHLER: Netzwerk nicht erreichbar'; exit 1"]);
+        c
+    });
+    let d = Arc::new(
+        Dienst::neu(wurzel, TOKEN.into(), starter, leeres_lagebild())
+            .mit_automatischer_updatesuche(),
+    );
+    let t = mittag()?;
+    assert!(d.schritt(t).is_none());
+    let (nr, kind) = some(d.schritt(t), "Automatische Suche")?;
+    assert!(get(&d, "/teil/update-hinweis")?.contains("Neue Version verfügbar"));
+    d.verfolge(nr, kind, || mittag().ok());
+    let live = get(&d, "/teil/live")?;
+    assert!(!live.contains("Letzter fehlgeschlagener Lauf"));
+    assert!(live.contains("class=\"leise\">Suche nicht abgeschlossen"));
+    assert!(get(&d, "/teil/update-hinweis")?.contains("Neue Version verfügbar"));
+    assert!(get(&d, "/teil/update")?.contains("Update einspielen"));
+    assert!(d.schritt(t).is_none());
     Ok(())
 }
 
@@ -1511,14 +1592,14 @@ test('Teilaktualisierung läuft weiter und alle Abrufe umgehen den Cache',async(
   assert.ok(b.requests.every(r=>r.options.cache==='no-store'&&r.options.credentials==='same-origin'&&r.options.signal));
 });
 
-test('Betriebsleiste wechselt von Lauf zu Update-Hinweis ohne Seitenneuladung',async()=>{
-  let inhalt=health()+'Jetzt: Kurse abrufen';
-  const b=browser({parts:1,urls:['/teil/kopf'],response:u=>reply(u==='/teil/kopf'?inhalt:health())});
-  await b.advance(2000);assert.match(b.elements[0].innerHTML,/Jetzt: Kurse abrufen/);
-  inhalt=health()+'Update verfügbar';
-  await b.advance(2000);assert.match(b.elements[0].innerHTML,/Update verfügbar/);
+test('Update-Hinweis erscheint ohne Seitenneuladung',async()=>{
+  let inhalt=health();
+  const b=browser({parts:1,urls:['/teil/update-hinweis'],response:u=>reply(u==='/teil/update-hinweis'?inhalt:health())});
+  await b.advance(2000);assert.doesNotMatch(b.elements[0].innerHTML,/Neue Version verfügbar/);
+  inhalt=health()+'Neue Version verfügbar';
+  await b.advance(2000);assert.match(b.elements[0].innerHTML,/Neue Version verfügbar/);
   assert.deepEqual(b.navigations,[]);
-  assert.ok(b.requests.some(r=>r.url==='/teil/kopf'));
+  assert.ok(b.requests.some(r=>r.url==='/teil/update-hinweis'));
 });
 
 test('Rückfall auf älteren Dienst ohne Bereitschaftsmarker wird erkannt',async()=>{

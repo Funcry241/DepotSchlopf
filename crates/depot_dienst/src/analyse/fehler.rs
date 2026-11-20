@@ -272,6 +272,9 @@ fn anbieterfehler(e: &Eintrag) -> Option<Ereignis> {
 
 fn dienstfehler(laeufe: &[Auftrag], zeitraum: Zeitraum) -> impl Iterator<Item = Ereignis> + '_ {
     laeufe.iter().filter_map(move |lauf| {
+        if lauf.anlass == Anlass::Hintergrund {
+            return None;
+        }
         let (zeit, ursache, folge) = match (lauf.art, lauf.frueher, lauf.erfolg) {
             (Art::PapierAusgelassen, _, _) => (
                 lauf.start,

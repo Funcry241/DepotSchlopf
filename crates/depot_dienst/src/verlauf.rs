@@ -28,6 +28,7 @@ fn anlass_kurz(a: Anlass) -> &'static str {
     match a {
         Anlass::Hand => "hand",
         Anlass::Zeitplan => "zeitplan",
+        Anlass::Hintergrund => "hintergrund",
     }
 }
 
@@ -35,6 +36,7 @@ fn anlass_aus(k: &str) -> Option<Anlass> {
     match k {
         "hand" => Some(Anlass::Hand),
         "zeitplan" => Some(Anlass::Zeitplan),
+        "hintergrund" => Some(Anlass::Hintergrund),
         _ => None,
     }
 }
