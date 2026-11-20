@@ -1750,10 +1750,11 @@ fn neuroeingaben_erreichen_das_geschwaerzte_exportarchiv_vollstaendig() -> Resul
     j.beobachte(tag, "Termin SAP veröffentlicht Quartalszahlen")
         .map_err(fehler)?;
     j.begruende(tag, "Frageliste", "0 1").map_err(fehler)?;
-    let original = fs::read_to_string(&pfad).map_err(|e| e.to_string())?;
-    let eingaben = depot_lage::belegauswahl_neuro::eingaben(j.stand(), &original, tag..=tag, 8192);
-    assert!(eingaben.contains("\"x\":[1,1,1]"));
+    let stand = j.stand().clone();
     drop(j);
+    let original = fs::read_to_string(&pfad).map_err(|e| e.to_string())?;
+    let eingaben = depot_lage::belegauswahl_neuro::eingaben(&stand, &original, tag..=tag, 8192);
+    assert!(eingaben.contains("\"x\":[1,1,1]"));
     let name = "neuro2026_eingaben.jsonl";
     let mut vergleich = Zip::default();
     vergleich.datei_gepackt(name, eingaben.as_bytes())?;
