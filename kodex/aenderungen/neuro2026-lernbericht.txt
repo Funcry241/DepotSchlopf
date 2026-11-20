@@ -1,0 +1,10 @@
+klasse: Funktion
+zweck: Den geprüften Neuro2026-Referenzlauf mit Netzaufbau, Lernkurve und Vorhersagen unter NeuroSchlopf anzeigen
+pfade:
+crates/depot_dienst/src/assets/app.js
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/neuro2026.rs
+crates/depot_dienst/src/neuroschlopf.rs
+crates/depot_dienst/tests/dienst/live.rs
+docs/neuroschlopf/lernlauf-v0.1.16.json
+docs/neuroschlopf/lernlauf.md

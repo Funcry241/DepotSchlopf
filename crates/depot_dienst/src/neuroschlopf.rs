@@ -14,13 +14,15 @@ use depot_lage::html::maskiere;
 use crate::http::{feld, umleitung};
 use crate::werkbank::{Dienst, lies_falls_da, schreibe_ganz};
 
+const LERNLAUF_LINK: &str = r#"<p><a href="/neuroschlopf/lernlauf">Neuro2026 · Lernkurve und Vorhersagen des Referenzlaufs</a></p>"#;
+
 const AUSGABE_MAX: usize = 16;
 const JOURNAL_MAX: u64 = 32 * 1024 * 1024;
 const CPU_PROZENT: u32 = 10;
 const ARBEITSBLOCK: Duration = Duration::from_millis(10);
 const KONTROLLPAUSE: Duration = Duration::from_millis(20);
 
-fn einstellung(daten: &Path) -> Result<bool, String> {
+pub(super) fn einstellung(daten: &Path) -> Result<bool, String> {
     match lies_falls_da(&daten.join("neuroschlopf.txt"))?.as_deref() {
         Some("an\n") => Ok(true),
         None | Some("aus\n") => Ok(false),
@@ -54,7 +56,7 @@ pub(crate) fn formular(d: &Dienst) -> String {
         <form method=\"post\" action=\"/neuroschlopf\"><input type=\"hidden\" name=\"t\" value=\"{}\">\
         <button type=\"submit\" name=\"an\" value=\"ja\"{an}>NeuroSchlopf einschalten</button> \
         <button type=\"submit\" name=\"an\" value=\"nein\"{aus}>NeuroSchlopf ausschalten</button>\
-        </form></section>",
+        </form>{LERNLAUF_LINK}</section>",
         maskiere(&d.token)
     )
 }
@@ -301,6 +303,7 @@ pub(crate) fn live(d: &Dienst, aufrufe: &crate::zeitstrahl_ki::Aufrufe) -> Strin
         }
         html.push_str("</ul>");
     }
+    html.push_str(LERNLAUF_LINK);
     html.push_str("</section>");
     html
 }
