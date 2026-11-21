@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Den Otter in der Navigation von den Stilen der Betriebsfigur trennen
+pfade:
+crates/depot_dienst/src/schmuck.rs

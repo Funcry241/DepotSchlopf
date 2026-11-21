@@ -40,13 +40,13 @@ nav:has(.kopffiguren){position:relative}
 .kopffigur .figur-auge{transform-box:fill-box;transform-origin:center;transform:scaleY(.45)}
 .kopffiguren:is([data-denkt=dachs],[data-denkt=beide]) .dachs,
 .kopffiguren:is([data-denkt=maus],[data-denkt=beide]) .maus,
-.kopffiguren[data-otter=dran] .otter{color:var(--gut)}
+.kopffiguren[data-otter=dran] .kopf-otter{color:var(--gut)}
 .kopffiguren:is([data-denkt=dachs],[data-denkt=beide]) .dachs svg,
 .kopffiguren:is([data-denkt=maus],[data-denkt=beide]) .maus svg,
-.kopffiguren[data-otter=dran] .otter svg{transform:translateY(-2px)}
+.kopffiguren[data-otter=dran] .kopf-otter svg{transform:translateY(-2px)}
 .kopffiguren:is([data-denkt=dachs],[data-denkt=beide]) .dachs .figur-auge,
 .kopffiguren:is([data-denkt=maus],[data-denkt=beide]) .maus .figur-auge,
-.kopffiguren[data-otter=dran] .otter .figur-auge{transform:none}
+.kopffiguren[data-otter=dran] .kopf-otter .figur-auge{transform:none}
 .kopffiguren[data-otter=dran] .otter-pfote{display:inline;stroke:var(--text);stroke-width:1}
 @media(prefers-reduced-motion:no-preference){
   .kopffigur svg,.kopffigur .figur-auge{transition:transform .18s ease-out}
@@ -126,7 +126,7 @@ pub(crate) fn figuren() -> String {
         r#"<span id="kopffiguren" class="kopffiguren" data-denkt="niemand" data-otter="ruht">
 <span class="kopffigur dachs" tabindex="0" aria-describedby="kopf-dachs">{DACHS_FIGUR}<span>Dachs</span><span class="kopfblase" id="kopf-dachs">Heute noch nichts gesagt.</span></span>
 <span class="kopffigur maus" tabindex="0" aria-describedby="kopf-maus">{MAUS_FIGUR}<span>Maus</span><span class="kopfblase" id="kopf-maus">Heute noch nichts gesagt.</span></span>
-<span class="kopffigur otter" tabindex="0" aria-describedby="kopf-otter"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+<span class="kopffigur kopf-otter" tabindex="0" aria-describedby="kopf-otter"><svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
 <circle class="otter-fell" cx="7" cy="11" r="4.5"/><circle class="otter-fell" cx="27" cy="11" r="4.5"/>
 <ellipse class="otter-fell" cx="17" cy="20" rx="13" ry="14"/>
 <ellipse class="figur-hell" cx="17" cy="26" rx="10" ry="6"/>
