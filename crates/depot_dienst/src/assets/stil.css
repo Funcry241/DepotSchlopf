@@ -51,3 +51,63 @@
 #zeitstrahl .optional {
   border-bottom: 1px dashed var(--linie);
 }
+
+.blindpruefung-kopf,
+.blindpruefung-fall {
+  margin-block: 8px;
+  padding-block: 10px;
+}
+.blindpruefung-zeile,
+.blindpruefung-kopf form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+.blindpruefung-zeile {
+  justify-content: space-between;
+}
+.blindpruefung-kopf h2,
+.blindpruefung-kopf label {
+  margin: 0;
+}
+.blindpruefung-kopf p,
+.blindpruefung-paar p,
+.blindpruefung-paar h3 {
+  margin-block: 4px;
+}
+.blindpruefung-paar,
+.blindpruefung-urteile {
+  display: grid;
+  gap: 4px 20px;
+}
+.blindpruefung-paar {
+  overflow-wrap: anywhere;
+}
+.blindpruefung-fall fieldset {
+  min-inline-size: 0;
+  margin: 8px 0 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--linie);
+  border-radius: 6px;
+}
+.blindpruefung-fall legend {
+  max-inline-size: 100%;
+}
+.blindpruefung-urteile label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-block-size: 28px;
+  margin: 0;
+  padding-block: 2px;
+}
+.blindpruefung-urteile input {
+  flex: none;
+}
+@media (min-width: 760px) {
+  .blindpruefung-paar,
+  .blindpruefung-urteile {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

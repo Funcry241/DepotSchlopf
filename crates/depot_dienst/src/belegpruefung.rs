@@ -84,11 +84,13 @@ fn formular(s: &mut String, fall: &Prueffall, d: &Dienst, tag: Datum) {
         .map_or_else(|| "Nicht belegt".into(), zeit_text);
     let _ = write!(
         s,
-        "<section><h3>These</h3><p><strong>{}</strong></p><p>{}</p><p>Wissensstichtag: {}</p></section>\
-        <section><h3>Beleg</h3><p>{}</p><p>Quelle: {quelle} · Veröffentlicht: {zeit}</p>\
+        "<section class=\"blindpruefung-fall\"><div class=\"blindpruefung-paar\">\
+        <div><h3>These</h3><p><strong>{}</strong></p><p>{}</p><p>Wissensstichtag: {}</p></div>\
+        <div><h3>Beleg</h3><p>{}</p><p>Quelle: {quelle} · Veröffentlicht: {zeit}</p></div></div>\
         <form method=\"post\" action=\"{PFAD}\" data-blindentscheidung><input type=\"hidden\" name=\"t\" value=\"{}\">\
         <input type=\"hidden\" name=\"id\" value=\"{}\"><input type=\"hidden\" name=\"tag\" value=\"{tag}\">\
-        <fieldset><legend>Welche Bedeutung hatte dieser Beleg für die These am Wissensstichtag?</legend>",
+        <fieldset><legend>Welche Bedeutung hatte dieser Beleg für die These am Wissensstichtag?</legend>\
+        <div class=\"blindpruefung-urteile\">",
         maskiere(&fall.wert),
         maskiere(&fall.these),
         zeit_text(fall.stichtag),
@@ -99,11 +101,11 @@ fn formular(s: &mut String, fall: &Prueffall, d: &Dienst, tag: Datum) {
     for (wert, text) in ANTWORTEN {
         let _ = write!(
             s,
-            "<label><input type=\"radio\" name=\"urteil\" value=\"{wert}\" required> {text}</label>"
+            "<label><input type=\"radio\" name=\"urteil\" value=\"{wert}\" required> <span>{text}</span></label>"
         );
     }
     s.push_str(
-        "</fieldset><button type=\"submit\">Urteil speichern und weiter</button></form></section>",
+        "</div></fieldset><button type=\"submit\">Urteil speichern und weiter</button></form></section>",
     );
 }
 
@@ -118,17 +120,18 @@ pub(super) fn seite(
         Err(grund) => return meldung(d, heute, wahl, 500, &grund),
     };
     let mut s = String::from(
-        "<p><a href=\"/neuroschlopf\">Zurück zu NeuroSchlopf</a></p><section><h2>Blindprüfung der Belegauswahl</h2>\
+        "<section class=\"blindpruefung-kopf\"><div class=\"blindpruefung-zeile\">\
+        <h2>Blindprüfung der Belegauswahl</h2><a href=\"/neuroschlopf\">Zurück zu NeuroSchlopf</a></div>\
         <p>Beurteile jeden Beleg anhand der damaligen These. DepotSchlopf speichert deine Urteile lokal.</p>",
     );
     if gespeichert {
         s.push_str("<p role=\"status\">Dein Urteil wurde gespeichert.</p>");
     }
-    tagwahl(&mut s, &gruppe);
     if let Some(grund) = gruppe.hinweis.as_deref() {
         let _ = write!(s, "<p>{}</p>", maskiere(grund));
     }
     let Some(tag) = gruppe.tag.filter(|_| !gruppe.faelle.is_empty()) else {
+        tagwahl(&mut s, &gruppe);
         if gruppe.hinweis.is_none() {
             s.push_str("<p>Keine Bewertung offen.</p>");
         }
@@ -153,6 +156,8 @@ pub(super) fn seite(
     let offen = gruppe
         .offene_faelle()
         .filter(|fall| !urteile.contains_key(&fall.kennung));
+    s.push_str("<div class=\"blindpruefung-zeile\">");
+    tagwahl(&mut s, &gruppe);
     let _ = write!(
         s,
         "<p>Bearbeitet <b>{} von {}</b>",
@@ -162,7 +167,7 @@ pub(super) fn seite(
     if unbewertet > 0 {
         let _ = write!(s, " · davon ausdrücklich unbewertet: {unbewertet}");
     }
-    s.push_str("</p></section>");
+    s.push_str("</p></div></section>");
     if let Some(fall) = offen.into_iter().next() {
         formular(&mut s, fall, d, tag);
     } else {
