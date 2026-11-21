@@ -1,0 +1,7 @@
+klasse: Funktion
+zweck: KI-Gespräche als lesbare Fragen mit zugehörigen Antworten und belegter Modellwahl anzeigen
+pfade:
+crates/depot_dienst/src/assets/stil.css
+crates/depot_dienst/src/gespraeche.rs
+crates/depot_dienst/src/neuroauftraege.rs
+crates/depot_dienst/tests/dienst/ki_gespraeche.rs

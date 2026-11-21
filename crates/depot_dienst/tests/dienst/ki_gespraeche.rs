@@ -1,5 +1,30 @@
 use super::*;
 
+fn sichtbarer_faden(html: &str) -> Result<(&str, &str), String> {
+    some(
+        html.split_once("<details class=\"ki-details\"><summary>Technische Details</summary>"),
+        "Geöffneter Gesprächsfaden vor den geschlossenen technischen Details",
+    )
+}
+
+fn nur_in_technik(html: &str, kennungen: &[&str]) -> Result<(), String> {
+    let (sichtbar, technik) = sichtbarer_faden(html)?;
+    for kennung in kennungen {
+        assert!(
+            !sichtbar.contains(kennung) && technik.contains(kennung),
+            "{kennung}"
+        );
+    }
+    Ok(())
+}
+
+fn pruefe_rohtext(http: &str, text: &str) {
+    assert!(http.starts_with("HTTP/1.1 200 OK"));
+    assert!(http.contains("Content-Type: text/plain; charset=utf-8"));
+    assert!(http.contains("X-Content-Type-Options: nosniff"));
+    assert!(http.ends_with(text));
+}
+
 #[test]
 fn gespraeche_zeigt_alle_ki_rollen_filtert_und_maskiert() -> Result<(), String> {
     use depot_lage::gespraeche::{Gespraech, anhaengen};
@@ -67,7 +92,12 @@ fn gespraeche_zeigt_alle_ki_rollen_filtert_und_maskiert() -> Result<(), String> 
 
     let alles = get(&d, "/gespraeche", zeit);
     assert!(alles.contains("KI-Gespräche") && alles.contains("Zusatz-KI"));
-    assert!(alles.contains("Dachs (Hauptmodell)") && alles.contains("Gemini (Zusatzmodell)"));
+    assert!(alles.contains("<strong>DepotSchlopf fragt Dachs</strong>"));
+    assert!(alles.contains("<div class=\"ki-antwort\"><p><strong>Dachs antwortet</strong>"));
+    assert!(alles.contains("<div class=\"ki-antwort\"><p><strong>Gemini antwortet</strong>"));
+    assert!(alles.contains(">05.11.2026, 17:50</time></h3>"));
+    assert_eq!(alles.matches("class=\"ki-lauf\"").count(), 1);
+    nur_in_technik(&alles, &["Hauptmodell", "Zusatzmodell", "123-1"])?;
     assert!(alles.contains("&lt;script&gt;Antwort von Dachs&lt;/script&gt;"));
     assert!(alles.contains("DE0007164600 20,00 %. Konkreter Kurstreiber."));
     assert!(alles.contains("Beim Anbieter fehlt Guthaben."));
@@ -160,6 +190,10 @@ fn gespraech_zeigt_journalbeleg_und_liefert_nur_gepruefte_rohtexte() -> Result<(
     fs::write(&frage_pfad, frage).map_err(|e| e.to_string())?;
 
     let html = get(&d, "/gespraeche", zeit);
+    nur_in_technik(
+        &html,
+        &[&vorlage, &frage_sha, &antwort_sha, "Journalmodell"],
+    )?;
     assert_eq!(
         html.matches("Journalbeleg · Modell Journalmodell").count(),
         1
@@ -176,11 +210,7 @@ fn gespraech_zeigt_journalbeleg_und_liefert_nur_gepruefte_rohtexte() -> Result<(
     assert!(!html.contains(frage));
 
     let lese = |art| get(&d, &format!("/gespraeche/rohtext?nr={nr}&art={art}"), zeit);
-    let geliefert = lese("frage");
-    assert!(geliefert.starts_with("HTTP/1.1 200 OK"));
-    assert!(geliefert.contains("Content-Type: text/plain; charset=utf-8"));
-    assert!(geliefert.contains("X-Content-Type-Options: nosniff"));
-    assert!(geliefert.ends_with(frage));
+    pruefe_rohtext(&lese("frage"), frage);
     assert!(lese("antwort").starts_with("HTTP/1.1 404"));
     assert!(lese("../journal.txt").starts_with("HTTP/1.1 404"));
     assert!(
@@ -188,7 +218,7 @@ fn gespraech_zeigt_journalbeleg_und_liefert_nur_gepruefte_rohtexte() -> Result<(
     );
 
     fs::write(roh.join(format!("{antwort_sha}.txt")), antwort).map_err(|e| e.to_string())?;
-    assert!(lese("antwort").ends_with(antwort));
+    pruefe_rohtext(&lese("antwort"), antwort);
     fs::write(frage_pfad, "Abweichender Inhalt").map_err(|e| e.to_string())?;
     assert!(lese("frage").starts_with("HTTP/1.1 404"));
     Ok(())
@@ -296,6 +326,251 @@ fn zeitstrahl_ordnet_modelle_und_gespraeche_dem_genauen_lauf_zu() -> Result<(), 
     );
     assert!(gespraech.contains("Frage für diesen Lauf"));
     assert!(!gespraech.contains("Frage aus anderem Lauf"));
+    Ok(())
+}
+
+struct NeuroProbe<'a> {
+    frage: depot_journal::neurofrage::NeuroFrage,
+    urteil: depot_journal::neurofrage::NeuroUrteil,
+    profil: depot_kern::modelle::BeraterEinstellung,
+    gemeldet: &'a str,
+    zeit: Zeitpunkt,
+    lauf: &'a str,
+}
+
+fn protokolliere_neuroprobe(
+    journal: &mut depot_journal::Journal,
+    daten: &Path,
+    probe: NeuroProbe<'_>,
+) -> Result<(), String> {
+    use depot_journal::neurofrage::NeuroErgebnis;
+    use depot_journal::{KiAufruf, KiAufrufErgebnis};
+    use depot_lage::gespraeche::{Gespraech, anhaengen};
+
+    let NeuroProbe {
+        frage,
+        urteil,
+        profil,
+        gemeldet,
+        zeit,
+        lauf,
+    } = probe;
+    let tag = some(zeit.frankfurt_tag(), "Tag des Aufrufs")?;
+    let erlaubnis = journal
+        .reserviere_neurofrage(&frage.id, frage.wer, tag, 1, profil, 8)
+        .map_err(|e| format!("{e:?}"))?;
+    let nr = erlaubnis.buchung();
+    let antwort = urteil.text();
+    journal
+        .belege_neuroergebnis(&NeuroErgebnis::neu(
+            frage.id.clone(),
+            frage.wer,
+            nr,
+            Ok(urteil),
+            Some(KiAufruf {
+                nr,
+                anbieter: "Testanbieter".into(),
+                modell: gemeldet.into(),
+                vorlage: "b".repeat(64),
+                frage: Some("c".repeat(64)),
+                antwort: Some("d".repeat(64)),
+                token_ein: Some(10),
+                token_aus: Some(20),
+                ergebnis: KiAufrufErgebnis::Beantwortet,
+            }),
+            erlaubnis.aufruf().abrechnung(20, 10),
+        ))
+        .map_err(|e| format!("{e:?}"))?;
+    anhaengen(
+        daten,
+        &Gespraech {
+            zeit,
+            lauf: lauf.into(),
+            wer: if frage.wer == BeraterId::Dachs {
+                "dachs"
+            } else {
+                "maus"
+            }
+            .into(),
+            rolle: "zusatz".into(),
+            modell: profil.auswahl.modell().kennung().into(),
+            zweck: "neurofrage".into(),
+            ergebnis: "ok".into(),
+            http: Some(200),
+            token_ein: Some(10),
+            token_aus: Some(20),
+            cache: None,
+            buchung: Some(nr),
+            schlopfmodell: None,
+            kosten_cent: None,
+            system: None,
+            frage: Some(frage.text()),
+            antwort: Some(antwort),
+            fehler: None,
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn historisches_profil(
+    wer: BeraterId,
+    modell: depot_kern::modelle::Modell,
+    tiefe: depot_kern::modelle::Denktiefe,
+) -> Result<depot_kern::modelle::BeraterEinstellung, String> {
+    use depot_kern::modelle::{BeraterEinstellung, Modellwahl};
+
+    Ok(BeraterEinstellung {
+        auswahl: some(Modellwahl::neu(wer, modell, tiefe), "Modellwahl")?,
+        ..BeraterEinstellung::standard(wer)
+    })
+}
+
+fn aendere_ki_einstellungen(daten: &Path) -> Result<(), String> {
+    use depot_journal::ki_einstellungen;
+    use depot_kern::modelle::{Denktiefe, KiEinstellungen, Modell};
+
+    let aktuell = KiEinstellungen {
+        dachs: historisches_profil(BeraterId::Dachs, Modell::Opus55, Denktiefe::Niedrig)?,
+        maus: historisches_profil(BeraterId::Maus, Modell::Terra61, Denktiefe::Ohne)?,
+        ..KiEinstellungen::default()
+    };
+    fs::write(
+        ki_einstellungen::pfad(daten),
+        ki_einstellungen::als_text(aktuell),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[test]
+fn neurofaden_verbindet_belegte_antworten_und_bewahrt_alte_modellwahl() -> Result<(), String> {
+    use depot_journal::Journal;
+    use depot_journal::neurofrage::{
+        NeuroAuftragId, NeuroFrage, NeuroRunde, NeuroUrteil, NeuroUrteilswert,
+    };
+    use depot_kern::modelle::{Denktiefe, Modell};
+
+    let d = dienst(ordner()?, true);
+    let daten = d.wurzel.join("daten");
+    let zeit = donnerstag(17, 50)?;
+    let tag = some(zeit.frankfurt_tag(), "Frankfurter Tag")?;
+    let folgetag = some(tag.plus_tage(1), "Folgetag")?;
+    let rueckzeit = some(Zeitpunkt::frankfurt(folgetag, 8, 17, 0), "Rückfragezeit")?;
+    let pfad = daten.join("journal.txt");
+    Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+    let mut journal = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+    let nachfrage = "Wie wurde der neue Wert abgegrenzt?";
+    let dachs = BeraterId::Dachs;
+    let maus = BeraterId::Maus;
+    let fall = "a".repeat(64);
+    let dachs_alt = historisches_profil(dachs, Modell::Sonnet55, Denktiefe::Hoch)?;
+    let maus_alt = historisches_profil(maus, Modell::Sol62, Denktiefe::Mittel)?;
+    for (wer, profil, gemeldet, runde, aufrufzeit, lauf, grund) in [
+        (
+            dachs,
+            dachs_alt,
+            "claude-opus-5-5-2026-11-01",
+            NeuroRunde::Erstfrage,
+            zeit,
+            "hand-1-1",
+            "Erstes begründetes Urteil.",
+        ),
+        (
+            maus,
+            maus_alt,
+            "gpt-6.2-sol?",
+            NeuroRunde::Erstfrage,
+            donnerstag(17, 55)?,
+            "hand-1-2",
+            "Zweites begründetes Urteil.",
+        ),
+        (
+            dachs,
+            dachs_alt,
+            "claude-sonnet-5-5",
+            NeuroRunde::Rueckfrage,
+            rueckzeit,
+            "hand-2-1",
+            "Begründete Antwort auf die Rückfrage.",
+        ),
+    ] {
+        let urteil = NeuroUrteil {
+            wert: NeuroUrteilswert::Staerkt,
+            begruendung: grund.into(),
+            nachfrage: (wer == dachs && runde == NeuroRunde::Erstfrage).then(|| nachfrage.into()),
+        };
+        let frage = NeuroFrage {
+            id: some(NeuroAuftragId::neu(&fall, runde), "Belegkennung")?,
+            wer,
+            thesen_wer: maus,
+            these_vom: tag,
+            these_gueltig_bis: folgetag,
+            isin: depot_kern::Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?,
+            these: "These aus dem Journal".into(),
+            bisher_zeile: None,
+            beleg_zeile: 12,
+            quelle: "Testquelle".into(),
+            bisher: None,
+            jetzt: "Beleg mit <vier> Teilen.".into(),
+            bekannt: zeit,
+            nachfrage: (runde == NeuroRunde::Rueckfrage).then(|| nachfrage.into()),
+        };
+        protokolliere_neuroprobe(
+            &mut journal,
+            &daten,
+            NeuroProbe {
+                frage,
+                urteil,
+                profil,
+                gemeldet,
+                zeit: aufrufzeit,
+                lauf,
+            },
+        )?;
+    }
+    drop(journal);
+    aendere_ki_einstellungen(&daten)?;
+
+    let html = get(&d, "/gespraeche", rueckzeit);
+    let direkt = get(
+        &d,
+        &format!("/gespraeche?tag={folgetag}&wer=dachs&lauf=hand-2-1"),
+        rueckzeit,
+    );
+    pruefe_neurofaden(&html, &direkt, nachfrage)
+}
+
+fn pruefe_neurofaden(html: &str, direkt: &str, nachfrage: &str) -> Result<(), String> {
+    let (faden, _) = sichtbarer_faden(html)?;
+    assert_eq!(faden.matches("<h3><time").count(), 1);
+    assert_eq!(
+        faden.matches("<strong>NeuroSchlopf fragt</strong>").count(),
+        1
+    );
+    for text in [
+        ">05.11.2026, 17:50</time></h3>",
+        "These aus dem Journal",
+        "Beleg mit &lt;vier&gt; Teilen.",
+        "<strong>Dachs antwortet</strong> · Claude Opus 5.5 · Denktiefe Hoch",
+        "<strong>Maus antwortet</strong> · GPT-6.2 Sol · damalige Auswahl · Denktiefe Mittel",
+        nachfrage,
+        "Begründete Antwort auf die Rückfrage.",
+    ] {
+        assert!(faden.contains(text), "{text}");
+    }
+    assert!(!faden.contains("GPT-6.1 Terra") && !faden.contains("Denktiefe Ohne"));
+    nur_in_technik(html, &["hand-2-1", "claude-opus-5-5-2026-11-01"])?;
+    let (_, nach_dachs) = some(
+        faden.split_once("Erstes begründetes Urteil."),
+        "Dachs-Urteil",
+    )?;
+    let (dachs_folge, maus_antwort) = some(nach_dachs.split_once("Maus antwortet"), "Maus-Urteil")?;
+    assert!(dachs_folge.contains("Begründete Antwort auf die Rückfrage."));
+    assert!(!maus_antwort.contains("Begründete Antwort auf die Rückfrage."));
+
+    assert!(direkt.contains(">06.11.2026, 08:17</time></h3>"));
+    assert!(direkt.contains(nachfrage));
+    assert!(direkt.contains("Begründete Antwort auf die Rückfrage."));
+    assert!(!direkt.contains("Erstes begründetes Urteil.") && !direkt.contains("Maus antwortet"));
     Ok(())
 }
 
