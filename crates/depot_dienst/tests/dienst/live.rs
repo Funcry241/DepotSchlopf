@@ -399,13 +399,14 @@ fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Re
         for teil in [
             "Hintergrundvergleich · Ausgeschaltet",
             "data-teil=\"/teil/neuroschlopf-aktivitaet\"",
-            "Netztopologie · Referenzmodell",
+            "Netztopologie · Neuro2026-Testlauf",
             "data-messung=\"/neuroschlopf/lernlauf.json\" data-topologie",
             "CPU-Auslastung nicht gemessen",
             "<h3>Offene Thesen und ihre Belege</h3>",
             "Noch kein abgeschlossener Vergleich. Es fehlt ein bestätigter Stand.",
-            "Neuronales Modell noch nicht eingebunden",
-            "href=\"/neuroschlopf/lernlauf\">Neuro2026-Referenzlauf Multiplikation</a>",
+            "Ein Depotmodell für die Belegbewertung steht noch aus.",
+            "Das Referenznetz wurde darauf trainiert, zwei Zahlen zu multiplizieren.",
+            "href=\"/neuroschlopf/lernlauf\">Lernkurve und Vorhersagen ansehen</a>",
             "href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a>",
             "Übermittlung an Dachs und Maus",
         ] {
