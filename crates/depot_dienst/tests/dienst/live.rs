@@ -331,7 +331,9 @@ fn neuro_lernlauf_zeigt_den_referenzstand_unabhaengig_vom_belegvergleich() -> Re
     let d = dienst(ordner()?, true);
     let t = donnerstag(12, 0)?;
     let link = "href=\"/neuroschlopf/lernlauf\"";
-    assert!(get(&d, "/teil/live", t).contains(link));
+    // Klickweg: Live → Vergleich ansehen → Referenzlauf.
+    assert!(get(&d, "/teil/live", t).contains("href=\"/neuroschlopf\">Vergleich ansehen"));
+    assert!(get(&d, "/neuroschlopf", t).contains(link));
     assert!(get(&d, "/einrichtung", t).contains(link));
     let seite = get(&d, "/neuroschlopf/lernlauf", t);
     assert!(seite.starts_with("HTTP/1.1 200 OK"));
@@ -352,5 +354,76 @@ fn neuro_lernlauf_zeigt_den_referenzstand_unabhaengig_vom_belegvergleich() -> Re
             .contains("Der lokale Belegvergleich ist eingeschaltet.")
     );
     assert_eq!(get(&d, "/neuroschlopf/lernlauf.json", t), antwort);
+    Ok(())
+}
+
+fn dateien(wurzel: &std::path::Path) -> Result<Vec<(std::path::PathBuf, Vec<u8>)>, String> {
+    let mut alle = Vec::new();
+    let mut offen = vec![wurzel.to_path_buf()];
+    while let Some(ordner) = offen.pop() {
+        for e in std::fs::read_dir(&ordner).map_err(|e| e.to_string())? {
+            let p = e.map_err(|e| e.to_string())?.path();
+            if p.is_dir() {
+                offen.push(p);
+            } else {
+                let inhalt = std::fs::read(&p).map_err(|e| e.to_string())?;
+                alle.push((p, inhalt));
+            }
+        }
+    }
+    alle.sort();
+    Ok(alle)
+}
+
+#[test]
+fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(12, 0)?;
+    for pfad in ["/", "/teil/live"] {
+        let html = get(&d, pfad, t);
+        assert!(html.contains("<section id=\"schlopfmodell\">"), "{pfad}");
+        assert!(
+            html.contains("<a href=\"/neuroschlopf\">Vergleich ansehen</a>"),
+            "{pfad}"
+        );
+    }
+    assert!(get(&d, "/", t).contains("<a href=\"/neuroschlopf\">NeuroSchlopf</a>"));
+    let vorher = dateien(&wurzel)?;
+    for _ in 0..3 {
+        let seite = get(&d, "/neuroschlopf", t);
+        assert!(seite.starts_with("HTTP/1.1 200 OK"));
+        assert_eq!(seite.matches("aria-current=\"page\"").count(), 1);
+        assert!(seite.contains("<a href=\"/neuroschlopf\" aria-current=\"page\">NeuroSchlopf</a>"));
+        for teil in [
+            "Hintergrundvergleich · Ausgeschaltet",
+            "Noch kein abgeschlossener Vergleich. Es fehlt ein bestätigter Stand.",
+            "Neuronales Modell noch nicht eingebunden",
+            "href=\"/neuroschlopf/lernlauf\">Neuro2026-Referenzlauf Multiplikation</a>",
+            "href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a>",
+            "Übermittlung an Dachs und Maus",
+        ] {
+            assert!(seite.contains(teil), "{teil}");
+        }
+    }
+    assert_eq!(
+        dateien(&wurzel)?,
+        vorher,
+        "Öffnen der Seite ändert keine Datei"
+    );
+    let post = formular_post("/neuroschlopf", &format!("t={TOKEN}&an=ja"));
+    assert!(
+        text(&behandle(&d, &Attrappe::default(), &post, t)).contains("/einrichtung#neuroschlopf")
+    );
+    let vorher = dateien(&wurzel)?;
+    let seite = get(&d, "/neuroschlopf", t);
+    assert!(seite.contains("Wartet auf einen bestätigten Journalstand."));
+    assert_eq!(dateien(&wurzel)?, vorher);
+    for unterseite in ["/neuroschlopf/lernlauf", "/neuroschlopf/belegpruefung"] {
+        assert!(
+            get(&d, unterseite, t).contains("<a href=\"/neuroschlopf\">Zurück zu NeuroSchlopf</a>"),
+            "{unterseite}"
+        );
+    }
     Ok(())
 }

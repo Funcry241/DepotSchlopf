@@ -30,7 +30,9 @@ pub use depot_journal::{abrufkontingent, anbieter, gespraeche, kurssperre};
 pub use depot_sim::ausfuehrung;
 mod budget;
 mod depot;
-pub use depot_sim::schlopfmodell::letzte_pruefungen as schlopfmodell_pruefungen;
+pub use depot_sim::schlopfmodell::{
+    Thesenpruefung, letzte_thesenpruefungen as schlopfmodell_thesenpruefungen,
+};
 pub mod depotverlauf;
 pub mod diagramm;
 pub mod handelsergebnis;

@@ -571,13 +571,14 @@ pub fn rahmen(
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div>\
          <p id=\"neuverbinden\" hidden><a id=\"neuverbinden-link\" class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
          <div id=\"update-hinweis\" data-teil=\"/teil/update-hinweis\" role=\"status\" aria-live=\"polite\">{update}</div>\
-         <nav aria-label=\"Hauptnavigation\"><h1>{herz}DepotSchlopf</h1>{}{}{}{}\
+         <nav aria-label=\"Hauptnavigation\"><h1>{herz}DepotSchlopf</h1>{}{}{}{}{}\
          <span class=\"leise\">Nur Papiergeld.</span>{figuren}{version}</nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit DepotSchlopf läuft. \
          Du kannst es minimieren.</p>",
         nav("/", "Live"),
         nav("/depot", "Depot"),
         nav("/gespraeche", "KI-Gespräche"),
+        nav("/neuroschlopf", "NeuroSchlopf"),
         nav("/einrichtung", "Einrichtung")
     );
     if let Some((klasse, text)) = meldung {

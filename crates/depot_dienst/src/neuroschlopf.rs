@@ -7,11 +7,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use depot_journal::{Art, Journal, JournalFehler, Stand};
-use depot_kern::Zeitpunkt;
 use depot_kern::json::{Json, lies, zitiere};
+use depot_kern::{Datum, Verlaesslichkeit, Zeitbezug, Zeitpunkt};
 use depot_lage::html::maskiere;
+use depot_lage::{Thesenpruefung, datum_text, zeit_text};
 
-use crate::http::{feld, umleitung};
+use crate::http::{antwort, feld, umleitung};
 use crate::werkbank::{Dienst, lies_falls_da, schreibe_ganz};
 
 const LERNLAUF_LINK: &str = r#"<p><a href="/neuroschlopf/lernlauf">Neuro2026 · Lernkurve und Vorhersagen des Referenzlaufs</a></p>"#;
@@ -20,6 +21,7 @@ const BLINDPRUEFUNG_LINK: &str =
     r#"<p><a href="/neuroschlopf/belegpruefung">Belege für NeuroSchlopf blind bewerten</a></p>"#;
 
 const AUSGABE_MAX: usize = 16;
+const EINGABEN_MAX: usize = 40;
 const JOURNAL_MAX: u64 = 32 * 1024 * 1024;
 const CPU_PROZENT: u32 = 10;
 const ARBEITSBLOCK: Duration = Duration::from_millis(10);
@@ -119,6 +121,8 @@ struct Bild {
     aenderungen: VecDeque<String>,
     quellen: VecDeque<u64>,
     beratungsstand: Option<Zeitpunkt>,
+    /// Letzte Journalzeile des Vergleichsstands. Fehlt bei älteren gespeicherten Ständen.
+    grenze: Option<u64>,
 }
 
 impl Bild {
@@ -127,8 +131,11 @@ impl Bild {
     }
 
     fn lese(daten: &Path) -> Option<Self> {
-        let text = lies_falls_da(&Self::pfad(daten)).ok()??;
-        let j = lies(&text).ok()?;
+        Self::lies_text(&lies_falls_da(&Self::pfad(daten)).ok()??)
+    }
+
+    fn lies_text(text: &str) -> Option<Self> {
+        let j = lies(text).ok()?;
         if j.feld("version")?.anzahl()? != 1 || j.doppelte_felder() {
             return None;
         }
@@ -157,12 +164,17 @@ impl Bild {
         if quellen.len() > AUSGABE_MAX || beratungsstand.is_some_and(|t| t > stichtag) {
             return None;
         }
+        let grenze = match j.feld("grenze") {
+            Some(Json::Null) | None => None,
+            Some(g) => Some(g.anzahl()?),
+        };
         Some(Self {
             journal,
             stichtag,
             basis,
             quellen,
             beratungsstand,
+            grenze,
             aenderungen: aenderungen
                 .iter()
                 .map(|a| {
@@ -193,8 +205,9 @@ impl Bild {
         let beratungsstand = self
             .beratungsstand
             .map_or_else(|| "null".into(), |t| t.sekunden().to_string());
+        let grenze = self.grenze.map_or_else(|| "null".into(), |g| g.to_string());
         format!(
-            "{{\"version\":1,\"journal\":{},\"stichtag\":{},\"basis\":{basis},\"beratungsstand\":{beratungsstand},\"quellen\":[{quellen}],\"aenderungen\":[{aenderungen}]}}\n",
+            "{{\"version\":1,\"journal\":{},\"stichtag\":{},\"basis\":{basis},\"grenze\":{grenze},\"beratungsstand\":{beratungsstand},\"quellen\":[{quellen}],\"aenderungen\":[{aenderungen}]}}\n",
             self.journal.json(),
             self.stichtag.sekunden()
         )
@@ -219,8 +232,58 @@ enum Status {
 #[derive(Debug)]
 struct Fertig {
     geprueft: Zeitpunkt,
-    befunde: String,
-    pruefungen: Vec<String>,
+    bild: Bild,
+    eingaben: Option<Eingaben>,
+    pruefungen: Vec<Thesenpruefung>,
+}
+
+/// Wie ein Beleg im verglichenen Abschnitt gegenüber dem vorigen Stand einzuordnen ist.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Einordnung {
+    Erststand,
+    Neu,
+    Geaendert(String),
+    Wiederholt,
+}
+
+/// Eine berücksichtigte Nachricht oder ein Termin mit Journalzeile.
+#[derive(Clone, Debug)]
+struct Eingabe {
+    zeile: u64,
+    termin: bool,
+    quelle: String,
+    aussage: String,
+    zeit: String,
+    abruf: Zeitpunkt,
+    einordnung: Einordnung,
+}
+
+/// Strukturierte Belege genau des Abschnitts, den der Vergleich geprüft hat.
+#[derive(Clone, Debug, Default)]
+struct Eingaben {
+    von: u64,
+    bis: u64,
+    gesamt: usize,
+    neu: usize,
+    geaendert: usize,
+    wiederholt: usize,
+    liste: VecDeque<Eingabe>,
+}
+
+impl Eingaben {
+    fn zaehle(&mut self, e: Eingabe) {
+        self.gesamt = self.gesamt.saturating_add(1);
+        match e.einordnung {
+            Einordnung::Neu => self.neu = self.neu.saturating_add(1),
+            Einordnung::Geaendert(_) => self.geaendert = self.geaendert.saturating_add(1),
+            Einordnung::Wiederholt => self.wiederholt = self.wiederholt.saturating_add(1),
+            Einordnung::Erststand => {}
+        }
+        if self.liste.len() == EINGABEN_MAX {
+            self.liste.pop_front();
+        }
+        self.liste.push_back(e);
+    }
 }
 
 fn zeige(bild: &Bild) -> String {
@@ -254,62 +317,311 @@ fn zeige(bild: &Bild) -> String {
     html
 }
 
-pub(crate) fn live(d: &Dienst, aufrufe: &crate::zeitstrahl_ki::Aufrufe) -> String {
-    let mut html = String::from(
-        "<section id=\"schlopfmodell\"><h2>NeuroSchlopf</h2>\
-        <p>NeuroSchlopf vergleicht belegte Nachrichten und Termine mit dem letzten bestätigten Journalstand. Dachs und Maus können anhand der Änderungen prüfen, ob ihre bisherigen Thesen noch tragen.</p>",
-    );
+/// Zustand des Hintergrundvergleichs in klaren Worten.
+fn aktivitaet(d: &Dienst, anzeige: &Anzeige, ein: &Result<bool, String>) -> String {
     let daten = d.wurzel.join("daten");
-    let ein = einstellung(&daten);
-    let pause = matches!(ein, Ok(true)) && !frei(d, &daten);
-    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
     match ein {
-        Err(_) => html.push_str("<p>NeuroSchlopf-Einstellung unlesbar.</p>"),
-        Ok(false) => html.push_str(
-            "<p>Ausgeschaltet · <a href=\"/einrichtung#neuroschlopf\">NeuroSchlopf einrichten</a></p>",
-        ),
-        Ok(true) if pause => html.push_str("<p>Hintergrundarbeit pausiert. Depotaufträge und Updates haben Vorrang.</p>"),
+        Err(_) => "NeuroSchlopf-Einstellung unlesbar.".into(),
+        Ok(false) => {
+            "Ausgeschaltet · <a href=\"/einrichtung#neuroschlopf\">NeuroSchlopf einrichten</a>"
+                .into()
+        }
+        Ok(true) if !frei(d, &daten) => {
+            "Hintergrundarbeit pausiert. Depotaufträge und Updates haben Vorrang.".into()
+        }
         Ok(true) => match &anzeige.status {
-            Status::Wartet => html.push_str("<p>Wartet auf einen bestätigten Journalstand.</p>"),
-            Status::Berechnet => html.push_str("<p>Vergleich läuft.</p>"),
-            Status::Fehler(e) => {
-                let _ = write!(html, "<p>Vergleich fehlgeschlagen: {}</p>", maskiere(e));
-            }
-            Status::Fertig => html.push_str("<p>Vergleich abgeschlossen.</p>"),
+            Status::Wartet => "Wartet auf einen bestätigten Journalstand.".into(),
+            Status::Berechnet => "Vergleich läuft.".into(),
+            Status::Fehler(e) => format!("Vergleich fehlgeschlagen: {}", maskiere(e)),
+            Status::Fertig => "Vergleich abgeschlossen.".into(),
         },
     }
+}
+
+pub(crate) fn live(d: &Dienst) -> String {
+    let ein = einstellung(&d.wurzel.join("daten"));
+    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut html = format!(
+        "<section id=\"schlopfmodell\"><h2>NeuroSchlopf</h2><p>{}</p>",
+        aktivitaet(d, &anzeige, &ein)
+    );
     if let Some(f) = &anzeige.fertig {
         let _ = write!(
             html,
             "<p>Letzter abgeschlossener Vergleich {}</p>",
-            f.geprueft
+            zeit_text(f.geprueft)
         );
-        html.push_str(&f.befunde);
     }
-    if matches!(ein, Ok(true)) {
-        aufrufe.schlopfmodell(&mut html);
-        html.push_str("<h3>Letzte protokollierte Thesenprüfungen</h3><ul>");
-        for wer in ["Dachs", "Maus"] {
-            let pruefung = anzeige.fertig.as_ref().and_then(|f| {
-                f.pruefungen
-                    .iter()
-                    .find(|p| p.starts_with(&format!("{wer} · ")))
-            });
-            match pruefung {
-                Some(p) => {
-                    let _ = write!(html, "<li>{}</li>", maskiere(p));
+    html.push_str("<p><a href=\"/neuroschlopf\">Vergleich ansehen</a></p></section>");
+    html
+}
+
+/// Lesende Detailseite. Sie löst keinen Vergleich aus und schreibt nichts.
+pub(crate) fn seite(
+    d: &Dienst,
+    aufrufe: &crate::zeitstrahl_ki::Aufrufe,
+    tag: Option<Datum>,
+) -> Vec<u8> {
+    let daten = d.wurzel.join("daten");
+    let ein = einstellung(&daten);
+    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut html = format!(
+        "<section id=\"neuroschlopf-vergleich\"><h2>NeuroSchlopf · Belegvergleich</h2>\
+        <p>NeuroSchlopf vergleicht belegte Nachrichten und Termine mit dem letzten bestätigten Journalstand. Dachs und Maus können anhand der Änderungen prüfen, ob ihre bisherigen Thesen noch tragen.</p>\
+        <h3>Aktivität</h3><p>Hintergrundvergleich · {}</p>",
+        aktivitaet(d, &anzeige, &ein)
+    );
+    let gespeichert;
+    let (bild, eingaben, pruefungen) = if let Some(f) = &anzeige.fertig {
+        {
+            let laeuft = matches!(anzeige.status, Status::Berechnet) && matches!(ein, Ok(true));
+            if laeuft {
+                html.push_str("<p>Ein weiterer Vergleich läuft. Bis er abgeschlossen ist, gilt der folgende letzte abgeschlossene Vergleich.</p>");
+            }
+            let _ = write!(
+                html,
+                "<p><strong>Letzter abgeschlossener Vergleich</strong> · Geprüft {}</p>",
+                zeit_text(f.geprueft)
+            );
+            if f.bild.stichtag == f.geprueft {
+                let _ = write!(
+                    html,
+                    "<p>Wissensstand der Daten {}</p>",
+                    zeit_text(f.bild.stichtag)
+                );
+            } else {
+                let _ = write!(
+                    html,
+                    "<p>Wissensstand der Daten {} · Das Journal hat sich seitdem nicht geändert. Der Prüfzeitpunkt liegt deshalb später.</p>",
+                    zeit_text(f.bild.stichtag)
+                );
+            }
+            (
+                Some(&f.bild),
+                f.eingaben.as_ref(),
+                Some(f.pruefungen.as_slice()),
+            )
+        }
+    } else {
+        {
+            gespeichert = Bild::lese(&daten);
+            match &gespeichert {
+                Some(b) => {
+                    let _ = write!(
+                        html,
+                        "<p><strong>Gespeicherter Stand</strong> · Wissensstand der Daten {} · Seit dem Start des Dienstes noch nicht erneut geprüft.</p>",
+                        zeit_text(b.stichtag)
+                    );
                 }
-                None => {
-                    let _ = write!(html, "<li>{wer} · Keine Thesenprüfung belegt</li>");
-                }
+                None => html.push_str(
+                    "<p>Noch kein abgeschlossener Vergleich. Es fehlt ein bestätigter Stand.</p>",
+                ),
+            }
+            (gespeichert.as_ref(), None, None)
+        }
+    };
+    if let Some(b) = bild {
+        eingaben_html(&mut html, b, eingaben);
+        ergebnis_html(&mut html, b, eingaben);
+    }
+    html.push_str("<h3>Dachs und Maus</h3><p>Die Übermittlung der Belege an einen Berater und seine protokollierte Entscheidung sind zwei getrennte Ereignisse.</p>");
+    aufrufe.schlopfmodell(&mut html);
+    thesen_html(&mut html, bild, pruefungen);
+    drop(anzeige);
+    let _ = write!(
+        html,
+        "<h3>Modellstatus</h3><p>Neuronales Modell noch nicht eingebunden. Der produktive Vergleich arbeitet mit dem Belegabgleich oben. Die Einbindung eines Modells für Depotbelege folgt mit #325.</p>\
+        <ul><li><a href=\"/neuroschlopf/lernlauf\">Neuro2026-Referenzlauf Multiplikation</a> · abgeschlossener Lernlauf mit echten Messwerten</li>\
+        <li><a href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a> · historische Thesen und Belege von Hand bewerten</li></ul>\
+        <p><a href=\"/einrichtung#neuroschlopf\">NeuroSchlopf einrichten</a></p></section>"
+    );
+    let seite = crate::seiten::rahmen(
+        "/neuroschlopf",
+        None,
+        None,
+        &html,
+        d.version.as_deref(),
+        (&crate::betriebsleiste(d, tag), &crate::update_leiste(d)),
+        ("", ""),
+    );
+    antwort(200, crate::HTML, seite.as_bytes())
+}
+
+fn eingaben_html(html: &mut String, bild: &Bild, eingaben: Option<&Eingaben>) {
+    let _ = write!(
+        html,
+        "<h3>Eingaben</h3><p>Bestätigter Journalstand · {} Bytes · Prüfsumme <code>{}</code></p>",
+        bild.journal.bytes,
+        maskiere(bild.journal.hash.get(..16).unwrap_or(&bild.journal.hash))
+    );
+    let Some(e) = eingaben else {
+        if bild.grenze.is_some() {
+            html.push_str("<p>Die einzelnen Eingaben dieses gespeicherten Stands erscheinen nach der nächsten Prüfung des Journals. Dafür muss das Journal nicht fortgeschrieben werden.</p>");
+        } else {
+            html.push_str("<p>Für diesen gespeicherten Stand sind der verglichene Abschnitt und die einzelnen Eingaben nicht belegt. Sie erscheinen nach dem nächsten Vergleich eines fortgeschriebenen Journals.</p>");
+        }
+        return;
+    };
+    let von = e.von.max(2);
+    if bild.basis.is_none() && von > e.bis {
+        html.push_str("<p>Erster bestätigter Stand · Das Journal enthält noch keine Einträge.</p>");
+    } else if bild.basis.is_none() {
+        let _ = write!(
+            html,
+            "<p>Erster bestätigter Stand · Journalzeilen J{von} bis J{}</p>",
+            e.bis
+        );
+    } else if von > e.bis {
+        html.push_str("<p>Verglichener Abschnitt · Seit dem vorigen Stand sind keine Journalzeilen hinzugekommen.</p>");
+    } else {
+        let _ = write!(
+            html,
+            "<p>Verglichener Abschnitt · Journalzeilen J{von} bis J{}</p>",
+            e.bis
+        );
+    }
+    if e.gesamt == 0 {
+        html.push_str("<p>Im verglichenen Abschnitt stehen keine Nachrichten oder Termine.</p>");
+        return;
+    }
+    if e.liste.len() < e.gesamt {
+        let _ = write!(
+            html,
+            "<p>Gezeigt werden die letzten {} von {} Nachrichten und Terminen dieses Abschnitts.</p>",
+            e.liste.len(),
+            e.gesamt
+        );
+    } else {
+        let _ = write!(
+            html,
+            "<p>{} Nachrichten und Termine in diesem Abschnitt.</p>",
+            e.gesamt
+        );
+    }
+    html.push_str("<div class=\"tabelle\"><table><thead><tr><th>Zeile</th><th>Typ</th><th>Quelle</th><th>Titel oder Aussage</th><th>Zeitpunkt</th><th>Abruf</th><th>Einordnung</th></tr></thead><tbody>");
+    for x in &e.liste {
+        let (typ, zeitart) = if x.termin {
+            ("Termin", "Termin")
+        } else {
+            ("Nachricht", "Veröffentlicht")
+        };
+        let einordnung = match &x.einordnung {
+            Einordnung::Erststand => "Erster Stand".into(),
+            Einordnung::Neu => "Neuer Beleg".into(),
+            Einordnung::Wiederholt => "Identische Wiederholung".into(),
+            Einordnung::Geaendert(alt) => format!(
+                "Aussage geändert · Bisher {} · Jetzt {}",
+                maskiere(alt),
+                maskiere(&x.aussage)
+            ),
+        };
+        let _ = write!(
+            html,
+            "<tr><td>J{}</td><td>{typ}</td><td>{}</td><td>{}</td><td>{zeitart} {}</td><td>Abgerufen {}</td><td>{einordnung}</td></tr>",
+            x.zeile,
+            maskiere(&x.quelle),
+            maskiere(&x.aussage),
+            maskiere(&x.zeit),
+            zeit_text(x.abruf)
+        );
+    }
+    html.push_str("</tbody></table></div>");
+}
+
+fn ergebnis_html(html: &mut String, bild: &Bild, eingaben: Option<&Eingaben>) {
+    html.push_str("<h3>Ergebnis</h3>");
+    match eingaben {
+        None => html.push_str(&zeige(bild)),
+        Some(e) if bild.basis.is_none() => {
+            let _ = write!(
+                html,
+                "<p>Erster bestätigter Stand mit {} Nachrichten und Terminen. Er dient als Basis für den nächsten Vergleich.</p>",
+                e.gesamt
+            );
+        }
+        Some(e) => {
+            if let Some(b) = bild.basis {
+                let _ = write!(html, "<p>Vergleich mit dem Stand vom {}</p>", zeit_text(b));
+            }
+            let _ = write!(
+                html,
+                "<p>Neue Belege {} · Geänderte Aussagen {} · Identische Wiederholungen {}</p>",
+                e.neu, e.geaendert, e.wiederholt
+            );
+            if e.neu == 0 && e.geaendert == 0 {
+                html.push_str("<p>Keine neuen oder geänderten Belege.</p>");
             }
         }
-        html.push_str("</ul>");
     }
-    html.push_str(BLINDPRUEFUNG_LINK);
-    html.push_str(LERNLAUF_LINK);
-    html.push_str("</section>");
-    html
+    match bild.beratungsstand {
+        Some(t) => {
+            let _ = write!(
+                html,
+                "<p>Belege für Dachs und Maus · Wissensstand {} · Journalzeilen {}</p>",
+                zeit_text(t),
+                bild.quellen
+                    .iter()
+                    .map(|z| format!("J{z}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        None => html.push_str("<p>Für Dachs und Maus ist noch kein Beleg bestätigt.</p>"),
+    }
+}
+
+fn thesen_html(html: &mut String, bild: Option<&Bild>, pruefungen: Option<&[Thesenpruefung]>) {
+    html.push_str("<h4>Letzte protokollierte Thesenprüfungen</h4>");
+    let Some(pruefungen) = pruefungen else {
+        html.push_str("<p>Die Thesenprüfungen werden beim nächsten abgeschlossenen Vergleich aus dem Journal gelesen.</p>");
+        return;
+    };
+    html.push_str("<ul>");
+    for wer in ["Dachs", "Maus"] {
+        let Some(p) = pruefungen.iter().find(|p| p.wer == wer) else {
+            let _ = write!(html, "<li>{wer} · Keine Thesenprüfung belegt</li>");
+            continue;
+        };
+        let these = p.these.as_deref().map_or_else(
+            || "Wortlaut der These im Journal nicht gefunden.".into(),
+            maskiere,
+        );
+        let _ = write!(
+            html,
+            "<li><strong>{wer}</strong> · These vom {} zu {} {} · Beleg J{} · Wissensstand {} · Protokolliert am {}<br>These: {these}<br>Begründung: {}",
+            datum_text(p.these_vom),
+            maskiere(&p.isin),
+            p.urteil,
+            p.beleg,
+            zeit_text(p.wissensstand),
+            datum_text(p.protokolliert),
+            maskiere(&p.begruendung)
+        );
+        if let Some(stand) = bild
+            .and_then(|b| b.beratungsstand)
+            .filter(|s| p.wissensstand < *s)
+        {
+            let _ = write!(
+                html,
+                "<br><em>Ältere Prüfung</em> · Sie beruht auf dem Wissensstand {}. Die aktuell bestätigten Belege haben den Wissensstand {}.",
+                zeit_text(p.wissensstand),
+                zeit_text(stand)
+            );
+        }
+        html.push_str("</li>");
+    }
+    html.push_str("</ul>");
+}
+
+struct Fund<'a> {
+    zeile: u64,
+    art: &'static str,
+    quelle: &'a str,
+    id: String,
+    aussage: String,
+    anzeige: String,
+    zeit: String,
+    abruf: Zeitpunkt,
 }
 
 struct Vergleich<'a> {
@@ -318,47 +630,99 @@ struct Vergleich<'a> {
     quellen: VecDeque<u64>,
     vergleichbar: bool,
     grenze: u64,
+    eingaben: Eingaben,
 }
 
 impl<'a> Vergleich<'a> {
-    fn belege(
-        &mut self,
-        zeile: u64,
-        art: &'static str,
-        quelle: &'a str,
-        id: String,
-        aussage: &str,
-    ) {
-        let alt = self.bisher.insert((art, quelle, id), aussage.to_owned());
-        if zeile <= self.grenze {
+    fn belege(&mut self, f: Fund<'a>) {
+        let alt = self
+            .bisher
+            .insert((f.art, f.quelle, f.id), f.aussage.clone());
+        if f.zeile <= self.grenze {
             return;
         }
-        if self.vergleichbar && alt.as_deref() != Some(aussage) {
+        if self.vergleichbar && alt.as_deref() != Some(f.aussage.as_str()) {
             if self.quellen.len() == AUSGABE_MAX {
                 self.quellen.pop_front();
             }
-            self.quellen.push_back(zeile);
+            self.quellen.push_back(f.zeile);
         }
-        let art = if self.vergleichbar {
-            match alt.as_deref() {
-                None => "Neuer Beleg",
-                Some(t) if t == aussage => "Erneut erfasst",
-                Some(_) => "Quelle hat Aussage geändert",
-            }
-        } else {
-            "Beleg im ersten Stand"
+        let einordnung = match alt {
+            _ if !self.vergleichbar => Einordnung::Erststand,
+            None => Einordnung::Neu,
+            Some(t) if t == f.aussage => Einordnung::Wiederholt,
+            Some(t) => Einordnung::Geaendert(t),
+        };
+        let (art, betrag) = match &einordnung {
+            Einordnung::Erststand => ("Beleg im ersten Stand", f.aussage.clone()),
+            Einordnung::Neu => ("Neuer Beleg", f.aussage.clone()),
+            Einordnung::Wiederholt => ("Erneut erfasst", f.aussage.clone()),
+            Einordnung::Geaendert(t) => (
+                "Quelle hat Aussage geändert",
+                format!("Bisher {t} · Jetzt {}", f.aussage),
+            ),
         };
         if self.ausgabe.len() == AUSGABE_MAX {
             self.ausgabe.pop_front();
         }
-        let vorher = alt.filter(|text| self.vergleichbar && text != aussage);
-        let betrag = vorher.map_or_else(
-            || aussage.to_owned(),
-            |text| format!("Bisher {text} · Jetzt {aussage}"),
-        );
         self.ausgabe.push_back(format!(
-            "{art} · Journalzeile {zeile} · {quelle} · {betrag}"
+            "{art} · Journalzeile {} · {} · {betrag}",
+            f.zeile, f.quelle
         ));
+        self.eingaben.zaehle(Eingabe {
+            zeile: f.zeile,
+            termin: f.art == "termin",
+            quelle: f.quelle.to_owned(),
+            aussage: f.anzeige,
+            zeit: f.zeit,
+            abruf: f.abruf,
+            einordnung,
+        });
+    }
+}
+
+fn nachricht_fund(zeile: u64, n: &depot_journal::NachrichtBeleg) -> Fund<'_> {
+    let (aussage, id) = n
+        .text()
+        .rsplit_once(" | ")
+        .filter(|(_, url)| url.starts_with("https://") && !url.chars().any(char::is_whitespace))
+        .unwrap_or((n.text(), n.text()));
+    Fund {
+        zeile,
+        art: "nachricht",
+        quelle: n.quelle(),
+        id: id.into(),
+        aussage: aussage.into(),
+        anzeige: aussage.into(),
+        zeit: zeit_text(n.zeit()),
+        abruf: n.abruf(),
+    }
+}
+
+fn termin_fund(zeile: u64, n: &depot_journal::TerminBeleg) -> Fund<'_> {
+    let t = n.termin();
+    let verlaesslichkeit = match t.verlaesslichkeit() {
+        Verlaesslichkeit::Bestaetigt => "bestätigt",
+        Verlaesslichkeit::Angekuendigt => "angekündigt",
+        Verlaesslichkeit::Vermutet => "vermutet",
+    };
+    Fund {
+        zeile,
+        art: "termin",
+        quelle: n.quelle(),
+        id: t.kennung().into(),
+        aussage: format!(
+            "{} · {} · {}",
+            t.zeit(),
+            t.verlaesslichkeit().name(),
+            t.titel()
+        ),
+        anzeige: format!("{} · {verlaesslichkeit}", t.titel()),
+        zeit: match t.zeit() {
+            Zeitbezug::Tag(tag) => datum_text(tag),
+            Zeitbezug::Zeitpunkt(z) => zeit_text(z),
+        },
+        abruf: n.abruf(),
     }
 }
 
@@ -370,7 +734,7 @@ fn verglichen(
     jetzt: Zeitpunkt,
     vorher: Option<&Bild>,
     schritt: &mut dyn FnMut() -> Result<(), String>,
-) -> Result<Bild, String> {
+) -> Result<(Bild, Option<Eingaben>), String> {
     let basis = vorher.filter(|v| v.journal.im_journal(journalbytes) && v.stichtag <= jetzt);
     let mut grenze = 0_u64;
     if let Some(bild) = basis {
@@ -384,12 +748,23 @@ fn verglichen(
             );
         }
     }
+    // Unverändertes Journal: Die Eingaben stammen aus dem Abschnitt, den der gespeicherte
+    // Stand damals verglichen hat. Ältere Stände ohne Grenze belegen ihn nicht.
+    let gleich = basis.filter(|b| b.journal == journal);
+    let (pruefgrenze, vergleichbar, belegt) = match gleich {
+        Some(b) => match b.grenze {
+            Some(g) => (g, b.basis.is_some(), true),
+            None => (grenze, true, false),
+        },
+        None => (grenze, basis.is_some(), true),
+    };
     let mut v = Vergleich {
         bisher: BTreeMap::new(),
         ausgabe: VecDeque::new(),
         quellen: VecDeque::new(),
-        vergleichbar: basis.is_some(),
-        grenze,
+        vergleichbar,
+        grenze: pruefgrenze,
+        eingaben: Eingaben::default(),
     };
     let mut nachrichten = stand.nachrichten().iter();
     let mut termine = stand.termine().iter();
@@ -409,39 +784,26 @@ fn verglichen(
                 if n.abruf() > jetzt {
                     return Err("Wissensstand liegt vor einem belegten Abruf.".into());
                 }
-                let (aussage, id) = n
-                    .text()
-                    .rsplit_once(" | ")
-                    .filter(|(_, url)| {
-                        url.starts_with("https://") && !url.chars().any(char::is_whitespace)
-                    })
-                    .unwrap_or((n.text(), n.text()));
-                v.belege(zeile, "nachricht", n.quelle(), id.into(), aussage);
+                v.belege(nachricht_fund(zeile, n));
             }
             Art::Termin => {
                 let n = termine.next().ok_or("Terminreferenz fehlt")?;
                 if n.abruf() > jetzt {
                     return Err("Wissensstand liegt vor einem belegten Abruf.".into());
                 }
-                let t = n.termin();
-                v.belege(
-                    zeile,
-                    "termin",
-                    n.quelle(),
-                    t.kennung().into(),
-                    &format!(
-                        "{} · {} · {}",
-                        t.zeit(),
-                        t.verlaesslichkeit().name(),
-                        t.titel()
-                    ),
-                );
+                v.belege(termin_fund(zeile, n));
             }
             _ => {}
         }
     }
-    if let Some(vorher) = basis.filter(|b| b.journal == journal) {
-        return Ok(vorher.clone());
+    let mut eingaben = std::mem::take(&mut v.eingaben);
+    eingaben.von = pruefgrenze.saturating_add(1);
+    eingaben.bis = u64::try_from(eintraege.len())
+        .map_err(|_| "Zeilenanzahl zu groß")?
+        .saturating_add(1);
+    let eingaben = belegt.then_some(eingaben);
+    if let Some(vorher) = gleich {
+        return Ok((vorher.clone(), eingaben));
     }
     let (quellen, beratungsstand) = if v.quellen.is_empty() {
         basis.map_or_else(
@@ -451,14 +813,18 @@ fn verglichen(
     } else {
         (v.quellen, Some(jetzt))
     };
-    Ok(Bild {
-        journal,
-        stichtag: jetzt,
-        basis: basis.map(|v| v.stichtag),
-        aenderungen: v.ausgabe,
-        quellen,
-        beratungsstand,
-    })
+    Ok((
+        Bild {
+            journal,
+            stichtag: jetzt,
+            basis: basis.map(|v| v.stichtag),
+            aenderungen: v.ausgabe,
+            quellen,
+            beratungsstand,
+            grenze: Some(grenze),
+        },
+        eingaben,
+    ))
 }
 
 struct Budget {
@@ -560,14 +926,21 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             JOURNAL_MAX,
             &mut schritt,
             |s, e, bytes, m, schritt| {
-                verglichen(s, e, bytes, m.into(), jetzt, gespeichert.as_ref(), schritt)
-                    .map(|bild| (bild, depot_lage::schlopfmodell_pruefungen(s)))
+                verglichen(s, e, bytes, m.into(), jetzt, gespeichert.as_ref(), schritt).map(
+                    |(bild, eingaben)| {
+                        (
+                            bild,
+                            eingaben,
+                            depot_lage::schlopfmodell_thesenpruefungen(s),
+                        )
+                    },
+                )
             },
         );
         if !frei(d, &daten) {
             continue;
         }
-        let (bild, pruefungen) = match neu {
+        let (bild, eingaben, pruefungen) = match neu {
             Ok(Ok(bild)) => bild,
             Err(JournalFehler::Belegt) => continue,
             Ok(Err(e)) | Err(JournalFehler::Halt(e)) => {
@@ -598,7 +971,8 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             anzeige.status = Status::Fertig;
             anzeige.fertig = Some(Fertig {
                 geprueft: jetzt,
-                befunde: zeige(&bild),
+                bild: bild.clone(),
+                eingaben,
                 pruefungen,
             });
         }
@@ -644,7 +1018,11 @@ mod tests {
             Ok(())
         }
 
-        fn bild(&self, zeit: &str, bisher: Option<&Bild>) -> Result<Bild, String> {
+        fn vergleich(
+            &self,
+            zeit: &str,
+            bisher: Option<&Bild>,
+        ) -> Result<(Bild, Option<Eingaben>), String> {
             let zeit = Zeitpunkt::lies(zeit).ok_or("Testzeit ungültig")?;
             Journal::pruefe_im_hintergrund(
                 &self.0.join("journal.txt"),
@@ -653,6 +1031,14 @@ mod tests {
                 |s, e, b, m, schritt| verglichen(s, e, b, m.into(), zeit, bisher, schritt),
             )
             .map_err(|e| format!("{e:?}"))?
+        }
+
+        fn bild(&self, zeit: &str, bisher: Option<&Bild>) -> Result<Bild, String> {
+            self.vergleich(zeit, bisher).map(|(bild, _)| bild)
+        }
+
+        fn journal(&self) -> Result<Journal, String> {
+            Journal::oeffnen(&self.0.join("journal.txt")).map_err(|e| format!("{e:?}"))
         }
     }
 
@@ -714,6 +1100,230 @@ mod tests {
                 .iter()
                 .all(|a| a.starts_with("Beleg im ersten Stand"))
         );
+        Ok(())
+    }
+
+    fn ansicht(bild: &Bild, e: &Eingaben) -> String {
+        let mut html = String::new();
+        eingaben_html(&mut html, bild, Some(e));
+        ergebnis_html(&mut html, bild, Some(e));
+        html
+    }
+
+    fn erststand_belegen(daten: &Testdaten, url: &str) -> Result<(), String> {
+        use depot_journal::TerminBeleg;
+        use depot_kern::{Betroffen, Herkunft, Isin, Termin};
+        let zeit = |t: &str| Zeitpunkt::lies(t).ok_or_else(|| format!("Testzeit {t}"));
+        let mut j = daten.journal()?;
+        let meldung = NachrichtBeleg::neu(
+            "quelle-test",
+            zeit("2026-11-12T10:00:00Z")?,
+            b"roh-1",
+            zeit("2026-11-12T09:00:00Z")?,
+            &format!("SAP erhöht die Prognose | {url}"),
+        )?;
+        assert!(j.belege_nachricht(&meldung).map_err(|e| format!("{e:?}"))?);
+        let termin = Termin::neu(
+            "sap-zahlen",
+            "SAP nennt Zahlen",
+            Zeitbezug::Tag(Datum::lies("2026-11-25").ok_or("Termintag")?),
+            vec![Betroffen::Wert(
+                Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?,
+            )],
+            Verlaesslichkeit::Bestaetigt,
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        let beleg = TerminBeleg::neu(
+            "kalender",
+            Herkunft::Quelle,
+            zeit("2026-11-12T10:05:00Z")?,
+            b"termin",
+            termin,
+        )?;
+        j.belege_termin(&beleg).map_err(|e| format!("{e:?}"))?;
+        drop(j);
+        Ok(())
+    }
+
+    #[test]
+    fn leeres_journal_und_gespeicherter_stand_nach_neustart() -> Result<(), String> {
+        let daten = Testdaten::neu()?;
+        let (leer, e) = daten.vergleich("2026-11-12T10:30:00Z", None)?;
+        let e = e.ok_or("Eingaben fehlen")?;
+        assert_eq!((e.gesamt, e.bis), (0, 1));
+        let html = ansicht(&leer, &e);
+        assert!(
+            html.contains("Erster bestätigter Stand · Das Journal enthält noch keine Einträge.")
+        );
+        assert!(!html.contains("J2 bis J1"), "{html}");
+        // Nach Neustart: Stand mit Grenze braucht nur die erneute Prüfung.
+        let mut html = String::new();
+        eingaben_html(&mut html, &leer, None);
+        assert!(html.contains("nach der nächsten Prüfung des Journals"));
+        assert!(!html.contains("fortgeschriebenen"));
+        let mut html = String::new();
+        eingaben_html(
+            &mut html,
+            &Bild {
+                grenze: None,
+                ..leer
+            },
+            None,
+        );
+        assert!(html.contains("fortgeschriebenen Journals"));
+        Ok(())
+    }
+
+    #[test]
+    fn gegenprobe_zeigt_zeile_quelle_zeit_und_einordnung_je_stand() -> Result<(), String> {
+        let daten = Testdaten::neu()?;
+        let zeit = |t: &str| Zeitpunkt::lies(t).ok_or_else(|| format!("Testzeit {t}"));
+        let url = "https://example.test/sap";
+        erststand_belegen(&daten, url)?;
+        // Erststand mit Nachricht und Termin.
+        let (erster, e1) = daten.vergleich("2026-11-12T10:30:00Z", None)?;
+        let e1 = e1.ok_or("Eingaben des Erststands fehlen")?;
+        assert_eq!((e1.gesamt, e1.von, e1.bis), (2, 1, 3));
+        let n = e1.liste.front().ok_or("Nachricht fehlt")?;
+        assert_eq!(
+            (n.zeile, n.termin, n.quelle.as_str()),
+            (2, false, "quelle-test")
+        );
+        assert_eq!(n.zeit, "12.11.2026 10:00 MEZ");
+        assert_eq!(zeit_text(n.abruf), "12.11.2026 11:00 MEZ");
+        let t = e1.liste.back().ok_or("Termin fehlt")?;
+        assert_eq!(
+            (t.zeile, t.termin, t.zeit.as_str()),
+            (3, true, "25.11.2026")
+        );
+        assert!(
+            e1.liste
+                .iter()
+                .all(|e| e.einordnung == Einordnung::Erststand)
+        );
+        let html = ansicht(&erster, &e1);
+        for teil in [
+            "Erster bestätigter Stand · Journalzeilen J2 bis J3",
+            "<td>J2</td><td>Nachricht</td><td>quelle-test</td><td>SAP erhöht die Prognose</td><td>Veröffentlicht 12.11.2026 10:00 MEZ</td><td>Abgerufen 12.11.2026 11:00 MEZ</td>",
+            "<td>J3</td><td>Termin</td><td>kalender</td><td>SAP nennt Zahlen · bestätigt</td><td>Termin 25.11.2026</td>",
+            "Erster bestätigter Stand mit 2 Nachrichten und Terminen",
+        ] {
+            assert!(html.contains(teil), "{teil}\n{html}");
+        }
+
+        // Korrigierte Nachricht derselben Quelle.
+        let mut j = daten.journal()?;
+        let korrektur = NachrichtBeleg::neu(
+            "quelle-test",
+            zeit("2026-11-12T12:00:00Z")?,
+            b"roh-2",
+            zeit("2026-11-12T11:30:00Z")?,
+            &format!("SAP senkt die Prognose | {url}"),
+        )?;
+        assert!(
+            j.belege_nachricht(&korrektur)
+                .map_err(|e| format!("{e:?}"))?
+        );
+        drop(j);
+        let (zweiter, e2) = daten.vergleich("2026-11-12T12:30:00Z", Some(&erster))?;
+        let e2 = e2.ok_or("Eingaben des Folgestands fehlen")?;
+        assert_eq!(
+            (e2.gesamt, e2.geaendert, e2.neu, e2.von, e2.bis),
+            (1, 1, 0, 4, 4)
+        );
+        let k = e2.liste.front().ok_or("Korrektur fehlt")?;
+        assert_eq!(k.zeile, 4);
+        assert_eq!(
+            k.einordnung,
+            Einordnung::Geaendert("SAP erhöht die Prognose".into())
+        );
+        let html = ansicht(&zweiter, &e2);
+        assert!(html.contains("Verglichener Abschnitt · Journalzeilen J4 bis J4"));
+        assert!(html.contains(
+            "Aussage geändert · Bisher SAP erhöht die Prognose · Jetzt SAP senkt die Prognose"
+        ));
+        assert!(html.contains("Neue Belege 0 · Geänderte Aussagen 1"));
+        assert!(html.contains("Journalzeilen J4</p>"), "{html}");
+        assert!(!html.contains("Keine neuen oder geänderten Belege"));
+
+        // Danach nur eine unabhängige Journalnotiz.
+        let mut j = daten.journal()?;
+        j.begruende(
+            Datum::lies("2026-11-12").ok_or("Tag")?,
+            "Test",
+            "Eigenständige Notiz",
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        drop(j);
+        let (dritter, e3) = daten.vergleich("2026-11-12T13:00:00Z", Some(&zweiter))?;
+        let e3 = e3.ok_or("Eingaben des dritten Stands fehlen")?;
+        assert_eq!((e3.gesamt, e3.von, e3.bis), (0, 5, 5));
+        let html = ansicht(&dritter, &e3);
+        assert!(html.contains("Im verglichenen Abschnitt stehen keine Nachrichten oder Termine."));
+        assert!(html.contains("Keine neuen oder geänderten Belege."));
+        assert!(
+            !html.contains("SAP senkt"),
+            "Frühere Korrektur gilt nicht als neue Eingabe"
+        );
+        assert_eq!(dritter.beratungsstand, zweiter.beratungsstand);
+
+        // Unverändertes Journal: derselbe Abschnitt bleibt belegt, ohne neuen Stand.
+        let gespeichert = Bild::lies_text(&dritter.json()).ok_or("Stand unlesbar")?;
+        let (gleich, e4) = daten.vergleich("2026-11-12T14:00:00Z", Some(&gespeichert))?;
+        assert_eq!(gleich.json(), dritter.json());
+        assert_eq!(e4.map(|e| (e.gesamt, e.von)), Some((0, 5)));
+        // Älterer gespeicherter Stand ohne Grenze: Lücke statt geratener Eingaben.
+        let alt = Bild {
+            grenze: None,
+            ..dritter.clone()
+        };
+        let (_, e5) = daten.vergleich("2026-11-12T14:00:00Z", Some(&alt))?;
+        assert!(e5.is_none());
+        let mut html = String::new();
+        eingaben_html(&mut html, &alt, None);
+        assert!(html.contains("einzelnen Eingaben nicht belegt"));
+        Ok(())
+    }
+
+    #[test]
+    fn thesenpruefung_je_berater_mit_beleg_oder_fehlender_pruefung() -> Result<(), String> {
+        let stand = Zeitpunkt::lies("2026-11-12T12:30:00Z").ok_or("Zeit")?;
+        let bild = Bild {
+            journal: Marke {
+                bytes: 1,
+                hash: "0".repeat(64),
+            },
+            stichtag: stand,
+            basis: None,
+            aenderungen: VecDeque::new(),
+            quellen: VecDeque::from([4]),
+            beratungsstand: Some(stand),
+            grenze: Some(0),
+        };
+        let pruefung = Thesenpruefung {
+            wer: "Dachs",
+            these_vom: Datum::lies("2026-11-11").ok_or("Tag")?,
+            isin: "DE0007164600".into(),
+            these: Some("These vom 2026-11-11 zu DE0007164600: Steigt".into()),
+            urteil: "beibehalten",
+            begruendung: "Prognose bestätigt <b>".into(),
+            wissensstand: Zeitpunkt::lies("2026-11-12T10:30:00Z").ok_or("Zeit")?,
+            beleg: 4,
+            protokolliert: Datum::lies("2026-11-12").ok_or("Tag")?,
+        };
+        let mut html = String::new();
+        thesen_html(&mut html, Some(&bild), Some(&[pruefung]));
+        for teil in [
+            "<strong>Dachs</strong> · These vom 11.11.2026 zu DE0007164600 beibehalten · Beleg J4 · Wissensstand 12.11.2026 11:30 MEZ · Protokolliert am 12.11.2026",
+            "Begründung: Prognose bestätigt &lt;b&gt;",
+            "<em>Ältere Prüfung</em>",
+            "<li>Maus · Keine Thesenprüfung belegt</li>",
+        ] {
+            assert!(html.contains(teil), "{teil}\n{html}");
+        }
+        let mut leer = String::new();
+        thesen_html(&mut leer, None, None);
+        assert!(leer.contains("beim nächsten abgeschlossenen Vergleich"));
         Ok(())
     }
 
@@ -799,15 +1409,12 @@ mod tests {
         let gemini = depot_lage::gespraeche::gemini_pfad(&daten);
         schreibe_ganz(&gemini, "gratisprojekt=ja\n")?;
         assert!(!einstellung(&daten)?);
-        assert!(live(&d, &crate::zeitstrahl_ki::Aufrufe::default()).contains("Ausgeschaltet"));
+        assert!(live(&d).contains("Ausgeschaltet"));
         assert!(aufruf("falsch", "ja").contains("403"));
         assert!(!einstellung(&daten)?);
         assert!(aufruf("testtoken", "ja").contains("/einrichtung#neuroschlopf"));
         assert!(einstellung(&daten)?);
-        assert!(
-            live(&d, &crate::zeitstrahl_ki::Aufrufe::default())
-                .contains("Wartet auf einen bestätigten Journalstand")
-        );
+        assert!(live(&d).contains("Wartet auf einen bestätigten Journalstand"));
         assert!(aufruf("testtoken", "nein").contains("/einrichtung#neuroschlopf"));
         assert!(!einstellung(&daten)?);
         assert_eq!(

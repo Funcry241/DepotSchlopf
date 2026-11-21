@@ -121,6 +121,66 @@ fn pruefung_anzeige(p: &Protokoll) -> String {
     )
 }
 
+/// Eine protokollierte Thesenprüfung mit den Angaben, die das Protokoll belegt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Thesenpruefung {
+    /// Dachs oder Maus.
+    pub wer: &'static str,
+    /// Tag der geprüften These.
+    pub these_vom: Datum,
+    /// Wert der geprüften These.
+    pub isin: String,
+    /// Wortlaut der These, falls die Prognose im Journal steht.
+    pub these: Option<String>,
+    /// beibehalten, präzisiert oder zurückgezogen.
+    pub urteil: &'static str,
+    /// Begründung des Beraters.
+    pub begruendung: String,
+    /// Wissensstand der übermittelten Belege.
+    pub wissensstand: Zeitpunkt,
+    /// Referenzierte Journalzeile des Belegs.
+    pub beleg: u64,
+    /// Journaltag, an dem die Entscheidung protokolliert wurde.
+    pub protokolliert: Datum,
+}
+
+/// Letzte protokollierte Prüfung je Berater mit These, Urteil und Belegzeile.
+pub fn letzte_thesenpruefungen(s: &Stand) -> Vec<Thesenpruefung> {
+    [BeraterId::Dachs, BeraterId::Maus]
+        .into_iter()
+        .filter_map(|wer| {
+            let (datum, p) = s
+                .begruendungen()
+                .iter()
+                .rev()
+                .filter(|(_, zweck, _)| zweck == ZWECK)
+                .filter_map(|(datum, _, text)| Protokoll::lies(text).map(|p| (*datum, p)))
+                .find(|(_, p)| p.wer == wer)?;
+            let these = s
+                .weltprognosen()
+                .iter()
+                .rev()
+                .find(|w| w.berater == wer && w.datum == p.tag && w.prognose.isin == p.isin)
+                .map(thesentext);
+            Some(Thesenpruefung {
+                wer: beratername(wer),
+                these_vom: p.tag,
+                isin: p.isin.als_str().to_owned(),
+                these,
+                urteil: match p.pruefung.status {
+                    "beibehalten" => "beibehalten",
+                    "präzisieren" => "präzisiert",
+                    _ => "zurückgezogen",
+                },
+                begruendung: p.pruefung.begruendung,
+                wissensstand: p.stand,
+                beleg: p.pruefung.beleg,
+                protokolliert: datum,
+            })
+        })
+        .collect()
+}
+
 /// Journalbelegte Thesenprüfungen nach dem Tag der Prüfung, mit der protokollierten Entscheidung.
 pub fn belegte_pruefungen(s: &Stand) -> impl Iterator<Item = (Datum, &'static str)> + '_ {
     s.begruendungen().iter().filter_map(|(datum, zweck, text)| {
