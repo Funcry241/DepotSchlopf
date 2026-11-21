@@ -543,19 +543,27 @@ mod tests {
                 .map_err(|e| e.to_string())?;
             vorlauf(&daten, zeit, "journal-fehlt", &liste, false);
             Journal::einrichten(&daten.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
+            vorlauf(&daten, zeit, "keine-nachrichten", &liste, false);
             let journal =
                 Journal::oeffnen(&daten.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
-            vorlauf(&daten, zeit, "keine-nachrichten", &liste, false);
+            vorlauf(&daten, zeit, "journal-exklusiv-geoeffnet", &liste, false);
             drop(journal);
             std::fs::write(daten.join("update_offen.txt"), "Probe").map_err(|e| e.to_string())?;
             vorlauf(&daten, zeit, "update-offen", &liste, false);
             let (e, fehler) = gespraeche::lesen(&daten, tag).map_err(|e| e.to_string())?;
             assert_eq!(fehler, 0);
+            // Unter Windows verweigert die exklusive Dateisperre auch das Lesen ohne Lese-Sperre.
+            let exklusiv_geoeffnet = if cfg!(windows) {
+                gemini::JOURNAL_UNVERFUEGBAR
+            } else {
+                gemini::KEINE_NACHRICHTEN
+            };
             assert_eq!(
                 e.iter().map(|g| g.fehler.as_deref()).collect::<Vec<_>>(),
                 [
                     Some(gemini::JOURNAL_UNVERFUEGBAR),
                     Some(gemini::KEINE_NACHRICHTEN),
+                    Some(exklusiv_geoeffnet),
                     Some(gemini::WARTET_AUF_UPDATE)
                 ],
             );
@@ -565,6 +573,7 @@ mod tests {
                     && g.frage.is_none())
             );
             assert!(!daten.join(anbieter::DATEI).exists());
+            assert!(!gespraeche::gemini_kontingent(&daten, tag).exists());
             Ok(())
         })();
         let _ = std::fs::remove_dir_all(daten);

@@ -10,7 +10,7 @@ Jede Arbeit ist ein eigener Lauf wie `run.cmd kurse`, `run.cmd termine` oder `ru
 
 - **Ein Hauptauftrag zur Zeit.** Gemini kann als optionale Zuarbeit parallel laufen. Der Papiertag und seine Vorbereitung nutzen die bis zum Start vorliegenden Ergebnisse. Updates und Sicherungen warten auf das Ende der Zuarbeit. Dieselbe Auftragsart läuft oder wartet nur einmal.
 - **Eindeutige Kennung** je Auftrag aus Startzeit in Sekunden und laufender Nummer.
-- **Das Lagebild liest nur ohne laufenden Hauptauftrag**, und nur im selben Arbeiter, der Aufträge startet. Gemini liest einen bestätigten Ausschnitt ohne Journalsperre und verzichtet auf Zuarbeit, falls sich der Ausschnitt während der Prüfung ändert. Das Lagebild ist dasselbe wie `run.cmd lage` (`depot_lage`), ergänzt um den Stand der Schlüssel.
+- **Das Lagebild liest nur ohne laufenden Hauptauftrag**, und nur im selben Arbeiter, der Aufträge startet. Gemini prüft einen bestätigten Journalausschnitt ohne eigene Dateisperre. Ist das Journal während der Prüfung unlesbar, etwa bei einem exklusiven Zugriff unter Windows, oder ändert sich der bestätigte Ausschnitt, überspringt Gemini die Zuarbeit. Das Lagebild ist dasselbe wie `run.cmd lage` (`depot_lage`), ergänzt um den Stand der Schlüssel.
 
 ## Zeitplan, einmal je Tag
 
