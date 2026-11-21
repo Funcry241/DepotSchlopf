@@ -41,6 +41,10 @@ pub struct Ergebnis {
     pub grund: String,
 }
 impl Ergebnis {
+    pub(crate) fn hinweis_im_betrieb(&self) -> Option<(bool, String)> {
+        (self.phase != Phase::Bestaetigt).then(|| self.meldung())
+    }
+
     pub fn meldung(&self) -> (bool, String) {
         let status = match self.phase {
             Phase::Probe => "Neustart läuft; noch nicht bestätigt",

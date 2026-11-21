@@ -106,11 +106,8 @@ fn bestaetigen(d: &Arc<Dienst>) {
                     rueckfall::BESTAETIGUNG_WIEDERHOLEN_FUER,
                     rueckfall::BESTAETIGUNG_WIEDERHOLEN_ALLE,
                 ) {
-                    Ok(Some(o)) => (
-                        false,
-                        format!("Update auf {} bestätigt.", rueckfall::kurz(&o.neu)),
-                    ),
-                    Ok(None) => (false, "Kein Update offen.".to_string()),
+                    Ok(Some(_)) => None,
+                    Ok(None) => Some((false, "Kein Update offen.".into())),
                     Err(e) => {
                         eprintln!("[Update] {e}");
                         if let Ok(Some(o)) = rueckfall::offen(&d.wurzel) {
@@ -122,13 +119,15 @@ fn bestaetigen(d: &Arc<Dienst>) {
                                 None,
                             );
                         }
-                        (true, e)
+                        Some((true, e))
                     }
                 };
-                if let Ok(e) = depot_dienst::aktualisierung::laden(&d.wurzel) {
-                    d.sperre().update_ergebnisse = e;
+                let ergebnisse = depot_dienst::aktualisierung::laden(&d.wurzel);
+                let mut z = d.sperre();
+                if let Ok(e) = ergebnisse {
+                    z.update_ergebnisse = e;
                 }
-                d.sperre().update_meldung = Some(m);
+                z.update_meldung = m;
             });
         }
         Err(e) => d.sperre().update_meldung = Some((true, e)),

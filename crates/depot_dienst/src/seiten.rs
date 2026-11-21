@@ -1072,6 +1072,44 @@ fn auftragsergebnis_html(a: &Auftrag, z: &Zustand, ki: &Aufrufe) -> String {
     format!("<span class=\"{klasse}\">{text}</span>")
 }
 
+fn update_auftrag(a: &Auftrag) -> bool {
+    matches!(a.art, Art::Update | Art::UpdatePruefen)
+}
+
+fn verlaufstabelle<'a>(
+    s: &mut String,
+    mut laeufe: std::iter::Peekable<impl Iterator<Item = &'a Auftrag>>,
+    z: &Zustand,
+    ki: &Aufrufe,
+) {
+    if laeufe.peek().is_none() {
+        return;
+    }
+    s.push_str(
+        "<div class=\"breit\"><table><tr><th>Auftrag</th><th>Anlass</th><th>Start</th>\
+         <th>Ende</th><th>Ergebnis</th></tr>",
+    );
+    for a in laeufe {
+        let ergebnis = auftragsergebnis_html(a, z, ki);
+        let _ = write!(
+            s,
+            "<tr><td>{}<br><span class=\"leise\">{}</span></td><td>{}</td><td>{}</td><td>{}</td>\
+             <td>{ergebnis}{}{}</td></tr>",
+            maskiere(a.art.name()),
+            maskiere(&a.kennung),
+            maskiere(&anlass_zeile(a)),
+            maskiere(&zeit_text(a.start)),
+            a.ende.map(|e| maskiere(&zeit_text(e))).unwrap_or_default(),
+            a.hinweis
+                .as_ref()
+                .map(|h| format!("<br>{}", maskiere(h)))
+                .unwrap_or_default(),
+            protokoll(a, false)
+        );
+    }
+    s.push_str("</table></div>");
+}
+
 /// Was der Dienst tut: laufender Auftrag, Warteschlange, naechster Lauf, Verlauf.
 fn wartende_auftraege(s: &mut String, z: &Zustand, heute: Option<Datum>) {
     if !z.warteschlange.is_empty() {
@@ -1118,7 +1156,7 @@ fn taetigkeit(
     } else {
         s.push_str("<p class=\"kopf\">Gerade läuft nichts.</p>");
         // Was der letzte Lauf heute zu sagen hatte, etwa warum der Papiertag ausfiel.
-        if let Some(a) = z.verlauf.front()
+        if let Some(a) = z.verlauf.iter().find(|a| !update_auftrag(a))
             && let Some(h) = &a.hinweis
             && heute.is_some_and(|t| {
                 a.ende
@@ -1153,31 +1191,12 @@ fn taetigkeit(
     }
     wartende_auftraege(&mut s, z, heute);
     letzter_fehler_hinweis(&mut s, z);
-    if !z.verlauf.is_empty() {
-        s.push_str(
-            "<div class=\"breit\"><table><tr><th>Auftrag</th><th>Anlass</th><th>Start</th>\
-             <th>Ende</th><th>Ergebnis</th></tr>",
-        );
-        for a in &z.verlauf {
-            let ergebnis = auftragsergebnis_html(a, z, ki);
-            let _ = write!(
-                s,
-                "<tr><td>{}<br><span class=\"leise\">{}</span></td><td>{}</td><td>{}</td><td>{}</td>\
-                 <td>{ergebnis}{}{}</td></tr>",
-                maskiere(a.art.name()),
-                maskiere(&a.kennung),
-                maskiere(&anlass_zeile(a)),
-                maskiere(&zeit_text(a.start)),
-                a.ende.map(|e| maskiere(&zeit_text(e))).unwrap_or_default(),
-                a.hinweis
-                    .as_ref()
-                    .map(|h| format!("<br>{}", maskiere(h)))
-                    .unwrap_or_default(),
-                protokoll(a, false)
-            );
-        }
-        s.push_str("</table></div>");
-    }
+    verlaufstabelle(
+        &mut s,
+        z.verlauf.iter().filter(|a| !update_auftrag(a)).peekable(),
+        z,
+        ki,
+    );
     if let Some(f) = &z.verlauf_fehler {
         let _ = write!(s, "<p class=\"kopf halt\">{}</p>", maskiere(f));
     }
@@ -1194,6 +1213,7 @@ fn taetigkeit(
 fn letzter_fehler_hinweis(s: &mut String, z: &Zustand) {
     let offen = z.verlauf.iter().enumerate().find_map(|(i, a)| {
         if a.erfolg != Some(false)
+            || a.art == Art::UpdatePruefen
             || a.anlass == Anlass::Hintergrund
             || a.update_pause.is_some()
             || z.verlauf
@@ -1319,31 +1339,21 @@ fn update_hinweis(z: &Zustand, sperre: Option<&UpdateSperre>, jetzt: Option<Zeit
     if let Some(sperre) = sperre {
         return sperre.hinweis(z, jetzt);
     }
-    if let Some(pause) = letzte_update_pause(z) {
-        let (klasse, titel) = pause.ergebnis();
-        return format!(
-            "<p class=\"kopf {klasse}\"><strong>{titel}</strong>. Dein bisheriger Stand läuft weiter.</p>"
-        );
-    }
     match &z.update_meldung {
-        Some((fehler, text)) => format!(
-            "<p class=\"kopf {}\">{}</p>",
-            if *fehler {
-                "halt"
-            } else if z
-                .update_ergebnisse
-                .last()
-                .is_some_and(|e| e.phase == crate::aktualisierung::Phase::Bestaetigt)
-                && !z.neustart
-                && z.auftrag_stand(Art::Update).is_none()
-            {
-                "gut"
-            } else {
-                "offen"
-            },
-            maskiere(text)
-        ),
-        None => String::new(),
+        Some((fehler, text))
+            if *fehler
+                || z.neustart
+                || z.update_ergebnisse
+                    .last()
+                    .is_some_and(|e| e.phase == crate::aktualisierung::Phase::Probe) =>
+        {
+            format!(
+                "<p class=\"kopf {}\">{}</p>",
+                if *fehler { "halt" } else { "offen" },
+                maskiere(text)
+            )
+        }
+        _ => String::new(),
     }
 }
 
@@ -1467,7 +1477,11 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
     } else {
         s.push_str("<div class=\"betrieb\"><strong>Im Moment läuft kein Auftrag.</strong>");
         s.push_str(&naechster_abschnitt(z, heute, true));
-        if let Some(a) = z.verlauf.iter().find(|a| a.anlass != Anlass::Hintergrund) {
+        if let Some(a) = z
+            .verlauf
+            .iter()
+            .find(|a| a.anlass != Anlass::Hintergrund && !update_auftrag(a))
+        {
             let (_, ergebnis) = ergebnis(a, z);
             let _ = write!(
                 s,
@@ -2197,7 +2211,29 @@ pub(crate) fn update_aktionen(
     let mut s = marke(start);
     let version = update.version.map_or("unbekannt", crate::rueckfall::kurz);
     let _ = write!(s, "<p>Laufender Programmstand: {}</p>", maskiere(version));
-    s.push_str(&update_hinweis(z, update.sperre, update.jetzt));
+    let hinweis = update_hinweis(z, update.sperre, update.jetzt);
+    if !hinweis.is_empty() {
+        s.push_str(&hinweis);
+    } else if let Some(pause) = letzte_update_pause(z) {
+        let (klasse, titel) = pause.ergebnis();
+        let _ = write!(
+            s,
+            "<p class=\"kopf {klasse}\"><strong>{titel}</strong>. Dein bisheriger Stand läuft weiter.</p>"
+        );
+    } else if let Some((false, text)) = &z.update_meldung {
+        let _ = write!(s, "<p class=\"kopf offen\">{}</p>", maskiere(text));
+    } else if z.auftrag_stand(Art::Update).is_none()
+        && let Some(e) = z
+            .update_ergebnisse
+            .last()
+            .filter(|e| e.phase == crate::aktualisierung::Phase::Bestaetigt)
+    {
+        let _ = write!(
+            s,
+            "<p class=\"kopf gut\">Update auf {} bestätigt.</p>",
+            maskiere(crate::rueckfall::kurz(&e.neu))
+        );
+    }
     if let Some((fehler, text)) = &z.programm_meldung {
         let _ = write!(
             s,
@@ -2217,6 +2253,12 @@ pub(crate) fn update_aktionen(
             z.update_angebot().is_none()
         )
     );
+    let mut verlauf = z.verlauf.iter().filter(|a| update_auftrag(a)).peekable();
+    if verlauf.peek().is_some() {
+        s.push_str("<details id=\"update-verlauf\"><summary>Update-Verlauf</summary>");
+        verlaufstabelle(&mut s, verlauf, z, &Aufrufe::default());
+        s.push_str("</details>");
+    }
     if update.sperre.is_some() {
         return s;
     }
@@ -2238,7 +2280,7 @@ pub(crate) fn update_aktionen(
         } else if a.anlass == Anlass::Hintergrund {
             s.push_str("<p class=\"leise\">Die automatische Suche konnte nicht abgeschlossen werden. DepotSchlopf prüft später erneut.</p>");
         } else {
-            s.push_str("<p>Die Suche konnte nicht abgeschlossen werden. Details stehen unter <a href=\"/\">Live</a>.</p>");
+            s.push_str("<p>Die Suche konnte nicht abgeschlossen werden. Details stehen im Update-Verlauf.</p>");
         }
     } else if letzte_update_pause(z).is_some() {
         s.push_str("<p>Klicke auf „Nach Update suchen“, um die aktuelle Version zu prüfen.</p>");
@@ -2246,9 +2288,7 @@ pub(crate) fn update_aktionen(
         .letzter_update_lauf()
         .is_some_and(|a| a.art == Art::Update && a.erfolg == Some(false))
     {
-        s.push_str(
-            "<p>Details zum fehlgeschlagenen Update stehen unter <a href=\"/\">Live</a>.</p>",
-        );
+        s.push_str("<p>Details zum fehlgeschlagenen Update stehen im Update-Verlauf.</p>");
     } else {
         s.push_str("<p>Suche zuerst nach einer neuen Version.</p>");
     }
