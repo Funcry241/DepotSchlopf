@@ -1159,6 +1159,8 @@ pub(crate) enum Erstmeinung {
 pub(crate) struct TopfAntwort {
     pub(crate) topf: Topf,
     pub(crate) vorschlag: Option<Vorschlag>,
+    /// Einsatz der letzten verwertbaren eigenen Ziele vor der Zustimmung des anderen Beraters.
+    pub(crate) eigener_einsatz_bp: i64,
     pub(crate) erstmeinung: Erstmeinung,
     zweitmeinung_ausgefallen: bool,
     ersatzkauf: bool,
@@ -1340,6 +1342,11 @@ fn frage_topf(
         }
     };
     Ok(TopfAntwort {
+        eigener_einsatz_bp: crate::mindesteinsatz::zielanteil(
+            &topf,
+            &tag.kurse,
+            vorschlag.as_ref(),
+        ),
         topf,
         vorschlag,
         erstmeinung,
@@ -1387,6 +1394,7 @@ fn zweite_meinung(
     let TopfAntwort {
         topf,
         mut vorschlag,
+        eigener_einsatz_bp,
         erstmeinung,
         mut zweitmeinung_ausgefallen,
         mut ersatzkauf,
@@ -1464,6 +1472,7 @@ fn zweite_meinung(
     Ok(TopfAntwort {
         topf,
         vorschlag,
+        eigener_einsatz_bp,
         erstmeinung,
         zweitmeinung_ausgefallen,
         ersatzkauf,
@@ -1503,9 +1512,9 @@ fn geplanter_einsatz(
 fn mindesteinsatz(
     j: &mut Journal,
     z: &Zyklus<'_>,
-    topf: &Topf,
+    eingabe: &Eingabe<'_>,
     plan: &depot_regelwerk::Entscheidung,
-    vorschlag: Option<&Vorschlag>,
+    eigener_einsatz_bp: i64,
     berater: &mut dyn Berater,
     minimum_bp: i64,
 ) -> Result<(), LaufFehler> {
@@ -1516,24 +1525,33 @@ fn mindesteinsatz(
     {
         return Ok(());
     }
-    let park = vorschlag.and_then(|v| v.park.as_ref()).map(|p| &p.isin);
+    let topf = eingabe.topf;
+    let park = eingabe
+        .vorschlag
+        .and_then(|v| v.park.as_ref())
+        .map(|p| &p.isin);
     let Some(einsatz_bp) =
         geplanter_einsatz(topf, &z.tag.kurse, plan, park).filter(|bp| *bp < minimum_bp)
     else {
         return Ok(());
     };
-    // Keine Nachfrage mehr: Der Grund kommt mit der Erstmeinung (#312-3, P37).
+    // Nur den zum eigenen Vorschlag gehörenden Grund verwenden, ohne weitere KI-Anfrage.
     let grund = berater.mindesteinsatz_begruendung(z.tag.datum);
-    let gehalten: BTreeMap<Isin, i64> = topf
-        .positionen()
-        .keys()
-        .filter_map(|isin| {
-            depot_regelwerk::entscheidung::ist_gewicht_bp(topf, &z.tag.kurse, isin)
-                .map(|bp| (isin.clone(), bp))
-        })
-        .collect();
-    let ki_bp = crate::mindesteinsatz::ki_einsatz_bp(&gehalten, vorschlag);
-    let status = crate::mindesteinsatz::vermerk(grund.as_deref(), ki_bp, minimum_bp);
+    let beraten_bp = crate::mindesteinsatz::zielanteil(topf, eingabe.kurse, eingabe.vorschlag);
+    let status = if eigener_einsatz_bp >= minimum_bp && beraten_bp < minimum_bp {
+        let anteile =
+            format!("eigenes Ziel {eigener_einsatz_bp} bp, nach der Beratung {beraten_bp} bp");
+        match grund
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            Some(text) => format!("{anteile} · Begründung zum eigenen Ziel: {text}"),
+            None => anteile,
+        }
+    } else {
+        crate::mindesteinsatz::vermerk(grund.as_deref(), beraten_bp, minimum_bp)
+    };
     begruende(
         j,
         z.tag,
@@ -1633,7 +1651,15 @@ fn topf_zyklus(
         None => plane_topf(j, &eingabe, frei, ersatzkauf, konto.tausch_moeglich()),
     };
     if !ruhetag {
-        mindesteinsatz(j, z, &topf, &ent, vorschlag.as_ref(), berater, minimum_bp)?;
+        mindesteinsatz(
+            j,
+            z,
+            &eingabe,
+            &ent,
+            antwort.eigener_einsatz_bp,
+            berater,
+            minimum_bp,
+        )?;
     }
     if ersatzkauf {
         begruende(
@@ -2341,31 +2367,32 @@ mod tests {
         })
     }
 
-    /// #312-3: Der Grund kommt nur mit der Erstmeinung, keine Nachfrage. Ziele 40 %, die das
+    struct Nachfrage(Option<String>);
+    impl Berater for Nachfrage {
+        fn vorschlagen(
+            &mut self,
+            _: depot_journal::AufrufErlaubnis,
+            _: &Lage<'_>,
+        ) -> crate::Antwort {
+            unreachable!("nur Nachfrage")
+        }
+        fn pruefen(
+            &mut self,
+            _: depot_journal::AufrufErlaubnis,
+            _: &Lage<'_>,
+            _: &Vorschlag,
+        ) -> crate::Urteil {
+            unreachable!("nur Nachfrage")
+        }
+        fn mindesteinsatz_begruendung(&mut self, _: depot_kern::Datum) -> Option<String> {
+            self.0.take()
+        }
+    }
+
+    /// #312-3: Die Prüfung übernimmt den mitgelieferten Grund ohne Nachfrage. Ziele 40 %, die das
     /// Regelwerk nicht plant, sind kein Versäumnis der KI („Regelwerk kürzte“).
     #[test]
     fn mindesteinsatz_ohne_feld_fragt_nicht() -> Result<(), LaufFehler> {
-        struct Nachfrage(Option<String>);
-        impl Berater for Nachfrage {
-            fn vorschlagen(
-                &mut self,
-                _: depot_journal::AufrufErlaubnis,
-                _: &Lage<'_>,
-            ) -> crate::Antwort {
-                unreachable!("nur Nachfrage")
-            }
-            fn pruefen(
-                &mut self,
-                _: depot_journal::AufrufErlaubnis,
-                _: &Lage<'_>,
-                _: &Vorschlag,
-            ) -> crate::Urteil {
-                unreachable!("nur Nachfrage")
-            }
-            fn mindesteinsatz_begruendung(&mut self, _: depot_kern::Datum) -> Option<String> {
-                self.0.take()
-            }
-        }
         let ordner =
             std::env::temp_dir().join(format!("depot-mindesteinsatz-{}", std::process::id()));
         std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
@@ -2402,20 +2429,43 @@ mod tests {
             .map_err(journal)?;
         let plan = depot_regelwerk::Entscheidung::default();
         let ki = sap_vorschlag(4_000)?;
-        let mut pruefe = |j: &mut Journal, z: &Zyklus<'_>, v, grund, minimum| {
-            berater.0 = grund;
-            mindesteinsatz(j, z, &topf, &plan, v, &mut berater, minimum)
+        let mut pruefe = |j: &mut Journal,
+                          z: &Zyklus<'_>,
+                          v,
+                          eigener_einsatz_bp,
+                          grund: Option<&str>,
+                          minimum| {
+            berater.0 = grund.map(str::to_owned);
+            let eingabe = Eingabe {
+                grenzen: z.grenzen,
+                universum: z.universum,
+                topf: &topf,
+                kurse: &z.tag.kurse,
+                vorschlag: v,
+                halt: false,
+                vor_valuta: &[],
+            };
+            mindesteinsatz(
+                j,
+                z,
+                &eingabe,
+                &plan,
+                eigener_einsatz_bp,
+                &mut berater,
+                minimum,
+            )
         };
-        pruefe(&mut j, &z, None, None, 0)?;
+        pruefe(&mut j, &z, None, 0, None, 0)?;
         let gesperrt = Zyklus {
             vollstaendige_kurse: false,
             ..z
         };
-        pruefe(&mut j, &gesperrt, None, None, 3_000)?;
+        pruefe(&mut j, &gesperrt, None, 0, None, 3_000)?;
         assert!(j.stand().begruendungen().is_empty());
-        pruefe(&mut j, &z, None, None, 3_000)?;
-        pruefe(&mut j, &z, Some(&ki), None, 3_000)?;
-        pruefe(&mut j, &z, None, Some("NVIDIA abwarten".into()), 3_000)?;
+        pruefe(&mut j, &z, None, 0, None, 3_000)?;
+        pruefe(&mut j, &z, Some(&ki), 4_000, None, 3_000)?;
+        pruefe(&mut j, &z, None, 0, Some("NVIDIA abwarten"), 3_000)?;
+        pruefe(&mut j, &z, None, 4_000, Some("Reserve halten"), 3_000)?;
         let zeilen: Vec<&str> = j
             .stand()
             .begruendungen()
@@ -2428,12 +2478,87 @@ mod tests {
                 "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt",
                 "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt, Regelwerk kürzte",
                 "Topf A: unter_mindesteinsatz 0 von 3000 bp · begründet: NVIDIA abwarten",
+                "Topf A: unter_mindesteinsatz 0 von 3000 bp · eigenes Ziel 4000 bp, nach der Beratung 0 bp · Begründung zum eigenen Ziel: Reserve halten",
             ]
         );
         assert_eq!(
             j.stand().ki().buchungen().len(),
             1,
             "keine Nachfrage gebucht"
+        );
+        drop(j);
+        std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
+        Ok(())
+    }
+
+    #[test]
+    fn mindesteinsatz_trennt_eigenes_bargeld_vom_abgelehnten_kauf() -> Result<(), LaufFehler> {
+        let (s, mut dachs, mut maus) =
+            crate::Szenario::beispiel().ok_or_else(|| halt("Szenario"))?;
+        let tag = s.tage.first().ok_or_else(|| halt("Tag"))?;
+        dachs.antworten.clear();
+        let veto = dachs
+            .urteile
+            .get_mut(&tag.datum)
+            .ok_or_else(|| halt("Zweitmeinung"))?;
+        veto.zustimmung = false;
+        veto.begruendung = "Kauf abgelehnt".into();
+        let kauf = maus
+            .antworten
+            .get_mut(&tag.datum)
+            .and_then(|a| a.vorschlag.as_mut())
+            .ok_or_else(|| halt("Kaufvorschlag"))?;
+        for ziel in kauf.zielgewichte_bp.values_mut() {
+            *ziel = 4_000;
+        }
+        let ordner =
+            std::env::temp_dir().join(format!("depot-veto-einsatz-{}", std::process::id()));
+        std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(journal)?;
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        for topf in &s.start {
+            j.setze_topf(topf).map_err(journal)?;
+        }
+        let mut konto =
+            crate::Papierkonto::eroeffne(&s.start).ok_or_else(|| halt("Papierkonto"))?;
+        let z = Zyklus {
+            anlass_pruefen: false,
+            grenzen: &Grenzen::standard(),
+            universum: &s.universum,
+            tag,
+            vortag: &s.vorlauf,
+            nr: 1,
+            abdruck: &"a".repeat(64),
+            uhr: None,
+            vollstaendige_kurse: true,
+            gesperrt: &BTreeSet::new(),
+            bewertung: &tag.kurse,
+        };
+        let mut beteiligte = Beteiligte {
+            dachs: &mut dachs,
+            maus: &mut maus,
+            konto: &mut konto,
+            mindesteinsatz_bp: 3_000,
+            anlass_pruefen: false,
+        };
+        let start =
+            depotwert(s.start.iter(), &s.vorlauf, Rundung::Auf).ok_or_else(|| halt("Startwert"))?;
+        ein_tag(&mut j, &z, start, &[], &mut beteiligte)?;
+        assert!(j.stand().auftraege().is_empty());
+        let zeilen: Vec<_> = j
+            .stand()
+            .begruendungen()
+            .iter()
+            .filter(|(_, _, text)| text.contains("unter_mindesteinsatz"))
+            .map(|(_, _, text)| text.as_str())
+            .collect();
+        assert_eq!(
+            zeilen,
+            [
+                "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt",
+                "Topf B: unter_mindesteinsatz 0 von 3000 bp · eigenes Ziel 4000 bp, nach der Beratung 0 bp",
+            ]
         );
         drop(j);
         std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;

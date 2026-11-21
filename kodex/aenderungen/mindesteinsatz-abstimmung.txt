@@ -1,0 +1,8 @@
+klasse: Funktion
+zweck: Den Mindesteinsatz mit den letzten eigenen Zielen und dem nach der Beratung vorgelegten Vorschlag belegen
+pfade:
+crates/depot_berater/src/ki.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/mindesteinsatz.rs

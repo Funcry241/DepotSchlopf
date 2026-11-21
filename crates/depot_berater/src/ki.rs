@@ -20,6 +20,7 @@
 //!
 //! Beides steht als Hinweiszeile (`depot_kern::hinweis`) in Alltagssprache in der Ausgabe.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
@@ -30,7 +31,7 @@ use depot_journal::{
     AufrufErlaubnis, KiAufruf, KiAufrufErgebnis, KiZweck,
     gespraeche::{self, Gespraech},
 };
-use depot_kern::{BeraterId, Cent, Grenzen, Universum, Vorschlag, Zeitpunkt};
+use depot_kern::{BeraterId, Cent, Grenzen, Isin, Universum, Vorschlag, Zeitpunkt};
 use depot_sim::belegrang::Verwerfungsgrund;
 use depot_sim::{Antwort, Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Urteil};
 
@@ -948,7 +949,36 @@ fn kostenzeile(ist: Option<i64>, reserviert: i64, v: Verbrauch) -> String {
     )
 }
 
+/// Ungenannte Bestände bleiben zu ihrem heutigen Gewicht im Topf. Limit, Stopp und
+/// neu formulierte Kaufthesen ändern die Begründung für die geplante Einsatzhöhe nicht.
+fn aktive_gewichtsaenderungen(
+    lage: &Lage<'_>,
+    vorschlag: Option<&Vorschlag>,
+) -> BTreeMap<Isin, i64> {
+    let Some(vorschlag) = vorschlag else {
+        return BTreeMap::new();
+    };
+    let mut ziele = vorschlag.zielgewichte_bp.clone();
+    if let Some(park) = &vorschlag.park {
+        // Der Parkwert bindet kein aktives Kapital, auch wenn er bereits im Topf liegt.
+        ziele.insert(park.isin.clone(), 0);
+    }
+    ziele.retain(|isin, bp| {
+        let heute = if lage.topf.stueck(isin) == 0 {
+            Some(0)
+        } else {
+            depot_sim::ist_gewicht_bp(lage.topf, lage.kurse, isin)
+        };
+        Some(*bp) != heute
+    });
+    ziele
+}
+
 impl<N: Netz> KiBerater<N> {
+    fn sicherer_mindesteinsatzgrund(&self, text: &str) -> Option<String> {
+        frage::lies_mindesteinsatz(text).filter(|grund| !self.geheim_im_gespraech(grund))
+    }
+
     /// Jeder Text, der aus einer Antwort ins Journal geht, ohne Schluessel; sonst verworfen.
     fn ohne_geheimnis_antwort(&self, a: Antwort) -> Result<Antwort, String> {
         if std::iter::once(&a.einschaetzung)
@@ -1006,9 +1036,20 @@ impl<N: Netz> Berater for KiBerater<N> {
     ) -> depot_sim::abstimmung::AbstimmungsAntwort {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::abstimmungs_frage_mit_bilanz(lage, &self.universum, stand, bilanz);
+        let f = if let Some(bp) = self.mindesteinsatz_bp.filter(|bp| *bp > 0) {
+            format!(
+                "{f}\nWenn du deinen Einsatzplan änderst und damit weniger als {bp} Basispunkte einsetzt, begründe das im Feld \"unter_mindesteinsatz\"."
+            )
+        } else {
+            f
+        };
         let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
-        self.mindesteinsatz_grund = None;
         let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Abstimmung, None);
+        let grund = e
+            .text
+            .as_deref()
+            .ok()
+            .and_then(|t| self.sicherer_mindesteinsatzgrund(t));
         match e
             .text
             .and_then(|t| {
@@ -1021,6 +1062,12 @@ impl<N: Netz> Berater for KiBerater<N> {
                 Ok(a)
             }) {
             Ok(mut a) => {
+                if grund.is_some()
+                    || aktive_gewichtsaenderungen(lage, stand.eigener_vorschlag.as_ref())
+                        != aktive_gewichtsaenderungen(lage, a.eigene.vorschlag.as_ref())
+                {
+                    self.mindesteinsatz_grund = grund.map(|g| (lage.datum, g));
+                }
                 a.eigene.prognose = None;
                 a.eigene.einschaetzung = format!("{} [{}]", a.eigene.einschaetzung, e.kosten);
                 a
@@ -1154,8 +1201,7 @@ impl<N: Netz> Berater for KiBerater<N> {
             .text
             .as_ref()
             .ok()
-            .and_then(|text| frage::lies_mindesteinsatz(text))
-            .filter(|grund| !self.enthaelt_schluessel(grund));
+            .and_then(|text| self.sicherer_mindesteinsatzgrund(text));
         self.kursprognosen = e
             .text
             .as_ref()

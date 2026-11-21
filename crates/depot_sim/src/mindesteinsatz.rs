@@ -6,13 +6,27 @@
 //!   (`analyse::pruefbericht::pflichtgrund_fehlt` zählt nur Zeilen, die auf „ · fehlt“ enden).
 //! - „fehlt, Regelwerk kürzte“: Die Zielgewichte der KI erreichen das Minimum, das Regelwerk hat
 //!   gekürzt (Budget, Anteil, Mindestorder). Das zählt nicht als Versäumnis.
+//! - Erreichen nur die eigenen Ziele das Minimum, nennt das Journal zusätzlich den Zielanteil
+//!   nach der Beratung. Die Handelsfreigabe beruht auf dem bestätigten Vorschlag.
 //!
 //! Eingebaut in `lauf::mindesteinsatz`. Die frühere Nachfrage war als `KiZweck::Abstimmung`
 //! gebucht und verfälschte die Kosten je Zweck; sie entfällt.
 
 use std::collections::BTreeMap;
 
-use depot_kern::{Isin, Vorschlag};
+use depot_kern::{Isin, Kurse, Topf, Vorschlag};
+
+pub(crate) fn zielanteil(topf: &Topf, kurse: &Kurse, vorschlag: Option<&Vorschlag>) -> i64 {
+    let gehalten = topf
+        .positionen()
+        .keys()
+        .filter_map(|isin| {
+            depot_regelwerk::entscheidung::ist_gewicht_bp(topf, kurse, isin)
+                .map(|bp| (isin.clone(), bp))
+        })
+        .collect();
+    ki_einsatz_bp(&gehalten, vorschlag)
+}
 
 /// Einsatz, den die KI selbst geplant hat, in bp vom Topfwert: genannte Zielgewichte plus die
 /// heutigen Gewichte gehaltener Werte, die sie nicht nennt (die bleiben unverändert). Der
