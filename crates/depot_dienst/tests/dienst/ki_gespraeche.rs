@@ -434,7 +434,7 @@ fn gemini_speichern_meldet_fehlenden_ruecklesebeleg_am_feld() -> Result<(), Stri
 }
 
 #[test]
-fn gemini_laeuft_vor_papier_und_speichert_stderr() -> Result<(), String> {
+fn papiertag_startet_trotz_laufendem_gemini() -> Result<(), String> {
     let wurzel = ordner()?;
     let daten = wurzel.join("daten");
     fs::write(
@@ -463,36 +463,66 @@ fn gemini_laeuft_vor_papier_und_speichert_stderr() -> Result<(), String> {
         starter,
         leeres_lagebild(),
     ));
-    let zeit = donnerstag(7, 30)?;
-    d.einreihen(Art::Papier, Anlass::Hand)?;
-    let (nr, kind) = some(d.schritt(zeit), "Gemini gestartet")?;
+    let terminzeit = donnerstag(7, 21)?;
+    let tag = some(terminzeit.frankfurt_tag(), "Handelstag")?;
+    {
+        let mut z = d.sperre();
+        z.zeitplan.an = true;
+        z.zeitplan.papier_danach = true;
+        z.boersen = vec![Boerse::Xetra];
+        z.erledigt.setze(Art::Termine, tag);
+    }
+    let (gemini_nr, gemini_kind) = some(d.schritt(terminzeit), "Gemini-Vorlauf gestartet")?;
+    assert_eq!(d.sperre().auftrag_stand(Art::Gemini), Some("läuft …"));
+    assert!(d.einreihen(Art::Gemini, Anlass::Hand).is_err());
+    let kurszeit = donnerstag(7, 30)?;
+    let (kurs_nr, kurs_kind) = some(d.schritt(kurszeit), "Kursabruf trotz Gemini gestartet")?;
     assert_eq!(
         d.sperre().laufend.as_ref().map(|a| a.art),
-        Some(Art::Gemini)
+        Some(Art::KurseVon(Boerse::Xetra))
     );
+    d.verfolge(kurs_nr, kurs_kind, || donnerstag(7, 30).ok());
+
+    let (papier_nr, papier_kind) = some(d.schritt(kurszeit), "Papiertag trotz Gemini gestartet")?;
     assert_eq!(
-        d.sperre().warteschlange.front().map(|a| a.art),
+        d.sperre().laufend.as_ref().map(|a| a.art),
         Some(Art::Papier)
     );
-    assert!(d.schritt(zeit).is_none());
-    d.verfolge(nr, kind, || donnerstag(7, 31).ok());
+    let live = get(&d, "/teil/live", kurszeit);
+    assert!(live.contains("Gemini-Zuarbeit läuft im Hintergrund."));
+    d.verfolge(gemini_nr, gemini_kind, || donnerstag(7, 31).ok());
+    assert_eq!(
+        d.sperre().laufend.as_ref().map(|a| a.art),
+        Some(Art::Papier)
+    );
     assert!(d.sperre().verlauf.front().is_some_and(|a| {
         a.art == Art::Gemini
             && a.protokoll
                 .iter()
                 .any(|z| z.contains("Probe-Standardfehler"))
     }));
+    d.verfolge(papier_nr, papier_kind, || donnerstag(7, 32).ok());
+    let lese_protokoll = |nr, zeit: Zeitpunkt| {
+        depot_dienst::protokoll::lesen(&wurzel, &format!("{}-{nr}", zeit.sekunden()))
+    };
+    let gemini_protokoll = lese_protokoll(gemini_nr, terminzeit)?;
+    let papier_protokoll = lese_protokoll(papier_nr, kurszeit)?;
+    assert!(gemini_protokoll.contains("Probe-Standardfehler"));
+    assert!(!papier_protokoll.contains("Probe-Standardfehler"));
+    assert!(papier_protokoll.contains("Lauf erfolgreich beendet."));
     let neu = dienst(wurzel, true);
-    assert_eq!(
-        neu.sperre().verlauf.front().map(|a| a.art),
-        Some(Art::Gemini)
+    assert!(
+        neu.sperre()
+            .verlauf
+            .iter()
+            .any(|a| a.art == Art::Gemini && a.erfolg == Some(true))
     );
-    let (nr, kind) = some(d.schritt(donnerstag(7, 31)?), "Papier gestartet")?;
-    assert_eq!(
-        d.sperre().laufend.as_ref().map(|a| a.art),
-        Some(Art::Papier)
+    assert!(
+        neu.sperre()
+            .verlauf
+            .iter()
+            .any(|a| a.art == Art::Papier && a.erfolg == Some(true))
     );
-    d.verfolge(nr, kind, || donnerstag(7, 32).ok());
     Ok(())
 }
 

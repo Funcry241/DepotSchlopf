@@ -149,7 +149,7 @@ pub fn lesen(wurzel: &Path, kennung: &str) -> Result<String, String> {
     Ok(text)
 }
 
-fn aufraeumen(wurzel: &Path, aktuell: &str) -> Result<(), String> {
+fn aufraeumen(wurzel: &Path, aktuell: &str, parallel: Option<&str>) -> Result<(), String> {
     let mut dateien = Vec::new();
     for eintrag in fs::read_dir(ordner(wurzel)).map_err(|_| "Protokollordner nicht lesbar.")? {
         let e = eintrag.map_err(|_| "Protokollordner nicht lesbar.")?;
@@ -173,7 +173,7 @@ fn aufraeumen(wurzel: &Path, aktuell: &str) -> Result<(), String> {
     let entfernen = dateien.len().saturating_sub(AUFBEWAHREN);
     for (_, _, kennung, pfad) in dateien
         .into_iter()
-        .filter(|(_, _, k, _)| k != aktuell)
+        .filter(|(_, _, k, _)| k != aktuell && Some(k.as_str()) != parallel)
         .take(entfernen)
     {
         fs::remove_file(pfad).map_err(|_| format!("Altes Protokoll {kennung} nicht löschbar."))?;
@@ -195,6 +195,7 @@ impl Datei {
         version: Option<&str>,
         start: Zeitpunkt,
         art: &str,
+        parallel: Option<&str>,
     ) -> Result<Self, String> {
         let p = dateipfad(wurzel, kennung)?;
         fs::create_dir_all(ordner(wurzel)).map_err(|_| "Protokollordner nicht schreibbar.")?;
@@ -221,7 +222,7 @@ impl Datei {
                 version.unwrap_or("unbekannt")
             ),
         )?;
-        aufraeumen(wurzel, kennung)?;
+        aufraeumen(wurzel, kennung, parallel)?;
         Ok(log)
     }
 
@@ -382,7 +383,8 @@ mod tests {
             .ok_or("Testzeit fehlt")?;
         for n in 0..AUFBEWAHREN.saturating_add(3) {
             let kennung = format!("1-{n}");
-            let mut datei = Datei::neu(&wurzel, &kennung, None, zeit, "Test")?;
+            let parallel = (n > 0).then_some("1-0");
+            let mut datei = Datei::neu(&wurzel, &kennung, None, zeit, "Test", parallel)?;
             if n == AUFBEWAHREN.saturating_add(2) {
                 datei.bytes = DATEI_MAX.saturating_sub(ENDE_RESERVE);
                 datei.zeile(zeit, "geheimer, zu großer Rest")?;
@@ -394,7 +396,8 @@ mod tests {
             .map_err(|e| e.to_string())?
             .count();
         assert_eq!(anzahl, AUFBEWAHREN);
-        assert!(lesen(&wurzel, "1-0").is_err());
+        assert!(lesen(&wurzel, "1-0").is_ok());
+        assert!(lesen(&wurzel, "1-1").is_err());
         let text = lesen(&wurzel, &format!("1-{}", AUFBEWAHREN.saturating_add(2)))?;
         assert!(text.contains("Protokollgrenze erreicht"));
         assert!(text.contains("Lauf abgebrochen"));
@@ -451,7 +454,7 @@ mod tests {
             .ok_or("Testzeit fehlt")?;
         for n in 0..AUFBEWAHREN.saturating_add(2) {
             let kennung = format!("{}-{n}", 100_usize.saturating_sub(n));
-            Datei::neu(&wurzel, &kennung, None, zeit, "Test")?
+            Datei::neu(&wurzel, &kennung, None, zeit, "Test", None)?
                 .abschliessen(zeit, "Lauf erfolgreich beendet.")?;
         }
         assert!(lesen(&wurzel, "100-0").is_err());

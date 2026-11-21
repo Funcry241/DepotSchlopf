@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 
 use depot_journal::{Art, Journal, JournalFehler, Stand};
 use depot_kern::json::{Json, lies, zitiere};
-use depot_kern::{Datum, Verlaesslichkeit, Zeitbezug, Zeitpunkt};
+use depot_kern::{Betroffen, Datum, Isin, Verlaesslichkeit, Zeitbezug, Zeitpunkt};
 use depot_lage::html::maskiere;
-use depot_lage::{Thesenpruefung, datum_text, zeit_text};
+use depot_lage::{OffeneThese, Thesenpruefung, datum_text, zeit_text};
 
 use crate::http::{antwort, feld, umleitung};
 use crate::werkbank::{Dienst, lies_falls_da, schreibe_ganz};
@@ -234,6 +234,8 @@ struct Fertig {
     geprueft: Zeitpunkt,
     bild: Bild,
     eingaben: Option<Eingaben>,
+    bereit: VecDeque<Eingabe>,
+    offene_thesen: Vec<OffeneThese>,
     pruefungen: Vec<Thesenpruefung>,
 }
 
@@ -256,6 +258,7 @@ struct Eingabe {
     zeit: String,
     abruf: Zeitpunkt,
     einordnung: Einordnung,
+    werte: Vec<Isin>,
 }
 
 /// Strukturierte Belege genau des Abschnitts, den der Vergleich geprüft hat.
@@ -365,10 +368,13 @@ pub(crate) fn seite(
     let daten = d.wurzel.join("daten");
     let ein = einstellung(&daten);
     let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
-    let mut html = format!(
-        "<section id=\"neuroschlopf-vergleich\"><h2>NeuroSchlopf · Belegvergleich</h2>\
-        <p>NeuroSchlopf vergleicht belegte Nachrichten und Termine mit dem letzten bestätigten Journalstand. Dachs und Maus können anhand der Änderungen prüfen, ob ihre bisherigen Thesen noch tragen.</p>\
-        <h3>Aktivität</h3><p>Hintergrundvergleich · {}</p>",
+    let mut html = String::from(
+        "<section id=\"neuroschlopf-vergleich\"><h2>NeuroSchlopf · Belegvergleich</h2>",
+    );
+    offene_thesen_html(&mut html, anzeige.fertig.as_ref(), tag);
+    let _ = write!(
+        html,
+        "<h3>Aktivität</h3><p>Hintergrundvergleich · {}</p>",
         aktivitaet(d, &anzeige, &ein)
     );
     let gespeichert;
@@ -421,19 +427,23 @@ pub(crate) fn seite(
         }
     };
     if let Some(b) = bild {
-        eingaben_html(&mut html, b, eingaben);
-        ergebnis_html(&mut html, b, eingaben);
+        bereit_html(&mut html, b);
     }
-    html.push_str("<h3>Dachs und Maus</h3><p>Die Übermittlung der Belege an einen Berater und seine protokollierte Entscheidung sind zwei getrennte Ereignisse.</p>");
     aufrufe.schlopfmodell(&mut html);
     thesen_html(&mut html, bild, pruefungen);
+    if let Some(b) = bild {
+        html.push_str("<details><summary>Alle neuen Belege</summary>");
+        ergebnis_html(&mut html, b, eingaben);
+        eingaben_html(&mut html, b, eingaben);
+        html.push_str("</details>");
+    }
     drop(anzeige);
     let _ = write!(
         html,
         "<h3>Modellstatus</h3><p>Neuronales Modell noch nicht eingebunden. Der produktive Vergleich arbeitet mit dem Belegabgleich oben. Die Einbindung eines Modells für Depotbelege folgt mit #325.</p>\
         <ul><li><a href=\"/neuroschlopf/lernlauf\">Neuro2026-Referenzlauf Multiplikation</a> · abgeschlossener Lernlauf mit echten Messwerten</li>\
         <li><a href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a> · historische Thesen und Belege von Hand bewerten</li></ul>\
-        <p><a href=\"/einrichtung#neuroschlopf\">NeuroSchlopf einrichten</a></p></section>"
+        </section>"
     );
     let seite = crate::seiten::rahmen(
         "/neuroschlopf",
@@ -447,14 +457,92 @@ pub(crate) fn seite(
     antwort(200, crate::HTML, seite.as_bytes())
 }
 
+fn offene_thesen_html(html: &mut String, fertig: Option<&Fertig>, heute: Option<Datum>) {
+    html.push_str("<h3>Offene Thesen und ihre Belege</h3>");
+    let Some(f) = fertig else {
+        html.push_str("<p>Die offenen Thesen erscheinen nach der nächsten bestätigten Prüfung des Journals.</p>");
+        return;
+    };
+    let heute = heute.or_else(|| f.geprueft.frankfurt_tag());
+    let mut thesen = f
+        .offene_thesen
+        .iter()
+        .filter(|t| heute.is_none_or(|tag| t.gueltig_bis >= tag))
+        .peekable();
+    if thesen.peek().is_none() {
+        html.push_str(
+            "<p>Im geprüften Journal ist keine offene These von Dachs oder Maus belegt.</p>",
+        );
+    }
+    for t in thesen {
+        let _ = write!(
+            html,
+            "<h4>{} · {} · These vom {}</h4><p>{}</p>",
+            t.wer,
+            t.isin,
+            datum_text(t.tag),
+            maskiere(&t.text)
+        );
+        if t.belege.is_empty() {
+            html.push_str("<p>Kein Beleg aus dem verfügbaren Stand in einer Prüfung dieser These zitiert.</p>");
+        } else {
+            html.push_str("<p>In einer Prüfung dieser These zitierte Belege</p><ul>");
+            for b in &f.bereit {
+                if let Some(grund) = t.belege.get(&b.zeile) {
+                    fokus_beleg_html(html, b, "", Some(grund));
+                }
+            }
+            html.push_str("</ul>");
+        }
+        let mut nennungen = f
+            .bereit
+            .iter()
+            .filter(|b| b.werte.contains(&t.isin) && !t.belege.contains_key(&b.zeile))
+            .peekable();
+        if nennungen.peek().is_some() {
+            html.push_str(
+                "<details><summary>Weitere Belege zum Wert · Thesenbezug offen</summary><ul>",
+            );
+            for b in nennungen {
+                fokus_beleg_html(
+                    html,
+                    b,
+                    if b.termin {
+                        "Termin zum Wert · "
+                    } else {
+                        "Wert in der Nachricht genannt · "
+                    },
+                    None,
+                );
+            }
+            html.push_str("</ul></details>");
+        }
+    }
+}
+
+fn fokus_beleg_html(html: &mut String, b: &Eingabe, einordnung: &str, grund: Option<&str>) {
+    let _ = write!(
+        html,
+        "<li>{einordnung}<strong>J{}</strong> · {} · {}",
+        b.zeile,
+        maskiere(&b.quelle),
+        maskiere(&b.aussage)
+    );
+    if let Some(grund) = grund {
+        let _ = write!(html, "<br>Begründung aus der Prüfung · {}", maskiere(grund));
+    }
+    html.push_str("</li>");
+}
+
 fn eingaben_html(html: &mut String, bild: &Bild, eingaben: Option<&Eingaben>) {
     let _ = write!(
         html,
-        "<h3>Eingaben</h3><p>Bestätigter Journalstand · {} Bytes · Prüfsumme <code>{}</code></p>",
+        "<details><summary>Technische Details</summary><p>Bestätigter Journalstand · {} Bytes · Prüfsumme <code>{}</code></p>",
         bild.journal.bytes,
         maskiere(bild.journal.hash.get(..16).unwrap_or(&bild.journal.hash))
     );
     let Some(e) = eingaben else {
+        html.push_str("</details>");
         if bild.grenze.is_some() {
             html.push_str("<p>Die einzelnen Eingaben dieses gespeicherten Stands erscheinen nach der nächsten Prüfung des Journals. Dafür muss das Journal nicht fortgeschrieben werden.</p>");
         } else {
@@ -480,6 +568,7 @@ fn eingaben_html(html: &mut String, bild: &Bild, eingaben: Option<&Eingaben>) {
             e.bis
         );
     }
+    html.push_str("</details>");
     if e.gesamt == 0 {
         html.push_str("<p>Im verglichenen Abschnitt stehen keine Nachrichten oder Termine.</p>");
         return;
@@ -553,11 +642,15 @@ fn ergebnis_html(html: &mut String, bild: &Bild, eingaben: Option<&Eingaben>) {
             }
         }
     }
+}
+
+fn bereit_html(html: &mut String, bild: &Bild) {
+    html.push_str("<h3>Zur Prüfung verfügbare Belege</h3>");
     match bild.beratungsstand {
         Some(t) => {
             let _ = write!(
                 html,
-                "<p>Belege für Dachs und Maus · Wissensstand {} · Journalzeilen {}</p>",
+                "<p>Für Dachs und Maus vorbereitet · Wissensstand {} · Journalzeilen {}</p>",
                 zeit_text(t),
                 bild.quellen
                     .iter()
@@ -566,12 +659,14 @@ fn ergebnis_html(html: &mut String, bild: &Bild, eingaben: Option<&Eingaben>) {
                     .join(", ")
             );
         }
-        None => html.push_str("<p>Für Dachs und Maus ist noch kein Beleg bestätigt.</p>"),
+        None => {
+            html.push_str("<p>Für Dachs und Maus sind noch keine neuen Belege vorbereitet.</p>");
+        }
     }
 }
 
 fn thesen_html(html: &mut String, bild: Option<&Bild>, pruefungen: Option<&[Thesenpruefung]>) {
-    html.push_str("<h4>Letzte protokollierte Thesenprüfungen</h4>");
+    html.push_str("<h3>Letzte protokollierte Thesenprüfungen</h3>");
     let Some(pruefungen) = pruefungen else {
         html.push_str("<p>Die Thesenprüfungen werden beim nächsten abgeschlossenen Vergleich aus dem Journal gelesen.</p>");
         return;
@@ -622,30 +717,47 @@ struct Fund<'a> {
     anzeige: String,
     zeit: String,
     abruf: Zeitpunkt,
+    werte: Vec<Isin>,
+}
+
+impl Fund<'_> {
+    fn eingabe(&self, einordnung: Einordnung) -> Eingabe {
+        Eingabe {
+            zeile: self.zeile,
+            termin: self.art == "termin",
+            quelle: self.quelle.to_owned(),
+            aussage: self.anzeige.clone(),
+            zeit: self.zeit.clone(),
+            abruf: self.abruf,
+            einordnung,
+            werte: self.werte.clone(),
+        }
+    }
 }
 
 struct Vergleich<'a> {
     bisher: BTreeMap<(&'static str, &'a str, String), String>,
     ausgabe: VecDeque<String>,
-    quellen: VecDeque<u64>,
+    bereit: VecDeque<Eingabe>,
+    bisher_bereit: VecDeque<Eingabe>,
+    bisher_quellen: Option<&'a VecDeque<u64>>,
     vergleichbar: bool,
     grenze: u64,
     eingaben: Eingaben,
 }
 
 impl<'a> Vergleich<'a> {
-    fn belege(&mut self, f: Fund<'a>) {
-        let alt = self
-            .bisher
-            .insert((f.art, f.quelle, f.id), f.aussage.clone());
+    fn belege(&mut self, mut f: Fund<'a>) {
+        if self.bisher_quellen.is_some_and(|q| q.contains(&f.zeile)) {
+            self.bisher_bereit
+                .push_back(f.eingabe(Einordnung::Erststand));
+        }
+        let alt = self.bisher.insert(
+            (f.art, f.quelle, std::mem::take(&mut f.id)),
+            f.aussage.clone(),
+        );
         if f.zeile <= self.grenze {
             return;
-        }
-        if self.vergleichbar && alt.as_deref() != Some(f.aussage.as_str()) {
-            if self.quellen.len() == AUSGABE_MAX {
-                self.quellen.pop_front();
-            }
-            self.quellen.push_back(f.zeile);
         }
         let einordnung = match alt {
             _ if !self.vergleichbar => Einordnung::Erststand,
@@ -669,15 +781,17 @@ impl<'a> Vergleich<'a> {
             "{art} · Journalzeile {} · {} · {betrag}",
             f.zeile, f.quelle
         ));
-        self.eingaben.zaehle(Eingabe {
-            zeile: f.zeile,
-            termin: f.art == "termin",
-            quelle: f.quelle.to_owned(),
-            aussage: f.anzeige,
-            zeit: f.zeit,
-            abruf: f.abruf,
-            einordnung,
-        });
+        let eingabe = f.eingabe(einordnung);
+        if matches!(
+            eingabe.einordnung,
+            Einordnung::Neu | Einordnung::Geaendert(_)
+        ) {
+            if self.bereit.len() == AUSGABE_MAX {
+                self.bereit.pop_front();
+            }
+            self.bereit.push_back(eingabe.clone());
+        }
+        self.eingaben.zaehle(eingabe);
     }
 }
 
@@ -696,6 +810,7 @@ fn nachricht_fund(zeile: u64, n: &depot_journal::NachrichtBeleg) -> Fund<'_> {
         anzeige: aussage.into(),
         zeit: zeit_text(n.zeit()),
         abruf: n.abruf(),
+        werte: Vec::new(),
     }
 }
 
@@ -723,6 +838,48 @@ fn termin_fund(zeile: u64, n: &depot_journal::TerminBeleg) -> Fund<'_> {
             Zeitbezug::Zeitpunkt(z) => zeit_text(z),
         },
         abruf: n.abruf(),
+        werte: t
+            .betroffen()
+            .iter()
+            .filter_map(|b| match b {
+                Betroffen::Wert(isin) => Some(isin.clone()),
+                Betroffen::Groesse(_) => None,
+            })
+            .collect(),
+    }
+}
+
+struct Vergleichsergebnis {
+    bild: Bild,
+    eingaben: Option<Eingaben>,
+    bereit: VecDeque<Eingabe>,
+}
+
+impl Vergleichsergebnis {
+    fn fertig(
+        mut self,
+        stand: &Stand,
+        jetzt: Zeitpunkt,
+        schritt: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<Fertig, String> {
+        let werte = depot_kern::liste::beobachtungsliste().unwrap_or_default();
+        for b in self.bereit.iter_mut().filter(|b| !b.termin) {
+            schritt()?;
+            b.werte = depot_lage::nachricht_wertnennungen(&b.aussage, &werte);
+        }
+        let belegzeilen = self.bereit.iter().map(|b| b.zeile).collect();
+        let offene_thesen = jetzt.frankfurt_tag().map_or_else(
+            || Ok(Vec::new()),
+            |tag| depot_lage::offene_thesen(stand, tag, &belegzeilen, schritt),
+        )?;
+        Ok(Fertig {
+            geprueft: jetzt,
+            bild: self.bild,
+            eingaben: self.eingaben,
+            bereit: self.bereit,
+            offene_thesen,
+            pruefungen: depot_lage::schlopfmodell_thesenpruefungen(stand),
+        })
     }
 }
 
@@ -734,7 +891,7 @@ fn verglichen(
     jetzt: Zeitpunkt,
     vorher: Option<&Bild>,
     schritt: &mut dyn FnMut() -> Result<(), String>,
-) -> Result<(Bild, Option<Eingaben>), String> {
+) -> Result<Vergleichsergebnis, String> {
     let basis = vorher.filter(|v| v.journal.im_journal(journalbytes) && v.stichtag <= jetzt);
     let mut grenze = 0_u64;
     if let Some(bild) = basis {
@@ -761,7 +918,9 @@ fn verglichen(
     let mut v = Vergleich {
         bisher: BTreeMap::new(),
         ausgabe: VecDeque::new(),
-        quellen: VecDeque::new(),
+        bereit: VecDeque::new(),
+        bisher_bereit: VecDeque::new(),
+        bisher_quellen: basis.map(|b| &b.quellen),
         vergleichbar,
         grenze: pruefgrenze,
         eingaben: Eingaben::default(),
@@ -803,18 +962,29 @@ fn verglichen(
         .saturating_add(1);
     let eingaben = belegt.then_some(eingaben);
     if let Some(vorher) = gleich {
-        return Ok((vorher.clone(), eingaben));
+        return Ok(Vergleichsergebnis {
+            bild: vorher.clone(),
+            eingaben,
+            bereit: v.bisher_bereit,
+        });
     }
-    let (quellen, beratungsstand) = if v.quellen.is_empty() {
-        basis.map_or_else(
+    // Ein Abschnitt mit bloßen Journalnotizen ändert den für die Beratung verfügbaren
+    // Belegstand nicht. Dann bleiben genau dessen belegte Quellen verfügbar.
+    let (quellen, beratungsstand, bereit) = if v.bereit.is_empty() {
+        let (quellen, beratungsstand) = basis.map_or_else(
             || (VecDeque::new(), None),
             |b| (b.quellen.clone(), b.beratungsstand),
-        )
+        );
+        (quellen, beratungsstand, v.bisher_bereit)
     } else {
-        (v.quellen, Some(jetzt))
+        (
+            v.bereit.iter().map(|b| b.zeile).collect(),
+            Some(jetzt),
+            v.bereit,
+        )
     };
-    Ok((
-        Bild {
+    Ok(Vergleichsergebnis {
+        bild: Bild {
             journal,
             stichtag: jetzt,
             basis: basis.map(|v| v.stichtag),
@@ -824,7 +994,8 @@ fn verglichen(
             grenze: Some(grenze),
         },
         eingaben,
-    ))
+        bereit,
+    })
 }
 
 struct Budget {
@@ -926,21 +1097,14 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             JOURNAL_MAX,
             &mut schritt,
             |s, e, bytes, m, schritt| {
-                verglichen(s, e, bytes, m.into(), jetzt, gespeichert.as_ref(), schritt).map(
-                    |(bild, eingaben)| {
-                        (
-                            bild,
-                            eingaben,
-                            depot_lage::schlopfmodell_thesenpruefungen(s),
-                        )
-                    },
-                )
+                verglichen(s, e, bytes, m.into(), jetzt, gespeichert.as_ref(), schritt)?
+                    .fertig(s, jetzt, schritt)
             },
         );
         if !frei(d, &daten) {
             continue;
         }
-        let (bild, eingaben, pruefungen) = match neu {
+        let fertig = match neu {
             Ok(Ok(bild)) => bild,
             Err(JournalFehler::Belegt) => continue,
             Ok(Err(e)) | Err(JournalFehler::Halt(e)) => {
@@ -954,6 +1118,7 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
                 continue;
             }
         };
+        let bild = &fertig.bild;
         if !Journal::hintergrund_abdruck(&pfad).is_ok_and(|m| Marke::from(m) == bild.journal) {
             continue;
         }
@@ -966,17 +1131,10 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             anzeige(&d.neuro, Status::Fehler(e));
             continue;
         }
-        {
-            let mut anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
-            anzeige.status = Status::Fertig;
-            anzeige.fertig = Some(Fertig {
-                geprueft: jetzt,
-                bild: bild.clone(),
-                eingaben,
-                pruefungen,
-            });
-        }
-        gespeichert = Some(bild);
+        gespeichert = Some(bild.clone());
+        let mut anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
+        anzeige.status = Status::Fertig;
+        anzeige.fertig = Some(fertig);
         geprueft = true;
     }
 }
@@ -1023,6 +1181,15 @@ mod tests {
             zeit: &str,
             bisher: Option<&Bild>,
         ) -> Result<(Bild, Option<Eingaben>), String> {
+            self.vergleich_voll(zeit, bisher)
+                .map(|v| (v.bild, v.eingaben))
+        }
+
+        fn vergleich_voll(
+            &self,
+            zeit: &str,
+            bisher: Option<&Bild>,
+        ) -> Result<Vergleichsergebnis, String> {
             let zeit = Zeitpunkt::lies(zeit).ok_or("Testzeit ungültig")?;
             Journal::pruefe_im_hintergrund(
                 &self.0.join("journal.txt"),
@@ -1107,6 +1274,7 @@ mod tests {
         let mut html = String::new();
         eingaben_html(&mut html, bild, Some(e));
         ergebnis_html(&mut html, bild, Some(e));
+        bereit_html(&mut html, bild);
         html
     }
 
@@ -1142,6 +1310,70 @@ mod tests {
         )?;
         j.belege_termin(&beleg).map_err(|e| format!("{e:?}"))?;
         drop(j);
+        Ok(())
+    }
+
+    #[test]
+    fn offene_these_zeigt_zitat_und_nennung_mit_unterschiedlichem_status() -> Result<(), String> {
+        let daten = Testdaten::neu()?;
+        let t1 = "2026-11-12T10:30:00Z";
+        let t2 = "2026-11-12T12:30:00Z";
+        let basis = daten.bild(t1, None)?;
+        for (aussage, url) in [
+            (
+                "Neue Aufträge im Cloud-Geschäft",
+                "https://example.test/auftraege",
+            ),
+            ("SAP verschiebt Konferenz", "https://example.test/sap"),
+            ("Weihnachtsbaum gefällt", "https://example.test/baum"),
+        ] {
+            daten.belege(t2, aussage, url)?;
+        }
+        let Vergleichsergebnis {
+            bild,
+            eingaben,
+            mut bereit,
+        } = daten.vergleich_voll(t2, Some(&basis))?;
+        let werte = depot_kern::liste::beobachtungsliste()?;
+        for b in &mut bereit {
+            b.werte = depot_lage::nachricht_wertnennungen(&b.aussage, &werte);
+        }
+        let geprueft = Zeitpunkt::lies(t2).ok_or("Testzeit fehlt")?;
+        let tag = geprueft.frankfurt_tag().ok_or("Testtag fehlt")?;
+        let f = Fertig {
+            geprueft,
+            bild,
+            eingaben,
+            bereit,
+            offene_thesen: vec![OffeneThese {
+                wer: "Dachs",
+                tag,
+                isin: Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?,
+                text: "Cloud-Umsatz nimmt zu".into(),
+                gueltig_bis: tag,
+                belege: BTreeMap::from([(2, "Die Aufträge stützen den erwarteten Umsatz.".into())]),
+            }],
+            pruefungen: Vec::new(),
+        };
+        let mut html = String::new();
+        offene_thesen_html(&mut html, Some(&f), Some(tag));
+        assert!(html.contains(
+            "In einer Prüfung dieser These zitierte Belege</p><ul><li><strong>J2</strong>"
+        ));
+        assert!(html.contains("Wert in der Nachricht genannt · <strong>J3</strong>"));
+        assert!(html.contains("Die Aufträge stützen den erwarteten Umsatz."));
+        assert!(!html.contains("Weihnachtsbaum"));
+        let e = f.eingaben.as_ref().ok_or("Verglichene Eingaben fehlen")?;
+        assert!(ansicht(&f.bild, e).contains("Weihnachtsbaum"));
+        // Eine spätere Beratungsnotiz lässt die Quellen des verfügbaren Stands bestehen.
+        let mut j = daten.journal()?;
+        j.begruende(tag, "Test", "Eigenständige Notiz")
+            .map_err(|e| format!("{e:?}"))?;
+        drop(j);
+        let spaeter = daten.vergleich_voll("2026-11-12T13:00:00Z", Some(&f.bild))?;
+        let vorliegend = spaeter.bereit.front().ok_or("Vorbereiteter Beleg fehlt")?;
+        assert_eq!(vorliegend.zeile, 2);
+        assert_eq!(vorliegend.aussage, "Neue Aufträge im Cloud-Geschäft");
         Ok(())
     }
 

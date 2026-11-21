@@ -785,8 +785,7 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
 
 fn ki_auftraege(z: &Zustand, tag: Datum) -> impl Iterator<Item = &Auftrag> {
     let am_tag = move |zeit: Zeitpunkt| zeit.in_frankfurt().is_some_and(|(d, ..)| d == tag);
-    z.laufend
-        .iter()
+    z.aktive_auftraege()
         .chain(
             z.verlauf
                 .iter()
@@ -1093,7 +1092,7 @@ fn taetigkeit(
 ) -> String {
     let klasse = z.laufend.as_ref().map_or("", |_| "aktiver-bereich");
     let mut s = format!("<section id=\"taetigkeit\" class=\"{klasse}\"><h2>Tätigkeit</h2>");
-    if let Some(a) = &z.laufend {
+    if let Some(a) = z.aktive_auftraege().next() {
         let _ = write!(
             s,
             "<p class=\"kopf offen\">Läuft: {} ({}) seit {}</p><p class=\"leise\">Kennung {}</p>{}",
@@ -1147,6 +1146,9 @@ fn taetigkeit(
             "<p class=\"kopf {klasse}\" id=\"neustart\">{}</p>",
             maskiere(&text)
         );
+    }
+    if z.laufend.is_some() && z.aktive_auftraege().any(|a| a.art == Art::Gemini) {
+        s.push_str("<p class=\"leise\">Gemini-Zuarbeit läuft im Hintergrund.</p>");
     }
     wartende_auftraege(&mut s, z, heute);
     letzter_fehler_hinweis(&mut s, z);

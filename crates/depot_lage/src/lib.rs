@@ -31,7 +31,8 @@ pub use depot_sim::ausfuehrung;
 mod budget;
 mod depot;
 pub use depot_sim::schlopfmodell::{
-    Thesenpruefung, letzte_thesenpruefungen as schlopfmodell_thesenpruefungen,
+    OffeneThese, Thesenpruefung, letzte_thesenpruefungen as schlopfmodell_thesenpruefungen,
+    nachricht_wertnennungen, offene_thesen,
 };
 pub mod depotverlauf;
 pub mod diagramm;
