@@ -201,12 +201,12 @@ pub fn formular(token: &str, ziel: &str, info: &str) -> String {
     format!(
         "<section id=\"sicherung\"><h2>Sicherung</h2>\
         <div data-teil=\"/teil/sicherung\" role=\"status\">{info}</div>\
-        <form method=\"post\" action=\"/sicherung-ziel\"><input type=\"hidden\" name=\"t\" value=\"{token}\">\
+        <form method=\"post\" action=\"/sicherung-ziel\" data-aenderungen><input type=\"hidden\" name=\"t\" value=\"{token}\">\
         <label for=\"sicherungsziel\">Zielordner</label>\
         <div class=\"sicherungszeile\"><input id=\"sicherungsziel\" type=\"text\" name=\"ziel\" value=\"{}\">\
         {auswahl}</div><div class=\"sicherungszeile\">\
         <button class=\"primaer\" type=\"submit\" name=\"aktion\" value=\"starten\">Jetzt sichern</button>\
-        <button type=\"submit\" name=\"aktion\" value=\"speichern\">Ziel speichern</button></div></form>\
+        <button type=\"submit\" name=\"aktion\" value=\"speichern\" data-speichern-hervorheben>Ziel speichern</button></div></form>\
         <details><summary>Hinweis zu Cloud-Ordnern</summary>\
         <p>Ein Cloud-Ordner wie OneDrive lädt das Papierdepot und seine Belege hoch. Das Journal enthält keine Schlüssel.</p>\
         </details></section>",
