@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Vertikale Abstände in KI-Vorschau und Zeitstrahl auf Live reduzieren
+pfade:
+crates/depot_dienst/src/assets/stil.css
