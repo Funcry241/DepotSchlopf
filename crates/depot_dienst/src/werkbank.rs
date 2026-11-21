@@ -8,14 +8,14 @@
 //! **Eindeutige Kennung:** Jeder Auftrag hat eine Kennung aus Startzeit und Nummer. Dieselbe Art
 //! steht nie zweimal in der Warteschlange oder laeuft zugleich.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{BufReader, PipeReader, Write, pipe};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use depot_kern::{Boerse, Datum, Zeitpunkt};
+use depot_kern::{BeraterId, Boerse, Datum, Zeitpunkt};
 use depot_lage::{Betrieb, Lagebild, SchluesselStand, TagStand, ortszeit};
 
 use crate::hinweis::Gedaechtnis;
@@ -268,6 +268,8 @@ pub struct Zustand {
     pub naechste_nr: u64,
     pub(crate) ibkr_pruefung_ab_nr: u64,
     pub laufend: Option<Auftrag>,
+    /// Berater, deren Transportaufruf im laufenden Prozess noch auf eine Antwort wartet.
+    pub(crate) berater_warten: BTreeSet<BeraterId>,
     pub warteschlange: VecDeque<WartenderAuftrag>,
     pub verlauf: VecDeque<Auftrag>,
     pub zeitplan: Zeitplan,
@@ -783,6 +785,7 @@ impl Dienst {
                 naechste_nr,
                 ibkr_pruefung_ab_nr: naechste_nr,
                 laufend: None,
+                berater_warten: BTreeSet::new(),
                 warteschlange: VecDeque::new(),
                 verlauf,
                 zeitplan,
@@ -962,6 +965,9 @@ impl Dienst {
         match depot_lage::papier_freigeben(&self.wurzel, gesehen, bestaetigt_am) {
             Ok(()) => {
                 z.lage_veraltet = true;
+                if let Some(lage) = &mut z.lage {
+                    lage.bild.papierfreigabe_offen = false;
+                }
                 "papierfreigabe_ok"
             }
             Err(depot_lage::PapierFreigabeFehler::Geaendert) => "papierfreigabe_geaendert",
@@ -1551,6 +1557,7 @@ impl Dienst {
         let Some(mut a) = z.laufend.take() else {
             return;
         };
+        z.berater_warten.clear();
         a.ende = uhr();
         a.erfolg = Some(erfolg);
         if a.art == Art::Update {
@@ -1684,6 +1691,18 @@ impl Dienst {
         let Some(a) = z.laufend.as_mut().filter(|a| a.nr == nr) else {
             return;
         };
+        if matches!(
+            a.art,
+            Art::Papier | Art::Vorbereiten | Art::Simulation | Art::Wochenrueckschau
+        ) && let Some((wer, wartet)) = depot_kern::hinweis::lies_berater_anfrage(&zeile)
+        {
+            if wartet {
+                z.berater_warten.insert(wer);
+            } else {
+                z.berater_warten.remove(&wer);
+            }
+            return;
+        }
         let zeit = zeit.unwrap_or(a.start);
         if let Some(h) = depot_kern::hinweis::lies(&zeile) {
             a.hinweis = Some(kuerze(h.to_string()));
@@ -1943,5 +1962,63 @@ fn zeitplan_auftrag_erlaubt(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> bool {
         Art::Gemini | Art::Sicherung | Art::IbkrAbgleich => true,
         Art::Vorbereiten => vorbereitung_faellig(z, jetzt),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod beraterstatus_tests {
+    use super::*;
+
+    #[test]
+    fn anfragen_besitzen_einen_eigenen_lebenszyklus_im_aktiven_lauf() -> Result<(), String> {
+        let wurzel =
+            std::env::temp_dir().join(format!("depot_beraterstatus_{}", std::process::id()));
+        fs::create_dir_all(wurzel.join("daten")).map_err(|e| e.to_string())?;
+        let starter: Starter = Box::new(|_, _| {
+            #[cfg(windows)]
+            let mut befehl = Command::new("cmd");
+            #[cfg(windows)]
+            befehl.args(["/C", "exit /B 3"]);
+            #[cfg(not(windows))]
+            let mut befehl = Command::new("sh");
+            #[cfg(not(windows))]
+            befehl.args(["-c", "exit 3"]);
+            befehl
+        });
+        let dienst = Arc::new(Dienst::neu(
+            wurzel.clone(),
+            String::new(),
+            starter,
+            crate::lagerechner(Arc::new(crate::System)),
+        ));
+        let uhr = || Zeitpunkt::aus_sekunden(1_800_000_000);
+        let zeit = uhr().ok_or("Ungültige Uhrzeit")?;
+        dienst.einreihen(Art::Papier, Anlass::Hand)?;
+        let (nr, kind) = dienst.schritt(zeit).ok_or("Kein Auftrag gestartet")?;
+        let prufe = |erwartet| {
+            let kopf = crate::betriebsleiste(&dienst, zeit.frankfurt_tag());
+            assert!(kopf.contains(&format!("data-denkt=\"{erwartet}\"")));
+        };
+        prufe("niemand");
+        let signal = |id, wer, wartet| {
+            dienst.protokolliere(
+                id,
+                depot_kern::hinweis::berater_anfrage(wer, wartet),
+                Some(zeit),
+            );
+        };
+        signal(nr.saturating_add(1), BeraterId::Dachs, true);
+        prufe("niemand");
+        signal(nr, BeraterId::Dachs, true);
+        prufe("dachs");
+        signal(nr, BeraterId::Maus, true);
+        prufe("beide");
+        signal(nr, BeraterId::Dachs, false);
+        prufe("maus");
+        dienst.verfolge(nr, kind, uhr);
+        prufe("niemand");
+        assert!(dienst.sperre().berater_warten.is_empty());
+        fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+        Ok(())
     }
 }

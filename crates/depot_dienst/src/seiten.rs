@@ -1417,7 +1417,7 @@ fn gesamtstatus_teil(token: &str, z: &Zustand, einrichtung: bool) -> String {
 
 /// Gemeinsame, unabhängig von Formularen aufgefrischte Betriebsleiste.
 pub fn betriebsleiste(start: &str, z: &Zustand, heute: Option<Datum>) -> String {
-    betriebsleiste_mit_kurssperre(start, z, heute, None, None)
+    betriebsleiste_mit_kurssperre(start, z, heute, None, None, false)
 }
 
 pub(crate) fn betriebsleiste_mit_kurssperre(
@@ -1426,6 +1426,7 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
     heute: Option<Datum>,
     kurssperre: Option<&str>,
     update_sperre: Option<&UpdateSperre>,
+    update_freigabe_offen: bool,
 ) -> String {
     let mut s = marke(start);
     let betrieb = z.gesamtstatus();
@@ -1435,12 +1436,7 @@ pub(crate) fn betriebsleiste_mit_kurssperre(
         "<span hidden data-otter=\"{}\" data-ampel=\"{ampel}\"></span>",
         otter::pose(z, kurssperre.is_some())
     );
-    s.push_str(&crate::schmuck::aussagen(
-        z,
-        heute,
-        betrieb.as_ref(),
-        kurssperre,
-    ));
+    s.push_str(&crate::schmuck::aussagen(z, heute, update_freigabe_offen));
     if let Some(a) = &z.laufend {
         let _ = write!(
             s,

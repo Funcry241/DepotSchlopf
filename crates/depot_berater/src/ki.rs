@@ -23,6 +23,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -479,6 +480,13 @@ impl<N: Netz> KiBerater<N> {
         inhalt: &str,
         reserviert: Cent,
     ) -> Result<crate::netz::Rueckmeldung, (Option<Ausgang>, String)> {
+        let dienstlauf = std::env::var_os(depot_journal::gespraeche::LAUF_ENV).is_some();
+        let status = |wartet| {
+            if dienstlauf {
+                let zeile = depot_kern::hinweis::berater_anfrage(self.wer, wartet);
+                let _ = writeln!(std::io::stdout().lock(), "{zeile}");
+            }
+        };
         let von = WARTEZEITEN.len().saturating_add(1);
         let mut warten = WARTEZEITEN.iter();
         let mut versuch = 1_usize;
@@ -493,10 +501,12 @@ impl<N: Netz> KiBerater<N> {
                     return Err((None, "nicht gesendet: Zeitfenster der Vorbereitung abgelaufen oder Rechneruhr zurückgestellt".into()));
                 }
             }
-            match self
+            status(true);
+            let versand = self
                 .netz
-                .sende(self.anbieter.url(), kopf, inhalt.as_bytes())
-            {
+                .sende(self.anbieter.url(), kopf, inhalt.as_bytes());
+            status(false);
+            match versand {
                 Ok(a) => return Ok(a),
                 Err(NetzFehler::NichtGesendet(e)) => {
                     self.vermerke(Ausgang::Netz, None, Kosten::Keine, reserviert, None);
