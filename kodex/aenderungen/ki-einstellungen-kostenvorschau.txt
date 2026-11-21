@@ -1,0 +1,12 @@
+klasse: Funktion
+zweck: Kosten geänderter KI-Tageslimits sofort schätzen und ungespeicherte Einstellungen am passenden Knopf markieren
+pfade:
+crates/depot_dienst/src/assets/app.js
+crates/depot_dienst/src/ibkr_abgleich.rs
+crates/depot_dienst/src/ibkr_papier.rs
+crates/depot_dienst/src/ki_einstellungen.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/sicherung.rs
+crates/depot_dienst/tests/dienst/live.rs
+crates/depot_dienst/tests/update.rs

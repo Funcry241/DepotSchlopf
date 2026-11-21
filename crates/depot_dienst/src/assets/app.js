@@ -4,19 +4,60 @@
   var gehtWeg = false;
   var andererStart = false;
   var bearbeitet = new WeakSet();
+  var normalerSpeichertext = new WeakMap();
+  var felder = "input:not([type=hidden]),select";
   function formulare() { return Array.from(document.querySelectorAll("form[data-aenderungen]")); }
+  function auswahlGeaendert(select) {
+    var optionen = Array.from(select.options);
+    var standard = optionen.find(function (o) { return o.defaultSelected; }) || optionen[0];
+    return !!standard && select.value !== standard.value;
+  }
   function istGeaendert(f) {
-    return f.dataset.entwurf === "ja" || Array.from(f.querySelectorAll("input:not([type=hidden])")).some(function (i) {
+    return f.dataset.entwurf === "ja" || Array.from(f.querySelectorAll(felder)).some(function (i) {
       if (!bearbeitet.has(i) || (i.type === "password" && i.matches(":autofill"))) { return false; }
+      if (i.type === "select-one") { return auswahlGeaendert(i); }
       return i.type === "checkbox" ? i.checked !== i.defaultChecked : i.value !== i.defaultValue;
     });
   }
   function offen(ausser) { return formulare().some(function (f) { return f !== ausser && istGeaendert(f); }); }
+  function textSetzen(element, text) {
+    if (element.textContent !== text) { element.textContent = text; }
+  }
+  function kostenvorschau(f, neu) {
+    var status = f.querySelector("[data-kostenstand]");
+    textSetzen(status, neu ? "Kostenvorschau für ungespeicherte Änderungen." : "Kostenschätzung für gespeicherte Einstellungen.");
+    var dachsNeu = auswahlGeaendert(f.elements["dachs-modell"]);
+    var mausNeu = auswahlGeaendert(f.elements["maus-modell"]);
+    f.querySelectorAll("[data-kostenlimit]").forEach(function (zeile) {
+      var feld = zeile.dataset.kostenlimit;
+      var input = f.elements[feld];
+      var modus = feld === "neuro-aufrufe" ? f.elements["neuro-empfaenger"].value : "standard";
+      var anderesProfil = (dachsNeu && (feld === "dachs-aufrufe" || modus === "dachs" || modus === "beide")) ||
+        (mausNeu && (feld === "maus-aufrufe" || modus === "maus" || modus === "beide"));
+      var basis = zeile.querySelector("[data-kostenbasis]");
+      if (basis) { basis.hidden = anderesProfil; }
+      var anzahl = Number(input.value);
+      var werte = /^[0-9]+$/.test(input.value) && input.validity.valid && (!anderesProfil || anzahl === 0)
+        ? JSON.parse(zeile.getAttribute("data-kosten-" + modus))[anzahl] : null;
+      zeile.querySelectorAll("[data-kosten-zeit]").forEach(function (zelle, i) {
+        zelle.hidden = !werte;
+        textSetzen(zelle, werte ? werte[i] : "");
+      });
+      zeile.querySelector("[data-kosten-unbekannt]").hidden = !!werte;
+    });
+  }
   function zeige(f) {
     var neu = istGeaendert(f);
     f.classList.toggle("ungespeichert", neu);
     var status = f.querySelector("[data-speicherstand]");
-    if (status) { status.textContent = neu ? "Noch nicht gespeichert. Bitte unten speichern, damit deine Änderungen gelten." : "Keine ungespeicherten Änderungen in diesem Formular."; }
+    if (status) { textSetzen(status, neu ? "Noch nicht gespeichert. Bitte unten speichern, damit deine Änderungen gelten." : "Keine ungespeicherten Änderungen in diesem Formular."); }
+    var knopf = f.querySelector("[data-speichern-hervorheben]");
+    if (knopf) {
+      if (!normalerSpeichertext.has(knopf)) { normalerSpeichertext.set(knopf, knopf.textContent); }
+      knopf.classList.toggle("primaer", neu);
+      textSetzen(knopf, neu ? "Änderungen speichern" : normalerSpeichertext.get(knopf));
+    }
+    if (f.dataset.kiEinstellungen !== undefined) { kostenvorschau(f, neu); }
   }
   ["input", "change"].forEach(function (ereignis) {
     document.addEventListener(ereignis, function (e) {
@@ -84,6 +125,33 @@
       knopf.disabled = false;
     }
   }
+  async function kiSpeichern(form, knopf) {
+    if (knopf.disabled) { return; }
+    var status = form.querySelector("[data-speicherstand]");
+    var daten = new URLSearchParams(new FormData(form));
+    var eingaben = Array.from(form.querySelectorAll(felder)).filter(function (i) { return !i.disabled; });
+    knopf.disabled = true;
+    eingaben.forEach(function (i) { i.disabled = true; });
+    textSetzen(status, "KI-Einstellungen werden gespeichert …");
+    var fehler = "KI-Einstellungen konnten nicht gespeichert werden. Deine Eingaben bleiben stehen.";
+    try {
+      var antwort = await fetch(form.action, { method: "POST", body: daten });
+      if (antwort.ok && antwort.redirected) {
+        var ziel = new URL(antwort.url);
+        ziel.hash = "ki-einstellungen";
+        gehtWeg = true;
+        window.location.replace(ziel.href);
+        return;
+      }
+      if (antwort.status === 409) { fehler = "Das Update läuft. Speichere deine Änderungen danach erneut."; }
+    } catch (_) {
+      gehtWeg = false;
+      fehler = "Der Dienst antwortet nicht. Deine Eingaben bleiben stehen.";
+    }
+    eingaben.forEach(function (i) { i.disabled = false; });
+    knopf.disabled = false;
+    textSetzen(status, fehler);
+  }
   // Doppelklicks: Ein abgesendetes Formular sperrt seinen Knopf. Der Dienst lehnt doppelte
   // Aufträge ohnehin ab; so sieht man sofort, dass der Klick angekommen ist.
   document.addEventListener("submit", function (e) {
@@ -99,6 +167,11 @@
     // Ein Download lässt die Seite offen; der Exportknopf bleibt benutzbar.
     if (e.target.dataset.download !== undefined) { return; }
     var b = e.submitter || e.target.querySelector("button[type=submit]");
+    if (e.target.dataset.kiEinstellungen !== undefined) {
+      e.preventDefault();
+      void kiSpeichern(e.target, b);
+      return;
+    }
     if (b) {
       if (b.disabled) { e.preventDefault(); return; }
       if (b.dataset.gesendet) { e.preventDefault(); return; }
@@ -378,12 +451,12 @@
   });
   window.addEventListener("pageshow", function (e) {
     gehtWeg = false;
-    formulare().forEach(zeige);
     document.querySelectorAll("button[data-gesendet]").forEach(function (b) {
       b.textContent = b.dataset.gesendet;
       delete b.dataset.gesendet;
       b.disabled = false;
     });
+    formulare().forEach(zeige);
     if (e.persisted) { pausiert = false; generation += 1; starte(); }
   });
   starte();

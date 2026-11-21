@@ -24,10 +24,10 @@
 pub mod belegauswahl;
 pub mod belegauswahl_neuro;
 pub mod betrieb;
-pub mod blindpruefung;
 /// Das Anbieterprotokoll, fuer die Oberflaeche.
 pub use depot_journal::{abrufkontingent, anbieter, gespraeche, kurssperre};
 pub use depot_sim::ausfuehrung;
+pub use depot_sim::blindpruefung;
 mod budget;
 mod depot;
 pub use depot_sim::schlopfmodell::kandidaten::{

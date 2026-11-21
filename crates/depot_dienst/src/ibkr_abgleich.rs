@@ -250,11 +250,11 @@ pub(crate) fn einrichtung(d: &Dienst, felder: &[(String, String)]) -> String {
     format!(
         "<div id=\"ibkr-abgleich\"><h3>IBKR-Papierjournal abgleichen</h3>{meldung}\
          <div data-teil=\"/teil/ibkr-abgleich\">{}</div>\
-         <form method=\"post\" action=\"/ibkr-abgleich\"><input type=\"hidden\" name=\"t\" value=\"{}\">\
+         <form method=\"post\" action=\"/ibkr-abgleich\" data-aenderungen><input type=\"hidden\" name=\"t\" value=\"{}\">\
          <label><input type=\"checkbox\" name=\"aktiv\" value=\"ja\"{haken}> Automatisch an Xetra-Handelstagen abgleichen</label>\
          <label>Uhrzeit (Frankfurter Zeit) <input type=\"time\" name=\"uhrzeit\" value=\"{uhrzeit}\" required></label>\
          <p class=\"leise\">Für den automatischen Abgleich müssen der DepotSchlopf-Zeitplan eingeschaltet und das Gateway verbunden sein.</p>\
-         <button type=\"submit\">Abgleichszeitplan speichern</button></form></div>",
+         <button type=\"submit\" data-speichern-hervorheben>Abgleichszeitplan speichern</button></form></div>",
         status(d),
         depot_lage::html::maskiere(&d.token),
     )

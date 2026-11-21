@@ -1,5 +1,5 @@
 //! Dauerhafte Übergabe lokaler Fälle und asynchrone Abwicklung externer Fragen.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::io::Read as _;
@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use depot_journal::neurofrage::{
     NeuroAuftragId, NeuroErgebnis, NeuroFrage, NeuroRunde, NeuroUrteilswert, ergebnis_pfad,
 };
-use depot_journal::{Journal, KiStand, ki_einstellungen};
+use depot_journal::{Art, Journal, KiStand, Lesecache, Stand, ki_einstellungen};
 use depot_kern::modelle::KiEinstellungen;
 use depot_kern::{BeraterId, Datum};
 use depot_lage::{NeuroFragefall, datum_text, html::maskiere};
@@ -167,12 +167,73 @@ fn auftraege(daten: &Path) -> Vec<Auftrag> {
 }
 
 fn ist_aktiv(a: &Auftrag, e: KiEinstellungen, tag: Datum) -> bool {
-    e.neuro_berater().contains(&a.frage.wer) && a.frage.these_gueltig_bis >= tag
+    e.neuro_berater().contains(&a.frage.wer)
+        && (a.frage.ist_vorpruefung() || a.frage.these_gueltig_bis >= tag)
+}
+
+fn vorpruefung_planen(
+    daten: &Path,
+    stand: &Stand,
+    zeilen: &[(Art, String)],
+    e: KiEinstellungen,
+    tag: Datum,
+    auftraege: &[Auftrag],
+) -> Result<(), String> {
+    let urteile = crate::belegurteile::lese(daten)
+        .map_err(|_| "Die gespeicherten Blindurteile sind nicht lesbar.".to_owned())?;
+    let gruppe = crate::prueftag::aus_stand(stand, zeilen, daten, tag, None)?;
+    let reserviert: BTreeSet<_> = stand
+        .ki()
+        .neurofragen()
+        .iter()
+        .filter(|v| v.id.runde() == NeuroRunde::Erstfrage)
+        .map(|v| (v.id.fall(), kurz(v.wer)))
+        .collect();
+    let ausstehend: BTreeSet<_> = auftraege
+        .iter()
+        .filter(|a| {
+            let f = &a.frage;
+            f.ist_vorpruefung()
+                && f.id.runde() == NeuroRunde::Erstfrage
+                && a.antwort.is_none()
+                && !urteile.contains_key(f.id.fall())
+                && !reserviert.contains(&(f.id.fall(), kurz(f.wer)))
+        })
+        .map(|a| kurz(a.frage.wer))
+        .collect();
+    for fall in gruppe
+        .faelle
+        .iter()
+        .filter(|f| !urteile.contains_key(&f.kennung))
+    {
+        let mut fragen = e
+            .neuro_berater()
+            .iter()
+            .copied()
+            .filter(|wer| {
+                !ausstehend.contains(kurz(*wer))
+                    && !reserviert.contains(&(fall.kennung.as_str(), kurz(*wer)))
+            })
+            .filter_map(|wer| fall.vorpruefung(wer, NeuroRunde::Erstfrage, None))
+            .peekable();
+        if fragen.peek().is_some() {
+            // Ein nicht erreichbarer Empfänger hält nur seine eigene Warteschlange an.
+            // Reservierungen rechnen jede Frage auf das gleiche Tageslimit wie Korrekturen an.
+            for frage in fragen {
+                sichern(daten, &frage)?;
+            }
+            break;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn arbeite(d: &Dienst) {
     let daten = d.wurzel.join("daten");
+    let journal = daten.join("journal.txt");
     let mut letzter_versuch = BTreeMap::<PathBuf, Instant>::new();
+    let mut letzte_planung = None::<Instant>;
+    let mut cache = Lesecache::default();
     loop {
         thread::sleep(Duration::from_secs(3));
         let Some(tag) = crate::jetzt().and_then(depot_kern::Zeitpunkt::frankfurt_tag) else {
@@ -185,11 +246,11 @@ pub(crate) fn arbeite(d: &Dienst) {
                 && !a.abgerechnet().exists()
                 && !letzter_versuch.contains_key(&a.abgerechnet())
         }) {
-            if let Ok(Some(kind)) = d.neuro_starten(&a.pfad, a.frage.wer, true) {
-                letzter_versuch.insert(a.abgerechnet(), Instant::now());
-                if d.neuro_verfolgen(kind, KURZFRIST).0 == Some(0) {
-                    let _ = schreibe_ganz(&a.abgerechnet(), "ja\n");
-                }
+            letzter_versuch.insert(a.abgerechnet(), Instant::now());
+            if let Ok(Some(kind)) = d.neuro_starten(&a.pfad, a.frage.wer, true)
+                && d.neuro_verfolgen(kind, KURZFRIST).0 == Some(0)
+            {
+                let _ = schreibe_ganz(&a.abgerechnet(), "ja\n");
             }
             continue;
         }
@@ -201,27 +262,62 @@ pub(crate) fn arbeite(d: &Dienst) {
         {
             continue;
         }
-        if let Some(a) = auftraege.iter().find(|a| {
-            a.antwort.is_none()
-                && ist_aktiv(a, e, tag)
-                && !a.versuch().exists()
-                && !letzter_versuch.contains_key(&a.pfad)
-        }) {
-            if let Ok(Some(kind)) = d.neuro_starten(&a.pfad, a.frage.wer, false) {
-                letzter_versuch.insert(a.pfad.clone(), Instant::now());
-                if d.neuro_verfolgen(kind, KURZFRIST).1 {
-                    let _ = schreibe_ganz(&a.versuch(), "reserviert\n");
-                }
+        let Ok((stand, zeilen)) = cache.lesen(&journal, 32 * 1024 * 1024) else {
+            continue;
+        };
+        if stand.seit_abschluss() != 0
+            || stand
+                .ki()
+                .neurofragen()
+                .iter()
+                .filter(|v| v.datum == tag)
+                .count()
+                >= e.neuroschlopf
+        {
+            continue;
+        }
+        let urteile = crate::belegurteile::lese(&daten).ok();
+        let offen = |a: &Auftrag| {
+            !a.frage.ist_vorpruefung()
+                || urteile
+                    .as_ref()
+                    .is_some_and(|u| !u.contains_key(a.frage.id.fall()))
+        };
+        if let Some(a) = auftraege
+            .iter()
+            .filter(|a| {
+                a.antwort.is_none()
+                    && ist_aktiv(a, e, tag)
+                    && offen(a)
+                    && !a.versuch().exists()
+                    && !letzter_versuch.contains_key(&a.pfad)
+            })
+            .min_by_key(|a| a.frage.ist_vorpruefung())
+        {
+            letzter_versuch.insert(a.pfad.clone(), Instant::now());
+            if let Ok(Some(kind)) = d.neuro_starten(&a.pfad, a.frage.wer, false)
+                && d.neuro_verfolgen(kind, KURZFRIST).1
+            {
+                let _ = schreibe_ganz(&a.versuch(), "reserviert\n");
             }
             continue;
         }
+        let mut rueckfrage_vorhanden = false;
         for a in auftraege
             .iter()
-            .filter(|a| a.abgerechnet().exists() && ist_aktiv(a, e, tag))
+            .filter(|a| a.abgerechnet().exists() && ist_aktiv(a, e, tag) && offen(a))
         {
             if let Some(rueckfrage) = a.rueckfrage() {
+                let pfad = sammlung(&daten).join(dateiname(&rueckfrage));
+                rueckfrage_vorhanden |= !pfad.exists();
                 let _ = sichern(&daten, &rueckfrage);
             }
+        }
+        if !rueckfrage_vorhanden
+            && letzte_planung.is_none_or(|zeit| zeit.elapsed() >= Duration::from_secs(30))
+        {
+            letzte_planung = Some(Instant::now());
+            let _ = vorpruefung_planen(&daten, stand, zeilen, e, tag, &auftraege);
         }
     }
 }
@@ -231,7 +327,11 @@ fn anzeige_fall(html: &mut String, a: &Auftrag, ki: &KiStand) {
     let urheber = crate::gespraeche::name(kurz(f.thesen_wer));
     let antwortet = crate::gespraeche::name(kurz(f.wer));
     let runde = if f.id.runde() == NeuroRunde::Erstfrage {
-        "Frage"
+        if f.ist_vorpruefung() {
+            "Vorprüfung"
+        } else {
+            "Frage"
+        }
     } else {
         "Rückfrage"
     };
@@ -246,9 +346,14 @@ fn anzeige_fall(html: &mut String, a: &Auftrag, ki: &KiStand) {
     if let Some((zeile, text)) = f.bisher_zeile.zip(f.bisher.as_deref()) {
         let _ = write!(html, "<p>Bisher · J{zeile} · {}</p>", maskiere(text));
     }
+    let fassung = if f.ist_vorpruefung() {
+        "Historischer Beleg"
+    } else {
+        "Jetzt"
+    };
     let _ = write!(
         html,
-        "<p>Jetzt · J{} · {} · {}</p>",
+        "<p>{fassung} · J{} · {} · {}</p>",
         f.beleg_zeile,
         maskiere(&f.quelle),
         maskiere(&f.jetzt)
@@ -263,14 +368,15 @@ fn anzeige_fall(html: &mut String, a: &Auftrag, ki: &KiStand) {
     match versuch.and_then(|v| ki.neuroergebnis(v.buchung)) {
         Some(e) => {
             if let Some(urteil) = &e.urteil {
-                let bewertung = match urteil.wert {
-                    NeuroUrteilswert::Staerkt => "Stärkt die These",
-                    NeuroUrteilswert::Schwaecht => "Schwächt die These",
-                    NeuroUrteilswert::Offen => "Lässt die These offen",
+                let bewertung = bewertungstext(urteil.wert);
+                let typ = if f.ist_vorpruefung() {
+                    "Einzelbewertung"
+                } else {
+                    "KI-Bewertung"
                 };
                 let _ = write!(
                     html,
-                    "<p><strong>KI-Bewertung · {bewertung}</strong> · {}</p>",
+                    "<p><strong>{typ} · {bewertung}</strong> · {}</p>",
                     maskiere(&urteil.begruendung)
                 );
             } else if let Some(grund) = &e.fehler {
@@ -287,6 +393,46 @@ fn anzeige_fall(html: &mut String, a: &Auftrag, ki: &KiStand) {
         None => html.push_str("<p>Keine Übermittlung belegt.</p>"),
     }
     html.push_str("</article>");
+}
+
+fn bewertungstext(wert: NeuroUrteilswert) -> &'static str {
+    match wert {
+        NeuroUrteilswert::Staerkt => "Stärkt die These",
+        NeuroUrteilswert::Schwaecht => "Schwächt die These",
+        NeuroUrteilswert::KeinBezug => "Kein Bezug zur These",
+        NeuroUrteilswert::Offen => "Lässt die These offen",
+    }
+}
+
+fn anzeige_auftraege(html: &mut String, auftraege: &[Auftrag], ki: &KiStand) {
+    let bewertet = crate::prueftag::vorbewertungen(ki);
+    let mut gesehen = BTreeSet::new();
+    for a in auftraege
+        .iter()
+        .filter(|a| !a.frage.ist_vorpruefung() || gesehen.insert(a.frage.id.fall()))
+        .take(BEFUNDE_MAX)
+    {
+        if !a.frage.ist_vorpruefung() {
+            anzeige_fall(html, a, ki);
+            continue;
+        }
+        let id = a.frage.id.fall();
+        html.push_str("<section><h4>Vorprüfung desselben These-Beleg-Paars</h4>");
+        if let Some(wert) = bewertet
+            .get(id)
+            .and_then(crate::prueftag::Vorbewertung::uebereinstimmung)
+        {
+            let text = bewertungstext(wert);
+            let _ = write!(
+                html,
+                "<p><strong>KI-Bewertung · Dachs und Maus stimmen überein</strong> · {text}</p>"
+            );
+        }
+        for befund in auftraege.iter().filter(|b| b.frage.id.fall() == id) {
+            anzeige_fall(html, befund, ki);
+        }
+        html.push_str("</section>");
+    }
 }
 
 pub(crate) fn anzeige(d: &Dienst, daten: &Path) -> String {
@@ -319,9 +465,7 @@ pub(crate) fn anzeige(d: &Dienst, daten: &Path) -> String {
         32 * 1024 * 1024,
         &mut || Ok(()),
         |stand, _, _, _, _| {
-            for a in auftraege.iter().take(BEFUNDE_MAX) {
-                anzeige_fall(&mut html, a, stand.ki());
-            }
+            anzeige_auftraege(&mut html, &auftraege, stand.ki());
         },
     )
     .is_err()

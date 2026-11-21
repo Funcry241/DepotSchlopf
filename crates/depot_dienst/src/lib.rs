@@ -929,9 +929,9 @@ fn mindesteinsatz_formular(d: &Dienst) -> String {
         .unwrap_or_default();
     format!(
         r#"<section id="mindesteinsatz"><h2>Papier-Mindesteinsatz</h2>
-          <form method="post" action="/mindesteinsatz"><input type="hidden" name="t" value="{}">
+          <form method="post" action="/mindesteinsatz" data-aenderungen><input type="hidden" name="t" value="{}">
           <label>Mindesteinsatz in Basispunkten <input type="number" name="bp" min="0" max="10000" value="{mindesteinsatz}" required></label>
-          <button type="submit">Speichern</button></form><p>3.000 bp entsprechen 30 %. Darunter ist eine Begründung erforderlich.</p></section>"#,
+          <button type="submit" data-speichern-hervorheben>Speichern</button></form><p>3.000 bp entsprechen 30 %. Darunter ist eine Begründung erforderlich.</p></section>"#,
         depot_lage::html::maskiere(&d.token)
     )
 }

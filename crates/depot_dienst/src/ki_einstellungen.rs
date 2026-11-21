@@ -1,5 +1,6 @@
 use depot_journal::{Journal, KiStand, KiZweck, ki_einstellungen};
 use depot_kern::gemini::TAGESGRENZE;
+use depot_kern::json::zitiere;
 use depot_kern::modelle::{
     BeraterEinstellung, KiEinstellungen, MAX_BERATER_AUFRUFE, Modell, Modellwahl, NeuroEmpfaenger,
 };
@@ -40,11 +41,8 @@ struct NeuroKosten {
 }
 
 impl NeuroKosten {
-    fn projektion(&self, e: KiEinstellungen, aufrufe: u64) -> Option<Cent> {
-        if aufrufe == 0 || e.neuro_berater().is_empty() {
-            return Some(Cent::NULL);
-        }
-        match e.neuro_empfaenger {
+    fn projektion(&self, empfaenger: NeuroEmpfaenger, aufrufe: u64) -> Option<Cent> {
+        match empfaenger {
             NeuroEmpfaenger::Aus => Some(Cent::NULL),
             NeuroEmpfaenger::Dachs => self.dachs?.fuer_aufrufe(aufrufe),
             NeuroEmpfaenger::Maus => self.maus?.fuer_aufrufe(aufrufe),
@@ -156,26 +154,56 @@ fn zahlenfeld(s: &mut String, id: &str, name: &str, anzahl: usize, maximum: usiz
     );
 }
 
-fn geldzeile(s: &mut String, aufrufe: usize, kosten: impl Fn(u64) -> Option<Cent>) {
-    if aufrufe == 0 {
-        s.push_str("<td>0 €</td><td>0 €</td><td>0 €</td>");
-    } else {
-        let werte = TAGE.map(|tage| {
-            let gesamt = u64::try_from(aufrufe).ok()?.checked_mul(tage)?;
-            Preis::aus_cent(kosten(gesamt)?)
-        });
-        if let [Some(tag), Some(monat), Some(jahr)] = werte {
+fn geldwerte(aufrufe: usize, kosten: impl Fn(u64) -> Option<Cent>) -> Option<[String; 3]> {
+    let [tag, monat, jahr] = TAGE.map(|tage| {
+        let gesamt = u64::try_from(aufrufe).ok()?.checked_mul(tage)?;
+        let cent = if gesamt == 0 {
+            Cent::NULL
+        } else {
+            kosten(gesamt)?
+        };
+        if cent == Cent::NULL {
+            Some("0 €".to_owned())
+        } else {
+            Some(format!("{} €", Preis::aus_cent(cent)?.euro_text()))
+        }
+    });
+    Some([tag?, monat?, jahr?])
+}
+
+fn geldzeile(s: &mut String, werte: Option<[String; 3]>) {
+    let unbekannt = werte.is_none();
+    for wert in werte.unwrap_or_default() {
+        let verborgen = if unbekannt { " hidden" } else { "" };
+        let _ = write!(s, "<td data-kosten-zeit{verborgen}>{wert}</td>");
+    }
+    let verborgen = if unbekannt { "" } else { " hidden" };
+    let _ = write!(
+        s,
+        "<td colspan=\"3\" data-kosten-unbekannt{verborgen}>{KEINE_SCHAETZUNG}</td>"
+    );
+}
+
+// Vorschau und gespeicherte Ansicht verwenden dieselbe Rundung und Formatierung.
+fn kostendaten(s: &mut String, modus: &str, maximum: usize, kosten: impl Fn(u64) -> Option<Cent>) {
+    let _ = write!(s, " data-kosten-{modus}=\"[");
+    for aufrufe in 0..=maximum {
+        if aufrufe > 0 {
+            s.push(',');
+        }
+        if let Some([tag, monat, jahr]) = geldwerte(aufrufe, &kosten) {
             let _ = write!(
                 s,
-                "<td>{} €</td><td>{} €</td><td>{} €</td>",
-                tag.euro_text(),
-                monat.euro_text(),
-                jahr.euro_text()
+                "[{},{},{}]",
+                maskiere(&zitiere(&tag)),
+                maskiere(&zitiere(&monat)),
+                maskiere(&zitiere(&jahr))
             );
         } else {
-            let _ = write!(s, "<td colspan=\"3\">{KEINE_SCHAETZUNG}</td>");
+            s.push_str("null");
         }
     }
+    s.push_str("]\"");
 }
 
 fn beraterzeile(
@@ -188,9 +216,12 @@ fn beraterzeile(
         BeraterId::Dachs => ("Dachs", "dachs"),
         BeraterId::Maus => ("Maus", "maus"),
     };
+    let kosten = |n| schaetzung?.0.fuer_aufrufe(n);
+    let _ = write!(s, "<tr data-kostenlimit=\"{kurz}-aufrufe\"");
+    kostendaten(s, "standard", MAX_BERATER_AUFRUFE, kosten);
     let _ = write!(
         s,
-        "<tr><th scope=\"row\">{name}</th><td><select name=\"{kurz}-modell\" aria-label=\"{name} Modell und Denktiefe\">"
+        "><th scope=\"row\">{name}</th><td><select name=\"{kurz}-modell\" aria-label=\"{name} Modell und Denktiefe\">"
     );
     for &modell in Modell::fuer_berater(wer) {
         let _ = write!(s, "<optgroup label=\"{}\">", modell.name());
@@ -217,7 +248,7 @@ fn beraterzeile(
         };
         let _ = write!(
             s,
-            "<br><small>{} abgerechnete Aufrufe{zusatz}</small>",
+            "<br><small data-kostenbasis>{} abgerechnete Aufrufe{zusatz}</small>",
             wert.anzahl
         );
     }
@@ -230,13 +261,22 @@ fn beraterzeile(
         MAX_BERATER_AUFRUFE,
     );
     s.push_str("</td>");
-    geldzeile(s, p.max_aufrufe, |n| schaetzung?.0.fuer_aufrufe(n));
+    geldzeile(s, geldwerte(p.max_aufrufe, kosten));
     s.push_str("</tr>");
 }
 
 fn neurozeile(s: &mut String, e: KiEinstellungen, neuro: &NeuroKosten) {
+    s.push_str("<tr data-kostenlimit=\"neuro-aufrufe\"");
+    for wahl in NeuroEmpfaenger::ALLE {
+        kostendaten(
+            s,
+            wahl.kennung(),
+            ki_einstellungen::MAX_NEURO_AUFRUFE,
+            |n| neuro.projektion(wahl, n),
+        );
+    }
     s.push_str(
-        "<tr><th scope=\"row\">NeuroSchlopf</th><td>Lokaler Vergleich · 0 €<br>\
+        "><th scope=\"row\">NeuroSchlopf</th><td>Lokaler Vergleich · 0 €<br>\
          <label>Antwortet auf externe Fragen <select name=\"neuro-empfaenger\">",
     );
     for wahl in NeuroEmpfaenger::ALLE {
@@ -270,12 +310,10 @@ fn neurozeile(s: &mut String, e: KiEinstellungen, neuro: &NeuroKosten) {
         );
     }
     s.push_str("</td>");
-    let externe_aufrufe = if e.neuro_berater().is_empty() {
-        0
-    } else {
-        e.neuroschlopf
-    };
-    geldzeile(s, externe_aufrufe, |n| neuro.projektion(e, n));
+    geldzeile(
+        s,
+        geldwerte(e.neuroschlopf, |n| neuro.projektion(e.neuro_empfaenger, n)),
+    );
     s.push_str("</tr>");
 }
 
@@ -284,7 +322,7 @@ pub(crate) fn einrichtung(d: &Dienst, tag: Option<depot_kern::Datum>) -> String 
     let gespeichert = ki_einstellungen::lesen(&daten);
     let mut s = String::from(
         "<section id=\"ki-einstellungen\"><h2>KI-Einstellungen</h2>\
-         <p>Die Kosten sind eine Schätzung für die gespeicherten Einstellungen bei voller Nutzung. \
+         <p>Die Schätzung geht von voller Nutzung aus. \
          Ein Monat zählt 30 Kalendertage, ein Jahr 365. Bei beiden Empfängern rechnet NeuroSchlopf mit abwechselnden Aufrufen.</p>",
     );
     if let Err(grund) = &gespeichert {
@@ -309,8 +347,9 @@ pub(crate) fn einrichtung(d: &Dienst, tag: Option<depot_kern::Datum>) -> String 
     let token = maskiere(&d.token);
     let _ = write!(
         s,
-        "<form method=\"post\" action=\"/ki-einstellungen\" data-aenderungen>\
+        "<form method=\"post\" action=\"/ki-einstellungen\" data-aenderungen data-ki-einstellungen>\
          <input type=\"hidden\" name=\"t\" value=\"{token}\">\
+         <p data-kostenstand role=\"status\">Kostenschätzung für gespeicherte Einstellungen.</p>\
          <table><thead><tr><th scope=\"col\">KI</th><th scope=\"col\">Modell, Denktiefe oder Empfänger</th>\
          <th scope=\"col\">Aufrufe pro Tag</th><th scope=\"col\">Kosten pro Tag</th>\
          <th scope=\"col\">pro Monat</th><th scope=\"col\">pro Jahr</th></tr></thead><tbody>"
@@ -318,22 +357,72 @@ pub(crate) fn einrichtung(d: &Dienst, tag: Option<depot_kern::Datum>) -> String 
     beraterzeile(&mut s, BeraterId::Dachs, e.dachs, auswertung.dachs);
     beraterzeile(&mut s, BeraterId::Maus, e.maus, auswertung.maus);
     let gemini = gemini::budget(&daten, tag);
+    let gratis = |_| Some(Cent::NULL);
+    s.push_str("<tr data-kostenlimit=\"gemini-aufrufe\"");
+    kostendaten(&mut s, "standard", TAGESGRENZE, gratis);
     let _ = write!(
         s,
-        "<tr><th scope=\"row\">Gemini</th><td>{}<br>{}</td><td>",
+        "><th scope=\"row\">Gemini</th><td>{}<br>{}</td><td>",
         depot_kern::gemini::MODELL,
         gemini.kontingent_text()
     );
     zahlenfeld(&mut s, "gemini-aufrufe", "Gemini", e.gemini, TAGESGRENZE);
-    s.push_str("</td><td>0 €</td><td>0 €</td><td>0 €</td></tr>");
+    s.push_str("</td>");
+    geldzeile(&mut s, geldwerte(e.gemini, gratis));
+    s.push_str("</tr>");
     neurozeile(&mut s, e, &auswertung.neuro);
     s.push_str(
         "</tbody></table>\
          <p>Ein Tageslimit von 0 pausiert die jeweiligen externen Aufrufe. \
          Der Kostenschutz begrenzt Ausgaben zusätzlich. \
          Gemini kann im Gratis-Projekt weitere Anfragen ablehnen.</p>\
-         <button type=\"submit\">KI-Einstellungen speichern</button>\
+         <button type=\"submit\" data-speichern-hervorheben>KI-Einstellungen speichern</button>\
          <p data-speicherstand role=\"status\"></p></form></section>",
     );
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vorschau_verwendet_dieselben_belegten_kosten_und_rundet_je_zeitraum() {
+        let schaetzung = AufrufkostenSchaetzung {
+            anzahl: 2,
+            gesamt: Cent(5),
+        };
+        let kosten = |n| schaetzung.fuer_aufrufe(n);
+        assert_eq!(
+            geldwerte(1, kosten),
+            Some(["0,03 €", "0,75 €", "9,13 €"].map(str::to_owned))
+        );
+        let mut daten = String::new();
+        kostendaten(&mut daten, "standard", 1, kosten);
+        assert!(daten.contains("[&quot;0,03 €&quot;,&quot;0,75 €&quot;,&quot;9,13 €&quot;]"));
+        assert_eq!(geldwerte(1, |_| None), None);
+        assert_eq!(geldwerte(0, |_| None), Some(["0 €"; 3].map(str::to_owned)));
+    }
+
+    #[test]
+    fn neuro_vorschau_berechnet_nur_die_gewaehlten_empfaenger() {
+        let kosten = NeuroKosten {
+            heute: None,
+            dachs: None,
+            maus: Some(AufrufkostenSchaetzung {
+                anzahl: 1,
+                gesamt: Cent(4),
+            }),
+        };
+        let vorschau = |wahl| geldwerte(3, |n| kosten.projektion(wahl, n));
+        assert_eq!(vorschau(NeuroEmpfaenger::Beide), None);
+        assert_eq!(
+            vorschau(NeuroEmpfaenger::Aus),
+            Some(["0 €"; 3].map(str::to_owned))
+        );
+        assert_eq!(
+            vorschau(NeuroEmpfaenger::Maus),
+            Some(["0,12 €", "3,60 €", "43,80 €"].map(str::to_owned))
+        );
+    }
 }

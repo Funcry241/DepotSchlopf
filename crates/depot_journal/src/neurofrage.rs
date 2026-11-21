@@ -122,6 +122,11 @@ pub struct NeuroFrage {
 }
 
 impl NeuroFrage {
+    /// Eine historische Vorprüfung hat einen Quellenbeleg und keine vorherige Fassung.
+    pub fn ist_vorpruefung(&self) -> bool {
+        self.bisher_zeile.is_none()
+    }
+
     pub fn text(&self) -> String {
         format!(
             concat!(
@@ -197,6 +202,7 @@ impl NeuroFrage {
 pub enum NeuroUrteilswert {
     Staerkt,
     Schwaecht,
+    KeinBezug,
     Offen,
 }
 
@@ -205,12 +211,13 @@ impl NeuroUrteilswert {
         match self {
             Self::Staerkt => "staerkt",
             Self::Schwaecht => "schwaecht",
+            Self::KeinBezug => "kein_bezug",
             Self::Offen => "offen",
         }
     }
 
     fn lies(text: &str) -> Option<Self> {
-        [Self::Staerkt, Self::Schwaecht, Self::Offen]
+        [Self::Staerkt, Self::Schwaecht, Self::KeinBezug, Self::Offen]
             .into_iter()
             .find(|v| v.text() == text)
     }

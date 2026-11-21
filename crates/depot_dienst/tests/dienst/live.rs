@@ -189,10 +189,10 @@ fn app_js_liefert_die_gepruefte_fassung() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let antwort = get(&d, "/app.js", donnerstag(12, 0)?);
     let (_, js) = some(antwort.split_once("\r\n\r\n"), "HTTP-Antwort")?;
-    // SHA-256 der geprüften Fassung mit der NeuroSchlopf-Referenztopologie.
+    // SHA-256 der geprüften Fassung mit Kostenvorschau und NeuroSchlopf-Referenztopologie.
     assert_eq!(
         depot_kern::abdruck::sha256_hex(js.as_bytes()),
-        "1d584333fcefb555a95e2fbc17f7f58b4da5559e5daf4a20cc19e34dd2006f55"
+        "d3114c7480d0bc0909c6cafa4630e0e436e489307307f8de847a964bea436263"
     );
     Ok(())
 }

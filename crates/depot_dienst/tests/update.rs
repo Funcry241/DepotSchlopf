@@ -1369,7 +1369,8 @@ function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47
     }
     return known?{getAttribute:()=>known}:null;
   },querySelectorAll:s=>s==='[data-teil]'?elements:s==='form[data-aenderungen]'?forms:[]};
-  vm.runInNewContext(script,{document,navigator:{},URL,AbortController,Set,Date:{now:()=>now},
+  vm.runInNewContext(script,{document,navigator:{},URL,URLSearchParams,AbortController,Set,Date:{now:()=>now},
+    FormData:function(form){return Object.entries(form.elements).map(([name,field])=>[name,field.value]);},
     window:{confirm,matchMedia:()=>({matches:bewegungReduziert}),addEventListener:(n,f)=>events[n]=f,location:{href,replace:u=>navigations.push(u)}},
     performance:{now:()=>now},requestAnimationFrame:f=>plane(()=>f(now),100),
     setTimeout:plane,clearTimeout:id=>timers.delete(id),
@@ -1381,8 +1382,10 @@ function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47
 }
 function formular(input={type:'time',value:'17:45',defaultValue:'17:45'}) {
   input.matches=s=>s===':autofill' && input.autofill===true;
-  const status={textContent:''},classes=new Set(),button={dataset:{},textContent:'Speichern',disabled:false};
-  return {dataset:{},input,status,button,classes,
+  const status={textContent:''},classes=new Set(),knopfKlassen=new Set();
+  const button={dataset:{},textContent:'Speichern',disabled:false,
+    classList:{toggle:(c,an)=>an?knopfKlassen.add(c):knopfKlassen.delete(c)}};
+  return {dataset:{},input,status,button,classes,knopfKlassen,
     querySelectorAll:()=>[input],querySelector:s=>s==='[data-speicherstand]'?status:button,
     classList:{toggle:(c,an)=>an?classes.add(c):classes.delete(c)}};
 }
@@ -1393,9 +1396,13 @@ test('Ändern und Zurücksetzen zeigen genau den Speicherbedarf; Verlassen warnt
   f.input.value='18:05';b.docEvents.input({target:Object.assign(f.input,{closest:()=>f})});
   assert.match(f.status.textContent,/Noch nicht gespeichert/);
   assert.ok(f.classes.has('ungespeichert'));
+  assert.equal(f.button.textContent,'Änderungen speichern');
+  assert.ok(f.knopfKlassen.has('primaer'));
   const weg=ereignis();b.events.beforeunload(weg);assert.equal(weg.verhindert,true);
   f.input.value='17:45';b.docEvents.change({target:Object.assign(f.input,{closest:()=>f})});
   assert.ok(!f.classes.has('ungespeichert'));
+  assert.equal(f.button.textContent,'Speichern');
+  assert.ok(!f.knopfKlassen.has('primaer'));
   const bleibt=ereignis();b.events.beforeunload(bleibt);assert.ok(!bleibt.verhindert);
 });
 test('Ein automatisch gefülltes Feld allein blockiert keinen Seitenwechsel',()=>{
@@ -1405,6 +1412,78 @@ test('Ein automatisch gefülltes Feld allein blockiert keinen Seitenwechsel',()=
   const weg=ereignis();b.events.beforeunload(weg);
   assert.ok(!weg.verhindert);
   assert.ok(!f.classes.has('ungespeichert'));
+});
+function kiFormular(){
+  const formularKlassen=new Set(),knopfKlassen=new Set();
+  const status={},kostenstand={},knopf={textContent:'KI-Einstellungen speichern',disabled:false,
+    classList:{toggle:(c,an)=>an?knopfKlassen.add(c):knopfKlassen.delete(c)}};
+  const limit=defaultValue=>({type:'number',value:defaultValue,defaultValue,validity:{valid:true}});
+  const auswahl=value=>({type:'select-one',value,options:[{value,defaultSelected:true},{value:'andere'}]});
+  const elements={'dachs-modell':auswahl('dachs'), 'maus-modell':auswahl('maus'), 'neuro-empfaenger':auswahl('aus'),
+    'dachs-aufrufe':limit('1'),'maus-aufrufe':limit('1'),'gemini-aufrufe':limit('1'),'neuro-aufrufe':limit('1')};
+  const werte=['0,05 €','1,50 €','18,25 €'], frei=['0 €','0 €','0 €'];
+  const zeilen={};
+  for(const wer of ['dachs','maus','gemini','neuro']){
+    const basis={},unbekannt={},zellen=[{},{},{}];
+    const tabellen={standard:[frei,werte,['0,10 €','3,00 €','36,50 €']],aus:[frei,frei],maus:[frei,werte],beide:[frei,null]};
+    if(wer==='maus')tabellen.standard=[frei,null];
+    if(wer==='gemini')tabellen.standard=[frei,frei,frei];
+    zeilen[wer]={dataset:{kostenlimit:wer+'-aufrufe'},basis,unbekannt,zellen,
+      getAttribute:a=>JSON.stringify(tabellen[a.replace('data-kosten-','')]),
+      querySelector:s=>s==='[data-kostenbasis]'?basis:unbekannt,querySelectorAll:()=>zellen};
+  }
+  const f={dataset:{kiEinstellungen:''},action:'/ki-einstellungen',elements,zeilen,status,kostenstand,knopf,knopfKlassen,
+    classList:{toggle:(c,an)=>an?formularKlassen.add(c):formularKlassen.delete(c)},
+    querySelector:s=>s==='[data-speicherstand]'?status:s==='[data-kostenstand]'?kostenstand:knopf,
+    querySelectorAll:s=>s==='[data-kostenlimit]'?Object.values(zeilen):Object.values(elements)};
+  Object.values(elements).forEach(e=>{e.closest=()=>f;});
+  return f;
+}
+test('Aufrufgrenzen, Modell und Empfänger ändern die Kostenvorschau sofort',()=>{
+  const f=kiFormular(),b=browser({forms:[f]});
+  const setze=(name,value)=>{const i=f.elements[name];i.value=value;b.docEvents.input({target:i});};
+  const kosten=(wer)=>f.zeilen[wer].zellen.map(z=>z.textContent);
+  assert.equal(f.zeilen.maus.unbekannt.hidden,false);
+  assert.deepEqual(kosten('neuro'),['0 €','0 €','0 €']);
+  setze('dachs-aufrufe','2');
+  assert.deepEqual(kosten('dachs'),['0,10 €','3,00 €','36,50 €']);
+  assert.equal(f.knopf.textContent,'Änderungen speichern');
+  assert.ok(f.knopfKlassen.has('primaer'));
+  assert.match(f.kostenstand.textContent,/Kostenvorschau für ungespeicherte/);
+  setze('dachs-modell','andere');
+  assert.equal(f.zeilen.dachs.unbekannt.hidden,false);
+  assert.equal(f.zeilen.dachs.basis.hidden,true);
+  setze('dachs-aufrufe','0');
+  assert.deepEqual(kosten('dachs'),['0 €','0 €','0 €']);
+  setze('neuro-empfaenger','maus');
+  assert.deepEqual(kosten('neuro'),['0,05 €','1,50 €','18,25 €']);
+  setze('neuro-empfaenger','beide');
+  assert.equal(f.zeilen.neuro.unbekannt.hidden,false);
+  setze('gemini-aufrufe','2');
+  assert.deepEqual(kosten('gemini'),['0 €','0 €','0 €']);
+  setze('dachs-aufrufe','1');setze('dachs-modell','dachs');setze('neuro-empfaenger','aus');setze('gemini-aufrufe','1');
+  assert.equal(f.knopf.textContent,'KI-Einstellungen speichern');
+  assert.ok(!f.knopfKlassen.has('primaer'));
+  assert.match(f.kostenstand.textContent,/gespeicherte Einstellungen/);
+});
+test('Fehlgeschlagenes KI-Speichern behält den Entwurf und erlaubt die Wiederholung',async()=>{
+  const f=kiFormular();let gelingt=false;
+  const b=browser({forms:[f],response:url=>url!=='/ki-einstellungen'?reply(health()):Promise.resolve(gelingt
+    ? {ok:true,redirected:true,url:'http://127.0.0.1:47410/einrichtung?m=ki_einstellungen_gespeichert'}
+    : {ok:false,status:409})});
+  const input=f.elements['dachs-aufrufe'];input.value='2';b.docEvents.input({target:input});
+  const entwurf=ereignis(f,f.knopf);b.docEvents.submit(entwurf);
+  assert.ok(entwurf.verhindert);
+  assert.ok(f.knopf.disabled);
+  await new Promise(r=>setImmediate(r));
+  assert.ok(!f.knopf.disabled);
+  assert.ok(f.knopfKlassen.has('primaer'));
+  assert.equal(input.value,'2');
+  assert.match(f.status.textContent,/Update läuft/);
+  assert.equal(b.requests[0].options.body.get('dachs-aufrufe'),'2');
+  gelingt=true;b.docEvents.submit(ereignis(f,f.knopf));
+  await new Promise(r=>setImmediate(r));
+  assert.deepEqual(b.navigations,['http://127.0.0.1:47410/einrichtung?m=ki_einstellungen_gespeichert#ki-einstellungen']);
 });
 test('Gespeicherter Fehlerentwurf und ungültige Felder bleiben als unerledigt sichtbar',()=>{
   const f=formular();f.dataset.entwurf='ja';const b=browser({forms:[f]});
