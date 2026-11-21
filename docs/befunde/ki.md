@@ -8,6 +8,12 @@ Der Schnitt schließt technisch 1·K01 bis 1·K06 und 1·R02, entlang R19, R20, 
 
 Seit dem Schnitt Persistenzbasis steht das Kassenbuch im Journal (`docs/befunde/journal.md`), samt `AufrufErlaubnis` in `crates/depot_journal/src/kasse.rs`; `depot_ki` enthält nur noch die Regeln. Die Tests, die das Kassenbuch brauchen, stehen in `crates/depot_journal/tests/`. Jede Buchung ist ein Eintrag; Anker, eigene Datei, Sperre und Zwischendatei des Kassenbuchs entfallen und leistet das Journal. Die Tests zu 1·K06, K12-01, K12-02 und den Speicherfehlern aus 1·R02 stehen deshalb in `crates/depot_journal`. Die Abschnitte unten beschreiben den Stand von PR #12. Die dort genannten Grenzen „Anker neben dem Kassenbuch“, „Abgebrochener Schreibvorgang“ und „Grenzen ändern sich“ sind mit der Persistenzbasis behandelt.
 
+## Modellwahl im Papierbetrieb
+
+Neue Buchungen von Dachs und Maus enthalten Modell und Denktiefe. Die dazugehörigen Tarifwerte gehören zum Grenzabdruck. Bestätigte ältere Buchungen bleiben lesbar, werden weiter angerechnet und behalten ihren ursprünglichen Kostenbeleg. Die Tageinstellung begrenzt neue Fragen. Monats-, Jahres- und Tokenobergrenzen gelten weiterhin.
+
+Bis zur Bestätigung eines Updates werden keine Buchungen im neuen Format geschrieben. Nach der ersten solchen Buchung benötigt dieses Journal den neuen Leser. Bei einer späteren Fehlerkorrektur bleiben die Journalbuchungen erhalten. Ein älterer Programmstand ohne passenden Leser kann diesen Datenstand nicht öffnen.
+
 ## Fassung 2 nach Maus' Prüfung von `7d887ed` (K12-01, K12-02)
 
 Maus' Gegenproben stehen als Tests in `crates/depot_ki/tests/befunde.rs`, am Stand `7d887ed` rot (eigener Commit `a94ae68`). Der K12-01-Test prüft sechs Fälle: symbolischer und harter Link als Zwischendatei, jeweils bei Einrichtung, Reservierung und Bestätigung beim Öffnen. Behoben ist allgemein und ohne neue Prüfschicht:

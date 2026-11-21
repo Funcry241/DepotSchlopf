@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 use depot_journal::anbieter::{self, Eintrag, Ergebnis, Wer};
 use depot_journal::gespraeche::{self, Gespraech};
-use depot_journal::{Journal, NachrichtBeleg};
+use depot_journal::{Journal, NachrichtBeleg, ki_einstellungen};
 use depot_kern::abdruck::sha256_hex;
-use depot_kern::gemini::{self, ADRESSE, DIENST, MODELL, RUECKLAGE, TAGESGRENZE};
+use depot_kern::gemini::{self, ADRESSE, DIENST, MODELL, RUECKLAGE};
 use depot_kern::json::{self, Json, zitiere};
 use depot_kern::{Datum, Universum, Zeitpunkt};
 
@@ -187,6 +187,7 @@ fn reserviere(
     tag: Datum,
     digest: &str,
     vorrang: bool,
+    tagesgrenze: usize,
 ) -> Result<(File, usize), &'static str> {
     let pfad = gespraeche::gemini_kontingent(daten, tag);
     let mut f = OpenOptions::new()
@@ -215,9 +216,9 @@ fn reserviere(
         return Err("Diesen Nachrichtenstand bereits angefragt");
     }
     let grenze = if vorrang {
-        TAGESGRENZE
+        tagesgrenze
     } else {
-        TAGESGRENZE.saturating_sub(RUECKLAGE)
+        tagesgrenze.saturating_sub(RUECKLAGE.min(tagesgrenze.saturating_sub(1)))
     };
     let frei = grenze.saturating_sub(bisher.lines().count());
     if frei == 0 {
@@ -362,13 +363,17 @@ pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum
         fehler: None,
     };
     let resultat = (|| {
+        let tagesgrenze = ki_einstellungen::lesen(daten)?.gemini;
+        if tagesgrenze == 0 {
+            return Err("Tagesgrenze ist 0".into());
+        }
         let frage = vorlauf_frage(daten, tag, jetzt, universum)?;
         let schluessel = Schluessel::fuer_dienst(DIENST, ADRESSE)?;
         if !sauber(&frage, &schluessel) {
             return Err("Nachrichten enthalten Zugangsdaten".into());
         }
         let digest = kennung(&frage);
-        let (mut kontingent, weitere) = reserviere(daten, tag, &digest, vorrang)?;
+        let (mut kontingent, weitere) = reserviere(daten, tag, &digest, vorrang, tagesgrenze)?;
         e.system = Some(SYSTEM.into());
         e.frage = Some(frage.clone());
         let beginn = Instant::now();
@@ -758,23 +763,34 @@ mod tests {
         let ergebnis = (|| {
             let tag = Datum::lies("2026-11-10").ok_or("Datum")?;
             let digest = kennung("0");
-            let (mut kontingent, weitere) = reserviere(&daten, tag, &digest, false)?;
+            let (mut kontingent, weitere) =
+                reserviere(&daten, tag, &digest, false, gemini::TAGESGRENZE)?;
             assert_eq!(weitere, 2);
             vermerke_aufruf(&mut kontingent, &digest)?;
             drop(kontingent);
-            assert!(reserviere(&daten, tag, &digest, false).is_err());
+            assert!(reserviere(&daten, tag, &digest, false, gemini::TAGESGRENZE).is_err());
             for n in 2..5 {
                 if n == 3 {
                     assert_eq!(
-                        reserviere(&daten, tag, &kennung("3"), false).err(),
+                        reserviere(&daten, tag, &kennung("3"), false, gemini::TAGESGRENZE).err(),
                         Some("Tagesgrenze erreicht")
                     );
                 }
-                drop(reserviere(&daten, tag, &kennung(&n.to_string()), n >= 3)?);
+                drop(reserviere(
+                    &daten,
+                    tag,
+                    &kennung(&n.to_string()),
+                    n >= 3,
+                    gemini::TAGESGRENZE,
+                )?);
             }
             assert_eq!(gespraeche::gemini_aufrufe(&daten, tag), 5);
             assert_eq!(
-                reserviere(&daten, tag, &kennung("6"), true).err(),
+                reserviere(&daten, tag, &kennung("neues Limit"), true, 2).err(),
+                Some("Tagesgrenze erreicht")
+            );
+            assert_eq!(
+                reserviere(&daten, tag, &kennung("6"), true, gemini::TAGESGRENZE).err(),
                 Some("Tagesgrenze erreicht")
             );
             Ok(())

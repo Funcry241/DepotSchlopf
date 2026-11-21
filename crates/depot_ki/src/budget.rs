@@ -5,6 +5,7 @@
 //! dieses Moduls.
 
 use crate::tagesrahmen;
+use depot_kern::modelle::{Modell, Modellwahl};
 use depot_kern::{BeraterId, Cent};
 
 pub use depot_kern::Datum;
@@ -74,11 +75,17 @@ impl KiDeckel {
     /// - Dachs = Claude Sonnet 5.5: 40.000 Token rein, 16.000 raus, 2 $ / 10 $ je Mio.
     /// - Maus = GPT-6.1 Terra: 40.000 Token rein, 16.000 raus, 1 $ / 5 $ je Mio.
     pub fn standard(berater: BeraterId) -> KiDeckel {
-        let (ein, aus, schreiben, lesen) = match berater {
-            // https://platform.claude.com/docs/en/about-claude/pricing (17.11.2026), 5 Minuten.
-            BeraterId::Dachs => (200, 1_000, 250, 10),
-            // https://developers.openai.com/api/docs/models/gpt-6.1-terra (17.11.2026), 30 Minuten.
-            BeraterId::Maus => (100, 500, 125, 5),
+        Self::fuer_modell(Modellwahl::standard(berater).modell())
+    }
+
+    pub fn fuer_modell(modell: Modell) -> KiDeckel {
+        let (ein, aus, schreiben, lesen) = match modell {
+            // Anthropic: 5 Minuten. OpenAI: 30 Minuten. Geprüft am 21.11.2026.
+            // https://platform.claude.com/docs/en/about-claude/pricing
+            // https://developers.openai.com/api/docs/models
+            Modell::Sonnet55 | Modell::Sol62 => (200, 1_000, 250, 10),
+            Modell::Opus55 => (400, 2_000, 500, 20),
+            Modell::Terra61 => (100, 500, 125, 5),
         };
         KiDeckel {
             max_token_ein: 40_000,
@@ -96,9 +103,13 @@ impl KiDeckel {
 
     /// Kurze Vorbereitung/Abstimmung: gleiche Preise und Eingabegrenze, 2.000 Ausgabetoken.
     pub fn kurz(berater: BeraterId) -> KiDeckel {
+        Self::kurz_fuer_modell(Modellwahl::standard(berater).modell())
+    }
+
+    pub fn kurz_fuer_modell(modell: Modell) -> KiDeckel {
         Self {
             max_token_aus: KiGrenzen::standard().kurz_max_token_aus(),
-            ..Self::standard(berater)
+            ..Self::fuer_modell(modell)
         }
     }
 

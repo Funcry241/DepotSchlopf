@@ -122,7 +122,7 @@ pub fn vorbereiten<'a>(
         if tag_jetzt(a.zeit) != Some(tag) {
             a.text = "Nicht gefragt: Zeitfenster abgelaufen.".into();
         } else if b.angebunden() {
-            match j.reserviere_vorbereitung(zeit, wer) {
+            match j.reserviere_vorbereitung_mit_einstellung(zeit, wer, b.einstellung()) {
                 Ok(erlaubnis) => {
                     a.gefragt = true;
                     println!(

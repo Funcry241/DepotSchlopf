@@ -76,9 +76,20 @@ fn budgetgrenze(sperre: &Sperre) -> bool {
     )
 }
 
-fn runde_frei(buch: &Journal, zyklus: &Zyklus<'_>) -> Result<bool, LaufFehler> {
-    for wer in [BeraterId::Dachs, BeraterId::Maus] {
-        match buch.pruefe_ki(wer, zyklus.tag.datum, zyklus.nr, KiZweck::Abstimmung) {
+fn runde_frei(
+    buch: &Journal,
+    zyklus: &Zyklus<'_>,
+    dachs: &dyn Berater,
+    maus: &dyn Berater,
+) -> Result<bool, LaufFehler> {
+    for (wer, berater) in [(BeraterId::Dachs, dachs), (BeraterId::Maus, maus)] {
+        match buch.pruefe_ki_mit_einstellung(
+            wer,
+            zyklus.tag.datum,
+            zyklus.nr,
+            KiZweck::Abstimmung,
+            berater.einstellung(),
+        ) {
             Ok(()) => {}
             Err(s) if budgetgrenze(&s) => return Ok(false),
             Err(s) => return Err(crate::lauf::halt(format!("Abstimmungsprüfung: {s:?}"))),
@@ -95,11 +106,13 @@ fn frage(
     dialog: &AbstimmungsStand,
 ) -> Result<Option<AbstimmungsAntwort>, LaufFehler> {
     let kaufbar = crate::lauf::kaufbudget(buch, zyklus.grenzen, topf.topf.id())?;
-    let erlaubnis = match buch.reserviere_fuer(
-        topf.topf.id().berater(),
+    let wer = topf.topf.id().berater();
+    let erlaubnis = match buch.reserviere_mit_einstellung(
+        wer,
         zyklus.tag.datum,
         zyklus.nr,
         KiZweck::Abstimmung,
+        zweite.einstellung(),
     ) {
         Ok(erlaubnis) => erlaubnis,
         Err(s) if budgetgrenze(&s) => return Ok(None),
@@ -325,7 +338,7 @@ pub(crate) fn berate(
         if !crate::lauf::beratungszeit(zyklus) || !dachs.angebunden() || !maus.angebunden() {
             break;
         }
-        if !runde_frei(buch, zyklus)? {
+        if !runde_frei(buch, zyklus, dachs, maus)? {
             break;
         }
         let sa = AbstimmungsStand {

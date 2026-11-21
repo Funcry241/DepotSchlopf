@@ -1121,3 +1121,51 @@ fn zeitplan_alte_datei() -> Result<(), String> {
     assert!(get(&d, "/teil/live", donnerstag(12, 0)?).contains("Sicherung: aus"));
     Ok(())
 }
+
+#[test]
+fn ki_einstellungen_bleiben_nach_neustart_und_pruefen_modell_und_tageslimit() -> Result<(), String>
+{
+    let wurzel = ordner()?;
+    let d = dienst(wurzel.clone(), true);
+    let t = donnerstag(17, 50)?;
+    let post = |felder: &str, token: &str| {
+        let a = formular_post("/ki-einstellungen", &format!("t={token}&{felder}"));
+        text(&behandle(&d, &Attrappe::default(), &a, t))
+    };
+    let werte = "dachs-modell=claude-sonnet-5-5%3Amedium&dachs-aufrufe=3&maus-modell=gpt-6.2-sol%3Amedium&maus-aufrufe=10&gemini-aufrufe=2&neuro-aufrufe=8";
+    assert!(post(werte, "").starts_with("HTTP/1.1 403 "));
+    assert!(
+        post(
+            &werte.replace("gemini-aufrufe=2", "gemini-aufrufe=6"),
+            TOKEN
+        )
+        .starts_with("HTTP/1.1 400 ")
+    );
+    assert!(
+        post(
+            &werte.replace("gpt-6.2-sol%3Amedium", "claude-sonnet-5-5%3Amedium"),
+            TOKEN
+        )
+        .starts_with("HTTP/1.1 400 ")
+    );
+    let daten = wurzel.join("daten");
+    assert!(!depot_journal::ki_einstellungen::pfad(&daten).exists());
+    assert!(post(werte, TOKEN).starts_with("HTTP/1.1 303 "));
+    drop(d);
+    let neu = dienst(wurzel, true);
+    let seite = get(&neu, "/einrichtung", t);
+    assert!(seite.contains("value=\"gpt-6.2-sol:medium\" selected"));
+    assert!(seite.contains("Aufrufe heute 0 von 2"));
+    assert!(seite.contains("Noch keine belastbare Schätzung"));
+    let e = depot_journal::ki_einstellungen::lesen(&daten)?;
+    assert_eq!(
+        (
+            e.dachs.max_aufrufe,
+            e.maus.max_aufrufe,
+            e.gemini,
+            e.neuroschlopf
+        ),
+        (3, 10, 2, 8)
+    );
+    Ok(())
+}

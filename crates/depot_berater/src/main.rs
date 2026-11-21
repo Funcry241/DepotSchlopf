@@ -23,6 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use depot_berater::{Anbieter, Https, KiBerater, SPERRDATEI, Schluessel};
 use depot_kern::liste::{als_universum, beobachtungsliste};
+use depot_kern::modelle::KiEinstellungen;
 use depot_kern::{BeraterId, Datum, Zeitpunkt};
 use depot_sim::papierlauf::papier_starten;
 
@@ -74,12 +75,34 @@ enum Modus {
     Simulation,
 }
 
+fn lade_einstellungen(daten: &Path, modus: Modus) -> Result<Option<KiEinstellungen>, String> {
+    // Reservierungen mit Modellwahl benötigen den neuen Journalleser. Ein laufender
+    // Rückfall darf auch bei einem direkten Konsolenaufruf noch möglich bleiben.
+    if daten
+        .join("update_offen.txt")
+        .try_exists()
+        .map_err(|e| format!("Update-Status nicht lesbar: {e}"))?
+    {
+        return Err("Das Update muss zuerst bestätigt sein. DepotSchlopf starten und die Update-Bestätigung abwarten.".into());
+    }
+    match depot_journal::ki_einstellungen::lesen(daten) {
+        Ok(e) => Ok(Some(e)),
+        Err(e) if matches!(modus, Modus::Papier { .. }) => {
+            eprintln!("[Papier] {e}. Dachs und Maus werden nicht gefragt.");
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 fn lauf(wurzel: &Path, modus: Modus) -> Result<(), String> {
     let werte = beobachtungsliste()?;
     let universum = als_universum(&werte);
     let heute = heute().ok_or("Uhr liefert kein Datum")?;
-    let sperre = wurzel.join("daten").join(SPERRDATEI);
-    let protokoll = wurzel.join("daten").join(depot_journal::anbieter::DATEI);
+    let daten = wurzel.join("daten");
+    let einstellungen = lade_einstellungen(&daten, modus)?;
+    let sperre = daten.join(SPERRDATEI);
+    let protokoll = daten.join(depot_journal::anbieter::DATEI);
     if sperre.exists() {
         eprintln!(
             "[Papier] {} liegt: KIs gesperrt, niemand wird gefragt. Grund in der Datei; nach der Prüfung löschen.",
@@ -92,8 +115,9 @@ fn lauf(wurzel: &Path, modus: Modus) -> Result<(), String> {
         .map_or_else(depot_berater::zusatz::Zuarbeit::default, |(tag, ..)| {
             depot_berater::zusatz::Zuarbeit::lesen(&wurzel.join("daten"), tag, &universum)
         });
-    let dachs_schluessel = schluessel(BeraterId::Dachs);
-    let maus_schluessel = schluessel(BeraterId::Maus);
+    let dachs_schluessel = einstellungen.and_then(|_| schluessel(BeraterId::Dachs));
+    let maus_schluessel = einstellungen.and_then(|_| schluessel(BeraterId::Maus));
+    let einstellungen = einstellungen.unwrap_or_default();
     let mut dachs = KiBerater::neu(
         BeraterId::Dachs,
         dachs_schluessel.clone(),
@@ -101,6 +125,7 @@ fn lauf(wurzel: &Path, modus: Modus) -> Result<(), String> {
         universum.clone(),
         sperre.clone(),
     )
+    .mit_einstellung(einstellungen.dachs)?
     .mit_protokoll(protokoll.clone(), jetzt)
     .mit_gespraechen(lauf.clone(), maus_schluessel.clone())
     .mit_zuarbeit(zuarbeit.clone());
@@ -111,6 +136,7 @@ fn lauf(wurzel: &Path, modus: Modus) -> Result<(), String> {
         universum.clone(),
         sperre.clone(),
     )
+    .mit_einstellung(einstellungen.maus)?
     .mit_protokoll(protokoll, jetzt)
     .mit_gespraechen(lauf, dachs_schluessel)
     .mit_zuarbeit(zuarbeit);

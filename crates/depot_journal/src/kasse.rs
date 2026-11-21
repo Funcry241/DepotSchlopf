@@ -13,8 +13,9 @@
 //! heutigen Grenzen beurteilt, zaehlen aber weiter mit: Ein voller Monat bleibt voll. Eine
 //! Buchung ohne vorangehenden Abdruck ist unzulaessig.
 
+use depot_kern::modelle::{BeraterEinstellung, Denktiefe, Modell, Modellwahl};
 use depot_kern::{BeraterId, Cent};
-use depot_ki::{Buchung, Datum, KiDeckel, KiGrenzen, grenzabdruck, pruefe};
+use depot_ki::{Buchung, Datum, KiDeckel, KiGrenzen, Sperre, grenzabdruck, pruefe};
 
 use crate::stand::{datum_text, lies_datum};
 
@@ -37,15 +38,22 @@ pub struct AufrufErlaubnis {
     buchung: Buchung,
     nr: usize,
     deckel: KiDeckel,
+    auswahl: Modellwahl,
     _siegel: siegel::Siegel,
 }
 
 impl AufrufErlaubnis {
-    pub(crate) fn neu(buchung: Buchung, deckel: KiDeckel, nr: usize) -> AufrufErlaubnis {
+    pub(crate) fn neu(
+        buchung: Buchung,
+        deckel: KiDeckel,
+        auswahl: Modellwahl,
+        nr: usize,
+    ) -> AufrufErlaubnis {
         AufrufErlaubnis {
             buchung,
             nr,
             deckel,
+            auswahl,
             _siegel: siegel::Siegel::neu(),
         }
     }
@@ -90,6 +98,10 @@ impl AufrufErlaubnis {
         &self.deckel
     }
 
+    pub fn modellwahl(&self) -> Modellwahl {
+        self.auswahl
+    }
+
     /// Ein Token umfasst mindestens ein Byte. Wer hoechstens `max_token_ein` Bytes sendet,
     /// sendet also sicher nicht mehr Token als erlaubt.
     pub fn eingabe_passt(&self, eingabe: &str) -> bool {
@@ -104,7 +116,7 @@ fn berater_text(b: BeraterId) -> &'static str {
     }
 }
 
-pub(crate) fn buchung_text(b: &Buchung) -> String {
+fn buchung_text(b: &Buchung) -> String {
     format!(
         "{};{};{};{}",
         berater_text(b.berater),
@@ -114,7 +126,7 @@ pub(crate) fn buchung_text(b: &Buchung) -> String {
     )
 }
 
-pub(crate) fn lies_buchung(text: &str) -> Option<Buchung> {
+fn lies_buchung(text: &str) -> Option<Buchung> {
     let teile: Vec<&str> = text.split(';').collect();
     let [berater, datum, zyklus, cent] = teile.as_slice() else {
         return None;
@@ -132,6 +144,49 @@ pub(crate) fn lies_buchung(text: &str) -> Option<Buchung> {
         zyklus: zyklus.parse().ok()?,
         reserviert,
     })
+}
+
+pub(crate) fn buchung_text_mit_modell(b: &Buchung, auswahl: Option<Modellwahl>) -> String {
+    let text = buchung_text(b);
+    auswahl.map_or_else(
+        || text.clone(),
+        |wahl| {
+            format!(
+                "{text};{};{}",
+                wahl.modell().kennung(),
+                wahl.denktiefe().kennung()
+            )
+        },
+    )
+}
+
+pub(crate) fn lies_buchung_mit_modell(text: &str) -> Option<(Buchung, Option<Modellwahl>)> {
+    let (buchung, auswahl) = if let Some(b) = lies_buchung(text) {
+        (b, None)
+    } else {
+        let (text, tiefe) = text.rsplit_once(';')?;
+        let (text, modell) = text.rsplit_once(';')?;
+        let b = lies_buchung(text)?;
+        let auswahl = Modellwahl::neu(b.berater, Modell::lies(modell)?, Denktiefe::lies(tiefe)?)?;
+        (b, Some(auswahl))
+    };
+    (buchung_text_mit_modell(&buchung, auswahl) == text).then_some((buchung, auswahl))
+}
+
+/// Tarife der Modellwahl sind Teil des Buchungsregimes. Der alte Abdruck bleibt unverändert.
+pub(crate) fn grenzabdruck_fuer_auswahl(auswahl: Option<Modellwahl>) -> String {
+    if auswahl.is_none() {
+        return grenzabdruck();
+    }
+    let text = format!(
+        "{}|{:?}|{:?}|{:?}|{:?}",
+        grenzabdruck(),
+        KiDeckel::fuer_modell(Modell::Opus55),
+        KiDeckel::kurz_fuer_modell(Modell::Opus55),
+        KiDeckel::fuer_modell(Modell::Sol62),
+        KiDeckel::kurz_fuer_modell(Modell::Sol62),
+    );
+    depot_kern::abdruck::sha256_hex(text.as_bytes())
 }
 
 fn ist_abdruck(text: &str) -> bool {
@@ -177,17 +232,20 @@ impl KiZweck {
     pub(crate) fn ohne_handelsbeginn(self) -> bool {
         matches!(self, Self::Simulation | Self::Wochenrueckschau)
     }
-    pub(crate) fn deckel(self, wer: BeraterId) -> KiDeckel {
+    pub(crate) fn deckel(self, modell: Modell) -> KiDeckel {
         match self {
-            Self::Abstimmung | Self::Vorbereitung | Self::Wochenrueckschau => KiDeckel::kurz(wer),
-            _ => KiDeckel::standard(wer),
+            Self::Abstimmung | Self::Vorbereitung | Self::Wochenrueckschau => {
+                KiDeckel::kurz_fuer_modell(modell)
+            }
+            _ => KiDeckel::fuer_modell(modell),
         }
     }
 }
-pub(crate) fn buchung_fuer(b: &Buchung, zweck: KiZweck) -> String {
+pub(crate) fn buchung_fuer(b: &Buchung, zweck: KiZweck, auswahl: Option<Modellwahl>) -> String {
+    let text = buchung_text_mit_modell(b, auswahl);
     match zweck {
-        KiZweck::Erstmeinung => buchung_text(b),
-        _ => format!("{};{}", buchung_text(b), zweck.text()),
+        KiZweck::Erstmeinung => text,
+        _ => format!("{text};{}", zweck.text()),
     }
 }
 
@@ -201,6 +259,7 @@ pub struct KiStand {
     abgerechnet: std::collections::BTreeSet<usize>,
     aufrufe: std::collections::BTreeMap<usize, crate::KiAufruf>,
     zwecke: Vec<KiZweck>,
+    modellwahlen: Vec<Option<Modellwahl>>,
 }
 
 impl KiStand {
@@ -215,6 +274,70 @@ impl KiStand {
 
     pub fn aufruf(&self, nr: usize) -> Option<&crate::KiAufruf> {
         self.aufrufe.get(&nr)
+    }
+
+    pub fn modellwahl(&self, nr: usize) -> Option<Modellwahl> {
+        self.modellwahlen.get(nr).copied().flatten()
+    }
+
+    fn pruefe_tageslimit(
+        &self,
+        berater: BeraterId,
+        datum: Datum,
+        einstellung: BeraterEinstellung,
+    ) -> Result<(), Sperre> {
+        if einstellung.auswahl.modell().berater() != berater {
+            return Err(Sperre::Rechenfehler);
+        }
+        if einstellung.max_aufrufe >= depot_kern::modelle::MAX_BERATER_AUFRUFE {
+            return Ok(());
+        }
+        let heute = self
+            .buchungen
+            .iter()
+            .filter(|b| b.berater == berater && b.datum == datum)
+            .count();
+        if heute >= einstellung.max_aufrufe {
+            return Err(Sperre::TagVoll);
+        }
+        Ok(())
+    }
+
+    /// Prüft mit denselben Grenzen wie eine neue Reservierung.
+    pub fn pruefe_reservierung(
+        &self,
+        berater: BeraterId,
+        datum: Datum,
+        zyklus: u32,
+        zweck: KiZweck,
+        einstellung: BeraterEinstellung,
+    ) -> Result<Cent, Sperre> {
+        self.naechste_mit_einstellung(berater, datum, zyklus, zweck, einstellung)
+            .map(|(buchung, _)| buchung.reserviert)
+    }
+
+    pub(crate) fn naechste_mit_einstellung(
+        &self,
+        berater: BeraterId,
+        datum: Datum,
+        zyklus: u32,
+        zweck: KiZweck,
+        einstellung: BeraterEinstellung,
+    ) -> Result<(Buchung, KiDeckel), Sperre> {
+        self.pruefe_tageslimit(berater, datum, einstellung)?;
+        let (buchung, deckel) = naechste_fuer(self, datum, zyklus, zweck, einstellung.auswahl)?;
+        if zweck == KiZweck::Vorbereitung {
+            let rahmen = depot_ki::vorbereitungsrahmen_fuer_modell(
+                &KiGrenzen::standard(),
+                &self.buchungen,
+                einstellung.auswahl.modell(),
+                datum,
+            )?;
+            if buchung.reserviert > rahmen {
+                return Err(Sperre::TagesrahmenErschoepft);
+            }
+        }
+        Ok((buchung, deckel))
     }
 
     pub(crate) fn belege_aufruf(&mut self, inhalt: &str) -> Result<(), String> {
@@ -244,8 +367,8 @@ impl KiStand {
     }
 
     /// Steht der heutige Abdruck als letzter im Journal?
-    pub(crate) fn abdruck_aktuell(&self) -> bool {
-        self.abdruck.as_deref() == Some(grenzabdruck().as_str())
+    pub(crate) fn abdruck_aktuell(&self, abdruck: &str) -> bool {
+        self.abdruck.as_deref() == Some(abdruck)
     }
 
     pub(crate) fn abdruck(&mut self, inhalt: &str) -> Result<(), String> {
@@ -279,8 +402,8 @@ impl KiStand {
         if zweck.ohne_handelsbeginn() {
             return Err("Simulationsbuchung ohne Grenzabdruck".into());
         }
-        let b = lies_buchung(text).ok_or("Buchung unlesbar")?;
-        if buchung_fuer(&b, zweck) != inhalt {
+        let (b, auswahl) = lies_buchung_mit_modell(text).ok_or("Buchung unlesbar")?;
+        if buchung_fuer(&b, zweck, auswahl) != inhalt {
             return Err("Buchung nicht in kanonischer Form".into());
         }
         self.buche_fuer(text, zweck)?;
@@ -288,15 +411,13 @@ impl KiStand {
     }
 
     pub(crate) fn buche_fuer(&mut self, inhalt: &str, zweck: KiZweck) -> Result<(), String> {
-        let b = lies_buchung(inhalt).ok_or("Buchung unlesbar")?;
-        if buchung_text(&b) != inhalt {
-            return Err("Buchung nicht in kanonischer Form".into());
-        }
+        let (b, auswahl) = lies_buchung_mit_modell(inhalt).ok_or("Buchung unlesbar")?;
         let Some(abschnitt) = &self.abdruck else {
             return Err("Buchung ohne Grenzabdruck".into());
         };
-        if *abschnitt == grenzabdruck() {
-            let erwartet = naechste_fuer(self, b.berater, b.datum, b.zyklus, zweck)
+        if *abschnitt == grenzabdruck_fuer_auswahl(auswahl) {
+            let wahl = auswahl.unwrap_or_else(|| Modellwahl::standard(b.berater));
+            let erwartet = naechste_fuer(self, b.datum, b.zyklus, zweck, wahl)
                 .map(|(b, _)| b.reserviert)
                 .map_err(|s| format!("Historie verletzt die Grenzen: {s:?}"))?;
             if erwartet != b.reserviert {
@@ -309,28 +430,22 @@ impl KiStand {
         // Frueherer Abdruck: zaehlt, wird aber nicht nach heutigen Grenzen beurteilt.
         self.obergrenzen.push(b.reserviert);
         self.zwecke.push(zweck);
+        self.modellwahlen.push(auswahl);
         self.buchungen.push(b);
         Ok(())
     }
 }
 
 /// Die Buchung, die `reserviere` schreiben wuerde, und ihr Deckel.
-pub(crate) fn naechste(
-    stand: &KiStand,
-    berater: BeraterId,
-    datum: Datum,
-    zyklus: u32,
-) -> Result<(Buchung, KiDeckel), depot_ki::Sperre> {
-    naechste_fuer(stand, berater, datum, zyklus, KiZweck::Erstmeinung)
-}
-
 pub(crate) fn naechste_fuer(
     stand: &KiStand,
-    berater: BeraterId,
     datum: Datum,
     zyklus: u32,
     zweck: KiZweck,
-) -> Result<(Buchung, KiDeckel), depot_ki::Sperre> {
+    auswahl: Modellwahl,
+) -> Result<(Buchung, KiDeckel), Sperre> {
+    let modell = auswahl.modell();
+    let berater = modell.berater();
     if matches!(zweck, KiZweck::Zweitmeinung | KiZweck::Abstimmung)
         && !stand
             .buchungen
@@ -340,7 +455,7 @@ pub(crate) fn naechste_fuer(
     {
         return Err(depot_ki::Sperre::ErstmeinungReserviert);
     }
-    let deckel = zweck.deckel(berater);
+    let deckel = zweck.deckel(modell);
     let reserviert = pruefe(
         &KiGrenzen::standard(),
         &deckel,
@@ -350,7 +465,7 @@ pub(crate) fn naechste_fuer(
         zyklus,
     )?;
     if zweck != KiZweck::Erstmeinung {
-        pruefe_zusatzreserve(stand, berater, datum, reserviert, zweck)?;
+        pruefe_zusatzreserve(stand, modell, datum, reserviert, zweck)?;
     }
     Ok((
         Buchung {
@@ -366,11 +481,12 @@ pub(crate) fn naechste_fuer(
 /// Zusatzfragen lassen Aufrufe und Höchstkosten aller übrigen Erstmeinungen frei.
 fn pruefe_zusatzreserve(
     stand: &KiStand,
-    berater: BeraterId,
+    modell: Modell,
     datum: Datum,
     reserviert: Cent,
     zweck: KiZweck,
 ) -> Result<(), depot_ki::Sperre> {
+    let berater = modell.berater();
     let g = KiGrenzen::standard();
     let gebucht = stand
         .buchungen
@@ -415,7 +531,7 @@ fn pruefe_zusatzreserve(
     if nachher > g.aufrufe_je_monat().saturating_sub(tage) {
         return Err(depot_ki::Sperre::ErstmeinungReserviert);
     }
-    let morgen = KiDeckel::standard(berater)
+    let morgen = KiDeckel::fuer_modell(modell)
         .hoechstkosten()
         .and_then(|c| c.mal_stueck(u64::from(tage.max(1))))
         .ok_or(depot_ki::Sperre::Rechenfehler)?;

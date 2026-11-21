@@ -1,5 +1,6 @@
 //! Gleichmäßige Monatsverteilung aus bestätigten Buchungen, ohne Uhr oder Dateien.
 use crate::{Buchung, KiDeckel, KiGrenzen, Sperre};
+use depot_kern::modelle::{Modell, Modellwahl};
 use depot_kern::{BeraterId, Cent, Datum};
 
 /// Verbleibende Handelstage einschließlich heute, auf den Börsen der Positivliste.
@@ -39,17 +40,33 @@ pub fn vorbereitungsrahmen(
     wer: BeraterId,
     datum: Datum,
 ) -> Result<Cent, Sperre> {
+    vorbereitungsrahmen_fuer_modell(g, buchungen, Modellwahl::standard(wer).modell(), datum)
+}
+
+pub fn vorbereitungsrahmen_fuer_modell(
+    g: &KiGrenzen,
+    buchungen: &[Buchung],
+    modell: Modell,
+    datum: Datum,
+) -> Result<Cent, Sperre> {
     let tage = handelstage_rest(datum);
     let deckel = if tage == 0 {
         Some(
-            KiDeckel::kurz(wer)
+            KiDeckel::kurz_fuer_modell(modell)
                 .hoechstkosten()
                 .ok_or(Sperre::Rechenfehler)?,
         )
     } else {
         None
     };
-    tagesanteil(g, buchungen, wer, datum, tage.saturating_add(1), deckel)
+    tagesanteil(
+        g,
+        buchungen,
+        modell.berater(),
+        datum,
+        tage.saturating_add(1),
+        deckel,
+    )
 }
 
 fn tagesanteil(

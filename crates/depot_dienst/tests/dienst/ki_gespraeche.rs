@@ -395,7 +395,7 @@ fn gemini_bleibt_ohne_bestaetigtes_gratisprojekt_aus() -> Result<(), String> {
     let rechnen = depot_dienst::lagerechner(Arc::new(Attrappe::default()));
     let budget = depot_lage::html::seite(&rechnen(&d.wurzel, t));
     assert!(budget.contains("<h3>Gemini</h3><p class=\"gut\">Eingeschaltet"));
-    assert!(budget.contains("<dt>Aufrufe heute</dt><dd>0 von 5</dd>"));
+    assert!(budget.contains("Aufrufe heute 0 von 5 · 0 €"));
     assert!(sende("an=nein").contains("/einrichtung#zusatz"));
     assert!(!depot_lage::gespraeche::gemini_aktiv(&ziel));
     Ok(())

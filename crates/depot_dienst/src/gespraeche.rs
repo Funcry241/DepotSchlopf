@@ -321,6 +321,9 @@ fn eintrag(s: &mut String, e: &Gespraech, belege: &Belege<'_>) {
         maskiere(zweck_text(&e.zweck)),
     );
     let buchung = belege.buchung(e);
+    if let Some(wahl) = buchung.and_then(|(nr, _)| belege.ki?.modellwahl(nr)) {
+        let _ = write!(s, " · Denktiefe {}", maskiere(wahl.denktiefe().name()));
+    }
     let kosten = if e.buchung.is_none() {
         e.kosten_cent
             .and_then(|cent| i64::try_from(cent).ok())

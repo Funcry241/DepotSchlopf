@@ -93,7 +93,12 @@ fn bestaetigungslink(art: Art, text: &str, sha: Option<&str>, primaer: bool) -> 
 const ZEITFENSTER: &str = "von 08:00 bis vor 23:00 Uhr Frankfurter Zeit";
 const VORBEREITUNG_HAEUFIGKEIT: &str = depot_lage::html::VORBEREITUNG_HAEUFIGKEIT;
 
-pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> String {
+pub(crate) fn auftrag_bestaetigen(
+    token: &str,
+    art: Art,
+    sha: Option<&str>,
+    simulationskosten: Option<depot_kern::Cent>,
+) -> String {
     let (text, ziel, knopf, haken) = if art == Art::Vorbereiten {
         (
             format!(
@@ -107,8 +112,7 @@ pub(crate) fn auftrag_bestaetigen(token: &str, art: Art, sha: Option<&str>) -> S
         (
             format!(
                 "Dachs und Maus beraten mit dem zuletzt belegten Kursstand. Die Simulation versendet keine Orders. Maximale KI-Reservierung je Lauf {}.",
-                depot_lage::simulationskosten()
-                    .map_or_else(|| "nicht berechenbar".into(), |c| c.to_string())
+                simulationskosten.map_or_else(|| "nicht berechenbar".into(), |c| c.to_string())
             ),
             "/#ki-simulation",
             Art::Simulation.name(),
@@ -334,6 +338,7 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
     Some(match code {
         "split_gebucht" => ("gut", "Split in Journal und Papierkonto gebucht."),
         "splitverdacht_entwarnt" => ("gut", "Geprüfter Fehlalarm im Journal belegt."),
+        "ki_einstellungen_gespeichert" => ("gut", "KI-Einstellungen gespeichert."),
         "sicherung_ziel" => ("gut", "Sicherungsziel gespeichert."),
         "sicherung_aus" => ("gut", "Sicherung ausgeschaltet."),
         "sicherung_start" => (
@@ -1698,6 +1703,7 @@ pub struct Einrichtung {
     /// `Some(true)`: Datei stimmt mit dem aktiven Zeitplan ueberein; `Some(false)`: weicht ab
     /// oder ist unlesbar; `None`: keine Datei (Voreinstellung).
     pub zeitplan_gespeichert: Option<bool>,
+    pub ki_einstellungen: String,
     /// Abgelehnte Eingaben, die wieder im Formular stehen.
     pub entwurf: Entwurf,
     pub autostart: autostart::Stand,
@@ -2552,6 +2558,7 @@ pub(crate) fn einrichtung_mit_update(
         quellen_teil(token, start, z, e.alpha_kontingent)
     );
     zeitplan_teil(token, z, e, &mut s);
+    s.push_str(&e.ki_einstellungen);
     update_teil(token, start, z, e, &mut s, update);
     s.push_str("<section id=\"selten\" class=\"einstellungsgruppe\" aria-labelledby=\"selten-titel\"><h2 id=\"selten-titel\">Seltene Einstellungen</h2><p>Für die erste Einrichtung oder wenn sich etwas ändert: Zugangsdaten, Datenspeicherung, Windows-Start und technische Prüfungen.</p>");
     if z.zeitplan.an {

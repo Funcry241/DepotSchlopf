@@ -929,7 +929,7 @@ fn erlaubnis(
     } else {
         depot_journal::KiZweck::Zweitmeinung
     };
-    match j.reserviere_fuer(berater, tag.datum, zyklus, zweck) {
+    match j.reserviere_mit_einstellung(berater, tag.datum, zyklus, zweck, ki.einstellung()) {
         Ok(e) => Ok(Some(e)),
         Err(Sperre::Kassenbuch(e)) => Err(halt(format!("Kassenbuch: {e}"))),
         Err(sperre) => {

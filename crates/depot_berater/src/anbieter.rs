@@ -10,6 +10,7 @@
 //! Ausgabe-Token und Zahl der Suchen, die null sein muss.
 
 use depot_kern::BeraterId;
+use depot_kern::modelle::Modellwahl;
 use depot_ki::KiDeckel;
 
 use crate::json::{self, Json, zitiere};
@@ -38,6 +39,7 @@ pub struct Verbrauch {
 pub struct Gelesen {
     pub text: Result<String, String>,
     pub verbrauch: Verbrauch,
+    pub modell: Option<String>,
 }
 
 impl Anbieter {
@@ -103,30 +105,47 @@ impl Anbieter {
 
     /// Der Inhalt der Anfrage.
     pub fn anfrage(self, deckel: &KiDeckel, system: &str, frage: &str) -> String {
-        match self {
+        let berater = match self {
+            Self::Anthropic => BeraterId::Dachs,
+            Self::OpenAi => BeraterId::Maus,
+        };
+        Self::anfrage_mit_modell(Modellwahl::standard(berater), deckel, system, frage)
+    }
+
+    pub(crate) fn anfrage_mit_modell(
+        auswahl: Modellwahl,
+        deckel: &KiDeckel,
+        system: &str,
+        frage: &str,
+    ) -> String {
+        let modell = auswahl.modell();
+        let denktiefe = zitiere(auswahl.denktiefe().kennung());
+        match Self::fuer(modell.berater()) {
             Anbieter::Anthropic => format!(
                 concat!(
                     "{{\"model\":{},\"max_tokens\":{},",
                     "\"thinking\":{{\"type\":\"adaptive\"}},",
-                    "\"output_config\":{{\"effort\":\"medium\"}},",
+                    "\"output_config\":{{\"effort\":{}}},",
                     "\"system\":{},",
                     "\"messages\":[{{\"role\":\"user\",\"content\":{}}}]}}"
                 ),
-                zitiere(self.modell()),
+                zitiere(modell.kennung()),
                 deckel.max_token_aus(),
+                denktiefe,
                 zitiere(system),
                 anthropic_inhalt(frage)
             ),
             Anbieter::OpenAi => format!(
                 concat!(
                     "{{\"model\":{},\"max_output_tokens\":{},",
-                    "\"reasoning\":{{\"effort\":\"medium\"}},",
+                    "\"reasoning\":{{\"effort\":{}}},",
                     "\"instructions\":{},",
                     "\"store\":false,",
                     "\"input\":{}}}"
                 ),
-                zitiere(self.modell()),
+                zitiere(modell.kennung()),
                 deckel.max_token_aus(),
+                denktiefe,
                 zitiere(system),
                 zitiere(frage)
             ),
@@ -144,10 +163,12 @@ impl Anbieter {
         if w.doppelte_felder() || w.feld("usage").is_some_and(Json::doppelte_felder) {
             return Err("Mehrdeutige Anbieterabrechnung".into());
         }
-        match self {
+        let mut gelesen = match self {
             Anbieter::Anthropic => lies_anthropic(&w),
             Anbieter::OpenAi => lies_openai(&w),
-        }
+        }?;
+        gelesen.modell = w.feld("model").and_then(Json::text).map(str::to_owned);
+        Ok(gelesen)
     }
 }
 
@@ -214,7 +235,11 @@ fn lies_anthropic(w: &Json) -> Result<Gelesen, String> {
     } else {
         Err(format!("Antwort unvollständig: stop_reason {grund:?}"))
     };
-    Ok(Gelesen { text, verbrauch })
+    Ok(Gelesen {
+        text,
+        verbrauch,
+        modell: None,
+    })
 }
 
 fn lies_openai(w: &Json) -> Result<Gelesen, String> {
@@ -266,5 +291,9 @@ fn lies_openai(w: &Json) -> Result<Gelesen, String> {
     } else {
         Err(format!("Antwort unvollständig: status {status:?}"))
     };
-    Ok(Gelesen { text, verbrauch })
+    Ok(Gelesen {
+        text,
+        verbrauch,
+        modell: None,
+    })
 }

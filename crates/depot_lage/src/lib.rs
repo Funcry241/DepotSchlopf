@@ -38,6 +38,7 @@ pub mod diagramm;
 pub mod handelsergebnis;
 pub mod handelsvergleich;
 pub mod html;
+pub mod ki_kostenschaetzung;
 pub mod leerlauf;
 pub mod messlatte;
 pub mod reife;
@@ -50,7 +51,7 @@ pub mod wiederanlauf;
 mod zugang;
 
 pub use betrieb::{AnbieterHinweis, Betrieb, SchluesselStand};
-pub use budget::{BudgetStatus, KiBudget, ki_budget, mit_verbrauch};
+pub use budget::{BudgetStatus, KiBudget, ki_budget, ki_budget_mit_einstellung, mit_verbrauch};
 pub use depot::{
     AuftragZeile, DepotLage, Position, Tagesergebnis, TopfLage, auftrag_zeile,
     letzter_tagesschluss, zustand_text,
@@ -78,7 +79,9 @@ pub use depot_sim::papierlauf::{
     papier_mindesteinsatz,
 };
 pub use depot_sim::vorbereitung::tag_jetzt as vorbereitungstag;
-pub use depot_sim::vorschau::hoechstkosten as simulationskosten;
+pub use depot_sim::vorschau::{
+    hoechstkosten as simulationskosten, hoechstkosten_fuer as simulationskosten_fuer,
+};
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
 pub use zugang::{
     DatenprobeFehler, PAPIERKONTO, anbieterprotokoll, ki_halt, mit_journal,
@@ -226,6 +229,22 @@ pub struct Grenzwert {
 pub struct GeminiBudget {
     pub an: bool,
     pub aufrufe: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+impl GeminiBudget {
+    pub fn kontingent_text(self) -> String {
+        let anzahl = match (self.aufrufe, self.limit) {
+            (Some(n), Some(limit)) => format!("{n} von {limit}"),
+            (None, Some(limit)) => format!("unbekannt von {limit}"),
+            (_, None) => return "Tageslimit unlesbar · Aufrufe pausiert".into(),
+        };
+        if self.an {
+            format!("Aufrufe heute {anzahl} · 0 €")
+        } else {
+            format!("Aufrufe heute {anzahl} · Gratis-Projekt aus")
+        }
+    }
 }
 
 /// Vorhandene Abrufbelege für die Ersteinrichtung, unabhängig vom Handelstag.
@@ -1034,8 +1053,37 @@ fn ausstiegsplaene(
     }
 }
 
+fn beraterbudgets(
+    ki: &depot_journal::KiStand,
+    anbieter: &[depot_journal::anbieter::Eintrag],
+    heute: Datum,
+    ki_einstellungen: Result<depot_kern::modelle::KiEinstellungen, &str>,
+) -> Vec<KiBudget> {
+    [BeraterId::Dachs, BeraterId::Maus]
+        .into_iter()
+        .map(|b| {
+            let einstellung = ki_einstellungen.map(|e| match b {
+                BeraterId::Dachs => e.dachs,
+                BeraterId::Maus => e.maus,
+            });
+            mit_verbrauch(
+                ki_budget_mit_einstellung(ki, b, heute, einstellung),
+                anbieter,
+                heute,
+            )
+        })
+        .collect()
+}
+
 /// Rechnet das Lagebild.
 pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
+    lagebild_mit_ki_einstellungen(u, Ok(depot_kern::modelle::KiEinstellungen::default()))
+}
+
+pub fn lagebild_mit_ki_einstellungen(
+    u: &Umgebung<'_>,
+    ki_einstellungen: Result<depot_kern::modelle::KiEinstellungen, &str>,
+) -> Lagebild {
     let mut punkte = vec![journal_punkt(u.journal)];
     sperr_punkte(u, &mut punkte);
     let (schluessel, hinweise) = schluessel_punkte(u, &mut punkte);
@@ -1058,10 +1106,7 @@ pub fn lagebild(u: &Umgebung<'_>) -> Lagebild {
                 vorbereitung = Some(letzte.clone());
             }
             tag_punkte(s, heute, u.jetzt, werte, &mut punkte);
-            budget = [BeraterId::Dachs, BeraterId::Maus]
-                .into_iter()
-                .map(|b| mit_verbrauch(ki_budget(s.ki().buchungen(), b, heute), &u.anbieter, heute))
-                .collect();
+            budget = beraterbudgets(s.ki(), &u.anbieter, heute, ki_einstellungen);
             punkte.extend(budget.iter().filter_map(budget_punkt));
             let depot = depot::depot_lage(s, werte);
             if let Some(vergleich) = &depot.vergleich {

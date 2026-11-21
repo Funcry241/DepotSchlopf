@@ -574,6 +574,7 @@ mod status_tests {
         for datei in [
             "kurse.halt",
             "gemini.txt",
+            "ki-einstellungen.txt",
             "anbieter.txt",
             "zeitplan.txt",
             "neuro2026-belegurteile.tsv",
@@ -592,6 +593,7 @@ mod status_tests {
                 "anbieter.txt",
                 "gemini.txt",
                 "journal.txt",
+                "ki-einstellungen.txt",
                 "kurse.halt",
                 "neuro2026-belegurteile.tsv",
                 "zeitplan.txt"
