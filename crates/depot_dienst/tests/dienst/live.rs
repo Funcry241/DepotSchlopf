@@ -56,8 +56,8 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
     let nyse = some(html.find("<b>07:30 Uhr</b> · Kurse US-Börsen"), "US-Abruf")?;
     assert!(termine < xetra && xetra < nyse);
     assert!(html.contains("Kurse Xetra abrufen · ohne KI"));
-    assert!(html.contains(&format!("Dachs ({})", depot_kern::modelle::MODELL_DACHS)));
-    assert!(html.contains(&format!("Maus ({})", depot_kern::modelle::MODELL_MAUS)));
+    assert!(html.contains("Dachs (Claude Sonnet 5.5 · Denktiefe Mittel)"));
+    assert!(html.contains("Maus (GPT-6.1 Terra · Denktiefe Mittel)"));
     assert!(
         html.contains("nach dem letzten Kursabruf, wenn Kurse für alle gehaltenen Werte vorliegen")
     );
@@ -82,6 +82,139 @@ fn live_zeitstrahl_zeigt_boersenzeiten_und_bedingten_papiertag() -> Result<(), S
     assert!(einrichtung.contains("Im Morgenlauf gilt der letzte abgeschlossene Handelstag"));
     assert!(!einrichtung.contains("Beim Abendplan wird jede andere Börse"));
 
+    Ok(())
+}
+
+#[test]
+fn live_ki_ausblick_zeigt_neue_einstellungen_und_bewahrt_den_alten_aufruf() -> Result<(), String> {
+    use depot_lage::gespraeche::{Gespraech, anhaengen};
+
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let d = dienst(wurzel.clone(), true);
+    let zeit = donnerstag(7, 19)?;
+    let tag = some(zeit.frankfurt_tag(), "Frankfurter Tag")?;
+    {
+        let mut z = d.sperre();
+        z.zeitplan.an = true;
+        z.zeitplan.papier_danach = true;
+        z.zeitplan.termine = (7, 20);
+        z.zeitplan.kurse = (7, 30);
+    }
+    fs::write(
+        depot_lage::gespraeche::gemini_pfad(&daten),
+        "gratisprojekt=ja\n",
+    )
+    .map_err(|e| e.to_string())?;
+    fs::write(daten.join("neuroschlopf.txt"), "an\n").map_err(|e| e.to_string())?;
+    anhaengen(
+        &daten,
+        &Gespraech {
+            zeit,
+            lauf: "hand-1".into(),
+            wer: "dachs".into(),
+            rolle: "haupt".into(),
+            modell: "claude-sonnet-5-5".into(),
+            zweck: "erstmeinung".into(),
+            ergebnis: "ok".into(),
+            http: Some(200),
+            token_ein: None,
+            token_aus: None,
+            cache: None,
+            buchung: None,
+            schlopfmodell: None,
+            kosten_cent: None,
+            system: None,
+            frage: None,
+            antwort: None,
+            fehler: None,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let vor = get(&d, "/teil/live", zeit);
+    assert!(vor.contains("Nächster Aufruf · Claude Sonnet 5.5 · Denktiefe Mittel"));
+    let post = formular_post(
+        "/ki-einstellungen",
+        &format!(
+            "t={TOKEN}&dachs-modell=claude-opus-5-5%3Ahigh&dachs-aufrufe=2&maus-modell=gpt-6.2-sol%3Alow&maus-aufrufe=10&gemini-aufrufe=1&neuro-aufrufe=8&neuro-empfaenger=dachs"
+        ),
+    );
+    assert!(text(&behandle(&d, &Attrappe::default(), &post, zeit)).starts_with("HTTP/1.1 303 "));
+    let vorher = dateien(&wurzel)?;
+    for pfad in ["/", "/teil/live"] {
+        let html = get(&d, pfad, zeit);
+        let abschnitt = some(
+            html.split_once("<section id=\"ki-ausblick\">")
+                .map(|(_, s)| s),
+            "KI-Ausblick",
+        )?;
+        let (ausblick, danach) = some(abschnitt.split_once("</section>"), "Ende des KI-Ausblicks")?;
+        assert_eq!(ausblick.matches("<th scope=\"row\">").count(), 4);
+        assert!(ausblick.contains("Papiertag am 05.11.2026 · nach dem letzten Kursabruf"));
+        assert!(ausblick.contains("Nächster Aufruf · Claude Opus 5.5 · Denktiefe Hoch"));
+        assert!(ausblick.contains("Nächster Aufruf · GPT-6.2 Sol · Denktiefe Niedrig"));
+        assert!(
+            ausblick.contains("Sortiert Schlagzeilen im Vorlauf, sobald die Termine vorliegen")
+        );
+        assert!(ausblick.contains("Belegvergleich · Wartet auf einen bestätigten Journalstand."));
+        assert!(ausblick.contains("Externe Fragen · Warten auf einen geeigneten Beleg."));
+        assert!(danach.contains("Dachs (Claude Opus 5.5 · Denktiefe Hoch)"));
+        assert!(danach.contains("Maus (GPT-6.2 Sol · Denktiefe Niedrig)"));
+        assert!(danach.contains("Dachs (claude-sonnet-5-5)</a> · Antwort erhalten"));
+        assert!(danach.contains("<details id=\"weitere-ki-auftraege\"><summary>"));
+    }
+    assert_eq!(dateien(&wurzel)?, vorher);
+    assert!(d.sperre().warteschlange.is_empty());
+
+    fs::write(
+        depot_lage::gespraeche::gemini_kontingent(&daten, tag),
+        format!("{}\n", "a".repeat(64)),
+    )
+    .map_err(|e| e.to_string())?;
+    d.einreihen(Art::Papier, Anlass::Hand)?;
+    let html = get(&d, "/teil/live", zeit);
+    assert!(html.contains("<td>Papiertag · wartet auf den Start."));
+    assert!(html.contains("<td>Pausiert · Kontingent für heute erreicht."));
+    Ok(())
+}
+
+#[test]
+fn live_ki_ausblick_springt_nach_erfolglosen_abrufen_zum_naechsten_papiertag() -> Result<(), String>
+{
+    use depot_dienst::zeitplan::{Abruf, AbrufAusgang};
+
+    let d = dienst(ordner()?, true);
+    let zeit = donnerstag(12, 0)?;
+    let tag = some(zeit.frankfurt_tag(), "Frankfurter Tag")?;
+    {
+        let mut z = d.sperre();
+        z.zeitplan.an = true;
+        z.zeitplan.papier_danach = true;
+        z.zeitplan.nachrichten_an = false;
+        z.erledigt.termine = Some(tag);
+        z.erledigt.kurse = Some(tag);
+        z.erledigt.kurse_nyse = Some(tag);
+        let abruf = Abruf {
+            anker: donnerstag(7, 30)?,
+            versuche: 1,
+            ausgang: AbrufAusgang::Fehler,
+        };
+        z.erledigt.xetra_abruf = Some(abruf);
+        z.erledigt.nyse_abruf = Some(abruf);
+        z.boersen = vec![Boerse::Xetra, Boerse::Nyse];
+    }
+    let html = get(&d, "/teil/live", zeit);
+    assert!(html.contains("Papiertag am 06.11.2026 · nach dem letzten Kursabruf"));
+    assert!(!html.contains("Papiertag am 05.11.2026"));
+    assert!(html.contains("<th scope=\"row\">Gemini</th><td>Ausgeschaltet"));
+    assert!(html.contains("<th scope=\"row\">NeuroSchlopf</th><td>Belegvergleich · Ausgeschaltet"));
+    d.einreihen(Art::Gemini, Anlass::Hand)?;
+    let (nr, kind) = some(d.schritt(zeit), "Gemini-Start")?;
+    assert!(
+        get(&d, "/teil/live", zeit)
+            .contains("<th scope=\"row\">Gemini</th><td>Sortiert Schlagzeilen vor.")
+    );
+    d.verfolge(nr, kind, || donnerstag(12, 1).ok());
     Ok(())
 }
 

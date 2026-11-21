@@ -32,6 +32,7 @@ pub mod hinweis;
 pub mod http;
 mod ibkr_abgleich;
 mod ibkr_papier;
+mod ki_ausblick;
 mod ki_einstellungen;
 pub mod kostenschutz;
 mod neuro2026;
@@ -285,11 +286,20 @@ fn update_sperre(d: &Dienst, z: &werkbank::Zustand) -> Option<seiten::UpdateSper
 }
 
 fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
-    let ki =
-        zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), heute(jetzt));
+    let tag = heute(jetzt);
+    let ki = zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), tag);
+    let ausblick = ki_ausblick::Ausblick::lesen(d, tag, ki.gemini_aktiv);
     let z = d.sperre();
     let sperre = update_sperre(d, &z);
-    let mut html = seiten::live_mit_ki(&d.token, &d.start, &z, jetzt, &ki, sperre.as_ref());
+    let mut html = seiten::live_mit_ki(
+        &d.token,
+        &d.start,
+        &z,
+        jetzt,
+        &ki,
+        sperre.as_ref(),
+        Some(&ausblick),
+    );
     if sicherung::ziel(&d.wurzel).is_empty() {
         html.push_str("<p class=\"leise\">Sicherung: aus</p>");
     } else {

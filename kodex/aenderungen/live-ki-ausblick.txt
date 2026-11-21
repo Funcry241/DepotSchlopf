@@ -1,0 +1,12 @@
+klasse: Funktion
+zweck: Belegte nächste Aufgaben aller vier KIs und gespeicherte Modellwahl auf Live anzeigen
+pfade:
+crates/depot_dienst/src/ki_ausblick.rs
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/neuroauftraege.rs
+crates/depot_dienst/src/neuroschlopf.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/src/zeitplan.rs
+crates/depot_dienst/src/zeitstrahl_ki.rs
+crates/depot_dienst/tests/dienst/live.rs

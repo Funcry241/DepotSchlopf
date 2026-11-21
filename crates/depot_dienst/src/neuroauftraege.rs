@@ -21,6 +21,30 @@ const NACHRICHT_MAX: u64 = 40_000;
 const BEFUNDE_MAX: usize = 20;
 const KURZFRIST: Duration = Duration::from_secs(10);
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Fragenstand {
+    Journal,
+    Tageslimit,
+    Vorgemerkt(BeraterId),
+    Wartet,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Fragenvorschau {
+    tag: Datum,
+    einstellungen: KiEinstellungen,
+    stand: Fragenstand,
+}
+
+impl Fragenvorschau {
+    pub(crate) fn stand(self, tag: Option<Datum>, e: KiEinstellungen) -> Option<Fragenstand> {
+        (Some(self.tag) == tag
+            && self.einstellungen.neuroschlopf == e.neuroschlopf
+            && self.einstellungen.neuro_empfaenger == e.neuro_empfaenger)
+            .then_some(self.stand)
+    }
+}
+
 fn sammlung(daten: &Path) -> PathBuf {
     daten.join("neuroschlopf-fragen")
 }
@@ -228,6 +252,42 @@ fn vorpruefung_planen(
     Ok(())
 }
 
+fn bearbeite_offene_frage(
+    d: &Dienst,
+    auftraege: &[Auftrag],
+    gilt: impl Fn(&Auftrag) -> bool,
+    merke: &impl Fn(Fragenstand),
+    letzter_versuch: &mut BTreeMap<PathBuf, Instant>,
+) -> bool {
+    let kandidaten = auftraege
+        .iter()
+        .filter(|a| a.antwort.is_none() && gilt(a) && !a.versuch().exists());
+    let wartestand = kandidaten
+        .clone()
+        .min_by_key(|a| a.frage.ist_vorpruefung())
+        .map_or(Fragenstand::Wartet, |a| {
+            Fragenstand::Vorgemerkt(a.frage.wer)
+        });
+    merke(wartestand);
+    if let Some(a) = kandidaten
+        .filter(|a| !letzter_versuch.contains_key(&a.pfad))
+        .min_by_key(|a| a.frage.ist_vorpruefung())
+    {
+        letzter_versuch.insert(a.pfad.clone(), Instant::now());
+        if let Ok(Some(kind)) = d.neuro_starten(&a.pfad, a.frage.wer, false) {
+            merke(Fragenstand::Vorgemerkt(a.frage.wer));
+            if d.neuro_verfolgen(kind, KURZFRIST).1 {
+                let _ = schreibe_ganz(&a.versuch(), "reserviert\n");
+                merke(Fragenstand::Wartet);
+            } else {
+                merke(wartestand);
+            }
+        }
+        return true;
+    }
+    false
+}
+
 pub(crate) fn arbeite(d: &Dienst) {
     let daten = d.wurzel.join("daten");
     let journal = daten.join("journal.txt");
@@ -246,6 +306,7 @@ pub(crate) fn arbeite(d: &Dienst) {
                 && !a.abgerechnet().exists()
                 && !letzter_versuch.contains_key(&a.abgerechnet())
         }) {
+            d.sperre().neuro_fragenstand = None;
             letzter_versuch.insert(a.abgerechnet(), Instant::now());
             if let Ok(Some(kind)) = d.neuro_starten(&a.pfad, a.frage.wer, true)
                 && d.neuro_verfolgen(kind, KURZFRIST).0 == Some(0)
@@ -255,25 +316,39 @@ pub(crate) fn arbeite(d: &Dienst) {
             continue;
         }
         let Ok(e) = ki_einstellungen::lesen(&daten) else {
+            d.sperre().neuro_fragenstand = None;
             continue;
         };
         if e.neuro_berater().is_empty()
             || !matches!(crate::neuroschlopf::einstellung(&daten), Ok(true))
         {
+            d.sperre().neuro_fragenstand = None;
             continue;
         }
+        let merke = |stand| {
+            d.sperre().neuro_fragenstand = Some(Fragenvorschau {
+                tag,
+                einstellungen: e,
+                stand,
+            });
+        };
         let Ok((stand, zeilen)) = cache.lesen(&journal, 32 * 1024 * 1024) else {
+            merke(Fragenstand::Journal);
             continue;
         };
-        if stand.seit_abschluss() != 0
-            || stand
-                .ki()
-                .neurofragen()
-                .iter()
-                .filter(|v| v.datum == tag)
-                .count()
-                >= e.neuroschlopf
+        if stand.seit_abschluss() != 0 {
+            merke(Fragenstand::Journal);
+            continue;
+        }
+        if stand
+            .ki()
+            .neurofragen()
+            .iter()
+            .filter(|v| v.datum == tag)
+            .count()
+            >= e.neuroschlopf
         {
+            merke(Fragenstand::Tageslimit);
             continue;
         }
         let urteile = crate::belegurteile::lese(&daten).ok();
@@ -283,23 +358,13 @@ pub(crate) fn arbeite(d: &Dienst) {
                     .as_ref()
                     .is_some_and(|u| !u.contains_key(a.frage.id.fall()))
         };
-        if let Some(a) = auftraege
-            .iter()
-            .filter(|a| {
-                a.antwort.is_none()
-                    && ist_aktiv(a, e, tag)
-                    && offen(a)
-                    && !a.versuch().exists()
-                    && !letzter_versuch.contains_key(&a.pfad)
-            })
-            .min_by_key(|a| a.frage.ist_vorpruefung())
-        {
-            letzter_versuch.insert(a.pfad.clone(), Instant::now());
-            if let Ok(Some(kind)) = d.neuro_starten(&a.pfad, a.frage.wer, false)
-                && d.neuro_verfolgen(kind, KURZFRIST).1
-            {
-                let _ = schreibe_ganz(&a.versuch(), "reserviert\n");
-            }
+        if bearbeite_offene_frage(
+            d,
+            &auftraege,
+            |a| ist_aktiv(a, e, tag) && offen(a),
+            &merke,
+            &mut letzter_versuch,
+        ) {
             continue;
         }
         let mut rueckfrage_vorhanden = false;
@@ -474,4 +539,47 @@ pub(crate) fn anzeige(d: &Dienst, daten: &Path) -> String {
     }
     html.push_str("</section>");
     html
+}
+
+#[cfg(test)]
+mod fragenvorschau_tests {
+    use super::*;
+    use depot_kern::modelle::NeuroEmpfaenger;
+
+    #[test]
+    fn vorgemerkter_empfaenger_gilt_nur_fuer_den_tag_und_die_externe_einstellung()
+    -> Result<(), &'static str> {
+        let tag = Datum::lies("2026-11-20").ok_or("Datum fehlt")?;
+        let einstellungen = KiEinstellungen {
+            neuro_empfaenger: NeuroEmpfaenger::Dachs,
+            ..KiEinstellungen::default()
+        };
+        let vorschau = Fragenvorschau {
+            tag,
+            einstellungen,
+            stand: Fragenstand::Vorgemerkt(BeraterId::Dachs),
+        };
+        assert!(matches!(
+            vorschau.stand(Some(tag), einstellungen),
+            Some(Fragenstand::Vorgemerkt(BeraterId::Dachs))
+        ));
+        assert!(vorschau.stand(tag.plus_tage(1), einstellungen).is_none());
+        assert!(
+            vorschau
+                .stand(Some(tag), KiEinstellungen::default())
+                .is_none()
+        );
+        assert!(
+            vorschau
+                .stand(
+                    Some(tag),
+                    KiEinstellungen {
+                        neuroschlopf: 0,
+                        ..einstellungen
+                    },
+                )
+                .is_none()
+        );
+        Ok(())
+    }
 }

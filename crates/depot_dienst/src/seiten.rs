@@ -4,6 +4,7 @@
 
 use std::fmt::Write as _;
 
+use depot_kern::modelle::KiEinstellungen;
 use depot_kern::{Datum, Zeitpunkt};
 use depot_lage::html::{STIL, maskiere};
 use depot_lage::{Abhilfe, Ampel, Grenzwert, SchluesselStand, datum_text, ortszeit, zeit_text};
@@ -741,7 +742,12 @@ pub fn naechster_text(z: &Zustand, heute: Option<Datum>) -> String {
     }
 }
 
-fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
+fn zeitstrahl(
+    z: &Zustand,
+    heute: Option<Datum>,
+    ki: &Aufrufe,
+    einstellungen: Option<KiEinstellungen>,
+) -> String {
     let mut s = String::from("<section id=\"zeitstrahl\"><h2>Zeitstrahl</h2>");
     if z.automatik_status() == "angehalten" {
         let klasse = automatik_halt_klasse(z);
@@ -750,11 +756,11 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
         && let Some(heute) = heute
     {
         s.push_str("<p class=\"leise\">Geplante Startzeiten in Frankfurter Ortszeit.</p>");
-        zeitstrahl_tag(&mut s, z, heute, true, ki);
+        zeitstrahl_tag(&mut s, z, heute, true, ki, einstellungen);
         if let Some((_, tag, _)) = naechster_fuer(&z.zeitplan, &z.erledigt, heute, &z.boersen)
             && tag != heute
         {
-            zeitstrahl_tag(&mut s, z, tag, false, ki);
+            zeitstrahl_tag(&mut s, z, tag, false, ki, einstellungen);
         }
         if z.zeitplan.nachrichten_an {
             s.push_str("<p><b>Schlagzeilen</b> · Abruf ohne KI");
@@ -770,7 +776,7 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
                 && !ki_auftraege(z, heute).any(|a| a.art == Art::Vorbereiten)
             {
                 s.push_str("<p><b>Vorbereitung</b> · nach einem erfolgreichen Schlagzeilenabruf.");
-                zeitstrahl_ki::geplant(&mut s, heute);
+                zeitstrahl_ki::geplant(&mut s, heute, einstellungen);
                 s.push_str("</p>");
             }
         }
@@ -778,7 +784,14 @@ fn zeitstrahl(z: &Zustand, heute: Option<Datum>, ki: &Aufrufe) -> String {
         s.push_str("<p>Die aktuelle Frankfurter Ortszeit ist nicht verfügbar.</p>");
     }
     if let Some(tag) = heute {
-        weitere_ki_auftraege(&mut s, z, tag, ki);
+        let mut weitere = String::new();
+        weitere_ki_auftraege(&mut weitere, z, tag, ki);
+        if !weitere.is_empty() {
+            let _ = write!(
+                s,
+                "<details id=\"weitere-ki-auftraege\"><summary>Weitere KI-Aufträge und Ergebnisse</summary><ol class=\"zeitstrahl\">{weitere}</ol></details>",
+            );
+        }
     }
     s.push_str("</section>");
     s
@@ -813,7 +826,7 @@ fn weitere_ki_auftraege(s: &mut String, z: &Zustand, tag: Datum, ki: &Aufrufe) {
         if schon_gezeigt.is_some_and(|b| b.kennung == a.kennung) {
             continue;
         }
-        let _ = write!(s, "<p><b>{}</b> · {}", a.art.name(), zeit_text(a.start));
+        let _ = write!(s, "<li><b>{}</b> · {}", a.art.name(), zeit_text(a.start));
         if a.art != Art::Gemini || !ki.hat_eintrag(&a.kennung) {
             let (klasse, stand) = ergebnis(a, z);
             let _ = write!(s, " <span class=\"{klasse}\">{stand}</span>");
@@ -821,7 +834,7 @@ fn weitere_ki_auftraege(s: &mut String, z: &Zustand, tag: Datum, ki: &Aufrufe) {
         if a.art != Art::Gemini || ki.hat_eintrag(&a.kennung) {
             ki.gelaufen(s, Some(&a.kennung), hand_kennung(ki, a));
         }
-        s.push_str("</p>");
+        s.push_str("</li>");
     }
     let zugeordnet = ki_auftraege(z, tag)
         .filter_map(|a| hand_kennung(ki, a))
@@ -829,7 +842,14 @@ fn weitere_ki_auftraege(s: &mut String, z: &Zustand, tag: Datum, ki: &Aufrufe) {
     ki.konsolenlaeufe(s, tag, &zugeordnet);
 }
 
-fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool, ki: &Aufrufe) {
+fn zeitstrahl_tag(
+    s: &mut String,
+    z: &Zustand,
+    tag: Datum,
+    heute: bool,
+    ki: &Aufrufe,
+    einstellungen: Option<KiEinstellungen>,
+) {
     let abrufe = geplante_abrufe(z.zeitplan, &z.erledigt, tag, &z.boersen);
     let titel = if heute {
         "Heute"
@@ -890,7 +910,7 @@ fn zeitstrahl_tag(s: &mut String, z: &Zustand, tag: Datum, heute: bool, ki: &Auf
                 lauf.and_then(|a| hand_kennung(ki, a)),
             );
         } else if klasse != "halt" {
-            zeitstrahl_ki::geplant(s, tag);
+            zeitstrahl_ki::geplant(s, tag, einstellungen);
         }
         s.push_str("</li>");
     }
@@ -1536,7 +1556,7 @@ pub(crate) fn update_leiste(
 
 /// Der Inhalt der Live-Seite (auch `/teil/live`).
 pub fn live(token: &str, start: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
-    live_mit_ki(token, start, z, jetzt, &Aufrufe::default(), None)
+    live_mit_ki(token, start, z, jetzt, &Aufrufe::default(), None, None)
 }
 
 fn vorbereitung_auf_live(token: &str, z: &Zustand, jetzt: Zeitpunkt) -> String {
@@ -1568,10 +1588,19 @@ pub(crate) fn live_mit_ki(
     jetzt: Zeitpunkt,
     ki: &Aufrufe,
     update_sperre: Option<&UpdateSperre>,
+    ausblick: Option<&crate::ki_ausblick::Ausblick>,
 ) -> String {
     let heute = ortszeit(jetzt).map(|(d, ..)| d);
     let mut s = marke(start);
-    s.push_str(&zeitstrahl(z, heute, ki));
+    if let Some(ausblick) = ausblick {
+        s.push_str(&ausblick.html(z, jetzt, update_sperre.is_some()));
+    }
+    s.push_str(&zeitstrahl(
+        z,
+        heute,
+        ki,
+        ausblick.and_then(|a| a.einstellungen),
+    ));
     s.push_str(&taetigkeit(z, heute, ki, update_sperre));
     s.push_str(&gesamtstatus_teil(token, z, false));
     if z.laufend.is_none()

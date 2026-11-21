@@ -261,7 +261,7 @@ impl Abruf {
         )
     }
 
-    fn wiederholung(self, schluss: Zeitpunkt) -> Option<Zeitpunkt> {
+    pub(crate) fn wiederholung(self, schluss: Zeitpunkt) -> Option<Zeitpunkt> {
         if !matches!(
             self.ausgang,
             AbrufAusgang::Voruebergehend | AbrufAusgang::Abgebrochen
