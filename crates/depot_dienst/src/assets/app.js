@@ -392,7 +392,7 @@
 // Die Referenzansicht zeigt den gemessenen Lauf des separaten Lernkerns.
 (async function neuroLernlauf() {
   const bereich = document.querySelector("[data-messung]");
-  if (!bereich) { return; }
+  if (!bereich?.dataset?.messung) { return; }
   const nurTopologie = bereich.hasAttribute("data-topologie");
   const feld = (id) => document.getElementById(id);
   const zahl = (wert) => wert.toLocaleString("de-DE", { maximumSignificantDigits: 5 });
