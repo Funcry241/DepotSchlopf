@@ -10,7 +10,7 @@
 //! Ausgabe-Token und Zahl der Suchen, die null sein muss.
 
 use depot_kern::BeraterId;
-use depot_kern::modelle::Modellwahl;
+use depot_kern::modelle::{Modell, Modellwahl};
 use depot_ki::KiDeckel;
 
 use crate::json::{self, Json, zitiere};
@@ -135,20 +135,29 @@ impl Anbieter {
                 zitiere(system),
                 anthropic_inhalt(frage)
             ),
-            Anbieter::OpenAi => format!(
-                concat!(
-                    "{{\"model\":{},\"max_output_tokens\":{},",
-                    "\"reasoning\":{{\"effort\":{}}},",
-                    "\"instructions\":{},",
-                    "\"store\":false,",
-                    "\"input\":{}}}"
-                ),
-                zitiere(modell.kennung()),
-                deckel.max_token_aus(),
-                denktiefe,
-                zitiere(system),
-                zitiere(frage)
-            ),
+            Anbieter::OpenAi => {
+                let kopf = format!(
+                    concat!(
+                        "{{\"model\":{},\"max_output_tokens\":{},",
+                        "\"reasoning\":{{\"effort\":{}}},",
+                        "\"instructions\":{},\"store\":false"
+                    ),
+                    zitiere(modell.kennung()),
+                    deckel.max_token_aus(),
+                    denktiefe,
+                    zitiere(system)
+                );
+                if let Some(eingabe) = openai_cache_eingabe(modell, frage) {
+                    let mit_cache = format!(
+                        r#"{kopf},"prompt_cache_options":{{"mode":"explicit","ttl":"30m"}},"input":{eingabe}}}"#
+                    );
+                    // Der zusätzliche JSON-Rahmen darf keine bisher passende Anfrage blockieren.
+                    if u32::try_from(mit_cache.len()).is_ok_and(|n| n <= deckel.max_token_ein()) {
+                        return mit_cache;
+                    }
+                }
+                format!(r#"{kopf},"input":{}}}"#, zitiere(frage))
+            }
         }
     }
 
@@ -182,6 +191,26 @@ fn anthropic_inhalt(frage: &str) -> String {
         zitiere(tag),
         zitiere(&rest)
     )
+}
+
+fn openai_cache_eingabe(modell: Modell, frage: &str) -> Option<String> {
+    if !matches!(modell, Modell::Terra61 | Modell::Sol62) || !frage.starts_with("Datum: ") {
+        return None;
+    }
+    let (tag, rest) = frage.split_once(crate::frage::TOPFBLOCK)?;
+    if rest.trim().is_empty() {
+        return None;
+    }
+    let rest = format!("{}{rest}", crate::frage::TOPFBLOCK);
+    Some(format!(
+        concat!(
+            r#"[{{"role":"user","content":["#,
+            r#"{{"type":"input_text","text":{},"prompt_cache_breakpoint":{{"mode":"explicit"}}}},"#,
+            r#"{{"type":"input_text","text":{}}}]}}]"#
+        ),
+        zitiere(tag),
+        zitiere(&rest)
+    ))
 }
 
 fn zahl(w: &Json, pfad: &[&str]) -> Option<u64> {
@@ -296,4 +325,101 @@ fn lies_openai(w: &Json) -> Result<Gelesen, String> {
         verbrauch,
         modell: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frage::TOPFBLOCK;
+    use depot_kern::modelle::Denktiefe;
+
+    #[test]
+    fn openai_nur_der_gemeinsame_tagesblock_wird_markiert() -> Result<(), String> {
+        let tag = "Datum: 2030-01-07\nBeleg \"Rückgang\"\n";
+        for modell in [Modell::Terra61, Modell::Sol62] {
+            let wahl =
+                Modellwahl::neu(BeraterId::Maus, modell, Denktiefe::Mittel).ok_or("Modellwahl")?;
+            let deckel = KiDeckel::fuer_modell(modell);
+            for aufgabe in ["Erstmeinung für A", "Zweitmeinung für B", "Abstimmung 1"] {
+                let rest = format!("{TOPFBLOCK}{aufgabe}");
+                let frage = format!("{tag}{rest}");
+                let body = json::lies(&Anbieter::anfrage_mit_modell(
+                    wahl, &deckel, "Auftrag", &frage,
+                ))?;
+                assert_eq!(
+                    body.feld("model").and_then(Json::text),
+                    Some(modell.kennung())
+                );
+                assert_eq!(
+                    body.feld("instructions").and_then(Json::text),
+                    Some("Auftrag")
+                );
+                assert_eq!(body.feld("store").and_then(Json::wahr), Some(false));
+                assert_eq!(
+                    body.feld("max_output_tokens").and_then(Json::anzahl),
+                    Some(u64::from(deckel.max_token_aus()))
+                );
+                let optionen = body.feld("prompt_cache_options").ok_or("Cache-Optionen")?;
+                assert_eq!(optionen.feld("mode").and_then(Json::text), Some("explicit"));
+                assert_eq!(optionen.feld("ttl").and_then(Json::text), Some("30m"));
+                let [nachricht] = body.feld("input").and_then(Json::liste).ok_or("Eingabe")? else {
+                    return Err("Genau eine Nachricht erwartet".into());
+                };
+                assert_eq!(nachricht.feld("role").and_then(Json::text), Some("user"));
+                let [erster, zweiter] = nachricht
+                    .feld("content")
+                    .and_then(Json::liste)
+                    .ok_or("Nachrichteninhalt")?
+                else {
+                    return Err("Zwei Textteile erwartet".into());
+                };
+                for teil in [erster, zweiter] {
+                    assert_eq!(teil.feld("type").and_then(Json::text), Some("input_text"));
+                }
+                assert_eq!(erster.feld("text").and_then(Json::text), Some(tag));
+                assert_eq!(
+                    zweiter.feld("text").and_then(Json::text),
+                    Some(rest.as_str())
+                );
+                let marke = erster
+                    .feld("prompt_cache_breakpoint")
+                    .ok_or("Cache-Marke")?;
+                assert_eq!(marke.feld("mode").and_then(Json::text), Some("explicit"));
+                assert!(zweiter.feld("prompt_cache_breakpoint").is_none());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn openai_mit_ungeteilter_eingabe_ohne_tagesblock_oder_am_deckel() -> Result<(), String> {
+        let deckel = KiDeckel::standard(BeraterId::Maus);
+        for frage in [
+            "Blindprüfung: Beleg zur These",
+            "Wochenrückschau\nTopflage:\nBeispiel",
+            "Datum: 2030-01-07\nTopflage:\n   ",
+        ] {
+            let body = json::lies(&Anbieter::OpenAi.anfrage(&deckel, "Auftrag", frage))?;
+            assert_eq!(body.feld("input").and_then(Json::text), Some(frage));
+            assert!(body.feld("prompt_cache_options").is_none());
+        }
+        let grenze = usize::try_from(deckel.max_token_ein()).map_err(|e| e.to_string())?;
+        let leer = Anbieter::OpenAi.anfrage(&deckel, "Auftrag", "");
+        let lage = format!("Datum: 2030-01-07{TOPFBLOCK}Topf A: ");
+        let json_lage = zitiere(&lage).len().checked_sub(2).ok_or("JSON-Text")?;
+        let laenge = grenze
+            .checked_sub(leer.len())
+            .and_then(|n| n.checked_sub(json_lage))
+            .ok_or("Eingabegrenze")?;
+        let frage = format!("{lage}{}", "a".repeat(laenge));
+        let anfrage = Anbieter::OpenAi.anfrage(&deckel, "Auftrag", &frage);
+        assert_eq!(anfrage.len(), grenze);
+        let body = json::lies(&anfrage)?;
+        assert_eq!(
+            body.feld("input").and_then(Json::text),
+            Some(frage.as_str())
+        );
+        assert!(body.feld("prompt_cache_options").is_none());
+        Ok(())
+    }
 }

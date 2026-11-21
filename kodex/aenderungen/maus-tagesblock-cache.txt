@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Bei Maus nur den gemeinsamen Tagesblock für spätere Handelsfragen im Prompt-Cache markieren
+pfade:
+crates/depot_berater/src/anbieter.rs
