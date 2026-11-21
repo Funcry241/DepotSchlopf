@@ -465,7 +465,8 @@
 // Die Referenzansicht zeigt den gemessenen Lauf des separaten Lernkerns.
 (async function neuroLernlauf() {
   const bereich = document.querySelector("[data-messung]");
-  if (!bereich) { return; }
+  if (!bereich?.dataset?.messung) { return; }
+  const nurTopologie = bereich.hasAttribute("data-topologie");
   const feld = (id) => document.getElementById(id);
   const zahl = (wert) => wert.toLocaleString("de-DE", { maximumSignificantDigits: 5 });
   const stand = feld("lernstand");
@@ -483,6 +484,11 @@
       " Neuronen. Die beiden inneren Schichten verwenden SiLU, der Ausgang ist linear. Beim Training verändert das Netz " +
       (gewichte + bias) + " Parameter (" + gewichte + " Gewichte und " + bias + " Biaswerte).";
     zeichneLernnetz(feld("lernaufbau"), schichten);
+    if (nurTopologie) {
+      bereich.hidden = false;
+      stand.hidden = true;
+      return;
+    }
     feld("lernplan").textContent = training.samples + " Trainingspaare · " + training.epochs +
       " Epochen · AdamW auf der CPU · Startwert " + lauf.seed + ".";
     feld("lernfehler").textContent = "Auf dem vollständigen Trainingssatz fiel der mittlere quadratische Fehler von " +
@@ -507,7 +513,8 @@
     bereich.hidden = false;
     stand.hidden = true;
   } catch (_) {
-    stand.textContent = "Die Laufansicht konnte die Messwerte nicht anzeigen. Du kannst die Originalmesswerte oben öffnen.";
+    stand.textContent = nurTopologie ? "Die Referenztopologie konnte nicht geladen werden." :
+      "Die Laufansicht konnte die Messwerte nicht anzeigen. Du kannst die Originalmesswerte oben öffnen.";
   }
 })();
 

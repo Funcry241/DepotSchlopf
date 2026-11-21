@@ -1,0 +1,9 @@
+klasse: Funktion
+zweck: Referenztopologie und tatsächliche laufende Aktivitäten auf der NeuroSchlopf-Seite sichtbar machen
+pfade:
+crates/depot_dienst/src/assets/app.js
+crates/depot_dienst/src/assets/stil.css
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/neuro2026.rs
+crates/depot_dienst/src/neuroschlopf.rs
+crates/depot_dienst/tests/dienst/live.rs
