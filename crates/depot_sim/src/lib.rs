@@ -31,6 +31,7 @@ pub mod abstimmung;
 pub mod anlass;
 pub mod ausfuehrung;
 pub mod belegrang;
+pub mod blindpruefung;
 pub mod einstand;
 pub mod handelsergebnis;
 pub mod handelsvergleich;

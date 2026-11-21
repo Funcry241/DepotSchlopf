@@ -130,7 +130,7 @@ pub(super) fn seite(
     }
     let Some(tag) = gruppe.tag.filter(|_| !gruppe.faelle.is_empty()) else {
         if gruppe.hinweis.is_none() {
-            s.push_str("<p>Für die Blindprüfung liegen noch keine belegten Paare aus These und Beleg vor.</p>");
+            s.push_str("<p>Keine Bewertung offen.</p>");
         }
         s.push_str("</section>");
         return rahmen(d, heute, 200, &s);
@@ -149,24 +149,26 @@ pub(super) fn seite(
         .iter()
         .filter_map(|fall| urteile.get(&fall.kennung));
     let unbewertet = bearbeitet.clone().filter(|urteil| urteil.is_none()).count();
+    let bearbeitet = bearbeitet.count();
+    let offen = gruppe
+        .offene_faelle()
+        .filter(|fall| !urteile.contains_key(&fall.kennung));
     let _ = write!(
         s,
         "<p>Bearbeitet <b>{} von {}</b>",
-        bearbeitet.count(),
-        gruppe.faelle.len()
+        bearbeitet,
+        bearbeitet.saturating_add(offen.clone().count())
     );
     if unbewertet > 0 {
         let _ = write!(s, " · davon ausdrücklich unbewertet: {unbewertet}");
     }
     s.push_str("</p></section>");
-    if let Some(fall) = gruppe
-        .faelle
-        .iter()
-        .find(|fall| !urteile.contains_key(&fall.kennung))
-    {
+    if let Some(fall) = offen.into_iter().next() {
         formular(&mut s, fall, d, tag);
     } else {
-        s.push_str("<section><h3>Prüftag abgeschlossen</h3><p>Alle verfügbaren Paare dieses Tages sind bearbeitet.</p></section>");
+        s.push_str(
+            "<section><h3>Prüftag abgeschlossen</h3><p>Keine Bewertung offen.</p></section>",
+        );
     }
     rahmen(d, heute, 200, &s)
 }
