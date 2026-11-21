@@ -1,5 +1,5 @@
 use depot_kern::Datum;
-use depot_kern::gemini::{DIENST, MODELL, TAGESGRENZE};
+use depot_kern::gemini::{DIENST, MODELL};
 use depot_lage::gespraeche;
 use depot_lage::html::maskiere;
 use depot_lage::{GeminiBudget, SchluesselStand};
@@ -39,6 +39,9 @@ pub(crate) fn budget(daten: &Path, tag: Option<Datum>) -> GeminiBudget {
     GeminiBudget {
         an: gespraeche::gemini_aktiv(daten),
         aufrufe: tag.map(|tag| gespraeche::gemini_aufrufe(daten, tag)),
+        limit: depot_journal::ki_einstellungen::lesen(daten)
+            .ok()
+            .map(|e| e.gemini),
     }
 }
 
@@ -93,9 +96,7 @@ pub(crate) fn einrichtung(
         "Ausgeschaltet"
     };
     let klasse = if budget.an { "gut" } else { "leise" };
-    let aufrufe = budget
-        .aufrufe
-        .map_or_else(|| "unbekannt".into(), |n| n.to_string());
+    let kontingent = maskiere(&budget.kontingent_text());
     let mut schluessel = seiten::SCHLUESSEL_TABELLE.to_owned();
     seiten::schluessel_zeile(&mut schluessel, &d.token, Wer::Gemini, stand, "");
     let meldung = schluessel_meldung(abfrage).map_or_else(String::new, |(klasse, text)| {
@@ -128,18 +129,14 @@ pub(crate) fn einrichtung(
     format!(
         "<section id=\"zusatz\" class=\"zusatz-einstellungen\" aria-labelledby=\"zusatz-titel\">\
          <h2 id=\"zusatz-titel\">Zusatz-KIs (optional)</h2>\
-         <p>Optionale Zuarbeiter helfen {} ({}) und {} ({}). Der Papiertag läuft auch ohne sie.</p>\
+         <p>Optionale Zuarbeiter helfen Dachs und Maus. Der Papiertag läuft auch ohne sie.</p>\
          <section aria-labelledby=\"gemini-titel\"><h3 id=\"gemini-titel\">Gemini ({MODELL})</h3>\
          <p>Sortiert belegte Nachrichten mit höchster Denkstufe vor.</p>\
-         <p><strong class=\"{klasse}\">{status}</strong> · Aufrufe heute {aufrufe} von {TAGESGRENZE} · Gratis-Projekt ohne Abrechnung</p>\
+         <p><strong class=\"{klasse}\">{status}</strong> · {kontingent} · Gratis-Projekt ohne Abrechnung</p>\
          {letzter_lauf}{meldung}{schluessel}</table>\
          <form method=\"post\" action=\"/gemini\" data-aenderungen><input type=\"hidden\" name=\"t\" value=\"{token}\">\
          {bestaetigung}<button type=\"submit\" name=\"an\" value=\"ja\"{einschalten}>Gemini einschalten</button> \
          <button type=\"submit\" name=\"an\" value=\"nein\"{ausschalten}>Gemini ausschalten</button>\
          <p data-speicherstand role=\"status\"></p></form></section>{neuro}</section>",
-        Wer::Berater(depot_kern::BeraterId::Dachs).name(),
-        depot_kern::modelle::MODELL_DACHS,
-        Wer::Berater(depot_kern::BeraterId::Maus).name(),
-        depot_kern::modelle::MODELL_MAUS,
     )
 }

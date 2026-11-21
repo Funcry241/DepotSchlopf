@@ -32,6 +32,7 @@ pub mod hinweis;
 pub mod http;
 mod ibkr_abgleich;
 mod ibkr_papier;
+mod ki_einstellungen;
 pub mod kostenschutz;
 mod neuro2026;
 mod neuroschlopf;
@@ -60,8 +61,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use depot_kern::{BeraterId, Zeitpunkt};
 use depot_lage::betrieb::schluessel_stand;
 use depot_lage::{
-    Hinterlegt, Umgebung, anbieter, anbieterprotokoll, grenzwerte, ki_halt, lagebild, ortszeit,
-    sperrdateien,
+    Hinterlegt, Umgebung, anbieter, anbieterprotokoll, grenzwerte, ki_halt,
+    lagebild_mit_ki_einstellungen, ortszeit, sperrdateien,
 };
 
 use crate::http::{Anfrage, antwort, feld, formular, gleich, herkunft_erlaubt, host_erlaubt};
@@ -175,26 +176,30 @@ pub fn lagerechner(umwelt: std::sync::Arc<dyn Umwelt>) -> Lagerechner {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut bild = depot_lage::mit_lesecache(&daten, &mut cache, |journal, eintraege| {
-            let mut bild = lagebild(&Umgebung {
-                jetzt,
-                journal,
-                kursquelle: umwelt.schluessel(Wer::Kursquelle),
-                kursquelle_us: umwelt.schluessel(Wer::KursquelleUs),
-                berater: [
-                    (
-                        BeraterId::Dachs,
-                        umwelt.schluessel(Wer::Berater(BeraterId::Dachs)),
-                    ),
-                    (
-                        BeraterId::Maus,
-                        umwelt.schluessel(Wer::Berater(BeraterId::Maus)),
-                    ),
-                ],
-                sperren,
-                anbieter,
-                anbieter_unlesbar,
-                ki_halt: ki_halt(&daten),
-            });
+            let einstellungen = depot_journal::ki_einstellungen::lesen(&daten);
+            let mut bild = lagebild_mit_ki_einstellungen(
+                &Umgebung {
+                    jetzt,
+                    journal,
+                    kursquelle: umwelt.schluessel(Wer::Kursquelle),
+                    kursquelle_us: umwelt.schluessel(Wer::KursquelleUs),
+                    berater: [
+                        (
+                            BeraterId::Dachs,
+                            umwelt.schluessel(Wer::Berater(BeraterId::Dachs)),
+                        ),
+                        (
+                            BeraterId::Maus,
+                            umwelt.schluessel(Wer::Berater(BeraterId::Maus)),
+                        ),
+                    ],
+                    sperren,
+                    anbieter,
+                    anbieter_unlesbar,
+                    ki_halt: ki_halt(&daten),
+                },
+                einstellungen.as_ref().copied().map_err(String::as_str),
+            );
             if let depot_lage::Zugang::Offen(stand) = journal {
                 bild.wiederanlauf =
                     depot_lage::wiederanlauf::Diagnose::lies(&daten, stand, eintraege);
@@ -374,6 +379,7 @@ fn einrichtungsseite(
         papier_freigabe: depot_lage::papier_freigabe_angebot(&d.wurzel),
         alpha_kontingent: depot_lage::abrufkontingent::stand(&d.wurzel.join("daten"), jetzt).ok(),
         zeitplan_gespeichert: None,
+        ki_einstellungen: ki_einstellungen::einrichtung(d, tag),
         entwurf: formular(a.abfrage.as_bytes())
             .map(|f| seiten::Entwurf::aus_formular(&f))
             .unwrap_or_default(),
@@ -756,6 +762,7 @@ fn post(
         "/update-freigabe" => update_freigabe_starten(d, &f),
         "/export" => analyse::exportieren(d, u, jetzt, &f),
         "/gemini" => gemini::speichern(d, &f),
+        "/ki-einstellungen" => ki_einstellungen::speichern(d, &f),
         "/ibkr-abgleich" => ibkr_abgleich::speichern(d, &f),
         "/ibkr-papier" => ibkr_papier::speichern(d, feld(&f, "konto").unwrap_or_default()),
         "/neuroschlopf" => neuroschlopf::speichern(d, &f),
@@ -873,7 +880,20 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let inhalt = format!(
         "{}{}",
         seiten::marke(&d.start),
-        seiten::auftrag_bestaetigen(&d.token, art, sha.as_deref())
+        seiten::auftrag_bestaetigen(
+            &d.token,
+            art,
+            sha.as_deref(),
+            if art == Art::Simulation {
+                depot_journal::ki_einstellungen::lesen(&d.wurzel.join("daten"))
+                    .ok()
+                    .and_then(|e| {
+                        depot_lage::simulationskosten_fuer(e.dachs.auswahl, e.maus.auswahl)
+                    })
+            } else {
+                None
+            }
+        )
     );
     let seite = seiten::rahmen(
         ziel,

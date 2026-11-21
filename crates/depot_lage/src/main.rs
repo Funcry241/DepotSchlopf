@@ -23,7 +23,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use depot_kern::{BeraterId, Zeitpunkt};
 use depot_lage::{
-    Hinterlegt, Umgebung, anbieterprotokoll, html, ki_halt, lagebild, mit_journal, sperrdateien,
+    Hinterlegt, Umgebung, anbieterprotokoll, html, ki_halt, lagebild_mit_ki_einstellungen,
+    mit_journal, sperrdateien,
 };
 
 fn wurzel() -> Option<PathBuf> {
@@ -61,20 +62,24 @@ fn lauf(wurzel: &Path) -> Result<PathBuf, String> {
     let sperren = sperrdateien(&daten);
     let (anbieter, anbieter_unlesbar) = anbieterprotokoll(&daten);
     let l = mit_journal(&daten, |journal| {
-        lagebild(&Umgebung {
-            jetzt,
-            journal,
-            kursquelle: Hinterlegt::Unbekannt,
-            kursquelle_us: Hinterlegt::Unbekannt,
-            berater: [
-                (BeraterId::Dachs, Hinterlegt::Unbekannt),
-                (BeraterId::Maus, Hinterlegt::Unbekannt),
-            ],
-            sperren,
-            anbieter,
-            anbieter_unlesbar,
-            ki_halt: ki_halt(&daten),
-        })
+        let einstellungen = depot_journal::ki_einstellungen::lesen(&daten);
+        lagebild_mit_ki_einstellungen(
+            &Umgebung {
+                jetzt,
+                journal,
+                kursquelle: Hinterlegt::Unbekannt,
+                kursquelle_us: Hinterlegt::Unbekannt,
+                berater: [
+                    (BeraterId::Dachs, Hinterlegt::Unbekannt),
+                    (BeraterId::Maus, Hinterlegt::Unbekannt),
+                ],
+                sperren,
+                anbieter,
+                anbieter_unlesbar,
+                ki_halt: ki_halt(&daten),
+            },
+            einstellungen.as_ref().copied().map_err(String::as_str),
+        )
     });
     fs::create_dir_all(&daten).map_err(|e| format!("{}: {e}", daten.display()))?;
     let ziel = daten.join("lage.html");

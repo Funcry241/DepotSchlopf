@@ -31,6 +31,7 @@ use depot_journal::{
     AufrufErlaubnis, KiAufruf, KiAufrufErgebnis, KiZweck,
     gespraeche::{self, Gespraech},
 };
+use depot_kern::modelle::BeraterEinstellung;
 use depot_kern::{BeraterId, Cent, Grenzen, Isin, Universum, Vorschlag, Zeitpunkt};
 use depot_sim::belegrang::Verwerfungsgrund;
 use depot_sim::{Antwort, Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Urteil};
@@ -52,6 +53,7 @@ type Protokoll = (PathBuf, fn() -> Option<Zeitpunkt>);
 pub struct KiBerater<N: Netz> {
     wer: BeraterId,
     anbieter: Anbieter,
+    einstellung: BeraterEinstellung,
     schluessel: Option<Schluessel>,
     netz: N,
     universum: Universum,
@@ -111,6 +113,7 @@ impl<N: Netz> KiBerater<N> {
         KiBerater {
             wer,
             anbieter: Anbieter::fuer(wer),
+            einstellung: BeraterEinstellung::standard(wer),
             schluessel,
             netz,
             universum,
@@ -135,6 +138,15 @@ impl<N: Netz> KiBerater<N> {
             kursprognosen: Vec::new(),
             belegverwerfungen: Vec::new(),
         }
+    }
+
+    /// Modell und Denktiefe sind für den ganzen Lauf festgelegt.
+    pub fn mit_einstellung(mut self, einstellung: BeraterEinstellung) -> Result<Self, String> {
+        if einstellung.auswahl.modell().berater() != self.wer {
+            return Err(format!("Modell passt nicht zu {:?}", self.wer));
+        }
+        self.einstellung = einstellung;
+        Ok(self)
     }
 
     /// Derselbe Kostenschutz, aber ein reiner Beobachtungsauftrag ohne Handelsziele.
@@ -233,7 +245,12 @@ impl<N: Netz> KiBerater<N> {
         };
         let verdichtet = self.zuarbeit.verdichte(lage.ereignisse, &frage);
         let ergaenzt = format!("{verdichtet}{hinweise}");
-        let inhalt = self.anbieter.anfrage(erlaubnis.deckel(), system, &ergaenzt);
+        let inhalt = Anbieter::anfrage_mit_modell(
+            erlaubnis.modellwahl(),
+            erlaubnis.deckel(),
+            system,
+            &ergaenzt,
+        );
         if erlaubnis.eingabe_passt(&inhalt) {
             ergaenzt
         } else {
@@ -253,7 +270,8 @@ impl<N: Netz> KiBerater<N> {
             .filter(|_| self.vorbereitung.is_none())
         {
             let erweitert = format!("{frage}{}", modell.frage());
-            if erlaubnis.eingabe_passt(&self.anbieter.anfrage(
+            if erlaubnis.eingabe_passt(&Anbieter::anfrage_mit_modell(
+                erlaubnis.modellwahl(),
                 erlaubnis.deckel(),
                 system,
                 &erweitert,
@@ -270,7 +288,7 @@ impl<N: Netz> KiBerater<N> {
             lauf: self.gespraechslauf.clone()?,
             wer: self.protokoll_wer().kurz().into(),
             rolle: "haupt".into(),
-            modell: self.anbieter.modell().into(),
+            modell: self.einstellung.auswahl.modell().kennung().into(),
             zweck: if self.simulation {
                 KiZweck::Simulation
             } else {
@@ -322,7 +340,7 @@ impl<N: Netz> KiBerater<N> {
             e.fehler = Some("Gespräch wegen Zugangsdaten verworfen.".into());
         }
         if self.geheim_im_gespraech(&e.modell) {
-            e.modell = self.anbieter.modell().into();
+            e.modell = self.einstellung.auswahl.modell().kennung().into();
         }
         if let Err(f) = gespraeche::anhaengen(daten, &e) {
             self.hinweis(&format!("Gespräch nicht gespeichert: {f}"));
@@ -640,7 +658,7 @@ impl<N: Netz> KiBerater<N> {
                     && !m.chars().any(char::is_control)
                     && !self.geheim_im_gespraech(m)
             })
-            .unwrap_or_else(|| format!("{}?", self.anbieter.modell()));
+            .unwrap_or_else(|| format!("{}?", self.einstellung.auswahl.modell().kennung()));
         let vorlage = sha(system.as_bytes());
         let frage = spur.frage.as_ref().map(|f| sha(f.as_bytes()));
         let antwort = spur.antwort.as_deref().map(sha);
@@ -769,13 +787,20 @@ impl<N: Netz> KiBerater<N> {
         if let Some(p) = self.pause() {
             return self.ohne_kosten(erlaubnis, e, format!("pausiert: {p}"));
         }
+        if erlaubnis.modellwahl() != self.einstellung.auswahl {
+            return self.ohne_kosten(
+                erlaubnis,
+                e,
+                "Gebuchte Modellwahl passt nicht, nicht gesendet".into(),
+            );
+        }
         let deckel = *erlaubnis.deckel();
         let reserviert = erlaubnis.buchung().reserviert;
         // Die ganze Anfrage vor dem Senden begrenzen (K25-01). Ein Token umfasst mindestens ein
         // Byte, und ohne Werkzeuge fuegt der Anbieter nichts ein; die Anfrage enthaelt mehr
         // Bytes als ihre Rahmenzeichen Token. So sind die reservierten Hoechstkosten eine
         // gesicherte Obergrenze.
-        let inhalt = self.anbieter.anfrage(&deckel, system, frage);
+        let inhalt = Anbieter::anfrage_mit_modell(erlaubnis.modellwahl(), &deckel, system, frage);
         if !erlaubnis.eingabe_passt(&inhalt) {
             return self.ohne_kosten(
                 erlaubnis,
@@ -855,6 +880,24 @@ impl<N: Netz> KiBerater<N> {
         };
         let v = gelesen.verbrauch;
         spur.verbrauch = Some(v);
+        let gebucht = erlaubnis.modellwahl().modell();
+        if gelesen
+            .modell
+            .as_deref()
+            .is_some_and(|m| !gebucht.passt_meldung(m))
+        {
+            self.vermerke(
+                Ausgang::Unklar,
+                Some(antwort.status),
+                Kosten::Unbekannt,
+                reserviert,
+                None,
+            );
+            return Ergebnis {
+                text: Err(self.sperre("Anbieter meldet ein anderes Modell, Kosten unbekannt")),
+                kosten: "Kosten unbekannt".into(),
+            };
+        }
         let ist =
             deckel.kosten_mit_cache(v.token_ein, v.token_aus, v.cache_schreiben, v.cache_lesen);
         let kosten = kostenzeile(ist.map(|c| c.0), reserviert.0, v);
@@ -1004,6 +1047,10 @@ impl<N: Netz> KiBerater<N> {
 }
 
 impl<N: Netz> Berater for KiBerater<N> {
+    fn einstellung(&self) -> Option<BeraterEinstellung> {
+        Some(self.einstellung)
+    }
+
     fn setze_mindesteinsatz(&mut self, bp: i64) {
         self.mindesteinsatz_bp = Some(bp);
     }

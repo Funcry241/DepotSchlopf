@@ -210,6 +210,9 @@ pub fn betrieb(halt: Vec<String>, kis: &[KiLage]) -> Betrieb {
             }
             _ => {}
         }
+        if let Some(BudgetStatus::KeineAufrufe(grund)) = &k.budget {
+            ohne.push(format!("{}: {grund}.", k.name));
+        }
         if let Some(
             b @ (BudgetStatus::PausiertBisMorgen
             | BudgetStatus::PausiertBisMonatsanfang

@@ -1,13 +1,13 @@
 //! KI-Budget je Berater, direkt aus dem Kassenbuch im Journal.
 //!
-//! Der Status kommt aus `depot_ki::pruefe` mit denselben Grenzen, demselben Deckel und demselben
-//! Zyklus (`depot_sim::tagnummer`), mit denen der Papiertag reserviert. Was die Anzeige
-//! „bereit“ nennt, wuerde der Kostenschutz also gerade erlauben.
+//! Die Live-Ansicht prüft eine Reservierung mit den Einstellungen des Beraters.
 //!
 //! Bestätigte Minderkosten vermindern die gebuchten Beträge; ungeklärte Reservierungen
 //! bleiben voll gebucht. Das unverbindliche Anbieterprotokoll ist keine Budgetfreigabe.
 
 use depot_journal::anbieter::{Eintrag, Kosten};
+use depot_journal::{KiStand, KiZweck};
+use depot_kern::modelle::BeraterEinstellung;
 use depot_kern::{BeraterId, Cent, Datum, Preis};
 use depot_ki::{Buchung, KiDeckel, KiGrenzen, Sperre, pruefe};
 use depot_sim::tagnummer;
@@ -21,6 +21,8 @@ pub enum BudgetStatus {
     /// Aufrufe oder Kosten des Monats sind ausgeschoepft.
     PausiertBisMonatsanfang,
     PausiertBisJahresanfang,
+    /// Eine Einstellung unterbindet Aufrufe, unabhängig vom Kassenbuch.
+    KeineAufrufe(String),
     /// Kassenbuch, Uhr oder Rechnung unstimmig: Halt bis zur Pruefung.
     Gesperrt(String),
 }
@@ -32,6 +34,7 @@ impl BudgetStatus {
             BudgetStatus::PausiertBisMorgen => "pausiert bis morgen".into(),
             BudgetStatus::PausiertBisMonatsanfang => "pausiert bis Monatsanfang".into(),
             BudgetStatus::PausiertBisJahresanfang => "pausiert bis Jahresanfang".into(),
+            BudgetStatus::KeineAufrufe(grund) => format!("Keine Aufrufe · {grund}"),
             BudgetStatus::Gesperrt(t) => format!("gesperrt: {t}"),
         }
     }
@@ -114,8 +117,81 @@ fn status(s: Result<Cent, Sperre>) -> BudgetStatus {
 
 /// Rechnet das Budget eines Beraters fuer den Tag `heute`.
 pub fn ki_budget(buchungen: &[Buchung], berater: BeraterId, heute: Datum) -> KiBudget {
-    let g = KiGrenzen::standard();
     let deckel = KiDeckel::standard(berater);
+    let st = match tagnummer(heute) {
+        Some(zyklus) => status(pruefe(
+            &KiGrenzen::standard(),
+            &deckel,
+            buchungen,
+            berater,
+            heute,
+            zyklus,
+        )),
+        None => BudgetStatus::Gesperrt("Tagnummer nicht berechenbar".into()),
+    };
+    budgetwerte(
+        buchungen,
+        berater,
+        heute,
+        Some(BeraterEinstellung::standard(berater)),
+        deckel.hoechstkosten(),
+        st,
+    )
+}
+
+/// Zeigt den Rahmen für eine Erstmeinung an Handelstagen und für die Vorbereitung
+/// an börsenfreien Tagen. Bei unlesbaren Einstellungen stehen nur gebuchte Werte fest.
+pub fn ki_budget_mit_einstellung(
+    ki: &KiStand,
+    berater: BeraterId,
+    heute: Datum,
+    einstellung: Result<BeraterEinstellung, &str>,
+) -> KiBudget {
+    let einstellung = match einstellung {
+        Ok(einstellung) => einstellung,
+        Err(grund) => {
+            return budgetwerte(
+                ki.buchungen(),
+                berater,
+                heute,
+                None,
+                None,
+                BudgetStatus::KeineAufrufe(grund.into()),
+            );
+        }
+    };
+    let modell = einstellung.auswahl.modell();
+    let (zweck, deckel) = if depot_kern::liste::handelstag(heute) {
+        (KiZweck::Erstmeinung, KiDeckel::fuer_modell(modell))
+    } else {
+        (KiZweck::Vorbereitung, KiDeckel::kurz_fuer_modell(modell))
+    };
+    let st = if einstellung.max_aufrufe == 0 {
+        BudgetStatus::KeineAufrufe("Tageslimit 0".into())
+    } else if let Some(zyklus) = tagnummer(heute) {
+        status(ki.pruefe_reservierung(berater, heute, zyklus, zweck, einstellung))
+    } else {
+        BudgetStatus::Gesperrt("Tagnummer nicht berechenbar".into())
+    };
+    budgetwerte(
+        ki.buchungen(),
+        berater,
+        heute,
+        Some(einstellung),
+        deckel.hoechstkosten(),
+        st,
+    )
+}
+
+fn budgetwerte(
+    buchungen: &[Buchung],
+    berater: BeraterId,
+    heute: Datum,
+    einstellung: Option<BeraterEinstellung>,
+    je_aufruf: Option<Cent>,
+    status: BudgetStatus,
+) -> KiBudget {
+    let g = KiGrenzen::standard();
     let eigene = || buchungen.iter().filter(move |b| b.berater == berater);
     let monat = || {
         eigene().filter(move |b| b.datum.jahr() == heute.jahr() && b.datum.monat() == heute.monat())
@@ -124,21 +200,28 @@ pub fn ki_budget(buchungen: &[Buchung], berater: BeraterId, heute: Datum) -> KiB
     let heute_b = || eigene().filter(move |b| b.datum == heute);
     let monat_gebucht = summe(monat());
     let jahr_gebucht = summe(jahr());
-    let st = match tagnummer(heute) {
-        Some(zyklus) => status(pruefe(&g, &deckel, buchungen, berater, heute, zyklus)),
-        None => BudgetStatus::Gesperrt("Tagnummer nicht berechenbar".into()),
-    };
+    let hartes_tageslimit = g.aufrufe_je_zyklus().saturating_mul(g.zyklen_je_tag());
+    let heute_aufrufe_max = einstellung.map_or(0, |e| {
+        u32::try_from(e.max_aufrufe)
+            .unwrap_or(u32::MAX)
+            .min(hartes_tageslimit)
+    });
+    let tagesrahmen = einstellung
+        .and_then(|e| {
+            if depot_kern::liste::handelstag(heute) {
+                depot_ki::tagesrahmen(&g, buchungen, berater, heute)
+            } else {
+                depot_ki::vorbereitungsrahmen_fuer_modell(&g, buchungen, e.auswahl.modell(), heute)
+            }
+            .ok()
+        })
+        .unwrap_or(Cent::NULL);
     KiBudget {
         berater,
         heute_aufrufe: heute_b().count(),
-        heute_aufrufe_max: g.aufrufe_je_zyklus().saturating_mul(g.zyklen_je_tag()),
+        heute_aufrufe_max,
         heute_gebucht: summe(heute_b()),
-        tagesrahmen: if depot_kern::liste::handelstag(heute) {
-            depot_ki::tagesrahmen(&g, buchungen, berater, heute)
-        } else {
-            depot_ki::vorbereitungsrahmen(&g, buchungen, berater, heute)
-        }
-        .unwrap_or(Cent::NULL),
+        tagesrahmen,
         handelstage_rest: depot_ki::handelstage_rest(heute),
         monat_aufrufe: monat().count(),
         monat_aufrufe_max: g.aufrufe_je_monat(),
@@ -148,8 +231,8 @@ pub fn ki_budget(buchungen: &[Buchung], berater: BeraterId, heute: Datum) -> KiB
         jahr_gebucht,
         jahr_grenze: g.kosten_je_jahr(),
         jahr_rest: rest(g.kosten_je_jahr(), jahr_gebucht),
-        je_aufruf: deckel.hoechstkosten(),
-        status: st,
+        je_aufruf,
+        status,
         monat_verbraucht: Cent::NULL,
         monat_abgerechnet: 0,
         monat_unbekannt: 0,
@@ -176,4 +259,92 @@ pub fn mit_verbrauch(mut b: KiBudget, protokoll: &[Eintrag], heute: Datum) -> Ki
         }
     }
     b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use depot_journal::{Art, Journal, inhalt_fuer, vermerk_fuer};
+    use depot_kern::modelle::{Denktiefe, Modell, Modellwahl};
+    use std::fs;
+
+    #[test]
+    fn geaenderter_tarif_und_tageslimit_bestimmen_den_live_status() -> Result<(), String> {
+        let wer = BeraterId::Maus;
+        let heute = Datum::neu(2026, 11, 27).ok_or("Datum")?;
+        let gestern = Datum::neu(2026, 11, 26).ok_or("Datum")?;
+        let zyklus = tagnummer(gestern).ok_or("Zyklus")?;
+        let bisher = format!("Maus;{gestern};{zyklus};1970");
+        let zyklus_heute = tagnummer(heute).ok_or("Zyklus")?;
+        let aufruf = format!("Maus;{heute};{zyklus_heute};0");
+        let bytes = inhalt_fuer(&[
+            (Art::KiGrenzen, &"0".repeat(64)),
+            (Art::Ki, &bisher),
+            (Art::Ki, &aufruf),
+        ]);
+        let ordner = std::env::temp_dir().join(format!("depot-live-budget-{}", std::process::id()));
+        fs::create_dir(&ordner).map_err(|e| e.to_string())?;
+        let ergebnis = (|| {
+            let pfad = ordner.join("journal.txt");
+            fs::write(&pfad, &bytes).map_err(|e| e.to_string())?;
+            fs::write(
+                pfad.with_extension("vermerk"),
+                vermerk_fuer(&bytes, 0).ok_or("Vermerk")?,
+            )
+            .map_err(|e| e.to_string())?;
+            let journal = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+            let ki = journal.stand().ki();
+
+            let terra =
+                ki_budget_mit_einstellung(ki, wer, heute, Ok(BeraterEinstellung::standard(wer)));
+            let sol = BeraterEinstellung {
+                auswahl: Modellwahl::neu(wer, Modell::Sol62, Denktiefe::Mittel)
+                    .ok_or("Modellwahl")?,
+                max_aufrufe: 3,
+            };
+            let teurer = ki_budget_mit_einstellung(ki, wer, heute, Ok(sol));
+            assert_eq!(terra.status, BudgetStatus::Bereit);
+            assert_eq!(terra.je_aufruf, Some(Cent(13)));
+            assert_eq!(teurer.status, BudgetStatus::PausiertBisMorgen);
+            assert_eq!(teurer.je_aufruf, Some(Cent(26)));
+            assert_eq!(teurer.heute_aufrufe_max, 3);
+            assert_eq!(teurer.tagesrahmen, Cent(15));
+            assert_eq!(teurer.monat_rest, Cent(30));
+
+            let erreicht = ki_budget_mit_einstellung(
+                ki,
+                wer,
+                heute,
+                Ok(BeraterEinstellung {
+                    max_aufrufe: 1,
+                    ..BeraterEinstellung::standard(wer)
+                }),
+            );
+            assert_eq!(erreicht.status, BudgetStatus::PausiertBisMorgen);
+            assert_eq!(erreicht.heute_aufrufe, 1);
+            assert_eq!(erreicht.heute_aufrufe_max, 1);
+
+            let deaktiviert = ki_budget_mit_einstellung(
+                ki,
+                wer,
+                heute,
+                Ok(BeraterEinstellung {
+                    max_aufrufe: 0,
+                    ..sol
+                }),
+            );
+            assert!(matches!(deaktiviert.status, BudgetStatus::KeineAufrufe(_)));
+            assert_eq!(deaktiviert.heute_aufrufe_max, 0);
+            let unerreichbar = ki_budget_mit_einstellung(ki, wer, heute, Err("unlesbar"));
+            assert_eq!(
+                unerreichbar.status,
+                BudgetStatus::KeineAufrufe("unlesbar".into())
+            );
+            assert_eq!(unerreichbar.je_aufruf, None);
+            assert_eq!(unerreichbar.monat_gebucht, Cent(1970));
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(ordner);
+        ergebnis
+    }
 }

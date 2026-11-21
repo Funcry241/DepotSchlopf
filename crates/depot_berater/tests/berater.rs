@@ -14,7 +14,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_berater::json::zitiere;
 use depot_berater::{KiBerater, Netz, NetzFehler, Rueckmeldung, Schluessel};
-use depot_journal::{AufrufErlaubnis, Journal};
+use depot_journal::{AufrufErlaubnis, Journal, KiZweck};
+use depot_kern::modelle::{BeraterEinstellung, Denktiefe, Modell, Modellwahl};
 use depot_kern::{
     BeraterId, Cent, Datum, Herkunft, Instrument, InstrumentArt, Isin, Kurs, Kurse, Topf, TopfId,
     Universum, Vorschlag, Zeitpunkt,
@@ -251,6 +252,15 @@ fn gpt(text: &str, ein: u64, aus: u64) -> Result<Rueckmeldung, NetzFehler> {
 struct Ort {
     dir: PathBuf,
     journal: Journal,
+    aufraeumen: Testverzeichnis,
+}
+
+struct Testverzeichnis(PathBuf);
+
+impl Drop for Testverzeichnis {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 impl Ort {
@@ -259,10 +269,15 @@ impl Ort {
         let dir = std::env::temp_dir().join(format!("depot_berater_{}_{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         vorbedingung(fs::create_dir_all(&dir), "Testverzeichnis")?;
+        let aufraeumen = Testverzeichnis(dir.clone());
         let pfad = dir.join("journal.txt");
         vorbedingung(Journal::einrichten(&pfad), "Einrichtung")?;
         let journal = vorbedingung(Journal::oeffnen(&pfad), "Journal")?;
-        Ok(Ort { dir, journal })
+        Ok(Ort {
+            dir,
+            journal,
+            aufraeumen,
+        })
     }
 
     fn sperre(&self) -> PathBuf {
@@ -271,12 +286,6 @@ impl Ort {
 
     fn erlaubnis(&mut self, wer: BeraterId, zyklus: u32) -> Result<AufrufErlaubnis, String> {
         vorbedingung(self.journal.reserviere(wer, tag()?, zyklus), "Erlaubnis")
-    }
-}
-
-impl Drop for Ort {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -597,6 +606,81 @@ fn dachs_schlaegt_vor_und_die_kosten_stehen_dabei() -> Result<(), String> {
     ] {
         assert!(inhalt.contains(teil), "{teil} fehlt in {inhalt}");
     }
+    Ok(())
+}
+
+#[test]
+fn sol_mittel_wird_gebucht_gesendet_und_nach_neustart_belegt() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let wer = BeraterId::Maus;
+    let auswahl = some(
+        Modellwahl::neu(wer, Modell::Sol62, Denktiefe::Mittel),
+        "Modellwahl",
+    )?;
+    let einstellung = BeraterEinstellung {
+        auswahl,
+        max_aufrufe: 1,
+    };
+    let mut netz = Attrappe::default();
+    let mut antwort = vorbedingung(gpt(VORSCHLAG, 20_000, 1_500), "Antwort")?;
+    let modell = "gpt-6.2-sol-2026-11-18";
+    let json = vorbedingung(std::str::from_utf8(&antwort.inhalt), "Antwort-JSON")?;
+    antwort.inhalt = json
+        .replacen('{', &format!("{{\"model\":{0},", zitiere(modell)), 1)
+        .into_bytes();
+    netz.antworten.push_back(Ok(antwort));
+    let mut maus = berater(&ort, wer, netz)?.mit_einstellung(einstellung)?;
+    let datum = tag()?;
+    let e = vorbedingung(
+        ort.journal.reserviere_mit_einstellung(
+            wer,
+            datum,
+            1,
+            KiZweck::Erstmeinung,
+            Some(einstellung),
+        ),
+        "Buchung",
+    )?;
+    let nr = e.buchungsnummer();
+    assert_eq!(e.buchung().reserviert, Cent(26));
+    let antwort = mit_lage(|l| maus.vorschlagen(e, l))?;
+    assert!(
+        antwort.einschaetzung.contains("Kosten 6 von 26 Cent"),
+        "{antwort:?}"
+    );
+    let (_, _, inhalt) = some(maus.netz().gesendet.first(), "versandt")?;
+    assert!(inhalt.contains("\"model\":\"gpt-6.2-sol\""));
+    assert!(inhalt.contains("\"reasoning\":{\"effort\":\"medium\"}"));
+    let aufruf = some(maus.aufruf(), "Aufrufbeleg")?;
+    vorbedingung(
+        ort.journal.belege_ki_aufruf(&aufruf),
+        "Aufrufbeleg schreiben",
+    )?;
+    let abrechnung = some(maus.abrechnung(), "Abrechnung")?;
+    assert_eq!(abrechnung.kosten(), Cent(6));
+    vorbedingung(
+        ort.journal.rechne_ki_ab(&abrechnung),
+        "Abrechnung schreiben",
+    )?;
+    let Ort {
+        dir,
+        journal,
+        aufraeumen: _aufraeumen,
+    } = ort;
+    drop(journal);
+    let journal = vorbedingung(
+        Journal::oeffnen(&dir.join("journal.txt")),
+        "Journal erneut öffnen",
+    )?;
+    let neu = journal.stand();
+    assert_eq!(neu.ki().modellwahl(nr), Some(auswahl));
+    assert_eq!(neu.ki().aufruf(nr).map(|a| a.modell.as_str()), Some(modell));
+    assert_eq!(
+        neu.ki()
+            .pruefe_reservierung(wer, datum, 1, KiZweck::Erstmeinung, einstellung)
+            .err(),
+        Some(depot_ki::Sperre::TagVoll)
+    );
     Ok(())
 }
 

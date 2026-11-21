@@ -99,7 +99,13 @@ pub fn lauf<'a>(
         j.belege_lehre(tag, name, "begonnen")
             .map_err(|e| format!("{e:?}"))?;
         let text = if berater.angebunden() {
-            match j.reserviere_fuer(wer, tag, zyklus, KiZweck::Wochenrueckschau) {
+            match j.reserviere_mit_einstellung(
+                wer,
+                tag,
+                zyklus,
+                KiZweck::Wochenrueckschau,
+                berater.einstellung(),
+            ) {
                 Ok(erlaubnis) => {
                     let antwort = berater.wochenrat(erlaubnis, &frage);
                     crate::lauf::belege_ki(&mut j, berater).map_err(|e| format!("{e:?}"))?;

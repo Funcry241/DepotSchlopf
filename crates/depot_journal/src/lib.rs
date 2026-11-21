@@ -57,6 +57,7 @@ pub mod ibkr_abruf;
 pub mod kasse;
 mod ki_abrechnung;
 mod ki_aufruf;
+pub mod ki_einstellungen;
 pub use ki_aufruf::{KiAufruf, KiAufrufErgebnis};
 pub mod kapitalmassnahme;
 pub mod konto;
