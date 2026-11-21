@@ -170,10 +170,18 @@ impl<N: Netz> KiBerater<N> {
             nachfrage: None,
         }
         .text();
+        let staerkt = NeuroUrteilswert::Staerkt.text();
+        let schwaecht = NeuroUrteilswert::Schwaecht.text();
+        let offen = NeuroUrteilswert::Offen.text();
         let aufgabe = if frage.ist_vorpruefung() {
-            "Bewerte denselben historischen Stand von These und Beleg unabhängig. Nutze nur die bereitgestellte These, Quelle und Aussage. Für das Urteil sind staerkt, schwaecht, kein_bezug und offen zulässig. 'kein_bezug' setzt voraus, dass der Beleg erkennbar keinen Bezug hat. Bei unklarem Bezug, geringer Aussagekraft oder unklarer Richtung wähle 'offen'."
+            let kein_bezug = NeuroUrteilswert::KeinBezug.text();
+            format!(
+                "Bewerte denselben historischen Stand von These und Beleg unabhängig. Nutze nur die bereitgestellte These, Quelle und Aussage. Für das Urteil sind {staerkt}, {schwaecht}, {kein_bezug} und {offen} zulässig. '{kein_bezug}' setzt voraus, dass der Beleg erkennbar keinen Bezug hat. Bei unklarem Bezug, geringer Aussagekraft oder unklarer Richtung wähle '{offen}'."
+            )
         } else {
-            "Bewerte ausschließlich, ob der neue Beleg die offene These stärkt, schwächt oder offenlässt. Für das Urteil sind staerkt, schwaecht und offen zulässig."
+            format!(
+                "Bewerte ausschließlich, ob der neue Beleg die offene These stärkt, schwächt oder offenlässt. Für das Urteil sind {staerkt}, {schwaecht} und {offen} zulässig."
+            )
         };
         let system = format!(
             concat!(
