@@ -8,9 +8,9 @@ Dieser Schritt liefert Dienst, Live-Seite, Config-Seite, Zeitplan, Starter und A
 
 Jede Arbeit ist ein eigener Lauf wie `run.cmd kurse`, `run.cmd termine` oder `run.cmd papier` (`cargo run -p depot_lauf -- …` im Projektordner). Der Dienst startet ihn, liest Ausgabe und Fehlerausgabe ins Protokoll und merkt sich das Ergebnis. Was ein Lauf darf, entscheidet weiter nur der Lauf; der Dienst fügt keinen Weg ins Journal hinzu.
 
-- **Ein Auftrag zur Zeit.** Dieselbe Art läuft oder wartet nie doppelt, höchstens vier warten.
+- **Ein Hauptauftrag zur Zeit.** Gemini kann als optionale Zuarbeit parallel laufen. Der Papiertag und seine Vorbereitung nutzen die bis zum Start vorliegenden Ergebnisse. Updates und Sicherungen warten auf das Ende der Zuarbeit. Dieselbe Auftragsart läuft oder wartet nur einmal.
 - **Eindeutige Kennung** je Auftrag aus Startzeit in Sekunden und laufender Nummer.
-- **Das Lagebild liest nur, wenn kein Auftrag läuft**, und nur im selben Arbeiter, der Aufträge startet. Lagebild und Lauf greifen nie zugleich auf das Journal zu. Das Lagebild ist dasselbe wie `run.cmd lage` (`depot_lage`), ergänzt um den Stand der Schlüssel.
+- **Das Lagebild liest nur ohne laufenden Hauptauftrag**, und nur im selben Arbeiter, der Aufträge startet. Gemini liest einen bestätigten Ausschnitt ohne Journalsperre und verzichtet auf Zuarbeit, falls sich der Ausschnitt während der Prüfung ändert. Das Lagebild ist dasselbe wie `run.cmd lage` (`depot_lage`), ergänzt um den Stand der Schlüssel.
 
 ## Zeitplan, einmal je Tag
 
