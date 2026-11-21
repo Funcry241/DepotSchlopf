@@ -395,7 +395,7 @@ fn anzeige_fall(html: &mut String, a: &Auftrag, ki: &KiStand) {
     html.push_str("</article>");
 }
 
-fn bewertungstext(wert: NeuroUrteilswert) -> &'static str {
+pub(crate) fn bewertungstext(wert: NeuroUrteilswert) -> &'static str {
     match wert {
         NeuroUrteilswert::Staerkt => "Stärkt die These",
         NeuroUrteilswert::Schwaecht => "Schwächt die These",

@@ -5,10 +5,12 @@ use std::fs;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
+use depot_journal::neurofrage::{NeuroFrage, NeuroRunde, NeuroUrteil, NeuroVersuch};
 use depot_journal::{Journal, KiAufruf, KiStand};
 
 use depot_kern::json::{Json, erstes_objekt};
-use depot_kern::{BeraterId, Cent, Datum};
+use depot_kern::modelle::{Modell, Modellwahl};
+use depot_kern::{BeraterId, Cent, Datum, Zeitpunkt};
 use depot_lage::gespraeche::{self, Gespraech};
 use depot_lage::html::maskiere;
 
@@ -52,7 +54,9 @@ pub(crate) fn zweck_text(zweck: &str) -> &str {
         "abstimmung" => "Abstimmung",
         "vorbereitung" => "Vorbereitung",
         "simulation" => "Simulation",
+        "wochenrueckschau" => "Wochenrückschau",
         "nachrichten-vorsortieren" => "Nachrichten vorsortieren",
+        "neurofrage" => "Belege bewerten",
         wert => wert,
     }
 }
@@ -60,6 +64,7 @@ pub(crate) fn zweck_text(zweck: &str) -> &str {
 struct Belege<'a> {
     daten: &'a Path,
     ki: Option<&'a KiStand>,
+    neurofragen: BTreeMap<usize, &'a NeuroVersuch>,
 }
 
 impl Belege<'_> {
@@ -76,6 +81,23 @@ impl Belege<'_> {
     fn aufruf(&self, nr: usize) -> Option<&KiAufruf> {
         self.ki?.aufruf(nr)
     }
+
+    fn neurofrage(&self, e: &Gespraech) -> Option<&NeuroVersuch> {
+        if e.zweck != "neurofrage" {
+            return None;
+        }
+        let (nr, _) = self.buchung(e)?;
+        self.neurofragen.get(&nr).copied()
+    }
+}
+
+fn lokale_zeit(zeit: Zeitpunkt) -> String {
+    zeit.in_frankfurt().map_or_else(
+        || depot_lage::zeit_text(zeit),
+        |(datum, stunde, minute, ..)| {
+            format!("{}, {stunde:02}:{minute:02}", depot_lage::datum_text(datum))
+        },
+    )
 }
 
 fn rohdatei(daten: &Path, sha: &str) -> PathBuf {
@@ -306,24 +328,80 @@ fn fehler_text(e: &Gespraech) -> &'static str {
     }
 }
 
-fn eintrag(s: &mut String, e: &Gespraech, belege: &Belege<'_>) {
-    let rolle = if e.rolle == "zusatz" {
-        "Zusatz-KI"
-    } else {
-        "Haupt-KI"
-    };
-    let _ = write!(
-        s,
-        "<article><h5>{} ({})</h5><p>{rolle} · {} · {}",
-        maskiere(name(&e.wer)),
-        maskiere(&e.modell),
-        depot_lage::zeit_text(e.zeit),
-        maskiere(zweck_text(&e.zweck)),
-    );
-    let buchung = belege.buchung(e);
-    if let Some(wahl) = buchung.and_then(|(nr, _)| belege.ki?.modellwahl(nr)) {
-        let _ = write!(s, " · Denktiefe {}", maskiere(wahl.denktiefe().name()));
+fn sichtbarer_modellname(kennung: &str) -> Option<&str> {
+    if kennung == depot_kern::gemini::MODELL {
+        return Some("Gemini 3.8 Flash");
     }
+    [BeraterId::Dachs, BeraterId::Maus]
+        .into_iter()
+        .flat_map(Modell::fuer_berater)
+        .find(|modell| modell.passt_meldung(kennung))
+        .map(|modell| modell.name())
+}
+
+fn modellangabe(s: &mut String, e: &Gespraech, beleg: Option<&KiAufruf>, wahl: Option<Modellwahl>) {
+    let modell = if let Some(gemeldet) = beleg.map(|a| a.modell.as_str()) {
+        match gemeldet.strip_suffix('?') {
+            Some(auswahl) => {
+                sichtbarer_modellname(auswahl).map(|name| (name, " · damalige Auswahl"))
+            }
+            None => Some((
+                sichtbarer_modellname(gemeldet).unwrap_or("Anbietermodell"),
+                "",
+            )),
+        }
+    } else if let Some(wahl) = wahl {
+        Some((wahl.modell().name(), " · damalige Auswahl"))
+    } else {
+        sichtbarer_modellname(&e.modell).map(|name| (name, " · laut Gesprächsprotokoll"))
+    };
+    if let Some((name, belegart)) = modell {
+        let _ = write!(s, " · {name}{belegart}");
+    }
+    if let Some(wahl) = wahl {
+        let _ = write!(s, " · Denktiefe {}", wahl.denktiefe().name());
+    }
+}
+
+fn neurofrage(e: &Gespraech, v: &NeuroVersuch) -> Option<NeuroFrage> {
+    let f = NeuroFrage::lies(e.frage.as_deref()?)?;
+    (f.id == v.id && f.wer == v.wer).then_some(f)
+}
+
+fn neurofrage_text(s: &mut String, frage: &NeuroFrage) {
+    absatz(s, "These: ", &frage.these);
+    if let Some(bisher) = &frage.bisher {
+        absatz(s, "Bisher: ", bisher);
+    }
+    absatz(s, "Beleg: ", &frage.jetzt);
+}
+
+fn neurourteil_text(s: &mut String, urteil: &NeuroUrteil) {
+    absatz(s, "", crate::neuroauftraege::bewertungstext(urteil.wert));
+    absatz(s, "Begründung: ", &urteil.begruendung);
+}
+
+fn antwort(s: &mut String, e: &Gespraech, belege: &Belege<'_>, rueckfragen: &[&Gespraech]) {
+    let buchung = belege.buchung(e);
+    let wahl = buchung.and_then(|(nr, _)| belege.ki?.modellwahl(nr));
+    let beleg = buchung.and_then(|(nr, _)| belege.aufruf(nr));
+    let neuro = belege.neurofrage(e);
+    let bestaetigt = neuro
+        .and_then(|v| belege.ki?.neuroergebnis(v.buchung))
+        .and_then(|e| e.urteil.as_ref());
+    let text = e.antwort.as_deref().filter(|_| e.ergebnis == "ok");
+    let wer = maskiere(name(&e.wer));
+    s.push_str("<div class=\"ki-antwort\"><p><strong>");
+    if bestaetigt.is_some() || text.is_some() {
+        let _ = write!(s, "{wer} antwortet");
+    } else {
+        let _ = write!(s, "Keine Antwort von {wer}");
+    }
+    s.push_str("</strong>");
+    if e.wer == depot_kern::gemini::DIENST {
+        s.push_str(" · Zusatz-KI");
+    }
+    modellangabe(s, e, beleg, wahl);
     let kosten = if e.buchung.is_none() {
         e.kosten_cent
             .and_then(|cent| i64::try_from(cent).ok())
@@ -339,17 +417,109 @@ fn eintrag(s: &mut String, e: &Gespraech, belege: &Belege<'_>) {
         s.push_str(" · Kosten noch offen");
     }
     s.push_str("</p>");
-    if let Some(beleg) = buchung.and_then(|(nr, _)| belege.aufruf(nr)) {
-        journalbeleg(s, belege.daten, beleg);
-    }
-    if e.ergebnis == "ok"
-        && let Some(antwort) = &e.antwort
-    {
-        antwort_text(s, antwort);
+    let unbestaetigt = text
+        .zip(neuro)
+        .and_then(|(text, v)| NeuroUrteil::lies(text, v.id.runde()));
+    if let Some(urteil) = bestaetigt.or(unbestaetigt.as_ref()) {
+        if bestaetigt.is_none() {
+            absatz(s, "", "Urteil noch nicht im Journal bestätigt.");
+        }
+        neurourteil_text(s, urteil);
+        if let Some(nachfrage) = &urteil.nachfrage {
+            absatz(s, "Rückfrage: ", nachfrage);
+        }
+    } else if let Some(text) = text {
+        antwort_text(s, text);
     } else {
         absatz(s, "", fehler_text(e));
     }
-    s.push_str("</article>");
+    for folge in rueckfragen {
+        let _ = write!(
+            s,
+            "<p><strong>NeuroSchlopf fragt bei {wer} nach</strong></p>"
+        );
+        antwort(s, folge, belege, &[]);
+    }
+    s.push_str("</div>");
+}
+
+fn faden(s: &mut String, eintraege: &[&Gespraech], belege: &Belege<'_>) {
+    s.push_str("<div class=\"ki-frage\">");
+    let erstfragen = || {
+        eintraege
+            .iter()
+            .filter_map(|e| Some((*e, belege.neurofrage(e)?)))
+            .filter(|(_, v)| v.id.runde() == NeuroRunde::Erstfrage)
+    };
+    if erstfragen().next().is_some() {
+        s.push_str("<p><strong>NeuroSchlopf fragt</strong> · Belege bewerten</p>");
+        if let Some(frage) = erstfragen().find_map(|(e, v)| neurofrage(e, v)) {
+            neurofrage_text(s, &frage);
+        }
+        let mut folgen = BTreeMap::<_, Vec<_>>::new();
+        for &e in eintraege {
+            if let Some(v) = belege.neurofrage(e)
+                && v.id.runde() == NeuroRunde::Rueckfrage
+            {
+                folgen.entry(v.wer).or_default().push(e);
+            }
+        }
+        for (e, v) in erstfragen() {
+            let rueckfragen = folgen.remove(&v.wer);
+            antwort(s, e, belege, rueckfragen.as_deref().unwrap_or_default());
+        }
+        for e in folgen.into_values().flatten() {
+            einzelne_frage(s, e, belege);
+        }
+    } else {
+        for &e in eintraege {
+            einzelne_frage(s, e, belege);
+        }
+    }
+    s.push_str("</div>");
+}
+
+fn einzelne_frage(s: &mut String, e: &Gespraech, belege: &Belege<'_>) {
+    let wer = maskiere(name(&e.wer));
+    let zweck = maskiere(zweck_text(&e.zweck));
+    if let Some(v) = belege.neurofrage(e) {
+        let _ = write!(
+            s,
+            "<p><strong>NeuroSchlopf fragt bei {wer} nach</strong> · {zweck}</p>"
+        );
+        if let Some(frage) = neurofrage(e, v)
+            && let Some(nachfrage) = frage.nachfrage
+        {
+            absatz(s, "", &nachfrage);
+        }
+    } else {
+        let fragt = if e.zweck == "neurofrage" {
+            "NeuroSchlopf"
+        } else {
+            "DepotSchlopf"
+        };
+        let _ = write!(s, "<p><strong>{fragt} fragt {wer}</strong> · {zweck}</p>");
+    }
+    antwort(s, e, belege, &[]);
+}
+
+fn technische_details(s: &mut String, eintraege: &[&Gespraech], belege: &Belege<'_>) {
+    s.push_str("<details class=\"ki-details\"><summary>Technische Details</summary>");
+    for e in eintraege {
+        let _ = write!(
+            s,
+            "<p>{} · <time datetime=\"{}\">{}</time> · Modell <code>{}</code> · Lauf <code>{}</code></p>",
+            maskiere(name(&e.wer)),
+            e.zeit,
+            e.zeit,
+            maskiere(&e.modell),
+            maskiere(&e.lauf),
+        );
+        if let Some(beleg) = belege.buchung(e).and_then(|(nr, _)| belege.aufruf(nr)) {
+            journalbeleg(s, belege.daten, beleg);
+        }
+    }
+    s.push_str("</details>");
 }
 
 fn filter(
@@ -386,8 +556,7 @@ fn filter(
     if !lauf.is_empty() {
         let _ = write!(
             s,
-            "<input type=\"hidden\" name=\"lauf\" value=\"{}\"> <span>Lauf {}</span>",
-            maskiere(lauf),
+            "<input type=\"hidden\" name=\"lauf\" value=\"{}\"> <span>Ein Lauf ausgewählt</span>",
             maskiere(lauf)
         );
     }
@@ -419,22 +588,31 @@ fn tag_lesen(daten: &Path, datum: Datum) -> Tag {
 }
 
 fn aufrufe_nach_lauf(s: &mut String, aufrufe: Vec<&Gespraech>, belege: &Belege<'_>) {
-    let mut laeufe = BTreeMap::<&str, Vec<&Gespraech>>::new();
-    for e in aufrufe {
-        laeufe.entry(&e.lauf).or_default().push(e);
+    let mut laeufe = BTreeMap::<_, Vec<_>>::new();
+    for e in aufrufe.into_iter().rev() {
+        let gruppe = belege
+            .neurofrage(e)
+            .map_or((false, e.lauf.as_str()), |v| (true, v.id.fall()));
+        laeufe.entry(gruppe).or_default().push(e);
     }
-    let mut laeufe: Vec<_> = laeufe.into_iter().collect();
-    laeufe.sort_by_key(|(_, eintraege)| std::cmp::Reverse(eintraege.first().map(|e| e.zeit)));
-    for (_, eintraege) in laeufe {
-        let beginn = eintraege
-            .last()
-            .map(|e| depot_lage::zeit_text(e.zeit))
-            .unwrap_or_default();
-        let _ = write!(s, "<section><h4>Lauf ab {beginn}</h4>");
-        for e in eintraege.into_iter().rev() {
-            eintrag(s, e, belege);
-        }
-        s.push_str("</section>");
+    for eintraege in laeufe.values_mut() {
+        eintraege.sort_by_key(|e| e.zeit);
+    }
+    let mut laeufe: Vec<_> = laeufe.into_values().collect();
+    laeufe.sort_by_key(|eintraege| std::cmp::Reverse(eintraege.first().map(|e| e.zeit)));
+    for eintraege in laeufe {
+        let Some(erste) = eintraege.first() else {
+            continue;
+        };
+        let _ = write!(
+            s,
+            "<div class=\"ki-lauf\"><h3><time datetime=\"{}\">{}</time></h3>",
+            erste.zeit,
+            lokale_zeit(erste.zeit)
+        );
+        faden(s, &eintraege, belege);
+        technische_details(s, &eintraege, belege);
+        s.push_str("</div>");
     }
 }
 
@@ -462,78 +640,50 @@ fn uebersprungene(s: &mut String, ausgelassen: Vec<&Gespraech>) {
     }
 }
 
-fn tagesueberblick(s: &mut String, aufrufe: &[&Gespraech]) {
-    let mut antworten = BTreeMap::<&str, usize>::new();
-    let mut fehler = BTreeMap::<(&str, &str), usize>::new();
-    for e in aufrufe {
-        let wer = name(&e.wer);
-        let anzahl = if e.ergebnis == "ok" && e.antwort.is_some() {
-            antworten.entry(wer).or_default()
-        } else {
-            fehler.entry((wer, fehler_text(e))).or_default()
-        };
-        *anzahl = anzahl.saturating_add(1);
-    }
-    if antworten.is_empty() && fehler.is_empty() {
-        return;
-    }
-    s.push_str("<ul>");
-    for (wer, anzahl) in antworten {
-        let wort = if anzahl == 1 { "Antwort" } else { "Antworten" };
-        let _ = write!(s, "<li>{}: {anzahl} {wort}.</li>", maskiere(wer));
-    }
-    for ((wer, grund), anzahl) in fehler {
-        let wort = if anzahl == 1 { "Aufruf" } else { "Aufrufe" };
-        let _ = write!(
-            s,
-            "<li>{}: {anzahl} {wort} ohne Antwort. {}</li>",
-            maskiere(wer),
-            maskiere(grund)
-        );
-    }
-    s.push_str("</ul>");
-}
-
-fn tagesstand(
-    s: &mut String,
-    tag: &Tag,
+fn tagesstand<'a>(
+    hinweise: &mut String,
+    tag: &'a Tag,
     wer: &str,
     lauf: &str,
-    belege: &Belege<'_>,
+    aufrufe: &mut Vec<&'a Gespraech>,
     leer_zeigen: bool,
 ) {
-    let sichtbar: Vec<_> = tag
+    let datum = depot_lage::datum_text(tag.datum);
+    if tag.lesefehler {
+        let _ = write!(hinweise, "<p>{datum} · Gesprächsdatei nicht lesbar.</p>");
+        return;
+    }
+    let mut ausgelassen = Vec::new();
+    let vorher = aufrufe.len();
+    for e in tag
         .eintraege
         .iter()
         .filter(|e| (wer.is_empty() || wer == e.wer) && (lauf.is_empty() || lauf == e.lauf))
-        .collect();
-    if sichtbar.is_empty() && !tag.lesefehler && tag.fehler == 0 && !leer_zeigen {
-        return;
+    {
+        if e.ergebnis == "uebersprungen" {
+            ausgelassen.push(e);
+        } else {
+            aufrufe.push(e);
+        }
     }
-    let _ = write!(s, "<h3>{}</h3>", depot_lage::datum_text(tag.datum));
-    if tag.lesefehler {
-        s.push_str("<p>Gesprächsdatei nicht lesbar.</p>");
-        return;
+    if aufrufe.len() == vorher && ausgelassen.is_empty() && leer_zeigen {
+        hinweise.push_str("<p>Keine Gespräche an diesem Tag für die Auswahl.</p>");
     }
-    if sichtbar.is_empty() {
-        s.push_str("<p>Keine Gespräche an diesem Tag für die Auswahl.</p>");
-    }
-    let (ausgelassen, aufrufe): (Vec<_>, Vec<_>) = sichtbar
-        .into_iter()
-        .partition(|e| e.ergebnis == "uebersprungen");
-    tagesueberblick(s, &aufrufe);
-    aufrufe_nach_lauf(s, aufrufe, belege);
     if !ausgelassen.is_empty() {
         let _ = write!(
-            s,
-            "<details><summary>Nicht gefragt ({})</summary>",
+            hinweise,
+            "<details><summary>{datum} · Nicht gefragt ({})</summary>",
             ausgelassen.len()
         );
-        uebersprungene(s, ausgelassen);
-        s.push_str("</details>");
+        uebersprungene(hinweise, ausgelassen);
+        hinweise.push_str("</details>");
     }
     if tag.fehler > 0 {
-        let _ = write!(s, "<p>Nicht lesbare Zeilen: {}</p>", tag.fehler);
+        let _ = write!(
+            hinweise,
+            "<p>{datum} · Nicht lesbare Zeilen: {}</p>",
+            tag.fehler
+        );
     }
 }
 
@@ -581,14 +731,29 @@ pub(crate) fn inhalt(
     let belege = Belege {
         daten,
         ki: ki.as_ref(),
+        neurofragen: ki
+            .iter()
+            .flat_map(KiStand::neurofragen)
+            .map(|v| (v.buchung, v))
+            .collect(),
     };
-    let vor_tagen = s.len();
-    for tag in tage {
-        tagesstand(&mut s, &tag, wer, lauf, &belege, einzel.is_some());
+    let mut aufrufe = Vec::new();
+    let mut hinweise = String::new();
+    for tag in &tage {
+        tagesstand(
+            &mut hinweise,
+            tag,
+            wer,
+            lauf,
+            &mut aufrufe,
+            einzel.is_some(),
+        );
     }
-    if s.len() == vor_tagen {
+    if aufrufe.is_empty() && hinweise.is_empty() {
         s.push_str("<p>Keine Gespräche für die Auswahl.</p>");
     }
+    aufrufe_nach_lauf(&mut s, aufrufe, &belege);
+    s.push_str(&hinweise);
     s.push_str("</section>");
     s
 }
@@ -629,9 +794,12 @@ mod tests {
         let belege = Belege {
             daten: Path::new(""),
             ki: None,
+            neurofragen: BTreeMap::new(),
         };
         let mut html = String::new();
-        tagesstand(&mut html, &tag, "", "", &belege, true);
+        let mut aufrufe = Vec::new();
+        tagesstand(&mut html, &tag, "", "", &mut aufrufe, true);
+        aufrufe_nach_lauf(&mut html, aufrufe, &belege);
         assert!(html.contains("Kosten noch offen"));
         assert!(!html.contains("0,20 €") && !html.contains("0,03 €"));
         let eintrag = tag.eintraege.first().ok_or("Gespräch fehlt")?;
@@ -651,8 +819,10 @@ mod tests {
             ..tag
         };
         let mut html = String::new();
-        tagesstand(&mut html, &tag, "", "", &belege, true);
-        assert_eq!(html.matches("<h4>Lauf ab").count(), 1);
+        let mut aufrufe = Vec::new();
+        tagesstand(&mut html, &tag, "", "", &mut aufrufe, true);
+        aufrufe_nach_lauf(&mut html, aufrufe, &belege);
+        assert_eq!(html.matches("<h3><time").count(), 1);
         assert_eq!(html.matches("Kein Zugangsschlüssel verfügbar").count(), 1);
         assert!(html.contains("2-mal nicht gefragt"));
         Ok(())
