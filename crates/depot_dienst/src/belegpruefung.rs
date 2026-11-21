@@ -118,7 +118,7 @@ pub(super) fn seite(
         Err(grund) => return meldung(d, heute, wahl, 500, &grund),
     };
     let mut s = String::from(
-        "<p><a href=\"/#schlopfmodell\">Zurück zu NeuroSchlopf</a></p><section><h2>Blindprüfung der Belegauswahl</h2>\
+        "<p><a href=\"/neuroschlopf\">Zurück zu NeuroSchlopf</a></p><section><h2>Blindprüfung der Belegauswahl</h2>\
         <p>Beurteile jeden Beleg anhand der damaligen These. DepotSchlopf speichert deine Urteile lokal.</p>",
     );
     if gespeichert {

@@ -288,7 +288,7 @@ fn live_inhalt(d: &Dienst, jetzt: Zeitpunkt) -> String {
         html.push_str(&sicherungsstand(d, &z, jetzt));
     }
     drop(z);
-    html.push_str(&neuroschlopf::live(d, &ki));
+    html.push_str(&neuroschlopf::live(d));
     html
 }
 
@@ -513,6 +513,11 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
                 None => None,
             };
             belegpruefung::seite(d, tag, wahl, feld(&f, "gespeichert") == Some("ja"))
+        }
+        "/neuroschlopf" => {
+            let ki =
+                zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), tag);
+            neuroschlopf::seite(d, &ki, tag)
         }
         "/neuroschlopf/lernlauf" => neuro2026::seite(d, tag),
         "/neuroschlopf/lernlauf.json" => neuro2026::daten(),
