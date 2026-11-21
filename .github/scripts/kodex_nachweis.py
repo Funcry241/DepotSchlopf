@@ -104,10 +104,12 @@ def ereignis_daten():
     return json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
 
 
-def pr_basis(geprueft, kopf):
+def pr_basis(geprueft, kopf, basis):
     eltern = befehl("git", "show", "-s", "--format=%H %P", "HEAD").split()
     if len(eltern) != 3 or eltern[0] != geprueft or eltern[2] != kopf:
         raise ValueError("Checkout ist nicht der Merge-Stand des PR-Laufs")
+    if eltern[1] != basis:
+        raise ValueError("Erster Elterncommit entspricht nicht der Basisrevision des PR-Ereignisses")
     return eltern[1]
 
 
@@ -121,7 +123,7 @@ def belege_pr():
         return
     kopf = pr["head"]["sha"]
     geprueft = os.environ["GITHUB_SHA"]
-    basis = pr_basis(geprueft, kopf)
+    basis = pr_basis(geprueft, kopf, pr["base"]["sha"])
     baum = git_baum(geprueft)
     # Nur der mit GitHubs API unabhängig überprüfbare Fall bekommt einen Beleg.
     if git_baum(kopf) != baum:
@@ -164,7 +166,7 @@ if __name__ == "__main__":
     aufgabe = sys.argv[1]
     if aufgabe == "basis":
         pr = ereignis_daten()["pull_request"]
-        print(pr_basis(os.environ["GITHUB_SHA"], pr["head"]["sha"]))
+        print(pr_basis(os.environ["GITHUB_SHA"], pr["head"]["sha"], pr["base"]["sha"]))
         sys.exit(0)
     try:
         {"beleg": belege_pr, "export": hole_export}[aufgabe]()

@@ -1,0 +1,7 @@
+klasse: KodexAenderung
+zweck: Ersten Elterncommit des geprüften PR-Merge-Stands an die Basisrevision des Ereignisses binden
+pfade:
+.github/scripts/kodex_nachweis.py
+.github/scripts/test_kodex_nachweis.py
+kodex/festschreibung.txt
+kodex/freigaben/362-pr-basis-identitaet.txt

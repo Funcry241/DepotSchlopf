@@ -1,0 +1,4 @@
+typ: Grenzfreigabe
+diff: a092d643b729e38653175343697dde13e4b53a9b1c309699f624e03cbdbc59cb
+festschreibung: c7e9fbc67f7cf5678b7b9b0738fa2309fd637e0f7d6205263a2c0b43372f4487
+erteilt: Wolfgang
