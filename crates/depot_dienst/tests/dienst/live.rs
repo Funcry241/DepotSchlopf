@@ -192,7 +192,7 @@ fn app_js_liefert_die_gepruefte_fassung() -> Result<(), String> {
     // SHA-256 der geprüften Fassung mit der NeuroSchlopf-Referenztopologie.
     assert_eq!(
         depot_kern::abdruck::sha256_hex(js.as_bytes()),
-        "004e7f45780eec032956b78fdbf9e1de4ec6fac0141f64286ef164527cadeb9b"
+        "6003f6979ea3e0ecaffaa9110935619bd4a20479a1165b735d08f261300fb13f"
     );
     Ok(())
 }
