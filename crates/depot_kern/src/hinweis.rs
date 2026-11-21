@@ -30,3 +30,21 @@ pub fn uhr_text(z: crate::Zeitpunkt) -> Option<String> {
     z.in_frankfurt()
         .map(|(_, h, m, _, _)| format!("{h:02}:{m:02} Uhr"))
 }
+
+/// Festes Signal aus dem Versandpfad. Überträgt ausschließlich Berater und Versandstatus.
+pub fn berater_anfrage(wer: crate::BeraterId, wartet: bool) -> &'static str {
+    match (wer, wartet) {
+        (crate::BeraterId::Dachs, true) => "[Beraterstatus] Dachs wartet",
+        (crate::BeraterId::Dachs, false) => "[Beraterstatus] Dachs fertig",
+        (crate::BeraterId::Maus, true) => "[Beraterstatus] Maus wartet",
+        (crate::BeraterId::Maus, false) => "[Beraterstatus] Maus fertig",
+    }
+}
+
+/// Liest ein vollständiges Signal aus der Ausgabe des aktuellen Prozesses.
+pub fn lies_berater_anfrage(zeile: &str) -> Option<(crate::BeraterId, bool)> {
+    [crate::BeraterId::Dachs, crate::BeraterId::Maus]
+        .into_iter()
+        .flat_map(|wer| [(wer, true), (wer, false)])
+        .find(|(wer, wartet)| zeile == berater_anfrage(*wer, *wartet))
+}

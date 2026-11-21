@@ -295,6 +295,8 @@ pub struct Lagebild {
     pub gemini_budget: Option<GeminiBudget>,
     pub wiederanlauf: Option<wiederanlauf::Diagnose>,
     pub depot: Option<DepotLage>,
+    /// Der bestätigte Journalstand bietet eine ausdrückliche Papierfreigabe an.
+    pub papierfreigabe_offen: bool,
     pub(crate) ausstiegsplaene: Vec<(
         depot_kern::TopfId,
         depot_kern::Isin,
@@ -1166,6 +1168,8 @@ pub fn lagebild_mit_ki_einstellungen(
         gemini_budget: None,
         wiederanlauf: None,
         depot: depot_lage,
+        papierfreigabe_offen: matches!(u.journal, Zugang::Offen(s)
+            if s.papier_freigabe_bargeld().is_some() && s.historischer_hoechststand().is_some()),
         ausstiegsplaene: ausstiegsplaene(u.journal, heute),
         gespraech,
         beratungsanlaesse,

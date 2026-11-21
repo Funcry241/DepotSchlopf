@@ -11,6 +11,7 @@ crates/depot_dienst/src/lib.rs
 crates/depot_dienst/src/neuroauftraege.rs
 crates/depot_dienst/src/neuroschlopf.rs
 crates/depot_dienst/src/programmstand.rs
+crates/depot_dienst/src/schmuck.rs
 crates/depot_dienst/src/werkbank.rs
 crates/depot_dienst/tests/dienst/einrichtung.rs
 crates/depot_journal/src/datei.rs

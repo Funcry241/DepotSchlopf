@@ -100,6 +100,7 @@ fn unabhaengiges_urteil_bleibt_nach_neustart_einmalig_erhalten() -> Result<(), S
     let d = dienst(wurzel.clone(), true);
     let anfang = get(&d, PFAD, zeit);
     assert!(anfang.contains("Bearbeitet <b>0 von 2</b>"));
+    assert!(anfang.contains("data-blindentscheidung"));
     assert!(anfang.contains("Das SAP-Cloudgeschäft wächst."));
     for urteil in ["0", "1", "2-stützt", "2-widerlegt", "2-offen", "unbewertet"] {
         assert!(anfang.contains(&format!("name=\"urteil\" value=\"{urteil}\"")));
@@ -146,6 +147,7 @@ fn unabhaengiges_urteil_bleibt_nach_neustart_einmalig_erhalten() -> Result<(), S
     let ende = get(&d, PFAD, zeit);
     assert!(ende.contains("Bearbeitet <b>2 von 2</b>") && ende.contains("ausdrücklich unbewertet"));
     assert!(!ende.contains("name=\"id\""));
+    assert!(!ende.contains("data-blindentscheidung"));
     assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, original);
     assert!(wartend(&d).is_empty());
     Ok(())

@@ -8,7 +8,7 @@
 //! **Eindeutige Kennung:** Jeder Auftrag hat eine Kennung aus Startzeit und Nummer. Dieselbe Art
 //! steht nie zweimal in der Warteschlange oder laeuft zugleich.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{BufReader, PipeReader, Write, pipe};
 use std::path::{Path, PathBuf};
@@ -282,6 +282,8 @@ pub struct Zustand {
     pub(crate) ibkr_pruefung_ab_nr: u64,
     pub laufend: Option<Auftrag>,
     gemini_laufend: Option<Auftrag>,
+    /// Berater, deren Transportaufruf im laufenden Prozess noch auf eine Antwort wartet.
+    pub(crate) berater_warten: BTreeSet<BeraterId>,
     neuro_abschnitt: Option<NeuroAbschnitt>,
     neuro_wer: Option<BeraterId>,
     pub warteschlange: VecDeque<WartenderAuftrag>,
@@ -390,6 +392,12 @@ impl Zustand {
         self.verlauf
             .iter()
             .find(|a| matches!(a.art, Art::Update | Art::UpdatePruefen))
+    }
+
+    pub(crate) fn neuro_wartet(&self) -> Option<BeraterId> {
+        (self.neuro_abschnitt == Some(NeuroAbschnitt::Extern))
+            .then_some(self.neuro_wer)
+            .flatten()
     }
 
     pub(crate) fn aktive_auftraege(&self) -> impl Iterator<Item = &Auftrag> {
@@ -844,6 +852,7 @@ impl Dienst {
                 ibkr_pruefung_ab_nr: naechste_nr,
                 laufend: None,
                 gemini_laufend: None,
+                berater_warten: BTreeSet::new(),
                 neuro_abschnitt: None,
                 neuro_wer: None,
                 warteschlange: VecDeque::new(),
@@ -1036,6 +1045,9 @@ impl Dienst {
         match depot_lage::papier_freigeben(&self.wurzel, gesehen, bestaetigt_am) {
             Ok(()) => {
                 z.lage_veraltet = true;
+                if let Some(lage) = &mut z.lage {
+                    lage.bild.papierfreigabe_offen = false;
+                }
                 "papierfreigabe_ok"
             }
             Err(depot_lage::PapierFreigabeFehler::Geaendert) => "papierfreigabe_geaendert",
@@ -1402,10 +1414,7 @@ impl Dienst {
     }
 
     pub(crate) fn neuro_wartet(&self) -> Option<BeraterId> {
-        let z = self.sperre();
-        (z.neuro_abschnitt == Some(NeuroAbschnitt::Extern))
-            .then_some(z.neuro_wer)
-            .flatten()
+        self.sperre().neuro_wartet()
     }
 
     pub(crate) fn neuro_verfolgen(
@@ -1684,6 +1693,9 @@ impl Dienst {
         let Some(mut a) = platz.take() else {
             return;
         };
+        if a.art != Art::Gemini {
+            z.berater_warten.clear();
+        }
         a.ende = uhr();
         a.erfolg = Some(erfolg);
         if a.art == Art::Update {
@@ -1818,6 +1830,18 @@ impl Dienst {
         let Some(a) = a.as_mut().filter(|a| a.nr == nr) else {
             return;
         };
+        if matches!(
+            a.art,
+            Art::Papier | Art::Vorbereiten | Art::Simulation | Art::Wochenrueckschau
+        ) && let Some((wer, wartet)) = depot_kern::hinweis::lies_berater_anfrage(&zeile)
+        {
+            if wartet {
+                z.berater_warten.insert(wer);
+            } else {
+                z.berater_warten.remove(&wer);
+            }
+            return;
+        }
         let zeit = zeit.unwrap_or(a.start);
         if let Some(h) = depot_kern::hinweis::lies(&zeile) {
             a.hinweis = Some(kuerze(h.to_string()));
@@ -2080,32 +2104,112 @@ fn zeitplan_auftrag_erlaubt(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> bool {
 }
 
 #[cfg(test)]
+mod beraterstatus_tests {
+    use super::*;
+
+    #[test]
+    fn anfragen_besitzen_einen_eigenen_lebenszyklus_im_aktiven_lauf() -> Result<(), String> {
+        let wurzel =
+            std::env::temp_dir().join(format!("depot_beraterstatus_{}", std::process::id()));
+        fs::create_dir_all(wurzel.join("daten")).map_err(|e| e.to_string())?;
+        let starter: Starter = Box::new(|_, _| {
+            #[cfg(windows)]
+            let mut befehl = Command::new("cmd");
+            #[cfg(windows)]
+            befehl.args(["/C", "exit /B 3"]);
+            #[cfg(not(windows))]
+            let mut befehl = Command::new("sh");
+            #[cfg(not(windows))]
+            befehl.args(["-c", "exit 3"]);
+            befehl
+        });
+        let dienst = Arc::new(Dienst::neu(
+            wurzel.clone(),
+            String::new(),
+            starter,
+            crate::lagerechner(Arc::new(crate::System)),
+        ));
+        let uhr = || Zeitpunkt::aus_sekunden(1_800_000_000);
+        let zeit = uhr().ok_or("Ungültige Uhrzeit")?;
+        dienst.einreihen(Art::Papier, Anlass::Hand)?;
+        let (nr, kind) = dienst.schritt(zeit).ok_or("Kein Auftrag gestartet")?;
+        let prufe = |erwartet| {
+            let kopf = crate::betriebsleiste(&dienst, zeit.frankfurt_tag());
+            assert!(kopf.contains(&format!("data-denkt=\"{erwartet}\"")));
+        };
+        prufe("niemand");
+        dienst.einreihen(Art::Gemini, Anlass::Hand)?;
+        let (gemini_nr, gemini_kind) = dienst.schritt(zeit).ok_or("Gemini nicht gestartet")?;
+        prufe("helfer");
+        let signal = |id, wer, wartet| {
+            dienst.protokolliere(
+                id,
+                depot_kern::hinweis::berater_anfrage(wer, wartet),
+                Some(zeit),
+            );
+        };
+        signal(gemini_nr, BeraterId::Dachs, true);
+        prufe("helfer");
+        signal(nr, BeraterId::Dachs, true);
+        prufe("dachs");
+        signal(nr, BeraterId::Maus, true);
+        prufe("beide");
+        signal(nr, BeraterId::Dachs, false);
+        prufe("maus");
+        dienst.verfolge(gemini_nr, gemini_kind, uhr);
+        prufe("maus");
+        dienst.verfolge(nr, kind, uhr);
+        prufe("niemand");
+        assert!(dienst.sperre().berater_warten.is_empty());
+        fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
 mod neuro_vorrang_tests {
     use super::*;
 
-    fn starter(art: Art, _: &Path) -> Command {
+    const FREIGABE_DATEI: &str = "neuro-antwort-fertig";
+
+    fn starter(art: Art, wurzel: &Path) -> Command {
         #[cfg(windows)]
-        {
+        let mut befehl = if art == Art::NeuroFrage {
             let mut befehl = Command::new("powershell.exe");
-            let skript = if art == Art::NeuroFrage {
-                "Write-Output 'NeuroSchlopf: Reservierung abgeschlossen'; Start-Sleep -Seconds 4"
-            } else {
-                "exit 0"
-            };
-            befehl.args(["-NoProfile", "-Command", skript]);
+            let skript = concat!(
+                "& { Write-Output 'NeuroSchlopf: Reservierung abgeschlossen'; ",
+                "$frist = [DateTime]::UtcNow.AddSeconds(45); ",
+                "while (!(Test-Path -LiteralPath $env:DEPOTSCHLOPF_TEST_NEURO_FREIGABE)) { ",
+                "if ([DateTime]::UtcNow -ge $frist) { exit 1 }; ",
+                "Start-Sleep -Milliseconds 100 }; exit 0 }"
+            );
+            befehl.args(["-NoProfile", "-NonInteractive", "-Command", skript]);
             befehl
-        }
+        } else {
+            let mut befehl = Command::new("cmd.exe");
+            befehl.args(["/D", "/C", "exit", "/B", "0"]);
+            befehl
+        };
         #[cfg(not(windows))]
-        {
+        let mut befehl = {
             let mut befehl = Command::new("sh");
             let skript = if art == Art::NeuroFrage {
-                "printf '%s\n' 'NeuroSchlopf: Reservierung abgeschlossen'; sleep 4"
+                concat!(
+                    "printf '%s\n' 'NeuroSchlopf: Reservierung abgeschlossen'; ",
+                    "n=0; while [ ! -f \"$DEPOTSCHLOPF_TEST_NEURO_FREIGABE\" ]; do ",
+                    "[ \"$n\" -ge 450 ] && exit 1; n=$((n + 1)); sleep 0.1; done"
+                )
             } else {
                 "exit 0"
             };
             befehl.args(["-c", skript]);
             befehl
-        }
+        };
+        befehl.env(
+            "DEPOTSCHLOPF_TEST_NEURO_FREIGABE",
+            wurzel.join(FREIGABE_DATEI),
+        );
+        befehl
     }
 
     #[test]
@@ -2113,7 +2217,7 @@ mod neuro_vorrang_tests {
         use std::time::{Duration, Instant};
 
         let wurzel =
-            std::env::temp_dir().join(format!("depot-neuro-vorrang-{}", std::process::id()));
+            std::env::temp_dir().join(format!("depot-neuro-vorrang-{}", crate::neues_token()));
         fs::create_dir_all(wurzel.join("daten")).map_err(|e| e.to_string())?;
         let d = Arc::new(Dienst::neu(
             wurzel.clone(),
@@ -2129,25 +2233,34 @@ mod neuro_vorrang_tests {
         d.einreihen(Art::Papier, Anlass::Hand)?;
         assert!(d.schritt(jetzt).is_none());
         let verfolge = Arc::clone(&d);
-        let warten =
-            std::thread::spawn(move || verfolge.neuro_verfolgen(neuro, Duration::from_secs(3)));
+        let startfrist = Duration::from_secs(10);
+        let warten = std::thread::spawn(move || verfolge.neuro_verfolgen(neuro, startfrist));
         let warte_seit = Instant::now();
-        while d.neuro_wartet().is_none() && warte_seit.elapsed() < Duration::from_secs(3) {
+        while d.neuro_wartet().is_none() && warte_seit.elapsed() < startfrist {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(d.neuro_wartet(), Some(BeraterId::Maus));
+        assert!(crate::betriebsleiste(&d, jetzt.frankfurt_tag()).contains("data-denkt=\"maus\""));
         let (nr, papier) = d
             .schritt(jetzt)
             .ok_or("Papiertag wartet auf NeuroSchlopf")?;
         let zeit = || Zeitpunkt::lies("2026-11-20T07:00:01Z");
         d.verfolge(nr, papier, zeit);
-        assert_eq!(d.neuro_wartet(), Some(BeraterId::Maus));
+        let maus_wartet = d.neuro_wartet();
+        let papier_fertig = d
+            .sperre()
+            .verlauf
+            .front()
+            .is_some_and(|a| a.nr == nr && a.erfolg == Some(true));
+        fs::write(wurzel.join(FREIGABE_DATEI), b"").map_err(|e| e.to_string())?;
         assert_eq!(
             warten
                 .join()
                 .map_err(|_| "NeuroSchlopf-Faden abgebrochen")?,
             (Some(0), true)
         );
+        assert!(papier_fertig);
+        assert_eq!(maus_wartet, Some(BeraterId::Maus));
         assert!(d.neuro_wartet().is_none());
         fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
         Ok(())

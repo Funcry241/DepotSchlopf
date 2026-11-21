@@ -86,7 +86,7 @@ fn formular(s: &mut String, fall: &Prueffall, d: &Dienst, tag: Datum) {
         s,
         "<section><h3>These</h3><p><strong>{}</strong></p><p>{}</p><p>Wissensstichtag: {}</p></section>\
         <section><h3>Beleg</h3><p>{}</p><p>Quelle: {quelle} · Veröffentlicht: {zeit}</p>\
-        <form method=\"post\" action=\"{PFAD}\"><input type=\"hidden\" name=\"t\" value=\"{}\">\
+        <form method=\"post\" action=\"{PFAD}\" data-blindentscheidung><input type=\"hidden\" name=\"t\" value=\"{}\">\
         <input type=\"hidden\" name=\"id\" value=\"{}\"><input type=\"hidden\" name=\"tag\" value=\"{tag}\">\
         <fieldset><legend>Welche Bedeutung hatte dieser Beleg für die These am Wissensstichtag?</legend>",
         maskiere(&fall.wert),

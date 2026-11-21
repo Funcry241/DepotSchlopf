@@ -663,9 +663,16 @@ fn papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand() -> Result<(), 
     ] {
         fs::write(daten.join(name), inhalt).map_err(|e| e.to_string())?;
     }
-    let d = dienst(wurzel.clone(), true);
+    let d = Arc::new(Dienst::neu(
+        wurzel.clone(),
+        TOKEN.into(),
+        echo_starter(true),
+        depot_dienst::lagerechner(Arc::new(Attrappe::default())),
+    ));
     let t = donnerstag(12, 0)?;
+    assert!(d.schritt(t).is_none());
     assert!(get(&d, "/einrichtung", t).contains("33,33 %"));
+    assert!(get(&d, "/teil/kopf", t).contains("Papierfreigabe wartet auf deine Entscheidung."));
     let angebot = some(
         depot_lage::papier_freigabe_angebot(&wurzel),
         "Freigabeangebot",
@@ -687,6 +694,7 @@ fn papierfreigabe_ueber_einrichtung_schreibt_bestaetigten_stand() -> Result<(), 
     let antwort = r(&anfrage, &umw);
     assert!(antwort.contains("papierfreigabe_ok"), "{antwort}");
     assert!(depot_lage::papier_freigabe_angebot(&wurzel).is_none());
+    assert!(get(&d, "/teil/kopf", t).contains("Keine Entscheidung offen."));
     let journal = fs::read_to_string(daten.join("journal.txt")).map_err(|e| e.to_string())?;
     assert!(journal.contains(concat!(
         "papier-freigabe;2026-11-04;1000000;einrichtung;dialog;",
