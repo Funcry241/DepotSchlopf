@@ -455,11 +455,17 @@ fn eingaben_html(html: &mut String, bild: &Bild, eingaben: Option<&Eingaben>) {
         maskiere(bild.journal.hash.get(..16).unwrap_or(&bild.journal.hash))
     );
     let Some(e) = eingaben else {
-        html.push_str("<p>Für diesen gespeicherten Stand sind der verglichene Abschnitt und die einzelnen Eingaben nicht belegt. Sie erscheinen nach dem nächsten Vergleich eines fortgeschriebenen Journals.</p>");
+        if bild.grenze.is_some() {
+            html.push_str("<p>Die einzelnen Eingaben dieses gespeicherten Stands erscheinen nach der nächsten Prüfung des Journals. Dafür muss das Journal nicht fortgeschrieben werden.</p>");
+        } else {
+            html.push_str("<p>Für diesen gespeicherten Stand sind der verglichene Abschnitt und die einzelnen Eingaben nicht belegt. Sie erscheinen nach dem nächsten Vergleich eines fortgeschriebenen Journals.</p>");
+        }
         return;
     };
     let von = e.von.max(2);
-    if bild.basis.is_none() {
+    if bild.basis.is_none() && von > e.bis {
+        html.push_str("<p>Erster bestätigter Stand · Das Journal enthält noch keine Einträge.</p>");
+    } else if bild.basis.is_none() {
         let _ = write!(
             html,
             "<p>Erster bestätigter Stand · Journalzeilen J{von} bis J{}</p>",
@@ -1136,6 +1142,35 @@ mod tests {
         )?;
         j.belege_termin(&beleg).map_err(|e| format!("{e:?}"))?;
         drop(j);
+        Ok(())
+    }
+
+    #[test]
+    fn leeres_journal_und_gespeicherter_stand_nach_neustart() -> Result<(), String> {
+        let daten = Testdaten::neu()?;
+        let (leer, e) = daten.vergleich("2026-11-12T10:30:00Z", None)?;
+        let e = e.ok_or("Eingaben fehlen")?;
+        assert_eq!((e.gesamt, e.bis), (0, 1));
+        let html = ansicht(&leer, &e);
+        assert!(
+            html.contains("Erster bestätigter Stand · Das Journal enthält noch keine Einträge.")
+        );
+        assert!(!html.contains("J2 bis J1"), "{html}");
+        // Nach Neustart: Stand mit Grenze braucht nur die erneute Prüfung.
+        let mut html = String::new();
+        eingaben_html(&mut html, &leer, None);
+        assert!(html.contains("nach der nächsten Prüfung des Journals"));
+        assert!(!html.contains("fortgeschriebenen"));
+        let mut html = String::new();
+        eingaben_html(
+            &mut html,
+            &Bild {
+                grenze: None,
+                ..leer
+            },
+            None,
+        );
+        assert!(html.contains("fortgeschriebenen Journals"));
         Ok(())
     }
 
