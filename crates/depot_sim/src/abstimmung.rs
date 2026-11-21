@@ -233,6 +233,8 @@ fn eigener_stand(
     gueltig: &mut TopfAntwort,
     neu: Option<&Vorschlag>,
 ) -> Result<bool, LaufFehler> {
+    gueltig.eigener_einsatz_bp =
+        crate::mindesteinsatz::zielanteil(&gueltig.topf, &zyklus.tag.kurse, neu);
     let nur_verkleinerung =
         neu.is_some_and(|v| nur_verkleinerung(&gueltig.topf, &zyklus.tag.kurse, v));
     let geaendert = !gleiche_ziele(gueltig.vorschlag.as_ref(), neu);
