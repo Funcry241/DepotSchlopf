@@ -10,7 +10,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use depot_journal::neurofrage::{NeuroAuftragId, NeuroRunde, NeuroSperre};
 use depot_journal::{Art, Journal, JournalFehler, inhalt_fuer, vermerk_fuer};
+use depot_kern::modelle::BeraterEinstellung;
 use depot_kern::{BeraterId, Cent};
 use depot_ki::{Datum, KiDeckel, KiGrenzen, Sperre, grenzabdruck};
 
@@ -336,4 +338,57 @@ fn grenzabdruck_ist_stabil() {
         a.bytes()
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
     );
+}
+
+#[test]
+fn neurogrenze_und_offener_versuch_bleiben_ueber_neustart_erhalten() -> Result<(), String> {
+    let pfad = neuer_pfad();
+    let mut j = journal(&pfad);
+    let wer = BeraterId::Maus;
+    let erstfrage = |zeichen: &str| {
+        NeuroAuftragId::neu(&zeichen.repeat(64), NeuroRunde::Erstfrage).ok_or("Kennung")
+    };
+    let id = erstfrage("a")?;
+    let auswahl = BeraterEinstellung::standard(wer);
+    let eng = BeraterEinstellung {
+        max_aufrufe: 5,
+        ..auswahl
+    };
+    assert_eq!(
+        j.reserviere_neurofrage(&id, wer, tag(4), 1, eng, 1).err(),
+        Some(NeuroSperre::Ki(Sperre::ErstmeinungReserviert))
+    );
+    let nr = j
+        .reserviere_neurofrage(&id, wer, tag(4), 1, auswahl, 1)
+        .map_err(|e| format!("{e:?}"))?
+        .buchung();
+    drop(j);
+    let mut j = journal(&pfad);
+    assert!(j.stand().ki().neuroergebnis(nr).is_none());
+    assert!(j.stand().ki().aufruf(nr).is_none());
+    assert_eq!(
+        j.reserviere_neurofrage(&id, wer, tag(4), 1, auswahl, 1)
+            .err(),
+        Some(NeuroSperre::BereitsReserviert)
+    );
+    let andere = erstfrage("b")?;
+    assert_eq!(
+        j.reserviere_neurofrage(
+            &andere,
+            DACHS,
+            tag(4),
+            1,
+            BeraterEinstellung::standard(DACHS),
+            1
+        )
+        .err(),
+        Some(NeuroSperre::NeuroTageslimit)
+    );
+    assert!(
+        j.reserviere_neurofrage(&andere, wer, tag(5), 2, auswahl, 1)
+            .is_ok()
+    );
+    assert_eq!(j.stand().seit_abschluss(), 0);
+    fs::remove_dir_all(pfad.parent().ok_or("Verzeichnis")?).ok();
+    Ok(())
 }

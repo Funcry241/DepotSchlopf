@@ -35,6 +35,7 @@ mod ibkr_papier;
 mod ki_einstellungen;
 pub mod kostenschutz;
 mod neuro2026;
+mod neuroauftraege;
 mod neuroschlopf;
 mod otter;
 mod papierdialog;
@@ -247,6 +248,8 @@ const HTML: &str = "text/html; charset=utf-8";
 
 /// Aufruf im einzigen Hintergrundfaden für die optionale lokale Auswertung.
 pub fn starte_neuroschlopf(d: &std::sync::Arc<Dienst>) {
+    let externes = std::sync::Arc::clone(d);
+    std::thread::spawn(move || neuroauftraege::arbeite(&externes));
     neuroschlopf::arbeite(d);
 }
 

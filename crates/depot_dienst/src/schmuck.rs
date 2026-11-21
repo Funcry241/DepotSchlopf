@@ -147,8 +147,12 @@ pub(crate) fn aussagen(
         .as_ref()
         .map_or(&[][..], |lage| lage.bild.gespraech.as_slice());
     let art = z.laufend.as_ref().map(|a| a.art);
-    let dachs_wartet = art.filter(|_| z.berater_warten.contains(&BeraterId::Dachs));
-    let maus_wartet = art.filter(|_| z.berater_warten.contains(&BeraterId::Maus));
+    let wartet = |wer| {
+        art.filter(|_| z.berater_warten.contains(&wer))
+            .or_else(|| (z.neuro_wartet() == Some(wer)).then_some(crate::werkbank::Art::NeuroFrage))
+    };
+    let dachs_wartet = wartet(BeraterId::Dachs);
+    let maus_wartet = wartet(BeraterId::Maus);
     let gemini = z
         .aktive_auftraege()
         .find(|a| a.art == crate::werkbank::Art::Gemini)

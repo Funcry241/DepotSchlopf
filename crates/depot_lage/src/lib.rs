@@ -30,6 +30,9 @@ pub use depot_journal::{abrufkontingent, anbieter, gespraeche, kurssperre};
 pub use depot_sim::ausfuehrung;
 mod budget;
 mod depot;
+pub use depot_sim::schlopfmodell::kandidaten::{
+    Fall as NeuroFragefall, neue_faelle as neuro_fragefaelle,
+};
 pub use depot_sim::schlopfmodell::{
     OffeneThese, Thesenpruefung, letzte_thesenpruefungen as schlopfmodell_thesenpruefungen,
     nachricht_wertnennungen, offene_thesen,

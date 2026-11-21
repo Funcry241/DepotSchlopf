@@ -27,6 +27,8 @@ use depot_kern::modelle::KiEinstellungen;
 use depot_kern::{BeraterId, Datum, Zeitpunkt};
 use depot_sim::papierlauf::papier_starten;
 
+mod neuro_lauf;
+
 fn wurzel() -> Option<PathBuf> {
     let start = std::env::current_dir().ok()?;
     start
@@ -75,7 +77,7 @@ enum Modus {
     Simulation,
 }
 
-fn lade_einstellungen(daten: &Path, modus: Modus) -> Result<Option<KiEinstellungen>, String> {
+fn update_bestaetigt(daten: &Path) -> Result<(), String> {
     // Reservierungen mit Modellwahl benötigen den neuen Journalleser. Ein laufender
     // Rückfall darf auch bei einem direkten Konsolenaufruf noch möglich bleiben.
     if daten
@@ -85,6 +87,11 @@ fn lade_einstellungen(daten: &Path, modus: Modus) -> Result<Option<KiEinstellung
     {
         return Err("Das Update muss zuerst bestätigt sein. DepotSchlopf starten und die Update-Bestätigung abwarten.".into());
     }
+    Ok(())
+}
+
+fn lade_einstellungen(daten: &Path, modus: Modus) -> Result<Option<KiEinstellungen>, String> {
+    update_bestaetigt(daten)?;
     match depot_journal::ki_einstellungen::lesen(daten) {
         Ok(e) => Ok(Some(e)),
         Err(e) if matches!(modus, Modus::Papier { .. }) => {
@@ -196,6 +203,11 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [befehl, pfad] = args.as_slice()
+        && matches!(befehl.as_str(), "neurofrage" | "neurofrage-abrechnen")
+    {
+        return neuro_lauf::lauf(&wurzel, befehl, Path::new(pfad));
+    }
     if matches!(args.as_slice(), [befehl] if befehl == "gemini-vorlauf")
         || matches!(args.as_slice(), [befehl, modus] if befehl == "gemini-vorlauf" && modus == "papiertag")
     {

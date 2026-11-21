@@ -57,7 +57,7 @@ pub(crate) fn formular(d: &Dienst) -> String {
     format!(
         "<section id=\"neuroschlopf\" aria-labelledby=\"neuroschlopf-titel\">\
         <h3 id=\"neuroschlopf-titel\">NeuroSchlopf</h3>\
-        <p>{stand} · Lokal · Keine API-Kosten · CPU-Budget {CPU_PROZENT} % des Rechners</p>\
+        <p>{stand} · Lokaler Belegvergleich · 0 € · CPU-Budget {CPU_PROZENT} % des Rechners</p>\
         <form method=\"post\" action=\"/neuroschlopf\"><input type=\"hidden\" name=\"t\" value=\"{}\">\
         <button type=\"submit\" name=\"an\" value=\"ja\"{an}>NeuroSchlopf einschalten</button> \
         <button type=\"submit\" name=\"an\" value=\"nein\"{aus}>NeuroSchlopf ausschalten</button>\
@@ -438,6 +438,7 @@ pub(crate) fn seite(
         html.push_str("</details>");
     }
     drop(anzeige);
+    html.push_str(&crate::neuroauftraege::anzeige(d, &daten));
     let _ = write!(
         html,
         "<h3>Modellstatus</h3><p>Neuronales Modell noch nicht eingebunden. Der produktive Vergleich arbeitet mit dem Belegabgleich oben. Die Einbindung eines Modells für Depotbelege folgt mit #325.</p>\
@@ -1062,6 +1063,30 @@ fn anzeige(feld: &Mutex<Anzeige>, status: Status) {
     feld.lock().unwrap_or_else(PoisonError::into_inner).status = status;
 }
 
+fn neue_fragefaelle(
+    stand: &Stand,
+    eintraege: &[(Art, String)],
+    vergleich: &Fertig,
+    schritt: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<Vec<depot_lage::NeuroFragefall>, String> {
+    let Some(eingaben) = &vergleich.eingaben else {
+        return Ok(Vec::new());
+    };
+    let neue_zeilen = eingaben
+        .liste
+        .iter()
+        .filter(|b| matches!(b.einordnung, Einordnung::Neu | Einordnung::Geaendert(_)))
+        .map(|b| b.zeile)
+        .collect();
+    depot_lage::neuro_fragefaelle(
+        stand,
+        eintraege,
+        &neue_zeilen,
+        &vergleich.offene_thesen,
+        schritt,
+    )
+}
+
 pub(crate) fn arbeite(d: &Arc<Dienst>) {
     let daten = d.wurzel.join("daten");
     let pfad = daten.join("journal.txt");
@@ -1092,19 +1117,29 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
         anzeige(&d.neuro, Status::Berechnet);
         let mut budget = Budget::neu();
         let mut schritt = || budget.schritt(|| frei(d, &daten));
+        let einstellungen = depot_journal::ki_einstellungen::lesen(&daten)
+            .ok()
+            .filter(|e| !e.neuro_berater().is_empty());
         let neu = Journal::pruefe_im_hintergrund(
             &pfad,
             JOURNAL_MAX,
             &mut schritt,
             |s, e, bytes, m, schritt| {
-                verglichen(s, e, bytes, m.into(), jetzt, gespeichert.as_ref(), schritt)?
-                    .fertig(s, jetzt, schritt)
+                let vergleich =
+                    verglichen(s, e, bytes, m.into(), jetzt, gespeichert.as_ref(), schritt)?
+                        .fertig(s, jetzt, schritt)?;
+                let faelle = if einstellungen.is_some() {
+                    neue_fragefaelle(s, e, &vergleich, schritt)?
+                } else {
+                    Vec::new()
+                };
+                Ok((vergleich, faelle))
             },
         );
         if !frei(d, &daten) {
             continue;
         }
-        let fertig = match neu {
+        let (fertig, faelle) = match neu {
             Ok(Ok(bild)) => bild,
             Err(JournalFehler::Belegt) => continue,
             Ok(Err(e)) | Err(JournalFehler::Halt(e)) => {
@@ -1121,6 +1156,11 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
         let bild = &fertig.bild;
         if !Journal::hintergrund_abdruck(&pfad).is_ok_and(|m| Marke::from(m) == bild.journal) {
             continue;
+        }
+        if let Some(e) = einstellungen
+            && let Err(grund) = crate::neuroauftraege::planen(&daten, e, faelle)
+        {
+            eprintln!("[Hinweis] NeuroSchlopf-Fragen konnten nicht geplant werden: {grund}");
         }
         if !gespeichert
             .as_ref()
@@ -1350,6 +1390,8 @@ mod tests {
                 tag,
                 isin: Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?,
                 text: "Cloud-Umsatz nimmt zu".into(),
+                grundtext: "Cloud-Umsatz nimmt zu".into(),
+                ereignis: "Ursprüngliches Ereignis".into(),
                 gueltig_bis: tag,
                 belege: BTreeMap::from([(2, "Die Aufträge stützen den erwarteten Umsatz.".into())]),
             }],

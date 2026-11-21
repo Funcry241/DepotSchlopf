@@ -1,4 +1,6 @@
 //! Gemeinsame Beleggrundlage für unabhängige Erstmeinungen.
+
+pub mod kandidaten;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs::File;
@@ -189,6 +191,8 @@ pub struct OffeneThese {
     pub tag: Datum,
     pub isin: Isin,
     pub text: String,
+    pub grundtext: String,
+    pub ereignis: String,
     pub gueltig_bis: Datum,
     pub belege: BTreeMap<u64, String>,
 }
@@ -231,7 +235,8 @@ pub fn offene_thesen(
         {
             continue;
         }
-        let mut text = thesentext(p);
+        let grundtext = thesentext(p);
+        let mut text = grundtext.clone();
         if let Some(a) = pruefungen
             .into_iter()
             .flatten()
@@ -244,6 +249,8 @@ pub fn offene_thesen(
             tag: p.datum,
             isin: p.prognose.isin.clone(),
             text,
+            grundtext,
+            ereignis: p.ereignis.clone(),
             gueltig_bis,
             belege: pruefungen
                 .into_iter()

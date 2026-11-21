@@ -1140,8 +1140,16 @@ fn ki_einstellungen_bleiben_nach_neustart_und_pruefen_modell_und_tageslimit() ->
         let a = formular_post("/ki-einstellungen", &format!("t={token}&{felder}"));
         text(&behandle(&d, &Attrappe::default(), &a, t))
     };
-    let werte = "dachs-modell=claude-sonnet-5-5%3Amedium&dachs-aufrufe=3&maus-modell=gpt-6.2-sol%3Amedium&maus-aufrufe=10&gemini-aufrufe=2&neuro-aufrufe=8";
-    assert!(post(werte, "").starts_with("HTTP/1.1 403 "));
+    let alte_werte = "dachs-modell=claude-sonnet-5-5%3Amedium&dachs-aufrufe=3&maus-modell=gpt-6.2-sol%3Amedium&maus-aufrufe=10&gemini-aufrufe=2&neuro-aufrufe=8";
+    let werte = format!("{alte_werte}&neuro-empfaenger=beide");
+    let vorher = get(&d, "/einrichtung", t);
+    let (_, neuro) = some(
+        vorher.split_once(">NeuroSchlopf</th>"),
+        "NeuroSchlopf-Zeile",
+    )?;
+    assert!(neuro.contains("value=\"aus\" selected>Ausgeschaltet"));
+    assert!(neuro.contains("name=\"neuro-aufrufe\" min=\"0\" max=\"30\" step=\"1\" value=\"8\""));
+    assert!(post(&werte, "").starts_with("HTTP/1.1 403 "));
     assert!(
         post(
             &werte.replace("gemini-aufrufe=2", "gemini-aufrufe=6"),
@@ -1156,15 +1164,24 @@ fn ki_einstellungen_bleiben_nach_neustart_und_pruefen_modell_und_tageslimit() ->
         )
         .starts_with("HTTP/1.1 400 ")
     );
+    assert!(
+        post(
+            &werte.replace("empfaenger=beide", "empfaenger=gemini"),
+            TOKEN
+        )
+        .starts_with("HTTP/1.1 400 ")
+    );
     let daten = wurzel.join("daten");
     assert!(!depot_journal::ki_einstellungen::pfad(&daten).exists());
-    assert!(post(werte, TOKEN).starts_with("HTTP/1.1 303 "));
+    assert!(post(&werte, TOKEN).starts_with("HTTP/1.1 303 "));
+    assert!(post(alte_werte, TOKEN).starts_with("HTTP/1.1 303 "));
     drop(d);
     let neu = dienst(wurzel, true);
     let seite = get(&neu, "/einrichtung", t);
     assert!(seite.contains("value=\"gpt-6.2-sol:medium\" selected"));
     assert!(seite.contains("Aufrufe heute 0 von 2"));
     assert!(seite.contains("Noch keine belastbare Schätzung"));
+    assert!(seite.contains("value=\"beide\" selected>Beide"));
     let e = depot_journal::ki_einstellungen::lesen(&daten)?;
     assert_eq!(
         (
@@ -1175,5 +1192,10 @@ fn ki_einstellungen_bleiben_nach_neustart_und_pruefen_modell_und_tageslimit() ->
         ),
         (3, 10, 2, 8)
     );
+    assert_eq!(
+        e.neuro_empfaenger,
+        depot_kern::modelle::NeuroEmpfaenger::Beide
+    );
+    assert_eq!(e.neuro_berater(), &[BeraterId::Maus, BeraterId::Dachs]);
     Ok(())
 }

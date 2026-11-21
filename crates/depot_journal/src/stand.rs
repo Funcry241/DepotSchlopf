@@ -103,6 +103,7 @@ pub enum Art {
     Ki,
     KiAbrechnung,
     KiAufruf,
+    NeuroErgebnis,
     /// Der Abdruck der KI-Grenzen, unter denen die folgenden Buchungen entstehen.
     KiGrenzen,
     /// `datum;wer;text`: warum etwas geschieht oder nicht geschieht. `wer` ist ein Berater
@@ -148,6 +149,7 @@ impl Art {
             Art::Ki => "ki",
             Art::KiAbrechnung => "ki-abrechnung",
             Art::KiAufruf => "ki-aufruf",
+            Art::NeuroErgebnis => "neuro-ergebnis",
             Art::KiGrenzen => "ki-grenzen",
             Art::Begruendung => "begruendung",
             Art::Lehre => "lehre",
@@ -180,6 +182,7 @@ impl Art {
             Art::Ki,
             Art::KiAbrechnung,
             Art::KiAufruf,
+            Art::NeuroErgebnis,
             Art::KiGrenzen,
             Art::Begruendung,
             Art::Lehre,
@@ -861,6 +864,7 @@ impl Stand {
                 }
             }
             Art::KiAufruf => return self.ki.belege_aufruf(inhalt),
+            Art::NeuroErgebnis => return self.ki.belege_neuroergebnis(inhalt),
             Art::KiAbrechnung => {
                 self.ki.rechne_ab(inhalt)?;
                 return Ok(());
