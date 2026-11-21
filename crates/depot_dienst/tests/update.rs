@@ -353,6 +353,7 @@ fn lock_freigabe_bleibt_ueber_neustart_offen_und_bindet_commit_und_abdruck() -> 
     let html = get(&d, "/teil/update")?;
     assert!(html.contains("Text kopieren") && html.contains("foo-59 1.2.3"));
     assert!(html.contains("Freigabe steht aus."));
+    assert!(get(&d, "/teil/kopf")?.contains("Update-Freigabe wartet auf deine Entscheidung."));
     assert!(!html.contains("Update einspielen"));
     assert!(bestaetige_update(&d)?.contains("m=update_freigabe_fehlt"));
     assert!(
@@ -393,6 +394,7 @@ fn lock_freigabe_bleibt_ueber_neustart_offen_und_bindet_commit_und_abdruck() -> 
     )
     .map_err(|e| e.to_string())?;
     assert!(get(&d, "/teil/update")?.contains("Abhängigkeiten freigegeben."));
+    assert!(get(&d, "/teil/kopf")?.contains("Keine Entscheidung offen."));
     assert!(bestaetige_update(&d)?.contains("m=update#update"));
     Ok(())
 }
@@ -1332,11 +1334,11 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const reply=t=>Promise.resolve({ok:true,text:()=>Promise.resolve(t)});
 const health=(start='alt',bereit=true)=>`<span data-start="${start}"></span><span data-bereit="${bereit?'ja':'nein'}"></span>`;
-function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt',urls=['/teil/status','/teil/update','/teil/journal'],forms=[],confirm=()=>false,bewegungReduziert=false}={}) {
+function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47410/einrichtung?m=update#update',known='alt',urls=['/teil/status','/teil/update','/teil/journal'],forms=[],confirm=()=>false,bewegungReduziert=false,blind=false}={}) {
   let now=0, nr=0, timers=new Map(), requests=[], navigations=[], events={},docEvents={};
   const attributes=new Set();
   const banner={hidden:true,textContent:'',setAttribute:n=>attributes.add(n),removeAttribute:n=>attributes.delete(n),hasAttribute:n=>attributes.has(n)}, reconnect={hidden:true}, reconnectLink={href:'/einrichtung'};
-  const element=()=>({attribute:{},textContent:'',setAttribute(n,v){this.attribute[n]=v;}});
+  const element=()=>({attribute:{},wechsel:[],textContent:'',getAttribute(n){return this.attribute[n]??null;},setAttribute(n,v){this.attribute[n]=v;this.wechsel.push([n,v]);}});
   const herz=element(),figuren=element(),dachs=element(),maus=element(),otter=element();
   const elements=Array.from({length:parts},(_,i)=>({
     html:'alt',werte:[],
@@ -1355,6 +1357,7 @@ function browser({parts=0,response=()=>reply(health()),href='http://127.0.0.1:47
   }));
   const plane=(f,delay)=>{const id=++nr;timers.set(id,{f,at:now+delay});return id;};
   const document={addEventListener:(n,f)=>docEvents[n]=f,getElementById:id=>id==='neuverbinden'?reconnect:id==='neuverbinden-link'?reconnectLink:id==='herz'?herz:id==='kopffiguren'?figuren:id==='kopf-dachs'?dachs:id==='kopf-maus'?maus:id==='kopf-otter'?otter:banner,querySelector:s=>{
+    if(s==='[data-blindentscheidung]')return blind?{}:null;
     if(s.includes('[data-figuren]')){
       const f=elements[urls.indexOf('/teil/kopf')]?.innerHTML.match(/<span data-figuren ([^>]+)>/);
       const attribute=Object.fromEntries(Array.from(f?.[1].matchAll(/(data-[a-z-]+)="([^"]*)"/g)??[],m=>[m[1],m[2]]));
@@ -1515,19 +1518,32 @@ test('Statusherz folgt der Betriebsleiste und zeigt einen Verbindungsabbruch',as
   offline=false;await b.advance(5000);
   assert.equal(b.herz.attribute['data-zustand'],'gut');
 });
-test('Kopffiguren bleiben stehen und übernehmen nur Daten und Text',async()=>{
-  let denkt='beide';
-  const b=browser({parts:1,urls:['/teil/kopf'],response:u=>reply(health()+(u==='/teil/kopf'?
-    `<span data-figuren data-denkt="${denkt}" data-otter="dran" data-dachs="Beobachtet." data-maus="Keine Änderung." data-otter-satz="Ich bin dran: Kurssperre." data-dachs-titel="Dachs, 11.11.2026"></span>`:''))});
+test('Kopffiguren wechseln unabhängig und nur bei einer Statusänderung',async()=>{
+  let denkt='dachs', freigabe='dran', durchlauf=0;
+  const b=browser({parts:1,urls:['/teil/kopf'],bewegungReduziert:true,response:u=>reply(health()+(u==='/teil/kopf'?
+    `<span data-figuren data-denkt="${denkt}" data-otter="${freigabe}" data-dachs="Anfrage läuft · Papiertag" data-maus="Keine Änderung." data-otter-satz="Update-Freigabe wartet auf deine Entscheidung." data-dachs-titel="Dachs"></span>${++durchlauf}`:''))});
   await b.advance(2000);
-  assert.equal(b.figuren.attribute['data-denkt'],'beide');
+  assert.equal(b.figuren.attribute['data-denkt'],'dachs');
   assert.equal(b.figuren.attribute['data-otter'],'dran');
-  assert.equal(b.dachs.textContent,'Beobachtet.');
-  assert.equal(b.dachs.attribute.title,'Dachs, 11.11.2026');
-  assert.equal(b.otter.textContent,'Ich bin dran: Kurssperre.');
-  denkt='helfer';await b.advance(2000);
-  assert.equal(b.figuren.attribute['data-denkt'],'helfer');
-  assert.equal(b.maus.textContent,'Keine Änderung.');
+  assert.equal(b.dachs.textContent,'Anfrage läuft · Papiertag');
+  assert.equal(b.dachs.attribute.title,'Dachs');
+  assert.equal(b.otter.textContent,'Update-Freigabe wartet auf deine Entscheidung.');
+  await b.advance(3000);
+  assert.deepEqual(b.figuren.wechsel,[['data-denkt','dachs'],['data-otter','dran']]);
+  denkt='beide';await b.advance(2000);
+  assert.equal(b.figuren.attribute['data-denkt'],'beide');
+  denkt='maus';await b.advance(2000);
+  assert.equal(b.figuren.attribute['data-denkt'],'maus');
+  denkt='niemand';freigabe='ruht';await b.advance(2000);
+  assert.equal(b.figuren.attribute['data-denkt'],'niemand');
+  assert.equal(b.figuren.attribute['data-otter'],'ruht');
+});
+test('Otter bleibt bei einer offenen Blindfrage auch nach der Kopfaktualisierung wach',async()=>{
+  const b=browser({parts:1,urls:['/teil/kopf'],blind:true,response:u=>reply(health()+(u==='/teil/kopf'?
+    '<span data-figuren data-denkt="niemand" data-otter="ruht" data-otter-satz="Keine Entscheidung offen."></span>':''))});
+  await b.advance(4000);
+  assert.equal(b.figuren.attribute['data-otter'],'dran');
+  assert.equal(b.otter.textContent,'Eine Blindbewertung wartet auf dein Urteil.');
 });
 function geldbetrag(wert, text) {
   return `<span data-schluessel="saldo" data-wert="${wert}">${text}</span>`;

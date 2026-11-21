@@ -124,12 +124,19 @@
     var ziel = document.getElementById("kopffiguren");
     var daten = document.querySelector('#betriebsleiste [data-figuren]');
     if (!ziel || !daten) { return; }
-    ziel.setAttribute("data-denkt", daten.getAttribute("data-denkt"));
-    ziel.setAttribute("data-otter", daten.getAttribute("data-otter"));
+    var blind = document.querySelector("[data-blindentscheidung]");
+    var denkt = daten.getAttribute("data-denkt");
+    var pose = blind ? "dran" : daten.getAttribute("data-otter");
+    if (ziel.getAttribute("data-denkt") !== denkt) { ziel.setAttribute("data-denkt", denkt); }
+    if (ziel.getAttribute("data-otter") !== pose) { ziel.setAttribute("data-otter", pose); }
     ["dachs", "maus", "otter"].forEach(function (wer) {
       var blase = document.getElementById("kopf-" + wer);
       if (!blase) { return; }
       var satz = daten.getAttribute("data-" + (wer === "otter" ? "otter-satz" : wer)) || "";
+      if (wer === "otter" && blind) {
+        satz = "Eine Blindbewertung wartet auf dein Urteil." +
+          (daten.getAttribute("data-otter") === "dran" ? " " + satz : "");
+      }
       if (blase.textContent !== satz) { blase.textContent = satz; }
       var titel = daten.getAttribute("data-" + wer + "-titel");
       if (titel) { blase.setAttribute("title", titel); }

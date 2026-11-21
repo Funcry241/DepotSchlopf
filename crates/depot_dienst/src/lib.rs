@@ -319,12 +319,22 @@ fn sicherungsinfo(d: &Dienst, jetzt: Zeitpunkt) -> String {
 fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {
     let kurssperre = seiten::kurssperre_status(&d.wurzel.join("daten"), tag);
     let z = d.sperre();
+    let sperre = update_sperre(d, &z);
+    let update_freigabe_offen = sperre.is_none()
+        && z.update_angebot().is_some_and(|angebot| {
+            angebot.passt(d.version.as_deref()) && angebot.abdruck.is_some()
+        })
+        && matches!(
+            d.update_freigabe(&z),
+            update_angebot::Freigabe::Offen | update_angebot::Freigabe::Wartet
+        );
     seiten::betriebsleiste_mit_kurssperre(
         &d.start,
         &z,
         tag,
         kurssperre.as_deref(),
-        update_sperre(d, &z).as_ref(),
+        sperre.as_ref(),
+        update_freigabe_offen,
     )
 }
 
