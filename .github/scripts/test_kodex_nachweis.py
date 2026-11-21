@@ -93,16 +93,21 @@ class Nachweis(unittest.TestCase):
         self.windows_update["steps"][0]["conclusion"] = "skipped"
         self.assertIsNone(self.finde())
 
-    def test_pr_basis_ist_der_erste_elterncommit_des_checkouts(self):
+    def test_pr_basis_entspricht_dem_ersten_elterncommit_und_dem_ereignis(self):
         with patch("kodex_nachweis.befehl", return_value=f"{BAUM} {BASIS} {KOPF}"):
-            self.assertEqual(pr_basis(BAUM, KOPF), BASIS)
+            self.assertEqual(pr_basis(BAUM, KOPF, BASIS), BASIS)
 
     def test_pr_basis_weist_falschen_checkout_oder_kopf_ab(self):
         with patch("kodex_nachweis.befehl", return_value=f"{BAUM} {BASIS} {KOPF}"):
             with self.assertRaises(ValueError):
-                pr_basis(ANDERER_BAUM, KOPF)
+                pr_basis(ANDERER_BAUM, KOPF, BASIS)
             with self.assertRaises(ValueError):
-                pr_basis(BAUM, ANDERER_BAUM)
+                pr_basis(BAUM, ANDERER_BAUM, BASIS)
+
+    def test_pr_basis_weist_abweichende_basisrevision_des_ereignisses_ab(self):
+        with patch("kodex_nachweis.befehl", return_value=f"{BAUM} {BASIS} {KOPF}"):
+            with self.assertRaisesRegex(ValueError, "Basisrevision des PR-Ereignisses"):
+                pr_basis(BAUM, KOPF, "5" * 40)
 
     def test_geaenderte_cachegrundlage_startet_regulaeren_lauf(self):
         event = {
