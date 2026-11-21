@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use depot_journal::{Art, Journal, JournalFehler, Stand};
 use depot_kern::json::{Json, lies, zitiere};
-use depot_kern::{Betroffen, Datum, Isin, Verlaesslichkeit, Zeitbezug, Zeitpunkt};
+use depot_kern::{BeraterId, Betroffen, Datum, Isin, Verlaesslichkeit, Zeitbezug, Zeitpunkt};
 use depot_lage::html::maskiere;
 use depot_lage::{OffeneThese, Thesenpruefung, datum_text, zeit_text};
 
@@ -336,7 +336,7 @@ fn aktivitaet(d: &Dienst, anzeige: &Anzeige, ein: &Result<bool, String>) -> Stri
             Status::Wartet => "Wartet auf einen bestätigten Journalstand.".into(),
             Status::Berechnet => "Vergleich läuft.".into(),
             Status::Fehler(e) => format!("Vergleich fehlgeschlagen: {}", maskiere(e)),
-            Status::Fertig => "Vergleich abgeschlossen.".into(),
+            Status::Fertig => "Vergleich abgeschlossen. Wartet auf neue Belege.".into(),
         },
     }
 }
@@ -359,6 +359,45 @@ pub(crate) fn live(d: &Dienst) -> String {
     html
 }
 
+fn aktivitaet_html(d: &Dienst, anzeige: &Anzeige, ein: &Result<bool, String>) -> String {
+    let mut html = format!(
+        "<p>Hintergrundvergleich · {}</p>",
+        aktivitaet(d, anzeige, ein)
+    );
+    if let Some(wer) = d.neuro_wartet() {
+        let name = match wer {
+            BeraterId::Maus => "Maus",
+            BeraterId::Dachs => "Dachs",
+        };
+        let _ = write!(html, "<p>Externe Frage · Wartet auf {name}.</p>");
+    }
+    if let Some(fertig) = &anzeige.fertig {
+        let _ = write!(
+            html,
+            "<p>Letzter abgeschlossener Vergleich · Geprüft {}</p>",
+            zeit_text(fertig.geprueft)
+        );
+        if let Some(e) = &fertig.eingaben {
+            let _ = write!(
+                html,
+                "<p>Im letzten verglichenen Abschnitt · {} Eingaben · {} neu · {} geändert</p>",
+                e.gesamt, e.neu, e.geaendert
+            );
+        }
+    }
+    let _ = write!(
+        html,
+        "<p class=\"leise\">CPU-Auslastung nicht gemessen · CPU-Budget des Belegvergleichs {CPU_PROZENT} %</p>"
+    );
+    html
+}
+
+pub(crate) fn aktivitaetsfragment(d: &Dienst) -> String {
+    let ein = einstellung(&d.wurzel.join("daten"));
+    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
+    aktivitaet_html(d, &anzeige, &ein)
+}
+
 /// Lesende Detailseite. Sie löst keinen Vergleich aus und schreibt nichts.
 pub(crate) fn seite(
     d: &Dienst,
@@ -371,12 +410,17 @@ pub(crate) fn seite(
     let mut html = String::from(
         "<section id=\"neuroschlopf-vergleich\"><h2>NeuroSchlopf · Belegvergleich</h2>",
     );
-    offene_thesen_html(&mut html, anzeige.fertig.as_ref(), tag);
     let _ = write!(
         html,
-        "<h3>Aktivität</h3><p>Hintergrundvergleich · {}</p>",
-        aktivitaet(d, &anzeige, &ein)
+        concat!(
+            "<div class=\"neuro-uebersicht\"><section><h3>Aktivität</h3>",
+            "<div data-teil=\"/teil/neuroschlopf-aktivitaet\">{}</div>",
+            "<p>Neuronales Modell noch nicht eingebunden.</p></section>{}</div>"
+        ),
+        aktivitaet_html(d, &anzeige, &ein),
+        crate::neuro2026::TOPOLOGIE,
     );
+    offene_thesen_html(&mut html, anzeige.fertig.as_ref(), tag);
     let gespeichert;
     let (bild, eingaben, pruefungen) = if let Some(f) = &anzeige.fertig {
         {
@@ -384,11 +428,6 @@ pub(crate) fn seite(
             if laeuft {
                 html.push_str("<p>Ein weiterer Vergleich läuft. Bis er abgeschlossen ist, gilt der folgende letzte abgeschlossene Vergleich.</p>");
             }
-            let _ = write!(
-                html,
-                "<p><strong>Letzter abgeschlossener Vergleich</strong> · Geprüft {}</p>",
-                zeit_text(f.geprueft)
-            );
             if f.bild.stichtag == f.geprueft {
                 let _ = write!(
                     html,
@@ -439,12 +478,8 @@ pub(crate) fn seite(
     }
     drop(anzeige);
     html.push_str(&crate::neuroauftraege::anzeige(d, &daten));
-    let _ = write!(
-        html,
-        "<h3>Modellstatus</h3><p>Neuronales Modell noch nicht eingebunden. Der produktive Vergleich arbeitet mit dem Belegabgleich oben. Die Einbindung eines Modells für Depotbelege folgt mit #325.</p>\
-        <ul><li><a href=\"/neuroschlopf/lernlauf\">Neuro2026-Referenzlauf Multiplikation</a> · abgeschlossener Lernlauf mit echten Messwerten</li>\
-        <li><a href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a> · historische Thesen und Belege von Hand bewerten</li></ul>\
-        </section>"
+    html.push_str(
+        "<p><a href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a> · historische Thesen und Belege von Hand bewerten</p></section>",
     );
     let seite = crate::seiten::rahmen(
         "/neuroschlopf",
@@ -1137,11 +1172,15 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
             },
         );
         if !frei(d, &daten) {
+            anzeige(&d.neuro, Status::Wartet);
             continue;
         }
         let (fertig, faelle) = match neu {
             Ok(Ok(bild)) => bild,
-            Err(JournalFehler::Belegt) => continue,
+            Err(JournalFehler::Belegt) => {
+                anzeige(&d.neuro, Status::Wartet);
+                continue;
+            }
             Ok(Err(e)) | Err(JournalFehler::Halt(e)) => {
                 geprueft = false;
                 anzeige(&d.neuro, Status::Fehler(e));
@@ -1155,6 +1194,7 @@ pub(crate) fn arbeite(d: &Arc<Dienst>) {
         };
         let bild = &fertig.bild;
         if !Journal::hintergrund_abdruck(&pfad).is_ok_and(|m| Marke::from(m) == bild.journal) {
+            anzeige(&d.neuro, Status::Wartet);
             continue;
         }
         if let Some(e) = einstellungen

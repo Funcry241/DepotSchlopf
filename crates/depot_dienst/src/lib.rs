@@ -549,6 +549,9 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/teil/ibkr-einstiegslink" => antwort(200, HTML, ibkr_papier::einstiegslink(d).as_bytes()),
         "/teil/ibkr-papier" => antwort(200, HTML, ibkr_papier::status(d).as_bytes()),
         "/teil/live" => antwort(200, HTML, live_inhalt(d, jetzt).as_bytes()),
+        "/teil/neuroschlopf-aktivitaet" => {
+            antwort(200, HTML, neuroschlopf::aktivitaetsfragment(d).as_bytes())
+        }
         "/teil/erste-schritte" => {
             let autostart = u.autostart(&d.wurzel);
             let html = seiten::erste_schritte(&d.start, &d.sperre(), &autostart);

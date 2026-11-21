@@ -189,10 +189,10 @@ fn app_js_liefert_die_gepruefte_fassung() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let antwort = get(&d, "/app.js", donnerstag(12, 0)?);
     let (_, js) = some(antwort.split_once("\r\n\r\n"), "HTTP-Antwort")?;
-    // SHA-256 der geprüften Fassung mit unabhängigen Aktivitätssignalen im Kopf.
+    // SHA-256 der geprüften Fassung mit der NeuroSchlopf-Referenztopologie.
     assert_eq!(
         depot_kern::abdruck::sha256_hex(js.as_bytes()),
-        "04e7d109003bea477213e3a09356d215d4c750344ea5e8640b966326ac27f910"
+        "004e7f45780eec032956b78fdbf9e1de4ec6fac0141f64286ef164527cadeb9b"
     );
     Ok(())
 }
@@ -398,6 +398,10 @@ fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Re
         assert!(seite.contains("<a href=\"/neuroschlopf\" aria-current=\"page\">NeuroSchlopf</a>"));
         for teil in [
             "Hintergrundvergleich · Ausgeschaltet",
+            "data-teil=\"/teil/neuroschlopf-aktivitaet\"",
+            "Netztopologie · Referenzmodell",
+            "data-messung=\"/neuroschlopf/lernlauf.json\" data-topologie",
+            "CPU-Auslastung nicht gemessen",
             "<h3>Offene Thesen und ihre Belege</h3>",
             "Noch kein abgeschlossener Vergleich. Es fehlt ein bestätigter Stand.",
             "Neuronales Modell noch nicht eingebunden",
@@ -420,6 +424,10 @@ fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Re
     let vorher = dateien(&wurzel)?;
     let seite = get(&d, "/neuroschlopf", t);
     assert!(seite.contains("Wartet auf einen bestätigten Journalstand."));
+    let aktivitaet = get(&d, "/teil/neuroschlopf-aktivitaet", t);
+    assert!(aktivitaet.starts_with("HTTP/1.1 200 OK"));
+    assert!(aktivitaet.contains("Wartet auf einen bestätigten Journalstand."));
+    assert!(aktivitaet.contains("CPU-Budget des Belegvergleichs 10 %"));
     assert!(!seite.contains("NeuroSchlopf einrichten"));
     assert!(!get(&d, "/neuroschlopf/lernlauf", t).contains("NeuroSchlopf einrichten"));
     assert_eq!(dateien(&wurzel)?, vorher);

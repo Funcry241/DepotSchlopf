@@ -410,6 +410,11 @@
       " Neuronen. Die beiden inneren Schichten verwenden SiLU, der Ausgang ist linear. Beim Training verändert das Netz " +
       (gewichte + bias) + " Parameter (" + gewichte + " Gewichte und " + bias + " Biaswerte).";
     zeichneLernnetz(feld("lernaufbau"), schichten);
+    if (bereich.hasAttribute("data-topologie")) {
+      bereich.hidden = false;
+      stand.hidden = true;
+      return;
+    }
     feld("lernplan").textContent = training.samples + " Trainingspaare · " + training.epochs +
       " Epochen · AdamW auf der CPU · Startwert " + lauf.seed + ".";
     feld("lernfehler").textContent = "Auf dem vollständigen Trainingssatz fiel der mittlere quadratische Fehler von " +
