@@ -46,6 +46,8 @@ Die automatisierte Gegenprobe `grundrang_holt_einen_gegenbeleg_vor_die_platzgren
 
 Unter **Live → NeuroSchlopf** öffnest du die Belegprüfung. Wähle einen Prüftag. DepotSchlopf zeigt dir für jede Bewertung den damaligen Thesentext und einen in der gespeicherten Frage sichtbaren Beleg. Die Reihenfolge ist für denselben Datenstand reproduzierbar gemischt. So kannst du die Prüfung unterbrechen und später beim nächsten offenen Paar fortsetzen.
 
+Mit freigegebenen externen Fragen kann NeuroSchlopf die Paare des jüngsten belegten Prüftags Maus und Dachs zur unabhängigen Vorprüfung geben. Empfängerauswahl und Tageslimit gelten auch hier. Klare Übereinstimmungen gelten als KI-Bewertung. Die Blindprüfung hält strittige und unklare Fälle, Einzelbewertungen und eine gemischte Stichprobe aus den Übereinstimmungen offen. Sie blendet die KI-Urteile aus. Sobald du ein Urteil speicherst, verschwindet dieses Paar aus der offenen Liste.
+
 Entscheide anhand des angezeigten Wortlauts. Stufe 1 genügt, wenn die Meldung einen Treiber der These erwähnt, die Behauptung aber weder bestätigt noch widerlegt. Bei Stufe 2 gibst du zusätzlich die Richtung an. Kannst du den Zusammenhang anhand der Unterlagen nicht beurteilen, wählst du **Unbewertet**. Diese Entscheidung zählt zum Bearbeitungsfortschritt und bleibt für die spätere Messung von Stufe 0 unterscheidbar.
 
 DepotSchlopf speichert die Urteile auf dem Rechner. Die externe Sicherung enthält auch die Bewertungsdatei `daten/neuro2026-belegurteile.tsv`. Darin verweist jede Bewertung auf ihre konkrete historische These und auf den Beleg im Analyse-Export. Die manuelle Prüfung lässt sich auch bei ausgeschaltetem Hintergrundvergleich öffnen.

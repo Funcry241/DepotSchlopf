@@ -1,9 +1,10 @@
 //! Verbindet den bestätigten Journalstand eines Prüftags mit den gespeicherten KI-Fragen.
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
-use depot_journal::{Journal, JournalFehler, Stand, gespraeche};
-use depot_kern::Datum;
-use depot_lage::blindpruefung::{Prueffall, prueffaelle};
+use depot_journal::neurofrage::NeuroUrteilswert;
+use depot_journal::{Art, Journal, JournalFehler, KiStand, Stand, gespraeche};
+use depot_kern::{BeraterId, Datum};
+use depot_lage::blindpruefung::{Prueffall, prueffaelle_mit_zeilen};
 
 use crate::werkbank::Dienst;
 
@@ -13,10 +14,63 @@ pub(super) struct Prueftag {
     pub tag: Option<Datum>,
     pub faelle: Vec<Prueffall>,
     pub hinweis: Option<String>,
+    pub vorbewertungen: BTreeMap<String, Vorbewertung>,
 }
 
-fn aus_stand(
+#[derive(Default)]
+pub(super) struct Vorbewertung {
+    dachs: Option<NeuroUrteilswert>,
+    maus: Option<NeuroUrteilswert>,
+}
+
+impl Vorbewertung {
+    pub fn uebereinstimmung(&self) -> Option<NeuroUrteilswert> {
+        self.dachs
+            .filter(|wert| Some(*wert) == self.maus && *wert != NeuroUrteilswert::Offen)
+    }
+}
+
+pub(super) fn vorbewertungen(ki: &KiStand) -> BTreeMap<String, Vorbewertung> {
+    let mut aus = BTreeMap::<String, Vorbewertung>::new();
+    // Rückfragen zählen erst nach ihrer protokollierten Antwort als abschließendes Urteil.
+    for versuch in ki.neurofragen() {
+        let wert = ki
+            .neuroergebnis(versuch.buchung)
+            .and_then(|e| e.urteil.as_ref())
+            .filter(|u| u.nachfrage.is_none())
+            .map(|u| u.wert);
+        let bewertung = aus.entry(versuch.id.fall().to_owned()).or_default();
+        match versuch.wer {
+            BeraterId::Dachs => bewertung.dachs = wert,
+            BeraterId::Maus => bewertung.maus = wert,
+        }
+    }
+    aus
+}
+
+impl Prueftag {
+    pub fn offene_faelle(&self) -> impl Iterator<Item = &Prueffall> + Clone {
+        let mut stichprobe = self.faelle.len().div_ceil(10).clamp(1, 5);
+        self.faelle.iter().filter(move |fall| {
+            let einig = self
+                .vorbewertungen
+                .get(&fall.kennung)
+                .and_then(Vorbewertung::uebereinstimmung)
+                .is_some();
+            if !einig {
+                return true;
+            }
+            // Auswahl aus übereinstimmenden Fällen nach vorgemischter Kennung, ohne Richtung.
+            let gewaehlt = stichprobe > 0;
+            stichprobe = stichprobe.saturating_sub(1);
+            gewaehlt
+        })
+    }
+}
+
+pub(super) fn aus_stand(
     stand: &Stand,
+    zeilen: &[(Art, String)],
     daten: &Path,
     bis: Datum,
     wahl: Option<Datum>,
@@ -46,8 +100,11 @@ fn aus_stand(
             aus.hinweis =
                 Some("Die Gesprächsdatei dieses Tages enthält unlesbare Einträge.".into());
         }
-        Some((eintraege, _)) => match prueffaelle(stand, &eintraege, tag) {
-            Ok(faelle) => aus.faelle = faelle,
+        Some((eintraege, _)) => match prueffaelle_mit_zeilen(stand, zeilen, &eintraege, tag) {
+            Ok(faelle) => {
+                aus.faelle = faelle;
+                aus.vorbewertungen = vorbewertungen(stand.ki());
+            }
             Err(grund) => aus.hinweis = Some(grund.into()),
         },
     }
@@ -65,9 +122,12 @@ pub(super) fn laden(
     if !Journal::eingerichtet(&pfad).map_err(|e| journalfehler(&e))? {
         return Ok(Prueftag::default());
     }
-    Journal::pruefe_lesend_begrenzt(&pfad, 32 * 1024 * 1024, |stand| {
-        aus_stand(stand, &daten, bis, wahl)
-    })
+    Journal::pruefe_im_hintergrund(
+        &pfad,
+        32 * 1024 * 1024,
+        &mut || Ok(()),
+        |stand, zeilen, _, _, _| aus_stand(stand, zeilen, &daten, bis, wahl),
+    )
     .map_err(|e| journalfehler(&e))?
 }
 

@@ -1,9 +1,11 @@
 use super::*;
 use depot_journal::{
-    Journal, KiZweck, NachrichtBeleg,
+    Journal, KiAufruf, KiAufrufErgebnis, KiZweck, Lesecache, NachrichtBeleg,
     gespraeche::{Gespraech, anhaengen},
+    neurofrage::{NeuroAuftragId, NeuroErgebnis, NeuroRunde, NeuroUrteil, NeuroUrteilswert},
 };
-use depot_kern::Cent;
+use depot_kern::{Cent, modelle::BeraterEinstellung};
+use depot_lage::blindpruefung::prueffaelle_mit_zeilen;
 
 const PFAD: &str = "/neuroschlopf/belegpruefung";
 const TAG: &str = "2026-11-05";
@@ -146,10 +148,158 @@ fn unabhaengiges_urteil_bleibt_nach_neustart_einmalig_erhalten() -> Result<(), S
     );
     let ende = get(&d, PFAD, zeit);
     assert!(ende.contains("Bearbeitet <b>2 von 2</b>") && ende.contains("ausdrücklich unbewertet"));
+    assert!(ende.contains("Keine Bewertung offen."));
     assert!(!ende.contains("name=\"id\""));
     assert!(!ende.contains("data-blindentscheidung"));
     assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, original);
     assert!(wartend(&d).is_empty());
+    Ok(())
+}
+
+fn belege_kiurteil(
+    pfad: &Path,
+    tag: Datum,
+    id: NeuroAuftragId,
+    wer: BeraterId,
+    wert: NeuroUrteilswert,
+    nachfrage: Option<String>,
+) -> Result<(), String> {
+    let mut j = Journal::oeffnen(pfad).map_err(|e| format!("{e:?}"))?;
+    let erlaubnis = j
+        .reserviere_neurofrage(&id, wer, tag, 1, BeraterEinstellung::standard(wer), 8)
+        .map_err(|e| format!("{e:?}"))?;
+    let nr = erlaubnis.buchung();
+    let ergebnis = NeuroErgebnis::neu(
+        id,
+        wer,
+        nr,
+        Ok(NeuroUrteil {
+            wert,
+            begruendung: "Dieser KI-Text bleibt bei der Blindprüfung ausgeblendet.".into(),
+            nachfrage,
+        }),
+        Some(KiAufruf {
+            nr,
+            anbieter: "Testanbieter".into(),
+            modell: "Testmodell".into(),
+            vorlage: "a".repeat(64),
+            frage: Some("b".repeat(64)),
+            antwort: Some("c".repeat(64)),
+            token_ein: Some(10),
+            token_aus: Some(20),
+            ergebnis: KiAufrufErgebnis::Beantwortet,
+        }),
+        erlaubnis.aufruf().abrechnung(20, 10),
+    );
+    j.belege_neuroergebnis(&ergebnis)
+        .map_err(|e| format!("{e:?}"))
+}
+
+#[test]
+fn nur_klare_doppelbewertung_ausserhalb_der_stichprobe_entfaellt() -> Result<(), String> {
+    use NeuroUrteilswert::{KeinBezug, Schwaecht, Staerkt};
+
+    let wurzel = ordner()?;
+    let zeit = beispiel(&wurzel)?;
+    let tag = some(zeit.frankfurt_tag(), "Prüftag")?;
+    let daten = wurzel.join("daten");
+    let pfad = daten.join("journal.txt");
+    let mut j = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+    j.schliesse_ab(tag, Cent(1000), &j.bestaetigt().1)
+        .map_err(|e| format!("{e:?}"))?;
+    drop(j);
+    let mut cache = Lesecache::default();
+    let (stand, zeilen) = cache
+        .lesen(&pfad, 32 * 1024 * 1024)
+        .map_err(|e| format!("{e:?}"))?;
+    let (gespraeche, 0) = some(
+        depot_journal::gespraeche::lesen_begrenzt(&daten, tag, &mut (8 * 1024 * 1024))
+            .map_err(|e| format!("{e:?}"))?,
+        "Bisherige Erstmeinung",
+    )?
+    else {
+        return Err("Erstmeinung unlesbar".into());
+    };
+    let faelle = prueffaelle_mit_zeilen(stand, zeilen, &gespraeche, tag)?;
+    let [stichprobe, anderer] = faelle.as_slice() else {
+        return Err("Zwei historische Paare erwartet".into());
+    };
+    let erste = some(
+        stichprobe.vorpruefung(BeraterId::Maus, NeuroRunde::Erstfrage, None),
+        "Erste Vorprüfung",
+    )?;
+    let zweite = some(
+        anderer.vorpruefung(BeraterId::Maus, NeuroRunde::Erstfrage, None),
+        "Zweite Vorprüfung",
+    )?;
+    assert_ne!(erste.beleg_zeile, zweite.beleg_zeile);
+    let dachs = some(
+        stichprobe.vorpruefung(BeraterId::Dachs, NeuroRunde::Erstfrage, None),
+        "Dieselbe Vorprüfung für Dachs",
+    )?;
+    assert_eq!(
+        erste,
+        depot_journal::neurofrage::NeuroFrage {
+            wer: BeraterId::Maus,
+            ..dachs.clone()
+        }
+    );
+    let sammlung = daten.join("neuroschlopf-fragen");
+    fs::create_dir(&sammlung).map_err(|e| e.to_string())?;
+    for (frage, empfaenger) in [(&erste, "maus"), (&dachs, "dachs")] {
+        let dateiname = format!("{}-{empfaenger}-erstfrage.frage.json", frage.id.fall());
+        fs::write(sammlung.join(dateiname), frage.text()).map_err(|e| e.to_string())?;
+    }
+
+    let d = dienst(wurzel, true);
+    let urteil =
+        |id: &NeuroAuftragId, wer, wert| belege_kiurteil(&pfad, tag, id.clone(), wer, wert, None);
+    urteil(&erste.id, BeraterId::Maus, KeinBezug)?;
+    let einzeln = get(&d, "/neuroschlopf", zeit);
+    assert!(einzeln.contains("Einzelbewertung · Kein Bezug zur These"));
+    assert!(!einzeln.contains("stimmen überein"));
+    urteil(&erste.id, BeraterId::Dachs, KeinBezug)?;
+    assert!(
+        get(&d, "/neuroschlopf", zeit).contains("KI-Bewertung · Dachs und Maus stimmen überein")
+    );
+    urteil(&zweite.id, BeraterId::Maus, Staerkt)?;
+    let rueckfrage = "Ist die Richtung des Hinweises klar?".to_owned();
+    belege_kiurteil(
+        &pfad,
+        tag,
+        zweite.id.clone(),
+        BeraterId::Dachs,
+        Schwaecht,
+        Some(rueckfrage),
+    )?;
+
+    let blind = get(&d, PFAD, zeit);
+    assert!(blind.contains("Bearbeitet <b>0 von 2</b>"));
+    assert_eq!(paar_id(&blind)?, erste.id.fall());
+    assert!(!blind.contains("Dieser KI-Text"));
+    assert!(!blind.contains("stimmen überein"));
+    assert_eq!(
+        sende(
+            &d,
+            zeit,
+            &format!("id={}&tag={TAG}&urteil=1", erste.id.fall())
+        )?,
+        303
+    );
+    assert_eq!(paar_id(&get(&d, PFAD, zeit))?, zweite.id.fall());
+
+    let id = some(
+        NeuroAuftragId::neu(zweite.id.fall(), NeuroRunde::Rueckfrage),
+        "Rückfrage",
+    )?;
+    urteil(&id, BeraterId::Dachs, Staerkt)?;
+    let ende = get(&d, PFAD, zeit);
+    assert!(ende.contains("Keine Bewertung offen."));
+    assert!(!ende.contains(r#"name="id""#));
+    let protokoll =
+        fs::read_to_string(daten.join("neuro2026-belegurteile.tsv")).map_err(|e| e.to_string())?;
+    assert!(protokoll.contains(erste.id.fall()));
+    assert!(!protokoll.contains(zweite.id.fall()));
     Ok(())
 }
 

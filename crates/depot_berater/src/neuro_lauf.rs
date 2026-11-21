@@ -10,10 +10,11 @@ use depot_journal::neurofrage::{
     NeuroAufrufErlaubnis, NeuroErgebnis, NeuroFrage, NeuroRunde, NeuroSperre, ergebnis_pfad,
     lokal_aktiv,
 };
-use depot_journal::{Journal, JournalFehler, Lesecache};
+use depot_journal::{Art, Journal, JournalFehler, Lesecache, Stand, gespraeche};
 use depot_kern::modelle::BeraterEinstellung;
 use depot_kern::{BeraterId, Universum, Zeitpunkt};
 use depot_sim::Berater;
+use depot_sim::blindpruefung::prueffaelle_mit_zeilen;
 use depot_sim::schlopfmodell::{kandidaten::neue_faelle, offene_thesen};
 
 const JOURNAL_MAX: u64 = 32 * 1024 * 1024;
@@ -92,7 +93,7 @@ fn frage_bestaetigt(
     let heute = jetzt
         .frankfurt_tag()
         .ok_or("Kalendertag fehlt".to_owned())?;
-    if heute > frage.these_gueltig_bis || frage.bekannt > jetzt {
+    if (!frage.ist_vorpruefung() && heute > frage.these_gueltig_bis) || frage.bekannt > jetzt {
         return Err(ueberspringe(
             "Frage liegt außerhalb des bestätigten Zeitfensters",
         ));
@@ -100,6 +101,54 @@ fn frage_bestaetigt(
     let mut cache = Lesecache::default();
     let (stand, eintraege) = cache.lesen(pfad, JOURNAL_MAX)?;
     // Die aufwendigere Kandidatensuche nutzt den bestätigten Cache ohne Journalsperre.
+    let passend = if frage.ist_vorpruefung() {
+        vorpruefung_bestaetigt(pfad, stand, eintraege, frage)?
+    } else {
+        korrektur_bestaetigt(stand, eintraege, frage, heute)?
+    };
+    if !passend {
+        return Err(ueberspringe(
+            "Kein passender bestätigter Fragefall mehr vorhanden",
+        ));
+    }
+    cache
+        .bestaetigt()
+        .ok_or_else(|| Fehler::Halt("Bestätigter Journalstand fehlt".into()))
+}
+
+fn vorpruefung_bestaetigt(
+    pfad: &Path,
+    stand: &Stand,
+    eintraege: &[(Art, String)],
+    frage: &NeuroFrage,
+) -> Result<bool, Fehler> {
+    let daten = pfad.parent().ok_or("Datenpfad fehlt".to_owned())?;
+    let tag = frage.these_gueltig_bis;
+    let mut budget = 8 * 1024 * 1024;
+    let aufrufe = gespraeche::lesen_begrenzt(daten, tag, &mut budget)
+        .map_err(|_| "Gespeicherte Erstmeinungsfragen sind nicht vollständig lesbar".to_owned())?;
+    let Some((gespraeche, 0)) = aufrufe else {
+        return Ok(false);
+    };
+    Ok(
+        prueffaelle_mit_zeilen(stand, eintraege, &gespraeche, tag).is_ok_and(|faelle| {
+            faelle.iter().any(|fall| {
+                fall.kennung == frage.id.fall()
+                    && fall
+                        .vorpruefung(frage.wer, frage.id.runde(), frage.nachfrage.clone())
+                        .as_ref()
+                        == Some(frage)
+            })
+        }),
+    )
+}
+
+fn korrektur_bestaetigt(
+    stand: &Stand,
+    eintraege: &[(Art, String)],
+    frage: &NeuroFrage,
+    heute: depot_kern::Datum,
+) -> Result<bool, Fehler> {
     let thesen = offene_thesen(stand, heute, &BTreeSet::new(), &mut || Ok(()))?;
     let faelle = neue_faelle(
         stand,
@@ -112,7 +161,7 @@ fn frage_bestaetigt(
         BeraterId::Dachs => "Dachs",
         BeraterId::Maus => "Maus",
     };
-    if !faelle.iter().any(|f| {
+    Ok(faelle.iter().any(|f| {
         f.schluessel == frage.id.fall()
             && f.these_berater == wer
             && f.these_vom == frage.these_vom
@@ -125,14 +174,7 @@ fn frage_bestaetigt(
             && Some(f.vorher.as_str()) == frage.bisher.as_deref()
             && f.beleg == frage.jetzt
             && f.abruf == frage.bekannt
-    }) {
-        return Err(ueberspringe(
-            "Kein passender bestätigter Fragefall mehr vorhanden",
-        ));
-    }
-    cache
-        .bestaetigt()
-        .ok_or_else(|| Fehler::Halt("Bestätigter Journalstand fehlt".into()))
+    }))
 }
 
 fn reserviere(

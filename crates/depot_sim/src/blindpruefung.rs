@@ -2,11 +2,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use depot_journal::{KiZweck, Stand, gespraeche::Gespraech};
-use depot_kern::{BeraterId, Datum, Herkunft, Isin, Zeitpunkt, abdruck::sha256_hex, liste};
-use depot_sim::{
+use crate::{
     Ausstiegsplan, belegrang::eindeutige_frageliste, papiertag, vorbereitung::text_fuer_frage,
 };
+use depot_journal::neurofrage::{NeuroAuftragId, NeuroFrage, NeuroRunde};
+use depot_journal::{Art, KiZweck, Stand, gespraeche::Gespraech};
+use depot_kern::{BeraterId, Datum, Herkunft, Isin, Zeitpunkt, abdruck::sha256_hex, liste};
 
 // Begrenzt den Umfang der lokal aufgebauten Tagesvorlage einschließlich mehrfacher Thesen.
 const MAX_PAARE: usize = 4096;
@@ -46,11 +47,39 @@ pub struct Prueffall {
     pub veroeffentlicht: Option<Zeitpunkt>,
     pub stichtag: Zeitpunkt,
     zuordnung: Zuordnung,
+    beleg_zeile: Option<u64>,
 }
 
 impl Prueffall {
     pub fn zuordnung(&self) -> &Zuordnung {
         &self.zuordnung
+    }
+
+    /// Externe Vorprüfung derselben historischen Beleglage, ohne menschliches Urteil.
+    pub fn vorpruefung(
+        &self,
+        wer: BeraterId,
+        runde: NeuroRunde,
+        nachfrage: Option<String>,
+    ) -> Option<NeuroFrage> {
+        let (_, these) = self.these.split_once(" · ")?;
+        let f = NeuroFrage {
+            id: NeuroAuftragId::neu(&self.kennung, runde)?,
+            wer,
+            thesen_wer: self.zuordnung.berater,
+            these_vom: self.zuordnung.thesentag,
+            these_gueltig_bis: self.stichtag.frankfurt_tag()?,
+            isin: self.zuordnung.isin.clone(),
+            these: these.to_owned(),
+            bisher_zeile: None,
+            beleg_zeile: self.beleg_zeile?,
+            quelle: self.quelle.clone()?,
+            bisher: None,
+            jetzt: self.beleg.clone(),
+            bekannt: self.stichtag,
+            nachfrage,
+        };
+        f.gueltig().then_some(f)
     }
 }
 
@@ -203,32 +232,67 @@ fn frage<'a>(
     (text.lines().next() == Some(format!("Datum: {tag}").as_str())).then_some(text)
 }
 
-#[derive(PartialEq, Eq)]
 struct Quelle<'a> {
     text: String,
     name: &'a str,
     zeit: Option<Zeitpunkt>,
     url: Option<&'a str>,
+    beleg_zeile: Option<u64>,
+}
+
+impl Quelle<'_> {
+    fn gleicher_beleg(&self, andere: &Self) -> bool {
+        self.text == andere.text
+            && self.name == andere.name
+            && self.zeit == andere.zeit
+            && self.url == andere.url
+    }
+}
+
+fn quellenzeilen(stand: &Stand, eintraege: &[(Art, String)]) -> (Vec<u64>, Vec<u64>) {
+    let mut terminzeilen = Vec::new();
+    let mut nachrichtzeilen = Vec::new();
+    for (index, (art, _)) in eintraege.iter().enumerate() {
+        let Some(zeile) = u64::try_from(index).ok().and_then(|n| n.checked_add(2)) else {
+            return (Vec::new(), Vec::new());
+        };
+        match art {
+            Art::Termin => terminzeilen.push(zeile),
+            Art::Nachricht => nachrichtzeilen.push(zeile),
+            _ => (),
+        }
+    }
+    // Positionsgleiche Zuordnung ist nur bei einem vollständigen bestätigten Journal zulässig.
+    if terminzeilen.len() != stand.termine().len() {
+        terminzeilen.clear();
+    }
+    if nachrichtzeilen.len() != stand.nachrichten().len() {
+        nachrichtzeilen.clear();
+    }
+    (terminzeilen, nachrichtzeilen)
 }
 
 fn quellen<'a>(
     stand: &'a Stand,
     zeit: Zeitpunkt,
     kandidaten: &[String],
+    eintraege: &[(Art, String)],
 ) -> BTreeMap<String, Quelle<'a>> {
+    let (terminzeilen, nachrichtzeilen) = quellenzeilen(stand, eintraege);
     let gesucht: BTreeSet<&str> = kandidaten.iter().map(String::as_str).collect();
     let mut aus = BTreeMap::new();
     // Neueste stichtagsbekannte Fassung jeder Terminkennung, in derselben Form wie im Papiertag.
     let termine: BTreeMap<_, _> = stand
         .termine()
         .iter()
-        .filter(|b| b.abruf() <= zeit)
-        .map(|b| (b.termin().kennung(), b))
+        .enumerate()
+        .filter(|(_, b)| b.abruf() <= zeit)
+        .map(|(i, b)| (b.termin().kennung(), (i, b)))
         .collect();
     let mut mehrdeutig = BTreeSet::new();
-    for b in termine
+    for &(i, b) in termine
         .values()
-        .filter(|b| b.herkunft() == Herkunft::Quelle)
+        .filter(|(_, b)| b.herkunft() == Herkunft::Quelle)
     {
         let Some(text) =
             papiertag::termin_text(b.termin()).filter(|t| gesucht.contains(t.as_str()))
@@ -240,8 +304,12 @@ fn quellen<'a>(
             name: b.quelle(),
             zeit: None,
             url: None,
+            beleg_zeile: terminzeilen.get(i).copied(),
         };
-        if aus.get(&text).is_some_and(|q| q != &quelle) {
+        if aus
+            .get(&text)
+            .is_some_and(|q: &Quelle<'_>| !q.gleicher_beleg(&quelle))
+        {
             mehrdeutig.insert(text);
         } else {
             aus.insert(text, quelle);
@@ -270,10 +338,11 @@ fn quellen<'a>(
             }
         }
     }
-    for n in stand
+    for (i, n) in stand
         .nachrichten()
         .iter()
-        .filter(|n| n.abruf() <= zeit && meldungen.contains(n.text()))
+        .enumerate()
+        .filter(|(_, n)| n.abruf() <= zeit && meldungen.contains(n.text()))
     {
         let Some(basis) = papiertag::nachricht_ohne_markierung(n.zeit(), n.quelle(), n.text())
         else {
@@ -300,9 +369,10 @@ fn quellen<'a>(
                 name: n.quelle(),
                 zeit: Some(n.zeit()),
                 url,
+                beleg_zeile: nachrichtzeilen.get(i).copied(),
             };
             // Der Fragetext rundet auf Minuten. Zwei unterschiedliche Belege bleiben mehrdeutig.
-            if aus.get(text).is_some_and(|q| q != &quelle) {
+            if aus.get(text).is_some_and(|q| !q.gleicher_beleg(&quelle)) {
                 mehrdeutig.insert(text.to_owned());
             } else {
                 aus.insert(text.to_owned(), quelle);
@@ -367,6 +437,16 @@ pub fn prueffaelle(
     gespraeche: &[Gespraech],
     tag: Datum,
 ) -> Result<Vec<Prueffall>, &'static str> {
+    prueffaelle_mit_zeilen(stand, &[], gespraeche, tag)
+}
+
+/// Historische Paare mit der für externe Vorprüfungen benötigten Journalzeile.
+pub fn prueffaelle_mit_zeilen(
+    stand: &Stand,
+    eintraege: &[(Art, String)],
+    gespraeche: &[Gespraech],
+    tag: Datum,
+) -> Result<Vec<Prueffall>, &'static str> {
     let (stichtag, vorher) = stand
         .wissensstichtag(tag)
         .zip(stand.begruendungen_bis_stichtag(tag))
@@ -376,7 +456,7 @@ pub fn prueffaelle(
         return Err("Frageabschnitt leer");
     }
     let werte = liste::beobachtungsliste().map_err(|_| "Werteliste fehlt")?;
-    let quellen = quellen(stand, stichtag, &kandidaten);
+    let quellen = quellen(stand, stichtag, &kandidaten, eintraege);
     let mut aus = Vec::new();
     let mut hat_these = false;
     let mut hat_frage = false;
@@ -418,6 +498,7 @@ pub fn prueffaelle(
                     veroeffentlicht: quelle.zeit,
                     stichtag,
                     zuordnung,
+                    beleg_zeile: quelle.beleg_zeile,
                 });
             }
         }

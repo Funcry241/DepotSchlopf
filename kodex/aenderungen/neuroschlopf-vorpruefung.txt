@@ -1,0 +1,15 @@
+klasse: Funktion
+zweck: Historisch belegte Paare mit demselben Fragenlimit unabhängig vorprüfen und offene Blindurteile erfassen
+pfade:
+crates/depot_berater/src/ki.rs
+crates/depot_berater/src/neuro_lauf.rs
+crates/depot_dienst/src/belegpruefung.rs
+crates/depot_dienst/src/neuroauftraege.rs
+crates/depot_dienst/src/prueftag.rs
+crates/depot_dienst/tests/dienst/belegpruefung.rs
+crates/depot_journal/src/neurofrage.rs
+crates/depot_lage/src/blindpruefung.rs
+crates/depot_lage/src/lib.rs
+crates/depot_sim/src/blindpruefung.rs
+crates/depot_sim/src/lib.rs
+docs/neuroschlopf/prueffaelle.md
