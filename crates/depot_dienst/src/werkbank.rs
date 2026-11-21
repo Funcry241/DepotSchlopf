@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use depot_kern::{Boerse, Datum, Zeitpunkt};
+use depot_kern::{BeraterId, Boerse, Datum, Zeitpunkt};
 use depot_lage::{Betrieb, Lagebild, SchluesselStand, TagStand, ortszeit};
 
 use crate::hinweis::Gedaechtnis;
@@ -39,6 +39,8 @@ pub enum Art {
     IbkrAbgleich,
     /// Interner Auftrag für die optionale Nachrichtensortierung.
     Gemini,
+    NeuroFrage,
+    NeuroAbrechnung,
     Vorbereiten,
     Wochenrueckschau,
     Simulation,
@@ -86,6 +88,8 @@ impl Art {
             Art::IbkrJournal => "IBKR-Papierjournal einrichten",
             Art::IbkrAbgleich => "IBKR-Papierjournal abgleichen",
             Art::Gemini => "Gemini-Zuarbeit",
+            Art::NeuroFrage => "NeuroSchlopf fragt",
+            Art::NeuroAbrechnung => "NeuroSchlopf-Aufruf abrechnen",
             Art::Vorbereiten => "Nächsten Handelstag vorbereiten",
             Art::Wochenrueckschau => "KI-Wochenrückschau",
             Art::Simulation => "KI-Simulation starten",
@@ -111,6 +115,8 @@ impl Art {
             Art::IbkrJournal => "ibkr_journal",
             Art::IbkrAbgleich => "ibkr_abgleich",
             Art::Gemini => "gemini-vorlauf",
+            Art::NeuroFrage => "neurofrage",
+            Art::NeuroAbrechnung => "neurofrage-abrechnen",
             Art::Vorbereiten => "vorbereiten",
             Art::Wochenrueckschau => "wochenrueckschau",
             Art::Simulation => "simulation",
@@ -140,6 +146,8 @@ impl Art {
             Art::IbkrJournal => &["ibkr", "journal-einrichten"],
             Art::IbkrAbgleich => &["ibkr", "abgleichen"],
             Art::Gemini => &["gemini-vorlauf"],
+            Art::NeuroFrage => &["neurofrage"],
+            Art::NeuroAbrechnung => &["neurofrage-abrechnen"],
             Art::Vorbereiten => &["vorbereiten"],
             Art::Wochenrueckschau => &["wochenrueckschau"],
             Art::Simulation => &["simulation"],
@@ -261,6 +269,12 @@ pub struct WartenderAuftrag {
     gemini_vorrang: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NeuroAbschnitt {
+    Journal,
+    Extern,
+}
+
 /// Der veraenderliche Zustand.
 #[derive(Debug)]
 pub struct Zustand {
@@ -268,6 +282,8 @@ pub struct Zustand {
     pub(crate) ibkr_pruefung_ab_nr: u64,
     pub laufend: Option<Auftrag>,
     gemini_laufend: Option<Auftrag>,
+    neuro_abschnitt: Option<NeuroAbschnitt>,
+    neuro_wer: Option<BeraterId>,
     pub warteschlange: VecDeque<WartenderAuftrag>,
     pub verlauf: VecDeque<Auftrag>,
     pub zeitplan: Zeitplan,
@@ -381,14 +397,16 @@ impl Zustand {
     }
 
     pub(crate) fn update_wartet_auf_ruhe(&self) -> bool {
-        self.aktive_auftraege().next().is_some() || !self.warteschlange.is_empty()
+        self.neuro_abschnitt.is_some()
+            || self.aktive_auftraege().next().is_some()
+            || !self.warteschlange.is_empty()
     }
 
     fn naechster_auftrag(&mut self) -> Option<WartenderAuftrag> {
         if self.laufend.is_none()
             && let Some(i) = self.warteschlange.iter().position(|a| {
                 a.art != Art::Gemini
-                    && (self.gemini_laufend.is_none()
+                    && ((self.gemini_laufend.is_none() && self.neuro_abschnitt.is_none())
                         || !matches!(a.art, Art::Update | Art::Sicherung))
             })
         {
@@ -563,6 +581,14 @@ impl Laufprozess {
 /// Der Standardstarter: `cargo run --quiet -p depot_lauf -- <argumente>` im Projektordner.
 pub fn cargo_starter() -> Starter {
     Box::new(|art: Art, wurzel: &Path| {
+        if matches!(art, Art::NeuroFrage | Art::NeuroAbrechnung) {
+            let ordner = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(Path::to_path_buf))
+                .unwrap_or_else(|| wurzel.join("target/debug"));
+            let programm = ordner.join(crate::programmstand::datei("depot_berater"));
+            return crate::programmstand::programmbefehl(&programm, wurzel, art.argumente());
+        }
         let mut c = Command::new("cargo");
         let (paket, argumente) = match art {
             Art::KurseVon(_) | Art::IbkrPapier | Art::IbkrJournal | Art::IbkrAbgleich => {
@@ -818,6 +844,8 @@ impl Dienst {
                 ibkr_pruefung_ab_nr: naechste_nr,
                 laufend: None,
                 gemini_laufend: None,
+                neuro_abschnitt: None,
+                neuro_wer: None,
                 warteschlange: VecDeque::new(),
                 verlauf,
                 zeitplan,
@@ -1246,6 +1274,9 @@ impl Dienst {
         self.zeitplan_pruefen(&mut z, jetzt);
         self.ibkr_zeitplan_pruefen(&mut z, jetzt);
         self.updatesuche_einreihen(&mut z, jetzt);
+        if z.neuro_abschnitt == Some(NeuroAbschnitt::Journal) {
+            return None;
+        }
         if let Some(wartend) = z.naechster_auftrag() {
             let WartenderAuftrag {
                 art,
@@ -1341,6 +1372,78 @@ impl Dienst {
             self.hinweise_pruefen(jetzt);
         }
         None
+    }
+
+    pub(crate) fn neuro_starten(
+        &self,
+        datei: &Path,
+        wer: BeraterId,
+        abrechnen: bool,
+    ) -> std::io::Result<Option<Laufprozess>> {
+        let mut z = self.sperre();
+        if self.update_offen() || z.neustart || z.update_wartet_auf_ruhe() {
+            return Ok(None);
+        }
+        let art = if abrechnen {
+            Art::NeuroAbrechnung
+        } else {
+            Art::NeuroFrage
+        };
+        let (ausgabe, schreiber) = pipe()?;
+        let kind = (self.starter)(art, &self.wurzel)
+            .arg(datei)
+            .stdin(Stdio::null())
+            .stdout(schreiber.try_clone()?)
+            .stderr(schreiber)
+            .spawn()?;
+        z.neuro_abschnitt = Some(NeuroAbschnitt::Journal);
+        z.neuro_wer = (!abrechnen).then_some(wer);
+        Ok(Some(Laufprozess { kind, ausgabe }))
+    }
+
+    pub(crate) fn neuro_wartet(&self) -> Option<BeraterId> {
+        let z = self.sperre();
+        (z.neuro_abschnitt == Some(NeuroAbschnitt::Extern))
+            .then_some(z.neuro_wer)
+            .flatten()
+    }
+
+    pub(crate) fn neuro_verfolgen(
+        &self,
+        lauf: Laufprozess,
+        abbrechfrist: std::time::Duration,
+    ) -> (Option<i32>, bool) {
+        let Laufprozess { mut kind, ausgabe } = lauf;
+        let ergebnis = std::thread::scope(|faden| {
+            let (sender, signal) = std::sync::mpsc::sync_channel(1);
+            faden.spawn(move || {
+                crate::protokoll::zeilen(BufReader::new(ausgabe), |zeile| {
+                    if zeile == "NeuroSchlopf: Reservierung abgeschlossen" {
+                        let _ = sender.try_send(());
+                    }
+                });
+            });
+            let reserviert = match signal.recv_timeout(abbrechfrist) {
+                Ok(()) => {
+                    self.sperre().neuro_abschnitt = Some(NeuroAbschnitt::Extern);
+                    true
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    let _ = kind.kill();
+                    false
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => false,
+            };
+            (
+                kind.wait().ok().and_then(|status| status.code()),
+                reserviert,
+            )
+        });
+        let mut z = self.sperre();
+        z.neuro_abschnitt = None;
+        z.neuro_wer = None;
+        z.lage_veraltet = true;
+        ergebnis
     }
 
     fn lagebild_erneuern(&self, jetzt: Zeitpunkt) {
@@ -1973,5 +2076,80 @@ fn zeitplan_auftrag_erlaubt(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> bool {
         Art::Gemini | Art::Sicherung | Art::IbkrAbgleich => true,
         Art::Vorbereiten => vorbereitung_faellig(z, jetzt),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod neuro_vorrang_tests {
+    use super::*;
+
+    fn starter(art: Art, _: &Path) -> Command {
+        #[cfg(windows)]
+        {
+            let mut befehl = Command::new("powershell.exe");
+            let skript = if art == Art::NeuroFrage {
+                "Write-Output 'NeuroSchlopf: Reservierung abgeschlossen'; Start-Sleep -Seconds 4"
+            } else {
+                "exit 0"
+            };
+            befehl.args(["-NoProfile", "-Command", skript]);
+            befehl
+        }
+        #[cfg(not(windows))]
+        {
+            let mut befehl = Command::new("sh");
+            let skript = if art == Art::NeuroFrage {
+                "printf '%s\n' 'NeuroSchlopf: Reservierung abgeschlossen'; sleep 4"
+            } else {
+                "exit 0"
+            };
+            befehl.args(["-c", skript]);
+            befehl
+        }
+    }
+
+    #[test]
+    fn papiertag_startet_waehrend_neuro_auf_die_antwort_wartet() -> Result<(), String> {
+        use std::time::{Duration, Instant};
+
+        let wurzel =
+            std::env::temp_dir().join(format!("depot-neuro-vorrang-{}", std::process::id()));
+        fs::create_dir_all(wurzel.join("daten")).map_err(|e| e.to_string())?;
+        let d = Arc::new(Dienst::neu(
+            wurzel.clone(),
+            String::new(),
+            Box::new(starter),
+            crate::lagerechner(Arc::new(crate::System)),
+        ));
+        let jetzt = Zeitpunkt::lies("2026-11-20T07:00:00Z").ok_or("Uhrzeit")?;
+        let neuro = d
+            .neuro_starten(&wurzel.join("probe.json"), BeraterId::Maus, false)
+            .map_err(|e| e.to_string())?
+            .ok_or("NeuroSchlopf startet nicht")?;
+        d.einreihen(Art::Papier, Anlass::Hand)?;
+        assert!(d.schritt(jetzt).is_none());
+        let verfolge = Arc::clone(&d);
+        let warten =
+            std::thread::spawn(move || verfolge.neuro_verfolgen(neuro, Duration::from_secs(3)));
+        let warte_seit = Instant::now();
+        while d.neuro_wartet().is_none() && warte_seit.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(d.neuro_wartet(), Some(BeraterId::Maus));
+        let (nr, papier) = d
+            .schritt(jetzt)
+            .ok_or("Papiertag wartet auf NeuroSchlopf")?;
+        let zeit = || Zeitpunkt::lies("2026-11-20T07:00:01Z");
+        d.verfolge(nr, papier, zeit);
+        assert_eq!(d.neuro_wartet(), Some(BeraterId::Maus));
+        assert_eq!(
+            warten
+                .join()
+                .map_err(|_| "NeuroSchlopf-Faden abgebrochen")?,
+            (Some(0), true)
+        );
+        assert!(d.neuro_wartet().is_none());
+        fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
+        Ok(())
     }
 }

@@ -64,6 +64,7 @@ pub mod konto;
 pub mod kursbeleg;
 pub mod kurssperre;
 pub mod nachrichtbeleg;
+pub mod neurofrage;
 pub mod rss_abruf;
 pub mod splitverdacht;
 pub use kasse::KiZweck;

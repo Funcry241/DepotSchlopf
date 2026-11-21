@@ -14,6 +14,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_berater::json::zitiere;
 use depot_berater::{KiBerater, Netz, NetzFehler, Rueckmeldung, Schluessel};
+use depot_journal::neurofrage::{
+    NeuroAuftragId, NeuroErgebnis, NeuroFrage, NeuroRunde, NeuroSperre, NeuroUrteilswert,
+};
 use depot_journal::{AufrufErlaubnis, Journal, KiZweck};
 use depot_kern::modelle::{BeraterEinstellung, Denktiefe, Modell, Modellwahl};
 use depot_kern::{
@@ -674,6 +677,111 @@ fn sol_mittel_wird_gebucht_gesendet_und_nach_neustart_belegt() -> Result<(), Str
             .err(),
         Some(depot_ki::Sperre::TagVoll)
     );
+    Ok(())
+}
+
+#[test]
+fn neurofrage_puffert_ein_urteil_bis_zur_kurzen_journalabrechnung() -> Result<(), String> {
+    let mut ort = Ort::neu()?;
+    let tag = tag()?;
+    let id = some(
+        NeuroAuftragId::neu(&"f".repeat(64), NeuroRunde::Erstfrage),
+        "Fall",
+    )?;
+    let wer = BeraterId::Maus;
+    let profil = BeraterEinstellung::standard(wer);
+    let frage = NeuroFrage {
+        id: id.clone(),
+        wer,
+        thesen_wer: BeraterId::Dachs,
+        these_vom: tag,
+        these_gueltig_bis: some(tag.plus_tage(3), "Endtag")?,
+        isin: sap()?,
+        these: "Der Umsatz steigt.".into(),
+        bisher_zeile: Some(2),
+        beleg_zeile: 3,
+        quelle: "test".into(),
+        bisher: Some("3 Prozent Wachstum".into()),
+        jetzt: "Umsatzprognose erhöht".into(),
+        bekannt: some(Zeitpunkt::neu(tag, 18, 0, 0), "Zeit")?,
+        nachfrage: None,
+    };
+    assert_eq!(NeuroFrage::lies(&frage.text()).as_ref(), Some(&frage));
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(gpt(r#"{"urteil":"staerkt","begruendung":"Die Prognose ist gestiegen.","nachfrage":"War die vorige Prognose vergleichbar?"}"#, 4_000, 500));
+    let mut maus = berater(&ort, wer, netz)?;
+    assert_eq!(
+        ort.journal
+            .reserviere_neurofrage(&id, wer, tag, 1, profil, 0)
+            .err(),
+        Some(NeuroSperre::NeuroTageslimit)
+    );
+    let e = vorbedingung(
+        ort.journal
+            .reserviere_neurofrage(&id, wer, tag, 1, profil, 2),
+        "Erstfrage",
+    )?;
+    let buchung = e.buchung();
+    let ergebnis = maus.neurofrage(e, &frage);
+    assert_eq!(
+        ergebnis.urteil.as_ref().map(|u| u.wert),
+        Some(NeuroUrteilswert::Staerkt)
+    );
+    let (_, _, frage_gesendet) = some(maus.netz().gesendet.first(), "versandt")?;
+    assert!(frage_gesendet.contains("\"max_output_tokens\":2000"));
+    let rueckfrage = some(
+        NeuroAuftragId::neu(id.fall(), NeuroRunde::Rueckfrage),
+        "Rückfrage",
+    )?;
+    assert_eq!(
+        ort.journal
+            .reserviere_neurofrage(&rueckfrage, wer, tag, 1, profil, 2)
+            .err(),
+        Some(NeuroSperre::ErstfrageOffen)
+    );
+    assert_eq!(
+        ort.journal.stand().ki().buchungsbeleg(buchung),
+        Some((KiZweck::Neurofrage, false))
+    );
+    let gelesen = some(
+        NeuroErgebnis::lies(&ergebnis.text()),
+        "Gepuffertes Ergebnis",
+    )?;
+    vorbedingung(ort.journal.belege_neuroergebnis(&gelesen), "Abrechnung")?;
+    vorbedingung(
+        ort.journal.belege_neuroergebnis(&gelesen),
+        "Wiederholte Abrechnung",
+    )?;
+    assert_eq!(
+        ort.journal.stand().ki().buchungsbeleg(buchung),
+        Some((KiZweck::Neurofrage, true))
+    );
+    assert_eq!(
+        ort.journal
+            .reserviere_neurofrage(&id, wer, tag, 1, profil, 2)
+            .err(),
+        Some(NeuroSperre::BereitsReserviert)
+    );
+    // Der zweite Empfänger derselben Frage zählt separat auf dasselbe Neuro-Tageslimit.
+    let dachs = BeraterId::Dachs;
+    vorbedingung(
+        ort.journal.reserviere_neurofrage(
+            &id,
+            dachs,
+            tag,
+            1,
+            BeraterEinstellung::standard(dachs),
+            2,
+        ),
+        "Dachs",
+    )?;
+    assert_eq!(
+        ort.journal
+            .reserviere_neurofrage(&rueckfrage, wer, tag, 1, profil, 2)
+            .err(),
+        Some(NeuroSperre::NeuroTageslimit)
+    );
+    assert_eq!(ort.journal.stand().seit_abschluss(), 0);
     Ok(())
 }
 

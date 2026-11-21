@@ -294,6 +294,12 @@ fn aufraeumen(wurzel: &Path, neu: &str, vorher: Option<&str>) {
     }
 }
 
+pub(crate) fn programmbefehl(programm: &Path, wurzel: &Path, args: &[&str]) -> Command {
+    let mut c = Command::new(programm);
+    c.current_dir(wurzel).args(args);
+    c
+}
+
 /// Der Starter fuer Auftraege aus einem gesicherten Stand: Kurse, Termine, Papiertag und das
 /// Einrichten des Journals direkt mit den Programmen des Stands; das Update ueber Cargo.
 pub fn starter(stand: &Stand) -> Starter {
@@ -315,13 +321,13 @@ pub fn starter(stand: &Stand) -> Starter {
             | Art::Vorbereiten
             | Art::Wochenrueckschau
             | Art::Simulation
-            | Art::Gemini => (&berater, art.argumente()),
+            | Art::Gemini
+            | Art::NeuroFrage
+            | Art::NeuroAbrechnung => (&berater, art.argumente()),
             Art::UpdatePruefen | Art::Update | Art::PapierAusgelassen | Art::Sicherung => {
                 return cargo(art, wurzel);
             }
         };
-        let mut c = Command::new(programm);
-        c.current_dir(wurzel).args(args);
-        c
+        programmbefehl(programm, wurzel, args)
     })
 }

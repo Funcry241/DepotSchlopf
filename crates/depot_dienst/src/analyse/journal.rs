@@ -38,6 +38,14 @@ fn datum(art: Art, text: &str, abrechnungstag: Option<Datum>, stand: &Stand) -> 
             .buchungen()
             .get(feld(0)?.parse::<usize>().ok()?)
             .map(|b| b.datum),
+        Art::NeuroErgebnis => {
+            let ergebnis = depot_journal::neurofrage::NeuroErgebnis::lies(text)?;
+            stand
+                .ki()
+                .buchungen()
+                .get(ergebnis.buchung)
+                .map(|b| b.datum)
+        }
         Art::Kurs | Art::Termin => frankfurt(zeit(2)?),
         Art::Nachricht => frankfurt(zeit(1)?),
         Art::RssAbruf => frankfurt(Zeitpunkt::aus_sekunden(feld(1)?.parse().ok()?)?),

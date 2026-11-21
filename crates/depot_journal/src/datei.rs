@@ -32,6 +32,7 @@ use crate::auftrag::{Meldung, meldung_text};
 use crate::kasse::{AufrufErlaubnis, grenzabdruck_fuer_auswahl};
 use crate::kursbeleg::{KursBeleg, kursbeleg_text};
 use crate::nachrichtbeleg::{NachrichtBeleg, nachrichtbeleg_text};
+use crate::neurofrage::{NeuroAufrufErlaubnis, NeuroAuftragId, NeuroErgebnis, NeuroSperre};
 use crate::stand::{
     Abschluss, Art, FORMAT, FORMAT_ALT, Stand, abschluss_text, begruendung_text, beleg_text,
     beobachtung_text, topf_text, trenne,
@@ -430,6 +431,12 @@ const LESECACHE_VOLLPRUEFUNG: Duration = Duration::from_secs(300);
 pub type GelesenerJournalstand<'a> = (&'a Stand, &'a [(Art, String)]);
 
 impl Lesecache {
+    /// Anker der zuletzt aus diesem Cache gelesenen bestätigten Daten.
+    pub fn bestaetigt(&self) -> Option<(u64, String)> {
+        let v = &self.stand.as_ref()?.vermerk;
+        Some((v.laenge, v.kette.clone()))
+    }
+
     /// Liest unter geteilter Sperre. Ein bestätigter Anhang wird ab der letzten
     /// bekannten Kette geprüft. Der erste Zugriff und die regelmäßige
     /// Vollprüfung prüfen die ganze Datei.
@@ -899,9 +906,11 @@ impl Journal {
             Art::Vorbereitung => Err(JournalFehler::Abgelehnt(
                 "Vorbereitung nur über ihre geprüften Methoden".into(),
             )),
-            Art::Ki | Art::KiAbrechnung | Art::KiAufruf | Art::KiGrenzen => Err(
-                JournalFehler::Abgelehnt("KI-Einträge entstehen nur über reserviere".into()),
-            ),
+            Art::Ki | Art::KiAbrechnung | Art::KiAufruf | Art::KiGrenzen | Art::NeuroErgebnis => {
+                Err(JournalFehler::Abgelehnt(
+                    "KI-Einträge entstehen nur über reserviere".into(),
+                ))
+            }
             Art::TopfUmbuchung => Err(JournalFehler::Abgelehnt(
                 "Topfumbuchung nur als atomare Bargeldbuchung".into(),
             )),
@@ -1312,6 +1321,7 @@ impl Journal {
             deckel,
             wahl.auswahl,
             self.stand.ki().buchungen().len().saturating_sub(1),
+            crate::KiZweck::Vorbereitung,
         ))
     }
 
@@ -1332,6 +1342,63 @@ impl Journal {
     /// Bestätigt Minderkosten einer passenden Reservierung; bei Schreibfehlern bleiben die Höchstkosten gebucht.
     pub fn rechne_ki_ab(&mut self, abrechnung: &crate::KiAbrechnung) -> Result<(), JournalFehler> {
         self.schreibe_eintrag(Art::KiAbrechnung, &abrechnung.text())
+    }
+
+    /// Reserviert einen NeuroSchlopf-Versuch genau einmal, noch vor jedem Versand.
+    pub fn reserviere_neurofrage(
+        &mut self,
+        id: &NeuroAuftragId,
+        wer: BeraterId,
+        datum: Datum,
+        zyklus: u32,
+        einstellung: BeraterEinstellung,
+        neuro_max: usize,
+    ) -> Result<NeuroAufrufErlaubnis, NeuroSperre> {
+        let ki = self.stand.ki();
+        ki.pruefe_neuroauftrag(id, wer)?;
+        let heute = ki.neurofragen().iter().filter(|e| e.datum == datum).count();
+        if heute >= neuro_max.min(crate::ki_einstellungen::MAX_NEURO_AUFRUFE) {
+            return Err(NeuroSperre::NeuroTageslimit);
+        }
+        if self.stand.seit_abschluss() != 0 {
+            return Err(NeuroSperre::PapierlaufOffen);
+        }
+        let auswahl = einstellung.auswahl;
+        let zweck = crate::KiZweck::Neurofrage;
+        let (buchung, deckel) =
+            ki.naechste_mit_einstellung(wer, datum, zyklus, zweck, einstellung)?;
+        let offen = depot_kern::liste::handelstag(datum)
+            && self.stand.abschluss().is_none_or(|a| a.datum < datum);
+        if offen {
+            let aufrufe = ki
+                .buchungen()
+                .iter()
+                .filter(|b| b.berater == wer && b.datum == datum)
+                .count();
+            if aufrufe >= einstellung.max_aufrufe.saturating_sub(5) {
+                return Err(Sperre::ErstmeinungReserviert.into());
+            }
+        }
+        let text = crate::kasse::buchung_fuer(&buchung, zweck, Some(auswahl));
+        let abdruck = grenzabdruck_fuer_auswahl(Some(auswahl));
+        let nr = ki.buchungen().len();
+        self.schreibe_eintrag(
+            Art::Ki,
+            &format!("{text};{};{};{abdruck}", id.fall(), id.runde().text()),
+        )
+        .map_err(|e| Sperre::Kassenbuch(format!("Journal: {e:?}")))?;
+        Ok(NeuroAufrufErlaubnis {
+            id: id.clone(),
+            erlaubnis: AufrufErlaubnis::neu(buchung, deckel, auswahl, nr, zweck),
+        })
+    }
+
+    /// Belegt Bewertung und Abrechnung gemeinsam. Wiederholtes Einspielen ist unschädlich.
+    pub fn belege_neuroergebnis(&mut self, ergebnis: &NeuroErgebnis) -> Result<(), JournalFehler> {
+        if self.stand.ki().neuroergebnis(ergebnis.buchung) == Some(ergebnis) {
+            return Ok(());
+        }
+        self.schreibe_eintrag(Art::NeuroErgebnis, &ergebnis.text())
     }
 
     pub fn pruefe_ki(
@@ -1382,6 +1449,11 @@ impl Journal {
             .stand
             .ki()
             .naechste_mit_einstellung(berater, datum, zyklus, zweck, wahl)?;
+        if zweck == crate::KiZweck::Neurofrage {
+            return Err(Sperre::Kassenbuch(
+                "NeuroSchlopf braucht einen belegten Auftrag".into(),
+            ));
+        }
         self.schreibe_ki(buchung, deckel, zweck, einstellung.map(|p| p.auswahl))
     }
 
@@ -1411,6 +1483,7 @@ impl Journal {
             deckel,
             wahl,
             self.stand.ki().buchungen().len().saturating_sub(1),
+            zweck,
         ))
     }
 

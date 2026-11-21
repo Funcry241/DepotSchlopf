@@ -1,7 +1,7 @@
 //! Dauerhafte Minderkostenabrechnung genau einer reservierten Anfrage.
 use depot_kern::Cent;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KiAbrechnung {
     pub(crate) nr: usize,
     pub(crate) reserviert: Cent,

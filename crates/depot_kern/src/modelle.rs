@@ -178,12 +178,72 @@ impl BeraterEinstellung {
     }
 }
 
+/// Wer einen belegten Fall für NeuroSchlopf beurteilen darf.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NeuroEmpfaenger {
+    #[default]
+    Aus,
+    Maus,
+    Dachs,
+    Beide,
+}
+
+impl NeuroEmpfaenger {
+    pub const ALLE: [Self; 4] = [Self::Aus, Self::Maus, Self::Dachs, Self::Beide];
+
+    pub fn kennung(self) -> &'static str {
+        match self {
+            Self::Aus => "aus",
+            Self::Maus => "maus",
+            Self::Dachs => "dachs",
+            Self::Beide => "beide",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Aus => "Ausgeschaltet",
+            Self::Maus => "Maus",
+            Self::Dachs => "Dachs",
+            Self::Beide => "Beide",
+        }
+    }
+
+    pub fn lies(kennung: &str) -> Option<Self> {
+        Self::ALLE
+            .into_iter()
+            .find(|wahl| wahl.kennung() == kennung)
+    }
+
+    /// Ein Eintrag je unabhängig zu befragendem Berater.
+    pub fn berater(self) -> &'static [BeraterId] {
+        match self {
+            Self::Aus => &[],
+            Self::Maus => &[BeraterId::Maus],
+            Self::Dachs => &[BeraterId::Dachs],
+            Self::Beide => &[BeraterId::Maus, BeraterId::Dachs],
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KiEinstellungen {
     pub dachs: BeraterEinstellung,
     pub maus: BeraterEinstellung,
     pub gemini: usize,
     pub neuroschlopf: usize,
+    pub neuro_empfaenger: NeuroEmpfaenger,
+}
+
+impl KiEinstellungen {
+    /// Bei Tageslimit 0 bleibt die Auswahl gespeichert und es gibt keine Empfänger.
+    pub fn neuro_berater(self) -> &'static [BeraterId] {
+        if self.neuroschlopf == 0 {
+            &[]
+        } else {
+            self.neuro_empfaenger.berater()
+        }
+    }
 }
 
 impl Default for KiEinstellungen {
@@ -193,6 +253,7 @@ impl Default for KiEinstellungen {
             maus: BeraterEinstellung::standard(BeraterId::Maus),
             gemini: 5,
             neuroschlopf: 8,
+            neuro_empfaenger: NeuroEmpfaenger::Aus,
         }
     }
 }

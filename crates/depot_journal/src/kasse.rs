@@ -17,6 +17,7 @@ use depot_kern::modelle::{BeraterEinstellung, Denktiefe, Modell, Modellwahl};
 use depot_kern::{BeraterId, Cent};
 use depot_ki::{Buchung, Datum, KiDeckel, KiGrenzen, Sperre, grenzabdruck, pruefe};
 
+use crate::neurofrage::{NeuroAuftragId, NeuroErgebnis, NeuroRunde, NeuroSperre, NeuroVersuch};
 use crate::stand::{datum_text, lies_datum};
 
 mod siegel {
@@ -39,6 +40,7 @@ pub struct AufrufErlaubnis {
     nr: usize,
     deckel: KiDeckel,
     auswahl: Modellwahl,
+    zweck: KiZweck,
     _siegel: siegel::Siegel,
 }
 
@@ -48,12 +50,14 @@ impl AufrufErlaubnis {
         deckel: KiDeckel,
         auswahl: Modellwahl,
         nr: usize,
+        zweck: KiZweck,
     ) -> AufrufErlaubnis {
         AufrufErlaubnis {
             buchung,
             nr,
             deckel,
             auswahl,
+            zweck,
             _siegel: siegel::Siegel::neu(),
         }
     }
@@ -96,6 +100,10 @@ impl AufrufErlaubnis {
 
     pub fn deckel(&self) -> &KiDeckel {
         &self.deckel
+    }
+
+    pub fn zweck(&self) -> KiZweck {
+        self.zweck
     }
 
     pub fn modellwahl(&self) -> Modellwahl {
@@ -189,7 +197,7 @@ pub(crate) fn grenzabdruck_fuer_auswahl(auswahl: Option<Modellwahl>) -> String {
     depot_kern::abdruck::sha256_hex(text.as_bytes())
 }
 
-fn ist_abdruck(text: &str) -> bool {
+pub(crate) fn ist_abdruck(text: &str) -> bool {
     text.len() == 64
         && text
             .bytes()
@@ -205,6 +213,7 @@ pub enum KiZweck {
     Vorbereitung,
     Simulation,
     Wochenrueckschau,
+    Neurofrage,
 }
 impl KiZweck {
     pub fn text(self) -> &'static str {
@@ -215,6 +224,7 @@ impl KiZweck {
             Self::Vorbereitung => "vorbereitung",
             Self::Simulation => "simulation",
             Self::Wochenrueckschau => "wochenrueckschau",
+            Self::Neurofrage => "neurofrage",
         }
     }
     fn lies(s: &str) -> Option<Self> {
@@ -225,16 +235,20 @@ impl KiZweck {
             Self::Vorbereitung,
             Self::Simulation,
             Self::Wochenrueckschau,
+            Self::Neurofrage,
         ]
         .into_iter()
         .find(|z| z.text() == s)
     }
     pub(crate) fn ohne_handelsbeginn(self) -> bool {
-        matches!(self, Self::Simulation | Self::Wochenrueckschau)
+        matches!(
+            self,
+            Self::Simulation | Self::Wochenrueckschau | Self::Neurofrage
+        )
     }
     pub(crate) fn deckel(self, modell: Modell) -> KiDeckel {
         match self {
-            Self::Abstimmung | Self::Vorbereitung | Self::Wochenrueckschau => {
+            Self::Abstimmung | Self::Vorbereitung | Self::Wochenrueckschau | Self::Neurofrage => {
                 KiDeckel::kurz_fuer_modell(modell)
             }
             _ => KiDeckel::fuer_modell(modell),
@@ -260,6 +274,8 @@ pub struct KiStand {
     aufrufe: std::collections::BTreeMap<usize, crate::KiAufruf>,
     zwecke: Vec<KiZweck>,
     modellwahlen: Vec<Option<Modellwahl>>,
+    neurofragen: Vec<NeuroVersuch>,
+    neuroergebnisse: std::collections::BTreeMap<usize, NeuroErgebnis>,
 }
 
 impl KiStand {
@@ -278,6 +294,40 @@ impl KiStand {
 
     pub fn modellwahl(&self, nr: usize) -> Option<Modellwahl> {
         self.modellwahlen.get(nr).copied().flatten()
+    }
+
+    pub fn neurofragen(&self) -> &[NeuroVersuch] {
+        &self.neurofragen
+    }
+
+    pub fn neuroergebnis(&self, buchung: usize) -> Option<&NeuroErgebnis> {
+        self.neuroergebnisse.get(&buchung)
+    }
+
+    pub(crate) fn pruefe_neuroauftrag(
+        &self,
+        id: &NeuroAuftragId,
+        wer: BeraterId,
+    ) -> Result<(), NeuroSperre> {
+        let gleiche_faelle = || {
+            self.neurofragen
+                .iter()
+                .filter(|v| v.wer == wer && v.id.fall() == id.fall())
+        };
+        if gleiche_faelle().any(|v| v.id.runde() == id.runde()) {
+            return Err(NeuroSperre::BereitsReserviert);
+        }
+        if id.runde() == NeuroRunde::Rueckfrage
+            && !gleiche_faelle().any(|v| {
+                v.id.runde() == NeuroRunde::Erstfrage
+                    && self
+                        .neuroergebnis(v.buchung)
+                        .is_some_and(|e| e.urteil.as_ref().is_some_and(|u| u.nachfrage.is_some()))
+            })
+        {
+            return Err(NeuroSperre::ErstfrageOffen);
+        }
+        Ok(())
     }
 
     fn pruefe_tageslimit(
@@ -340,6 +390,30 @@ impl KiStand {
         Ok((buchung, deckel))
     }
 
+    pub(crate) fn belege_neuroergebnis(&mut self, inhalt: &str) -> Result<(), String> {
+        let e = NeuroErgebnis::lies(inhalt).ok_or("NeuroSchlopf-Ergebnis unlesbar")?;
+        if !self
+            .neurofragen
+            .iter()
+            .any(|v| v.buchung == e.buchung && v.id == e.id && v.wer == e.wer)
+        {
+            return Err("NeuroSchlopf-Ergebnis ohne passende Buchung".into());
+        }
+        if self.neuroergebnisse.contains_key(&e.buchung) {
+            return Err("NeuroSchlopf-Ergebnis bereits belegt".into());
+        }
+        let mut neu = self.clone();
+        if let Some(a) = &e.aufruf {
+            neu.belege_aufruf(&a.text())?;
+        }
+        if let Some(a) = &e.abrechnung {
+            neu.rechne_ab(&a.text())?;
+        }
+        neu.neuroergebnisse.insert(e.buchung, e);
+        *self = neu;
+        Ok(())
+    }
+
     pub(crate) fn belege_aufruf(&mut self, inhalt: &str) -> Result<(), String> {
         let a = crate::KiAufruf::lies(inhalt).ok_or("KI-Aufruf unlesbar")?;
         if self.buchungen.get(a.nr).is_none() {
@@ -381,6 +455,30 @@ impl KiStand {
 
     /// Prueft eine Buchung nach den Regeln ihres Abschnitts und zaehlt sie.
     pub(crate) fn buche(&mut self, inhalt: &str) -> Result<KiZweck, String> {
+        if let Some((buchung, zusatz)) = inhalt.rsplit_once(";neurofrage;") {
+            let (fall, rest) = zusatz.split_once(';').ok_or("NeuroSchlopf-Fall fehlt")?;
+            let (runde, abdruck) = rest.split_once(';').ok_or("NeuroSchlopf-Runde fehlt")?;
+            let runde = NeuroRunde::lies(runde).ok_or("NeuroSchlopf-Runde unbekannt")?;
+            let id = NeuroAuftragId::neu(fall, runde).ok_or("NeuroSchlopf-Fall unlesbar")?;
+            let (b, auswahl) =
+                lies_buchung_mit_modell(buchung).ok_or("NeuroSchlopf-Buchung unlesbar")?;
+            if auswahl.is_none() {
+                return Err("NeuroSchlopf-Buchung ohne Modellwahl".into());
+            }
+            self.pruefe_neuroauftrag(&id, b.berater)
+                .map_err(|e| format!("NeuroSchlopf-Auftrag: {e:?}"))?;
+            let mut neu = self.clone();
+            neu.abdruck(abdruck)?;
+            neu.buche_fuer(buchung, KiZweck::Neurofrage)?;
+            neu.neurofragen.push(NeuroVersuch {
+                id,
+                wer: b.berater,
+                datum: b.datum,
+                buchung: self.buchungen.len(),
+            });
+            *self = neu;
+            return Ok(KiZweck::Neurofrage);
+        }
         // Die Simulation hat keinen Handelsbeginn. Ihr Grenzabdruck und ihre Buchung
         // gehören in denselben Eintrag, auch bei der ersten Buchung überhaupt.
         for (marke, zweck) in [
@@ -499,10 +597,10 @@ fn pruefe_zusatzreserve(
         .try_fold(Cent::NULL, |s, b| s.checked_add(b.reserviert))
         .ok_or(depot_ki::Sperre::Rechenfehler)?;
     let ist_handelstag = depot_kern::liste::handelstag(datum);
-    let simulation = zweck == KiZweck::Simulation;
+    let vorab = matches!(zweck, KiZweck::Simulation | KiZweck::Neurofrage);
     let tage =
-        depot_ki::handelstage_rest(datum).saturating_sub(u32::from(ist_handelstag && !simulation));
-    if simulation && ist_handelstag {
+        depot_ki::handelstage_rest(datum).saturating_sub(u32::from(ist_handelstag && !vorab));
+    if vorab && ist_handelstag {
         // Zwei Fachfragen, zwei Abstimmungsrunden und die Nachfrage zum Mindesteinsatz.
         let handelsaufrufe = 5;
         let heute = stand
