@@ -255,6 +255,15 @@ fn gpt(text: &str, ein: u64, aus: u64) -> Result<Rueckmeldung, NetzFehler> {
 struct Ort {
     dir: PathBuf,
     journal: Journal,
+    aufraeumen: Testverzeichnis,
+}
+
+struct Testverzeichnis(PathBuf);
+
+impl Drop for Testverzeichnis {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 impl Ort {
@@ -263,10 +272,15 @@ impl Ort {
         let dir = std::env::temp_dir().join(format!("depot_berater_{}_{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         vorbedingung(fs::create_dir_all(&dir), "Testverzeichnis")?;
+        let aufraeumen = Testverzeichnis(dir.clone());
         let pfad = dir.join("journal.txt");
         vorbedingung(Journal::einrichten(&pfad), "Einrichtung")?;
         let journal = vorbedingung(Journal::oeffnen(&pfad), "Journal")?;
-        Ok(Ort { dir, journal })
+        Ok(Ort {
+            dir,
+            journal,
+            aufraeumen,
+        })
     }
 
     fn sperre(&self) -> PathBuf {
@@ -275,12 +289,6 @@ impl Ort {
 
     fn erlaubnis(&mut self, wer: BeraterId, zyklus: u32) -> Result<AufrufErlaubnis, String> {
         vorbedingung(self.journal.reserviere(wer, tag()?, zyklus), "Erlaubnis")
-    }
-}
-
-impl Drop for Ort {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -657,18 +665,17 @@ fn sol_mittel_wird_gebucht_gesendet_und_nach_neustart_belegt() -> Result<(), Str
         ort.journal.rechne_ki_ab(&abrechnung),
         "Abrechnung schreiben",
     )?;
-    let pfad = ort.dir.join("journal.txt");
-    let kopie = ort.dir.join("kopie.txt");
-    vorbedingung(fs::copy(&pfad, &kopie), "Journal kopieren")?;
-    vorbedingung(
-        fs::copy(
-            pfad.with_extension("vermerk"),
-            kopie.with_extension("vermerk"),
-        ),
-        "Vermerk kopieren",
+    let Ort {
+        dir,
+        journal,
+        aufraeumen: _aufraeumen,
+    } = ort;
+    drop(journal);
+    let journal = vorbedingung(
+        Journal::oeffnen(&dir.join("journal.txt")),
+        "Journal erneut öffnen",
     )?;
-    let kopie = vorbedingung(Journal::oeffnen(&kopie), "Journal erneut öffnen")?;
-    let neu = kopie.stand();
+    let neu = journal.stand();
     assert_eq!(neu.ki().modellwahl(nr), Some(auswahl));
     assert_eq!(neu.ki().aufruf(nr).map(|a| a.modell.as_str()), Some(modell));
     assert_eq!(
