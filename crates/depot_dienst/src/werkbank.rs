@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use depot_kern::{BeraterId, Boerse, Datum, Zeitpunkt};
 use depot_lage::{Betrieb, Lagebild, SchluesselStand, TagStand, ortszeit};
 
+use crate::aktualisierung::Ergebnis;
 use crate::hinweis::Gedaechtnis;
 use crate::zeitplan::{AbrufAusgang, Erledigt, Zeitplan, faellig_mit_bestand};
 
@@ -825,7 +826,7 @@ impl Dienst {
             .saturating_add(1);
         let (update_ergebnisse, mut update_meldung) = match crate::aktualisierung::laden(&wurzel) {
             Ok(e) => {
-                let m = e.last().map(crate::aktualisierung::Ergebnis::meldung);
+                let m = e.last().and_then(Ergebnis::hinweis_im_betrieb);
                 (e, m)
             }
             Err(e) => (Vec::new(), Some((true, e))),
@@ -834,7 +835,7 @@ impl Dienst {
             && a.erfolg == Some(true)
             && !update_ergebnisse.iter().any(|e| e.lauf == a.kennung)
         {
-            update_meldung = Some((true, "Für das letzte Update liegt keine bestätigte Aktivierung vor. Details stehen unter Tätigkeit im Protokoll.".into()));
+            update_meldung = Some((true, "Für das letzte Update liegt keine bestätigte Aktivierung vor. Details stehen im Update-Verlauf der Einrichtung.".into()));
         }
         let update_angebot = crate::update_angebot::Angebot::laden(&wurzel);
         let letzte_updatesuche = verlauf

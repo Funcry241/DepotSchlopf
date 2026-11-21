@@ -328,9 +328,11 @@ fn automatische_updatesuche_haelt_ein_angebot_bei_ausfall_sichtbar() -> Result<(
     d.verfolge(nr, kind, || mittag().ok());
     let live = get(&d, "/teil/live")?;
     assert!(!live.contains("Letzter fehlgeschlagener Lauf"));
-    assert!(live.contains("class=\"leise\">Suche nicht abgeschlossen"));
+    assert!(!live.contains("Suche nicht abgeschlossen"));
     assert!(get(&d, "/teil/update-hinweis")?.contains("Neue Version verfügbar"));
-    assert!(get(&d, "/teil/update")?.contains("Update einspielen"));
+    let update = get(&d, "/teil/update")?;
+    assert!(update.contains("Update einspielen"));
+    assert!(update.contains("class=\"leise\">Suche nicht abgeschlossen"));
     assert!(d.schritt(t).is_none());
     Ok(())
 }
@@ -446,9 +448,12 @@ fn neutrale_updateabschluesse_bleiben_im_verlauf_lesbar() -> Result<(), String> 
         assert!(!html.contains("Erneut zur Freigabe"), "{html}");
         assert!(!rueckfall::offen_pfad(&wurzel).exists());
 
-        if code != 1 {
-            let live = get(&d, "/teil/live")?;
-            assert!(live.contains(&format!("class=\"{klasse}\">{titel}")));
+        let live = get(&d, "/teil/live")?;
+        if code == 1 {
+            assert!(live.contains(titel));
+        } else {
+            assert!(!live.contains(titel));
+            assert!(html.contains(&format!("class=\"{klasse}\">{titel}")));
             assert!(!live.contains("Letzter fehlgeschlagener Lauf"));
             let neustart = dienst(wurzel);
             let html = get(&neustart, "/teil/update")?;
@@ -1095,6 +1100,8 @@ fn update_abschluss_bleibt_nach_bestaetigung_und_rueckfall_sichtbar() -> Result<
         let (w, vorher, neu) = zwei_staende()?;
         let d = dienst(w.clone());
         let t = mittag()?;
+        d.einreihen(Art::Termine, Anlass::Hand)?;
+        assert_eq!(lauf_ab(&d, t)?, Art::Termine);
         suche_update(&d, t)?;
         bestaetige_update(&d)?;
         let (nr, kind) = some(d.schritt(t), "Update startet")?;
@@ -1142,13 +1149,47 @@ fn update_abschluss_bleibt_nach_bestaetigung_und_rueckfall_sichtbar() -> Result<
         let update = get(&fertig, "/teil/update")?;
         assert!(get(&fertig, "/teil/verbindung")?.contains("data-bereit=\"ja\""));
         if bestaetigen {
-            assert!(live.contains("Update bestätigt") && update.contains("bestätigt"));
+            let meldung = format!("Update auf {} bestätigt.", rueckfall::kurz(&neu));
+            assert!(update.contains(&meldung), "{update}");
+            assert_eq!(get(&fertig, "/einrichtung")?.matches(&meldung).count(), 1);
+            assert!(update.contains("<summary>Update-Verlauf</summary>"));
+            assert!(update.contains("class=\"gut\">Update bestätigt"));
+            assert!(update.contains(">Nach Update suchen<br>"));
+            assert!(update.contains(&format!("/protokoll?lauf={kennung}")));
+            assert!(
+                get(&fertig, &format!("/protokoll?lauf={kennung}"))?
+                    .contains("Neuer Dienst und Papierdaten erfolgreich geprüft.")
+            );
+            for pfad in [
+                "/",
+                "/depot",
+                "/gespraeche",
+                "/neuroschlopf",
+                "/teil/live",
+                "/teil/kopf",
+            ] {
+                let seite = get(&fertig, pfad)?;
+                assert!(seite.starts_with("HTTP/1.1 200 OK"), "{pfad}");
+                if pfad != "/teil/live" {
+                    assert!(seite.contains("Zuletzt: Termine abrufen"), "{pfad}");
+                }
+                assert!(
+                    !seite.contains(&meldung)
+                        && !seite.contains("Update bestätigt")
+                        && !seite.contains("Neuer Dienst und Papierdaten erfolgreich geprüft.")
+                        && !seite.contains(&format!("/protokoll?lauf={kennung}")),
+                    "{pfad}"
+                );
+            }
             assert_eq!(g(&w, &["rev-parse", "HEAD"])?, neu);
         } else {
             assert!(
                 live.contains("zurückgesetzt")
                     && update.contains("Erfundener Startfehler &lt;i&gt;")
             );
+            assert!(get(&fertig, "/gespraeche")?.contains("Erfundener Startfehler &lt;i&gt;"));
+            assert!(get(&fertig, "/teil/kopf")?.contains("Erfundener Startfehler &lt;i&gt;"));
+            assert!(update.contains(&format!("/protokoll?lauf={kennung}")));
             assert_eq!(g(&w, &["rev-parse", "HEAD"])?, vorher);
         }
     }
