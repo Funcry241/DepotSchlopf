@@ -372,8 +372,8 @@ pub(crate) fn seite(
         aktivitaet(d, &anzeige, &ein)
     );
     let gespeichert;
-    let (bild, eingaben, pruefungen) = match &anzeige.fertig {
-        Some(f) => {
+    let (bild, eingaben, pruefungen) = if let Some(f) = &anzeige.fertig {
+        {
             let laeuft = matches!(anzeige.status, Status::Berechnet) && matches!(ein, Ok(true));
             if laeuft {
                 html.push_str("<p>Ein weiterer Vergleich läuft. Bis er abgeschlossen ist, gilt der folgende letzte abgeschlossene Vergleich.</p>");
@@ -383,16 +383,16 @@ pub(crate) fn seite(
                 "<p><strong>Letzter abgeschlossener Vergleich</strong> · Geprüft {}</p>",
                 zeit_text(f.geprueft)
             );
-            if f.bild.stichtag != f.geprueft {
+            if f.bild.stichtag == f.geprueft {
                 let _ = write!(
                     html,
-                    "<p>Wissensstand der Daten {} · Das Journal hat sich seitdem nicht geändert. Der Prüfzeitpunkt liegt deshalb später.</p>",
+                    "<p>Wissensstand der Daten {}</p>",
                     zeit_text(f.bild.stichtag)
                 );
             } else {
                 let _ = write!(
                     html,
-                    "<p>Wissensstand der Daten {}</p>",
+                    "<p>Wissensstand der Daten {} · Das Journal hat sich seitdem nicht geändert. Der Prüfzeitpunkt liegt deshalb später.</p>",
                     zeit_text(f.bild.stichtag)
                 );
             }
@@ -402,7 +402,8 @@ pub(crate) fn seite(
                 Some(f.pruefungen.as_slice()),
             )
         }
-        None => {
+    } else {
+        {
             gespeichert = Bild::lese(&daten);
             match &gespeichert {
                 Some(b) => {
@@ -674,6 +675,51 @@ impl<'a> Vergleich<'a> {
     }
 }
 
+fn nachricht_fund(zeile: u64, n: &depot_journal::NachrichtBeleg) -> Fund<'_> {
+    let (aussage, id) = n
+        .text()
+        .rsplit_once(" | ")
+        .filter(|(_, url)| url.starts_with("https://") && !url.chars().any(char::is_whitespace))
+        .unwrap_or((n.text(), n.text()));
+    Fund {
+        zeile,
+        art: "nachricht",
+        quelle: n.quelle(),
+        id: id.into(),
+        aussage: aussage.into(),
+        anzeige: aussage.into(),
+        zeit: zeit_text(n.zeit()),
+        abruf: n.abruf(),
+    }
+}
+
+fn termin_fund(zeile: u64, n: &depot_journal::TerminBeleg) -> Fund<'_> {
+    let t = n.termin();
+    let verlaesslichkeit = match t.verlaesslichkeit() {
+        Verlaesslichkeit::Bestaetigt => "bestätigt",
+        Verlaesslichkeit::Angekuendigt => "angekündigt",
+        Verlaesslichkeit::Vermutet => "vermutet",
+    };
+    Fund {
+        zeile,
+        art: "termin",
+        quelle: n.quelle(),
+        id: t.kennung().into(),
+        aussage: format!(
+            "{} · {} · {}",
+            t.zeit(),
+            t.verlaesslichkeit().name(),
+            t.titel()
+        ),
+        anzeige: format!("{} · {verlaesslichkeit}", t.titel()),
+        zeit: match t.zeit() {
+            Zeitbezug::Tag(tag) => datum_text(tag),
+            Zeitbezug::Zeitpunkt(z) => zeit_text(z),
+        },
+        abruf: n.abruf(),
+    }
+}
+
 fn verglichen(
     stand: &Stand,
     eintraege: &[(Art, String)],
@@ -732,56 +778,14 @@ fn verglichen(
                 if n.abruf() > jetzt {
                     return Err("Wissensstand liegt vor einem belegten Abruf.".into());
                 }
-                let (aussage, id) = n
-                    .text()
-                    .rsplit_once(" | ")
-                    .filter(|(_, url)| {
-                        url.starts_with("https://") && !url.chars().any(char::is_whitespace)
-                    })
-                    .unwrap_or((n.text(), n.text()));
-                v.belege(Fund {
-                    zeile,
-                    art: "nachricht",
-                    quelle: n.quelle(),
-                    id: id.into(),
-                    aussage: aussage.into(),
-                    anzeige: aussage.into(),
-                    zeit: zeit_text(n.zeit()),
-                    abruf: n.abruf(),
-                });
+                v.belege(nachricht_fund(zeile, n));
             }
             Art::Termin => {
                 let n = termine.next().ok_or("Terminreferenz fehlt")?;
                 if n.abruf() > jetzt {
                     return Err("Wissensstand liegt vor einem belegten Abruf.".into());
                 }
-                let t = n.termin();
-                v.belege(Fund {
-                    zeile,
-                    art: "termin",
-                    quelle: n.quelle(),
-                    id: t.kennung().into(),
-                    aussage: format!(
-                        "{} · {} · {}",
-                        t.zeit(),
-                        t.verlaesslichkeit().name(),
-                        t.titel()
-                    ),
-                    anzeige: format!(
-                        "{} · {}",
-                        t.titel(),
-                        match t.verlaesslichkeit() {
-                            Verlaesslichkeit::Bestaetigt => "bestätigt",
-                            Verlaesslichkeit::Angekuendigt => "angekündigt",
-                            Verlaesslichkeit::Vermutet => "vermutet",
-                        }
-                    ),
-                    zeit: match t.zeit() {
-                        Zeitbezug::Tag(tag) => datum_text(tag),
-                        Zeitbezug::Zeitpunkt(z) => zeit_text(z),
-                    },
-                    abruf: n.abruf(),
-                });
+                v.belege(termin_fund(zeile, n));
             }
             _ => {}
         }
@@ -1093,13 +1097,17 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn gegenprobe_zeigt_zeile_quelle_zeit_und_einordnung_je_stand() -> Result<(), String> {
+    fn ansicht(bild: &Bild, e: &Eingaben) -> String {
+        let mut html = String::new();
+        eingaben_html(&mut html, bild, Some(e));
+        ergebnis_html(&mut html, bild, Some(e));
+        html
+    }
+
+    fn erststand_belegen(daten: &Testdaten, url: &str) -> Result<(), String> {
         use depot_journal::TerminBeleg;
         use depot_kern::{Betroffen, Herkunft, Isin, Termin};
-        let daten = Testdaten::neu()?;
         let zeit = |t: &str| Zeitpunkt::lies(t).ok_or_else(|| format!("Testzeit {t}"));
-        let url = "https://example.test/sap";
         let mut j = daten.journal()?;
         let meldung = NachrichtBeleg::neu(
             "quelle-test",
@@ -1128,7 +1136,15 @@ mod tests {
         )?;
         j.belege_termin(&beleg).map_err(|e| format!("{e:?}"))?;
         drop(j);
+        Ok(())
+    }
 
+    #[test]
+    fn gegenprobe_zeigt_zeile_quelle_zeit_und_einordnung_je_stand() -> Result<(), String> {
+        let daten = Testdaten::neu()?;
+        let zeit = |t: &str| Zeitpunkt::lies(t).ok_or_else(|| format!("Testzeit {t}"));
+        let url = "https://example.test/sap";
+        erststand_belegen(&daten, url)?;
         // Erststand mit Nachricht und Termin.
         let (erster, e1) = daten.vergleich("2026-11-12T10:30:00Z", None)?;
         let e1 = e1.ok_or("Eingaben des Erststands fehlen")?;
@@ -1150,9 +1166,7 @@ mod tests {
                 .iter()
                 .all(|e| e.einordnung == Einordnung::Erststand)
         );
-        let mut html = String::new();
-        eingaben_html(&mut html, &erster, Some(&e1));
-        ergebnis_html(&mut html, &erster, Some(&e1));
+        let html = ansicht(&erster, &e1);
         for teil in [
             "Erster bestätigter Stand · Journalzeilen J2 bis J3",
             "<td>J2</td><td>Nachricht</td><td>quelle-test</td><td>SAP erhöht die Prognose</td><td>Veröffentlicht 12.11.2026 10:00 MEZ</td><td>Abgerufen 12.11.2026 11:00 MEZ</td>",
@@ -1188,9 +1202,7 @@ mod tests {
             k.einordnung,
             Einordnung::Geaendert("SAP erhöht die Prognose".into())
         );
-        let mut html = String::new();
-        eingaben_html(&mut html, &zweiter, Some(&e2));
-        ergebnis_html(&mut html, &zweiter, Some(&e2));
+        let html = ansicht(&zweiter, &e2);
         assert!(html.contains("Verglichener Abschnitt · Journalzeilen J4 bis J4"));
         assert!(html.contains(
             "Aussage geändert · Bisher SAP erhöht die Prognose · Jetzt SAP senkt die Prognose"
@@ -1211,9 +1223,7 @@ mod tests {
         let (dritter, e3) = daten.vergleich("2026-11-12T13:00:00Z", Some(&zweiter))?;
         let e3 = e3.ok_or("Eingaben des dritten Stands fehlen")?;
         assert_eq!((e3.gesamt, e3.von, e3.bis), (0, 5, 5));
-        let mut html = String::new();
-        eingaben_html(&mut html, &dritter, Some(&e3));
-        ergebnis_html(&mut html, &dritter, Some(&e3));
+        let html = ansicht(&dritter, &e3);
         assert!(html.contains("Im verglichenen Abschnitt stehen keine Nachrichten oder Termine."));
         assert!(html.contains("Keine neuen oder geänderten Belege."));
         assert!(
