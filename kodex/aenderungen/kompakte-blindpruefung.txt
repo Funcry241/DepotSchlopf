@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Kurze Belegbewertungen mit weniger vertikalem Platz darstellen
+pfade:
+crates/depot_dienst/src/assets/stil.css
+crates/depot_dienst/src/belegpruefung.rs
