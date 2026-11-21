@@ -415,7 +415,7 @@ pub(crate) fn seite(
         concat!(
             "<div class=\"neuro-uebersicht\"><section><h3>Aktivität</h3>",
             "<div data-teil=\"/teil/neuroschlopf-aktivitaet\">{}</div>",
-            "<p>Neuronales Modell noch nicht eingebunden.</p></section>{}</div>"
+            "<p>Ein Depotmodell für die Belegbewertung steht noch aus.</p></section>{}</div>"
         ),
         aktivitaet_html(d, &anzeige, &ein),
         crate::neuro2026::TOPOLOGIE,

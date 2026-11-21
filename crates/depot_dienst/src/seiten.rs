@@ -576,8 +576,9 @@ pub fn rahmen(
          Fenster geschlossen hast, starte DepotSchlopf.cmd erneut.</div>\
          <p id=\"neuverbinden\" hidden><a id=\"neuverbinden-link\" class=\"aktion\" href=\"/einrichtung\">Einrichtung neu laden</a> · Prüfe deine Eingaben vorher. Beim Verlassen fragt dein Browser wegen ungespeicherter Änderungen nach.</p><main>\
          <div id=\"update-hinweis\" data-teil=\"/teil/update-hinweis\" role=\"status\" aria-live=\"polite\">{update}</div>\
-         <nav aria-label=\"Hauptnavigation\"><h1>{herz}DepotSchlopf</h1>{}{}{}{}{}\
-         <span class=\"leise\">Nur Papiergeld.</span>{figuren}{version}</nav>\
+         <nav aria-label=\"Hauptnavigation\">\
+         <div class=\"nav-kopf\"><h1>{herz}DepotSchlopf</h1><div class=\"nav-status\">{figuren}{version}</div></div>\
+         <div class=\"nav-seiten\">{}{}{}{}{}<span class=\"leise\">Nur Papiergeld.</span></div></nav>\
          <p class=\"leise\">Lass das schwarze DepotSchlopf-Fenster offen, damit DepotSchlopf läuft. \
          Du kannst es minimieren.</p>",
         nav("/", "Live"),
@@ -2605,12 +2606,30 @@ mod speicherleiste_tests {
     use super::STIL_DIENST;
 
     #[test]
-    fn herz_steht_ausserhalb_der_aktualisierten_betriebsleiste() {
-        let seite = super::rahmen("/", None, None, "", None, ("", ""), ("", ""));
-        let nav = seite.split_once("</nav>").map_or("", |(nav, _)| nav);
-        assert!(nav.contains("id=\"herz\""));
-        assert!(!nav.contains("id=\"betriebsleiste\""));
-        assert_eq!(seite.matches("id=\"herz\"").count(), 1);
+    fn kopfzeile_bleibt_unabhaengig_vom_aktiven_menuepunkt() -> Result<(), &'static str> {
+        let kopfzeile = |pfad| -> Result<String, &'static str> {
+            let seite = super::rahmen(pfad, None, None, "", None, ("", ""), ("", ""));
+            let (_, nav) = seite
+                .split_once("<nav aria-label=\"Hauptnavigation\">")
+                .ok_or("Hauptnavigation fehlt")?;
+            let (nav, _) = nav
+                .split_once("</nav>")
+                .ok_or("Hauptnavigation ist offen")?;
+            let (kopf, _) = nav
+                .split_once("<div class=\"nav-seiten\">")
+                .ok_or("Navigationslinks fehlen")?;
+            assert!(kopf.contains("id=\"herz\""));
+            assert!(kopf.contains("<div class=\"nav-status\"><span id=\"kopffiguren\""));
+            assert!(kopf.contains("<span class=\"version leise\">"));
+            assert!(!nav.contains("id=\"betriebsleiste\""));
+            assert_eq!(seite.matches("id=\"herz\"").count(), 1);
+            Ok(kopf.to_owned())
+        };
+        let live = kopfzeile("/")?;
+        for pfad in ["/depot", "/gespraeche", "/neuroschlopf", "/einrichtung"] {
+            assert_eq!(kopfzeile(pfad)?, live, "{pfad}");
+        }
+        Ok(())
     }
 
     #[test]

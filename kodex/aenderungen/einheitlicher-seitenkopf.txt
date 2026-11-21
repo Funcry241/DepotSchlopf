@@ -1,0 +1,9 @@
+klasse: Funktion
+zweck: Statusfiguren und Version in allen Ansichten stabil ausrichten und den Referenzlauf erklären
+pfade:
+crates/depot_dienst/src/assets/stil.css
+crates/depot_dienst/src/neuro2026.rs
+crates/depot_dienst/src/neuroschlopf.rs
+crates/depot_dienst/src/schmuck.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/dienst/live.rs

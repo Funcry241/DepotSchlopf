@@ -25,8 +25,7 @@ pub(crate) const STIL: &str = "
 #herz .herz-ring,#herz .herz-pause,#herz .herz-warnung{display:none;fill:none;stroke-width:2;stroke-linecap:round}
 #herz[data-zustand=offen] .herz-pause,#herz[data-zustand=halt] .herz-warnung{display:inline;stroke:var(--flaeche)}
 #herz[data-zustand=halt] .herz-ring{display:inline;stroke:currentColor}
-nav:has(.kopffiguren){position:relative}
-.kopffiguren{display:flex;gap:clamp(4px,1vw,12px);margin-inline-start:auto;align-self:center}
+.kopffiguren{display:flex;gap:clamp(4px,1vw,12px)}
 .kopffigur{display:grid;justify-items:center;min-width:45px;color:var(--text);font-size:.8rem}
 .kopffigur svg{width:36px;height:36px;overflow:visible;fill:currentColor}
 .dachs-fell{fill:#8b8275}.maus-fell{fill:#a995ae}.otter-fell{fill:#9d6a47}.figur-hell{fill:var(--flaeche)}
@@ -52,7 +51,6 @@ nav:has(.kopffiguren){position:relative}
   .kopffigur svg,.kopffigur .figur-auge{transition:transform .18s ease-out}
 }
 @media(max-width:600px){.kopffigur svg{width:28px;height:28px}.kopffigur{min-width:38px}}
-@media(max-width:460px){.kopffiguren{margin-inline-start:0}}
 .handelskarten{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:16px;align-items:start;margin-block:16px}
 .handelskarte{--figur-akzent:#877968;min-width:0;padding:clamp(14px,2.2vw,22px);
   border:1px solid var(--linie);border-radius:14px;background:var(--flaeche);
