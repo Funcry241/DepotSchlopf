@@ -2078,7 +2078,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
     };
     let entwurf = if ent.leer() { "nein" } else { "ja" };
     let (speicher_text, speicher_hinweis) = if p.an {
-        ("Änderungen speichern", "Der Zeitplan bleibt eingeschaltet.")
+        ("Zeitplan speichern", "Der Zeitplan bleibt eingeschaltet.")
     } else {
         (
             "Nur speichern · Zeitplan bleibt aus",
@@ -2089,11 +2089,6 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
         "Im Morgenlauf gilt der letzte abgeschlossene Handelstag je Börse."
     } else {
         "Kursabruf und Papiertag sind angehalten. Speichere eine Kursabrufzeit zwischen 07:00 und 08:30."
-    };
-    let speichern_hervorheben = if p.an || !gesperrt.is_empty() {
-        " data-speichern-hervorheben"
-    } else {
-        ""
     };
     let _ = write!(
         s,
@@ -2127,7 +2122,7 @@ fn zeitplan_teil(token: &str, zustand: &Zustand, e: &Einrichtung, s: &mut String
          ein neuer Grund für „Eingriff nötig“ entsteht oder ein Papiertag ausgefallen ist; löst \
          nichts aus und gilt auch bei ausgeschaltetem Zeitplan)</label>\
          <div class=\"speicher-aktionen\"><p data-speicherstand role=\"status\">Änderungen werden erst durch Speichern wirksam.</p>\
-         <button type=\"submit\" name=\"aktion\" value=\"speichern\"{speichern_hervorheben}>{speicher_text}</button> {einschalten}\
+         <button type=\"submit\" name=\"aktion\" value=\"speichern\" data-speichern-hervorheben>{speicher_text}</button> {einschalten}\
          <p>{speicher_hinweis} Du kannst die Einrichtung jederzeit später fortsetzen.</p></div></form></section>",
         uhrzeit_text(ent.termine.unwrap_or(p.termine)),
         uhrzeit_text(ent.kurse.unwrap_or(p.kurse)),

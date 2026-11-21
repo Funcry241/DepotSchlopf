@@ -193,11 +193,11 @@ pub(crate) fn einrichtung(d: &Dienst, abfrage: &str, konto_gespeichert: bool) ->
          Stelle <b>03:00 Uhr Ortszeit</b> ein. Im 12-Stunden-Format wählst du <b>03:00 AM</b>. Klicke auf <b>Übernehmen</b>.</li>\
          <li>Für den Journalstart sind <b>1.000 €</b> vorgesehen. Öffne bei abweichendem Bargeldbestand im Client Portal den <b>Paper-Modus</b> und suche in den <b>Einstellungen</b> nach <b>Paper Trading Account Reset</b>. Prüfe dort, ob IBKR 1.000 € in EUR anbietet.</li></ol>";
     let formular = format!(
-        "<form method=\"post\" action=\"/ibkr-papier\">\
+        "<form method=\"post\" action=\"/ibkr-papier\" data-aenderungen>\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <div class=\"formularfelder\"><label>Papierkontonummer \
          <input name=\"konto\" required autocomplete=\"off\" spellcheck=\"false\" maxlength=\"23\" pattern=\"DUR?[0-9]{{1,20}}\"></label>\
-         <button type=\"submit\">Papierkontonummer speichern</button></div></form>\
+         <button type=\"submit\" data-speichern-hervorheben>Papierkontonummer speichern</button></div></form>\
          <p class=\"leise\">Die Nummer bleibt lokal. Benutzername und Passwort gibst du im Gateway ein.</p>",
         maskiere(&d.token),
     );

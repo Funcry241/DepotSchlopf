@@ -189,10 +189,10 @@ fn app_js_liefert_die_gepruefte_fassung() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let antwort = get(&d, "/app.js", donnerstag(12, 0)?);
     let (_, js) = some(antwort.split_once("\r\n\r\n"), "HTTP-Antwort")?;
-    // SHA-256 der geprüften Fassung mit unabhängigen Aktivitätssignalen im Kopf.
+    // SHA-256 der geprüften Fassung mit live berechneter Kostenvorschau.
     assert_eq!(
         depot_kern::abdruck::sha256_hex(js.as_bytes()),
-        "04e7d109003bea477213e3a09356d215d4c750344ea5e8640b966326ac27f910"
+        "ed37cfbb1d2d4499c8dc4c05c918b7b32f5ffb4602b71a3154a73c397eaf3279"
     );
     Ok(())
 }
