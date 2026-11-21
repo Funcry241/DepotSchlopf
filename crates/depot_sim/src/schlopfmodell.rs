@@ -1,4 +1,5 @@
 //! Gemeinsame Beleggrundlage für unabhängige Erstmeinungen.
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::Read as _;
@@ -178,6 +179,90 @@ pub fn letzte_thesenpruefungen(s: &Stand) -> Vec<Thesenpruefung> {
                 protokolliert: datum,
             })
         })
+        .collect()
+}
+
+/// Laufende, journalbelegte Weltprognose und ihre protokollierten Belegverweise.
+#[derive(Debug)]
+pub struct OffeneThese {
+    pub wer: &'static str,
+    pub tag: Datum,
+    pub isin: Isin,
+    pub text: String,
+    pub gueltig_bis: Datum,
+    pub belege: BTreeMap<u64, String>,
+}
+
+/// Offene Thesen mit den ausdrücklich zitierten Zeilen des verfügbaren Belegstands.
+pub fn offene_thesen(
+    s: &Stand,
+    heute: Datum,
+    belegzeilen: &BTreeSet<u64>,
+    schritt: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<Vec<OffeneThese>, String> {
+    let mut pruefungen = BTreeMap::<_, Vec<_>>::new();
+    for p in protokolle(s) {
+        schritt()?;
+        pruefungen
+            .entry((p.wer, p.tag, p.isin))
+            .or_default()
+            .push(p.pruefung);
+    }
+    let mut offen = Vec::new();
+    for p in s.weltprognosen().iter().rev() {
+        schritt()?;
+        if p.datum > heute {
+            continue;
+        }
+        let Some(gueltig_bis) =
+            depot_journal::aufloesung::zieltag(&p.prognose.isin, p.datum, p.prognose.handelstage)
+                .filter(|tag| *tag >= heute)
+        else {
+            continue;
+        };
+        if s.aufloesungen().iter().any(|a| a.zu(p)) {
+            continue;
+        }
+        let pruefungen = pruefungen.get(&(p.berater, p.datum, p.prognose.isin.clone()));
+        if pruefungen
+            .into_iter()
+            .flatten()
+            .any(|a| a.status == "zurückziehen")
+        {
+            continue;
+        }
+        let mut text = thesentext(p);
+        if let Some(a) = pruefungen
+            .into_iter()
+            .flatten()
+            .find(|a| a.status == "präzisieren")
+        {
+            let _ = write!(text, " Letzte Präzisierung: {}", a.begruendung);
+        }
+        offen.push(OffeneThese {
+            wer: beratername(p.berater),
+            tag: p.datum,
+            isin: p.prognose.isin.clone(),
+            text,
+            gueltig_bis,
+            belege: pruefungen
+                .into_iter()
+                .flatten()
+                .rev()
+                .filter(|a| belegzeilen.contains(&a.beleg))
+                .map(|a| (a.beleg, a.begruendung.clone()))
+                .collect(),
+        });
+    }
+    Ok(offen)
+}
+
+/// Wertnennungen nach derselben Beobachtungsliste wie in der Schlagzeilenübersicht.
+pub fn nachricht_wertnennungen(text: &str, werte: &[depot_kern::liste::Wert]) -> Vec<Isin> {
+    crate::nachrichtenbezug::bezug(text, werte)
+        .werte
+        .into_iter()
+        .map(|w| w.isin.clone())
         .collect()
 }
 
@@ -438,6 +523,32 @@ mod tests {
         }
     }
 
+    fn pruefe_offene_thesen(stand: &Stand, heute: Datum, zeile: u64) -> Result<(), String> {
+        let belege = BTreeSet::from([zeile]);
+        let offen = offene_thesen(stand, heute, &belege, &mut || Ok(()))?;
+        assert_eq!(
+            offen.len(),
+            1,
+            "Zurückgezogene Thesen sind nicht mehr offen"
+        );
+        let dachs = offen.first().ok_or("Offene These fehlt")?;
+        assert_eq!(dachs.wer, "Dachs");
+        assert_eq!(
+            dachs.belege.get(&zeile).map(String::as_str),
+            Some("Neue Nachfrage eingeordnet.")
+        );
+        assert!(
+            offene_thesen(stand, heute, &BTreeSet::new(), &mut || Ok(()))?
+                .iter()
+                .all(|t| t.belege.is_empty())
+        );
+        let nach_zieltag = dachs.gueltig_bis.plus_tage(1).ok_or("Tag nach Ende")?;
+        assert!(offene_thesen(stand, nach_zieltag, &belege, &mut || Ok(()))?.is_empty());
+        let spaeter = Zeitpunkt::lies("2026-11-13T08:00:00Z").ok_or("Testzeit später")?;
+        assert!(bisherige_these(stand, BeraterId::Maus, heute, spaeter).is_none());
+        Ok(())
+    }
+
     #[test]
     fn gleicher_belegstand_und_getrennte_thesen_bleiben_beim_neustart_nachvollziehbar()
     -> Result<(), String> {
@@ -538,8 +649,6 @@ mod tests {
         drop(journal);
         let journal = daten.journal()?;
         assert_eq!(letzte_pruefungen(journal.stand()), erwartet);
-        let spaeter = Zeitpunkt::lies("2026-11-13T08:00:00Z").ok_or("Testzeit später")?;
-        assert!(bisherige_these(journal.stand(), BeraterId::Maus, heute, spaeter).is_none());
-        Ok(())
+        pruefe_offene_thesen(journal.stand(), heute, zeile)
     }
 }
