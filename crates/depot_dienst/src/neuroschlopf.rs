@@ -342,12 +342,8 @@ fn aktivitaet(d: &Dienst, anzeige: &Anzeige, ein: &Result<bool, String>) -> Stri
 }
 
 pub(crate) fn live(d: &Dienst) -> String {
-    let ein = einstellung(&d.wurzel.join("daten"));
     let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
-    let mut html = format!(
-        "<section id=\"schlopfmodell\"><h2>NeuroSchlopf</h2><p>{}</p>",
-        aktivitaet(d, &anzeige, &ein)
-    );
+    let mut html = String::from("<section id=\"schlopfmodell\"><h2>NeuroSchlopf</h2>");
     if let Some(f) = &anzeige.fertig {
         let _ = write!(
             html,
@@ -357,6 +353,12 @@ pub(crate) fn live(d: &Dienst) -> String {
     }
     html.push_str("<p><a href=\"/neuroschlopf\">Vergleich ansehen</a></p></section>");
     html
+}
+
+/// Liest den Zustand für Live vor der Sperre des Auftragsdienstes.
+pub(crate) fn live_aktivitaet(d: &Dienst, ein: &Result<bool, String>) -> String {
+    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
+    aktivitaet(d, &anzeige, ein)
 }
 
 fn aktivitaet_html(d: &Dienst, anzeige: &Anzeige, ein: &Result<bool, String>) -> String {
@@ -1723,12 +1725,12 @@ mod tests {
         let gemini = depot_lage::gespraeche::gemini_pfad(&daten);
         schreibe_ganz(&gemini, "gratisprojekt=ja\n")?;
         assert!(!einstellung(&daten)?);
-        assert!(live(&d).contains("Ausgeschaltet"));
+        assert!(crate::live_inhalt(&d, t).contains("Belegvergleich · Ausgeschaltet"));
         assert!(aufruf("falsch", "ja").contains("403"));
         assert!(!einstellung(&daten)?);
         assert!(aufruf("testtoken", "ja").contains("/einrichtung#neuroschlopf"));
         assert!(einstellung(&daten)?);
-        assert!(live(&d).contains("Wartet auf einen bestätigten Journalstand"));
+        assert!(crate::live_inhalt(&d, t).contains("Wartet auf einen bestätigten Journalstand"));
         assert!(aufruf("testtoken", "nein").contains("/einrichtung#neuroschlopf"));
         assert!(!einstellung(&daten)?);
         assert_eq!(

@@ -286,6 +286,7 @@ pub struct Zustand {
     pub(crate) berater_warten: BTreeSet<BeraterId>,
     neuro_abschnitt: Option<NeuroAbschnitt>,
     neuro_wer: Option<BeraterId>,
+    pub(crate) neuro_fragenstand: Option<crate::neuroauftraege::Fragenvorschau>,
     pub warteschlange: VecDeque<WartenderAuftrag>,
     pub verlauf: VecDeque<Auftrag>,
     pub zeitplan: Zeitplan,
@@ -855,6 +856,7 @@ impl Dienst {
                 berater_warten: BTreeSet::new(),
                 neuro_abschnitt: None,
                 neuro_wer: None,
+                neuro_fragenstand: None,
                 warteschlange: VecDeque::new(),
                 verlauf,
                 zeitplan,
@@ -1625,20 +1627,10 @@ impl Dienst {
             let _ = einreihen(z, Art::Wochenrueckschau, Anlass::Zeitplan, None);
             return;
         }
-        if z.zeitplan.an
-            && z.zeitplan.papier_danach
+        if gemini_vorlauf_offen(z, tag, (h, m))
             && z.erledigt.termine == Some(tag)
-            && z.erledigt.papier != Some(tag)
             && z.laufend.is_none()
             && z.warteschlange.is_empty()
-            && z.verlauf_fehler.is_none()
-            && z.verlauf_vermerkfehler.is_none()
-            && z.zeitplan_fehler.is_none()
-            && crate::zeitplan::gemini_zeitfenster(&z.zeitplan, tag, (h, m), &z.boersen)
-            && !z
-                .verlauf
-                .iter()
-                .any(|a| a.art == Art::Gemini && a.start.frankfurt_tag() == Some(tag))
             && depot_lage::gespraeche::gemini_aktiv(&self.wurzel.join("daten"))
             && einreihen(z, Art::Gemini, Anlass::Zeitplan, None).is_ok()
             && let Some(a) = z.warteschlange.back_mut()
@@ -2043,11 +2035,9 @@ fn rss_zeitplan_an(z: &Zustand, jetzt: Zeitpunkt) -> bool {
         && ortszeit(jetzt).is_some_and(|(_, h, ..)| (8..23).contains(&h))
 }
 
-fn vorbereitung_faellig(z: &Zustand, jetzt: Zeitpunkt) -> bool {
-    let Some((tag, ..)) = ortszeit(jetzt) else {
-        return false;
-    };
-    rss_zeitplan_an(z, jetzt)
+pub(crate) fn vorbereitung_offen(z: &Zustand, tag: Datum) -> bool {
+    z.zeitplan.an
+        && z.zeitplan.nachrichten_an
         && z.zeitplan.vorbereitung.aktiv()
         && !crate::zeitplan::handelstag(tag)
         && z.erledigt_fehler.is_none()
@@ -2058,6 +2048,14 @@ fn vorbereitung_faellig(z: &Zustand, jetzt: Zeitpunkt) -> bool {
             .verlauf
             .iter()
             .any(|a| a.art == Art::Vorbereiten && ortszeit(a.start).is_some_and(|(t, ..)| t == tag))
+}
+
+fn vorbereitung_faellig(z: &Zustand, jetzt: Zeitpunkt) -> bool {
+    let Some((tag, ..)) = ortszeit(jetzt) else {
+        return false;
+    };
+    rss_zeitplan_an(z, jetzt)
+        && vorbereitung_offen(z, tag)
         && z.verlauf.iter().any(|a| {
             a.art == Art::Nachrichten
                 && a.erfolg == Some(true)
@@ -2068,20 +2066,54 @@ fn vorbereitung_faellig(z: &Zustand, jetzt: Zeitpunkt) -> bool {
         })
 }
 
-fn zeitplan_faellig(z: &Zustand, tag: Datum, zeit: (u8, u8)) -> Option<Art> {
-    let depot = z.lage.as_ref().and_then(|l| l.bild.depot.as_ref());
-    let bestand: Vec<_> = depot
-        .into_iter()
-        .flat_map(|d| &d.toepfe)
+pub(crate) fn gemini_vorlauf_offen(z: &Zustand, tag: Datum, zeit: (u8, u8)) -> bool {
+    z.zeitplan.an
+        && z.zeitplan.papier_danach
+        && z.erledigt.papier != Some(tag)
+        && z.erledigt_fehler.is_none()
+        && z.verlauf_fehler.is_none()
+        && z.verlauf_vermerkfehler.is_none()
+        && z.zeitplan_fehler.is_none()
+        && crate::zeitplan::gemini_zeitfenster(&z.zeitplan, tag, zeit, &z.boersen)
+        && !z
+            .verlauf
+            .iter()
+            .any(|a| a.art == Art::Gemini && a.start.frankfurt_tag() == Some(tag))
+}
+
+fn bestandsboersen(depot: &depot_lage::DepotLage) -> Vec<Boerse> {
+    depot
+        .toepfe
+        .iter()
         .flat_map(|t| &t.positionen)
         .filter_map(|p| depot_kern::Isin::neu(&p.isin).ok())
         .filter_map(|isin| depot_kern::liste::boerse_von(&isin))
-        .collect();
-    let pflicht = if depot.is_some() {
-        &bestand
-    } else {
-        &z.boersen
+        .collect()
+}
+
+pub(crate) fn papier_kurse_moeglich(z: &Zustand, tag: Datum) -> bool {
+    let abrufe = crate::zeitplan::abrufe_fuer(&z.zeitplan, tag, &z.boersen);
+    let depot = z.lage.as_ref().and_then(|l| l.bild.depot.as_ref());
+    let bestand = depot.map(bestandsboersen);
+    let pflicht = bestand.as_deref().unwrap_or(&z.boersen);
+    let schluss = depot_kern::liste::erster_schluss(tag, &z.boersen);
+    let kurs_moeglich = |b| {
+        z.erledigt.erfolgreich(b, tag)
+            || (abrufe.iter().any(|(boerse, _)| *boerse == b)
+                && (z.erledigt.kurse_von(b) != Some(tag)
+                    || z.auftrag_stand(Art::KurseVon(b)).is_some()
+                    || z.erledigt
+                        .abruf(b)
+                        .zip(schluss)
+                        .is_some_and(|(abruf, schluss)| abruf.wiederholung(schluss).is_some())))
     };
+    abrufe.iter().any(|(b, _)| kurs_moeglich(*b)) && pflicht.iter().copied().all(kurs_moeglich)
+}
+
+fn zeitplan_faellig(z: &Zustand, tag: Datum, zeit: (u8, u8)) -> Option<Art> {
+    let depot = z.lage.as_ref().and_then(|l| l.bild.depot.as_ref());
+    let bestand = depot.map(bestandsboersen);
+    let pflicht = bestand.as_deref().unwrap_or(&z.boersen);
     let art = faellig_mit_bestand(&z.zeitplan, &z.erledigt, tag, zeit, &z.boersen, pflicht)?;
     if art == Art::Papier && depot.is_some_and(|d| d.letzter_abschluss.is_some_and(|d| d >= tag)) {
         return None;
@@ -2241,6 +2273,7 @@ mod neuro_vorrang_tests {
         }
         assert_eq!(d.neuro_wartet(), Some(BeraterId::Maus));
         assert!(crate::betriebsleiste(&d, jetzt.frankfurt_tag()).contains("data-denkt=\"maus\""));
+        let live_waehrend_der_frage = crate::live_inhalt(&d, jetzt);
         let (nr, papier) = d
             .schritt(jetzt)
             .ok_or("Papiertag wartet auf NeuroSchlopf")?;
@@ -2262,6 +2295,13 @@ mod neuro_vorrang_tests {
         assert!(papier_fertig);
         assert_eq!(maus_wartet, Some(BeraterId::Maus));
         assert!(d.neuro_wartet().is_none());
+        assert!(live_waehrend_der_frage.contains("Wartet auf die Antwort von Maus."));
+        assert!(
+            live_waehrend_der_frage.contains(
+                "Beantwortet eine Frage von NeuroSchlopf. Danach vorgemerkt · Papiertag."
+            )
+        );
+        assert!(!crate::live_inhalt(&d, jetzt).contains("Wartet auf die Antwort von Maus."));
         fs::remove_dir_all(wurzel).map_err(|e| e.to_string())?;
         Ok(())
     }

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
-use depot_kern::modelle::{MODELL_DACHS, MODELL_MAUS};
+use depot_kern::modelle::KiEinstellungen;
 use depot_kern::{Datum, Zeitpunkt};
 use depot_lage::gespraeche::{self, Gespraech};
 use depot_lage::html::maskiere;
@@ -285,9 +285,9 @@ impl Aufrufe {
                     .iter()
                     .any(|z| z.in_frankfurt().is_some_and(|(d, ..)| d == tag))
             {
-                s.push_str("<p><b>Konsolenlauf</b>");
+                s.push_str("<li><b>Konsolenlauf</b>");
                 self.gelaufen(s, Some(lauf), None);
-                s.push_str("</p>");
+                s.push_str("</li>");
             }
         }
     }
@@ -305,11 +305,21 @@ fn abfragewert(wert: &str) -> String {
     aus
 }
 
-pub(crate) fn geplant(s: &mut String, tag: Datum) {
-    for (wer, modell) in [("dachs", MODELL_DACHS), ("maus", MODELL_MAUS)] {
+pub(crate) fn geplant(s: &mut String, tag: Datum, einstellungen: Option<KiEinstellungen>) {
+    let Some(e) = einstellungen else {
+        s.push_str(" <span class=\"leise\">KI-Einstellungen nicht verfügbar</span>");
+        return;
+    };
+    for (wer, profil) in [("dachs", e.dachs), ("maus", e.maus)] {
+        let modell = crate::ki_ausblick::modell_text(profil.auswahl);
+        let hinweis = if profil.max_aufrufe == 0 {
+            " · Tageslimit 0"
+        } else {
+            ""
+        };
         let _ = write!(
             s,
-            " <span><a href=\"/gespraeche?tag={tag}&amp;wer={wer}\">{} ({modell})</a></span>",
+            " <span><a href=\"/gespraeche?tag={tag}&amp;wer={wer}\">{} ({modell})</a>{hinweis}</span>",
             name(wer)
         );
     }
