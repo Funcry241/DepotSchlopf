@@ -2,7 +2,10 @@
 use std::path::Path;
 
 use depot_journal::{AufrufErlaubnis, Journal, KiZweck};
-use depot_kern::{Cent, Datum, Grenzen, Kurse, Topf, TopfId, Universum, Vorschlag, Zeitpunkt};
+use depot_kern::modelle::Modellwahl;
+use depot_kern::{
+    BeraterId, Cent, Datum, Grenzen, Kurse, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
+};
 use depot_ki::{KiDeckel, Sperre};
 use depot_regelwerk::{Eingabe, Kennungsvergabe, entscheide_ersatzkauf, entscheide_mit_kaufbudget};
 
@@ -14,8 +17,15 @@ const RUNDEN: u32 = crate::abstimmung::ABSTIMMUNG_RUNDEN;
 
 /// Pro KI höchstens vier Fragen: Erstmeinung, Prüfung, zwei Abstimmungsrunden.
 pub fn hoechstkosten() -> Option<Cent> {
-    let dachs = KiDeckel::standard(depot_kern::BeraterId::Dachs).hoechstkosten()?;
-    let maus = KiDeckel::standard(depot_kern::BeraterId::Maus).hoechstkosten()?;
+    hoechstkosten_fuer(
+        Modellwahl::standard(BeraterId::Dachs),
+        Modellwahl::standard(BeraterId::Maus),
+    )
+}
+
+pub fn hoechstkosten_fuer(dachs: Modellwahl, maus: Modellwahl) -> Option<Cent> {
+    let dachs = KiDeckel::fuer_modell(dachs.modell()).hoechstkosten()?;
+    let maus = KiDeckel::fuer_modell(maus.modell()).hoechstkosten()?;
     dachs
         .checked_add(maus)?
         .mal_stueck(u64::from(RUNDEN.checked_add(2)?))
@@ -38,12 +48,17 @@ impl Budget {
                 .warum_nicht()
                 .unwrap_or_else(|| "KI nicht verfügbar".into())));
         }
-        let erlaubnis =
-            match j.reserviere_fuer(id.berater(), self.datum, self.zyklus, KiZweck::Simulation) {
-                Ok(e) => e,
-                Err(Sperre::Kassenbuch(e)) => return Err(e),
-                Err(e) => return Ok(Err(format!("Kostenschutz ({e:?})"))),
-            };
+        let erlaubnis = match j.reserviere_mit_einstellung(
+            id.berater(),
+            self.datum,
+            self.zyklus,
+            KiZweck::Simulation,
+            b.einstellung(),
+        ) {
+            Ok(e) => e,
+            Err(Sperre::Kassenbuch(e)) => return Err(e),
+            Err(e) => return Ok(Err(format!("Kostenschutz ({e:?})"))),
+        };
         let antwort = frage(b, erlaubnis);
         crate::lauf::belege_ki(j, b).map_err(|e| format!("Kassenbuch: {e:?}"))?;
         Ok(Ok(antwort))

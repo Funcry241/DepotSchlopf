@@ -326,14 +326,11 @@ fn budget(l: &Lagebild, s: &mut String) {
         } else {
             ("leise", "Ausgeschaltet")
         };
-        let aufrufe = gemini.aufrufe.map_or_else(
-            || "unbekannt".into(),
-            |n| format!("{n} von {}", depot_kern::gemini::TAGESGRENZE),
-        );
+        let kontingent = maskiere(&gemini.kontingent_text());
         let _ = write!(
             s,
             "<article class=\"budget-karte\"><h3>Gemini</h3><p class=\"{klasse}\">{status}</p>\
-             <dl><dt>Tarif</dt><dd>Gratis-Projekt</dd><dt>Aufrufe heute</dt><dd>{aufrufe}</dd></dl></article>"
+             <p>{kontingent}</p></article>"
         );
     }
     s.push_str(

@@ -22,13 +22,14 @@ use std::io::{ErrorKind, Read, Seek, SeekFrom, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
+use depot_kern::modelle::{BeraterEinstellung, Modellwahl};
 use depot_kern::{BeraterId, Cent, Datum, Topf, TopfId, Zeitpunkt};
-use depot_ki::{Sperre, grenzabdruck};
+use depot_ki::Sperre;
 use depot_regelwerk::{GenehmigterAuftrag, Kennungsvergabe};
 use sha2::{Digest, Sha256};
 
 use crate::auftrag::{Meldung, meldung_text};
-use crate::kasse::{AufrufErlaubnis, naechste};
+use crate::kasse::{AufrufErlaubnis, grenzabdruck_fuer_auswahl};
 use crate::kursbeleg::{KursBeleg, kursbeleg_text};
 use crate::nachrichtbeleg::{NachrichtBeleg, nachrichtbeleg_text};
 use crate::stand::{
@@ -1277,37 +1278,39 @@ impl Journal {
         start: Zeitpunkt,
         berater: BeraterId,
     ) -> Result<AufrufErlaubnis, Sperre> {
+        self.reserviere_vorbereitung_mit_einstellung(start, berater, None)
+    }
+
+    pub fn reserviere_vorbereitung_mit_einstellung(
+        &mut self,
+        start: Zeitpunkt,
+        berater: BeraterId,
+        einstellung: Option<BeraterEinstellung>,
+    ) -> Result<AufrufErlaubnis, Sperre> {
         let datum = start.datum().ok_or(Sperre::Rechenfehler)?;
         let zyklus =
             u32::try_from(start.sekunden().div_euclid(86_400)).map_err(|_| Sperre::Rechenfehler)?;
-        let (buchung, deckel) = crate::kasse::naechste_fuer(
-            self.stand.ki(),
+        let wahl = einstellung.unwrap_or_else(|| BeraterEinstellung::standard(berater));
+        let auswahl = einstellung.map(|p| p.auswahl);
+        let (buchung, deckel) = self.stand.ki().naechste_mit_einstellung(
             berater,
             datum,
             zyklus,
             crate::KiZweck::Vorbereitung,
+            wahl,
         )?;
-        // Die engere Grenze gilt für neue Aufrufe. Frühere Buchungen werden
-        // weiterhin nach den beim Schreiben geltenden Grenzen wiederabgespielt.
-        let rahmen = depot_ki::vorbereitungsrahmen(
-            &depot_ki::KiGrenzen::standard(),
-            self.stand.ki().buchungen(),
-            berater,
-            datum,
-        )?;
-        if buchung.reserviert > rahmen {
-            return Err(Sperre::TagesrahmenErschoepft);
-        }
         let e = crate::vorbereitung::Eintrag::Budget {
             start,
-            abdruck: grenzabdruck(),
+            abdruck: grenzabdruck_fuer_auswahl(auswahl),
             buchung: buchung.clone(),
+            auswahl,
         };
         self.schreibe_eintrag(Art::Vorbereitung, &e.text())
             .map_err(|e| Sperre::Kassenbuch(format!("{e:?}")))?;
         Ok(AufrufErlaubnis::neu(
             buchung,
             deckel,
+            wahl.auswahl,
             self.stand.ki().buchungen().len().saturating_sub(1),
         ))
     }
@@ -1338,7 +1341,22 @@ impl Journal {
         zyklus: u32,
         zweck: crate::KiZweck,
     ) -> Result<(), Sperre> {
-        crate::kasse::naechste_fuer(self.stand.ki(), berater, datum, zyklus, zweck).map(|_| ())
+        self.pruefe_ki_mit_einstellung(berater, datum, zyklus, zweck, None)
+    }
+
+    pub fn pruefe_ki_mit_einstellung(
+        &self,
+        berater: BeraterId,
+        datum: Datum,
+        zyklus: u32,
+        zweck: crate::KiZweck,
+        einstellung: Option<BeraterEinstellung>,
+    ) -> Result<(), Sperre> {
+        let wahl = einstellung.unwrap_or_else(|| BeraterEinstellung::standard(berater));
+        self.stand
+            .ki()
+            .pruefe_reservierung(berater, datum, zyklus, zweck, wahl)
+            .map(|_| ())
     }
 
     pub fn reserviere_fuer(
@@ -1348,9 +1366,23 @@ impl Journal {
         zyklus: u32,
         zweck: crate::KiZweck,
     ) -> Result<AufrufErlaubnis, Sperre> {
-        let (buchung, deckel) =
-            crate::kasse::naechste_fuer(self.stand.ki(), berater, datum, zyklus, zweck)?;
-        self.schreibe_ki(buchung, deckel, zweck)
+        self.reserviere_mit_einstellung(berater, datum, zyklus, zweck, None)
+    }
+
+    pub fn reserviere_mit_einstellung(
+        &mut self,
+        berater: BeraterId,
+        datum: Datum,
+        zyklus: u32,
+        zweck: crate::KiZweck,
+        einstellung: Option<BeraterEinstellung>,
+    ) -> Result<AufrufErlaubnis, Sperre> {
+        let wahl = einstellung.unwrap_or_else(|| BeraterEinstellung::standard(berater));
+        let (buchung, deckel) = self
+            .stand
+            .ki()
+            .naechste_mit_einstellung(berater, datum, zyklus, zweck, wahl)?;
+        self.schreibe_ki(buchung, deckel, zweck, einstellung.map(|p| p.auswahl))
     }
 
     fn schreibe_ki(
@@ -1358,22 +1390,26 @@ impl Journal {
         buchung: depot_ki::Buchung,
         deckel: depot_ki::KiDeckel,
         zweck: crate::KiZweck,
+        auswahl: Option<Modellwahl>,
     ) -> Result<AufrufErlaubnis, Sperre> {
         let sperre = |e: JournalFehler| Sperre::Kassenbuch(format!("Journal: {e:?}"));
-        let text = crate::kasse::buchung_fuer(&buchung, zweck);
+        let text = crate::kasse::buchung_fuer(&buchung, zweck, auswahl);
+        let abdruck = grenzabdruck_fuer_auswahl(auswahl);
         if zweck.ohne_handelsbeginn() {
-            self.schreibe_eintrag(Art::Ki, &format!("{text};{}", grenzabdruck()))
+            self.schreibe_eintrag(Art::Ki, &format!("{text};{abdruck}"))
                 .map_err(sperre)?;
         } else {
-            if !self.stand.ki().abdruck_aktuell() {
-                self.schreibe_eintrag(Art::KiGrenzen, &grenzabdruck())
+            if !self.stand.ki().abdruck_aktuell(&abdruck) {
+                self.schreibe_eintrag(Art::KiGrenzen, &abdruck)
                     .map_err(sperre)?;
             }
             self.schreibe_eintrag(Art::Ki, &text).map_err(sperre)?;
         }
+        let wahl = auswahl.unwrap_or_else(|| Modellwahl::standard(buchung.berater));
         Ok(AufrufErlaubnis::neu(
             buchung,
             deckel,
+            wahl,
             self.stand.ki().buchungen().len().saturating_sub(1),
         ))
     }
@@ -1384,8 +1420,7 @@ impl Journal {
         datum: Datum,
         zyklus: u32,
     ) -> Result<AufrufErlaubnis, Sperre> {
-        let (buchung, deckel) = naechste(self.stand.ki(), berater, datum, zyklus)?;
-        self.schreibe_ki(buchung, deckel, crate::KiZweck::Erstmeinung)
+        self.reserviere_fuer(berater, datum, zyklus, crate::KiZweck::Erstmeinung)
     }
 }
 

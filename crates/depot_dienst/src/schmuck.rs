@@ -149,7 +149,11 @@ pub(crate) fn aussagen(
     let art = z.laufend.as_ref().map(|a| a.art);
     let dachs_wartet = art.filter(|_| z.berater_warten.contains(&BeraterId::Dachs));
     let maus_wartet = art.filter(|_| z.berater_warten.contains(&BeraterId::Maus));
-    let denkt = denkt(dachs_wartet.is_some(), maus_wartet.is_some(), art);
+    let gemini = z
+        .aktive_auftraege()
+        .find(|a| a.art == crate::werkbank::Art::Gemini)
+        .map(|a| a.art);
+    let denkt = denkt(dachs_wartet.is_some(), maus_wartet.is_some(), gemini);
     let papier_freigabe_offen = z.lage.as_ref().is_some_and(|l| l.bild.papierfreigabe_offen);
     let (otter, satz) = match (update_freigabe_offen, papier_freigabe_offen) {
         (true, true) => (

@@ -393,10 +393,12 @@ fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Re
     for _ in 0..3 {
         let seite = get(&d, "/neuroschlopf", t);
         assert!(seite.starts_with("HTTP/1.1 200 OK"));
+        assert_eq!(seite.matches("NeuroSchlopf einrichten</a>").count(), 1);
         assert_eq!(seite.matches("aria-current=\"page\"").count(), 1);
         assert!(seite.contains("<a href=\"/neuroschlopf\" aria-current=\"page\">NeuroSchlopf</a>"));
         for teil in [
             "Hintergrundvergleich · Ausgeschaltet",
+            "<h3>Offene Thesen und ihre Belege</h3>",
             "Noch kein abgeschlossener Vergleich. Es fehlt ein bestätigter Stand.",
             "Neuronales Modell noch nicht eingebunden",
             "href=\"/neuroschlopf/lernlauf\">Neuro2026-Referenzlauf Multiplikation</a>",
@@ -418,6 +420,8 @@ fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Re
     let vorher = dateien(&wurzel)?;
     let seite = get(&d, "/neuroschlopf", t);
     assert!(seite.contains("Wartet auf einen bestätigten Journalstand."));
+    assert!(!seite.contains("NeuroSchlopf einrichten"));
+    assert!(!get(&d, "/neuroschlopf/lernlauf", t).contains("NeuroSchlopf einrichten"));
     assert_eq!(dateien(&wurzel)?, vorher);
     for unterseite in ["/neuroschlopf/lernlauf", "/neuroschlopf/belegpruefung"] {
         assert!(

@@ -25,6 +25,8 @@
 
 pub mod budget;
 mod tagesrahmen;
-pub use tagesrahmen::{handelstage_rest, tagesrahmen, vorbereitungsrahmen};
+pub use tagesrahmen::{
+    handelstage_rest, tagesrahmen, vorbereitungsrahmen, vorbereitungsrahmen_fuer_modell,
+};
 
 pub use budget::{Buchung, Datum, KiDeckel, KiGrenzen, Preise, Sperre, grenzabdruck, pruefe};

@@ -2,6 +2,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use depot_kern::json::{self, Json, zitiere};
 use depot_kern::{BeraterId, Cent, Datum, Zeitpunkt};
@@ -168,7 +169,17 @@ pub fn anhaengen(daten: &Path, e: &Gespraech) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => verzeichnis(daten)?,
         Err(e) => return Err(e),
     }
-    let _sperre = sperre_schreiber(daten)?;
+    // Gemini und die Hauptberater teilen die Tagesdatei. Nur eine kurze Kollision
+    // beim Anhängen abwarten. Die Sperre bleibt außerhalb aller Anbieteraufrufe.
+    let mut versuche = 0..5;
+    let _sperre = loop {
+        match sperre_schreiber(daten) {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock && versuche.next().is_some() => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            ergebnis => break ergebnis?,
+        }
+    };
     let pfad = datei(daten, tag);
     if let Ok(info) = fs::symlink_metadata(&pfad)
         && !info.is_file()

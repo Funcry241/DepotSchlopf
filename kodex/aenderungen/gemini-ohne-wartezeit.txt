@@ -1,0 +1,10 @@
+klasse: Funktion
+zweck: Kostenlose Gemini-Zuarbeit im Hintergrund ausführen und den Papierlauf unabhängig davon starten
+pfade:
+crates/depot_berater/src/zusatz.rs
+crates/depot_dienst/src/protokoll.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/tests/dienst/ki_gespraeche.rs
+crates/depot_journal/src/gespraeche.rs
+docs/befunde/dienst.md

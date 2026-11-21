@@ -1,0 +1,8 @@
+klasse: Funktion
+zweck: NeuroSchlopf stellt offene Thesen und belegte Zuordnungen vor den weiteren Vergleichsbefunden dar
+pfade:
+crates/depot_dienst/src/neuro2026.rs
+crates/depot_dienst/src/neuroschlopf.rs
+crates/depot_dienst/tests/dienst/live.rs
+crates/depot_lage/src/lib.rs
+crates/depot_sim/src/schlopfmodell.rs

@@ -81,6 +81,10 @@ pub struct Urteil {
 /// Ein Berater. Jede Frage kostet eine `AufrufErlaubnis`; die gibt es nur, wenn das Journal die
 /// Hoechstkosten vorher gebucht hat (R8). Der Berater verbraucht sie.
 pub trait Berater {
+    fn einstellung(&self) -> Option<depot_kern::modelle::BeraterEinstellung> {
+        None
+    }
+
     fn wochenrat(
         &mut self,
         _erlaubnis: AufrufErlaubnis,

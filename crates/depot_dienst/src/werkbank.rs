@@ -1,14 +1,14 @@
 //! Die Werkbank: was der Dienst gerade tut, was wartet und was zuletzt geschah.
 //!
-//! **Ein Auftrag zur Zeit.** Jeder Auftrag ist ein eigener Lauf von `depotschlopf` (wie
-//! `run.cmd kurse`, `run.cmd termine`, `run.cmd papier`) im Projektordner; der Dienst selbst
-//! schreibt nie ins Journal. Das Lagebild liest das Journal nur, wenn kein Auftrag laeuft, und
-//! nur im selben Arbeiter, der auch Auftraege startet: Beide greifen nie zugleich zu.
+//! **Ein Hauptauftrag zur Zeit.** Optionale Gemini-Zuarbeit läuft unabhängig.
+//! Jeder Auftrag läuft in einem eigenen Prozess im Projektordner. Der Dienst
+//! selbst schreibt nie ins Journal. Das Lagebild liest nur ohne Hauptauftrag. Gemini liest
+//! im Hintergrund einen bestätigten Journalausschnitt ohne Journalsperre.
 //!
 //! **Eindeutige Kennung:** Jeder Auftrag hat eine Kennung aus Startzeit und Nummer. Dieselbe Art
 //! steht nie zweimal in der Warteschlange oder laeuft zugleich.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{BufReader, PipeReader, Write, pipe};
 use std::path::{Path, PathBuf};
@@ -259,7 +259,6 @@ pub struct WartenderAuftrag {
     pub anlass: Anlass,
     update_commit: Option<String>,
     gemini_vorrang: bool,
-    gemini_vorgeschaltet: bool,
 }
 
 /// Der veraenderliche Zustand.
@@ -268,6 +267,7 @@ pub struct Zustand {
     pub naechste_nr: u64,
     pub(crate) ibkr_pruefung_ab_nr: u64,
     pub laufend: Option<Auftrag>,
+    gemini_laufend: Option<Auftrag>,
     /// Berater, deren Transportaufruf im laufenden Prozess noch auf eine Antwort wartet.
     pub(crate) berater_warten: BTreeSet<BeraterId>,
     pub warteschlange: VecDeque<WartenderAuftrag>,
@@ -299,8 +299,13 @@ pub struct Zustand {
     pub verlauf_vermerkfehler: Option<String>,
     /// Die Boersen der Liste (`depot_kern::liste::boersen`), je eine mit eigenem Kursabruf.
     pub boersen: Vec<Boerse>,
-    pub(crate) protokoll_datei: Option<crate::protokoll::Datei>,
-    protokoll_fehler: Option<String>,
+    protokolle: BTreeMap<u64, Laufprotokoll>,
+}
+
+#[derive(Debug, Default)]
+struct Laufprotokoll {
+    datei: Option<crate::protokoll::Datei>,
+    fehler: Option<String>,
 }
 
 /// Warum ein Zeitplan nicht gespeichert wurde.
@@ -342,7 +347,7 @@ impl Zustand {
 
     /// Stand des Auftrags für die Bedienelemente.
     pub fn auftrag_stand(&self, art: Art) -> Option<&'static str> {
-        if self.laufend.as_ref().is_some_and(|a| a.art == art) {
+        if self.aktive_auftraege().any(|a| a.art == art) {
             Some("läuft …")
         } else if self.warteschlange.iter().any(|a| a.art == art) {
             Some("wartet …")
@@ -373,8 +378,37 @@ impl Zustand {
             .find(|a| matches!(a.art, Art::Update | Art::UpdatePruefen))
     }
 
+    pub(crate) fn aktive_auftraege(&self) -> impl Iterator<Item = &Auftrag> {
+        self.laufend.iter().chain(self.gemini_laufend.iter())
+    }
+
     pub(crate) fn update_wartet_auf_ruhe(&self) -> bool {
-        self.laufend.is_some() || !self.warteschlange.is_empty()
+        self.aktive_auftraege().next().is_some() || !self.warteschlange.is_empty()
+    }
+
+    fn naechster_auftrag(&mut self) -> Option<WartenderAuftrag> {
+        if self.laufend.is_none()
+            && let Some(i) = self.warteschlange.iter().position(|a| {
+                a.art != Art::Gemini
+                    && (self.gemini_laufend.is_none()
+                        || !matches!(a.art, Art::Update | Art::Sicherung))
+            })
+        {
+            return self.warteschlange.remove(i);
+        }
+        if self.gemini_laufend.is_some()
+            || self
+                .laufend
+                .as_ref()
+                .is_some_and(|a| matches!(a.art, Art::Update | Art::Sicherung))
+        {
+            return None;
+        }
+        let i = self
+            .warteschlange
+            .iter()
+            .position(|a| a.art == Art::Gemini)?;
+        self.warteschlange.remove(i)
     }
 
     pub(crate) fn update_angebot(&self) -> Option<&crate::update_angebot::Angebot> {
@@ -785,6 +819,7 @@ impl Dienst {
                 naechste_nr,
                 ibkr_pruefung_ab_nr: naechste_nr,
                 laufend: None,
+                gemini_laufend: None,
                 berater_warten: BTreeSet::new(),
                 warteschlange: VecDeque::new(),
                 verlauf,
@@ -804,8 +839,7 @@ impl Dienst {
                 verlauf_fehler: None,
                 verlauf_vermerkfehler: None,
                 boersen: depot_kern::liste::boersen(),
-                protokoll_datei: None,
-                protokoll_fehler: None,
+                protokolle: BTreeMap::new(),
             }),
             depot_lesecache: Mutex::default(),
             gespraechscache: crate::zeitstrahl_ki::Cache::default(),
@@ -902,29 +936,41 @@ impl Dienst {
     fn protokoll_beginnen(&self, z: &mut Zustand, a: &Auftrag) {
         z.verlauf_fehler = None;
         z.verlauf_vermerkfehler = None;
-        z.protokoll_fehler = None;
         self.protokoll_schutz
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .auffrischen();
-        match crate::protokoll::Datei::neu(
+        let parallel = z
+            .aktive_auftraege()
+            .next()
+            .map(|lauf| lauf.kennung.as_str());
+        let datei = match crate::protokoll::Datei::neu(
             &self.wurzel,
             &a.kennung,
             self.version.as_deref(),
             a.start,
             a.art.name(),
+            parallel,
         ) {
-            Ok(log) => z.protokoll_datei = Some(log),
+            Ok(log) => Some(log),
             Err(e) => {
-                z.protokoll_datei = None;
                 z.verlauf_hinweis = Some(format!("Diagnoseprotokoll nicht gespeichert. {e}"));
+                None
             }
-        }
+        };
+        z.protokolle.insert(
+            a.nr,
+            Laufprotokoll {
+                datei,
+                fehler: None,
+            },
+        );
     }
 
     fn protokoll_beenden(&self, z: &mut Zustand, a: &mut Auftrag) {
-        let schon_protokolliert = z.protokoll_fehler.is_some();
-        if let Some(fehler) = z.protokoll_fehler.take()
+        let Laufprotokoll { datei, fehler } = z.protokolle.remove(&a.nr).unwrap_or_default();
+        let schon_protokolliert = fehler.is_some();
+        if let Some(fehler) = fehler
             && !a.protokoll.contains(&fehler)
         {
             if a.protokoll.len() >= PROTOKOLL_ZEILEN {
@@ -932,7 +978,7 @@ impl Dienst {
             }
             a.protokoll.insert(0, fehler);
         }
-        if let Some(mut log) = z.protokoll_datei.take() {
+        if let Some(mut log) = datei {
             let zeit = a.ende.unwrap_or(a.start);
             // Fehler beim Start gelangen direkt in den Auftrag, Prozessausgaben schon beim Lesen in die Datei.
             if !schon_protokolliert
@@ -1206,16 +1252,13 @@ impl Dienst {
         self.zeitplan_pruefen(&mut z, jetzt);
         self.ibkr_zeitplan_pruefen(&mut z, jetzt);
         self.updatesuche_einreihen(&mut z, jetzt);
-        if z.laufend.is_none()
-            && let Some(wartend) = z.warteschlange.pop_front()
-        {
+        if let Some(wartend) = z.naechster_auftrag() {
             let WartenderAuftrag {
                 art,
                 anlass,
                 update_commit,
                 gemini_vorrang,
-                ..
-            } = self.gemini_vorschalten(&mut z, wartend, jetzt);
+            } = wartend;
             if anlass == Anlass::Zeitplan && !zeitplan_auftrag_erlaubt(&z, art, jetzt) {
                 return None;
             }
@@ -1275,7 +1318,11 @@ impl Dienst {
                 anlass,
             ) {
                 Ok(kind) => {
-                    z.laufend = Some(auftrag);
+                    if art == Art::Gemini {
+                        z.gemini_laufend = Some(auftrag);
+                    } else {
+                        z.laufend = Some(auftrag);
+                    }
                     return Some((nr, kind));
                 }
                 Err(e) => {
@@ -1336,32 +1383,6 @@ impl Dienst {
         self.protokoll_beenden(z, &mut auftrag);
         ende_vermerken(&self.wurzel, z, &auftrag);
         ablegen(z, auftrag);
-    }
-
-    fn gemini_vorschalten(
-        &self,
-        z: &mut Zustand,
-        mut wartend: WartenderAuftrag,
-        jetzt: Zeitpunkt,
-    ) -> WartenderAuftrag {
-        if !matches!(wartend.art, Art::Papier | Art::Vorbereiten)
-            || wartend.gemini_vorgeschaltet
-            || (wartend.anlass == Anlass::Zeitplan
-                && !zeitplan_auftrag_erlaubt(z, wartend.art, jetzt))
-            || !depot_lage::gespraeche::gemini_aktiv(&self.wurzel.join("daten"))
-        {
-            return wartend;
-        }
-        wartend.gemini_vorgeschaltet = true;
-        let anlass = wartend.anlass;
-        z.warteschlange.push_front(wartend);
-        WartenderAuftrag {
-            art: Art::Gemini,
-            anlass,
-            update_commit: None,
-            gemini_vorrang: true,
-            gemini_vorgeschaltet: false,
-        }
     }
 
     fn starte_auftrag(
@@ -1513,9 +1534,10 @@ impl Dienst {
                 .iter()
                 .any(|a| a.art == Art::Gemini && a.start.frankfurt_tag() == Some(tag))
             && depot_lage::gespraeche::gemini_aktiv(&self.wurzel.join("daten"))
+            && einreihen(z, Art::Gemini, Anlass::Zeitplan, None).is_ok()
+            && let Some(a) = z.warteschlange.back_mut()
         {
-            let _ = einreihen(z, Art::Gemini, Anlass::Zeitplan, None);
-            return;
+            a.gemini_vorrang = true;
         }
         let Some(art) = zeitplan_faellig(z, tag, (h, m)) else {
             if z.laufend.is_none() && z.warteschlange.is_empty() && vorbereitung_faellig(z, jetzt) {
@@ -1554,10 +1576,20 @@ impl Dienst {
         let ausgang = AbrufAusgang::aus_exitcode(code);
         let erfolg = ausgang == AbrufAusgang::Ok;
         let mut z = self.sperre();
-        let Some(mut a) = z.laufend.take() else {
+        let platz = if z.gemini_laufend.as_ref().is_some_and(|a| a.nr == nr) {
+            &mut z.gemini_laufend
+        } else {
+            &mut z.laufend
+        };
+        if platz.as_ref().is_none_or(|a| a.nr != nr) {
+            return;
+        }
+        let Some(mut a) = platz.take() else {
             return;
         };
-        z.berater_warten.clear();
+        if a.art != Art::Gemini {
+            z.berater_warten.clear();
+        }
         a.ende = uhr();
         a.erfolg = Some(erfolg);
         if a.art == Art::Update {
@@ -1621,10 +1653,6 @@ impl Dienst {
         }
         if let Some(anlass) = nachrichten_lauf
             && !self.update_offen()
-            && !z
-                .warteschlange
-                .iter()
-                .any(|a| matches!(a.art, Art::Papier | Art::Vorbereiten))
             && depot_lage::gespraeche::gemini_aktiv(&self.wurzel.join("daten"))
         {
             let _ = einreihen(&mut z, Art::Gemini, anlass, None);
@@ -1680,7 +1708,7 @@ impl Dienst {
     /// laeuft oder wartet: Kein eingereihter Lauf geht verloren.
     pub fn neustart_bereit(&self) -> bool {
         let z = self.sperre();
-        z.neustart && z.laufend.is_none() && z.warteschlange.is_empty()
+        z.neustart && !z.update_wartet_auf_ruhe()
     }
 
     fn protokolliere(&self, nr: u64, zeile: &str, zeit: Option<Zeitpunkt>) {
@@ -1688,7 +1716,12 @@ impl Dienst {
         let zeile = self.protokoll_bereinigen(&maskiert);
         let leck = zeile == "[Ausgabe mit Zugangsdaten entfernt.]";
         let mut z = self.sperre();
-        let Some(a) = z.laufend.as_mut().filter(|a| a.nr == nr) else {
+        let a = if z.gemini_laufend.as_ref().is_some_and(|a| a.nr == nr) {
+            &mut z.gemini_laufend
+        } else {
+            &mut z.laufend
+        };
+        let Some(a) = a.as_mut().filter(|a| a.nr == nr) else {
             return;
         };
         if matches!(
@@ -1714,14 +1747,16 @@ impl Dienst {
         if leck {
             z.verlauf_hinweis = Some("Ein Lauf hat Zugangsdaten ausgegeben, Zeile entfernt. Bitte das Diagnoseprotokoll zur Prüfung öffnen.".into());
         }
-        if crate::protokoll::letzter_fehler(std::slice::from_ref(&zeile)).is_some() {
-            z.protokoll_fehler = Some(kuerze(zeile.clone()));
-        }
-        if let Some(log) = z.protokoll_datei.as_mut()
-            && let Err(e) = log.zeile(zeit, &zeile)
-        {
-            z.protokoll_datei = None;
-            z.verlauf_hinweis = Some(e);
+        if let Some(log) = z.protokolle.get_mut(&nr) {
+            if crate::protokoll::letzter_fehler(std::slice::from_ref(&zeile)).is_some() {
+                log.fehler = Some(kuerze(zeile.clone()));
+            }
+            if let Some(datei) = log.datei.as_mut()
+                && let Err(e) = datei.zeile(zeit, &zeile)
+            {
+                log.datei = None;
+                z.verlauf_hinweis = Some(e);
+            }
         }
     }
 }
@@ -1765,9 +1800,7 @@ fn einreihen(
     if art == Art::Update && z.update_wartet_auf_ruhe() {
         return Err("Update nur, wenn nichts läuft oder wartet");
     }
-    if z.laufend.as_ref().is_some_and(|a| a.art == art)
-        || z.warteschlange.iter().any(|a| a.art == art)
-    {
+    if z.aktive_auftraege().any(|a| a.art == art) || z.warteschlange.iter().any(|a| a.art == art) {
         return Err("läuft schon oder wartet schon");
     }
     if z.warteschlange.len() >= WARTEN_MAX {
@@ -1778,7 +1811,6 @@ fn einreihen(
         anlass,
         update_commit,
         gemini_vorrang: false,
-        gemini_vorgeschaltet: false,
     });
     Ok(())
 }
@@ -2000,6 +2032,9 @@ mod beraterstatus_tests {
             assert!(kopf.contains(&format!("data-denkt=\"{erwartet}\"")));
         };
         prufe("niemand");
+        dienst.einreihen(Art::Gemini, Anlass::Hand)?;
+        let (gemini_nr, gemini_kind) = dienst.schritt(zeit).ok_or("Gemini nicht gestartet")?;
+        prufe("helfer");
         let signal = |id, wer, wartet| {
             dienst.protokolliere(
                 id,
@@ -2007,13 +2042,15 @@ mod beraterstatus_tests {
                 Some(zeit),
             );
         };
-        signal(nr.saturating_add(1), BeraterId::Dachs, true);
-        prufe("niemand");
+        signal(gemini_nr, BeraterId::Dachs, true);
+        prufe("helfer");
         signal(nr, BeraterId::Dachs, true);
         prufe("dachs");
         signal(nr, BeraterId::Maus, true);
         prufe("beide");
         signal(nr, BeraterId::Dachs, false);
+        prufe("maus");
+        dienst.verfolge(gemini_nr, gemini_kind, uhr);
         prufe("maus");
         dienst.verfolge(nr, kind, uhr);
         prufe("niemand");

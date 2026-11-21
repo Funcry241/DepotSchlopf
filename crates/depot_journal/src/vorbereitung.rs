@@ -1,10 +1,11 @@
 //! Beobachten ohne Handel. Start, Reservierungen und Antworten sind eigene Journaleintraege
 //! und beginnen keinen Papiertag. Ein Start wird nach einem Absturz nie erneut ausgefuehrt.
 use depot_kern::json::{self, Json, zitiere};
+use depot_kern::modelle::Modellwahl;
 use depot_kern::{BeraterId, Datum, Isin, Zeitpunkt};
 use depot_ki::Buchung;
 
-use crate::kasse::{KiStand, buchung_text, lies_buchung};
+use crate::kasse::{KiStand, buchung_text_mit_modell, lies_buchung_mit_modell};
 use crate::{Prognoserichtung, Weltprognose};
 
 /// Feste Speichergrenze der eingefrorenen Auswahl.
@@ -47,6 +48,7 @@ pub(crate) enum Eintrag {
         start: Zeitpunkt,
         abdruck: String,
         buchung: Buchung,
+        auswahl: Option<Modellwahl>,
     },
     Antwort {
         start: Zeitpunkt,
@@ -121,11 +123,12 @@ impl Eintrag {
                 start,
                 abdruck,
                 buchung,
+                auswahl,
             } => format!(
                 "{{\"art\":\"budget\",\"start\":{},\"abdruck\":{},\"buchung\":{}}}",
                 start.sekunden(),
                 zitiere(abdruck),
-                zitiere(&buchung_text(buchung))
+                zitiere(&buchung_text_mit_modell(buchung, *auswahl))
             ),
             Self::Antwort { start, antwort: a } => format!(
                 "{{\"art\":\"antwort\",\"start\":{},\"zeit\":{},\"berater\":{},\"gefragt\":{},\"verwertbar\":{},\"text\":{},\"prognose\":{}}}",
@@ -156,11 +159,15 @@ impl Eintrag {
                     .map(|e| e.text().map(str::to_string))
                     .collect::<Option<_>>()?,
             },
-            "budget" => Self::Budget {
-                start: zeit("start")?,
-                abdruck: j.feld("abdruck")?.text()?.into(),
-                buchung: lies_buchung(j.feld("buchung")?.text()?)?,
-            },
+            "budget" => {
+                let (buchung, auswahl) = lies_buchung_mit_modell(j.feld("buchung")?.text()?)?;
+                Self::Budget {
+                    start: zeit("start")?,
+                    abdruck: j.feld("abdruck")?.text()?.into(),
+                    buchung,
+                    auswahl,
+                }
+            }
             "antwort" => {
                 let p = j.feld("prognose")?;
                 Self::Antwort {
@@ -226,6 +233,7 @@ pub(crate) fn anwenden(
             start,
             abdruck,
             buchung,
+            auswahl,
         } => {
             let p = alle
                 .last_mut()
@@ -243,7 +251,10 @@ pub(crate) fn anwenden(
             }
             let mut neu = ki.clone();
             neu.abdruck(&abdruck)?;
-            neu.buche_fuer(&buchung_text(&buchung), crate::KiZweck::Vorbereitung)?;
+            neu.buche_fuer(
+                &buchung_text_mit_modell(&buchung, auswahl),
+                crate::KiZweck::Vorbereitung,
+            )?;
             *ki = neu;
             p.reserviert.push(buchung.berater);
         }
