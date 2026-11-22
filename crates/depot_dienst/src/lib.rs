@@ -939,22 +939,22 @@ fn mindesteinsatz_formular(d: &Dienst) -> String {
 
 fn sicherung_einstellen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Vec<u8> {
     let aktion = feld(f, "aktion").unwrap_or("speichern");
-    let (ziel, meldung) = match aktion {
+    let (ziel, ort) = match aktion {
         "speichern" | "starten" => {
             let Some(ziel) = feld(f, "ziel") else {
                 return seiten::fehler(400, "Sicherungsziel fehlt");
             };
-            let meldung = match (aktion, ziel.trim().is_empty()) {
-                ("starten", _) => "sicherung_start",
-                (_, true) => "sicherung_aus",
-                _ => "sicherung_ziel",
+            let ort = match (aktion, ziel.trim().is_empty()) {
+                ("starten", _) => "/einrichtung#sicherung",
+                (_, true) => "/einrichtung?m=sicherung_aus#sicherung",
+                _ => "/einrichtung?m=sicherung_ziel#sicherung",
             };
-            (ziel.to_owned(), meldung)
+            (ziel.to_owned(), ort)
         }
         _ => return seiten::fehler(400, "Unbekannte Sicherungsaktion"),
     };
     match d.sicherung_einstellen(&ziel, aktion == "starten", jetzt, None) {
-        Ok(()) => http::umleitung(&format!("/einrichtung?m={meldung}#sicherung")),
+        Ok(()) => http::umleitung(ort),
         Err((code, fehler)) => seiten::fehler(code, &fehler),
     }
 }

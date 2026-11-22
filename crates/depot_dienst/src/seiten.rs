@@ -342,10 +342,6 @@ pub fn meldung(abfrage: &str) -> Option<(&'static str, &'static str)> {
         "ki_einstellungen_gespeichert" => ("gut", "KI-Einstellungen gespeichert."),
         "sicherung_ziel" => ("gut", "Sicherungsziel gespeichert."),
         "sicherung_aus" => ("gut", "Sicherung ausgeschaltet."),
-        "sicherung_start" => (
-            "gut",
-            "Sicherung eingereiht. Das Ergebnis erscheint im Abschnitt Sicherung.",
-        ),
         "auftrag" => ("gut", "Auftrag eingereiht. Er steht unter Tätigkeit."),
         "auftrag_belegt" => (
             "offen",
