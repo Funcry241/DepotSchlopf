@@ -443,6 +443,8 @@ type Gruppen<'a> = BTreeMap<(Datum, String, String, String), Vec<(&'a Zeile, &'a
 
 #[derive(Default)]
 struct Vergleichszahlen {
+    zu_kurz: usize,
+    mit_auswahl: usize,
     verglichen: usize,
     grund_treffer: usize,
     modell_treffer: usize,
@@ -455,8 +457,10 @@ struct Vergleichszahlen {
 impl Vergleichszahlen {
     fn erfasse(&mut self, zeilen: &[&Zeile], modell: &[usize], grund: &[usize]) {
         if zeilen.len() <= 3 {
+            self.zu_kurz = self.zu_kurz.saturating_add(1);
             return;
         }
+        self.mit_auswahl = self.mit_auswahl.saturating_add(1);
         let offen: Vec<_> = modell
             .iter()
             .take(3)
@@ -496,26 +500,48 @@ impl Vergleichszahlen {
     }
 
     fn text(&self) -> String {
-        if self.verglichen == 0 {
-            return "Für den Nutzenvergleich fehlen übereinstimmende KI-Urteile für beide Top-3-Listen.".into();
+        use std::fmt::Write as _;
+
+        if self.mit_auswahl == 0 {
+            return if self.zu_kurz == 0 {
+                "Für den Top-3-Vergleich liegen keine Prüfgruppen vor.".into()
+            } else {
+                format!(
+                    "Top-3-Vergleich nicht aussagekräftig. Jede Prüfgruppe enthält höchstens drei Belege, die damit alle in die Top 3 passen. Zahl der Prüfgruppen insgesamt {}.",
+                    self.zu_kurz
+                )
+            };
         }
         let mut t = format!(
-            "Relevanter Beleg unter den ersten drei in {} von {} mit KI-Konsens bewerteten Vergleichen (Grundrang {})",
+            "KI-Konsens für beide Top-3-Listen ({}/{} Prüfgruppen mit mindestens vier Belegen).",
+            self.verglichen, self.mit_auswahl
+        );
+        if self.zu_kurz > 0 {
+            let _ = write!(
+                t,
+                " Prüfgruppen mit höchstens drei Belegen ({}) gehen nicht in den Vergleich ein.",
+                self.zu_kurz
+            );
+        }
+        if self.verglichen == 0 {
+            return t;
+        }
+        let _ = write!(
+            t,
+            " Relevanter Beleg unter den ersten drei in {} von {} mit KI-Konsens bewerteten Vergleichen (Grundrang {}).",
             self.modell_treffer, self.verglichen, self.grund_treffer
         );
         if let Ok(n) = u64::try_from(self.vollstaendig)
             && n != 0
         {
-            use std::fmt::Write as _;
             let _ = write!(
                 t,
-                ". nDCG@3 in Basispunkten {} (bisher {}, {} vollständig bewertete Listen)",
+                " nDCG@3 in Basispunkten {} (Grundrang {}, {} vollständig bewertete Prüfgruppen).",
                 self.modell_ndcg.checked_div(n).unwrap_or(0),
                 self.grund_ndcg.checked_div(n).unwrap_or(0),
                 n
             );
         }
-        t.push('.');
         t
     }
 }
