@@ -136,8 +136,11 @@ fn textprobe_merkt_nur_die_vereinigten_top3_fuer_gewahlte_ki_vor() -> Result<(),
     fs::write(daten.join("neuroschlopf.txt"), "an\n").map_err(|e| e.to_string())?;
     speichern(NeuroEmpfaenger::Maus)?;
     let vormerken = || depot_dienst::neuro_textprobe_ki(&daten, tag, tag, &austausch);
-    assert!(vormerken()?.contains("4 neue Aufträge für Maus · Tageslimit 1"));
-    assert!(vormerken()?.contains("0 neue Aufträge"));
+    assert!(vormerken()?.contains("2 neue Aufträge für Maus · Tageslimit 1"));
+    let erneut = vormerken()?;
+    assert!(erneut.contains("0 neue Aufträge"));
+    assert!(erneut.contains("2 bereits vorgemerkt · 1 Antwort oder Rückfrage ausstehend"));
+    assert!(erneut.contains("1 abschließend beantwortet · 1 ohne verwertbares Urteil"));
     speichern(NeuroEmpfaenger::Beide)?;
     assert!(vormerken()?.contains("5 neue Aufträge für Beide"));
     let mut anzahl = 0_usize;
@@ -154,7 +157,7 @@ fn textprobe_merkt_nur_die_vereinigten_top3_fuer_gewahlte_ki_vor() -> Result<(),
         assert!(!frage.jetzt.ends_with("Beleg A") || frage.wer == BeraterId::Dachs);
         anzahl = anzahl.saturating_add(1);
     }
-    assert_eq!(anzahl, 9);
+    assert_eq!(anzahl, 7);
     assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, vorher);
     Ok(())
 }
@@ -193,6 +196,16 @@ fn textprobe_belegte_urteile(
             wer,
             NeuroUrteilswert::KeinBezug,
             None,
+        )?;
+    }
+    for (titel, nachfrage) in [("Beleg E", None), ("Beleg F", Some("Stand?".into()))] {
+        belege_kiurteil(
+            journal,
+            tag,
+            kennung(titel)?,
+            BeraterId::Maus,
+            NeuroUrteilswert::Offen,
+            nachfrage,
         )?;
     }
     Ok(())

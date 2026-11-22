@@ -98,6 +98,16 @@ fn textprobe_marke(daten: &Path, frage: &NeuroFrage) -> PathBuf {
     sammlung(daten).join(format!("{}-{}.textprobe", frage.id.fall(), kurz(frage.wer)))
 }
 
+#[derive(Default)]
+struct TextprobeStand {
+    neu: usize,
+    vorgemerkt: usize,
+    ausstehend: usize,
+    beantwortet: usize,
+    unverwertbar: usize,
+    nicht_vormerkbar: usize,
+}
+
 pub(crate) fn textprobe_planen<'a>(
     daten: &Path,
     faelle: impl Iterator<Item = &'a Prueffall>,
@@ -110,35 +120,68 @@ pub(crate) fn textprobe_planen<'a>(
     let (stand, _) = cache
         .lesen(&daten.join("journal.txt"), 32 * 1024 * 1024)
         .map_err(|_| "Journal für die KI-Vorprüfung gerade nicht lesbar.")?;
-    let reserviert: BTreeSet<_> = stand
-        .ki()
+    let ki = stand.ki();
+    let reserviert: BTreeMap<_, _> = ki
         .neurofragen()
         .iter()
-        .filter(|v| v.id.runde() == NeuroRunde::Erstfrage)
-        .map(|v| (v.id.fall(), kurz(v.wer)))
+        .map(|v| ((v.id.fall(), kurz(v.wer), v.id.runde()), v.buchung))
         .collect();
-    let (mut paare, mut neu) = (0_usize, 0_usize);
+    let mut paare = 0_usize;
+    let mut status = TextprobeStand::default();
     for fall in faelle {
         paare = paare.saturating_add(1);
         for &wer in e.neuro_berater() {
-            if reserviert.contains(&(fall.kennung.as_str(), kurz(wer))) {
+            let schluessel = |runde| (fall.kennung.as_str(), kurz(wer), runde);
+            if let Some(erstfrage) = reserviert.get(&schluessel(NeuroRunde::Erstfrage)) {
+                let letzte = reserviert
+                    .get(&schluessel(NeuroRunde::Rueckfrage))
+                    .unwrap_or(erstfrage);
+                match ki.neuroergebnis(*letzte) {
+                    None => status.ausstehend = status.ausstehend.saturating_add(1),
+                    Some(e) => match &e.urteil {
+                        Some(u) if u.nachfrage.is_some() => {
+                            status.ausstehend = status.ausstehend.saturating_add(1);
+                        }
+                        Some(u) if u.wert != NeuroUrteilswert::Offen => {
+                            status.beantwortet = status.beantwortet.saturating_add(1);
+                        }
+                        _ => status.unverwertbar = status.unverwertbar.saturating_add(1),
+                    },
+                }
                 continue;
             }
             if let Some(frage) = fall.vorpruefung(wer, NeuroRunde::Erstfrage, None) {
                 sichern(daten, &frage)?;
                 match fs::File::create_new(textprobe_marke(daten, &frage)) {
-                    Ok(_) => neu = neu.saturating_add(1),
-                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+                    Ok(_) => status.neu = status.neu.saturating_add(1),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        status.vorgemerkt = status.vorgemerkt.saturating_add(1);
+                    }
                     Err(e) => return Err(e.to_string()),
                 }
+            } else {
+                status.nicht_vormerkbar = status.nicht_vormerkbar.saturating_add(1);
             }
         }
     }
-    Ok(format!(
-        "KI-Vorprüfung · {paare} Top-3-Paare ohne Konsens · {neu} neue Aufträge für {} · Tageslimit {}.",
+    let mut ausgabe = format!(
+        "KI-Vorprüfung · {paare} Top-3-Paare ohne Konsens · {} neue Aufträge für {} · Tageslimit {}.\n\
+         Fragenstatus · {} bereits vorgemerkt · {} Antwort oder Rückfrage ausstehend · \
+         {} abschließend beantwortet · {} ohne verwertbares Urteil · {} nicht vormerkbar.",
+        status.neu,
         e.neuro_empfaenger.name(),
-        e.neuroschlopf
-    ))
+        e.neuroschlopf,
+        status.vorgemerkt,
+        status.ausstehend,
+        status.beantwortet,
+        status.unverwertbar,
+        status.nicht_vormerkbar
+    );
+    if let Some(heute) = crate::jetzt().and_then(depot_kern::Zeitpunkt::frankfurt_tag) {
+        let belegt = ki.neurofragen().iter().filter(|v| v.datum == heute).count();
+        let _ = write!(ausgabe, "\nHeute reserviert · {belegt}/{}.", e.neuroschlopf);
+    }
+    Ok(ausgabe)
 }
 
 pub(crate) fn planen(
