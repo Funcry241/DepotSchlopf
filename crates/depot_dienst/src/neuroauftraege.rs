@@ -13,6 +13,7 @@ use depot_journal::neurofrage::{
 use depot_journal::{Art, Journal, KiStand, Lesecache, Stand, ki_einstellungen};
 use depot_kern::modelle::KiEinstellungen;
 use depot_kern::{BeraterId, Datum};
+use depot_lage::blindpruefung::Prueffall;
 use depot_lage::{NeuroFragefall, datum_text, html::maskiere};
 
 use crate::werkbank::{Dienst, schreibe_ganz};
@@ -81,9 +82,63 @@ fn lese(pfad: &Path, maximum: u64) -> Option<String> {
 fn sichern(daten: &Path, frage: &NeuroFrage) -> Result<(), String> {
     let pfad = sammlung(daten).join(dateiname(frage));
     if frage.gueltig() && !pfad.try_exists().map_err(|e| e.to_string())? {
-        schreibe_ganz(&pfad, &frage.text())?;
+        // Kommandozeile und Hintergrunddienst können dieselbe Frage vormerken.
+        let zwischen = pfad.with_file_name(crate::neues_token());
+        schreibe_ganz(&zwischen, &frage.text())?;
+        let ergebnis = depot_journal::dateiersatz::ersetze(&zwischen, &pfad);
+        if ergebnis.is_err() {
+            let _ = fs::remove_file(&zwischen);
+        }
+        ergebnis.map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn textprobe_marke(daten: &Path, frage: &NeuroFrage) -> PathBuf {
+    sammlung(daten).join(format!("{}-{}.textprobe", frage.id.fall(), kurz(frage.wer)))
+}
+
+pub(crate) fn textprobe_planen<'a>(
+    daten: &Path,
+    faelle: impl Iterator<Item = &'a Prueffall>,
+) -> Result<String, String> {
+    let e = ki_einstellungen::lesen(daten)?;
+    if e.neuro_berater().is_empty() || !crate::neuroschlopf::einstellung(daten)? {
+        return Ok("KI-Vorprüfung pausiert. NeuroSchlopf und externe Empfänger in der Einrichtung aktivieren.".into());
+    }
+    let mut cache = Lesecache::default();
+    let (stand, _) = cache
+        .lesen(&daten.join("journal.txt"), 32 * 1024 * 1024)
+        .map_err(|_| "Journal für die KI-Vorprüfung gerade nicht lesbar.")?;
+    let reserviert: BTreeSet<_> = stand
+        .ki()
+        .neurofragen()
+        .iter()
+        .filter(|v| v.id.runde() == NeuroRunde::Erstfrage)
+        .map(|v| (v.id.fall(), kurz(v.wer)))
+        .collect();
+    let (mut paare, mut neu) = (0_usize, 0_usize);
+    for fall in faelle {
+        paare = paare.saturating_add(1);
+        for &wer in e.neuro_berater() {
+            if reserviert.contains(&(fall.kennung.as_str(), kurz(wer))) {
+                continue;
+            }
+            if let Some(frage) = fall.vorpruefung(wer, NeuroRunde::Erstfrage, None) {
+                sichern(daten, &frage)?;
+                match fs::File::create_new(textprobe_marke(daten, &frage)) {
+                    Ok(_) => neu = neu.saturating_add(1),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+        }
+    }
+    Ok(format!(
+        "KI-Vorprüfung · {paare} Top-3-Paare ohne Konsens · {neu} neue Aufträge für {} · Tageslimit {}.",
+        e.neuro_empfaenger.name(),
+        e.neuroschlopf
+    ))
 }
 
 pub(crate) fn planen(
@@ -129,9 +184,14 @@ struct Auftrag {
     pfad: PathBuf,
     frage: NeuroFrage,
     antwort: Option<NeuroErgebnis>,
+    textprobe: bool,
 }
 
 impl Auftrag {
+    fn prioritaet(&self) -> (bool, bool) {
+        (self.frage.ist_vorpruefung(), !self.textprobe)
+    }
+
     fn versuch(&self) -> PathBuf {
         self.pfad.with_extension("versuch.txt")
     }
@@ -173,10 +233,12 @@ fn auftraege(daten: &Path) -> Vec<Auftrag> {
                 .as_deref()
                 .and_then(NeuroErgebnis::lies)
                 .filter(|e| e.id == frage.id && e.wer == frage.wer);
+            let textprobe = frage.ist_vorpruefung() && textprobe_marke(daten, &frage).is_file();
             Some(Auftrag {
                 pfad,
                 frage,
                 antwort,
+                textprobe,
             })
         })
         .collect();
@@ -264,14 +326,14 @@ fn bearbeite_offene_frage(
         .filter(|a| a.antwort.is_none() && gilt(a) && !a.versuch().exists());
     let wartestand = kandidaten
         .clone()
-        .min_by_key(|a| a.frage.ist_vorpruefung())
+        .min_by_key(|a| a.prioritaet())
         .map_or(Fragenstand::Wartet, |a| {
             Fragenstand::Vorgemerkt(a.frage.wer)
         });
     merke(wartestand);
     if let Some(a) = kandidaten
         .filter(|a| !letzter_versuch.contains_key(&a.pfad))
-        .min_by_key(|a| a.frage.ist_vorpruefung())
+        .min_by_key(|a| a.prioritaet())
     {
         letzter_versuch.insert(a.pfad.clone(), Instant::now());
         if let Ok(Some(kind)) = d.neuro_starten(&a.pfad, a.frage.wer, false) {
@@ -354,6 +416,7 @@ pub(crate) fn arbeite(d: &Dienst) {
         let urteile = crate::belegurteile::lese(&daten).ok();
         let offen = |a: &Auftrag| {
             !a.frage.ist_vorpruefung()
+                || a.textprobe
                 || urteile
                     .as_ref()
                     .is_some_and(|u| !u.contains_key(a.frage.id.fall()))

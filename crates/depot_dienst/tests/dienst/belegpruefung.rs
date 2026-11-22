@@ -68,6 +68,136 @@ fn textprobe_bindet_lokale_rangwerte_an_dieselben_belege() -> Result<(), String>
     Ok(())
 }
 
+#[test]
+fn textprobe_merkt_nur_die_vereinigten_top3_fuer_gewahlte_ki_vor() -> Result<(), String> {
+    use depot_journal::{ki_einstellungen, neurofrage::NeuroFrage};
+    use depot_kern::{
+        abdruck::sha256_hex,
+        json,
+        modelle::{KiEinstellungen, NeuroEmpfaenger},
+    };
+
+    let wurzel = ordner()?;
+    let tag = some(Datum::lies(TAG), "Prüftag")?;
+    let titel = [
+        "Beleg A", "Beleg B", "Beleg C", "Beleg D", "Beleg E", "Beleg F", "Beleg G",
+    ];
+    beispiel_am(&wurzel, tag, &titel, titel.len())?;
+    let daten = wurzel.join("daten");
+    let austausch = wurzel.join("textprobe");
+    fs::create_dir(&austausch).map_err(|e| e.to_string())?;
+    let journal = daten.join("journal.txt");
+    let mut j = Journal::oeffnen(&journal).map_err(|e| format!("{e:?}"))?;
+    j.schliesse_ab(tag, Cent(1000), &j.bestaetigt().1)
+        .map_err(|e| format!("{e:?}"))?;
+    drop(j);
+    assert!(depot_dienst::neuro_textprobe_ki(&daten, tag, tag, &austausch).is_err());
+    depot_dienst::neuro_textprobe(&daten, tag, tag, &austausch)?;
+    let eingabe =
+        fs::read_to_string(austausch.join("textprobe-eingabe.json")).map_err(|e| e.to_string())?;
+    let json = json::lies(&eingabe)?;
+    let zeilen = some(json.feld("rows").and_then(json::Json::liste), "Textfälle")?;
+    textprobe_belegte_urteile(zeilen, &journal, tag)?;
+    let vorher = fs::read(&journal).map_err(|e| e.to_string())?;
+    let werte = zeilen
+        .iter()
+        .map(|z| {
+            let id = some(z.feld("id").and_then(json::Json::text), "Fall-ID")?;
+            let beleg = some(z.feld("beleg").and_then(json::Json::text), "Beleg")?;
+            let platz = some(titel.iter().position(|t| beleg.ends_with(t)), "Belegtext")?;
+            Ok(format!(
+                "{{\"id\":{},\"score\":0.{} }}",
+                json::zitiere(id),
+                platz.saturating_add(1)
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?
+        .join(",");
+    fs::write(austausch.join("textprobe-antwort.json"), format!(
+        "{{\"format\":\"depot-neuro-textprobe-v1\",\"input_sha256\":\"{}\",\"scores\":[{werte}]}}",
+        sha256_hex(eingabe.as_bytes()),
+    )).map_err(|e| e.to_string())?;
+    let fragen = daten.join("neuroschlopf-fragen");
+    depot_dienst::neuro_textprobe(&daten, tag, tag, &austausch)?;
+    assert!(!fragen.exists());
+    assert!(depot_dienst::neuro_textprobe_ki(&daten, tag, tag, &austausch)?.contains("pausiert"));
+    let speichern = |neuro_empfaenger| -> Result<(), String> {
+        let e = KiEinstellungen {
+            neuro_empfaenger,
+            neuroschlopf: 1,
+            ..KiEinstellungen::default()
+        };
+        fs::write(
+            ki_einstellungen::pfad(&daten),
+            ki_einstellungen::als_text(e),
+        )
+        .map_err(|e| e.to_string())
+    };
+    fs::write(daten.join("neuroschlopf.txt"), "an\n").map_err(|e| e.to_string())?;
+    speichern(NeuroEmpfaenger::Maus)?;
+    let vormerken = || depot_dienst::neuro_textprobe_ki(&daten, tag, tag, &austausch);
+    assert!(vormerken()?.contains("4 neue Aufträge für Maus · Tageslimit 1"));
+    assert!(vormerken()?.contains("0 neue Aufträge"));
+    speichern(NeuroEmpfaenger::Beide)?;
+    assert!(vormerken()?.contains("5 neue Aufträge für Beide"));
+    let mut anzahl = 0_usize;
+    for datei in fs::read_dir(fragen).map_err(|e| e.to_string())? {
+        let pfad = datei.map_err(|e| e.to_string())?.path();
+        if pfad.extension().is_none_or(|e| e != "json") {
+            continue;
+        }
+        let text = fs::read_to_string(pfad).map_err(|e| e.to_string())?;
+        assert!(!text.contains("score") && !text.contains("grundrang"));
+        let frage = some(NeuroFrage::lies(&text), "Vorgemerkte Frage")?;
+        assert!(frage.ist_vorpruefung());
+        assert!(!frage.jetzt.ends_with("Beleg B") && !frage.jetzt.ends_with("Beleg D"));
+        assert!(!frage.jetzt.ends_with("Beleg A") || frage.wer == BeraterId::Dachs);
+        anzahl = anzahl.saturating_add(1);
+    }
+    assert_eq!(anzahl, 9);
+    assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, vorher);
+    Ok(())
+}
+
+fn textprobe_belegte_urteile(
+    zeilen: &[depot_kern::json::Json],
+    journal: &Path,
+    tag: Datum,
+) -> Result<(), String> {
+    use depot_kern::json;
+
+    let kennung = |titel: &str| -> Result<NeuroAuftragId, String> {
+        let zeile = some(
+            zeilen.iter().find(|z| {
+                z.feld("beleg")
+                    .and_then(json::Json::text)
+                    .is_some_and(|b| b.ends_with(titel))
+            }),
+            "Belegtext",
+        )?;
+        let id = some(zeile.feld("id").and_then(json::Json::text), "Fall-ID")?;
+        some(
+            NeuroAuftragId::neu(id, NeuroRunde::Erstfrage),
+            "Auftrags-ID",
+        )
+    };
+    for (titel, wer) in [
+        ("Beleg A", BeraterId::Maus),
+        ("Beleg B", BeraterId::Maus),
+        ("Beleg B", BeraterId::Dachs),
+    ] {
+        belege_kiurteil(
+            journal,
+            tag,
+            kennung(titel)?,
+            wer,
+            NeuroUrteilswert::KeinBezug,
+            None,
+        )?;
+    }
+    Ok(())
+}
+
 fn beispiel_am(
     wurzel: &Path,
     tag: Datum,
