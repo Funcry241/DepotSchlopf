@@ -1,0 +1,4 @@
+klasse: DokuOnly
+zweck: Textverständnis und Netzbreite im Neuro2026-Belegvergleich getrennt prüfen
+pfade:
+docs/neuroschlopf/text-und-netzvergleich.md
