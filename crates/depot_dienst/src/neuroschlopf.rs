@@ -414,16 +414,18 @@ pub(crate) fn seite(
     let mut html = String::from(
         "<section id=\"neuroschlopf-vergleich\"><h2>NeuroSchlopf · Belegvergleich</h2>",
     );
-    modellansicht::html(&mut html, &daten, tag);
-    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
+    let aktivitaet = aktivitaetsfragment(d);
     let _ = write!(
         html,
         concat!(
-            "<section><h3>Aktivität des Belegvergleichs</h3>",
-            "<div data-teil=\"/teil/neuroschlopf-aktivitaet\">{}</div></section>"
+            "<div class=\"neuro-uebersicht\"><section><h3>Aktivität des Belegvergleichs</h3>",
+            "<div data-teil=\"/teil/neuroschlopf-aktivitaet\">{}</div></section>{}</div>"
         ),
-        aktivitaet_html(d, &anzeige, &ein),
+        aktivitaet,
+        crate::neuro2026::TOPOLOGIE,
     );
+    modellansicht::html(&mut html, &daten, tag);
+    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
     offene_thesen_html(&mut html, anzeige.fertig.as_ref(), tag);
     let gespeichert;
     let (bild, eingaben, pruefungen) = if let Some(f) = &anzeige.fertig {
@@ -485,9 +487,7 @@ pub(crate) fn seite(
     html.push_str(
         "<p><a href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a> · historische Thesen und Belege von Hand bewerten</p>",
     );
-    html.push_str("<details><summary>Neuro2026-Referenzlauf zur Multiplikation</summary>");
-    html.push_str(crate::neuro2026::TOPOLOGIE);
-    html.push_str("</details></section>");
+    html.push_str("</section>");
     let seite = crate::seiten::rahmen(
         "/neuroschlopf",
         None,

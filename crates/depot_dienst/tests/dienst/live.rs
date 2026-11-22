@@ -527,6 +527,11 @@ fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Re
         let seite = get(&d, "/neuroschlopf", t);
         assert!(seite.starts_with("HTTP/1.1 200 OK"));
         assert_eq!(seite.matches("NeuroSchlopf einrichten</a>").count(), 1);
+        let (_, nach_grafik) = some(
+            seite.split_once("Netztopologie · Neuro2026-Testlauf"),
+            "Netzgrafik",
+        )?;
+        assert!(nach_grafik.contains("Neuro2026 · Depotmodell"));
         assert_eq!(seite.matches("aria-current=\"page\"").count(), 1);
         assert!(seite.contains("<a href=\"/neuroschlopf\" aria-current=\"page\">NeuroSchlopf</a>"));
         for teil in [
@@ -539,7 +544,7 @@ fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Re
             "Noch kein abgeschlossener Vergleich. Es fehlt ein bestätigter Stand.",
             "Neuro2026 · Depotmodell",
             "Wartet auf die erste lokale Modellauswertung.",
-            "<details><summary>Neuro2026-Referenzlauf zur Multiplikation</summary>",
+            "<div class=\"neuro-uebersicht\">",
             "Das Referenznetz wurde darauf trainiert, zwei Zahlen zu multiplizieren.",
             "href=\"/neuroschlopf/lernlauf\">Lernkurve und Vorhersagen ansehen</a>",
             "href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a>",

@@ -1,7 +1,9 @@
 klasse: Funktion
-zweck: KI-Trainingsurteile und fehlende Prüffälle vor dem lokalen Modelllauf anzeigen
+zweck: KI-Trainingsurteile und fehlende Prüffälle vor dem lokalen Modelllauf neben der sichtbaren Referenztopologie anzeigen
 pfade:
+crates/depot_dienst/src/assets/stil.css
 crates/depot_dienst/src/neuromodell.rs
 crates/depot_dienst/src/neuroschlopf.rs
 crates/depot_dienst/src/neuroschlopf/modellansicht.rs
 crates/depot_dienst/tests/dienst/belegpruefung.rs
+crates/depot_dienst/tests/dienst/live.rs
