@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Externe Sicherung bei kurzzeitig belegtem Journal erneut versuchen
+pfade:
+crates/depot_lauf/src/sicherung.rs
+crates/depot_lauf/src/updatedaten.rs

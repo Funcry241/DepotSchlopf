@@ -4,12 +4,14 @@ use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::updatedaten::{journal_sperren_fuer, lies_sicherung, sichern_nach, sicherung_sperren};
 
 const KOPF: &str = "sicherung-stand-v1";
 const STANDDATEI: &str = "sicherung_stand.txt";
+const JOURNAL_PAUSEN: usize = 8;
+const JOURNAL_PAUSE: Duration = Duration::from_millis(250);
 
 #[derive(Default)]
 struct Stand {
@@ -109,14 +111,34 @@ fn zielordner(wurzel: &Path, ziel: &Path) -> Result<(PathBuf, bool), String> {
 }
 
 pub(crate) fn sichern(wurzel: &Path, auto: bool) -> Result<(), String> {
+    let mut pausen = 0..JOURNAL_PAUSEN;
+    sichern_mit_warten(wurzel, auto, || {
+        if pausen.next().is_none() {
+            return false;
+        }
+        std::thread::sleep(JOURNAL_PAUSE);
+        true
+    })
+}
+
+fn sichern_mit_warten(
+    wurzel: &Path,
+    auto: bool,
+    warten: impl FnMut() -> bool,
+) -> Result<(), String> {
     let daten = wurzel.join("daten");
     let sperre = sicherung_sperren(&daten, "Sicherung oder Update läuft gerade")?;
-    let ergebnis = sichere_mit_sperre(wurzel, &daten, auto);
+    let ergebnis = sichere_mit_sperre(wurzel, &daten, auto, warten);
     let _ = sperre.unlock();
     ergebnis
 }
 
-fn sichere_mit_sperre(wurzel: &Path, daten: &Path, auto: bool) -> Result<(), String> {
+fn sichere_mit_sperre(
+    wurzel: &Path,
+    daten: &Path,
+    auto: bool,
+    warten: impl FnMut() -> bool,
+) -> Result<(), String> {
     let zeit = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| format!("Zeit der Sicherung: {e}"))?
@@ -139,7 +161,7 @@ fn sichere_mit_sperre(wurzel: &Path, daten: &Path, auto: bool) -> Result<(), Str
         }
         let (ziel, gleich) = zielordner(wurzel, Path::new(text))?;
         let commit = crate::abbild::git_text(wurzel, &["rev-parse", "HEAD"])?;
-        let _journal = journal_sperren_fuer(daten, "Sicherung")?;
+        let _journal = journal_sperren_fuer(daten, "Sicherung", warten)?;
         let inhalt = lies_sicherung(daten)?;
         if inhalt.is_empty() {
             return Err("Keine Laufzeitdaten für die Sicherung vorhanden".into());
@@ -386,6 +408,56 @@ mod tests {
         }
         fs::remove_file(quelle.join("journal.vermerk")).map_err(|e| e.to_string())?;
         assert!(mit_probekopie(&quelle, |_| Ok(())).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn sicherung_wartet_bis_zur_freigabe_des_journals() -> Result<(), String> {
+        let ort = Ort::neu()?;
+        let projekt = ort.projekt();
+        let journal = projekt.join("daten/journal.txt");
+        let datei = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(journal)
+            .map_err(|e| e.to_string())?;
+        datei.lock().map_err(|e| e.to_string())?;
+        let mut datei = Some(datei);
+        let ziel = ort.0.join("ziel/DepotSchlopf");
+        sichern_mit_warten(&projekt, false, || {
+            assert!(
+                !ziel.exists(),
+                "Vor der Freigabe darf nichts kopiert werden"
+            );
+            datei.take().is_some()
+        })?;
+        assert!(
+            datei.is_none(),
+            "Das Journal war beim ersten Versuch belegt"
+        );
+        assert!(ziel.is_dir());
+        Ok(())
+    }
+
+    #[test]
+    fn sicherung_bricht_bei_belegt_bleibendem_journal_ohne_kopie_ab() -> Result<(), String> {
+        let ort = Ort::neu()?;
+        let projekt = ort.projekt();
+        let journal = projekt.join("daten/journal.txt");
+        let datei = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(journal)
+            .map_err(|e| e.to_string())?;
+        datei.lock().map_err(|e| e.to_string())?;
+        let mut pausen = 0..JOURNAL_PAUSEN;
+        let fehler = sichern_mit_warten(&projekt, false, || pausen.next().is_some())
+            .err()
+            .ok_or("Das belegte Journal muss die Sicherung verhindern")?;
+        assert!(fehler.contains("Journal für die Sicherung belegt"));
+        assert_eq!(pausen.len(), 0);
+        assert!(!ort.0.join("ziel/DepotSchlopf").exists());
+        assert_eq!(Stand::lies(&projekt.join("daten")).fehler, fehler);
         Ok(())
     }
 
