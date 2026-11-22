@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Offene Orders mit Tabellenkopf auszeichnen und veraltete Depotkurse hervorheben
+pfade:
+crates/depot_dienst/src/depotseite.rs
+crates/depot_dienst/tests/dienst/depot.rs
