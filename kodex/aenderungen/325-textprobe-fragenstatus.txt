@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Bei der KI-Vorprüfung den Stand bereits vorhandener Fragen anzeigen
+pfade:
+crates/depot_dienst/src/neuroauftraege.rs
+crates/depot_dienst/tests/dienst/belegpruefung.rs
