@@ -251,56 +251,67 @@ fn analyseexport_enthaelt_genaue_paare_und_urteilsanzahl() -> Result<(), String>
 }
 
 #[test]
-fn neuro_pilot_nutzt_lokale_urteile_und_spaetere_echte_fallkennungen() -> Result<(), String> {
+fn neuro_pilot_nutzt_ki_konsens_und_spaetere_echte_fallkennungen() -> Result<(), String> {
+    use NeuroUrteilswert::{KeinBezug, Offen, Schwaecht, Staerkt};
     use depot_kern::json;
 
     let wurzel = ordner()?;
     let daten = wurzel.join("daten");
     let trainingstag = some(Datum::lies(TAG), "Trainingstag")?;
     let prueftag = some(Datum::lies("2026-11-12"), "Späterer Prüftag")?;
-    let training = beispiel_am(
-        &wurzel,
-        trainingstag,
-        &[
+    let trainingsfaelle = [
+        (
             "SAP-Cloudgeschäft meldet Quartalszahlen",
+            Staerkt,
+            Some(Staerkt),
+        ),
+        (
             "Institut veröffentlicht Wahlumfrage",
-        ],
-        2,
-    )?;
-    let d = dienst(wurzel.clone(), true);
-    for _ in 0..2 {
-        let seite = get(&d, PFAD, training);
-        let id = paar_id(&seite)?;
-        let urteil = if seite.contains("meldet Quartalszahlen") {
-            "2-st%C3%BCtzt"
-        } else {
-            "0"
-        };
-        assert_eq!(
-            sende(
-                &d,
-                training,
-                &format!("id={id}&tag={trainingstag}&urteil={urteil}")
-            )?,
-            303
-        );
-    }
-    let pruefung = beispiel_am(
-        &wurzel,
-        prueftag,
-        &[
-            "SAP-Cloudgeschäft bekommt neuen Großauftrag",
-            "Lokalradio meldet Theatereröffnung",
-            "Pendler befragen kommunale Verkehrsbetriebe",
-            "Softwaresparte berichtet neue Kunden",
-        ],
-        4,
-    )?;
+            KeinBezug,
+            Some(KeinBezug),
+        ),
+        (
+            "SAP meldet verfehltes Vertriebsziel",
+            Schwaecht,
+            Some(Schwaecht),
+        ),
+        (
+            "Institut prüft Software-Nutzerzahlen",
+            Staerkt,
+            Some(Schwaecht),
+        ),
+        ("Stadt meldet neue Vorschriften", KeinBezug, None),
+        ("Studie erscheint mit vagen Prognosen", Offen, Some(Offen)),
+    ];
+    prueftag_mit_ki_urteilen(&wurzel, trainingstag, &trainingsfaelle)?;
 
+    let prueffaelle = [
+        (
+            "SAP-Cloudgeschäft bekommt neuen Großauftrag",
+            Staerkt,
+            Some(Staerkt),
+        ),
+        (
+            "Lokalradio meldet Theatereröffnung",
+            KeinBezug,
+            Some(KeinBezug),
+        ),
+        (
+            "Pendler befragen kommunale Verkehrsbetriebe",
+            KeinBezug,
+            Some(KeinBezug),
+        ),
+        (
+            "Softwaresparte berichtet neue Kunden",
+            Staerkt,
+            Some(Staerkt),
+        ),
+    ];
+    let pruefung = prueftag_mit_ki_urteilen(&wurzel, prueftag, &prueffaelle)?;
     let journal = daten.join("journal.txt");
-    let urteile = daten.join("neuro2026-belegurteile.tsv");
+
+    let d = dienst(wurzel.clone(), true);
     let journal_vorher = fs::read(&journal).map_err(|e| e.to_string())?;
-    let urteile_vorher = fs::read(&urteile).map_err(|e| e.to_string())?;
     let austausch = wurzel.join("test-austausch");
     fs::create_dir(&austausch).map_err(|e| e.to_string())?;
     depot_dienst::neuro_pilot(
@@ -313,14 +324,16 @@ fn neuro_pilot_nutzt_lokale_urteile_und_spaetere_echte_fallkennungen() -> Result
     let lesefile = |name| fs::read_to_string(austausch.join(name)).map_err(|e| e.to_string());
     let train = json::lies(&lesefile("train-eingabe.json")?)?;
     let rank = json::lies(&lesefile("rank-eingabe.json")?)?;
-    let stufen: std::collections::BTreeSet<_> = some(
+    let mut stufen: Vec<_> = some(
         train.feld("rows").and_then(json::Json::liste),
         "Trainingszeilen",
     )?
     .iter()
     .filter_map(|zeile| zeile.feld("stufe").and_then(json::Json::ganz))
     .collect();
-    assert_eq!(stufen, [0, 2].into());
+    stufen.sort_unstable();
+    assert_eq!(stufen, [0, 1, 1]);
+    assert!(get(&d, "/neuroschlopf", pruefung).contains("7 KI-Übereinstimmungen"));
     let prueffall_ids: std::collections::BTreeSet<_> =
         some(rank.feld("rows").and_then(json::Json::liste), "Rangzeilen")?
             .iter()
@@ -340,12 +353,52 @@ fn neuro_pilot_nutzt_lokale_urteile_und_spaetere_echte_fallkennungen() -> Result
         fs::read(journal).map_err(|e| e.to_string())?,
         journal_vorher
     );
-    assert_eq!(
-        fs::read(urteile).map_err(|e| e.to_string())?,
-        urteile_vorher
-    );
+    assert!(!daten.join("neuro2026-belegurteile.tsv").exists());
     assert!(wartend(&d).is_empty());
     Ok(())
+}
+
+fn prueftag_mit_ki_urteilen(
+    wurzel: &Path,
+    tag: Datum,
+    faelle_mit_urteilen: &[(&str, NeuroUrteilswert, Option<NeuroUrteilswert>)],
+) -> Result<Zeitpunkt, String> {
+    let titel: Vec<_> = faelle_mit_urteilen
+        .iter()
+        .map(|(titel, _, _)| *titel)
+        .collect();
+    let zeit = beispiel_am(wurzel, tag, &titel, titel.len())?;
+    let daten = wurzel.join("daten");
+    let journal = daten.join("journal.txt");
+    let mut j = Journal::oeffnen(&journal).map_err(|e| format!("{e:?}"))?;
+    j.schliesse_ab(tag, Cent(1000), &j.bestaetigt().1)
+        .map_err(|e| format!("{e:?}"))?;
+    drop(j);
+    let mut cache = Lesecache::default();
+    let (stand, zeilen) = cache
+        .lesen(&journal, 32 * 1024 * 1024)
+        .map_err(|e| format!("{e:?}"))?;
+    let (gespraeche, 0) = some(
+        depot_journal::gespraeche::lesen_begrenzt(&daten, tag, &mut (8 * 1024 * 1024))
+            .map_err(|e| format!("{e:?}"))?,
+        "Erstmeinung",
+    )?
+    else {
+        return Err("Erstmeinung unlesbar".into());
+    };
+    let faelle = prueffaelle_mit_zeilen(stand, zeilen, &gespraeche, tag)?;
+    for (titel, maus, dachs) in faelle_mit_urteilen.iter().copied() {
+        let fall = some(faelle.iter().find(|fall| fall.beleg.contains(titel)), titel)?;
+        let id = some(
+            NeuroAuftragId::neu(&fall.kennung, NeuroRunde::Erstfrage),
+            "Fall-ID",
+        )?;
+        belege_kiurteil(&journal, tag, id.clone(), BeraterId::Maus, maus, None)?;
+        if let Some(dachs) = dachs {
+            belege_kiurteil(&journal, tag, id, BeraterId::Dachs, dachs, None)?;
+        }
+    }
+    Ok(zeit)
 }
 
 /// Prüft den optional gebauten Originalkern über denselben Aufruf wie auf dem Depot-PC.
@@ -399,6 +452,7 @@ fn pruefe_originalkern(
     );
     let seite = get(d, "/neuroschlopf", pruefung);
     assert!(seite.contains("Modellwert") && seite.contains("bekommt neuen Großauftrag"));
+    assert!(seite.contains("mit KI-Konsens bewerteten Vergleichen"));
     let scores = some(
         rang.feld("scores").and_then(json::Json::liste),
         "Modellwerte",
@@ -486,7 +540,7 @@ fn belege_kiurteil(
 ) -> Result<(), String> {
     let mut j = Journal::oeffnen(pfad).map_err(|e| format!("{e:?}"))?;
     let erlaubnis = j
-        .reserviere_neurofrage(&id, wer, tag, 1, BeraterEinstellung::standard(wer), 8)
+        .reserviere_neurofrage(&id, wer, tag, 1, BeraterEinstellung::standard(wer), 20)
         .map_err(|e| format!("{e:?}"))?;
     let nr = erlaubnis.buchung();
     let ergebnis = NeuroErgebnis::neu(

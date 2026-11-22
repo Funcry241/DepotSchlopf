@@ -13,7 +13,7 @@ pub(super) fn html(html: &mut String, daten: &Path) {
         Ok(Some(bericht)) => bericht_html(html, &bericht),
         Ok(None) => html.push_str(
             "<p>Wartet auf die erste lokale Modellauswertung.</p>\
-             <p><a href=\"/neuroschlopf/belegpruefung\">Historische Belege blind bewerten</a></p>",
+             <p><a href=\"/einrichtung#ki-einstellungen\">Empfänger für KI-Vorprüfung einstellen</a></p>",
         ),
         Err(_) => html.push_str("<p>Der lokale Modellbericht ist unlesbar.</p>"),
     }
@@ -23,16 +23,21 @@ pub(super) fn html(html: &mut String, daten: &Path) {
 fn bericht_html(html: &mut String, bericht: &ModellBericht) {
     let _ = write!(
         html,
-        "<p>{}</p><p class=\"leise\">{} These-Beleg-Paare · {} Urteile · {} Trainingstage · {} Prüftage</p>",
+        "<p>{}</p><p class=\"leise\">{} These-Beleg-Paare · {} {} · {} Trainingstage · {} Prüftage</p>",
         maskiere(&bericht.stand),
         bericht.paare,
         bericht.urteile,
+        if bericht.ki_konsens {
+            "KI-Übereinstimmungen"
+        } else {
+            "Blindurteile"
+        },
         bericht.trainingstage,
         bericht.prueftage,
     );
     let Some(version) = &bericht.modellversion else {
         html.push_str(
-            "<p><a href=\"/neuroschlopf/belegpruefung\">Historische Belege blind bewerten</a></p>",
+            "<p><a href=\"/einrichtung#ki-einstellungen\">Empfänger für KI-Vorprüfung einstellen</a></p>",
         );
         return;
     };
@@ -130,6 +135,7 @@ mod tests {
             stand: "Lokaler Beobachtungslauf abgeschlossen.".into(),
             paare: 9,
             urteile: 5,
+            ki_konsens: false,
             trainingstage: 2,
             prueftage: 1,
             gruppen: vec![Ranggruppe {
@@ -175,6 +181,7 @@ mod tests {
             stand: "Zu wenig unabhängige Urteile.".into(),
             paare: 105,
             urteile: 1,
+            ki_konsens: true,
             trainingstage: 0,
             prueftage: 1,
             gruppen: Vec::new(),
