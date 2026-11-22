@@ -316,6 +316,24 @@ fn depot_tagesergebnis_ohne_vortag() -> Result<(), String> {
 }
 
 #[test]
+fn depot_kurse_veraltet() -> Result<(), String> {
+    let d = depot_mit_positionen()?;
+    let vor_schluss = some(Zeitpunkt::lies("2026-11-06T15:00:00Z"), "Vor Börsenschluss")?;
+    let nach_schluss = some(
+        Zeitpunkt::lies("2026-11-06T18:00:00Z"),
+        "Nach Börsenschluss",
+    )?;
+    let kursdatum = "<p class=\"leise\">Bewertet mit Schlusskursen vom 05.11.2026";
+    let frisch = get(&d, "/depot", vor_schluss);
+    assert!(frisch.contains(&format!("{kursdatum}</p>")));
+    let veraltet = get(&d, "/depot", nach_schluss);
+    assert!(veraltet.contains(&format!(
+        "{kursdatum} <strong class=\"offen\">(veraltet)</strong></p>"
+    )));
+    Ok(())
+}
+
+#[test]
 fn handelsbilanz_zeigt_offenen_verlust_ohne_verkauf() -> Result<(), String> {
     use depot_journal::Art::{Abrechnungstag, Abschluss, Auftrag, Kurs, Topf, Zustand};
     let wurzel = ordner()?;
@@ -347,6 +365,30 @@ fn handelsbilanz_zeigt_offenen_verlust_ohne_verkauf() -> Result<(), String> {
     assert!(bilanz.contains("offen, bewertet zum letzten Schluss"));
     assert!(bilanz.contains("Realisiert + offen: -23,00 €"), "{bilanz}");
     assert!(bilanz.contains("Käufe nicht zugeordnet: 1"), "{bilanz}");
+    Ok(())
+}
+
+#[test]
+fn depot_offene_orders_haben_tabellenkopf() -> Result<(), String> {
+    let d = depot_mit_order()?;
+    let html = get(&d, "/depot", donnerstag(18, 0)?);
+    let (_, orders) = some(html.split_once("<h2>Offene Orders</h2>"), "Offene Orders")?;
+    let (orders, _) = some(orders.split_once("</section>"), "Ende der offenen Orders")?;
+    let (_, tabelle) = some(orders.split_once("<table><thead><tr>"), "Tabellenkopf")?;
+    let (kopf, inhalt) = some(tabelle.split_once("</tr></thead><tbody>"), "Tabellenkörper")?;
+    for spalte in [
+        "Wertpapier",
+        "Richtung",
+        "Stück offen",
+        "Limit",
+        "Topf",
+        "Zustand",
+    ] {
+        assert!(kopf.contains(&format!("<th scope=\"col\">{spalte}</th>")));
+    }
+    assert!(inhalt.contains("<tr><td>SAP</td>"));
+    assert!(inhalt.contains("liegt beim Papiermakler"), "{inhalt}");
+    assert!(inhalt.ends_with("</tbody></table></div>"));
     Ok(())
 }
 

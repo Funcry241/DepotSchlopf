@@ -72,10 +72,14 @@ fn kennzahlen(d: &DepotLage, jetzt: Zeitpunkt, startgeld: Option<Cent>, text: &m
                 .frankfurt_tag()
                 .and_then(|tag| crate::analyse::letzter_boersenschluss(jetzt, tag))
                 .is_some_and(|tag| datum < tag);
+            let hinweis = if alt {
+                " <strong class=\"offen\">(veraltet)</strong>"
+            } else {
+                ""
+            };
             format!(
-                "Bewertet mit Schlusskursen vom {}{}",
-                datum_text(datum),
-                if alt { " (veraltet)" } else { "" }
+                "Bewertet mit Schlusskursen vom {}{hinweis}",
+                datum_text(datum)
             )
         },
     );
@@ -172,8 +176,9 @@ fn orders(stand: &depot_journal::Stand, werte: &[depot_kern::liste::Wert], text:
         return;
     }
     text.push_str(
-        "<div class=\"breit\"><table><tr><th>Wertpapier</th><th>Richtung</th><th>Stück offen</th>\
-        <th>Limit</th><th>Topf</th><th>Zustand</th></tr>",
+        "<div class=\"breit\"><table><thead><tr><th scope=\"col\">Wertpapier</th>\
+        <th scope=\"col\">Richtung</th><th scope=\"col\">Stück offen</th><th scope=\"col\">Limit</th>\
+        <th scope=\"col\">Topf</th><th scope=\"col\">Zustand</th></tr></thead><tbody>",
     );
     for auftrag in stand.offene_auftraege() {
         let zeile = depot_lage::auftrag_zeile(auftrag, werte);
@@ -188,7 +193,7 @@ fn orders(stand: &depot_journal::Stand, werte: &[depot_kern::liste::Wert], text:
             maskiere(&zeile.zustand)
         );
     }
-    text.push_str("</table></div></section>");
+    text.push_str("</tbody></table></div></section>");
 }
 
 fn zahlen_je_tag(punkte: &[Tagespunkt], text: &mut String) {
