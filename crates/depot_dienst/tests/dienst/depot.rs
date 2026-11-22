@@ -148,9 +148,12 @@ fn sicherung_formulare_speichern_und_starten() -> Result<(), String> {
     );
     let antwort = text(&behandle(&d, &Attrappe::default(), &starten, zeit));
     assert!(
-        antwort.contains("Location: /einrichtung?m=sicherung_start#sicherung"),
+        antwort.contains("Location: /einrichtung#sicherung"),
         "{antwort}"
     );
+    let einrichtung = get(&d, "/einrichtung?m=sicherung_start", zeit);
+    assert!(!einrichtung.contains("Sicherung eingereiht."));
+    assert!(einrichtung.contains("Sicherung wartet auf den Start."));
     assert_eq!(
         fs::read_to_string(wurzel.join("daten/sicherung_ziel.txt"))
             .map_err(|e| e.to_string())?

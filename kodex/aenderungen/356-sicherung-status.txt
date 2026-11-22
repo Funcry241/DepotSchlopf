@@ -1,0 +1,6 @@
+klasse: Funktion
+zweck: Beim manuellen Sicherungsstart den laufend aktualisierten Sicherungsstatus anzeigen
+pfade:
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/seiten.rs
+crates/depot_dienst/tests/dienst/depot.rs
