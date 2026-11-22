@@ -17,6 +17,8 @@ Ein breites Netz mit 2.048 Neuronen lässt sich am Ausgang testen, sobald genug 
 
 ## Auswertung und Rechenaufwand
 
+Der [lokale Quantisierungstest](lokale-quantisierung.md) prüft Speicherbedarf, Präzision und Antwortzeit getrennt von der Topologie.
+
 - Alle Kandidaten verwenden denselben Wissensstichtag, dieselben Instrumente, dieselben Ausführungsannahmen und dieselben später beobachteten Entscheidungen. Die Auswertung veröffentlicht Treffer, Nettoergebnis, Verlustphasen, Enthaltungen und Datenabdeckung für dieselben Zeitfenster.
 - Der Vergleich misst, welche Rolle zusätzlichen Nutzen bringt, indem jeweils eine Rolle ausgesetzt oder durch die einfache Variante ersetzt wird. Die gemeinsame Verarbeitung und getrennte Netze werden zusätzlich bei vergleichbarem Parameter- oder Rechenbudget ausgewiesen, soweit technisch möglich.
 - CPU und RTX werden je mit derselben Modellversion und denselben Daten gemessen. Text wird bei einer neuen Meldung einmal kodiert. Der zeitliche Prädiktor verarbeitet Instrumente und Horizonte in Gruppen. Bei einem GPU-Lauf bleibt die gemeinsame Darstellung bis zu den Ausgängen auf der Karte. Der Bericht misst kalten Start und Folgeläufe, Antwortzeit am langsamen Ende der Verteilung, Spitzenbedarf an Grafikspeicher und Rechenzeit. Er weist außerdem die Zeit aus, die zwischen verfügbarem Datensatz und fertig bewerteter Papierchance liegt.

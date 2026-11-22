@@ -1,6 +1,7 @@
 klasse: DokuOnly
-zweck: Topologien und Textverarbeitung für die Kapitalrotation mit sechs Rollen vergleichen
+zweck: Topologien, Textverarbeitung und lokale Quantisierung für die Kapitalrotation mit sechs Rollen vergleichen
 pfade:
 docs/neuroschlopf/kapitalrotation.md
+docs/neuroschlopf/lokale-quantisierung.md
 docs/neuroschlopf/text-und-netzvergleich.md
 docs/neuroschlopf/topologien-kapitalrotation.md
