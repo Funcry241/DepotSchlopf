@@ -1860,15 +1860,18 @@ impl Dienst {
     }
 }
 
+pub(crate) fn wartezeit_nach_lauf(z: &Zustand, art: Art, jetzt: Zeitpunkt) -> Option<i64> {
+    z.verlauf
+        .iter()
+        .filter(|a| a.art == art && a.frueher == Frueher::Nein)
+        .filter_map(|a| jetzt.sekunden_seit(a.ende?))
+        .filter(|&sekunden| sekunden < DOPPELT_SEKUNDEN)
+        .min()
+        .map(|sekunden| DOPPELT_SEKUNDEN.saturating_sub(sekunden))
+}
+
 fn von_hand_einreihen(z: &mut Zustand, art: Art, jetzt: Zeitpunkt) -> Result<(), &'static str> {
-    let gerade = z.verlauf.iter().any(|a| {
-        a.art == art
-            && a.frueher == Frueher::Nein
-            && a.ende
-                .and_then(|e| jetzt.sekunden_seit(e))
-                .is_some_and(|s| s < DOPPELT_SEKUNDEN)
-    });
-    if gerade {
+    if wartezeit_nach_lauf(z, art, jetzt).is_some() {
         return Err("gerade erst erledigt");
     }
     einreihen(z, art, Anlass::Hand, None)

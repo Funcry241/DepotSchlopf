@@ -1,0 +1,7 @@
+klasse: Funktion
+zweck: Den manuellen Sicherungsstart während der Wiederholsperre sichtbar deaktivieren
+pfade:
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/sicherung.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/tests/dienst/update_leiste.rs
