@@ -358,6 +358,50 @@ fn neuro_pilot_nutzt_ki_konsens_und_spaetere_echte_fallkennungen() -> Result<(),
     Ok(())
 }
 
+#[test]
+fn modellseite_zeigt_aktuellen_lernstand_vor_dem_ersten_lauf() -> Result<(), String> {
+    use NeuroUrteilswert::{KeinBezug, Staerkt};
+
+    let wurzel = ordner()?;
+    let trainingstag = some(Datum::lies(TAG), "Trainingstag")?;
+    let prueftag = some(Datum::lies("2026-11-12"), "Späterer Prüftag")?;
+    let train = [
+        ("SAP meldet neue Cloud-Kunden", Staerkt, Some(Staerkt)),
+        (
+            "Institut veröffentlicht Wahlumfrage",
+            KeinBezug,
+            Some(KeinBezug),
+        ),
+        (
+            "Lokalradio meldet Preisverleihung",
+            KeinBezug,
+            Some(KeinBezug),
+        ),
+    ];
+    let training = prueftag_mit_ki_urteilen(&wurzel, trainingstag, &train)?;
+    let d = dienst(wurzel.clone(), true);
+    let vorher = get(&d, "/neuroschlopf", training);
+    assert!(vorher.contains("1 mit Belegbezug · 2 ohne Bezug"));
+    assert!(!vorher.contains("Empfänger für KI-Vorprüfung einstellen"));
+    assert!(vorher.contains("Es fehlen spätere Prüffälle mit drei vollen Handelstagen Abstand"));
+
+    let pruefung = beispiel_am(
+        &wurzel,
+        prueftag,
+        &[
+            "Lokalradio meldet Preisverleihung",
+            "SAP-Cloudgeschäft bekommt neuen Großauftrag",
+        ],
+        2,
+    )?;
+    let nachher = get(&d, "/neuroschlopf", pruefung);
+    assert!(nachher.contains("1 mit Belegbezug · 1 ohne Bezug"));
+    assert!(nachher.contains("Die Fälle für den lokalen Modelllauf liegen vor."));
+    assert!(nachher.contains("2 spätere Prüffälle, davon 0 mit KI-Übereinstimmung"));
+    assert!(!wurzel.join("daten/neuro2026-beobachtung.json").exists());
+    Ok(())
+}
+
 fn prueftag_mit_ki_urteilen(
     wurzel: &Path,
     tag: Datum,
@@ -453,6 +497,33 @@ fn pruefe_originalkern(
     let seite = get(d, "/neuroschlopf", pruefung);
     assert!(seite.contains("Modellwert") && seite.contains("bekommt neuen Großauftrag"));
     assert!(seite.contains("mit KI-Konsens bewerteten Vergleichen"));
+    assert!(
+        seite.contains("Netz des Depotmodells") && seite.contains("Lernkurve des Depotmodells")
+    );
+    assert!(!seite.contains("Multiplikation"));
+    let bericht =
+        fs::read_to_string(daten.join("neuro2026-beobachtung.json")).map_err(|e| e.to_string())?;
+    let bericht = json::lies(&bericht)?;
+    let kurve = some(bericht.feld("lernkurve"), "Depotlernkurve")?;
+    let verluste = some(
+        kurve.feld("fehler").and_then(json::Json::liste),
+        "Epochenverluste",
+    )?;
+    let train = json::lies(
+        &fs::read_to_string(lauf.join("train-antwort.json")).map_err(|e| e.to_string())?,
+    )?;
+    let epochen = some(
+        train.feld("metrics").and_then(json::Json::liste),
+        "Originalepochen",
+    )?;
+    assert_eq!(verluste.len(), epochen.len());
+    let zahlenwert = |j: &json::Json| match j {
+        json::Json::Zahl(s) => s.parse::<f64>().ok(),
+        _ => None,
+    };
+    assert!(epochen.iter().zip(verluste).all(|(epoche, verlust)| {
+        epoche.feld("mean_loss").and_then(zahlenwert) == zahlenwert(verlust)
+    }));
     let scores = some(
         rang.feld("scores").and_then(json::Json::liste),
         "Modellwerte",

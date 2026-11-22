@@ -1,0 +1,11 @@
+klasse: Funktion
+zweck: KI-Trainingsurteile und fehlende Prüffälle vor dem lokalen Modelllauf mit Netz und Lernkurve des Depotmodells anzeigen
+pfade:
+crates/depot_dienst/src/assets/app.js
+crates/depot_dienst/src/assets/stil.css
+crates/depot_dienst/src/neuro2026.rs
+crates/depot_dienst/src/neuromodell.rs
+crates/depot_dienst/src/neuroschlopf.rs
+crates/depot_dienst/src/neuroschlopf/modellansicht.rs
+crates/depot_dienst/tests/dienst/belegpruefung.rs
+crates/depot_dienst/tests/dienst/live.rs

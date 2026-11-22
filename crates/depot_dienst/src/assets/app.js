@@ -466,7 +466,6 @@
 (async function neuroLernlauf() {
   const bereich = document.querySelector("[data-messung]");
   if (!bereich?.dataset?.messung) { return; }
-  const nurTopologie = bereich.hasAttribute("data-topologie");
   const feld = (id) => document.getElementById(id);
   const zahl = (wert) => wert.toLocaleString("de-DE", { maximumSignificantDigits: 5 });
   const stand = feld("lernstand");
@@ -484,11 +483,6 @@
       " Neuronen. Die beiden inneren Schichten verwenden SiLU, der Ausgang ist linear. Beim Training verändert das Netz " +
       (gewichte + bias) + " Parameter (" + gewichte + " Gewichte und " + bias + " Biaswerte).";
     zeichneLernnetz(feld("lernaufbau"), schichten);
-    if (nurTopologie) {
-      bereich.hidden = false;
-      stand.hidden = true;
-      return;
-    }
     feld("lernplan").textContent = training.samples + " Trainingspaare · " + training.epochs +
       " Epochen · AdamW auf der CPU · Startwert " + lauf.seed + ".";
     feld("lernfehler").textContent = "Auf dem vollständigen Trainingssatz fiel der mittlere quadratische Fehler von " +
@@ -513,8 +507,7 @@
     bereich.hidden = false;
     stand.hidden = true;
   } catch (_) {
-    stand.textContent = nurTopologie ? "Die Referenztopologie konnte nicht geladen werden." :
-      "Die Laufansicht konnte die Messwerte nicht anzeigen. Du kannst die Originalmesswerte oben öffnen.";
+    stand.textContent = "Die Laufansicht konnte die Messwerte nicht anzeigen. Du kannst die Originalmesswerte oben öffnen.";
   }
 })();
 
@@ -527,7 +520,7 @@ function svgElement(svg, name, merkmale, text) {
 
 function zeichneLernnetz(svg, groessen) {
   const gruppen = groessen.map((anzahl, schicht) => Array.from({length:anzahl}, (_, i) => ({
-    x:45 + 130 * schicht, y:94 + (i - (anzahl - 1) / 2) * (schicht === 0 ? 55 : 11)
+    x:45 + 130 * schicht, y:94 + (i - (anzahl - 1) / 2) * (schicht === 0 ? Math.min(55, 165 / Math.max(anzahl - 1, 1)) : Math.min(11, 165 / Math.max(anzahl - 1, 1)))
   })));
   const linien = [];
   for (let schicht = 1; schicht < gruppen.length; schicht++) {
@@ -545,6 +538,34 @@ function zeichneLernnetz(svg, groessen) {
       namen[i] + " · " + punkte.length);
   });
 }
+
+(function depotLernlauf() {
+  const bereich = document.querySelector("[data-depotmodell]");
+  if (!bereich?.dataset?.depotmodell) { return; }
+  const lauf = JSON.parse(bereich.dataset.depotmodell);
+  const format = (n) => n.toLocaleString("de-DE", {maximumSignificantDigits: 4});
+  bereich.querySelector("[data-schichten]").textContent = lauf.schichten.join(" → ") + " Neuronen";
+  bereich.querySelector("[data-trainingsfehler]").textContent = lauf.paare + " Trainingspaare · " +
+    lauf.fehler.length + " Epochen · Fehler vor dem Training " + format(lauf.anfang) +
+    " · danach " + format(lauf.ende);
+  const [netz, kurve] = bereich.querySelectorAll("svg");
+  zeichneLernnetz(netz, lauf.schichten);
+  const hoehe = Math.max(...lauf.fehler) || 1;
+  const x = (i) => 68 + i / Math.max(lauf.fehler.length - 1, 1) * 500;
+  const y = (fehler) => 175 - fehler / hoehe * 150;
+  for (const wert of [0, hoehe / 2, hoehe]) {
+    svgElement(kurve, "line", {x1:68, y1:y(wert), x2:568, y2:y(wert), stroke:"currentColor", opacity:0.25});
+    svgElement(kurve, "text", {x:58, y:y(wert) + 4, "text-anchor":"end", fill:"currentColor", "font-size":13}, format(wert));
+  }
+  svgElement(kurve, "polyline", {points:lauf.fehler.map((wert, i) => x(i) + "," + y(wert)).join(" "),
+    fill:"none", stroke:"var(--nav-akzent)", "stroke-width":2.5});
+  svgElement(kurve, "circle", {cx:x(0), cy:y(lauf.fehler[0]), r:3, fill:"var(--nav-akzent)"});
+  svgElement(kurve, "text", {x:68, y:196, "text-anchor":"middle", fill:"currentColor", "font-size":13}, "1");
+  if (lauf.fehler.length > 1) {
+    svgElement(kurve, "text", {x:568, y:196, "text-anchor":"middle", fill:"currentColor", "font-size":13}, lauf.fehler.length);
+  }
+  svgElement(kurve, "text", {x:318, y:196, "text-anchor":"middle", fill:"currentColor", "font-size":13}, "Epoche");
+})();
 
 function zeichneLernkurve(svg, epochen) {
   const werte = epochen.map((m) => Math.log10(m.mean_loss));

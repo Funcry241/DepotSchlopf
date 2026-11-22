@@ -29,6 +29,7 @@ const MAX_PAARE: usize = 8192;
 pub(crate) struct ModellBericht {
     pub modellversion: Option<String>,
     pub modellabdruck: Option<String>,
+    pub lernkurve: Option<Lernkurve>,
     pub stand: String,
     pub paare: usize,
     pub urteile: usize,
@@ -148,6 +149,58 @@ impl Ranggruppe {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct Lernkurve {
+    schichten: [usize; 4],
+    paare: usize,
+    anfang: f64,
+    ende: f64,
+    fehler: Vec<f64>,
+}
+
+impl Lernkurve {
+    fn lies(j: &Json) -> Option<Self> {
+        let [eingang, erste, zweite, ausgang] = j.feld("schichten")?.liste()? else {
+            return None;
+        };
+        let breite = erste.anzahl().filter(|b| (2..=32).contains(b))?;
+        if eingang.anzahl()? != 4 || zweite.anzahl()? != breite || ausgang.anzahl()? != 1 {
+            return None;
+        }
+        let breite = usize::try_from(breite).ok()?;
+        let fehler = j.feld("fehler")?.liste()?;
+        if fehler.is_empty() || fehler.len() > 10_000 {
+            return None;
+        }
+        Some(Self {
+            schichten: [4, breite, breite, 1],
+            paare: anzahl(j, "paare").filter(|n| (1..=MAX_PAARE).contains(n))?,
+            anfang: verlust(j.feld("anfang")?)?,
+            ende: verlust(j.feld("ende")?)?,
+            fehler: fehler.iter().map(verlust).collect::<Option<_>>()?,
+        })
+    }
+
+    pub fn json(&self) -> String {
+        let [a, b, c, d] = self.schichten;
+        let fehler = self
+            .fehler
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"schichten\":[{a},{b},{c},{d}],\"paare\":{},\"anfang\":{},\"ende\":{},\"fehler\":[{fehler}]}}",
+            self.paare, self.anfang, self.ende
+        )
+    }
+}
+
+fn verlust(j: &Json) -> Option<f64> {
+    let (_, wert) = score(j)?;
+    (0.0..=f64::from(f32::MAX)).contains(&wert).then_some(wert)
+}
+
 impl ModellBericht {
     fn lies(j: &Json) -> Option<Self> {
         if text(j, "schema")? != SCHEMA {
@@ -175,6 +228,10 @@ impl ModellBericht {
         Some(Self {
             modellversion,
             modellabdruck,
+            lernkurve: match j.feld("lernkurve") {
+                None | Some(Json::Null) => None,
+                Some(kurve) => Some(Lernkurve::lies(kurve)?),
+            },
             stand: text(j, "stand")?.into(),
             paare: anzahl(j, "paare")?,
             urteile: anzahl(j, "urteile")?,
@@ -200,10 +257,14 @@ impl ModellBericht {
             .modellabdruck
             .as_deref()
             .map_or_else(|| "null".into(), zitiere);
+        let kurve = self
+            .lernkurve
+            .as_ref()
+            .map_or_else(|| "null".into(), Lernkurve::json);
         let inhalt = format!(
             "{{\"schema\":\"{SCHEMA}\",\"modellversion\":{version},\"modellabdruck\":{abdruck},\"stand\":{},\
              \"paare\":{},\"urteile\":{},\"ki_konsens\":{},\"trainingstage\":{},\"prueftage\":{},\
-             \"gruppen\":[{gruppen}]}}\n",
+             \"lernkurve\":{kurve},\"gruppen\":[{gruppen}]}}\n",
             zitiere(&self.stand),
             self.paare,
             self.urteile,
@@ -218,7 +279,7 @@ impl ModellBericht {
     }
 }
 
-fn lese_json(pfad: &Path) -> Result<Option<Json>, String> {
+fn lese_datei(pfad: &Path) -> Result<Option<String>, String> {
     let datei = match File::open(pfad) {
         Ok(d) => d,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
@@ -232,7 +293,11 @@ fn lese_json(pfad: &Path) -> Result<Option<Json>, String> {
     if inhalt.len() > MAX_BYTES {
         return Err("Die Neuro2026-Datei ist zu groß.".into());
     }
-    json::lies(&inhalt).map(Some)
+    Ok(Some(inhalt))
+}
+
+fn lese_json(pfad: &Path) -> Result<Option<Json>, String> {
+    lese_datei(pfad)?.as_deref().map(json::lies).transpose()
 }
 
 pub(crate) fn ansicht(daten: &Path) -> Result<Option<ModellBericht>, String> {
@@ -508,11 +573,87 @@ fn ranggruppen(zeilen: &[&Zeile], werte: &Rangwerte) -> (Vec<Ranggruppe>, Vergle
     (aus, zahlen)
 }
 
+fn messwerte(
+    ordner: &Path,
+    antwort: &Json,
+    abdruck: &str,
+    paare: usize,
+) -> Result<Lernkurve, String> {
+    let fehlt = || {
+        "Die Neuro2026-Trainingsmesswerte sind unvollständig oder gehören zu einem anderen Modell."
+            .to_owned()
+    };
+    let modell = ordner.join("modell");
+    let stand = lese_datei(&modell.join("stand.json"))?.ok_or_else(fehlt)?;
+    let metadaten = lese_datei(&modell.join("modell.neuro.json"))?.ok_or_else(fehlt)?;
+    if sha256_hex(stand.as_bytes()) != abdruck {
+        return Err(fehlt());
+    }
+    let stand = json::lies(&stand)?;
+    if text(&stand, "metadaten_sha256") != Some(&sha256_hex(metadaten.as_bytes())) {
+        return Err(fehlt());
+    }
+    let metadaten = json::lies(&metadaten)?;
+    let config = metadaten.feld("model").ok_or_else(fehlt)?;
+    let breite = anzahl(config, "hidden_width")
+        .filter(|b| (2..=32).contains(b))
+        .ok_or_else(fehlt)?;
+    if text(&metadaten, "format") != Some("neuro2026-model-v1")
+        || text(&metadaten, "neuro2026_version") != Some(VERSION)
+        || anzahl(config, "input_size") != Some(4)
+        || anzahl(config, "output_size") != Some(1)
+    {
+        return Err(fehlt());
+    }
+    let epochen = antwort
+        .feld("metrics")
+        .and_then(Json::liste)
+        .ok_or_else(fehlt)?;
+    if epochen.is_empty()
+        || epochen.len() > 10_000
+        || anzahl(antwort, "epochs") != Some(epochen.len())
+        || anzahl(antwort, "samples") != Some(paare)
+    {
+        return Err(fehlt());
+    }
+    let fehler = epochen
+        .iter()
+        .zip(1..)
+        .map(|(epoche, nummer)| {
+            if anzahl(epoche, "epoch") != Some(nummer) || epoche.doppelte_felder() {
+                return None;
+            }
+            verlust(epoche.feld("mean_loss")?)
+        })
+        .collect::<Option<_>>()
+        .ok_or_else(fehlt)?;
+    Ok(Lernkurve {
+        schichten: [4, breite, breite, 1],
+        paare,
+        anfang: antwort
+            .feld("initial_loss")
+            .and_then(verlust)
+            .ok_or_else(fehlt)?,
+        ende: antwort
+            .feld("final_loss")
+            .and_then(verlust)
+            .ok_or_else(fehlt)?,
+        fehler,
+    })
+}
+
+struct ModellLauf {
+    gruppen: Vec<Ranggruppe>,
+    vergleich: Vergleichszahlen,
+    abdruck: String,
+    lernkurve: Lernkurve,
+}
+
 fn bericht_lauf(
     train: &[(&Zeile, u8)],
     pruef: &[&Zeile],
     ordner: &Path,
-) -> Result<Option<(Vec<Ranggruppe>, Vergleichszahlen, String)>, String> {
+) -> Result<Option<ModellLauf>, String> {
     let train: Vec<_> = train
         .iter()
         .map(|(z, label)| format!("{{\"x\":{},\"stufe\":{label}}}", merkmale(z.merkmale)))
@@ -532,11 +673,79 @@ fn bericht_lauf(
     let (Some(lernlauf), Some(antwort)) = (lernlauf, antwort) else {
         return Ok(None);
     };
-    if modellabdruck(&lernlauf)? != modellabdruck(&antwort)? {
+    let abdruck = modellabdruck(&lernlauf)?;
+    if abdruck != modellabdruck(&antwort)? {
         return Err("Der Ranglauf hat ein anderes Modell geladen.".into());
     }
-    let (gruppen, zahlen) = ranggruppen(pruef, &rangwerte(&antwort, pruef)?);
-    Ok(Some((gruppen, zahlen, modellabdruck(&antwort)?.to_owned())))
+    let lernkurve = messwerte(ordner, &lernlauf, abdruck, train.len())?;
+    let (gruppen, vergleich) = ranggruppen(pruef, &rangwerte(&antwort, pruef)?);
+    Ok(Some(ModellLauf {
+        gruppen,
+        vergleich,
+        abdruck: abdruck.into(),
+        lernkurve,
+    }))
+}
+
+fn prueffaelle_ab(zeilen: &[Zeile], ab: Datum) -> Vec<&Zeile> {
+    zeilen.iter().filter(|z| z.tag >= ab).collect()
+}
+
+fn trainingsfaelle<'a>(
+    zeilen: &'a [Zeile],
+    train_bis: Datum,
+    pruef: &[&Zeile],
+) -> Vec<(&'a Zeile, u8)> {
+    let spaetere_meldungen: BTreeSet<_> = pruef.iter().map(|z| meldung(z)).collect();
+    zeilen
+        .iter()
+        .filter(|z| z.tag <= train_bis && !spaetere_meldungen.contains(&meldung(z)))
+        .filter_map(|z| Some((z, u8::from(ki_relevanz(z)? == Urteil::Bezug))))
+        .collect()
+}
+
+pub(super) struct Lernstand {
+    pub von: Datum,
+    pub train_bis: Datum,
+    pub bis: Datum,
+    pub mit_bezug: usize,
+    pub ohne_bezug: usize,
+    pub prueffaelle: usize,
+    pub pruefurteile: usize,
+}
+
+/// Prüft einen vorgeschlagenen Zeitraum anhand derselben Fälle wie der Modelllauf.
+/// Der Vorschlag nimmt den jüngsten verfügbaren Prüftag und das spätestmögliche Trainingsende.
+pub(super) fn lernstand(daten: &Path, heute: Datum) -> Result<Option<Lernstand>, String> {
+    let beginn = Datum::neu(1970, 1, 1).ok_or("Historischer Zeitraum ist ungültig.")?;
+    let datensatz = crate::neurodaten::laden(daten, beginn, heute)?;
+    let zeilen = &datensatz.zeilen;
+    if zeilen.len() > MAX_PAARE {
+        return Err("Zu viele Belegpaare für einen gemeinsamen Lauf. Wähle beim lokalen Modelllauf einen kürzeren Zeitraum.".into());
+    }
+    let (Some(erste), Some(letzte)) = (zeilen.first(), zeilen.last()) else {
+        return Ok(None);
+    };
+    let trainingsende = zeilen
+        .iter()
+        .rev()
+        .map(|z| z.tag)
+        .find(|&tag| pruefstart(tag).is_some_and(|start| start <= letzte.tag));
+    let train_bis = trainingsende.unwrap_or(letzte.tag);
+    let pruef = trainingsende
+        .and_then(pruefstart)
+        .map_or_else(Vec::new, |start| prueffaelle_ab(zeilen, start));
+    let train = trainingsfaelle(zeilen, train_bis, &pruef);
+    let mit_bezug = train.iter().filter(|(_, stufe)| *stufe == 1).count();
+    Ok(Some(Lernstand {
+        von: erste.tag,
+        train_bis,
+        bis: letzte.tag,
+        mit_bezug,
+        ohne_bezug: train.len().saturating_sub(mit_bezug),
+        prueffaelle: pruef.len(),
+        pruefurteile: pruef.iter().filter(|z| ki_relevanz(z).is_some()).count(),
+    }))
 }
 
 /// Bereitet Trainings- und Prüfeingaben vor oder übernimmt den belegten Ranglauf.
@@ -556,22 +765,13 @@ pub fn neuro_pilot(
         return Err("Zu viele Belegpaare. Bitte einen kürzeren Zeitraum wählen.".into());
     }
     let erster_prueftag = pruefstart(train_bis).ok_or("Prüfzeitraum ist nicht darstellbar.")?;
-    let pruef: Vec<_> = datensatz
-        .zeilen
-        .iter()
-        .filter(|z| z.tag >= erster_prueftag)
-        .collect();
-    let spaetere_meldungen: BTreeSet<_> = pruef.iter().map(|z| meldung(z)).collect();
-    let train: Vec<_> = datensatz
-        .zeilen
-        .iter()
-        .filter(|z| z.tag <= train_bis && !spaetere_meldungen.contains(&meldung(z)))
-        .filter_map(|z| Some((z, u8::from(ki_relevanz(z)? == Urteil::Bezug))))
-        .collect();
+    let pruef = prueffaelle_ab(&datensatz.zeilen, erster_prueftag);
+    let train = trainingsfaelle(&datensatz.zeilen, train_bis, &pruef);
     let klassen: BTreeSet<_> = train.iter().map(|(_, k)| *k).collect();
     let mut bericht = ModellBericht {
         modellversion: None,
         modellabdruck: None,
+        lernkurve: None,
         stand: String::new(),
         paare: datensatz.zeilen.len(),
         urteile: datensatz
@@ -596,11 +796,12 @@ pub fn neuro_pilot(
     } else if pruef.is_empty() {
         "Es fehlen spätere Prüffälle mit drei Handelstagen Abstand zum Training.".into()
     } else if let Some(ordner) = austauschordner {
-        if let Some((gruppen, vergleich, abdruck)) = bericht_lauf(&train, &pruef, ordner)? {
+        if let Some(lauf) = bericht_lauf(&train, &pruef, ordner)? {
             bericht.modellversion = Some(VERSION.into());
-            bericht.modellabdruck = Some(abdruck);
-            bericht.gruppen = gruppen;
-            vergleich.text()
+            bericht.modellabdruck = Some(lauf.abdruck);
+            bericht.lernkurve = Some(lauf.lernkurve);
+            bericht.gruppen = lauf.gruppen;
+            lauf.vergleich.text()
         } else {
             "Die Eingaben sind vorbereitet. Der lokale Modelllauf steht aus.".into()
         }
