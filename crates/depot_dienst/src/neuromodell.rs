@@ -511,7 +511,11 @@ impl Vergleichszahlen {
     }
 }
 
-fn ranggruppen(zeilen: &[&Zeile], werte: &Rangwerte) -> (Vec<Ranggruppe>, Vergleichszahlen) {
+fn ranggruppen(
+    zeilen: &[&Zeile],
+    werte: &Rangwerte,
+    gleichstand: fn(&Zeile) -> usize,
+) -> (Vec<Ranggruppe>, Vergleichszahlen) {
     let mut gruppen = Gruppen::new();
     for z in zeilen {
         let z = *z;
@@ -533,7 +537,8 @@ fn ranggruppen(zeilen: &[&Zeile], werte: &Rangwerte) -> (Vec<Ranggruppe>, Vergle
     for ((tag, berater, isin, _), mut gruppe) in gruppen.into_iter().rev() {
         gruppe.sort_by(|(a, aw), (b, bw)| {
             bw.1.total_cmp(&aw.1)
-                .then_with(|| a.fragenplatz.cmp(&b.fragenplatz))
+                .then_with(|| gleichstand(a).cmp(&gleichstand(b)))
+                .then_with(|| a.fall.kennung.cmp(&b.fall.kennung))
         });
         let modell: Vec<_> = (0..gruppe.len()).collect();
         let mut grund = modell.clone();
@@ -678,7 +683,7 @@ fn bericht_lauf(
         return Err("Der Ranglauf hat ein anderes Modell geladen.".into());
     }
     let lernkurve = messwerte(ordner, &lernlauf, abdruck, train.len())?;
-    let (gruppen, vergleich) = ranggruppen(pruef, &rangwerte(&antwort, pruef)?);
+    let (gruppen, vergleich) = ranggruppen(pruef, &rangwerte(&antwort, pruef)?, |z| z.fragenplatz);
     Ok(Some(ModellLauf {
         gruppen,
         vergleich,
@@ -746,6 +751,68 @@ pub(super) fn lernstand(daten: &Path, heute: Datum) -> Result<Option<Lernstand>,
         prueffaelle: pruef.len(),
         pruefurteile: pruef.iter().filter(|z| ki_relevanz(z).is_some()).count(),
     }))
+}
+
+const TEXT_FORMAT: &str = "depot-neuro-textprobe-v1";
+
+/// Bereitet eine lokale Textprobe vor oder wertet die passende Rangantwort lesend aus.
+pub fn neuro_textprobe(
+    daten: &Path,
+    von: Datum,
+    bis: Datum,
+    ordner: &Path,
+) -> Result<String, String> {
+    let datensatz = crate::neurodaten::laden(daten, von, bis)?;
+    let faelle: Vec<_> = datensatz
+        .zeilen
+        .iter()
+        .filter(|z| !z.fall.these.trim().is_empty() && !z.fall.beleg.trim().is_empty())
+        .collect();
+    if faelle.is_empty() {
+        return Err("Im Zeitraum liegen keine belegten These-Beleg-Paare vor.".into());
+    }
+    if faelle.len() > MAX_PAARE {
+        return Err("Zu viele These-Beleg-Paare. Bitte einen kürzeren Zeitraum wählen.".into());
+    }
+    let zeilen = faelle
+        .iter()
+        .map(|z| {
+            format!(
+                "{{\"id\":{},\"these\":{},\"beleg\":{}}}",
+                zitiere(&z.fall.kennung),
+                zitiere(&z.fall.these),
+                zitiere(&z.fall.beleg)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let eingabe = format!("{{\"format\":\"{TEXT_FORMAT}\",\"rows\":[{zeilen}]}}\n");
+    if eingabe.len() > MAX_BYTES {
+        return Err(
+            "Die lokalen Textdaten sind zu groß. Bitte einen kürzeren Zeitraum wählen.".into(),
+        );
+    }
+    let pfad = ordner.join("textprobe-eingabe.json");
+    let Some(antwort) = lese_json(&ordner.join("textprobe-antwort.json"))? else {
+        schreibe_ganz(&pfad, &eingabe)?;
+        return Ok(format!(
+            "{} Paare für die lokale Textprobe vorbereitet. Die Rangantwort steht aus.",
+            faelle.len()
+        ));
+    };
+    if antwort.doppelte_felder()
+        || text(&antwort, "format") != Some(TEXT_FORMAT)
+        || text(&antwort, "input_sha256") != Some(sha256_hex(eingabe.as_bytes()).as_str())
+    {
+        return Err("Die Textantwort gehört zu einem anderen Fallbestand.".into());
+    }
+    let werte = rangwerte(&antwort, &faelle)?;
+    let (_, vergleich) = ranggruppen(&faelle, &werte, |z| z.grundrang);
+    Ok(format!(
+        "Textähnlichkeit gegen Grundrang · {} geprüfte Paare. {}",
+        faelle.len(),
+        vergleich.text()
+    ))
 }
 
 /// Bereitet Trainings- und Prüfeingaben vor oder übernimmt den belegten Ranglauf.

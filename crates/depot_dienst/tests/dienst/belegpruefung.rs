@@ -23,6 +23,51 @@ fn beispiel(wurzel: &Path) -> Result<Zeitpunkt, String> {
     )
 }
 
+#[test]
+fn textprobe_bindet_lokale_rangwerte_an_dieselben_belege() -> Result<(), String> {
+    use depot_kern::{abdruck::sha256_hex, json};
+
+    let wurzel = ordner()?;
+    let zeit = beispiel(&wurzel)?;
+    let daten = wurzel.join("daten");
+    let tag = some(zeit.frankfurt_tag(), "Prüftag")?;
+    let austausch = wurzel.join("textprobe");
+    fs::create_dir(&austausch).map_err(|e| e.to_string())?;
+    assert!(depot_dienst::neuro_textprobe(&daten, tag, tag, &austausch)?.contains("2 Paare"));
+    let eingabe = fs::read(austausch.join("textprobe-eingabe.json")).map_err(|e| e.to_string())?;
+    let j = json::lies(std::str::from_utf8(&eingabe).map_err(|e| e.to_string())?)?;
+    let faelle = some(j.feld("rows").and_then(json::Json::liste), "Textfälle")?;
+    assert_eq!(faelle.len(), 2);
+    assert!(faelle.iter().any(|f| {
+        f.feld("beleg")
+            .and_then(json::Json::text)
+            .is_some_and(|b| b.contains("<Vorabzahlen>"))
+    }));
+    let werte = faelle
+        .iter()
+        .map(|f| {
+            let id = some(f.feld("id").and_then(json::Json::text), "Fall-ID")?;
+            Ok(format!("{{\"id\":{},\"score\":0.29}}", json::zitiere(id)))
+        })
+        .collect::<Result<Vec<_>, String>>()?
+        .join(",");
+    let antwort = |hash: &str| {
+        format!(
+            r#"{{"format":"depot-neuro-textprobe-v1","input_sha256":"{hash}","scores":[{werte}]}}"#
+        )
+    };
+    let pfad = austausch.join("textprobe-antwort.json");
+    fs::write(&pfad, antwort("ungueltig")).map_err(|e| e.to_string())?;
+    assert!(depot_dienst::neuro_textprobe(&daten, tag, tag, &austausch).is_err());
+    fs::write(&pfad, antwort(&sha256_hex(&eingabe))).map_err(|e| e.to_string())?;
+    let result = depot_dienst::neuro_textprobe(&daten, tag, tag, &austausch)?;
+    assert!(
+        result.contains("Textähnlichkeit gegen Grundrang") && result.contains("2 geprüfte Paare")
+    );
+    assert!(!daten.join("neuro2026-beobachtung.json").exists());
+    Ok(())
+}
+
 fn beispiel_am(
     wurzel: &Path,
     tag: Datum,

@@ -39,7 +39,7 @@ mod neuro2026;
 mod neuroauftraege;
 mod neurodaten;
 mod neuromodell;
-pub use neuromodell::neuro_pilot;
+pub use neuromodell::{neuro_pilot, neuro_textprobe};
 mod neuroschlopf;
 mod otter;
 mod papierdialog;
