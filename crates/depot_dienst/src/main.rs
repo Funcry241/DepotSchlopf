@@ -227,9 +227,18 @@ fn sichern(d: &Arc<Dienst>, baum: String) {
 }
 
 fn main() -> ExitCode {
-    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--neuro-pilot")) {
-        return neuro_pilot();
+    match std::env::args_os()
+        .nth(1)
+        .as_deref()
+        .and_then(std::ffi::OsStr::to_str)
+    {
+        Some("--neuro-pilot") => neuro_pilot(),
+        Some("--neuro-textprobe") => neuro_textprobe(),
+        _ => dienst_starten(),
     }
+}
+
+fn dienst_starten() -> ExitCode {
     let mut ohne_browser = false;
     let mut herkunft = Herkunft::Unbekannt;
     let mut args = std::env::args().skip(1);
@@ -360,6 +369,41 @@ fn neuro_pilot() -> ExitCode {
         }
         Err(e) => {
             eprintln!("Neuro2026-Beobachtungslauf: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn neuro_textprobe() -> ExitCode {
+    let mut args = std::env::args_os().skip(2);
+    let termine = [args.next(), args.next()];
+    let [Some(von), Some(bis)] = termine.map(|a| {
+        a.as_deref()
+            .and_then(std::ffi::OsStr::to_str)
+            .and_then(depot_kern::Datum::lies)
+    }) else {
+        eprintln!("Aufruf: depot_dienst --neuro-textprobe VON BIS AUSTAUSCHORDNER");
+        return ExitCode::FAILURE;
+    };
+    let Some(ordner) = args.next().map(std::path::PathBuf::from) else {
+        eprintln!("Aufruf: depot_dienst --neuro-textprobe VON BIS AUSTAUSCHORDNER");
+        return ExitCode::FAILURE;
+    };
+    if args.next().is_some() || !ordner.is_dir() {
+        eprintln!("Gib genau einen vorhandenen lokalen Austauschordner an.");
+        return ExitCode::FAILURE;
+    }
+    let Some(wurzel) = finde_wurzel() else {
+        eprintln!("Projektordner für die NeuroSchlopf-Textprobe nicht gefunden.");
+        return ExitCode::FAILURE;
+    };
+    match depot_dienst::neuro_textprobe(&wurzel.join("daten"), von, bis, &ordner) {
+        Ok(status) => {
+            println!("{status}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("NeuroSchlopf-Textprobe: {e}");
             ExitCode::FAILURE
         }
     }

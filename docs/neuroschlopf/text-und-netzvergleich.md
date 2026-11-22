@@ -35,3 +35,13 @@ C und D erhalten das elementweise Produkt beider Vektoren, dessen Summe als Kosi
 Der nächste Code-Take liest die belegten Fälle und erzeugt einen lokalen Offline-Durchstich für A und B. Die technische Probe enthält eine deutsch-englische Textzuordnung, einen thematischen Beleg ohne Firmennamen, eine unabhängige Meldung über dasselbe Unternehmen und einen Neuabdruck über der Datumsgrenze. Dessen Ausschluss aus dem Trainingsfenster ist Teil der Abnahme. Danach lässt sich derselbe festgeschriebene Fallbestand für C und D verwenden. Der bestehende Pilot mit vier Merkmalen und zwei gleich breiten Schichten bleibt als eigener Referenzlauf nutzbar.
 
 Forschungsbezug: [Qwen3 Embedding](https://arxiv.org/abs/2506.05176), [E2Rank](https://aclanthology.org/2026.emnlp-main.2171/) und [TabM](https://proceedings.iclr.cc/paper_files/paper/2025/hash/c1ba41c694834aeef91ae161711d4939-Abstract-Conference.html). Die Breiten sind Versuchskandidaten für diese Aufgabe.
+
+## Lokale Textprobe für A und B
+
+Die Textprobe nutzt einen vorhandenen, lokalen Ordner außerhalb des normalen Analyseexports. Er enthält die zum jeweiligen Wissensstichtag gespeicherte These und den belegten Text. Für den zweiten Probeaufruf muss der lokale Embedding-Server mit dem Qwen3-Embedding-Modell laufen und unter dem gewählten Loopback-Port erreichbar sein. Er gibt 1.024-dimensionale Textvektoren aus.
+
+1. `depot_dienst --neuro-textprobe VON BIS AUSTAUSCHORDNER` erstellt die Eingabe.
+2. `python docs/neuroschlopf/textprobe.py AUSTAUSCHORDNER --port PORT` ermittelt die Textähnlichkeit. Das Skript kodiert gleichlautende Eingabetexte je Lauf einmal und sendet sie nur an `127.0.0.1`.
+3. Derselbe Dienstaufruf wie in Schritt 1 prüft den Abdruck der Antwort und wertet die Rangfolgen mit dem bestehenden Urteilsschema aus. Das ausgegebene Ergebnis zählt nur Gruppen mit verwertbaren KI-Übereinstimmungen für die benötigten Top-3-Fälle.
+
+Die beiden Austauschdateien gehören zu einer festgelegten Probe. Für einen anderen Zeitraum oder einen veränderten Fallbestand einen neuen Ordner verwenden. Das Journal und der gespeicherte Neuro2026-Modellbericht bleiben beim Aufruf unverändert.
