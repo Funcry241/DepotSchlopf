@@ -83,21 +83,41 @@ pub fn sicherung_sperren(daten: &Path, belegt: &str) -> Result<File, String> {
 }
 
 pub fn journal_sperren(daten: &Path) -> Result<Option<File>, String> {
-    journal_sperren_fuer(daten, "Update-Sicherung")
+    journal_sperren_fuer(daten, "Update-Sicherung", || false)
 }
 
-pub fn journal_sperren_fuer(daten: &Path, zweck: &str) -> Result<Option<File>, String> {
+pub fn journal_sperren_fuer(
+    daten: &Path,
+    zweck: &str,
+    mut warten: impl FnMut() -> bool,
+) -> Result<Option<File>, String> {
     let pfad = daten.join("journal.txt");
-    match fs::symlink_metadata(&pfad) {
-        Ok(m) if m.is_file() => {}
-        Ok(_) => return Err("Journal ist keine reguläre Datei".into()),
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(format!("Journal: {e}")),
+    loop {
+        match fs::symlink_metadata(&pfad) {
+            Ok(m) if m.is_file() => {}
+            Ok(_) => return Err("Journal ist keine reguläre Datei".into()),
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("Journal: {e}")),
+        }
+        let f = File::open(&pfad).map_err(|e| format!("Journal: {e}"))?;
+        match f.try_lock_shared() {
+            Ok(()) => return Ok(Some(f)),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                drop(f);
+                if !warten() {
+                    return Err(format!(
+                        "Journal für die {zweck} belegt oder nicht sperrbar: {}",
+                        std::fs::TryLockError::WouldBlock
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Journal für die {zweck} belegt oder nicht sperrbar: {e}"
+                ));
+            }
+        }
     }
-    let f = File::open(pfad).map_err(|e| format!("Journal: {e}"))?;
-    f.try_lock_shared()
-        .map_err(|e| format!("Journal für die {zweck} belegt oder nicht sperrbar: {e}"))?;
-    Ok(Some(f))
 }
 
 pub fn lesen(daten: &Path) -> Result<Datenstand, String> {
