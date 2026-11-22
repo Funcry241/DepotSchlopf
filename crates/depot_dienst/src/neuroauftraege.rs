@@ -105,12 +105,51 @@ struct TextprobeStand {
     ausstehend: usize,
     beantwortet: usize,
     unverwertbar: usize,
+    noch_nicht_vorgemerkt: usize,
     nicht_vormerkbar: usize,
 }
 
-pub(crate) fn textprobe_planen<'a>(
+impl TextprobeStand {
+    fn text(
+        &self,
+        e: KiEinstellungen,
+        paare: usize,
+        vormerken: bool,
+        belegt: Option<usize>,
+    ) -> String {
+        let aktion = if vormerken {
+            format!(
+                " · {} neue Aufträge für {}",
+                self.neu,
+                e.neuro_empfaenger.name()
+            )
+        } else {
+            format!(" · Empfänger {}", e.neuro_empfaenger.name())
+        };
+        let mut ausgabe = format!(
+            "KI-Vorprüfung · {paare} Top-3-Paare ohne Konsens{aktion} · Tageslimit {}.\n\
+         Fragenstatus · {} bereits vorgemerkt · {} Antwort oder Rückfrage ausstehend · \
+         {} abschließend beantwortet · {} ohne verwertbares Urteil · {} noch nicht vorgemerkt · \
+         {} nicht vormerkbar.",
+            e.neuroschlopf,
+            self.vorgemerkt,
+            self.ausstehend,
+            self.beantwortet,
+            self.unverwertbar,
+            self.noch_nicht_vorgemerkt,
+            self.nicht_vormerkbar
+        );
+        if let Some(belegt) = belegt {
+            let _ = write!(ausgabe, "\nHeute reserviert · {belegt}/{}.", e.neuroschlopf);
+        }
+        ausgabe
+    }
+}
+
+pub(crate) fn textprobe_fragen<'a>(
     daten: &Path,
     faelle: impl Iterator<Item = &'a Prueffall>,
+    vormerken: bool,
 ) -> Result<String, String> {
     let e = ki_einstellungen::lesen(daten)?;
     if e.neuro_berater().is_empty() || !crate::neuroschlopf::einstellung(daten)? {
@@ -151,6 +190,16 @@ pub(crate) fn textprobe_planen<'a>(
                 continue;
             }
             if let Some(frage) = fall.vorpruefung(wer, NeuroRunde::Erstfrage, None) {
+                if !vormerken {
+                    let pfad = sammlung(daten).join(dateiname(&frage));
+                    if pfad.try_exists().map_err(|e| e.to_string())? {
+                        status.vorgemerkt = status.vorgemerkt.saturating_add(1);
+                    } else {
+                        status.noch_nicht_vorgemerkt =
+                            status.noch_nicht_vorgemerkt.saturating_add(1);
+                    }
+                    continue;
+                }
                 sichern(daten, &frage)?;
                 match fs::File::create_new(textprobe_marke(daten, &frage)) {
                     Ok(_) => status.neu = status.neu.saturating_add(1),
@@ -164,24 +213,10 @@ pub(crate) fn textprobe_planen<'a>(
             }
         }
     }
-    let mut ausgabe = format!(
-        "KI-Vorprüfung · {paare} Top-3-Paare ohne Konsens · {} neue Aufträge für {} · Tageslimit {}.\n\
-         Fragenstatus · {} bereits vorgemerkt · {} Antwort oder Rückfrage ausstehend · \
-         {} abschließend beantwortet · {} ohne verwertbares Urteil · {} nicht vormerkbar.",
-        status.neu,
-        e.neuro_empfaenger.name(),
-        e.neuroschlopf,
-        status.vorgemerkt,
-        status.ausstehend,
-        status.beantwortet,
-        status.unverwertbar,
-        status.nicht_vormerkbar
-    );
-    if let Some(heute) = crate::jetzt().and_then(depot_kern::Zeitpunkt::frankfurt_tag) {
-        let belegt = ki.neurofragen().iter().filter(|v| v.datum == heute).count();
-        let _ = write!(ausgabe, "\nHeute reserviert · {belegt}/{}.", e.neuroschlopf);
-    }
-    Ok(ausgabe)
+    let belegt = crate::jetzt()
+        .and_then(depot_kern::Zeitpunkt::frankfurt_tag)
+        .map(|heute| ki.neurofragen().iter().filter(|v| v.datum == heute).count());
+    Ok(status.text(e, paare, vormerken, belegt))
 }
 
 pub(crate) fn planen(
