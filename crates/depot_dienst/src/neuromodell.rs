@@ -159,6 +159,10 @@ pub(crate) struct Lernkurve {
 }
 
 impl Lernkurve {
+    pub(crate) fn schichten(&self) -> [usize; 4] {
+        self.schichten
+    }
+
     fn lies(j: &Json) -> Option<Self> {
         let [eingang, erste, zweite, ausgang] = j.feld("schichten")?.liste()? else {
             return None;

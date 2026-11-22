@@ -7,6 +7,9 @@ use depot_lage::{datum_text, html::maskiere};
 
 use crate::neuromodell::{Lernkurve, ModellBericht, Rangbeleg, Ranggruppe, ansicht, lernstand};
 
+// Konfiguration des ausgelieferten depot-neuro-worker für den Beobachtungslauf.
+const PILOT_SCHICHTEN: [usize; 4] = [4, 16, 16, 1];
+
 pub(super) fn html(html: &mut String, daten: &Path, heute: Option<Datum>) {
     html.push_str("<section aria-labelledby=\"depotmodell-titel\"><h3 id=\"depotmodell-titel\">Neuro2026 · Depotmodell</h3>");
     html.push_str("<p>Neuro2026 bewertet, wie gut Nachrichten und Termine zu einer Depotthese passen. Im lokalen Modelllauf ordnet es historische Belege nach ihrem Modellwert und vergleicht die Rangfolge mit der bisherigen Sortierung.</p>");
@@ -15,8 +18,14 @@ pub(super) fn html(html: &mut String, daten: &Path, heute: Option<Datum>) {
     }
     match ansicht(daten) {
         Ok(Some(bericht)) => bericht_html(html, &bericht),
-        Ok(None) => html.push_str("<p>Wartet auf die erste lokale Modellauswertung.</p>"),
-        Err(_) => html.push_str("<p>Der lokale Modellbericht ist unlesbar.</p>"),
+        Ok(None) => {
+            html.push_str("<p>Wartet auf die erste lokale Modellauswertung.</p>");
+            modellgrafik_html(html, None);
+        }
+        Err(_) => {
+            html.push_str("<p>Der lokale Modellbericht ist unlesbar.</p>");
+            modellgrafik_html(html, None);
+        }
     }
     html.push_str("</section>");
 }
@@ -82,6 +91,7 @@ fn bericht_html(html: &mut String, bericht: &ModellBericht) {
         bericht.prueftage,
     );
     let Some(version) = &bericht.modellversion else {
+        modellgrafik_html(html, None);
         return;
     };
     let _ = write!(
@@ -89,11 +99,7 @@ fn bericht_html(html: &mut String, bericht: &ModellBericht) {
         "<p><strong>Neuro2026-Kern {}</strong> · Beobachtungsbetrieb</p>",
         maskiere(version)
     );
-    if let Some(kurve) = &bericht.lernkurve {
-        lernkurve_html(html, kurve);
-    } else {
-        html.push_str("<p>Für diesen Modellbericht liegt keine Lernkurve vor. Ein neuer lokaler Modelllauf erfasst sie.</p>");
-    }
+    modellgrafik_html(html, bericht.lernkurve.as_ref());
     if let Some(abdruck) = &bericht.modellabdruck {
         let _ = write!(
             html,
@@ -106,20 +112,33 @@ fn bericht_html(html: &mut String, bericht: &ModellBericht) {
     }
 }
 
-fn lernkurve_html(html: &mut String, kurve: &Lernkurve) {
+fn modellgrafik_html(html: &mut String, kurve: Option<&Lernkurve>) {
+    let [eingang, erste, zweite, ausgang] = kurve.map_or(PILOT_SCHICHTEN, Lernkurve::schichten);
+    let titel = if kurve.is_some() {
+        "Netz des trainierten Depotmodells"
+    } else {
+        "Vorgesehener Aufbau des Depotmodells"
+    };
     let _ = write!(
         html,
-        r#"<div class="neuro-uebersicht" data-depotmodell="{}">
-        <section class="neuro-topologie"><h4>Netz des Depotmodells</h4>
-        <p data-schichten></p>
-        <svg viewBox="0 0 480 215" role="img" aria-label="Schichten des trainierten Depotmodells"></svg>
-        <p>Vier Eingaben erfassen den Wertbezug, den Terminbezug, gemeinsame Thesenwörter und die Aktualität. Der Ausgang liefert einen Sortierwert pro Beleg.</p></section>
-        <section class="neuro-kurve"><h4>Lernkurve des Depotmodells</h4>
-        <p data-trainingsfehler></p>
-        <svg viewBox="0 0 600 210" role="img" aria-label="Trainingsfehler über aufeinanderfolgende Epochen"></svg>
-        <p>Die Linie zeigt den mittleren quadratischen Trainingsfehler je Epoche. Der Rangvergleich mit späteren Belegen steht im Modellbericht.</p></section></div>"#,
-        maskiere(&kurve.json())
+        r#"<div class="neuro-uebersicht"><section class="neuro-topologie"><h4>{titel}</h4>
+        <p>{eingang} → {erste} → {zweite} → {ausgang} Neuronen</p>
+        <svg viewBox="0 0 480 215" role="img" aria-label="{titel}" data-netzschichten="[{eingang},{erste},{zweite},{ausgang}]"></svg>
+        <p>Vier Eingaben erfassen den Wertbezug, den Terminbezug, gemeinsame Thesenwörter und die Aktualität. Der Ausgang liefert einen Sortierwert pro Beleg.</p></section>"#
     );
+    if let Some(kurve) = kurve {
+        let _ = write!(
+            html,
+            r#"<section class="neuro-kurve" data-depotmodell="{}"><h4>Lernkurve des Depotmodells</h4>
+            <p data-trainingsfehler></p>
+            <svg viewBox="0 0 600 210" role="img" aria-label="Trainingsfehler über aufeinanderfolgende Epochen"></svg>
+            <p>Die Linie zeigt den mittleren quadratischen Trainingsfehler je Epoche. Der Rangvergleich mit späteren Belegen steht im Modellbericht.</p></section>"#,
+            maskiere(&kurve.json())
+        );
+    } else {
+        html.push_str("<section class=\"neuro-kurve\"><h4>Lernkurve des Depotmodells</h4><p>Es liegen noch keine Trainingsmesswerte für die Lernkurve vor.</p></section>");
+    }
+    html.push_str("</div>");
 }
 
 fn gruppe_html(html: &mut String, gruppe: &Ranggruppe, aufgeklappt: bool) {
