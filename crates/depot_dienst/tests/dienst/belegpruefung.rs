@@ -64,6 +64,12 @@ fn textprobe_bindet_lokale_rangwerte_an_dieselben_belege() -> Result<(), String>
     assert!(
         result.contains("Textähnlichkeit gegen Grundrang") && result.contains("2 geprüfte Paare")
     );
+    assert!(result.contains("höchstens drei Belege"));
+    assert!(
+        depot_dienst::neuro_textprobe_ki(&daten, tag, tag, &austausch)?
+            .contains("höchstens drei Belege")
+    );
+    assert!(!daten.join("neuroschlopf-fragen").exists());
     assert!(!daten.join("neuro2026-beobachtung.json").exists());
     Ok(())
 }
@@ -136,7 +142,9 @@ fn textprobe_merkt_nur_die_vereinigten_top3_fuer_gewahlte_ki_vor() -> Result<(),
     fs::write(daten.join("neuroschlopf.txt"), "an\n").map_err(|e| e.to_string())?;
     speichern(NeuroEmpfaenger::Maus)?;
     let vormerken = || depot_dienst::neuro_textprobe_ki(&daten, tag, tag, &austausch);
-    assert!(vormerken()?.contains("2 neue Aufträge für Maus · Tageslimit 1"));
+    let zuerst = vormerken()?;
+    assert!(zuerst.contains("2 neue Aufträge für Maus · Tageslimit 1"));
+    assert!(zuerst.contains("0/1 Prüfgruppen mit mindestens vier Belegen"));
     let erneut = vormerken()?;
     assert!(erneut.contains("0 neue Aufträge"));
     assert!(erneut.contains("2 bereits vorgemerkt · 1 Antwort oder Rückfrage ausstehend"));

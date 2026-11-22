@@ -429,7 +429,10 @@ mod tests {
                 !ziel.exists(),
                 "Vor der Freigabe darf nichts kopiert werden"
             );
-            datei.take().is_some()
+            datei.take().is_some_and(|datei| {
+                // Parallele Tests können den Dateideskriptor bis zum exec erben.
+                datei.unlock().is_ok()
+            })
         })?;
         assert!(
             datei.is_none(),
