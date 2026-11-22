@@ -1,0 +1,4 @@
+klasse: DokuOnly
+zweck: Den Windows-Vergleich zwischen CPU und optionalem GPU-Training in Neuro2026 vorbereiten
+pfade:
+docs/neuroschlopf/prueffaelle.md

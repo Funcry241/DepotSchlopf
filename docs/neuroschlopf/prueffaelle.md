@@ -79,3 +79,19 @@ Der Beobachtungslauf lernt aus journalbelegten Übereinstimmungen von Dachs und 
 Der eigenständige Aufruf `depot-neuro-pilot` benötigt den gebauten DepotSchlopf-Dienst, den Projektordner sowie die drei Daten Beginn, Trainingsende und Prüfende in der Form JJJJ-MM-TT. Das lokale Neuro2026-Modellprogramm liegt neben dem Aufrufprogramm. Beende DepotSchlopf für den Modelllauf. Nach Neustart findest du den Bericht unter **NeuroSchlopf → Neuro2026 · Depotmodell**. Der Beobachtungslauf liest Journal und Gesprächsdaten. Modellantworten müssen zum exakten Inhalt der Trainings- und Prüfeingaben passen. Der Bericht ändert weder Journal noch Beraterfragen oder Aufträge.
 
 Der Blindvergleich mischt die ersten drei Belege beider Rangfolgen sowie eine Kontrollauswahl pro angezeigter These. Rang und Herkunft aus der Auswahl bleiben in der Blindprüfung verborgen. Der Beobachtungsbericht wertet Treffer je These, sobald für beide Top-3-Listen vollständige KI-Übereinstimmungen vorliegen. nDCG@3 setzt eine vollständig beurteilte Kandidatenliste mit mindestens einem relevanten Beleg voraus. Kurze Listen mit höchstens drei Belegen fließen in keine der beiden Wertungen ein.
+
+## GPU-Vergleich auf Windows
+
+Der optionale Neuro2026-Probelauf verwendet Burn WGPU 0.21.0 mit einem ausdrücklich ausgewählten Hardwareadapter. CPU und GPU erhalten für jede Zeile der Auswertung dieselben Eingaben und Trainingsparameter. Die Gesamtdauer enthält Start, Training, Modellablage, erneutes Laden und Rangberechnung. Die separate Zeit für das Kerntraining umfasst auch die erste Initialisierung des Backends.
+
+| Synthetischer Testfall | CPU gesamt | GPU gesamt |
+|---|---:|---:|
+| Depotnetz mit 16 Neuronen je verdeckter Schicht, Einzelabrufe | 3,37 s | 240,30 s |
+| Dasselbe Depotnetz, gebündelte Fehler- und Rangabrufe | 3,08 s | 145,75 s |
+| Lastprobe, 256 Neuronen je verdeckter Schicht, 24 Epochen, Batchgröße 128 | 3,07 s | 107,70 s |
+
+Die ersten beiden Zeilen stammen aus demselben Windows-Stapeltest. Die separat wiederholte Lastprobe verwendete 4.096 synthetische Trainingspaare und 32 Prüfgruppen. CPU und GPU hatten dieselben Eingabeabdrücke, lasen den Trainingsfehler 24-mal zurück und erreichten je 32 Top-3-Treffer. Kerntraining dauerte 2,91 s auf der CPU und 103,04 s auf der GPU. Das Speichern dauerte jeweils rund 0,02 s. Der Bericht schlüsselt die Zeit innerhalb des Trainingskerns nicht nach Shader-Kompilierung, Rechenoperationen und Synchronisierung auf.
+
+Die CPU bleibt für den Depotmodelllauf der Standard. Ein neuer GPU-Vergleich ist für eine deutlich andere Arbeitslast sinnvoll, etwa die 4-Bit-Textkodierung. Deren Messung ist vom WGPU-Training getrennt. Die vorliegenden Läufe messen keine GPU-Auslastung. Die 10 % bleiben ein Ziel für den späteren Hintergrundbetrieb. Die Grenze des Windows-Job-Objekts betrifft die CPU-Zeit.
+
+Quelle für das optionale Backend: [Burn WGPU 0.21.0](https://docs.rs/crate/burn-wgpu/0.21.0/source/README.md).
