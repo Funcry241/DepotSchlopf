@@ -181,6 +181,15 @@ impl<'a> Grundrang<'a> {
         ]
     }
 
+    pub(crate) fn paarpunkte([wertbezug, termin, _]: [usize; 3]) -> u32 {
+        Self::merkmalspunkte(wertbezug, termin != 0)
+    }
+
+    fn merkmalspunkte(werte: usize, termin: bool) -> u32 {
+        let bezug = u32::try_from(werte.min(2)).unwrap_or(2).saturating_mul(4);
+        bezug.saturating_add(if termin { 2 } else { 0 })
+    }
+
     fn punkte(&self, beleg: &str, thesen: &[These]) -> u32 {
         let inhalt = Self::beleginhalt(beleg);
         let suche = Wortsuche::neu(&inhalt);
@@ -189,11 +198,7 @@ impl<'a> Grundrang<'a> {
             .filter(|t| self.trifft(&suche, t))
             .map(|t| &t.isin)
             .collect();
-        let bezug = u32::try_from(isins.len().min(2))
-            .unwrap_or(2)
-            .saturating_mul(4);
-        let termin = if Self::ist_termin(beleg) { 2 } else { 0 };
-        bezug.saturating_add(termin)
+        Self::merkmalspunkte(isins.len(), Self::ist_termin(beleg))
     }
 
     fn trifft(&self, suche: &Wortsuche<'_>, these: &These) -> bool {

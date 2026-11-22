@@ -1,4 +1,6 @@
 //! Lokaler Belegvergleich für das gemeinsame SchlopfModell.
+mod modellansicht;
+
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -15,7 +17,8 @@ use depot_lage::{OffeneThese, Thesenpruefung, datum_text, zeit_text};
 use crate::http::{antwort, feld, umleitung};
 use crate::werkbank::{Dienst, lies_falls_da, schreibe_ganz};
 
-const LERNLAUF_LINK: &str = r#"<p><a href="/neuroschlopf/lernlauf">Neuro2026 · Lernkurve und Vorhersagen des Referenzlaufs</a></p>"#;
+const LERNLAUF_LINK: &str =
+    r#"<p><a href="/neuroschlopf/lernlauf">Neuro2026 · Referenzlauf Multiplikation</a></p>"#;
 
 const BLINDPRUEFUNG_LINK: &str =
     r#"<p><a href="/neuroschlopf/belegpruefung">Belege für NeuroSchlopf blind bewerten</a></p>"#;
@@ -408,19 +411,18 @@ pub(crate) fn seite(
 ) -> Vec<u8> {
     let daten = d.wurzel.join("daten");
     let ein = einstellung(&daten);
-    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
     let mut html = String::from(
         "<section id=\"neuroschlopf-vergleich\"><h2>NeuroSchlopf · Belegvergleich</h2>",
     );
+    modellansicht::html(&mut html, &daten);
+    let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
     let _ = write!(
         html,
         concat!(
-            "<div class=\"neuro-uebersicht\"><section><h3>Aktivität</h3>",
-            "<div data-teil=\"/teil/neuroschlopf-aktivitaet\">{}</div>",
-            "<p>Ein Depotmodell für die Belegbewertung steht noch aus.</p></section>{}</div>"
+            "<section><h3>Aktivität des Belegvergleichs</h3>",
+            "<div data-teil=\"/teil/neuroschlopf-aktivitaet\">{}</div></section>"
         ),
         aktivitaet_html(d, &anzeige, &ein),
-        crate::neuro2026::TOPOLOGIE,
     );
     offene_thesen_html(&mut html, anzeige.fertig.as_ref(), tag);
     let gespeichert;
@@ -481,8 +483,11 @@ pub(crate) fn seite(
     drop(anzeige);
     html.push_str(&crate::neuroauftraege::anzeige(d, &daten));
     html.push_str(
-        "<p><a href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a> · historische Thesen und Belege von Hand bewerten</p></section>",
+        "<p><a href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a> · historische Thesen und Belege von Hand bewerten</p>",
     );
+    html.push_str("<details><summary>Neuro2026-Referenzlauf zur Multiplikation</summary>");
+    html.push_str(crate::neuro2026::TOPOLOGIE);
+    html.push_str("</details></section>");
     let seite = crate::seiten::rahmen(
         "/neuroschlopf",
         None,

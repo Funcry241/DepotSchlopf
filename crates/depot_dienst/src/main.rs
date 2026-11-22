@@ -227,6 +227,9 @@ fn sichern(d: &Arc<Dienst>, baum: String) {
 }
 
 fn main() -> ExitCode {
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--neuro-pilot")) {
+        return neuro_pilot();
+    }
     let mut ohne_browser = false;
     let mut herkunft = Herkunft::Unbekannt;
     let mut args = std::env::args().skip(1);
@@ -322,4 +325,42 @@ fn main() -> ExitCode {
         });
     }
     ExitCode::SUCCESS
+}
+
+fn neuro_pilot() -> ExitCode {
+    let mut argumente = std::env::args_os().skip(2);
+    let termine = [argumente.next(), argumente.next(), argumente.next()];
+    let [Some(von), Some(train_bis), Some(bis)] = termine.map(|a| {
+        a.as_deref()
+            .and_then(|s| s.to_str())
+            .and_then(depot_kern::Datum::lies)
+    }) else {
+        eprintln!("Aufruf: depot_dienst --neuro-pilot VON TRAIN_BIS BIS [AUSTAUSCHORDNER]");
+        return ExitCode::FAILURE;
+    };
+    let austauschordner = argumente.next().map(std::path::PathBuf::from);
+    if argumente.next().is_some() {
+        eprintln!("Zu viele Angaben für --neuro-pilot.");
+        return ExitCode::FAILURE;
+    }
+    let Some(wurzel) = finde_wurzel() else {
+        eprintln!("Projektordner für den Neuro2026-Beobachtungslauf nicht gefunden.");
+        return ExitCode::FAILURE;
+    };
+    match depot_dienst::neuro_pilot(
+        &wurzel.join("daten"),
+        von,
+        train_bis,
+        bis,
+        austauschordner.as_deref(),
+    ) {
+        Ok(status) => {
+            println!("{status}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Neuro2026-Beobachtungslauf: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }

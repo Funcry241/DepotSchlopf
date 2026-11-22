@@ -11,12 +11,33 @@ const PFAD: &str = "/neuroschlopf/belegpruefung";
 const TAG: &str = "2026-11-05";
 
 fn beispiel(wurzel: &Path) -> Result<Zeitpunkt, String> {
+    beispiel_am(
+        wurzel,
+        some(Datum::lies(TAG), "Prüftag")?,
+        &[
+            "Institut meldet <Vorabzahlen>",
+            "Institut meldet <Jahreszahlen>",
+            "Ungezeigter dritter Quellenbeleg",
+        ],
+        2,
+    )
+}
+
+fn beispiel_am(
+    wurzel: &Path,
+    tag: Datum,
+    titel: &[&str],
+    sichtbar: usize,
+) -> Result<Zeitpunkt, String> {
+    use std::fmt::Write as _;
+
     let fehler = |e| format!("{e:?}");
-    let zeit = donnerstag(9, 0)?;
-    let tag = some(zeit.frankfurt_tag(), "Prüftag")?;
+    let zeit = some(Zeitpunkt::frankfurt(tag, 9, 0, 0), "Wissensstichtag")?;
     let vorher = some(tag.plus_tage(-1), "Vortag")?;
     let pfad = wurzel.join("daten/journal.txt");
-    Journal::einrichten(&pfad).map_err(fehler)?;
+    if !Journal::eingerichtet(&pfad).map_err(fehler)? {
+        Journal::einrichten(&pfad).map_err(fehler)?;
+    }
     let mut j = Journal::oeffnen(&pfad).map_err(fehler)?;
     j.begruende(
         vorher,
@@ -26,14 +47,20 @@ fn beispiel(wurzel: &Path) -> Result<Zeitpunkt, String> {
     .map_err(fehler)?;
     j.schliesse_ab(vorher, Cent(1000), &j.bestaetigt().1)
         .map_err(fehler)?;
-    let publiziert = donnerstag(8, 0)?;
-    let titel = [
-        "Institut meldet <Vorabzahlen>",
-        "Institut meldet <Jahreszahlen>",
-        "Ungezeigter dritter Quellenbeleg",
-    ];
-    let kandidaten = titel.map(|t| format!("Nachricht 05.11.2026 07:00 UTC (testquelle): {t}"));
-    for text in titel {
+    let publiziert = some(Zeitpunkt::frankfurt(tag, 8, 0, 0), "Veröffentlichungszeit")?;
+    let (stunde, minute, _) = some(publiziert.uhrzeit(), "UTC-Uhrzeit")?;
+    let kandidaten: Vec<_> = titel
+        .iter()
+        .map(|t| {
+            format!(
+                "Nachricht {:02}.{:02}.{} {stunde:02}:{minute:02} UTC (testquelle): {t}",
+                tag.tag(),
+                tag.monat(),
+                tag.jahr()
+            )
+        })
+        .collect();
+    for &text in titel {
         let beleg = NachrichtBeleg::neu("testquelle", zeit, b"Testquelle", publiziert, text)?;
         j.belege_nachricht(&beleg).map_err(fehler)?;
     }
@@ -41,7 +68,8 @@ fn beispiel(wurzel: &Path) -> Result<Zeitpunkt, String> {
     for beleg in &kandidaten {
         j.beobachte(tag, beleg).map_err(fehler)?;
     }
-    j.begruende(tag, "Frageliste", "0 3").map_err(fehler)?;
+    j.begruende(tag, "Frageliste", &format!("0 {}", kandidaten.len()))
+        .map_err(fehler)?;
     j.begruende(
         vorher,
         "Maus",
@@ -52,10 +80,11 @@ fn beispiel(wurzel: &Path) -> Result<Zeitpunkt, String> {
         .reserviere_fuer(BeraterId::Maus, tag, 1, KiZweck::Erstmeinung)
         .map_err(|e| format!("{e:?}"))?
         .buchungsnummer();
-    let [erster, zweiter, _] = kandidaten;
-    let frage = format!(
-        "Datum: {tag}\nBelegte Termine und Nachrichten:\n- Ereignis 1: {erster}\n- Ereignis 2: {zweiter}\n"
-    );
+    let mut frage = format!("Datum: {tag}\nBelegte Termine und Nachrichten:\n");
+    for (index, beleg) in kandidaten.iter().take(sichtbar).enumerate() {
+        writeln!(frage, "- Ereignis {}: {beleg}", index.saturating_add(1))
+            .map_err(|e| e.to_string())?;
+    }
     let aufruf = Gespraech {
         zeit,
         lauf: "Prüfung".into(),
@@ -153,6 +182,297 @@ fn unabhaengiges_urteil_bleibt_nach_neustart_einmalig_erhalten() -> Result<(), S
     assert!(!ende.contains("data-blindentscheidung"));
     assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, original);
     assert!(wartend(&d).is_empty());
+    Ok(())
+}
+
+#[test]
+fn analyseexport_enthaelt_genaue_paare_und_urteilsanzahl() -> Result<(), String> {
+    use std::fmt::Write as _;
+
+    let wurzel = ordner()?;
+    let zeit = beispiel(&wurzel)?;
+    let tag = some(zeit.frankfurt_tag(), "Prüftag")?;
+    let daten = wurzel.join("daten");
+    let d = dienst(wurzel, true);
+    let blindseite = get(&d, PFAD, zeit);
+    let id = paar_id(&blindseite)?;
+    assert_eq!(
+        sende(&d, zeit, &format!("id={id}&tag={TAG}&urteil=2-widerlegt"))?,
+        303
+    );
+
+    let mut budget = 128 * 1024;
+    let (fragen, _) = some(
+        depot_journal::gespraeche::lesen_begrenzt(&daten, tag, &mut budget)
+            .map_err(|e| e.to_string())?,
+        "KI-Frage",
+    )?;
+    let (faelle, abdruck) = Journal::pruefe_lesend_mit_eintraegen(
+        &daten.join("journal.txt"),
+        128 * 1024,
+        |stand, eintraege, journal| {
+            (
+                prueffaelle_mit_zeilen(stand, eintraege, &fragen, tag),
+                depot_kern::abdruck::sha256_hex(journal.as_bytes()),
+            )
+        },
+    )
+    .map_err(|e| format!("{e:?}"))?;
+    let mut faelle = faelle.map_err(str::to_owned)?;
+    assert_eq!(faelle.len(), 2);
+    faelle.sort_by_key(|fall| fall.grundmerkmale);
+
+    let mut erwartet = format!(
+        "{{\"format\":\"depot-belegpaar-v1\",\"merkmale\":[\"wertbezug\",\"termin\",\"thesenwortanteil\",\"aktualitaet\"],\"journal_sha\":\"{abdruck}\",\"von\":\"{tag}\",\"bis\":\"{tag}\",\"urteile_lesbar\":true,\"menschlich_bearbeitet\":1,\"menschlich_bewertet\":1,\"ki_uebereinstimmungen\":0}}\n"
+    );
+    for (index, fall) in faelle.iter().enumerate() {
+        let z = fall.zuordnung();
+        let platz = index.saturating_add(1);
+        writeln!(
+            erwartet,
+            "{{\"tag\":\"{tag}\",\"stichtag\":\"{zeit}\",\"fall_id\":\"{}\",\"berater\":\"Maus\",\"isin\":\"DE0007164600\",\"thesentag\":\"2026-11-04\",\"thesen_sha\":\"{}\",\"ref\":\"{}\",\"x\":[0.000,0.000,0.000,0.994],\"fragenplatz\":{platz},\"grundrang\":{platz}}}",
+            fall.kennung, z.thesen_sha, z.referenz
+        ).map_err(|e| e.to_string())?;
+    }
+
+    let mut zip = depot_export::Zip::default();
+    zip.datei_gepackt("neuro2026_belegpaare.jsonl", erwartet.as_bytes())?;
+    let zip = zip.fertig()?;
+    let ende = some(
+        zip.windows(4).position(|w| w == b"PK\x01\x02"),
+        "ZIP-Verzeichnis",
+    )?;
+    let eintrag = some(zip.get(..ende), "ZIP-Eintrag")?;
+    let export = formular_post("/export", &format!("t={TOKEN}&zeitraum=heute"));
+    let antwort = behandle(&d, &Attrappe::default(), &export, zeit);
+    assert_eq!(status(&antwort)?, 200);
+    assert!(antwort.windows(eintrag.len()).any(|w| w == eintrag));
+    Ok(())
+}
+
+#[test]
+fn neuro_pilot_nutzt_lokale_urteile_und_spaetere_echte_fallkennungen() -> Result<(), String> {
+    use depot_kern::json;
+
+    let wurzel = ordner()?;
+    let daten = wurzel.join("daten");
+    let trainingstag = some(Datum::lies(TAG), "Trainingstag")?;
+    let prueftag = some(Datum::lies("2026-11-12"), "Späterer Prüftag")?;
+    let training = beispiel_am(
+        &wurzel,
+        trainingstag,
+        &[
+            "SAP-Cloudgeschäft meldet Quartalszahlen",
+            "Institut veröffentlicht Wahlumfrage",
+        ],
+        2,
+    )?;
+    let d = dienst(wurzel.clone(), true);
+    for _ in 0..2 {
+        let seite = get(&d, PFAD, training);
+        let id = paar_id(&seite)?;
+        let urteil = if seite.contains("meldet Quartalszahlen") {
+            "2-st%C3%BCtzt"
+        } else {
+            "0"
+        };
+        assert_eq!(
+            sende(
+                &d,
+                training,
+                &format!("id={id}&tag={trainingstag}&urteil={urteil}")
+            )?,
+            303
+        );
+    }
+    let pruefung = beispiel_am(
+        &wurzel,
+        prueftag,
+        &[
+            "SAP-Cloudgeschäft bekommt neuen Großauftrag",
+            "Lokalradio meldet Theatereröffnung",
+            "Pendler befragen kommunale Verkehrsbetriebe",
+            "Softwaresparte berichtet neue Kunden",
+        ],
+        4,
+    )?;
+
+    let journal = daten.join("journal.txt");
+    let urteile = daten.join("neuro2026-belegurteile.tsv");
+    let journal_vorher = fs::read(&journal).map_err(|e| e.to_string())?;
+    let urteile_vorher = fs::read(&urteile).map_err(|e| e.to_string())?;
+    let austausch = wurzel.join("test-austausch");
+    fs::create_dir(&austausch).map_err(|e| e.to_string())?;
+    depot_dienst::neuro_pilot(
+        &daten,
+        trainingstag,
+        trainingstag,
+        prueftag,
+        Some(&austausch),
+    )?;
+    let lesefile = |name| fs::read_to_string(austausch.join(name)).map_err(|e| e.to_string());
+    let train = json::lies(&lesefile("train-eingabe.json")?)?;
+    let rank = json::lies(&lesefile("rank-eingabe.json")?)?;
+    let stufen: std::collections::BTreeSet<_> = some(
+        train.feld("rows").and_then(json::Json::liste),
+        "Trainingszeilen",
+    )?
+    .iter()
+    .filter_map(|zeile| zeile.feld("stufe").and_then(json::Json::ganz))
+    .collect();
+    assert_eq!(stufen, [0, 2].into());
+    let prueffall_ids: std::collections::BTreeSet<_> =
+        some(rank.feld("rows").and_then(json::Json::liste), "Rangzeilen")?
+            .iter()
+            .filter_map(|zeile| {
+                zeile
+                    .feld("id")
+                    .and_then(json::Json::text)
+                    .map(str::to_owned)
+            })
+            .collect();
+    assert_eq!(prueffall_ids.len(), 4);
+
+    if let Some(pilot) = std::env::var_os("DEPOT_NEURO_PILOT_EXE") {
+        pruefe_originalkern(pilot, &d, trainingstag, pruefung, &prueffall_ids)?;
+    }
+    assert_eq!(
+        fs::read(journal).map_err(|e| e.to_string())?,
+        journal_vorher
+    );
+    assert_eq!(
+        fs::read(urteile).map_err(|e| e.to_string())?,
+        urteile_vorher
+    );
+    assert!(wartend(&d).is_empty());
+    Ok(())
+}
+
+/// Prüft den optional gebauten Originalkern über denselben Aufruf wie auf dem Depot-PC.
+fn pruefe_originalkern(
+    pilot: std::ffi::OsString,
+    d: &Dienst,
+    trainingstag: Datum,
+    pruefung: Zeitpunkt,
+    prueffall_ids: &std::collections::BTreeSet<String>,
+) -> Result<(), String> {
+    use depot_kern::json;
+
+    let wurzel = &d.wurzel;
+    let daten = wurzel.join("daten");
+    let prueftag = some(pruefung.frankfurt_tag(), "Späterer Prüftag")?;
+    fs::create_dir(wurzel.join("kodex")).map_err(|e| e.to_string())?;
+    fs::write(wurzel.join("kodex/festschreibung.txt"), "Testprojekt\n")
+        .map_err(|e| e.to_string())?;
+    let ausgabe = Command::new(pilot)
+        .arg(env!("CARGO_BIN_EXE_depot_dienst"))
+        .arg(wurzel)
+        .args([
+            trainingstag.to_string(),
+            trainingstag.to_string(),
+            prueftag.to_string(),
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    assert!(
+        ausgabe.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&ausgabe.stdout),
+        String::from_utf8_lossy(&ausgabe.stderr)
+    );
+    let lauf = some(
+        fs::read_dir(daten.join("neuro2026-pilotlaeufe"))
+            .map_err(|e| e.to_string())?
+            .next(),
+        "Pilotlauf",
+    )?
+    .map_err(|e| e.to_string())?
+    .path();
+    let eingabe = fs::read(lauf.join("rank-eingabe.json")).map_err(|e| e.to_string())?;
+    let antwortpfad = lauf.join("rank-antwort.json");
+    let antwort = fs::read_to_string(&antwortpfad).map_err(|e| e.to_string())?;
+    let rang = json::lies(&antwort)?;
+    let sha = depot_kern::abdruck::sha256_hex(&eingabe);
+    assert_eq!(
+        rang.feld("input_sha256").and_then(json::Json::text),
+        Some(sha.as_str())
+    );
+    let seite = get(d, "/neuroschlopf", pruefung);
+    assert!(seite.contains("Modellwert") && seite.contains("bekommt neuen Großauftrag"));
+    let scores = some(
+        rang.feld("scores").and_then(json::Json::liste),
+        "Modellwerte",
+    )?;
+    assert_eq!(scores.len(), 4);
+    for score in scores {
+        let id = some(score.feld("id").and_then(json::Json::text), "Modellfall")?;
+        let Some(json::Json::Zahl(wert)) = score.feld("score") else {
+            return Err("Modellwert fehlt".into());
+        };
+        assert!(prueffall_ids.contains(id) && seite.contains(&wert.replace('.', ",")));
+    }
+    fs::write(&antwortpfad, antwort.replace(&sha, &"0".repeat(64))).map_err(|e| e.to_string())?;
+    assert!(
+        depot_dienst::neuro_pilot(&daten, trainingstag, trainingstag, prueftag, Some(&lauf))
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn rangvergleich_bleibt_beim_tagwechsel_und_speichern_blind() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let zeit = beispiel(&wurzel)?;
+    let d = dienst(wurzel.clone(), true);
+    let normal = get(&d, PFAD, zeit);
+    let id = paar_id(&normal)?;
+    let pfad = format!("{PFAD}?tag={TAG}&vergleich=ja");
+    let vorab = get(&d, &pfad, zeit);
+    assert!(vorab.contains("Für diesen Prüftag liegt keine Stichprobe aus dem Rangvergleich vor."));
+    assert!(!vorab.contains("name=\"id\""));
+    let abdruck = "a".repeat(64);
+    let berichtszeile = |kennung: &str, rang: usize| {
+        format!(
+            r#"{{"fall_id":"{kennung}","referenz":"Berichtsreferenz","titel":"Berichtstitel",
+            "quelle":"Berichtsquelle","grundrang":{rang},"modellrang":{rang},"wert":"0.6","merkmale":[0,0,0,0]}}"#,
+        )
+    };
+    let belege = [
+        berichtszeile(id, 1),
+        berichtszeile(&"1".repeat(64), 2),
+        berichtszeile(&"2".repeat(64), 3),
+        berichtszeile(&"3".repeat(64), 4),
+    ]
+    .join(",");
+    let bericht = format!(
+        r#"{{"schema":"depot-belegpaar-v1","modellversion":"0.1.16","modellabdruck":"{abdruck}",
+        "stand":"Testbericht","paare":2,"urteile":0,"trainingstage":1,"prueftage":1,
+        "gruppen":[{{"tag":"{TAG}","berater":"Maus","isin":"DE0007164600","these":"Berichtsthese",
+        "belege":[{belege}]}}]}}"#,
+    );
+    fs::write(wurzel.join("daten/neuro2026-beobachtung.json"), bericht)
+        .map_err(|e| e.to_string())?;
+    let seite = get(&d, &pfad, zeit);
+    assert!(seite.contains("Blindprüfung zum Rangvergleich"));
+    assert!(seite.contains("Bearbeitet <b>0 von 1</b>"));
+    assert_eq!(seite.matches("name=\"vergleich\" value=\"ja\"").count(), 2);
+    assert_eq!(paar_id(&seite)?, id);
+    for verborgen in ["Berichtstitel", "Neuro2026-Rang", "Grundrang", "Modellwert"] {
+        assert!(!seite.contains(verborgen));
+    }
+    let felder = format!("t={TOKEN}&id={id}&tag={TAG}&urteil=1&vergleich=ja");
+    let post = formular_post(PFAD, &felder);
+    let antwort = behandle(&d, &Attrappe::default(), &post, zeit);
+    assert_eq!(status(&antwort)?, 303);
+    assert!(text(&antwort).contains(&format!(
+        "Location: {PFAD}?tag={TAG}&gespeichert=ja&vergleich=ja\r\n"
+    )));
+    let danach = get(&d, &pfad, zeit);
+    assert!(danach.contains("Bearbeitet <b>1 von 1</b>"));
+    assert!(!danach.contains("name=\"id\""));
+    let normal_danach = get(&d, PFAD, zeit);
+    assert!(normal_danach.contains("Bearbeitet <b>1 von 2</b>"));
+    assert_ne!(paar_id(&normal_danach)?, id);
     Ok(())
 }
 

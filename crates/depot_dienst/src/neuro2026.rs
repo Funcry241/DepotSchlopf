@@ -42,7 +42,7 @@ pub(super) fn seite(d: &Dienst, tag: Option<Datum>) -> Vec<u8> {
         r#"<p><a href="/neuroschlopf">Zurück zu NeuroSchlopf</a></p>
 <section><h2>Neuro2026 · Referenzlauf Multiplikation</h2>
 <p>Das Netz hat aus Zahlenpaaren gelernt, ihr Produkt zu schätzen. Hier siehst du den abgeschlossenen Lauf vom 20.11.2026.</p>
-<p>{schalter} Die Auswahl von Nachrichten und Terminen in DepotSchlopf verwendet bisher den Belegvergleich. Für dessen Bewertung durch Neuro2026 steht der Modellbetrieb noch aus.{einrichtung}</p></section>
+<p>{schalter}{einrichtung}</p></section>
 <p><a href="/neuroschlopf/lernlauf.json" download="neuro2026-lernlauf.json">Originalmesswerte herunterladen (JSON)</a></p>
 <p id="lernstand" role="status">Für die grafische Ansicht benötigt dein Browser JavaScript.</p>
 <div id="lernansicht" data-messung="/neuroschlopf/lernlauf.json" hidden>

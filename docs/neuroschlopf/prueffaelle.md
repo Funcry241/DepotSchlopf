@@ -63,3 +63,19 @@ Eine Datenzeile gehört zu einem Tag, dem Wissensstichtag in UTC, einem Berater 
 Im Vorbereitungsformat `grundrang-paar-v1` enthält `x` in fester Reihenfolge den Wertbezug zur einzelnen These (0 oder 1), das Terminmerkmal (0 oder 1) und den ursprünglichen Fragenplatz (ab 1). Beispiel für einen SAP-Termin an zweiter Stelle bei einer SAP-These ist `[1,1,2]`. Das Feld `grundrang` nennt den einsbasierten Vergleichsplatz unter denselben Kandidaten für diese einzelne These. Rohtexte, Beträge und Zielwerte werden für diese Vektoren nicht benötigt. Ein unabhängiges Relevanzurteil ist für überwachte Trainingsbeispiele separat zu erheben. Das Multiplikationsmodell von Neuro2026 hat zwei Eingänge und gehört zu einem anderen Lernversuch.
 
 Tage mit fehlendem Stichtag sowie fehlende, mehrfache, leere oder unvollständige Frageabschnitte erhalten Statuszeilen. Überschreiten die Eingaben die Textgrenze des Exports, enthält die Datei den Größenhinweis. Wähle dann einen kürzeren Zeitraum.
+
+## Genaue Belegpaare für den Modellversuch
+
+`neuro2026_belegpaare.jsonl` liefert dieselben historischen Paare wie die Blindprüfung. Die Fallkennung bindet den Wissensstichtag, die genaue Vorschlagsthese und den eindeutig in der gespeicherten Erstmeinungsfrage sichtbaren Quellenbeleg. Der Grundrang sortiert diese sichtbaren Kandidaten pro These. Die Datei enthält auch ihren ursprünglichen Fragenplatz.
+
+Im Schema `depot-belegpaar-v1` stehen Wertbezug und Terminkennzeichen, der Anteil gemeinsamer Inhaltswörter im Beleg und die Aktualität am Wissensstichtag. Alle vier Werte liegen zwischen 0 und 1. Die Aktualität nimmt über sieben Tage linear ab. Termine und Belege ohne Veröffentlichungszeit erhalten dafür den Wert 0. Fragenplatz und Grundrang gehören zum Vergleich und stehen außerhalb des Merkmalsvektors.
+
+Der lokale Modellversuch ordnet jedes Blindurteil anhand der Fallkennung zu. Die Kopfzeile des Exports zählt bearbeitete und bewertete Paare sowie KI-Übereinstimmungen. Thesen- und Belegtexte und die einzelnen Urteile bleiben auf dem Rechner. Fehlende Tagesunterlagen und ein nicht lesbarer Urteilsbestand werden im Export ausgewiesen.
+
+## Lokaler Neuro2026-Beobachtungslauf
+
+Der Beobachtungslauf lernt aus gespeicherten Blindurteilen bis einschließlich des gewählten Trainingsendes. Die spätere Prüfmenge beginnt nach drei vollen Handelstagen Abstand. Meldungen mit identischem normalisiertem Text in der Prüfmenge entfallen im Training. Für den Start braucht das Modell mindestens ein Urteil ohne Bezug und eines mit Bezug aus dem Trainingsfenster. Die Auswertung ordnet jedem Modellwert die genaue Fallkennung zu und vergleicht je These dieselben sichtbaren Belege mit dem Grundrang.
+
+Der eigenständige Aufruf `depot-neuro-pilot` benötigt den gebauten DepotSchlopf-Dienst, den Projektordner sowie die drei Daten Beginn, Trainingsende und Prüfende in der Form JJJJ-MM-TT. Das lokale Neuro2026-Modellprogramm liegt neben dem Aufrufprogramm. Beende DepotSchlopf für den Modelllauf. Nach Neustart findest du den Bericht unter **NeuroSchlopf → Neuro2026 · Depotmodell**. Der Beobachtungslauf liest Journal und Gesprächsdaten. Modellantworten müssen zum exakten Inhalt der Trainings- und Prüfeingaben passen. Der Bericht ändert weder Journal noch Beraterfragen oder Aufträge.
+
+Der Blindvergleich mischt die ersten drei Belege beider Rangfolgen sowie eine Kontrollauswahl pro angezeigter These. Rang und Herkunft aus der Auswahl bleiben in der Blindprüfung verborgen. Die Trefferwertung beginnt je These, sobald beide Top-3-Listen vollständig unabhängig beurteilt sind. nDCG@3 setzt eine vollständig beurteilte Kandidatenliste mit mindestens einem relevanten Beleg voraus. Kurze Listen mit höchstens drei Belegen fließen in keine der beiden Wertungen ein.

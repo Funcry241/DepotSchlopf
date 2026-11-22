@@ -754,6 +754,7 @@ fn programmstand(version: Option<&str>) -> String {
 
 struct Journalpaket {
     neuroeingaben: String,
+    neuropaare: String,
     pruefbericht: String,
     betrieb: String,
     kurz: String,
@@ -904,6 +905,15 @@ fn journalpaket(
                     zeitraum.von..=zeitraum.bis,
                     usize::try_from(TEXT_MAX).unwrap_or(0),
                 ),
+                neuropaare: crate::neurodaten::vorrat(
+                    daten,
+                    stand,
+                    eintraege,
+                    original,
+                    zeitraum.von,
+                    zeitraum.bis,
+                )
+                .jsonl(usize::try_from(TEXT_MAX).unwrap_or(0)),
                 pruefbericht,
                 betrieb: betrieb.ablauf.bericht(Some(stand))
                     + &betrieb.fehler.bericht(
@@ -930,6 +940,7 @@ fn journalpaket(
             let (ki, gespraechsbelege) = ki(daten, zeitraum, None, luecken);
             Ok(Journalpaket {
                 neuroeingaben: "{\"status\":\"Journalstand nicht bestätigt\"}\n".into(),
+                neuropaare: "{\"status\":\"Journalstand nicht bestätigt\"}\n".into(),
                 pruefbericht: pruefbericht::bericht(
                     None,
                     zeitraum,
@@ -1009,6 +1020,7 @@ pub(crate) fn exportieren(
     let sperren = sperrentext(&daten);
     let Ok(Journalpaket {
         neuroeingaben,
+        neuropaare,
         pruefbericht,
         betrieb: betriebsbericht,
         kurz,
@@ -1061,6 +1073,7 @@ pub(crate) fn exportieren(
         ("07_version.md", programmstand(d.version.as_deref())),
         ("ausfuehrungen.csv", ausfuehrungen),
         ("neuro2026_eingaben.jsonl", neuroeingaben),
+        ("neuro2026_belegpaare.jsonl", neuropaare),
     ];
     zip_antwort(
         &schutz::Exportschutz::neu(&schutz, sec_kontakt.as_deref()),
