@@ -141,6 +141,9 @@ fn textprobe_merkt_nur_die_vereinigten_top3_fuer_gewahlte_ki_vor() -> Result<(),
     };
     fs::write(daten.join("neuroschlopf.txt"), "an\n").map_err(|e| e.to_string())?;
     speichern(NeuroEmpfaenger::Maus)?;
+    let fragenstand = || depot_dienst::neuro_textprobe(&daten, tag, tag, &austausch);
+    assert!(fragenstand()?.contains("2 noch nicht vorgemerkt"));
+    assert!(!fragen.exists());
     let vormerken = || depot_dienst::neuro_textprobe_ki(&daten, tag, tag, &austausch);
     let zuerst = vormerken()?;
     assert!(zuerst.contains("2 neue Aufträge für Maus · Tageslimit 1"));
@@ -149,6 +152,8 @@ fn textprobe_merkt_nur_die_vereinigten_top3_fuer_gewahlte_ki_vor() -> Result<(),
     assert!(erneut.contains("0 neue Aufträge"));
     assert!(erneut.contains("2 bereits vorgemerkt · 1 Antwort oder Rückfrage ausstehend"));
     assert!(erneut.contains("1 abschließend beantwortet · 1 ohne verwertbares Urteil"));
+    let lesend = fragenstand()?;
+    assert!(lesend.contains("2 bereits vorgemerkt") && !lesend.contains("neue Aufträge"));
     speichern(NeuroEmpfaenger::Beide)?;
     assert!(vormerken()?.contains("5 neue Aufträge für Beide"));
     let mut anzahl = 0_usize;

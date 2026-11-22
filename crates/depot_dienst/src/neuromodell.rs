@@ -871,17 +871,24 @@ fn textprobe(
         faelle.len(),
         vergleich.text()
     );
-    if !ki_vormerken || vergleich.fehlende_top3.is_empty() {
+    if vergleich.fehlende_top3.is_empty() {
         return Ok(status);
     }
-    let geplant = crate::neuroauftraege::textprobe_planen(
+    let fragen = crate::neuroauftraege::textprobe_fragen(
         daten,
         faelle
             .iter()
             .map(|z| &z.fall)
             .filter(|f| vergleich.fehlende_top3.contains(&f.kennung)),
-    )?;
-    Ok(format!("{status}\n{geplant}"))
+        ki_vormerken,
+    );
+    match fragen {
+        Ok(fragen) => Ok(format!("{status}\n{fragen}")),
+        Err(e) if !ki_vormerken => Ok(format!(
+            "{status}\nKI-Fragenstatus gerade nicht verfügbar · {e}"
+        )),
+        Err(e) => Err(e),
+    }
 }
 
 /// Bereitet Trainings- und Prüfeingaben vor oder übernimmt den belegten Ranglauf.
