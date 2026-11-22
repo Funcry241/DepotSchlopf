@@ -759,7 +759,8 @@ fn pruefe_originalkern(
     assert!(seite.contains("Modellwert") && seite.contains("bekommt neuen Großauftrag"));
     assert!(seite.contains("mit KI-Konsens bewerteten Vergleichen"));
     assert!(
-        seite.contains("Netz des Depotmodells") && seite.contains("Lernkurve des Depotmodells")
+        seite.contains("Netz des trainierten Depotmodells")
+            && seite.contains("Lernkurve des Depotmodells")
     );
     assert!(!seite.contains("Multiplikation"));
     let bericht =

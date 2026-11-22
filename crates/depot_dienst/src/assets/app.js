@@ -540,16 +540,17 @@ function zeichneLernnetz(svg, groessen) {
 }
 
 (function depotLernlauf() {
+  for (const netz of document.querySelectorAll("[data-netzschichten]")) {
+    zeichneLernnetz(netz, JSON.parse(netz.dataset.netzschichten));
+  }
   const bereich = document.querySelector("[data-depotmodell]");
   if (!bereich?.dataset?.depotmodell) { return; }
   const lauf = JSON.parse(bereich.dataset.depotmodell);
   const format = (n) => n.toLocaleString("de-DE", {maximumSignificantDigits: 4});
-  bereich.querySelector("[data-schichten]").textContent = lauf.schichten.join(" → ") + " Neuronen";
   bereich.querySelector("[data-trainingsfehler]").textContent = lauf.paare + " Trainingspaare · " +
     lauf.fehler.length + " Epochen · Fehler vor dem Training " + format(lauf.anfang) +
     " · danach " + format(lauf.ende);
-  const [netz, kurve] = bereich.querySelectorAll("svg");
-  zeichneLernnetz(netz, lauf.schichten);
+  const kurve = bereich.querySelector("svg");
   const hoehe = Math.max(...lauf.fehler) || 1;
   const x = (i) => 68 + i / Math.max(lauf.fehler.length - 1, 1) * 500;
   const y = (fehler) => 175 - fehler / hoehe * 150;

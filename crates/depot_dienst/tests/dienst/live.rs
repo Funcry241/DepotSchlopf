@@ -322,10 +322,10 @@ fn app_js_liefert_die_gepruefte_fassung() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let antwort = get(&d, "/app.js", donnerstag(12, 0)?);
     let (_, js) = some(antwort.split_once("\r\n\r\n"), "HTTP-Antwort")?;
-    // SHA-256 der geprüften Fassung mit Kostenvorschau und Depot-Lernkurve.
+    // SHA-256 der geprüften Fassung mit Depot-Netzgrafik und Lernkurve.
     assert_eq!(
         depot_kern::abdruck::sha256_hex(js.as_bytes()),
-        "1b4f3f7912c32fef4f13ddb34b1fe6b3efb68c1e0d49e82c3bdee0bede64eb0b"
+        "82010b048689b0341d6b59b8b07ec452944942f51f612b9c51fd9ceddd0737d8"
     );
     Ok(())
 }
@@ -509,6 +509,27 @@ fn dateien(wurzel: &std::path::Path) -> Result<Vec<(std::path::PathBuf, Vec<u8>)
 }
 
 #[test]
+fn neuro_topologie_uebernimmt_schichten_des_lokalen_modellberichts() -> Result<(), String> {
+    let wurzel = ordner()?;
+    let bericht = format!(
+        r#"{{"schema":"depot-belegpaar-v1","modellversion":"0.1.16","modellabdruck":"{}",
+        "lernkurve":{{"schichten":[4,8,8,1],"paare":20,"anfang":0.4,"ende":0.2,"fehler":[0.4,0.2]}},
+        "stand":"Lokaler Modelllauf abgeschlossen.","paare":20,"urteile":20,
+        "ki_konsens":true,"trainingstage":2,"prueftage":1,"gruppen":[]}}"#,
+        "a".repeat(64)
+    );
+    fs::write(wurzel.join("daten/neuro2026-beobachtung.json"), bericht)
+        .map_err(|e| e.to_string())?;
+    let d = dienst(wurzel, true);
+    let seite = get(&d, "/neuroschlopf", donnerstag(12, 0)?);
+    assert!(seite.contains("Netz des trainierten Depotmodells"));
+    assert!(seite.contains("data-netzschichten=\"[4,8,8,1]\""));
+    assert!(seite.contains("data-depotmodell="));
+    assert!(!seite.contains("Vorgesehener Aufbau des Depotmodells"));
+    Ok(())
+}
+
+#[test]
 fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Result<(), String> {
     let wurzel = ordner()?;
     let d = dienst(wurzel.clone(), true);
@@ -539,6 +560,9 @@ fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Re
             "Noch kein abgeschlossener Vergleich. Es fehlt ein bestätigter Stand.",
             "Neuro2026 · Depotmodell",
             "Wartet auf die erste lokale Modellauswertung.",
+            "Vorgesehener Aufbau des Depotmodells",
+            "data-netzschichten=\"[4,16,16,1]\"",
+            "Es liegen noch keine Trainingsmesswerte für die Lernkurve vor.",
             "href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a>",
             "Übermittlung an Dachs und Maus",
         ] {
