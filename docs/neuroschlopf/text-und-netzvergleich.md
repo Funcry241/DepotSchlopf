@@ -45,3 +45,22 @@ Die Textprobe nutzt einen vorhandenen, lokalen Ordner außerhalb des normalen An
 3. Derselbe Dienstaufruf wie in Schritt 1 prüft den Abdruck der Antwort und wertet die Rangfolgen mit dem bestehenden Urteilsschema aus. Das ausgegebene Ergebnis zählt nur Gruppen mit verwertbaren KI-Übereinstimmungen für die benötigten Top-3-Fälle.
 
 Die beiden Austauschdateien gehören zu einer festgelegten Probe. Für einen anderen Zeitraum oder einen veränderten Fallbestand einen neuen Ordner verwenden. Das Journal und der gespeicherte Neuro2026-Modellbericht bleiben beim Aufruf unverändert.
+
+### Historischer Pilot mit Q4 auf Windows
+
+Der synthetische RTX-3070-Lauf hat die Vulkan-Auslagerung aller 29 Modellschichten belegt. Für den historischen Pilot verwendet B die ersten 512 Komponenten der Q4_K_M-Ausgabe und normalisiert sie neu. Der Encoder berechnet weiterhin 1.024 Komponenten. Die Antwort hält die gewählte Dimension fest.
+
+Im DepotSchlopf-Ordner einen lokalen Austauschordner anlegen und die Probe für den 20.11.2026 vorbereiten. Die folgenden Befehle gelten für die Windows-Eingabeaufforderung.
+
+```cmd
+mkdir "%LOCALAPPDATA%\NeuroSchlopf\Textprobe-20261120"
+cargo run --quiet -p depot_dienst --bin depot_dienst -- --neuro-textprobe 2026-11-20 2026-11-20 "%LOCALAPPDATA%\NeuroSchlopf\Textprobe-20261120"
+```
+
+Im aktualisierten Q4-Testpaket den vorbereiteten Ordner angeben. Der Starter verwendet das vorhandene Laufzeit- und Modellcache, prüft die Hashes und beendet den lokalen Server nach dem Ranglauf.
+
+```cmd
+Quantisierungstest.cmd --textprobe "%LOCALAPPDATA%\NeuroSchlopf\Textprobe-20261120" > Historische-Textprobe.log 2>&1
+```
+
+Danach den DepotSchlopf-Aufruf wiederholen. Er zeigt den Vergleich mit dem Grundrang aus den bereits vorhandenen übereinstimmenden KI-Urteilen. Bis beide Top-3-Listen einer Gruppe abgedeckt sind, bleibt ihr Nutzen offen. Die Austauschdateien enthalten lokale Falltexte oder Fallkennungen und bleiben auf dem Rechner.
