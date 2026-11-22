@@ -28,6 +28,12 @@ impl Vorbewertung {
         self.dachs
             .filter(|wert| Some(*wert) == self.maus && *wert != NeuroUrteilswert::Offen)
     }
+
+    pub fn widerspruch(&self) -> bool {
+        self.dachs.zip(self.maus).is_some_and(|(dachs, maus)| {
+            dachs != maus && dachs != NeuroUrteilswert::Offen && maus != NeuroUrteilswert::Offen
+        })
+    }
 }
 
 pub(super) fn vorbewertungen(ki: &KiStand) -> BTreeMap<String, Vorbewertung> {

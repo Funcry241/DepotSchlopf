@@ -101,6 +101,7 @@ fn textprobe_marke(daten: &Path, frage: &NeuroFrage) -> PathBuf {
 #[derive(Default)]
 struct TextprobeStand {
     neu: usize,
+    widerspruch: usize,
     vorgemerkt: usize,
     ausstehend: usize,
     beantwortet: usize,
@@ -129,10 +130,12 @@ impl TextprobeStand {
         };
         let mut ausgabe = format!(
             "KI-Vorprüfung · {paare} Top-3-Paare ohne Konsens{aktion} · Tageslimit {}.\n\
+         Unterschiedliche abschließende Urteile von Maus und Dachs ({}/{paare} Paare ohne Konsens).\n\
          Fragenstatus · {} bereits vorgemerkt · {} Antwort oder Rückfrage ausstehend · \
          {} abschließend beantwortet · {} ohne verwertbares Urteil · {} noch nicht vorgemerkt · \
          {} nicht vormerkbar.",
             e.neuroschlopf,
+            self.widerspruch,
             self.vorgemerkt,
             self.ausstehend,
             self.beantwortet,
@@ -177,6 +180,7 @@ pub(crate) fn textprobe_fragen<'a>(
         .lesen(&daten.join("journal.txt"), 32 * 1024 * 1024)
         .map_err(|_| "Journal für die KI-Vorprüfung gerade nicht lesbar.")?;
     let ki = stand.ki();
+    let vorbewertungen = crate::prueftag::vorbewertungen(ki);
     let reserviert: BTreeMap<_, _> = ki
         .neurofragen()
         .iter()
@@ -186,6 +190,12 @@ pub(crate) fn textprobe_fragen<'a>(
     let mut status = TextprobeStand::default();
     for fall in faelle {
         paare = paare.saturating_add(1);
+        if vorbewertungen
+            .get(&fall.kennung)
+            .is_some_and(crate::prueftag::Vorbewertung::widerspruch)
+        {
+            status.widerspruch = status.widerspruch.saturating_add(1);
+        }
         for &wer in beobachtet {
             let schluessel = |runde| (fall.kennung.as_str(), kurz(wer), runde);
             if let Some(erstfrage) = reserviert.get(&schluessel(NeuroRunde::Erstfrage)) {
