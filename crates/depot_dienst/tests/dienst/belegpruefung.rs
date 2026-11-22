@@ -171,7 +171,56 @@ fn textprobe_merkt_nur_die_vereinigten_top3_fuer_gewahlte_ki_vor() -> Result<(),
         anzahl = anzahl.saturating_add(1);
     }
     assert_eq!(anzahl, 7);
+    textprobe_status_bei_pause(&daten, tag, &austausch)?;
     assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, vorher);
+    Ok(())
+}
+
+fn textprobe_status_bei_pause(daten: &Path, tag: Datum, austausch: &Path) -> Result<(), String> {
+    use depot_journal::ki_einstellungen;
+    use depot_kern::modelle::{KiEinstellungen, NeuroEmpfaenger};
+
+    let fragen = daten.join("neuroschlopf-fragen");
+    let anzahl = || {
+        fs::read_dir(&fragen)
+            .map(Iterator::count)
+            .map_err(|e| e.to_string())
+    };
+    let vorher = anzahl()?;
+    for (schalter, neuro_empfaenger, neuroschlopf, grund) in [
+        (
+            "aus\n",
+            NeuroEmpfaenger::Beide,
+            20,
+            "NeuroSchlopf ausgeschaltet",
+        ),
+        ("an\n", NeuroEmpfaenger::Beide, 0, "Tageslimit 0"),
+        (
+            "an\n",
+            NeuroEmpfaenger::Aus,
+            20,
+            "Externe Empfänger ausgeschaltet",
+        ),
+    ] {
+        let e = KiEinstellungen {
+            neuro_empfaenger,
+            neuroschlopf,
+            ..KiEinstellungen::default()
+        };
+        fs::write(ki_einstellungen::pfad(daten), ki_einstellungen::als_text(e))
+            .map_err(|e| e.to_string())?;
+        fs::write(daten.join("neuroschlopf.txt"), schalter).map_err(|e| e.to_string())?;
+        let status = depot_dienst::neuro_textprobe(daten, tag, tag, austausch)?;
+        assert!(status.contains(grund));
+        assert!(status.contains("7 bereits vorgemerkt · 1 Antwort oder Rückfrage ausstehend"));
+        assert!(status.contains("1 abschließend beantwortet · 1 ohne verwertbares Urteil"));
+        assert!(!status.contains("neue Aufträge"));
+        assert_eq!(
+            depot_dienst::neuro_textprobe_ki(daten, tag, tag, austausch)?,
+            status
+        );
+    }
+    assert_eq!(anzahl()?, vorher);
     Ok(())
 }
 
