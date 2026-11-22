@@ -382,6 +382,7 @@ fn modellseite_zeigt_aktuellen_lernstand_vor_dem_ersten_lauf() -> Result<(), Str
     let d = dienst(wurzel.clone(), true);
     let vorher = get(&d, "/neuroschlopf", training);
     assert!(vorher.contains("1 mit Belegbezug · 2 ohne Bezug"));
+    assert!(!vorher.contains("Empfänger für KI-Vorprüfung einstellen"));
     assert!(vorher.contains("Es fehlen spätere Prüffälle mit drei vollen Handelstagen Abstand"));
 
     let pruefung = beispiel_am(

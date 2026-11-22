@@ -14,10 +14,7 @@ pub(super) fn html(html: &mut String, daten: &Path, heute: Option<Datum>) {
     }
     match ansicht(daten) {
         Ok(Some(bericht)) => bericht_html(html, &bericht),
-        Ok(None) => html.push_str(
-            "<p>Wartet auf die erste lokale Modellauswertung.</p>\
-             <p><a href=\"/einrichtung#ki-einstellungen\">Empfänger für KI-Vorprüfung einstellen</a></p>",
-        ),
+        Ok(None) => html.push_str("<p>Wartet auf die erste lokale Modellauswertung.</p>"),
         Err(_) => html.push_str("<p>Der lokale Modellbericht ist unlesbar.</p>"),
     }
     html.push_str("</section>");
@@ -84,9 +81,6 @@ fn bericht_html(html: &mut String, bericht: &ModellBericht) {
         bericht.prueftage,
     );
     let Some(version) = &bericht.modellversion else {
-        html.push_str(
-            "<p><a href=\"/einrichtung#ki-einstellungen\">Empfänger für KI-Vorprüfung einstellen</a></p>",
-        );
         return;
     };
     let _ = write!(
