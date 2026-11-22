@@ -14,18 +14,6 @@ pub(super) fn daten() -> Vec<u8> {
     )
 }
 
-pub(super) const TOPOLOGIE: &str = r#"
-<section class="neuro-topologie">
-<h3>Netztopologie · Neuro2026-Testlauf</h3>
-<p id="lernstand" role="status">Für die grafische Ansicht benötigt dein Browser JavaScript.</p>
-<div data-messung="/neuroschlopf/lernlauf.json" data-topologie hidden>
-<p id="lernnetz"></p>
-<svg id="lernaufbau" viewBox="0 0 480 215" role="img" aria-labelledby="netz-titel">
-<title id="netz-titel">Schichten des Neuro2026-Referenzmodells für Multiplikation</title>
-</svg></div>
-<p>Das Referenznetz wurde darauf trainiert, zwei Zahlen zu multiplizieren. <a href="/neuroschlopf/lernlauf">Lernkurve und Vorhersagen ansehen</a></p>
-</section>"#;
-
 pub(super) fn seite(d: &Dienst, tag: Option<Datum>) -> Vec<u8> {
     let (schalter, einrichtung) = match crate::neuroschlopf::einstellung(&d.wurzel.join("daten")) {
         Ok(true) => ("Der lokale Belegvergleich ist eingeschaltet.", ""),

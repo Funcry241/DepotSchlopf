@@ -9,7 +9,7 @@
   align-items: start;
   gap: 0 16px;
 }
-.neuro-topologie svg{display:block;width:100%;max-width:32rem}
+.neuro-topologie svg,.neuro-kurve svg{display:block;width:100%;max-width:38rem}
 .ki-lauf{margin-block:18px;padding-block-start:10px;border-block-start:1px solid var(--linie);overflow-wrap:anywhere}
 .ki-lauf h3,.ki-frage p,.ki-details p{margin-block:4px}
 .ki-antwort{margin-block:4px;margin-inline-start:clamp(6px,2.5vw,24px);padding-inline-start:clamp(6px,1.5vw,12px);border-inline-start:2px solid var(--linie)}

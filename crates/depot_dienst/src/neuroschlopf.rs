@@ -17,9 +17,6 @@ use depot_lage::{OffeneThese, Thesenpruefung, datum_text, zeit_text};
 use crate::http::{antwort, feld, umleitung};
 use crate::werkbank::{Dienst, lies_falls_da, schreibe_ganz};
 
-const LERNLAUF_LINK: &str =
-    r#"<p><a href="/neuroschlopf/lernlauf">Neuro2026 · Referenzlauf Multiplikation</a></p>"#;
-
 const BLINDPRUEFUNG_LINK: &str =
     r#"<p><a href="/neuroschlopf/belegpruefung">Belege für NeuroSchlopf blind bewerten</a></p>"#;
 
@@ -64,7 +61,7 @@ pub(crate) fn formular(d: &Dienst) -> String {
         <form method=\"post\" action=\"/neuroschlopf\"><input type=\"hidden\" name=\"t\" value=\"{}\">\
         <button type=\"submit\" name=\"an\" value=\"ja\"{an}>NeuroSchlopf einschalten</button> \
         <button type=\"submit\" name=\"an\" value=\"nein\"{aus}>NeuroSchlopf ausschalten</button>\
-        </form>{BLINDPRUEFUNG_LINK}{LERNLAUF_LINK}</section>",
+        </form>{BLINDPRUEFUNG_LINK}</section>",
         maskiere(&d.token)
     )
 }
@@ -414,17 +411,12 @@ pub(crate) fn seite(
     let mut html = String::from(
         "<section id=\"neuroschlopf-vergleich\"><h2>NeuroSchlopf · Belegvergleich</h2>",
     );
-    let aktivitaet = aktivitaetsfragment(d);
+    modellansicht::html(&mut html, &daten, tag);
     let _ = write!(
         html,
-        concat!(
-            "<div class=\"neuro-uebersicht\"><section><h3>Aktivität des Belegvergleichs</h3>",
-            "<div data-teil=\"/teil/neuroschlopf-aktivitaet\">{}</div></section>{}</div>"
-        ),
-        aktivitaet,
-        crate::neuro2026::TOPOLOGIE,
+        "<section><h3>Aktivität des Belegvergleichs</h3><div data-teil=\"/teil/neuroschlopf-aktivitaet\">{}</div></section>",
+        aktivitaetsfragment(d),
     );
-    modellansicht::html(&mut html, &daten, tag);
     let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
     offene_thesen_html(&mut html, anzeige.fertig.as_ref(), tag);
     let gespeichert;

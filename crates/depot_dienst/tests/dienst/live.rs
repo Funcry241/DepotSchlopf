@@ -322,10 +322,10 @@ fn app_js_liefert_die_gepruefte_fassung() -> Result<(), String> {
     let d = dienst(ordner()?, true);
     let antwort = get(&d, "/app.js", donnerstag(12, 0)?);
     let (_, js) = some(antwort.split_once("\r\n\r\n"), "HTTP-Antwort")?;
-    // SHA-256 der geprüften Fassung mit Kostenvorschau und NeuroSchlopf-Referenztopologie.
+    // SHA-256 der geprüften Fassung mit Kostenvorschau und Depot-Lernkurve.
     assert_eq!(
         depot_kern::abdruck::sha256_hex(js.as_bytes()),
-        "d3114c7480d0bc0909c6cafa4630e0e436e489307307f8de847a964bea436263"
+        "1b4f3f7912c32fef4f13ddb34b1fe6b3efb68c1e0d49e82c3bdee0bede64eb0b"
     );
     Ok(())
 }
@@ -464,10 +464,10 @@ fn neuro_lernlauf_zeigt_den_referenzstand_unabhaengig_vom_belegvergleich() -> Re
     let d = dienst(ordner()?, true);
     let t = donnerstag(12, 0)?;
     let link = "href=\"/neuroschlopf/lernlauf\"";
-    // Klickweg: Live → Vergleich ansehen → Referenzlauf.
+    // Der archivierte Referenzlauf bleibt unter seinem direkten Pfad erreichbar.
     assert!(get(&d, "/teil/live", t).contains("href=\"/neuroschlopf\">Vergleich ansehen"));
-    assert!(get(&d, "/neuroschlopf", t).contains(link));
-    assert!(get(&d, "/einrichtung", t).contains(link));
+    assert!(!get(&d, "/neuroschlopf", t).contains(link));
+    assert!(!get(&d, "/einrichtung", t).contains(link));
     let seite = get(&d, "/neuroschlopf/lernlauf", t);
     assert!(seite.starts_with("HTTP/1.1 200 OK"));
     assert!(seite.contains("Der lokale Belegvergleich ist ausgeschaltet."));
@@ -527,26 +527,18 @@ fn neuroschlopf_seite_ist_ueber_menue_und_live_erreichbar_und_nur_lesend() -> Re
         let seite = get(&d, "/neuroschlopf", t);
         assert!(seite.starts_with("HTTP/1.1 200 OK"));
         assert_eq!(seite.matches("NeuroSchlopf einrichten</a>").count(), 1);
-        let (_, nach_grafik) = some(
-            seite.split_once("Netztopologie · Neuro2026-Testlauf"),
-            "Netzgrafik",
-        )?;
-        assert!(nach_grafik.contains("Neuro2026 · Depotmodell"));
+        assert!(!seite.contains("Multiplikation"));
+        assert!(!seite.contains("data-depotmodell="));
         assert_eq!(seite.matches("aria-current=\"page\"").count(), 1);
         assert!(seite.contains("<a href=\"/neuroschlopf\" aria-current=\"page\">NeuroSchlopf</a>"));
         for teil in [
             "Hintergrundvergleich · Ausgeschaltet",
             "data-teil=\"/teil/neuroschlopf-aktivitaet\"",
-            "Netztopologie · Neuro2026-Testlauf",
-            "data-messung=\"/neuroschlopf/lernlauf.json\" data-topologie",
             "CPU-Auslastung nicht gemessen",
             "<h3>Offene Thesen und ihre Belege</h3>",
             "Noch kein abgeschlossener Vergleich. Es fehlt ein bestätigter Stand.",
             "Neuro2026 · Depotmodell",
             "Wartet auf die erste lokale Modellauswertung.",
-            "<div class=\"neuro-uebersicht\">",
-            "Das Referenznetz wurde darauf trainiert, zwei Zahlen zu multiplizieren.",
-            "href=\"/neuroschlopf/lernlauf\">Lernkurve und Vorhersagen ansehen</a>",
             "href=\"/neuroschlopf/belegpruefung\">Blindbewertung</a>",
             "Übermittlung an Dachs und Maus",
         ] {

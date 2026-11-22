@@ -5,10 +5,11 @@ use std::path::Path;
 use depot_kern::Datum;
 use depot_lage::{datum_text, html::maskiere};
 
-use crate::neuromodell::{ModellBericht, Rangbeleg, Ranggruppe, ansicht, lernstand};
+use crate::neuromodell::{Lernkurve, ModellBericht, Rangbeleg, Ranggruppe, ansicht, lernstand};
 
 pub(super) fn html(html: &mut String, daten: &Path, heute: Option<Datum>) {
     html.push_str("<section aria-labelledby=\"depotmodell-titel\"><h3 id=\"depotmodell-titel\">Neuro2026 · Depotmodell</h3>");
+    html.push_str("<p>Neuro2026 bewertet, wie gut Nachrichten und Termine zu einer Depotthese passen. Im lokalen Modelllauf ordnet es historische Belege nach ihrem Modellwert und vergleicht die Rangfolge mit der bisherigen Sortierung.</p>");
     if let Some(heute) = heute {
         lernstand_html(html, daten, heute);
     }
@@ -88,6 +89,11 @@ fn bericht_html(html: &mut String, bericht: &ModellBericht) {
         "<p><strong>Neuro2026-Kern {}</strong> · Beobachtungsbetrieb</p>",
         maskiere(version)
     );
+    if let Some(kurve) = &bericht.lernkurve {
+        lernkurve_html(html, kurve);
+    } else {
+        html.push_str("<p>Für diesen Modellbericht liegt keine Lernkurve vor. Ein neuer lokaler Modelllauf erfasst sie.</p>");
+    }
     if let Some(abdruck) = &bericht.modellabdruck {
         let _ = write!(
             html,
@@ -98,6 +104,22 @@ fn bericht_html(html: &mut String, bericht: &ModellBericht) {
     for (nr, gruppe) in bericht.gruppen.iter().enumerate() {
         gruppe_html(html, gruppe, nr == 0);
     }
+}
+
+fn lernkurve_html(html: &mut String, kurve: &Lernkurve) {
+    let _ = write!(
+        html,
+        r#"<div class="neuro-uebersicht" data-depotmodell="{}">
+        <section class="neuro-topologie"><h4>Netz des Depotmodells</h4>
+        <p data-schichten></p>
+        <svg viewBox="0 0 480 215" role="img" aria-label="Schichten des trainierten Depotmodells"></svg>
+        <p>Vier Eingaben erfassen den Wertbezug, den Terminbezug, gemeinsame Thesenwörter und die Aktualität. Der Ausgang liefert einen Sortierwert pro Beleg.</p></section>
+        <section class="neuro-kurve"><h4>Lernkurve des Depotmodells</h4>
+        <p data-trainingsfehler></p>
+        <svg viewBox="0 0 600 210" role="img" aria-label="Trainingsfehler über aufeinanderfolgende Epochen"></svg>
+        <p>Die Linie zeigt den mittleren quadratischen Trainingsfehler je Epoche. Der Rangvergleich mit späteren Belegen steht im Modellbericht.</p></section></div>"#,
+        maskiere(&kurve.json())
+    );
 }
 
 fn gruppe_html(html: &mut String, gruppe: &Ranggruppe, aufgeklappt: bool) {
@@ -173,6 +195,7 @@ mod tests {
     fn echte_rangwerte_zeigen_beide_raenge_und_maskieren_belegtexte() {
         let bericht = ModellBericht {
             modellversion: Some("v0.1.16-ab12".into()),
+            lernkurve: None,
             modellabdruck: Some("9".repeat(64)),
             stand: "Lokaler Beobachtungslauf abgeschlossen.".into(),
             paare: 9,
@@ -220,6 +243,7 @@ mod tests {
         let bericht = ModellBericht {
             modellversion: None,
             modellabdruck: None,
+            lernkurve: None,
             stand: "Zu wenig unabhängige Urteile.".into(),
             paare: 105,
             urteile: 1,
