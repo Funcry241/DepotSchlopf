@@ -1,6 +1,9 @@
 //! Kursbasierte Rückschau. Diese Rechnung behandelt belegte Schlusskurse als
 //! ab Börsenschluss bekannt. Sie erzeugt weder einen Wissensstichtag noch einen Papierauftrag.
 
+mod rotation;
+pub use rotation::rotationsbericht;
+
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 

@@ -853,6 +853,16 @@ struct Betrieb {
     fehler: fehler::Belege,
 }
 
+fn historische_kursberichte(stand: &Stand, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> String {
+    depot_lage::rueckschau::bericht(stand, jetzt)
+        + &depot_lage::rueckschau::rotationsbericht(
+            stand.kurse(),
+            jetzt,
+            zeitraum.von,
+            zeitraum.bis,
+        )
+}
+
 fn journalpaket(
     daten: &Path,
     jetzt: Zeitpunkt,
@@ -897,7 +907,7 @@ fn journalpaket(
                 )
                 + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege)
                 + &nachher.bericht
-                + &depot_lage::rueckschau::bericht(stand, jetzt);
+                + &historische_kursberichte(stand, jetzt, zeitraum);
             Journalpaket {
                 neuroeingaben: depot_lage::belegauswahl_neuro::eingaben(
                     stand,

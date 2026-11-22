@@ -1,0 +1,6 @@
+klasse: Funktion
+zweck: Einen tagesbasierten Kapitalrotationsvergleich mit tatsächlicher Kursverfügbarkeit auswerten
+pfade:
+crates/depot_dienst/src/analyse.rs
+crates/depot_sim/src/rueckschau.rs
+crates/depot_sim/src/rueckschau/rotation.rs
