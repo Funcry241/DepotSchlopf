@@ -424,7 +424,18 @@ fn freigabe_dialog(
         Err(std::fs::TryLockError::WouldBlock) => return Ok(()),
         Err(e) => return Err(format!("Update-Dialog: {e}")),
     }
+    let ergebnis = freigabe_erfragen(wurzel, k, a, bestaetigen);
+    // Auf Unix kann ein paralleler Kindprozess den Deskriptor bis zum exec erben.
+    let entsperrt = sperre.unlock().map_err(|e| format!("Update-Dialog: {e}"));
+    ergebnis.and(entsperrt)
+}
 
+fn freigabe_erfragen(
+    wurzel: &Path,
+    k: &Kandidat,
+    a: &LockAenderung,
+    bestaetigen: impl FnOnce(&str) -> Freigabe,
+) -> Result<(), String> {
     let zeile = a.zeile(k);
     if freigegeben(wurzel, &zeile)? {
         return Ok(());
@@ -1021,7 +1032,13 @@ mod tests {
     fn lock_freigabe_gilt_fuer_genau_einen_stand() -> Result<(), String> {
         let (a, mut k) = lock_stand(LOCK_NEU)?;
         let aenderung = lock_aenderung(&a.andere, &k)?.ok_or("Lock geändert")?;
-        freigabe_dialog(&a.andere, &k, &aenderung, |_| Freigabe::Nein)?;
+        assert!(freigabe_dialog(&a.andere, &k, &aenderung, |_| Freigabe::NichtVerfuegbar).is_err());
+        let mut gefragt = false;
+        freigabe_dialog(&a.andere, &k, &aenderung, |_| {
+            gefragt = true;
+            Freigabe::Nein
+        })?;
+        assert!(gefragt);
         assert!(!freigabe_pfad(&a.andere).exists());
 
         freigabe_dialog(&a.andere, &k, &aenderung, |hinweis| {

@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Sperre des Update-Freigabedialogs nach jeder Entscheidung und bei Fehlern ausdrücklich freigeben
+pfade:
+crates/depot_lauf/src/update.rs
