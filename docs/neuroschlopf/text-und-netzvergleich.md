@@ -64,3 +64,11 @@ Quantisierungstest.cmd --textprobe "%LOCALAPPDATA%\NeuroSchlopf\Textprobe-202611
 ```
 
 Danach den DepotSchlopf-Aufruf wiederholen. Er zeigt den Vergleich mit dem Grundrang aus den bereits vorhandenen übereinstimmenden KI-Urteilen. Bis beide Top-3-Listen einer Gruppe abgedeckt sind, bleibt ihr Nutzen offen. Die Austauschdateien enthalten lokale Falltexte oder Fallkennungen und bleiben auf dem Rechner.
+
+Fehlen Urteile, im DepotSchlopf-Ordner einmal denselben Aufruf mit `--ki-urteile` ausführen:
+
+```cmd
+cargo run --quiet -p depot_dienst --bin depot_dienst -- --neuro-textprobe 2026-11-20 2026-11-20 "%LOCALAPPDATA%\NeuroSchlopf\Textprobe-20261120" --ki-urteile
+```
+
+DepotSchlopf merkt je vergleichbarer These nur die offenen Fälle aus beiden Top-3-Listen vor. Es fragt die unter **Einrichtung** gewählten Empfänger über den laufenden Dienst und rechnet die Aufrufe auf das eingestellte Tageslimit an. Maus und Dachs erhalten denselben historischen Stand ohne Rangwerte oder Auswahlverfahren. Bereits reservierte Erstfragen werden nicht erneut vorgemerkt. Für einen Konsensvergleich werden Beiträge beider KIs benötigt. Wenn das Tageslimit erreicht ist, bearbeitet der laufende Dienst die vorgemerkten Fälle an den Folgetagen. Die zusammengefasste Auswertung lässt sich jederzeit mit dem ursprünglichen Aufruf ohne Zusatz und ohne erneute GPU-Kodierung abrufen.

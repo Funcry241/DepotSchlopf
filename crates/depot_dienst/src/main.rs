@@ -375,6 +375,8 @@ fn neuro_pilot() -> ExitCode {
 }
 
 fn neuro_textprobe() -> ExitCode {
+    const AUFRUF: &str =
+        "Aufruf: depot_dienst --neuro-textprobe VON BIS AUSTAUSCHORDNER [--ki-urteile]";
     let mut args = std::env::args_os().skip(2);
     let termine = [args.next(), args.next()];
     let [Some(von), Some(bis)] = termine.map(|a| {
@@ -382,12 +384,20 @@ fn neuro_textprobe() -> ExitCode {
             .and_then(std::ffi::OsStr::to_str)
             .and_then(depot_kern::Datum::lies)
     }) else {
-        eprintln!("Aufruf: depot_dienst --neuro-textprobe VON BIS AUSTAUSCHORDNER");
+        eprintln!("{AUFRUF}");
         return ExitCode::FAILURE;
     };
     let Some(ordner) = args.next().map(std::path::PathBuf::from) else {
-        eprintln!("Aufruf: depot_dienst --neuro-textprobe VON BIS AUSTAUSCHORDNER");
+        eprintln!("{AUFRUF}");
         return ExitCode::FAILURE;
+    };
+    let probe = match args.next().as_deref() {
+        None => depot_dienst::neuro_textprobe,
+        Some(a) if a == "--ki-urteile" => depot_dienst::neuro_textprobe_ki,
+        _ => {
+            eprintln!("{AUFRUF}");
+            return ExitCode::FAILURE;
+        }
     };
     if args.next().is_some() || !ordner.is_dir() {
         eprintln!("Gib genau einen vorhandenen lokalen Austauschordner an.");
@@ -397,7 +407,7 @@ fn neuro_textprobe() -> ExitCode {
         eprintln!("Projektordner für die NeuroSchlopf-Textprobe nicht gefunden.");
         return ExitCode::FAILURE;
     };
-    match depot_dienst::neuro_textprobe(&wurzel.join("daten"), von, bis, &ordner) {
+    match probe(&wurzel.join("daten"), von, bis, &ordner) {
         Ok(status) => {
             println!("{status}");
             ExitCode::SUCCESS

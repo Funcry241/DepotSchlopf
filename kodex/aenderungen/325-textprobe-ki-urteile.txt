@@ -1,0 +1,9 @@
+klasse: Funktion
+zweck: Fehlende KI-Urteile für die vereinigten Top-3-Fälle der historischen Textprobe vormerken
+pfade:
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/src/main.rs
+crates/depot_dienst/src/neuromodell.rs
+crates/depot_dienst/src/neuroauftraege.rs
+crates/depot_dienst/tests/dienst/belegpruefung.rs
+docs/neuroschlopf/text-und-netzvergleich.md

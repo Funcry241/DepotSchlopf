@@ -449,10 +449,26 @@ struct Vergleichszahlen {
     vollstaendig: usize,
     grund_ndcg: u64,
     modell_ndcg: u64,
+    fehlende_top3: BTreeSet<String>,
 }
 
 impl Vergleichszahlen {
     fn erfasse(&mut self, zeilen: &[&Zeile], modell: &[usize], grund: &[usize]) {
+        if zeilen.len() <= 3 {
+            return;
+        }
+        let offen: Vec<_> = modell
+            .iter()
+            .take(3)
+            .chain(grund.iter().take(3))
+            .filter_map(|i| zeilen.get(*i))
+            .filter(|z| ki_relevanz(z).is_none())
+            .collect();
+        if !offen.is_empty() {
+            self.fehlende_top3
+                .extend(offen.into_iter().map(|z| z.fall.kennung.clone()));
+            return;
+        }
         let urteile: Vec<_> = zeilen
             .iter()
             .map(|z| Beleg {
@@ -460,17 +476,10 @@ impl Vergleichszahlen {
                 pflicht: false,
             })
             .collect();
-        if zeilen.len() > 3
-            && modell
-                .iter()
-                .take(3)
-                .chain(grund.iter().take(3))
-                .all(|i| urteile.get(*i).is_some_and(|u| u.urteil.is_some()))
-            && let (Some(m), Some(g)) = (
-                relevanzmessung::messe(&urteile, modell),
-                relevanzmessung::messe(&urteile, grund),
-            )
-        {
+        if let (Some(m), Some(g)) = (
+            relevanzmessung::messe(&urteile, modell),
+            relevanzmessung::messe(&urteile, grund),
+        ) {
             self.verglichen = self.verglichen.saturating_add(1);
             self.modell_treffer = self
                 .modell_treffer
@@ -762,6 +771,26 @@ pub fn neuro_textprobe(
     bis: Datum,
     ordner: &Path,
 ) -> Result<String, String> {
+    textprobe(daten, von, bis, ordner, false)
+}
+
+/// Merkt fehlende KI-Urteile der beiden historischen Top-3-Listen lokal vor.
+pub fn neuro_textprobe_ki(
+    daten: &Path,
+    von: Datum,
+    bis: Datum,
+    ordner: &Path,
+) -> Result<String, String> {
+    textprobe(daten, von, bis, ordner, true)
+}
+
+fn textprobe(
+    daten: &Path,
+    von: Datum,
+    bis: Datum,
+    ordner: &Path,
+    ki_vormerken: bool,
+) -> Result<String, String> {
     let datensatz = crate::neurodaten::laden(daten, von, bis)?;
     let faelle: Vec<_> = datensatz
         .zeilen
@@ -794,6 +823,9 @@ pub fn neuro_textprobe(
     }
     let pfad = ordner.join("textprobe-eingabe.json");
     let Some(antwort) = lese_json(&ordner.join("textprobe-antwort.json"))? else {
+        if ki_vormerken {
+            return Err("Für die KI-Vorprüfung fehlt die lokale Rangantwort.".into());
+        }
         schreibe_ganz(&pfad, &eingabe)?;
         return Ok(format!(
             "{} Paare für die lokale Textprobe vorbereitet. Die Rangantwort steht aus.",
@@ -808,11 +840,22 @@ pub fn neuro_textprobe(
     }
     let werte = rangwerte(&antwort, &faelle)?;
     let (_, vergleich) = ranggruppen(&faelle, &werte, |z| z.grundrang);
-    Ok(format!(
+    let status = format!(
         "Textähnlichkeit gegen Grundrang · {} geprüfte Paare. {}",
         faelle.len(),
         vergleich.text()
-    ))
+    );
+    if !ki_vormerken || vergleich.fehlende_top3.is_empty() {
+        return Ok(status);
+    }
+    let geplant = crate::neuroauftraege::textprobe_planen(
+        daten,
+        faelle
+            .iter()
+            .map(|z| &z.fall)
+            .filter(|f| vergleich.fehlende_top3.contains(&f.kennung)),
+    )?;
+    Ok(format!("{status}\n{geplant}"))
 }
 
 /// Bereitet Trainings- und Prüfeingaben vor oder übernimmt den belegten Ranglauf.
