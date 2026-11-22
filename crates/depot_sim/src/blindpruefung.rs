@@ -139,6 +139,7 @@ fn thesen<'a>(
         let grund = grund.trim();
         if !bp.parse::<u16>().is_ok_and(|g| (1..=10_000).contains(&g))
             || grund == "ausgelassen, unverändert gehalten"
+            || grund == crate::abstimmung::OHNE_BEGRUENDUNG
             || !beurteilbar(grund.rsplit_once(']').map_or(grund, |(_, s)| s))
             || !blind_lesbar(grund)
         {
@@ -642,6 +643,12 @@ mod tests {
                 )
                 .map_err(fehler)?;
             }
+            j.begruende(
+                davor,
+                "Maus",
+                "Abstimmung Runde 1: DE0007164600 2000 bp: ohne Begründung",
+            )
+            .map_err(fehler)?;
             j.schliesse_ab(davor, depot_kern::Cent(1000), &j.bestaetigt().1)
                 .map_err(fehler)?;
             j.belege_wissensstichtag(tag, zeit).map_err(fehler)?;
