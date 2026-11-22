@@ -320,16 +320,27 @@ fn sicherungsstand(d: &Dienst, z: &werkbank::Zustand, jetzt: Zeitpunkt) -> Strin
 }
 
 fn sicherungsinfo(d: &Dienst, jetzt: Zeitpunkt) -> String {
-    let (ziel, status) = {
-        let z = d.sperre();
-        let status = if z.warteschlange.iter().any(|a| a.art == Art::Sicherung) {
-            "<p>Sicherung wartet auf den Start.</p>".into()
-        } else {
-            sicherungsstand(d, &z, jetzt)
-        };
-        (sicherung::ziel(&d.wurzel), status)
+    let z = d.sperre();
+    let wartet = z.warteschlange.iter().any(|a| a.art == Art::Sicherung);
+    let laeuft = z.laufend.as_ref().is_some_and(|a| a.art == Art::Sicherung);
+    let stand = sicherung::lies(&d.wurzel);
+    let laeuft = laeuft || stand.laeuft(&d.wurzel);
+    let status = if wartet {
+        "<p>Sicherung wartet auf den Start.</p>".into()
+    } else {
+        stand.html(jetzt, laeuft)
     };
-    sicherung::info(&ziel, &status)
+    let hinweis = if wartet || laeuft {
+        Some("Eine Sicherung ist bereits eingereiht oder läuft.".into())
+    } else {
+        werkbank::wartezeit_nach_lauf(&z, Art::Sicherung, jetzt).map(|sekunden| {
+            let einheit = if sekunden == 1 { "Sekunde" } else { "Sekunden" };
+            format!("Erneut sichern in {sekunden} {einheit}.")
+        })
+    };
+    drop(z);
+    let ziel = sicherung::ziel(&d.wurzel);
+    sicherung::abschnitt(&ziel, &status, hinweis.as_deref())
 }
 
 fn betriebsleiste(d: &Dienst, tag: Option<depot_kern::Datum>) -> String {

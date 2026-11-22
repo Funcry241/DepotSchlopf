@@ -606,3 +606,34 @@ fn diagnose_kindprozess() {
         std::process::exit(3);
     }
 }
+
+#[test]
+fn sicherung_deaktiviert_start_bis_zur_wiederholung() -> Result<(), String> {
+    let d = dienst(ordner()?, true);
+    let ende = donnerstag(12, 0)?;
+    for erfolg in [false, true] {
+        let mut zustand = d.sperre();
+        zustand.verlauf.clear();
+        zustand
+            .verlauf
+            .push_front(verlaufslauf(1, Art::Sicherung, ende, erfolg));
+        drop(zustand);
+        let anfang = get(&d, "/einrichtung", ende);
+        assert!(anfang.contains("disabled aria-describedby=\"sicherung-wartezeit\""));
+        assert!(anfang.contains("Erneut sichern in 30 Sekunden."));
+        let sekunden = |delta| {
+            some(
+                Zeitpunkt::aus_sekunden(ende.sekunden().saturating_add(delta)),
+                "Zeitpunkt der Wiederholung",
+            )
+        };
+        let vorher = get(&d, "/teil/sicherung", sekunden(29)?);
+        assert!(vorher.contains("Erneut sichern in 1 Sekunde."));
+        let danach = get(&d, "/teil/sicherung", sekunden(30)?);
+        assert!(
+            danach.contains("class=\"primaer\" type=\"submit\" name=\"aktion\" value=\"starten\"")
+        );
+        assert!(!danach.contains("sicherung-wartezeit"));
+    }
+    Ok(())
+}
