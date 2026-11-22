@@ -154,8 +154,11 @@ fn textprobe_merkt_nur_die_vereinigten_top3_fuer_gewahlte_ki_vor() -> Result<(),
     assert!(erneut.contains("1 abschließend beantwortet · 1 ohne verwertbares Urteil"));
     let lesend = fragenstand()?;
     assert!(lesend.contains("2 bereits vorgemerkt") && !lesend.contains("neue Aufträge"));
+    assert!(lesend.contains(
+        "Unterschiedliche abschließende Urteile von Maus und Dachs (1/5 Paare ohne Konsens)"
+    ));
     speichern(NeuroEmpfaenger::Beide)?;
-    assert!(vormerken()?.contains("5 neue Aufträge für Beide"));
+    assert!(vormerken()?.contains("4 neue Aufträge für Beide"));
     let mut anzahl = 0_usize;
     for datei in fs::read_dir(fragen).map_err(|e| e.to_string())? {
         let pfad = datei.map_err(|e| e.to_string())?.path();
@@ -167,10 +170,10 @@ fn textprobe_merkt_nur_die_vereinigten_top3_fuer_gewahlte_ki_vor() -> Result<(),
         let frage = some(NeuroFrage::lies(&text), "Vorgemerkte Frage")?;
         assert!(frage.ist_vorpruefung());
         assert!(!frage.jetzt.ends_with("Beleg B") && !frage.jetzt.ends_with("Beleg D"));
-        assert!(!frage.jetzt.ends_with("Beleg A") || frage.wer == BeraterId::Dachs);
+        assert!(!frage.jetzt.ends_with("Beleg A"));
         anzahl = anzahl.saturating_add(1);
     }
-    assert_eq!(anzahl, 7);
+    assert_eq!(anzahl, 6);
     textprobe_status_bei_pause(&daten, tag, &austausch)?;
     assert_eq!(fs::read(journal).map_err(|e| e.to_string())?, vorher);
     Ok(())
@@ -212,8 +215,8 @@ fn textprobe_status_bei_pause(daten: &Path, tag: Datum, austausch: &Path) -> Res
         fs::write(daten.join("neuroschlopf.txt"), schalter).map_err(|e| e.to_string())?;
         let status = depot_dienst::neuro_textprobe(daten, tag, tag, austausch)?;
         assert!(status.contains(grund));
-        assert!(status.contains("7 bereits vorgemerkt · 1 Antwort oder Rückfrage ausstehend"));
-        assert!(status.contains("1 abschließend beantwortet · 1 ohne verwertbares Urteil"));
+        assert!(status.contains("6 bereits vorgemerkt · 1 Antwort oder Rückfrage ausstehend"));
+        assert!(status.contains("2 abschließend beantwortet · 1 ohne verwertbares Urteil"));
         assert!(!status.contains("neue Aufträge"));
         assert_eq!(
             depot_dienst::neuro_textprobe_ki(daten, tag, tag, austausch)?,
@@ -260,6 +263,14 @@ fn textprobe_belegte_urteile(
             None,
         )?;
     }
+    belege_kiurteil(
+        journal,
+        tag,
+        kennung("Beleg A")?,
+        BeraterId::Dachs,
+        NeuroUrteilswert::Staerkt,
+        None,
+    )?;
     for (titel, nachfrage) in [("Beleg E", None), ("Beleg F", Some("Stand?".into()))] {
         belege_kiurteil(
             journal,
