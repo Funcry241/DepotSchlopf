@@ -6,6 +6,13 @@ use depot_kern::{BeraterId, Kurse, Topf, Vorschlag};
 use depot_ki::Sperre;
 
 pub(crate) const ABSTIMMUNG_RUNDEN: u32 = 2;
+pub(crate) const OHNE_BEGRUENDUNG: &str = "ohne Begründung";
+
+fn protokollgrund(grund: Option<&str>) -> &str {
+    grund
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or(OHNE_BEGRUENDUNG)
+}
 
 #[derive(Clone, Debug)]
 pub struct AbstimmungsStand {
@@ -176,7 +183,7 @@ fn frage(
         && let Some(vorschlag) = vorschlag
     {
         for (isin, bp) in &vorschlag.zielgewichte_bp {
-            let grund = vorschlag.begruendung.get(isin).map_or("", String::as_str);
+            let grund = protokollgrund(vorschlag.begruendung.get(isin).map(String::as_str));
             begruende(
                 buch,
                 zyklus.tag,
@@ -409,6 +416,15 @@ pub(crate) fn berate(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn abstimmungsjournal_kennzeichnet_fehlende_gruende() {
+        let leer = "  ";
+        let begruendung = "Beleg nennt einen neuen Auftrag";
+        assert_eq!(super::protokollgrund(None), "ohne Begründung");
+        assert_eq!(super::protokollgrund(Some(leer)), "ohne Begründung");
+        assert_eq!(super::protokollgrund(Some(begruendung)), begruendung);
+    }
+
     use super::*;
     use depot_kern::{Cent, Datum, Herkunft, Isin, Kurs, Kurse, Topf, TopfId, Zeitpunkt};
 

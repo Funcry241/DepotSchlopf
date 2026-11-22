@@ -37,6 +37,14 @@ Fehlende Information wird nie zu null oder zu einer Erlaubnis. „Kein Kurs“, 
 | 15 | Wilson-Intervall 95 % ganzzahlig: $\frac{k + z^2/2 \pm z\sqrt{k(n-k)/n + z^2/4}}{n + z^2}$ mit $z^2 = 3{,}8416$, Wurzel aufgerundet, Untergrenze ab-, Obergrenze aufgerundet; Vergleich mit „steigt immer“ auf denselben Fällen | Misst. „Besser als naiv“ erst, wenn die Untergrenze über der naiven Quote liegt; daraus folgt die Mindestfallzahl. Hinweis, nie Regel. | [aufloesung.rs](../crates/depot_journal/src/aufloesung.rs) |
 | 16 | Eigenschaftstests: vollständige Aufzählung kleiner Modelle und Zufallsfolgen mit festem Startwert (xorshift64) | Prüft die Invarianten unten an allen Folgen statt an Einzelfällen. Ohne Abhängigkeit. | [journal](../crates/depot_journal/tests/invarianten.rs), [Abstimmung und Wiederanlauf](../crates/depot_sim/tests/invarianten.rs) |
 
+## Rundung von Geldanteilen und Differenzen
+
+`Cent::anteil_bp_ab` berechnet einen Anteil eines Geldbetrags in ganzen Cent und schneidet den Rest Richtung null ab. DepotSchlopf nutzt die Funktion für nichtnegative Beträge, etwa für das Kaufbudget im Schattendepot, Zielbeträge bei der Topfgewichtung und die Gebührenhürde. Bei einem negativen Produkt liegt das Ergebnis näher an null als der exakte Wert.
+
+Für eine vorzeichenbehaftete Differenz in Basispunkten berechnet `delta.in_bp_von(basis)` den Quotienten $10.000 \cdot \text{delta} / \text{basis}$ mit einer positiven Basis und rundet Richtung null. Eine Änderung von −1 Cent bei einer Basis von 100.000 Cent ergibt so 0 ganze Basispunkte. Die Funktion liefert bei einem Überlauf oder einer nichtpositiven Basis keinen Wert. Der separate Renditevergleich rundet Richtung minus unendlich. Dort ergibt dasselbe Beispiel −1 Basispunkt.
+
+[Geldfunktionen](../crates/depot_kern/src/geld.rs) · [Schattendepot](../crates/depot_sim/src/schatten.rs) · [Topfgewichtung](../crates/depot_sim/src/topfgewichtung.rs) · [Gebührenhürde](../crates/depot_sim/src/kostenhuerde.rs) · [Renditevergleich](befunde/vergleich.md)
+
 ## Zentrale Invarianten
 
 Diese Sätze müssen für **jeden** Ablauf gelten, nicht nur für die ausgedachten Testfälle. Sie werden mit Verfahren 16 geprüft (#111, #112); jede Prüfung ist mit einer Gegenprobe belegt, die bei verletztem Satz rot wird.
@@ -66,7 +74,6 @@ Diese Sätze müssen für **jeden** Ablauf gelten, nicht nur für die ausgedacht
 
 ## Offene Grenzen
 
-- `Cent::anteil_bp_ab` rundet Richtung null. Für negative Beträge (Differenzen) ist das eine Aufrundung. Klären, ob das gewollt ist, oder die Benennung anpassen.
 - Der Tagesrahmen verteilt an börsenfreien Tagen und nach dem letzten Handelstag ungleichmäßig (A3 in #100).
 - Die Hashkette beweist Unverändertheit, nicht Vollständigkeit gegenüber der Außenwelt. Dafür bleibt der Abgleich mit dem Broker.
 

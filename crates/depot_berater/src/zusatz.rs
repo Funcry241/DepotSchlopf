@@ -549,6 +549,18 @@ mod tests {
             vorlauf(&daten, zeit, "journal-fehlt", &liste, false);
             Journal::einrichten(&daten.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
             vorlauf(&daten, zeit, "keine-nachrichten", &liste, false);
+            let kostensperre = daten.join("ki.halt");
+            std::fs::write(&kostensperre, "Kostenprüfung der bezahlten Berater")
+                .map_err(|e| e.to_string())?;
+            vorlauf(
+                &daten,
+                zeit,
+                "keine-nachrichten-mit-ki-sperre",
+                &liste,
+                false,
+            );
+            assert!(kostensperre.is_file());
+            std::fs::remove_file(kostensperre).map_err(|e| e.to_string())?;
             let journal =
                 Journal::oeffnen(&daten.join("journal.txt")).map_err(|e| format!("{e:?}"))?;
             vorlauf(&daten, zeit, "journal-exklusiv-geoeffnet", &liste, false);
@@ -567,6 +579,7 @@ mod tests {
                 e.iter().map(|g| g.fehler.as_deref()).collect::<Vec<_>>(),
                 [
                     Some(gemini::JOURNAL_UNVERFUEGBAR),
+                    Some(gemini::KEINE_NACHRICHTEN),
                     Some(gemini::KEINE_NACHRICHTEN),
                     Some(exklusiv_geoeffnet),
                     Some(gemini::WARTET_AUF_UPDATE)
