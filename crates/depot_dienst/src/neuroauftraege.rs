@@ -640,11 +640,15 @@ pub(crate) fn bewertungstext(wert: NeuroUrteilswert) -> &'static str {
 fn anzeige_auftraege(html: &mut String, auftraege: &[Auftrag], ki: &KiStand) {
     let bewertet = crate::prueftag::vorbewertungen(ki);
     let mut gesehen = BTreeSet::new();
+    let mut gesamt = 0_usize;
     for a in auftraege
         .iter()
         .filter(|a| !a.frage.ist_vorpruefung() || gesehen.insert(a.frage.id.fall()))
-        .take(BEFUNDE_MAX)
     {
+        gesamt = gesamt.saturating_add(1);
+        if gesamt > BEFUNDE_MAX {
+            continue;
+        }
         if !a.frage.ist_vorpruefung() {
             anzeige_fall(html, a, ki);
             continue;
@@ -665,6 +669,12 @@ fn anzeige_auftraege(html: &mut String, auftraege: &[Auftrag], ki: &KiStand) {
             anzeige_fall(html, befund, ki);
         }
         html.push_str("</section>");
+    }
+    if gesamt > BEFUNDE_MAX {
+        let _ = write!(
+            html,
+            "<p class=\"leise\">{BEFUNDE_MAX} von {gesamt} Befunden angezeigt.</p>"
+        );
     }
 }
 
@@ -710,9 +720,62 @@ pub(crate) fn anzeige(d: &Dienst, daten: &Path) -> String {
 }
 
 #[cfg(test)]
-mod fragenvorschau_tests {
+mod tests {
     use super::*;
     use depot_kern::modelle::NeuroEmpfaenger;
+
+    #[test]
+    fn befundgrenze_zaehlt_vorpruefungen_beider_kis_als_ein_paar() -> Result<(), String> {
+        let tag = Datum::lies("2026-11-20").ok_or("Datum fehlt")?;
+        let bekannt = depot_kern::Zeitpunkt::frankfurt(tag, 9, 0, 0).ok_or("Zeit fehlt")?;
+        let isin = depot_kern::Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let mut auftraege = Vec::new();
+        for nr in 1..=BEFUNDE_MAX.saturating_add(2) {
+            let id = NeuroAuftragId::neu(&format!("{nr:064x}"), NeuroRunde::Erstfrage)
+                .ok_or("Fallkennung fehlt")?;
+            for wer in NeuroEmpfaenger::Beide.berater() {
+                auftraege.push(Auftrag {
+                    pfad: PathBuf::new(),
+                    antwort: None,
+                    textprobe: false,
+                    frage: NeuroFrage {
+                        id: id.clone(),
+                        wer: *wer,
+                        thesen_wer: BeraterId::Dachs,
+                        these_vom: tag,
+                        these_gueltig_bis: tag,
+                        isin: isin.clone(),
+                        these: "Beispielthese".into(),
+                        bisher_zeile: None,
+                        beleg_zeile: 1,
+                        quelle: "Testquelle".into(),
+                        bisher: None,
+                        jetzt: "Beispielbeleg".into(),
+                        bekannt,
+                        nachfrage: None,
+                    },
+                });
+            }
+        }
+        let mut html = String::new();
+        anzeige_auftraege(&mut html, &auftraege, &KiStand::default());
+        assert_eq!(
+            html.matches("Vorprüfung desselben These-Beleg-Paars")
+                .count(),
+            BEFUNDE_MAX
+        );
+        assert_eq!(
+            html.matches("<article>").count(),
+            BEFUNDE_MAX.saturating_mul(2)
+        );
+        assert!(html.contains("20 von 22 Befunden angezeigt."));
+
+        html.clear();
+        auftraege.truncate(BEFUNDE_MAX.saturating_mul(2));
+        anzeige_auftraege(&mut html, &auftraege, &KiStand::default());
+        assert!(!html.contains("Befunden angezeigt"));
+        Ok(())
+    }
 
     #[test]
     fn vorgemerkter_empfaenger_gilt_nur_fuer_den_tag_und_die_externe_einstellung()

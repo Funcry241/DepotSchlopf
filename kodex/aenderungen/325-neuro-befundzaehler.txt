@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Die Anzahl ausgeblendeter Befunde bei der begrenzten NeuroSchlopf-Liste erkennbar machen
+pfade:
+crates/depot_dienst/src/neuroauftraege.rs
