@@ -11,7 +11,7 @@ use depot_journal::neurofrage::{
     NeuroAuftragId, NeuroErgebnis, NeuroFrage, NeuroRunde, NeuroUrteilswert, ergebnis_pfad,
 };
 use depot_journal::{Art, Journal, KiStand, Lesecache, Stand, ki_einstellungen};
-use depot_kern::modelle::KiEinstellungen;
+use depot_kern::modelle::{KiEinstellungen, NeuroEmpfaenger};
 use depot_kern::{BeraterId, Datum};
 use depot_lage::blindpruefung::Prueffall;
 use depot_lage::{NeuroFragefall, datum_text, html::maskiere};
@@ -116,6 +116,7 @@ impl TextprobeStand {
         paare: usize,
         vormerken: bool,
         belegt: Option<usize>,
+        pause: Option<&str>,
     ) -> String {
         let aktion = if vormerken {
             format!(
@@ -142,6 +143,9 @@ impl TextprobeStand {
         if let Some(belegt) = belegt {
             let _ = write!(ausgabe, "\nHeute reserviert · {belegt}/{}.", e.neuroschlopf);
         }
+        if let Some(grund) = pause {
+            let _ = write!(ausgabe, "\nKI-Vorprüfung pausiert · {grund}.");
+        }
         ausgabe
     }
 }
@@ -152,9 +156,22 @@ pub(crate) fn textprobe_fragen<'a>(
     vormerken: bool,
 ) -> Result<String, String> {
     let e = ki_einstellungen::lesen(daten)?;
-    if e.neuro_berater().is_empty() || !crate::neuroschlopf::einstellung(daten)? {
-        return Ok("KI-Vorprüfung pausiert. NeuroSchlopf und externe Empfänger in der Einrichtung aktivieren.".into());
-    }
+    let empfaenger = e.neuro_empfaenger.berater();
+    let pause = if !crate::neuroschlopf::einstellung(daten)? {
+        Some("NeuroSchlopf ausgeschaltet")
+    } else if empfaenger.is_empty() {
+        Some("Externe Empfänger ausgeschaltet")
+    } else if e.neuroschlopf == 0 {
+        Some("Tageslimit 0")
+    } else {
+        None
+    };
+    let vormerken = vormerken && pause.is_none();
+    let beobachtet = if pause.is_some() {
+        NeuroEmpfaenger::Beide.berater()
+    } else {
+        empfaenger
+    };
     let mut cache = Lesecache::default();
     let (stand, _) = cache
         .lesen(&daten.join("journal.txt"), 32 * 1024 * 1024)
@@ -169,7 +186,7 @@ pub(crate) fn textprobe_fragen<'a>(
     let mut status = TextprobeStand::default();
     for fall in faelle {
         paare = paare.saturating_add(1);
-        for &wer in e.neuro_berater() {
+        for &wer in beobachtet {
             let schluessel = |runde| (fall.kennung.as_str(), kurz(wer), runde);
             if let Some(erstfrage) = reserviert.get(&schluessel(NeuroRunde::Erstfrage)) {
                 let letzte = reserviert
@@ -194,7 +211,7 @@ pub(crate) fn textprobe_fragen<'a>(
                     let pfad = sammlung(daten).join(dateiname(&frage));
                     if pfad.try_exists().map_err(|e| e.to_string())? {
                         status.vorgemerkt = status.vorgemerkt.saturating_add(1);
-                    } else {
+                    } else if empfaenger.contains(&wer) {
                         status.noch_nicht_vorgemerkt =
                             status.noch_nicht_vorgemerkt.saturating_add(1);
                     }
@@ -208,7 +225,7 @@ pub(crate) fn textprobe_fragen<'a>(
                     }
                     Err(e) => return Err(e.to_string()),
                 }
-            } else {
+            } else if empfaenger.contains(&wer) {
                 status.nicht_vormerkbar = status.nicht_vormerkbar.saturating_add(1);
             }
         }
@@ -216,7 +233,7 @@ pub(crate) fn textprobe_fragen<'a>(
     let belegt = crate::jetzt()
         .and_then(depot_kern::Zeitpunkt::frankfurt_tag)
         .map(|heute| ki.neurofragen().iter().filter(|v| v.datum == heute).count());
-    Ok(status.text(e, paare, vormerken, belegt))
+    Ok(status.text(e, paare, vormerken, belegt, pause))
 }
 
 pub(crate) fn planen(
