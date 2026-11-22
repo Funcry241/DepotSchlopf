@@ -6,6 +6,7 @@ use std::{
     path::Path,
 };
 
+use depot_journal::neurofrage::NeuroUrteilswert;
 use depot_kern::{
     Datum,
     abdruck::sha256_hex,
@@ -31,6 +32,7 @@ pub(crate) struct ModellBericht {
     pub stand: String,
     pub paare: usize,
     pub urteile: usize,
+    pub ki_konsens: bool,
     pub trainingstage: usize,
     pub prueftage: usize,
     pub gruppen: Vec<Ranggruppe>,
@@ -176,6 +178,7 @@ impl ModellBericht {
             stand: text(j, "stand")?.into(),
             paare: anzahl(j, "paare")?,
             urteile: anzahl(j, "urteile")?,
+            ki_konsens: matches!(j.feld("ki_konsens"), Some(Json::Bool(true))),
             trainingstage: anzahl(j, "trainingstage")?,
             prueftage: anzahl(j, "prueftage")?,
             gruppen,
@@ -199,11 +202,12 @@ impl ModellBericht {
             .map_or_else(|| "null".into(), zitiere);
         let inhalt = format!(
             "{{\"schema\":\"{SCHEMA}\",\"modellversion\":{version},\"modellabdruck\":{abdruck},\"stand\":{},\
-             \"paare\":{},\"urteile\":{},\"trainingstage\":{},\"prueftage\":{},\
+             \"paare\":{},\"urteile\":{},\"ki_konsens\":{},\"trainingstage\":{},\"prueftage\":{},\
              \"gruppen\":[{gruppen}]}}\n",
             zitiere(&self.stand),
             self.paare,
             self.urteile,
+            self.ki_konsens,
             self.trainingstage,
             self.prueftage
         );
@@ -313,11 +317,11 @@ fn modellabdruck(j: &Json) -> Result<&str, String> {
         .ok_or_else(|| "Neuro2026 hat keinen gültigen Modellabdruck gemeldet.".into())
 }
 
-fn stufe(u: Urteil) -> u8 {
-    match u {
-        Urteil::KeinBezug => 0,
-        Urteil::Bezug => 1,
-        Urteil::Entscheidend(_) => 2,
+fn ki_relevanz(z: &Zeile) -> Option<Urteil> {
+    match z.ki_urteil? {
+        NeuroUrteilswert::KeinBezug => Some(Urteil::KeinBezug),
+        NeuroUrteilswert::Staerkt | NeuroUrteilswert::Schwaecht => Some(Urteil::Bezug),
+        NeuroUrteilswert::Offen => None,
     }
 }
 
@@ -387,7 +391,7 @@ impl Vergleichszahlen {
         let urteile: Vec<_> = zeilen
             .iter()
             .map(|z| Beleg {
-                urteil: z.urteil,
+                urteil: ki_relevanz(z),
                 pflicht: false,
             })
             .collect();
@@ -419,10 +423,10 @@ impl Vergleichszahlen {
 
     fn text(&self) -> String {
         if self.verglichen == 0 {
-            return "Für den Nutzenvergleich fehlen unabhängige Urteile für beide Top 3.".into();
+            return "Für den Nutzenvergleich fehlen übereinstimmende KI-Urteile für beide Top-3-Listen.".into();
         }
         let mut t = format!(
-            "Relevanter Beleg unter den ersten drei in {} von {} vollständig beurteilten Vergleichen (bisher {})",
+            "Relevanter Beleg unter den ersten drei in {} von {} mit KI-Konsens bewerteten Vergleichen (Grundrang {})",
             self.modell_treffer, self.verglichen, self.grund_treffer
         );
         if let Ok(n) = u64::try_from(self.vollstaendig)
@@ -562,7 +566,7 @@ pub fn neuro_pilot(
         .zeilen
         .iter()
         .filter(|z| z.tag <= train_bis && !spaetere_meldungen.contains(&meldung(z)))
-        .filter_map(|z| Some((z, stufe(z.urteil?))))
+        .filter_map(|z| Some((z, u8::from(ki_relevanz(z)? == Urteil::Bezug))))
         .collect();
     let klassen: BTreeSet<_> = train.iter().map(|(_, k)| *k).collect();
     let mut bericht = ModellBericht {
@@ -573,8 +577,9 @@ pub fn neuro_pilot(
         urteile: datensatz
             .zeilen
             .iter()
-            .filter(|z| z.urteil.is_some())
+            .filter(|z| ki_relevanz(z).is_some())
             .count(),
+        ki_konsens: true,
         trainingstage: train
             .iter()
             .map(|(z, _)| z.tag)
@@ -583,11 +588,9 @@ pub fn neuro_pilot(
         prueftage: pruef.iter().map(|z| z.tag).collect::<BTreeSet<_>>().len(),
         gruppen: Vec::new(),
     };
-    bericht.stand = if !datensatz.urteile_lesbar {
-        "Die lokalen Blindurteile konnten nicht geprüft werden.".into()
-    } else if klassen.len() < 2 || !klassen.contains(&0) {
+    bericht.stand = if klassen.len() < 2 {
         format!(
-            "{} verwendbare Blindurteile im Training. Es fehlen ältere Fälle mit und ohne relevanten Beleg.",
+            "{} verwendbare KI-Übereinstimmungen im Training. Für den Start braucht Neuro2026 ältere Fälle mit und ohne Belegbezug.",
             train.len()
         )
     } else if pruef.is_empty() {
