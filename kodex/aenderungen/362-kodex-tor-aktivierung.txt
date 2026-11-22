@@ -1,0 +1,7 @@
+klasse: KodexAenderung
+zweck: Geprüfte Startfreigabe für Folgejobs und beide Pflichtchecks auswerten
+pfade:
+.github/scripts/test_kodex_tor.py
+.github/workflows/kodex.yml
+kodex/festschreibung.txt
+kodex/freigaben/362-kodex-tor-aktivierung.txt
