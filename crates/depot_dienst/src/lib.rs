@@ -37,6 +37,9 @@ mod ki_einstellungen;
 pub mod kostenschutz;
 mod neuro2026;
 mod neuroauftraege;
+mod neurodaten;
+mod neuromodell;
+pub use neuromodell::neuro_pilot;
 mod neuroschlopf;
 mod otter;
 mod papierdialog;
@@ -530,19 +533,7 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/" => live_seite(d, a, jetzt),
         "/depot" | "/teil/depot" => depot_seite(d, a, jetzt),
         "/gespraeche" => gespraechsseite(d, a, tag),
-        "/neuroschlopf/belegpruefung" => {
-            let Some(f) = formular(a.abfrage.as_bytes()) else {
-                return seiten::fehler(400, "Der gewählte Prüftag ist ungültig.");
-            };
-            let wahl = match feld(&f, "tag") {
-                Some(wert) => match depot_kern::Datum::lies(wert) {
-                    Some(datum) => Some(datum),
-                    None => return seiten::fehler(400, "Der gewählte Prüftag ist ungültig."),
-                },
-                None => None,
-            };
-            belegpruefung::seite(d, tag, wahl, feld(&f, "gespeichert") == Some("ja"))
-        }
+        "/neuroschlopf/belegpruefung" => belegpruefung::get(d, tag, &a.abfrage),
         "/neuroschlopf" => {
             let ki =
                 zeitstrahl_ki::Aufrufe::lesen(&d.gespraechscache, &d.wurzel.join("daten"), tag);

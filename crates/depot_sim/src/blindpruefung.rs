@@ -3,7 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    Ausstiegsplan, belegrang::eindeutige_frageliste, papiertag, vorbereitung::text_fuer_frage,
+    Ausstiegsplan,
+    belegrang::{Grundrang, These as Rangthese, eindeutige_frageliste},
+    papiertag,
+    vorbereitung::text_fuer_frage,
 };
 use depot_journal::neurofrage::{NeuroAuftragId, NeuroFrage, NeuroRunde};
 use depot_journal::{Art, KiZweck, Stand, gespraeche::Gespraech};
@@ -46,6 +49,8 @@ pub struct Prueffall {
     pub quelle: Option<String>,
     pub veroeffentlicht: Option<Zeitpunkt>,
     pub stichtag: Zeitpunkt,
+    /// Wertbezug, Termin und ursprünglicher Platz im bestätigten Frageabschnitt.
+    pub grundmerkmale: [usize; 3],
     zuordnung: Zuordnung,
     beleg_zeile: Option<u64>,
 }
@@ -53,6 +58,10 @@ pub struct Prueffall {
 impl Prueffall {
     pub fn zuordnung(&self) -> &Zuordnung {
         &self.zuordnung
+    }
+
+    pub fn grundpunkte(&self) -> u32 {
+        Grundrang::paarpunkte(self.grundmerkmale)
     }
 
     /// Externe Vorprüfung derselben historischen Beleglage, ohne menschliches Urteil.
@@ -456,6 +465,7 @@ pub fn prueffaelle_mit_zeilen(
         return Err("Frageabschnitt leer");
     }
     let werte = liste::beobachtungsliste().map_err(|_| "Werteliste fehlt")?;
+    let grundrang = Grundrang::neu(&werte);
     let quellen = quellen(stand, stichtag, &kandidaten, eintraege);
     let mut aus = Vec::new();
     let mut hat_these = false;
@@ -482,6 +492,10 @@ pub fn prueffaelle_mit_zeilen(
             let referenz = format!("{tag}#{platz}:{}", sha256_hex(original.as_bytes()));
             for t in &thesen {
                 let isin = &t.wert.isin;
+                let rangthese = Rangthese {
+                    isin: isin.clone(),
+                    name: None,
+                };
                 let zuordnung = Zuordnung {
                     berater: wer,
                     thesentag: t.tag,
@@ -497,6 +511,7 @@ pub fn prueffaelle_mit_zeilen(
                     quelle: Some(quelle.name.to_owned()),
                     veroeffentlicht: quelle.zeit,
                     stichtag,
+                    grundmerkmale: grundrang.paarmerkmale(original, &rangthese, platz),
                     zuordnung,
                     beleg_zeile: quelle.beleg_zeile,
                 });

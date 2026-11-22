@@ -1433,7 +1433,10 @@ fn export_enthaelt_nie_rohdaten() -> Result<(), String> {
     assert_eq!(status(&antwort)?, 200);
     let archiv = text(&antwort);
     assert!(archiv.contains("neuro2026_eingaben.jsonl"));
-    let archiv = archiv.replace("neuro2026_eingaben.jsonl", "");
+    assert!(archiv.contains("neuro2026_belegpaare.jsonl"));
+    let archiv = archiv
+        .replace("neuro2026_eingaben.jsonl", "")
+        .replace("neuro2026_belegpaare.jsonl", "");
     assert!(archiv.contains("MANIFEST.txt") && archiv.contains("03_journal.md"));
     for muster in [
         "rohdaten/",
