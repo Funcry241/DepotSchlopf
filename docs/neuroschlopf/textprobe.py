@@ -8,6 +8,9 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 FORMAT = "depot-neuro-textprobe-v1"
 INSTRUCTION = "Retrieve evidence relevant to assessing this investment thesis at its stated cutoff."
+MODEL_DIMENSION = 1024
+
+
 class NoRedirects(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -16,7 +19,7 @@ class NoRedirects(HTTPRedirectHandler):
 OPENER = build_opener(ProxyHandler({}), NoRedirects())
 
 
-def vectors(texts, port):
+def vectors(texts, port, dimension):
     aus = {}
     for start in range(0, len(texts), 16):
         block = texts[start:start + 16]
@@ -29,14 +32,17 @@ def vectors(texts, port):
             raise ValueError("Der lokale Server lieferte eine andere Textmenge.")
         for key, row in zip(block, zeilen):
             werte = row["embedding"]
-            norm = math.sqrt(sum(x * x for x in werte))
-            if len(werte) != 1024 or not math.isfinite(norm) or norm == 0:
+            if len(werte) != MODEL_DIMENSION or not all(map(math.isfinite, werte)):
                 raise ValueError("Erwartet werden 1.024 endliche Vektorkomponenten.")
+            werte = werte[:dimension]
+            norm = math.sqrt(sum(x * x for x in werte))
+            if not math.isfinite(norm) or norm == 0:
+                raise ValueError("Die gewählten Vektorkomponenten lassen sich nicht normalisieren.")
             aus[key] = [x / norm for x in werte]
     return aus
 
 
-def rangantwort(rohdaten, port):
+def rangantwort(rohdaten, port, dimension=MODEL_DIMENSION):
     eingabe = json.loads(rohdaten)
     if eingabe["format"] != FORMAT or not eingabe["rows"]:
         raise ValueError("Unbekanntes oder leeres Textprobe-Format.")
@@ -48,10 +54,11 @@ def rangantwort(rohdaten, port):
         raise ValueError("Doppelte Fallkennung in den Eingaben.")
     gespeicherte_vektoren = vectors(list(dict.fromkeys(
         text for _, these, beleg in paare for text in (these, beleg)
-    )), port)
+    )), port, dimension)
     return {
         "format": FORMAT,
         "input_sha256": hashlib.sha256(rohdaten).hexdigest(),
+        "dimension": dimension,
         "scores": [
             {"id": fall, "score": math.fsum(a * b for a, b in
                 zip(gespeicherte_vektoren[these], gespeicherte_vektoren[beleg]))}
@@ -64,6 +71,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("ordner", type=Path)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--dimension", type=int, choices=(512, MODEL_DIMENSION), default=MODEL_DIMENSION)
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("Der lokale Server-Port liegt außerhalb des gültigen Bereichs.")
@@ -71,11 +79,11 @@ def main():
     ziel = args.ordner / "textprobe-antwort.json"
     if eingabe.stat().st_size > 4_000_000:
         raise ValueError("Die lokale Textprobe überschreitet die unterstützte Dateigröße.")
-    antwort = rangantwort(eingabe.read_bytes(), args.port)
+    antwort = rangantwort(eingabe.read_bytes(), args.port, args.dimension)
     zwischenstand = ziel.with_suffix(".tmp")
     zwischenstand.write_text(json.dumps(antwort, allow_nan=False) + "\n", encoding="utf-8")
     zwischenstand.replace(ziel)
-    print(f"{len(antwort['scores'])} lokale Rangwerte in {ziel.name} gespeichert.")
+    print(f"{len(antwort['scores'])} lokale Rangwerte mit {args.dimension} Dimensionen in {ziel.name} gespeichert.")
 
 
 if __name__ == "__main__":
