@@ -1,6 +1,6 @@
 # Neuro2026 · Text- und Netzvergleich
 
-Der Versuch misst, ob NeuroSchlopf relevante Nachrichten und Termine für eine offene Depotthese besser findet. Er prüft getrennt, was vortrainierte Textmerkmale beitragen und was zusätzliche Netzbreite beiträgt.
+Der Versuch ist ein Baustein der [Kapitalrotation mit sechs Modellen](kapitalrotation.md). Er misst, ob NeuroSchlopf relevante Nachrichten und Termine für eine offene Depotthese besser findet. Er prüft getrennt, was vortrainierte Textmerkmale beitragen und was zusätzliche Netzbreite beiträgt.
 
 ## Kandidaten
 

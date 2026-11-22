@@ -1,4 +1,5 @@
 klasse: DokuOnly
-zweck: Textverständnis und Netzbreite im Neuro2026-Belegvergleich getrennt prüfen
+zweck: Architektur für sechs Kapitalrotationsmodelle und ihren Textvergleich beschreiben
 pfade:
+docs/neuroschlopf/kapitalrotation.md
 docs/neuroschlopf/text-und-netzvergleich.md
