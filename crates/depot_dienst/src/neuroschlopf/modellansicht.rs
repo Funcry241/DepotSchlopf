@@ -5,10 +5,13 @@ use std::path::Path;
 use depot_kern::Datum;
 use depot_lage::{datum_text, html::maskiere};
 
-use crate::neuromodell::{ModellBericht, Rangbeleg, Ranggruppe, ansicht};
+use crate::neuromodell::{ModellBericht, Rangbeleg, Ranggruppe, ansicht, lernstand};
 
-pub(super) fn html(html: &mut String, daten: &Path) {
+pub(super) fn html(html: &mut String, daten: &Path, heute: Option<Datum>) {
     html.push_str("<section aria-labelledby=\"depotmodell-titel\"><h3 id=\"depotmodell-titel\">Neuro2026 · Depotmodell</h3>");
+    if let Some(heute) = heute {
+        lernstand_html(html, daten, heute);
+    }
     match ansicht(daten) {
         Ok(Some(bericht)) => bericht_html(html, &bericht),
         Ok(None) => html.push_str(
@@ -18,6 +21,51 @@ pub(super) fn html(html: &mut String, daten: &Path) {
         Err(_) => html.push_str("<p>Der lokale Modellbericht ist unlesbar.</p>"),
     }
     html.push_str("</section>");
+}
+
+fn lernstand_html(html: &mut String, daten: &Path, heute: Datum) {
+    let stand = match lernstand(daten, heute) {
+        Ok(Some(stand)) => stand,
+        Ok(None) => {
+            html.push_str("<p>Für den ersten Modelllauf fehlen bisher belegte historische These-Beleg-Paare.</p>");
+            return;
+        }
+        Err(fehler) => {
+            let _ = write!(
+                html,
+                "<p>Trainingsstand gerade nicht verfügbar. {}</p>",
+                maskiere(&fehler)
+            );
+            return;
+        }
+    };
+    let _ = write!(
+        html,
+        "<p><strong>KI-Übereinstimmungen fürs Training bis {}</strong><br>{} mit Belegbezug · {} ohne Bezug</p>",
+        datum_text(stand.train_bis),
+        stand.mit_bezug,
+        stand.ohne_bezug,
+    );
+    let hinweis = match (stand.mit_bezug, stand.ohne_bezug, stand.prueffaelle) {
+        (0, 0, _) => "Es fehlen KI-Übereinstimmungen mit und ohne Belegbezug.",
+        (0, _, _) => "Es fehlt eine KI-Übereinstimmung mit Belegbezug.",
+        (_, 0, _) => "Es fehlt eine KI-Übereinstimmung ohne Belegbezug.",
+        (_, _, 0) => {
+            "Es fehlen spätere Prüffälle mit drei vollen Handelstagen Abstand zum Training."
+        }
+        _ => "Die Fälle für den lokalen Modelllauf liegen vor.",
+    };
+    let _ = write!(html, "<p>{hinweis}</p>");
+    if stand.prueffaelle > 0 {
+        let _ = write!(
+            html,
+            "<p class=\"leise\">Zeitraum für den lokalen Lauf {} bis {} · {} spätere Prüffälle, davon {} mit KI-Übereinstimmung</p>",
+            datum_text(stand.von),
+            datum_text(stand.bis),
+            stand.prueffaelle,
+            stand.pruefurteile,
+        );
+    }
 }
 
 fn bericht_html(html: &mut String, bericht: &ModellBericht) {

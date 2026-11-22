@@ -414,7 +414,7 @@ pub(crate) fn seite(
     let mut html = String::from(
         "<section id=\"neuroschlopf-vergleich\"><h2>NeuroSchlopf · Belegvergleich</h2>",
     );
-    modellansicht::html(&mut html, &daten);
+    modellansicht::html(&mut html, &daten, tag);
     let anzeige = d.neuro.lock().unwrap_or_else(PoisonError::into_inner);
     let _ = write!(
         html,

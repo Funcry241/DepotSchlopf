@@ -539,6 +539,67 @@ fn bericht_lauf(
     Ok(Some((gruppen, zahlen, modellabdruck(&antwort)?.to_owned())))
 }
 
+fn prueffaelle_ab(zeilen: &[Zeile], ab: Datum) -> Vec<&Zeile> {
+    zeilen.iter().filter(|z| z.tag >= ab).collect()
+}
+
+fn trainingsfaelle<'a>(
+    zeilen: &'a [Zeile],
+    train_bis: Datum,
+    pruef: &[&Zeile],
+) -> Vec<(&'a Zeile, u8)> {
+    let spaetere_meldungen: BTreeSet<_> = pruef.iter().map(|z| meldung(z)).collect();
+    zeilen
+        .iter()
+        .filter(|z| z.tag <= train_bis && !spaetere_meldungen.contains(&meldung(z)))
+        .filter_map(|z| Some((z, u8::from(ki_relevanz(z)? == Urteil::Bezug))))
+        .collect()
+}
+
+pub(super) struct Lernstand {
+    pub von: Datum,
+    pub train_bis: Datum,
+    pub bis: Datum,
+    pub mit_bezug: usize,
+    pub ohne_bezug: usize,
+    pub prueffaelle: usize,
+    pub pruefurteile: usize,
+}
+
+/// Prüft einen vorgeschlagenen Zeitraum anhand derselben Fälle wie der Modelllauf.
+/// Der Vorschlag nimmt den jüngsten verfügbaren Prüftag und das spätestmögliche Trainingsende.
+pub(super) fn lernstand(daten: &Path, heute: Datum) -> Result<Option<Lernstand>, String> {
+    let beginn = Datum::neu(1970, 1, 1).ok_or("Historischer Zeitraum ist ungültig.")?;
+    let datensatz = crate::neurodaten::laden(daten, beginn, heute)?;
+    let zeilen = &datensatz.zeilen;
+    if zeilen.len() > MAX_PAARE {
+        return Err("Zu viele Belegpaare für einen gemeinsamen Lauf. Wähle beim lokalen Modelllauf einen kürzeren Zeitraum.".into());
+    }
+    let (Some(erste), Some(letzte)) = (zeilen.first(), zeilen.last()) else {
+        return Ok(None);
+    };
+    let trainingsende = zeilen
+        .iter()
+        .rev()
+        .map(|z| z.tag)
+        .find(|&tag| pruefstart(tag).is_some_and(|start| start <= letzte.tag));
+    let train_bis = trainingsende.unwrap_or(letzte.tag);
+    let pruef = trainingsende
+        .and_then(pruefstart)
+        .map_or_else(Vec::new, |start| prueffaelle_ab(zeilen, start));
+    let train = trainingsfaelle(zeilen, train_bis, &pruef);
+    let mit_bezug = train.iter().filter(|(_, stufe)| *stufe == 1).count();
+    Ok(Some(Lernstand {
+        von: erste.tag,
+        train_bis,
+        bis: letzte.tag,
+        mit_bezug,
+        ohne_bezug: train.len().saturating_sub(mit_bezug),
+        prueffaelle: pruef.len(),
+        pruefurteile: pruef.iter().filter(|z| ki_relevanz(z).is_some()).count(),
+    }))
+}
+
 /// Bereitet Trainings- und Prüfeingaben vor oder übernimmt den belegten Ranglauf.
 /// Der Aufruf selbst startet keine weiteren Programme.
 pub fn neuro_pilot(
@@ -556,18 +617,8 @@ pub fn neuro_pilot(
         return Err("Zu viele Belegpaare. Bitte einen kürzeren Zeitraum wählen.".into());
     }
     let erster_prueftag = pruefstart(train_bis).ok_or("Prüfzeitraum ist nicht darstellbar.")?;
-    let pruef: Vec<_> = datensatz
-        .zeilen
-        .iter()
-        .filter(|z| z.tag >= erster_prueftag)
-        .collect();
-    let spaetere_meldungen: BTreeSet<_> = pruef.iter().map(|z| meldung(z)).collect();
-    let train: Vec<_> = datensatz
-        .zeilen
-        .iter()
-        .filter(|z| z.tag <= train_bis && !spaetere_meldungen.contains(&meldung(z)))
-        .filter_map(|z| Some((z, u8::from(ki_relevanz(z)? == Urteil::Bezug))))
-        .collect();
+    let pruef = prueffaelle_ab(&datensatz.zeilen, erster_prueftag);
+    let train = trainingsfaelle(&datensatz.zeilen, train_bis, &pruef);
     let klassen: BTreeSet<_> = train.iter().map(|(_, k)| *k).collect();
     let mut bericht = ModellBericht {
         modellversion: None,
