@@ -1,5 +1,7 @@
 # NeuroSchlopf · Kapitalrotation
 
+Die sechs Rollen beschreiben Aufgaben und Schnittstellen. Der [Architekturvergleich](topologien-kapitalrotation.md) prüft, wie viele trainierte Netze diese Aufgaben am besten übernehmen.
+
 NeuroSchlopf soll erkennen, wo Verkaufsdruck zunimmt, wo Kaufdruck entsteht und ob eine mögliche Rotation nach Kosten noch im Papierdepot nutzbar ist. Zu jedem Entscheidungszeitpunkt liefert es eine Antwort mit möglichen Quellen und Zielen der Rotation, den tragenden Belegen, ihrer Unsicherheit und dem Zeitpunkt, bis zu dem die Aussage gilt.
 
 ## Was wir messen können
@@ -17,9 +19,9 @@ Die Strömungsanalogie hilft bei der Modellierung. Druck entspricht gerichteter 
 
 DepotSchlopf belegt heute Schlusskurse, Nachrichten und Termine. Damit beginnt die Prüfung auf Tageshorizonten. Eine Entscheidung für die nächsten Minuten braucht rechtzeitig verfügbare Intraday-Quotes, Trades und Ausführungsinformationen für dieselben Instrumente. Für einen ersten Intraday-Versuch wird ein liquides Teiluniversum mit zusammenhängender Handelszeit ausgewählt. Die Datenabdeckung entscheidet, welche Laufzeiten die Modelle sinnvoll bewerten können.
 
-## Sechs Modelle mit zwei parallelen Stufen
+## Sechs Rollen mit zwei parallelen Stufen
 
-Alle Eingänge desselben Laufs teilen einen eingefrorenen Wissensstichtag. Die drei vorbereitenden Modelle laufen parallel. Sobald ihr Datenstand für den Lauf geschlossen ist, werten drei weitere Modelle parallel aus. Jede Ausgabe führt den Wissensstichtag, Datenalter, Quellenkennungen, Unsicherheit und Modellversion mit.
+Alle Eingänge desselben Laufs teilen einen eingefrorenen Wissensstichtag. Die drei vorbereitenden Rollen können ihre Eingänge parallel verarbeiten. Sobald ihr Datenstand für den Lauf geschlossen ist, arbeiten die drei Auswertungsrollen mit derselben Datenbasis. Ein gemeinsames Modell kann mehrere Ausgaben in einem Lauf berechnen. Jede Ausgabe führt den Wissensstichtag, Datenalter, Quellenkennungen, Unsicherheit und Modellversion mit.
 
 | Modell | Aufgabe | Fester Ausgang |
 |---|---|---|
@@ -34,7 +36,7 @@ Die Zusammenführung ist eine prüfbare Regel. Sie gibt eine Papierchance aus, w
 
 ## Selbstwahl der Topologie
 
-Jedes der sechs Modelle darf seine Architektur getrennt auswählen. Die Ausgangskandidaten orientieren sich an seiner Aufgabe. Bei V1 eignen sich einfache Filter und Zeitmodelle als Basis, bei V2 ein vortrainiertes Textmodell und ein anpassbarer Kopf, bei V3 ein kleiner Graph. Für die Auswertung treten unter anderem Zustandsraummodelle, temporale Faltungen, Graphmodelle und breite Netze als Kandidaten an. Die Variante mit 2.048 Neuronen kann dort antreten, wo Eingaben und Fallzahl einen sinnvollen Vergleich zulassen.
+Die Architektur kann je Rolle oder gemeinsam für eng verwandte Aufgaben ausgewählt werden. Die Ausgangskandidaten orientieren sich an seiner Aufgabe. Bei V1 eignen sich einfache Filter und Zeitmodelle als Basis, bei V2 ein vortrainiertes Textmodell und ein anpassbarer Kopf, bei V3 ein kleiner Graph. Für die Auswertung treten unter anderem Zustandsraummodelle, temporale Faltungen, Graphmodelle und breite Netze als Kandidaten an. Die Variante mit 2.048 Neuronen kann dort antreten, wo Eingaben und Fallzahl einen sinnvollen Vergleich zulassen.
 
 Jede Rolle hält ihr Ausgabeschema stabil und führt ein aktuell verwendetes Modell sowie getrennte Alternativen. Die Suche darf Breite, Tiefe, Fenstergröße, Eingabegruppen und bei Graphmodellen die Kantenwahl verändern. Die Modelle bewerten Vorschläge in historischen Vorwärtsfenstern mit bekanntem Wissensstichtag. Eine bessere Variante wird erst nach einer späteren Prüfung in einem Schattenlauf übernommen. Zusätzlich zählen Latenz, Datenabdeckung und Robustheit. Modellwechsel erscheinen mit Daten- und Modellversion im Protokoll. Während eines laufenden Entscheidungsfensters bleibt die eingesetzte Version fest. Bleibt eine Rolle aus, gibt die Zusammenführung bei fehlender entscheidender Evidenz eine Enthaltung aus. Das bisherige Modell bleibt für einen Rückfall verfügbar.
 

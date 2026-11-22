@@ -1,5 +1,6 @@
 klasse: DokuOnly
-zweck: Architektur für sechs Kapitalrotationsmodelle und ihren Textvergleich beschreiben
+zweck: Topologien und Textverarbeitung für die Kapitalrotation mit sechs Rollen vergleichen
 pfade:
 docs/neuroschlopf/kapitalrotation.md
 docs/neuroschlopf/text-und-netzvergleich.md
+docs/neuroschlopf/topologien-kapitalrotation.md
