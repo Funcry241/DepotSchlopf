@@ -21,6 +21,7 @@ pub struct AbstimmungsStand {
     pub fremder_vorschlag: Option<Vorschlag>,
     pub eigene_erstmeinung: String,
     pub fremde_beitraege: String,
+    pub kaufkosten: String,
 }
 #[derive(Clone, Debug)]
 pub struct AbstimmungsAntwort {
@@ -348,12 +349,17 @@ pub(crate) fn berate(
         if !runde_frei(buch, zyklus, dachs, maus)? {
             break;
         }
+        let kaufkosten = crate::kostenhuerde::abstimmung(
+            &zyklus.tag.kurse,
+            [(&ea.topf, va.as_ref()), (&eb.topf, vb.as_ref())],
+        );
         let sa = AbstimmungsStand {
             runde,
             eigener_vorschlag: va.clone(),
             fremder_vorschlag: vb.clone(),
             eigene_erstmeinung: da.clone(),
             fremde_beitraege: format!("{db}\nLetzte Abstimmung: {letzte_b}"),
+            kaufkosten: kaufkosten.clone(),
         };
         let sb = AbstimmungsStand {
             runde,
@@ -361,6 +367,7 @@ pub(crate) fn berate(
             fremder_vorschlag: va.clone(),
             eigene_erstmeinung: db.clone(),
             fremde_beitraege: format!("{da}\nLetzte Abstimmung: {letzte_a}"),
+            kaufkosten,
         };
         // Beide sehen denselben vor der Runde fixierten Stand; die zweite Anfrage sieht die erste Antwort nicht.
         let Some(erste) = frage(buch, zyklus, dachs, &ea, &sa)? else {

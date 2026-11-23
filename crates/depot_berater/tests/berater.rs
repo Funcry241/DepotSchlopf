@@ -976,6 +976,7 @@ fn unbrauchbare_antwort_mit_belegtem_verbrauch_wird_abgerechnet() -> Result<(), 
                     fremder_vorschlag: None,
                     eigene_erstmeinung: String::new(),
                     fremde_beitraege: String::new(),
+                    kaufkosten: String::new(),
                 };
                 ki.abstimmen(erlaubnis, lage, &dialog).eigene
             } else {
@@ -2217,6 +2218,7 @@ fn mindesteinsatzgrund_folgt_dem_eigenen_einsatzplan() -> Result<(), String> {
                 fremder_vorschlag: None,
                 eigene_erstmeinung: erste.einschaetzung,
                 fremde_beitraege: String::new(),
+                kaufkosten: String::new(),
             };
             dachs.abstimmen(abstimmung, &lage, &stand)
         })?;
@@ -2257,6 +2259,7 @@ fn abstimmungsfrage_zitiert_fremde_aussagen_als_daten() -> Result<(), String> {
         }),
         eigene_erstmeinung: "Eigene Erstmeinung".into(),
         fremde_beitraege: antwort.into(),
+        kaufkosten: String::new(),
     };
     let topf = Topf::neu(TopfId::A, Cent(500_000)).map_err(|e| format!("{e:?}"))?;
     let kurse = kurse()?;

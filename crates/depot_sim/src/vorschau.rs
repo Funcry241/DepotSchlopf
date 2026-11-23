@@ -200,12 +200,20 @@ fn abstimmen(
             break;
         }
         let phase = format!("Abstimmung Runde {runde}");
+        let kaufkosten = crate::kostenhuerde::abstimmung(
+            lage_a.kurse,
+            [
+                (lage_a.topf, a.vorschlag.as_ref()),
+                (lage_b.topf, b.vorschlag.as_ref()),
+            ],
+        );
         let frage = |eigen: &Stand, fremd: &Stand| AbstimmungsStand {
             runde,
             eigener_vorschlag: eigen.vorschlag.clone(),
             fremder_vorschlag: fremd.vorschlag.clone(),
             eigene_erstmeinung: eigen.text.clone(),
             fremde_beitraege: fremd.text.clone(),
+            kaufkosten: kaufkosten.clone(),
         };
         a.ersatzkauf = false;
         b.ersatzkauf = false;
