@@ -41,6 +41,7 @@ use depot_regelwerk::{
 
 use crate::abdruck;
 use crate::papier::{Broker, Sendeantwort};
+use crate::schattenkandidaten::{self, Phase};
 use crate::szenario::{Berater, KEINE_VERWERTBARE_ANTWORT, Lage, Szenario, Tag};
 use crate::teilveto::Urteilsfolge;
 
@@ -544,17 +545,7 @@ pub(crate) fn ein_tag(
     let heute = depotwert(jr.stand().toepfe().values(), z.bewertung, Rundung::Auf)
         .ok_or_else(|| rechnung("Depotwert"))?;
     let b = beteiligte;
-    let topf_b = frage_topf(jr, z, TopfId::B, b.maus, &gestoppt)?;
-    let topf_a = frage_topf(jr, z, TopfId::A, b.dachs, &gestoppt)?;
-    let erste = [topf_a.clone(), topf_b.clone()];
-    let topf_b = zweite_meinung(jr, z, topf_b, b.dachs)?;
-    let topf_a = zweite_meinung(jr, z, topf_a, b.maus)?;
-    let mut antworten = crate::abstimmung::berate(jr, z, erste, [topf_a, topf_b], b.dachs, b.maus)?;
-    if b.dachs.kostensperre() || b.maus.kostensperre() {
-        for antwort in &mut antworten {
-            antwort.verwerfe_ersatzkauf();
-        }
-    }
+    let antworten = berate_toepfe(jr, z, &gestoppt, b)?;
     beide_topfzyklen(jr, z, antworten, b)?;
     let hoch = if z.gesperrt.is_empty() {
         hoch.max(heute)
@@ -565,6 +556,35 @@ pub(crate) fn ein_tag(
     jr.schliesse_ab(tag.datum, hoch, z.abdruck)
         .map_err(journal)?;
     Ok(hoch)
+}
+
+fn berate_toepfe(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    gestoppt: &BTreeSet<TopfId>,
+    b: &mut Beteiligte<'_, '_, '_>,
+) -> Result<[TopfAntwort; 2], LaufFehler> {
+    let topf_b = frage_topf(j, z, TopfId::B, b.maus, gestoppt)?;
+    let topf_a = frage_topf(j, z, TopfId::A, b.dachs, gestoppt)?;
+    let erste = [topf_a.clone(), topf_b.clone()];
+    let topf_b = zweite_meinung(j, z, topf_b, b.dachs)?;
+    let topf_a = zweite_meinung(j, z, topf_a, b.maus)?;
+    let mut antworten = crate::abstimmung::berate(j, z, erste, [topf_a, topf_b], b.dachs, b.maus)?;
+    if b.dachs.kostensperre() || b.maus.kostensperre() {
+        for antwort in &mut antworten {
+            antwort.verwerfe_ersatzkauf();
+        }
+    }
+    for antwort in antworten.iter().filter(|a| !a.ersatzkauf) {
+        schattenkandidaten::belege(
+            j,
+            z,
+            Phase::Gemeinsam,
+            &antwort.topf,
+            antwort.vorschlag.as_ref(),
+        )?;
+    }
+    Ok(antworten)
 }
 
 fn pruefe_topfgewichtung(j: &mut Journal, z: &Zyklus<'_>) -> Result<(), LaufFehler> {
@@ -1015,6 +1035,7 @@ fn frage(
         }
         if let Some(v) = &antwort.vorschlag {
             belege_erstmeinungsziele(j, tag, wer, v)?;
+            schattenkandidaten::belege(j, z, Phase::Erstmeinung, lage.topf, Some(v))?;
         }
         crate::ausgelassen::belege_ausgelassene(j, z, lage, &mut antwort.vorschlag, name(wer))?;
         if let Some(v) = &antwort.vorschlag {
@@ -1468,6 +1489,9 @@ fn zweite_meinung(
             _ if ersatzkauf => Some(v),
             _ => None,
         };
+        if !ersatzkauf {
+            schattenkandidaten::belege(j, z, Phase::Zweitmeinung, &topf, vorschlag.as_ref())?;
+        }
     }
     Ok(TopfAntwort {
         topf,

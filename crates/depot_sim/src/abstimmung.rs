@@ -2,7 +2,7 @@
 use crate::lauf::{TopfAntwort, Zyklus, begruende, journal, topf_name};
 use crate::{Antwort, Berater, Lage, LaufFehler};
 use depot_journal::{Journal, KiZweck};
-use depot_kern::{BeraterId, Kurse, Topf, Vorschlag};
+use depot_kern::{BeraterId, Isin, Kurse, Topf, Vorschlag};
 use depot_ki::Sperre;
 
 pub(crate) const ABSTIMMUNG_RUNDEN: u32 = 2;
@@ -112,6 +112,7 @@ fn frage(
     zweite: &mut dyn Berater,
     topf: &TopfAntwort,
     dialog: &AbstimmungsStand,
+    teilveto: &[Isin],
 ) -> Result<Option<AbstimmungsAntwort>, LaufFehler> {
     let kaufbar = crate::lauf::kaufbudget(buch, zyklus.grenzen, topf.topf.id())?;
     let wer = topf.topf.id().berater();
@@ -160,6 +161,15 @@ fn frage(
         BeraterId::Maus => "Maus",
     };
     if erste.eigene.verwertbar {
+        let runde = u8::try_from(dialog.runde)
+            .map_err(|_| crate::lauf::halt("Abstimmungsrunde außerhalb des Kennungsbereichs"))?;
+        crate::schattenkandidaten::belege(
+            buch,
+            zyklus,
+            crate::schattenkandidaten::Phase::Runde(runde),
+            &topf.topf,
+            erste.eigene.vorschlag.as_ref(),
+        )?;
         crate::ausgelassen::belege_ausgelassene(
             buch,
             zyklus,
@@ -167,9 +177,11 @@ fn frage(
             &mut erste.eigene.vorschlag,
             wer,
         )?;
+        erste.eigene.vorschlag = bereinige(erste.eigene.vorschlag.take(), teilveto);
     }
     let vorschlag = erste.eigene.vorschlag.as_ref();
-    let geaendert = !gleiche_ziele(vorschlag, dialog.eigener_vorschlag.as_ref());
+    let geaendert =
+        !gleiche_abstimmungsziele(vorschlag, dialog.eigener_vorschlag.as_ref(), teilveto);
     let runde = dialog.runde;
     let text = format!(
         "Abstimmung Runde {runde}: verwertbar={}; Änderung={geaendert}; Ziele={:?}; Zustimmung zum fremden Stand={}; Grund: {}",
@@ -207,6 +219,85 @@ pub(crate) fn gleiche_ziele(a: Option<&Vorschlag>, b: Option<&Vorschlag>) -> boo
         }
         (None, None) => true,
         _ => false,
+    }
+}
+
+fn gleiche_abstimmungsziele(
+    a: Option<&Vorschlag>,
+    b: Option<&Vorschlag>,
+    teilveto: &[Isin],
+) -> bool {
+    if !gleiche_ziele(a, b) {
+        return false;
+    }
+    if teilveto.is_empty() {
+        return true;
+    }
+    let (Some(a), Some(b)) = (a, b) else {
+        return true;
+    };
+    let gleicher_park = match (&a.park, &b.park) {
+        (Some(a), Some(b)) => {
+            a.isin == b.isin
+                && a.reserve_bp == b.reserve_bp
+                && a.naechster_kauf_tage == b.naechster_kauf_tage
+        }
+        (a, b) => a == b,
+    };
+    let plan = |v: &Vorschlag, isin| {
+        v.begruendung
+            .get(isin)
+            .and_then(|grund| crate::positionskauf::Ausstiegsplan::lies(grund))
+    };
+    gleicher_park
+        && a.zielgewichte_bp
+            .keys()
+            .all(|isin| plan(a, isin) == plan(b, isin))
+}
+
+fn nennt(v: &Vorschlag, isin: &Isin) -> bool {
+    v.zielgewichte_bp.contains_key(isin) || v.park.as_ref().is_some_and(|p| &p.isin == isin)
+}
+
+/// Übernimmt nur einen Rest, den genau das Teilveto aus der Erstmeinung bilden kann.
+fn abstimmungsstart(
+    erst: Option<&Vorschlag>,
+    gueltig: Option<&Vorschlag>,
+) -> (Option<Vorschlag>, Vec<Isin>) {
+    let (Some(v), Some(rest)) = (erst, gueltig) else {
+        return (erst.cloned(), Vec::new());
+    };
+    let gestrichen: Vec<_> = v
+        .zielgewichte_bp
+        .keys()
+        .chain(v.park.iter().map(|p| &p.isin))
+        .filter(|isin| !nennt(rest, isin))
+        .cloned()
+        .collect();
+    if let crate::teilveto::Urteilsfolge::Teilveto {
+        vorschlag,
+        abgelehnt,
+    } = crate::teilveto::urteilsfolge(v, false, Some(&gestrichen))
+        && vorschlag.as_ref() == rest
+    {
+        return (Some(*vorschlag), abgelehnt);
+    }
+    (erst.cloned(), Vec::new())
+}
+
+fn bereinige(neu: Option<Vorschlag>, teilveto: &[Isin]) -> Option<Vorschlag> {
+    let neu = neu?;
+    let gestrichen: Vec<_> = teilveto
+        .iter()
+        .filter(|isin| nennt(&neu, isin))
+        .cloned()
+        .collect();
+    if gestrichen.is_empty() {
+        return Some(neu);
+    }
+    match crate::teilveto::urteilsfolge(&neu, false, Some(&gestrichen)) {
+        crate::teilveto::Urteilsfolge::Teilveto { vorschlag, .. } => Some(*vorschlag),
+        _ => None,
     }
 }
 
@@ -253,12 +344,13 @@ fn eigener_stand(
     zyklus: &Zyklus<'_>,
     gueltig: &mut TopfAntwort,
     neu: Option<&Vorschlag>,
+    teilveto: &[Isin],
 ) -> Result<bool, LaufFehler> {
     gueltig.eigener_einsatz_bp =
         crate::mindesteinsatz::zielanteil(&gueltig.topf, &zyklus.tag.kurse, neu);
     let nur_verkleinerung =
         neu.is_some_and(|v| nur_verkleinerung(&gueltig.topf, &zyklus.tag.kurse, v));
-    let geaendert = !gleiche_ziele(gueltig.vorschlag.as_ref(), neu);
+    let geaendert = !gleiche_abstimmungsziele(gueltig.vorschlag.as_ref(), neu, teilveto);
     if nur_verkleinerung {
         if geaendert {
             belege_verkleinerung(buch, zyklus, &gueltig.topf)?;
@@ -271,15 +363,35 @@ fn eigener_stand(
 }
 
 fn uebernehme(
-    gueltig: &mut TopfAntwort,
     bisher: Option<&Vorschlag>,
     neu: &AbstimmungsAntwort,
     peer: &AbstimmungsAntwort,
-) {
-    if gleiche_ziele(neu.eigene.vorschlag.as_ref(), bisher) && peer.zustimmung_fremd {
+    teilveto: &[Isin],
+) -> Option<Vorschlag> {
+    if gleiche_abstimmungsziele(neu.eigene.vorschlag.as_ref(), bisher, teilveto)
+        && peer.zustimmung_fremd
+    {
         // Die Kaufthese stammt aus dem Stand, den der andere Berater gesehen hat.
-        gueltig.vorschlag = bisher.cloned();
+        bisher.cloned()
     } else {
+        None
+    }
+}
+
+fn widerrufe_fremden_stand(
+    gueltig: &mut TopfAntwort,
+    gezeigt: Option<&Vorschlag>,
+    antwort: &AbstimmungsAntwort,
+    kurse: &Kurse,
+    teilveto: &[Isin],
+) {
+    if !antwort.zustimmung_fremd
+        && gleiche_abstimmungsziele(gueltig.vorschlag.as_ref(), gezeigt, teilveto)
+        && !gueltig
+            .vorschlag
+            .as_ref()
+            .is_some_and(|v| nur_verkleinerung(&gueltig.topf, kurse, v))
+    {
         gueltig.vorschlag = None;
     }
 }
@@ -316,28 +428,41 @@ pub(crate) fn berate(
     buch: &mut Journal,
     zyklus: &Zyklus<'_>,
     erste: [TopfAntwort; 2],
-    mut gueltig: [TopfAntwort; 2],
+    gueltig: [TopfAntwort; 2],
     dachs: &mut dyn Berater,
     maus: &mut dyn Berater,
 ) -> Result<[TopfAntwort; 2], LaufFehler> {
     if zyklus.uhr.is_none() || !dachs.kann_abstimmen() || !maus.kann_abstimmen() {
         return Ok(gueltig);
     }
-    let [ea, eb] = erste;
-    if [ea.erstmeinung, eb.erstmeinung]
+    if erste
         .iter()
-        .any(|e| *e != crate::lauf::Erstmeinung::Verwertbar)
+        .any(|e| e.erstmeinung != crate::lauf::Erstmeinung::Verwertbar)
     {
         return Ok(gueltig);
     }
-    if entfaellt(buch, zyklus, [&ea, &eb], &gueltig)? {
+    let [ea, eb] = &erste;
+    if entfaellt(buch, zyklus, [ea, eb], &gueltig)? {
         return Ok(gueltig);
     }
+    abstimmungsrunden(buch, zyklus, erste, gueltig, dachs, maus)
+}
+
+fn abstimmungsrunden(
+    buch: &mut Journal,
+    zyklus: &Zyklus<'_>,
+    [ea, eb]: [TopfAntwort; 2],
+    mut gueltig: [TopfAntwort; 2],
+    dachs: &mut dyn Berater,
+    maus: &mut dyn Berater,
+) -> Result<[TopfAntwort; 2], LaufFehler> {
     let (da, db) = (
         beitraege(buch, zyklus, BeraterId::Dachs),
         beitraege(buch, zyklus, BeraterId::Maus),
     );
-    let (mut va, mut vb) = (ea.vorschlag.clone(), eb.vorschlag.clone());
+    let [ga, gb] = &gueltig;
+    let (mut va, teilveto_a) = abstimmungsstart(ea.vorschlag.as_ref(), ga.vorschlag.as_ref());
+    let (mut vb, teilveto_b) = abstimmungsstart(eb.vorschlag.as_ref(), gb.vorschlag.as_ref());
     let (mut letzte_a, mut letzte_b) = (String::new(), String::new());
     let max = depot_ki::KiGrenzen::standard()
         .aufrufe_je_zyklus()
@@ -370,7 +495,7 @@ pub(crate) fn berate(
             kaufkosten,
         };
         // Beide sehen denselben vor der Runde fixierten Stand; die zweite Anfrage sieht die erste Antwort nicht.
-        let Some(erste) = frage(buch, zyklus, dachs, &ea, &sa)? else {
+        let Some(erste) = frage(buch, zyklus, dachs, &ea, &sa, &teilveto_a)? else {
             break;
         };
         // Ein neuer Austausch muss die aktuelle Zustimmung selbst belegen.
@@ -382,20 +507,18 @@ pub(crate) fn berate(
         }
         // Rückzug, Wechsel und Widerruf gelten auch bei einer unvollständigen Runde.
         let [ga, gb] = &mut gueltig;
-        let verkleinert_a = eigener_stand(buch, zyklus, ga, erste.eigene.vorschlag.as_ref())?;
-        if !erste.zustimmung_fremd
-            && gleiche_ziele(gb.vorschlag.as_ref(), vb.as_ref())
-            && !gb
-                .vorschlag
-                .as_ref()
-                .is_some_and(|v| nur_verkleinerung(&gb.topf, &zyklus.tag.kurse, v))
-        {
-            gb.vorschlag = None;
-        }
+        let verkleinert_a = eigener_stand(
+            buch,
+            zyklus,
+            ga,
+            erste.eigene.vorschlag.as_ref(),
+            &teilveto_a,
+        )?;
+        widerrufe_fremden_stand(gb, vb.as_ref(), &erste, &zyklus.tag.kurse, &teilveto_b);
         if !crate::lauf::beratungszeit(zyklus) {
             break;
         }
-        let Some(zweite) = frage(buch, zyklus, maus, &eb, &sb)? else {
+        let Some(zweite) = frage(buch, zyklus, maus, &eb, &sb, &teilveto_b)? else {
             break;
         };
         if !zweite.eigene.verwertbar {
@@ -403,13 +526,24 @@ pub(crate) fn berate(
         }
         let [ga, gb] = &mut gueltig;
         if !verkleinert_a {
-            uebernehme(ga, va.as_ref(), &erste, &zweite);
+            ga.vorschlag = uebernehme(va.as_ref(), &erste, &zweite, &teilveto_a);
         }
-        if !eigener_stand(buch, zyklus, gb, zweite.eigene.vorschlag.as_ref())? {
-            uebernehme(gb, vb.as_ref(), &zweite, &erste);
+        if !eigener_stand(
+            buch,
+            zyklus,
+            gb,
+            zweite.eigene.vorschlag.as_ref(),
+            &teilveto_b,
+        )? {
+            gb.vorschlag = uebernehme(vb.as_ref(), &zweite, &erste, &teilveto_b);
         }
-        let gleich = gleiche_ziele(va.as_ref(), erste.eigene.vorschlag.as_ref())
-            && gleiche_ziele(vb.as_ref(), zweite.eigene.vorschlag.as_ref());
+        let gleich =
+            gleiche_abstimmungsziele(va.as_ref(), erste.eigene.vorschlag.as_ref(), &teilveto_a)
+                && gleiche_abstimmungsziele(
+                    vb.as_ref(),
+                    zweite.eigene.vorschlag.as_ref(),
+                    &teilveto_b,
+                );
         letzte_a = crate::vorbereitung::text_fuer_frage(&erste.eigene.einschaetzung);
         letzte_b = crate::vorbereitung::text_fuer_frage(&zweite.eigene.einschaetzung);
         va = erste.eigene.vorschlag;
@@ -434,6 +568,130 @@ mod tests {
 
     use super::*;
     use depot_kern::{Cent, Datum, Herkunft, Isin, Kurs, Kurse, Topf, TopfId, Zeitpunkt};
+    use std::collections::BTreeMap;
+
+    fn kandidat(isins: &[Isin]) -> Vorschlag {
+        Vorschlag {
+            berater: BeraterId::Maus,
+            zielgewichte_bp: isins.iter().cloned().map(|i| (i, 2_000)).collect(),
+            limit_bp: BTreeMap::new(),
+            stopp_bp: BTreeMap::new(),
+            erwartung_bp: BTreeMap::new(),
+            begruendung: BTreeMap::new(),
+            belege: BTreeMap::new(),
+            park: None,
+        }
+    }
+
+    fn stimme(vorschlag: Option<Vorschlag>, zustimmung_fremd: bool) -> AbstimmungsAntwort {
+        AbstimmungsAntwort {
+            eigene: Antwort {
+                vorschlag,
+                verwertbar: true,
+                halten: BTreeMap::new(),
+                prognose: None,
+                einschaetzung: String::new(),
+            },
+            zustimmung_fremd,
+        }
+    }
+
+    #[test]
+    fn teilveto_zeigt_und_bestaetigt_nur_den_geprueften_rest() -> Result<(), String> {
+        let sap = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let alv = Isin::neu("DE0008404005").map_err(|e| format!("{e:?}"))?;
+        let erst = kandidat(&[sap.clone(), alv.clone()]);
+        let rest = kandidat(std::slice::from_ref(&sap));
+        let (gezeigt, teilveto) = abstimmungsstart(Some(&erst), Some(&rest));
+        assert_eq!(gezeigt.as_ref(), Some(&rest));
+        assert_eq!(teilveto.as_slice(), std::slice::from_ref(&alv));
+
+        // Der Autor wiederholt den alten Vorschlag. Der Prüfer bestätigt den tatsächlich
+        // gezeigten Rest. Die gestrichene ISIN kommt auch mit diesem Ja nicht zurück.
+        let autor = stimme(bereinige(Some(erst), &teilveto), false);
+        let pruefer = stimme(None, true);
+        assert_eq!(
+            uebernehme(gezeigt.as_ref(), &autor, &pruefer, &teilveto),
+            Some(rest.clone())
+        );
+        assert_eq!(bereinige(Some(kandidat(&[alv])), &teilveto), None);
+
+        let mut geaendert = rest.clone();
+        geaendert.zielgewichte_bp.insert(sap.clone(), 2_500);
+        assert_eq!(
+            uebernehme(
+                Some(&rest),
+                &stimme(Some(geaendert.clone()), false),
+                &pruefer,
+                &teilveto
+            ),
+            None
+        );
+        assert_eq!(
+            uebernehme(
+                Some(&geaendert),
+                &stimme(Some(geaendert.clone()), false),
+                &pruefer,
+                &teilveto
+            ),
+            Some(geaendert)
+        );
+
+        let mut anderer_ausstieg = rest.clone();
+        anderer_ausstieg
+            .begruendung
+            .insert(sap, "[Kursbewegung] [Ausstieg +300bp 5] Probe".into());
+        assert_eq!(
+            uebernehme(
+                Some(&rest),
+                &stimme(Some(anderer_ausstieg), false),
+                &pruefer,
+                &teilveto
+            ),
+            None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rueckzug_und_veto_geben_keinen_kauf_frei() -> Result<(), String> {
+        let sap = Isin::neu("DE0007164600").map_err(|e| format!("{e:?}"))?;
+        let alv = Isin::neu("DE0008404005").map_err(|e| format!("{e:?}"))?;
+        let erst = kandidat(&[sap.clone(), alv]);
+        let rest = kandidat(&[sap]);
+        let (gezeigt, teilveto) = abstimmungsstart(Some(&erst), Some(&rest));
+        assert_eq!(
+            uebernehme(
+                gezeigt.as_ref(),
+                &stimme(None, false),
+                &stimme(None, true),
+                &teilveto
+            ),
+            None
+        );
+        assert_eq!(
+            uebernehme(
+                gezeigt.as_ref(),
+                &stimme(Some(rest), false),
+                &stimme(None, false),
+                &teilveto
+            ),
+            None
+        );
+
+        let (gezeigt, teilveto) = abstimmungsstart(Some(&erst), None);
+        assert!(teilveto.is_empty());
+        assert_eq!(
+            uebernehme(
+                gezeigt.as_ref(),
+                &stimme(Some(erst), false),
+                &stimme(None, false),
+                &teilveto
+            ),
+            None
+        );
+        Ok(())
+    }
 
     #[test]
     fn invariante_nie_kauf_ohne_zustimmung() -> Result<(), String> {

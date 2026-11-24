@@ -44,6 +44,7 @@ pub mod handelsvergleich;
 pub mod html;
 pub mod ki_kostenschaetzung;
 pub mod leerlauf;
+pub use depot_sim::{kandidatenschatten, schattenkandidaten};
 pub mod messlatte;
 pub mod reife;
 pub mod relevanzmessung;

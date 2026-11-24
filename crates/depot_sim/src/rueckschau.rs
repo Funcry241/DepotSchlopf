@@ -1,6 +1,7 @@
 //! Kursbasierte Rückschau. Diese Rechnung behandelt belegte Schlusskurse als
 //! ab Börsenschluss bekannt. Sie erzeugt weder einen Wissensstichtag noch einen Papierauftrag.
 
+mod ausstiegsvergleich;
 mod rotation;
 pub use rotation::rotationsbericht;
 
@@ -102,16 +103,18 @@ fn naechster_gemeinsamer_tag(mut datum: Datum) -> Option<Datum> {
 }
 
 fn grober_preissprung(vorher: &BTreeMap<Isin, Preis>, heute: &BTreeMap<Isin, Preis>) -> bool {
-    heute.iter().any(|(isin, kurs)| {
-        vorher.get(isin).is_some_and(|alt| {
-            let kleiner = i128::from((*kurs).min(*alt).fein());
-            let groesser = i128::from((*kurs).max(*alt).fein());
-            kleiner
-                .checked_mul(3)
-                .zip(groesser.checked_mul(2))
-                .is_some_and(|(klein, gross)| klein <= gross)
-        })
-    })
+    heute
+        .iter()
+        .any(|(isin, kurs)| vorher.get(isin).is_some_and(|alt| preissprung(*alt, *kurs)))
+}
+
+fn preissprung(vorher: Preis, heute: Preis) -> bool {
+    let kleiner = i128::from(heute.min(vorher).fein());
+    let groesser = i128::from(heute.max(vorher).fein());
+    kleiner
+        .checked_mul(3)
+        .zip(groesser.checked_mul(2))
+        .is_some_and(|(klein, gross)| klein <= gross)
 }
 
 fn kurs(preis: Preis, richtung: Rundung) -> Option<Preis> {
@@ -322,6 +325,7 @@ pub fn bericht(stand: &Stand, jetzt: Zeitpunkt) -> String {
             );
         }
     }
+    ausstiegsvergleich::bericht(&mut text, stand, jetzt, &werte);
     text
 }
 

@@ -880,7 +880,7 @@ fn journalpaket(
             let (kurz, depotdetails) = depot(stand, jetzt, tag, sperren);
             let buch = depot_lage::ausfuehrung::ausfuehrungsbuch(stand);
             let historie = historie::bericht(zeitraum, Some(stand), luecken);
-            let (ki, gespraechsbelege) = ki(daten, zeitraum, Some(stand), luecken);
+            let (ki, belege) = ki(daten, zeitraum, Some(stand), luecken);
             let nachher = nachher::auswertung(stand, &buch, zeitraum, jetzt);
             let pruefbericht = pruefbericht::bericht(
                 Some(stand),
@@ -889,14 +889,7 @@ fn journalpaket(
                 betrieb.fehler.ampel(true),
                 nachher.ampel(),
             ) + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
-                + &leerlauf::bericht(
-                    stand,
-                    &buch,
-                    &depot_kern::liste::beobachtungsliste()
-                        .map(|werte| depot_lage::depotverlauf::depotverlauf(stand, &werte))
-                        .unwrap_or_default(),
-                    zeitraum,
-                )
+                + &leerlauf::bericht(stand, &buch, zeitraum, jetzt)
                 + &depot_lage::belegauswahl::bericht(stand, zeitraum.von, zeitraum.bis)
                 + &depot_lage::belegauswahl::schlagzeilen_abdeckung(
                     stand,
@@ -904,7 +897,7 @@ fn journalpaket(
                     zeitraum.bis,
                     jetzt,
                 )
-                + &ki_kosten::bericht(stand, zeitraum, &historie.depotwerte, &gespraechsbelege)
+                + &ki_kosten::bericht(stand, eintraege, zeitraum, &historie.depotwerte, &belege)
                 + &nachher.bericht
                 + &historische_kursberichte(stand, jetzt, zeitraum);
             Journalpaket {
@@ -926,11 +919,9 @@ fn journalpaket(
                 pruefbericht,
                 massstab: massstab::vergleich(stand, &historie.depotwerte),
                 betrieb: betrieb.ablauf.bericht(Some(stand))
-                    + &betrieb.fehler.bericht(
-                        Some(eintraege),
-                        zeitraum,
-                        &gespraechsbelege.gemini_netzfehler,
-                    ),
+                    + &betrieb
+                        .fehler
+                        .bericht(Some(eintraege), zeitraum, &belege.gemini_netzfehler),
                 kurz,
                 depotdetails,
                 orders: orders::bericht(stand, eintraege, &buch, zeitraum),

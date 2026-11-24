@@ -434,3 +434,47 @@ fn neurogrenze_und_offener_versuch_bleiben_ueber_neustart_erhalten() -> Result<(
     fs::remove_dir_all(pfad.parent().ok_or("Verzeichnis")?).ok();
     Ok(())
 }
+
+#[test]
+fn kostenfenster_ordnet_neuroabrechnung_ihrem_journaleintrag_zu() -> Result<(), String> {
+    use depot_journal::neurofrage::NeuroErgebnis;
+
+    let pfad = neuer_pfad();
+    let mut j = journal(&pfad);
+    let von = tag(4);
+    let bis = tag(5);
+    let wer = BeraterId::Maus;
+    let id = NeuroAuftragId::neu(&"a".repeat(64), NeuroRunde::Erstfrage).ok_or("Kennung")?;
+    let erlaubnis = j
+        .reserviere_neurofrage(&id, wer, von, 1, BeraterEinstellung::standard(wer), 1)
+        .map_err(|e| format!("{e:?}"))?;
+    let nr = erlaubnis.buchung();
+    let abrechnung = erlaubnis.aufruf().abrechnung(12, 3).ok_or("Abrechnung")?;
+    let kosten = abrechnung.kosten();
+    assert!(kosten > Cent::NULL);
+
+    let fehler = |e| format!("{e:?}");
+    let abdruck = j.bestaetigt().1;
+    j.schliesse_ab(von, Cent(1_000_000), &abdruck)
+        .map_err(fehler)?;
+    j.belege_neuroergebnis(&NeuroErgebnis::neu(
+        id,
+        wer,
+        nr,
+        Err("Antwort unbrauchbar".into()),
+        None,
+        Some(abrechnung),
+    ))
+    .map_err(fehler)?;
+    let abdruck = j.bestaetigt().1;
+    j.schliesse_ab(bis, Cent(1_000_000), &abdruck)
+        .map_err(fehler)?;
+    let fenster = j
+        .stand()
+        .ki()
+        .kosten_zwischen_abschluessen(j.eintraege(), von, bis)
+        .ok_or("Kostenfenster")?;
+    assert_eq!(fenster.abgerechnet, kosten);
+    assert_eq!(fenster.offen_reserviert, Cent::NULL);
+    Ok(())
+}

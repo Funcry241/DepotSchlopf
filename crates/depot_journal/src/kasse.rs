@@ -20,7 +20,7 @@ use depot_ki::{
 };
 
 use crate::neurofrage::{NeuroAuftragId, NeuroErgebnis, NeuroRunde, NeuroSperre, NeuroVersuch};
-use crate::stand::{datum_text, lies_datum};
+use crate::stand::{datum_text, lies_abschluss, lies_datum};
 
 mod siegel {
     /// Nur in `depot_journal` erzeugbar.
@@ -290,6 +290,13 @@ pub struct KiStand {
     neuroergebnisse: std::collections::BTreeMap<usize, NeuroErgebnis>,
 }
 
+/// Abrechnung und neue, am Fensterende noch offene Reservierungen im Journalfenster.
+#[derive(Debug)]
+pub struct KiKostenfenster {
+    pub abgerechnet: Cent,
+    pub offen_reserviert: Cent,
+}
+
 impl KiStand {
     pub fn buchungen(&self) -> &[Buchung] {
         &self.buchungen
@@ -298,6 +305,50 @@ impl KiStand {
     /// Belegter Zweck und Abrechnungsstatus zu einer Buchungsnummer.
     pub fn buchungsbeleg(&self, nr: usize) -> Option<(KiZweck, bool)> {
         Some((*self.zwecke.get(nr)?, self.abgerechnet.contains(&nr)))
+    }
+
+    /// Zählt die Buchungsereignisse zwischen zwei Abschlüssen desselben geprüften Journals.
+    /// Eine Abrechnung zählt an ihrer Journalposition, auch bei einer älteren Reservierung.
+    pub fn kosten_zwischen_abschluessen(
+        &self,
+        eintraege: &[(crate::Art, String)],
+        anfang: Datum,
+        ende: Datum,
+    ) -> Option<KiKostenfenster> {
+        use crate::{Art, KiAbrechnung};
+
+        let abschluss = |(art, inhalt): &(Art, String), datum| {
+            *art == Art::Abschluss && lies_abschluss(inhalt).is_some_and(|a| a.datum == datum)
+        };
+        let start = eintraege.iter().position(|e| abschluss(e, anfang))?;
+        let (vorher, rest) = eintraege.split_at_checked(start.checked_add(1)?)?;
+        let stop = rest.iter().position(|e| abschluss(e, ende))?;
+        let mut nr = vorher.iter().filter(|(art, _)| *art == Art::Ki).count();
+        let mut reservierungen = std::collections::BTreeMap::new();
+        let mut abgerechnet = Cent::NULL;
+        for (art, inhalt) in rest.get(..stop)? {
+            let abrechnung = match art {
+                Art::Ki => {
+                    reservierungen.insert(nr, *self.obergrenzen.get(nr)?);
+                    nr = nr.checked_add(1)?;
+                    None
+                }
+                Art::KiAbrechnung => Some(KiAbrechnung::lies(inhalt)?),
+                Art::NeuroErgebnis => NeuroErgebnis::lies(inhalt)?.abrechnung,
+                _ => None,
+            };
+            if let Some(a) = abrechnung {
+                reservierungen.remove(&a.nr);
+                abgerechnet = abgerechnet.checked_add(a.kosten())?;
+            }
+        }
+        let offen_reserviert = reservierungen
+            .into_values()
+            .try_fold(Cent::NULL, Cent::checked_add)?;
+        Some(KiKostenfenster {
+            abgerechnet,
+            offen_reserviert,
+        })
     }
 
     pub fn aufruf(&self, nr: usize) -> Option<&crate::KiAufruf> {

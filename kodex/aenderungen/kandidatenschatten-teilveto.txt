@@ -1,0 +1,19 @@
+klasse: Funktion
+zweck: Kaufkandidaten im Schatten bewerten, Teilveto-Reste vorlegen, Ausstiege vergleichen und KI-Kosten am Journalabschluss zählen
+pfade:
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/analyse/ki_kosten.rs
+crates/depot_dienst/src/analyse/leerlauf.rs
+crates/depot_dienst/src/analyse/leerlauf/kandidatenschatten.rs
+crates/depot_journal/src/kasse.rs
+crates/depot_journal/src/lib.rs
+crates/depot_journal/src/stand.rs
+crates/depot_journal/tests/budget.rs
+crates/depot_lage/src/lib.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/src/kandidatenschatten.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/lib.rs
+crates/depot_sim/src/rueckschau.rs
+crates/depot_sim/src/rueckschau/ausstiegsvergleich.rs
+crates/depot_sim/src/schattenkandidaten.rs
