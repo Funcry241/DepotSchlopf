@@ -16,7 +16,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use depot_kern::{BeraterId, Boerse, Datum, Zeitpunkt};
-use depot_lage::{Betrieb, Lagebild, SchluesselStand, TagStand, ortszeit};
+use depot_lage::{Betrieb, BudgetStatus, Lagebild, SchluesselStand, TagStand, ortszeit};
 
 use crate::aktualisierung::Ergebnis;
 use crate::hinweis::Gedaechtnis;
@@ -304,6 +304,8 @@ pub struct Zustand {
     pub erledigt_fehler: Option<String>,
     pub lage: Option<Lage>,
     pub lage_veraltet: bool,
+    /// Letzte Budgetauskunft für den Live-Ausblick, auch bei vorübergehend belegtem Journal.
+    pub(crate) letztes_ki_budget: BTreeMap<BeraterId, (Datum, BudgetStatus)>,
     /// Ein Update ist eingespielt: Der Dienst endet, sobald nichts mehr laeuft oder wartet.
     pub neustart: bool,
     /// Stand des letzten Updates fuer die Seite; `true` heisst Fehler.
@@ -844,12 +846,8 @@ impl Dienst {
         let start: String = crate::neues_token().chars().take(16).collect();
         let protokoll_schutz = crate::protokoll::Schutz::laden();
         let (verlauf, verlauf_hinweis) = lade_verlauf(&wurzel, &protokoll_schutz);
-        let naechste_nr = verlauf
-            .iter()
-            .map(|a| a.nr)
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1);
+        let letzte_nr = verlauf.iter().map(|a| a.nr).max().unwrap_or_default();
+        let naechste_nr = letzte_nr.saturating_add(1);
         let (update_ergebnisse, mut update_meldung) = match crate::aktualisierung::laden(&wurzel) {
             Ok(e) => {
                 let m = e.last().and_then(Ergebnis::hinweis_im_betrieb);
@@ -891,6 +889,7 @@ impl Dienst {
                 erledigt_fehler,
                 lage: None,
                 lage_veraltet: true,
+                letztes_ki_budget: BTreeMap::new(),
                 neustart: false,
                 update_meldung,
                 update_ergebnisse,
@@ -1525,6 +1524,13 @@ impl Dienst {
     fn lagebild_erneuern(&self, jetzt: Zeitpunkt) {
         let bild = (self.lagerechner)(&self.wurzel, jetzt);
         let mut z = self.sperre();
+        if let Some(tag) = jetzt.frankfurt_tag() {
+            z.letztes_ki_budget.extend(
+                bild.budget
+                    .iter()
+                    .map(|budget| (budget.berater, (tag, budget.status.clone()))),
+            );
+        }
         let depot_version = z.lage.as_ref().map_or(1, |alt| {
             if alt.bild.depot == bild.depot {
                 alt.depot_version
