@@ -53,7 +53,8 @@ fn ereignis(
     }
     let naechster = naechste_handelstage(lage.datum).next();
     let termine: std::collections::BTreeMap<_, _> = stand
-        .termine()
+        .termine_bis_stichtag(lage.datum)
+        .unwrap_or_else(|| stand.termine())
         .iter()
         .filter(|b| b.abruf() <= wissen)
         .map(|b| (b.termin().kennung(), b.termin()))

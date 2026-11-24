@@ -7,7 +7,7 @@ use depot_kern::liste::{VERGLEICH_ISIN, boerse_von, papierorder_schluss};
 use depot_kern::{Boerse, Cent, Datum, Grenzen, Herkunft, Isin, Preis, Rundung, Zeitpunkt};
 
 use crate::positionskauf::Kursziel;
-use crate::schattenkandidaten::{Kandidat, kandidaten};
+use crate::schattenkandidaten::{Kandidat, kandidaten, modell_stueck, signale};
 
 const MODELLTAGE: u16 = 5;
 type Schlusskurse<'a> = BTreeMap<(&'a Isin, Datum), (Zeitpunkt, Preis)>;
@@ -33,6 +33,13 @@ pub struct Abschluss {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Signalkontrolle {
+    pub isin: Isin,
+    pub idee_netto: Cent,
+    pub signal_netto: Cent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StandImSchatten {
     FehlendeKaufdaten,
     KeineStuecke,
@@ -47,6 +54,7 @@ pub enum StandImSchatten {
         mit_stopp: Abschluss,
         mit_ziel: Option<Abschluss>,
         korbnetto: Option<Cent>,
+        signalkontrolle: Option<Signalkontrolle>,
     },
 }
 
@@ -123,6 +131,7 @@ struct Markt<'a> {
     kurse: Schlusskurse<'a>,
     kapitaltage: BTreeMap<Isin, BTreeSet<Datum>>,
     korb: Vec<Isin>,
+    signale: BTreeMap<(Datum, usize, Boerse), Isin>,
     bis: Datum,
     jetzt: Zeitpunkt,
 }
@@ -244,12 +253,52 @@ impl Markt<'_> {
                 netto: erloes(&self.g, kurs, stueck)?.checked_sub(basis)?,
             })
         };
+        let signalkontrolle = self.signalkontrolle(k, boerse, einstieg.datum, frist, basis, stueck);
         Some(StandImSchatten::Abgeschlossen {
             einstieg,
             frist,
             mit_stopp: rechne(None)?,
             mit_ziel: ziel.and_then(|ziel| rechne(Some(ziel))),
             korbnetto: self.korbnetto(boerse, einstieg.datum, frist, basis),
+            signalkontrolle,
+        })
+    }
+
+    fn signalkontrolle(
+        &self,
+        k: &Kandidat,
+        boerse: Boerse,
+        von: Datum,
+        bis: Datum,
+        basis: Cent,
+        stueck: u64,
+    ) -> Option<Signalkontrolle> {
+        let isin = self.signale.get(&(k.tag, k.lauf?, boerse))?;
+        // Beide Ideen verwenden die ganze Haltefrist und dieselbe Kaufkraft. Fehlende Kurse
+        // bleiben Lücken. Bei einer bekannten Größenhürde bleibt das Vergleichsgeld bar.
+        if self.kapitalwechsel(isin, von, bis).is_some() {
+            return None;
+        }
+        let kauf = self
+            .g
+            .papierkurs(boerse, self.kurs(isin, von)?, Rundung::Auf)?;
+        let verkauf = self
+            .g
+            .papierkurs(boerse, self.kurs(isin, bis)?, Rundung::Ab)?;
+        let rangstueck = modell_stueck(&self.g, Preis::aus_cent(basis)?, basis, kauf)?;
+        let signal_netto = if rangstueck == 0 {
+            Cent::NULL
+        } else {
+            erloes(&self.g, verkauf, rangstueck)?
+                .checked_sub(kaufpreis(&self.g, kauf, rangstueck)?)?
+        };
+        let ende = self
+            .g
+            .papierkurs(boerse, self.kurs(&k.isin, bis)?, Rundung::Ab)?;
+        Some(Signalkontrolle {
+            isin: isin.clone(),
+            idee_netto: erloes(&self.g, ende, stueck)?.checked_sub(basis)?,
+            signal_netto,
         })
     }
 }
@@ -270,21 +319,23 @@ fn ausstieg(
     Some((*kurse.last()?, Ausstieg::Frist))
 }
 
-/// Rechnet die im Intervall protokollierten Kaufkandidaten mit belegten Börsenschlüssen nach.
+/// Wählt Kaufkandidaten aus dem Intervall und verfolgt sie bis zum Stand des Exports.
 /// Offene und unvollständige Haltefenster bleiben ohne Nettowert, auch nach einer frühen Schwelle.
 pub fn auswertung(stand: &Stand, von: Datum, bis: Datum, jetzt: Zeitpunkt) -> Vec<Zeile> {
     let kandidaten = kandidaten(stand)
         .into_iter()
         .filter(|k| (von..=bis).contains(&k.tag));
+    let kursende = jetzt.frankfurt_tag().unwrap_or(bis);
     let markt = Markt {
         g: Grenzen::standard(),
-        kurse: schlusskurse(stand, bis, jetzt),
+        kurse: schlusskurse(stand, kursende, jetzt),
         kapitaltage: kapitaltage(stand, jetzt),
         korb: VERGLEICH_ISIN
             .iter()
             .filter_map(|i| Isin::neu(i).ok())
             .collect(),
-        bis,
+        signale: signale(stand),
+        bis: kursende,
         jetzt,
     };
     kandidaten
@@ -329,11 +380,13 @@ mod tests {
             kurse,
             kapitaltage: BTreeMap::new(),
             korb: vec![isin.clone()],
+            signale: BTreeMap::from([((tag, 1, Boerse::Xetra), isin.clone())]),
             bis,
             jetzt,
         };
         let mut kandidat = Kandidat {
             tag,
+            lauf: Some(1),
             topf: TopfId::A,
             phase: Phase::Erstmeinung,
             isin: isin.clone(),
@@ -353,12 +406,15 @@ mod tests {
             mit_stopp,
             mit_ziel: Some(mit_ziel),
             korbnetto: Some(_),
+            signalkontrolle: Some(signal),
         }) = markt.werte_aus(&kandidat)
         else {
             return Err("Der vollständige Fall fehlt".into());
         };
         assert_eq!(einstieg.kurs, Cent(10_005));
         assert_eq!(frist, bis);
+        assert_eq!(signal.isin, kandidat.isin);
+        assert_eq!(signal.idee_netto, signal.signal_netto);
         assert_eq!(
             (mit_stopp.grund, mit_stopp.netto),
             (Ausstieg::Stopp, Cent(-5_400))

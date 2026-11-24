@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use depot_journal::Stand;
+use depot_journal::{KursBeleg, Stand};
 use depot_kern::{Datum, Herkunft, Isin, Zeitpunkt};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,10 +18,23 @@ pub enum Verlauf {
 }
 
 pub fn kursverlauf(stand: &Stand, isin: &Isin, bis: Datum, wissen: Zeitpunkt) -> Verlauf {
-    berechne(stand, isin, bis, wissen).unwrap_or(Verlauf::ZuWenig)
+    berechne(kurse_zum_wissensstand(stand, wissen), isin, bis, wissen).unwrap_or(Verlauf::ZuWenig)
 }
 
-fn berechne(stand: &Stand, isin: &Isin, bis: Datum, wissen: Zeitpunkt) -> Option<Verlauf> {
+fn kurse_zum_wissensstand(stand: &Stand, wissen: Zeitpunkt) -> &[KursBeleg] {
+    wissen
+        .in_frankfurt()
+        .filter(|(tag, ..)| stand.wissensstichtag(*tag) == Some(wissen))
+        .and_then(|(tag, ..)| stand.kurse_bis_stichtag(tag))
+        .unwrap_or_else(|| stand.kurse())
+}
+
+fn berechne(
+    kursbelege: &[KursBeleg],
+    isin: &Isin,
+    bis: Datum,
+    wissen: Zeitpunkt,
+) -> Option<Verlauf> {
     let boerse = depot_kern::liste::boerse_von(isin)?;
     let fremdwaehrung = boerse.waehrung() == "USD";
     let vergleichbar = |tag| !fremdwaehrung || !depot_kern::boerse::target_geschlossen(tag);
@@ -37,7 +50,7 @@ fn berechne(stand: &Stand, isin: &Isin, bis: Datum, wissen: Zeitpunkt) -> Option
         }
     }
     let mut belege = BTreeMap::new();
-    for beleg in stand.kurse().iter().filter(|b| {
+    for beleg in kursbelege.iter().filter(|b| {
         b.isin() == isin
             && b.abruf() <= wissen
             && b.kurs().herkunft() == Herkunft::Quelle
@@ -102,8 +115,7 @@ pub(crate) fn kurzbewegung(
             bis = boerse.bezugstag(bis)?;
         }
     }
-    let basis = stand
-        .kurse()
+    let basis = kurse_zum_wissensstand(stand, wissen)
         .iter()
         .filter(|b| {
             b.isin() == isin
@@ -126,6 +138,9 @@ pub(crate) fn fuer_lage(
     let wissen = stand
         .wissensstichtag(lauf_tag)
         .unwrap_or_else(|| kurse.stand());
+    let kursbelege = stand
+        .kurse_bis_stichtag(lauf_tag)
+        .unwrap_or_else(|| stand.kurse());
     universum
         .isins()
         .into_iter()
@@ -134,9 +149,9 @@ pub(crate) fn fuer_lage(
                 .eintrag(&isin)
                 .map(depot_kern::Kurs::handelstag)
                 .or_else(|| depot_kern::liste::boerse_von(&isin)?.bezugstag(lauf_tag));
-            let verlauf = bis.map_or(Verlauf::ZuWenig, |bis| {
-                kursverlauf(stand, &isin, bis, wissen)
-            });
+            let verlauf = bis
+                .and_then(|bis| berechne(kursbelege, &isin, bis, wissen))
+                .unwrap_or(Verlauf::ZuWenig);
             (isin, verlauf)
         })
         .collect()
@@ -175,7 +190,7 @@ mod tests {
 
     #[test]
     fn nachgeladene_historie_zaehlt_erst_ab_abruf() -> Result<(), String> {
-        use depot_journal::{Journal, KursBeleg};
+        use depot_journal::Journal;
         use depot_kern::{Boerse, Cent, Kurs};
 
         let ordner = std::env::temp_dir().join(format!("depot-kursverlauf-{}", std::process::id()));
@@ -208,6 +223,39 @@ mod tests {
                 kursverlauf(journal.stand(), &isin, bis, abruf),
                 Verlauf::Da { t20_bp: 2500, .. }
             ));
+
+            journal
+                .belege_wissensstichtag(bis, abruf)
+                .map_err(|e| format!("{e:?}"))?;
+            let vortag = Boerse::Xetra.bezugstag(bis).ok_or("Vortag")?;
+            let schluss = Boerse::Xetra.schluss(vortag).ok_or("Vortagsschluss")?;
+            let revision = Kurs::neu(Cent(7_500), "EUR", vortag, schluss, Herkunft::Quelle)
+                .map_err(|e| format!("{e:?}"))?;
+            let beleg = KursBeleg::neu("probe", abruf, b"Revision", isin.clone(), revision)?;
+            journal.belege_kurs(&beleg).map_err(|e| format!("{e:?}"))?;
+            let spaeter = Zeitpunkt::frankfurt(bis, 19, 0, 1).ok_or("Späterer Wissensstand")?;
+            assert!(matches!(
+                kursverlauf(journal.stand(), &isin, bis, abruf),
+                Verlauf::Da { t1_bp: 101, .. }
+            ));
+            assert!(matches!(
+                kursverlauf(journal.stand(), &isin, bis, spaeter),
+                Verlauf::Da { t1_bp: 3333, .. }
+            ));
+            let aktuell = journal
+                .stand()
+                .kurse()
+                .first()
+                .ok_or("Aktueller Schlusskurs")?
+                .kurs();
+            assert_eq!(
+                kurzbewegung(journal.stand(), &isin, aktuell, abruf, 1),
+                Some(101)
+            );
+            assert_eq!(
+                kurzbewegung(journal.stand(), &isin, aktuell, spaeter, 1),
+                Some(3333)
+            );
             Ok(())
         }();
         std::fs::remove_dir_all(&ordner).map_err(|e| e.to_string())?;

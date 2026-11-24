@@ -23,14 +23,14 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use depot_kern::modelle::{BeraterEinstellung, Modellwahl};
-use depot_kern::{BeraterId, Cent, Datum, Topf, TopfId, Zeitpunkt};
+use depot_kern::{BeraterId, Cent, Datum, Herkunft, Kurse, Topf, TopfId, Zeitpunkt};
 use depot_ki::Sperre;
 use depot_regelwerk::{GenehmigterAuftrag, Kennungsvergabe};
 use sha2::{Digest, Sha256};
 
 use crate::auftrag::{Meldung, meldung_text};
 use crate::kasse::{AufrufErlaubnis, grenzabdruck_fuer_auswahl, grenzabdruck_fuer_zweck};
-use crate::kursbeleg::{KursBeleg, kursbeleg_text};
+use crate::kursbeleg::{KURSGRUNDLAGE, KursBeleg, kursbeleg_text};
 use crate::nachrichtbeleg::{NachrichtBeleg, nachrichtbeleg_text};
 use crate::neurofrage::{NeuroAufrufErlaubnis, NeuroAuftragId, NeuroErgebnis, NeuroSperre};
 use crate::stand::{
@@ -1237,6 +1237,41 @@ impl Journal {
         zeit: depot_kern::Zeitpunkt,
     ) -> Result<(), JournalFehler> {
         self.schreibe_eintrag(Art::Wissensstichtag, &format!("{tag};{zeit}"))
+    }
+
+    /// Referenziert die zum Papiertag ausgewählten Originalbelege, ohne die Kurswerte zu kopieren.
+    pub fn belege_kursgrundlage(
+        &mut self,
+        tag: Datum,
+        auswahl: &Kurse,
+    ) -> Result<(), JournalFehler> {
+        let stand = self.stand();
+        let Some((stichtag, belege)) = stand
+            .wissensstichtag(tag)
+            .zip(stand.kurse_bis_stichtag(tag))
+        else {
+            return Ok(());
+        };
+        let mut offen: std::collections::BTreeSet<_> =
+            auswahl.alle().map(|(isin, _)| isin).collect();
+        let mut text = String::from("v1");
+        for (nr, beleg) in belege.iter().enumerate().rev() {
+            if offen.is_empty() {
+                break;
+            }
+            if beleg.abruf() <= stichtag
+                && beleg.kurs().herkunft() == Herkunft::Quelle
+                && auswahl.abruf(beleg.isin()) == Some(beleg.abruf())
+                && auswahl.eintrag(beleg.isin()) == Some(beleg.kurs())
+                && offen.remove(beleg.isin())
+            {
+                let _ = write!(text, " {nr}");
+            }
+        }
+        if offen.is_empty() {
+            self.begruende(tag, KURSGRUNDLAGE, &text)?;
+        }
+        Ok(())
     }
 
     /// Belegt den Handelstag vor der ersten Ausfuehrung und gibt faellige Erloese frei.

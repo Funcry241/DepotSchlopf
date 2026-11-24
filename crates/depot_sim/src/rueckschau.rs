@@ -1,7 +1,9 @@
 //! Kursbasierte Rückschau. Diese Rechnung behandelt belegte Schlusskurse als
 //! ab Börsenschluss bekannt. Sie erzeugt weder einen Wissensstichtag noch einen Papierauftrag.
 
+mod aufwaertsdruck;
 mod ausstiegsvergleich;
+mod ranggruppen;
 mod rotation;
 pub use rotation::rotationsbericht;
 
@@ -325,7 +327,23 @@ pub fn bericht(stand: &Stand, jetzt: Zeitpunkt) -> String {
             );
         }
     }
-    ausstiegsvergleich::bericht(&mut text, stand, jetzt, &werte);
+    let historie = ausstiegsvergleich::Historie::laden(stand, jetzt);
+    let beobachtungsliste = depot_kern::liste::beobachtungsliste().ok();
+    ausstiegsvergleich::bericht(
+        &mut text,
+        &historie,
+        jetzt,
+        &werte,
+        beobachtungsliste.as_deref(),
+    );
+    ranggruppen::bericht(
+        &mut text,
+        &historie,
+        jetzt,
+        &werte,
+        beobachtungsliste.as_deref(),
+    );
+    aufwaertsdruck::bericht(&mut text, stand, &historie, jetzt, &werte);
     text
 }
 

@@ -29,6 +29,8 @@ pub use depot_regelwerk::entscheidung::ist_gewicht_bp;
 
 pub mod abstimmung;
 pub mod anlass;
+mod aufwaertsdruck;
+mod aufwaertsdruck_beleg;
 pub mod ausfuehrung;
 pub mod belegrang;
 pub mod blindpruefung;

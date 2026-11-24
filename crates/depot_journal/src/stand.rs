@@ -15,7 +15,7 @@ use crate::auftrag::{AuftragsLage, Meldung, lies_meldung, meldung_text};
 use crate::kapitalmassnahme::{Bewertungsschritt, GebuchteKapitalmassnahme, Kapitalmassnahme};
 use crate::kasse::KiStand;
 use crate::konto::{Abrechnungen, papier_valuta};
-use crate::kursbeleg::{KursBeleg, kursbeleg_text, lies_kursbeleg};
+use crate::kursbeleg::{KURSGRUNDLAGE, KursBeleg, kursbeleg_text, lies_kursbeleg};
 use crate::nachrichtbeleg::{NachrichtBeleg, lies_nachrichtbeleg, nachrichtbeleg_text};
 use crate::terminbeleg::{TerminBeleg, lies_terminbeleg, terminbeleg_text};
 
@@ -241,6 +241,15 @@ pub const FORMAT_ALT: u8 = 1;
 /// Format 2: Auftraege mit Zustandsmaschine und Deckung (R37).
 pub const FORMAT: u8 = 2;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Wissensstand {
+    zeit: Zeitpunkt,
+    begruendungen: usize,
+    kurse: usize,
+    termine: usize,
+    nachrichten: usize,
+}
+
 /// Der Stand, wie er aus dem Journal folgt.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stand {
@@ -276,7 +285,7 @@ pub struct Stand {
     prueft_wiederanlauf: bool,
     seit_abschluss: usize,
     abrechnungstag: Option<Datum>,
-    wissensstichtage: BTreeMap<Datum, (Zeitpunkt, usize)>,
+    wissensstichtage: BTreeMap<Datum, Wissensstand>,
     abrechnungen: Abrechnungen,
     /// Je abgeschlossenem Tag die Toepfe zum Abschluss, aufsteigend (#118). Entsteht nur beim
     /// Lesen; das Journal schreibt dafuer nichts.
@@ -716,7 +725,7 @@ impl Stand {
     }
 
     pub fn wissensstichtag(&self, tag: Datum) -> Option<Zeitpunkt> {
-        self.wissensstichtage.get(&tag).map(|(zeit, _)| *zeit)
+        Some(self.wissensstichtage.get(&tag)?.zeit)
     }
 
     /// Handelstage mit eigenem belegtem Wissensstichtag.
@@ -726,8 +735,47 @@ impl Stand {
 
     /// Journalbegründungen, die beim Schreiben des Wissensstichtags bereits vorlagen.
     pub fn begruendungen_bis_stichtag(&self, tag: Datum) -> Option<&[(Datum, String, String)]> {
-        let (_, anzahl) = self.wissensstichtage.get(&tag)?;
-        self.begruendungen.get(..*anzahl)
+        self.begruendungen
+            .get(..self.wissensstichtage.get(&tag)?.begruendungen)
+    }
+
+    /// Nur die Quellenzeilen, die beim Schreiben des Wissensstichtags im Journal standen.
+    /// Der Aufrufer schränkt zusätzlich über die Abrufzeit ein.
+    pub fn kurse_bis_stichtag(&self, tag: Datum) -> Option<&[KursBeleg]> {
+        self.kurse.get(..self.wissensstichtage.get(&tag)?.kurse)
+    }
+
+    pub fn termine_bis_stichtag(&self, tag: Datum) -> Option<&[TerminBeleg]> {
+        self.termine.get(..self.wissensstichtage.get(&tag)?.termine)
+    }
+
+    pub fn nachrichten_bis_stichtag(&self, tag: Datum) -> Option<&[NachrichtBeleg]> {
+        self.nachrichten
+            .get(..self.wissensstichtage.get(&tag)?.nachrichten)
+    }
+
+    /// Die für den Papiertag ausdrücklich referenzierten Originalkurse.
+    pub fn kursgrundlage(&self, tag: Datum) -> Option<Vec<&KursBeleg>> {
+        let stichtag = self.wissensstichtag(tag)?;
+        let kurse = self.kurse_bis_stichtag(tag)?;
+        let mut belege = self
+            .begruendungen
+            .iter()
+            .filter(|(datum, wer, _)| *datum == tag && wer == KURSGRUNDLAGE);
+        let mut felder = belege.next()?.2.split_ascii_whitespace();
+        if belege.next().is_some() || felder.next()? != "v1" {
+            return None;
+        }
+        let mut isins = BTreeSet::new();
+        felder
+            .map(|feld| {
+                let beleg = kurse.get(feld.parse::<usize>().ok()?)?;
+                (beleg.abruf() <= stichtag
+                    && beleg.kurs().herkunft() == Herkunft::Quelle
+                    && isins.insert(beleg.isin()))
+                .then_some(beleg)
+            })
+            .collect()
     }
 
     pub fn abrechnungstag(&self) -> Option<Datum> {
@@ -1255,8 +1303,16 @@ impl Stand {
         {
             return Err("Wissensstichtag unzulässig".into());
         }
-        self.wissensstichtage
-            .insert(tag, (zeit, self.begruendungen.len()));
+        self.wissensstichtage.insert(
+            tag,
+            Wissensstand {
+                zeit,
+                begruendungen: self.begruendungen.len(),
+                kurse: self.kurse.len(),
+                termine: self.termine.len(),
+                nachrichten: self.nachrichten.len(),
+            },
+        );
         Ok(())
     }
 

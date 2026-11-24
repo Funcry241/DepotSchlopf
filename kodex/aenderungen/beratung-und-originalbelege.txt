@@ -1,0 +1,27 @@
+klasse: Funktion
+zweck: Aufwärtsdruck und Beratungsbeitrag messen und Originalkurse am Wissensstichtag nachweisen
+pfade:
+crates/depot_dienst/src/analyse.rs
+crates/depot_dienst/src/analyse/kursgrundlage.rs
+crates/depot_dienst/src/analyse/leerlauf/kandidatenschatten.rs
+crates/depot_dienst/src/analyse/leerlauf/kandidatenschatten/kosten.rs
+crates/depot_dienst/src/analyse/leerlauf/kandidatenschatten/rollen.rs
+crates/depot_journal/src/datei.rs
+crates/depot_journal/src/kursbeleg.rs
+crates/depot_journal/src/stand.rs
+crates/depot_sim/src/anlass.rs
+crates/depot_sim/src/aufwaertsdruck.rs
+crates/depot_sim/src/aufwaertsdruck_beleg.rs
+crates/depot_sim/src/kandidatenschatten.rs
+crates/depot_sim/src/kursverlauf.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/lib.rs
+crates/depot_sim/src/papiertag.rs
+crates/depot_sim/src/relative_staerke.rs
+crates/depot_sim/src/rueckschau.rs
+crates/depot_sim/src/rueckschau/aufwaertsdruck.rs
+crates/depot_sim/src/rueckschau/ausstiegsvergleich.rs
+crates/depot_sim/src/rueckschau/ranggruppen.rs
+crates/depot_sim/src/schattenkandidaten.rs
+crates/depot_sim/src/zahlenreaktion.rs
+crates/depot_sim/tests/papiertag.rs

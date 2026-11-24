@@ -6,7 +6,7 @@ use std::ops::Bound::{Excluded, Included};
 
 use depot_journal::{KursBeleg, Stand};
 use depot_kern::geld::BP_GANZ;
-use depot_kern::liste::{Wert, beobachtungsliste, boerse_von};
+use depot_kern::liste::{Wert, boerse_von};
 use depot_kern::{Boerse, Cent, Datum, Grenzen, Herkunft, Isin, Preis, Rundung, Zeitpunkt};
 
 use super::{BLICK_ZURUECK, gemeinsamer_tag, naechster_gemeinsamer_tag, preissprung, rendite_bp};
@@ -17,20 +17,20 @@ const STOPP_BP: i128 = 300;
 const POSITION_BUDGETS: [Cent; 2] = [Cent(300_000), Cent(30_000)];
 
 #[derive(Clone, Copy)]
-struct Schluss {
-    preis: Preis,
-    abruf: Zeitpunkt,
+pub(super) struct Schluss {
+    pub(super) preis: Preis,
+    pub(super) abruf: Zeitpunkt,
 }
 
 #[derive(Default)]
-struct Historie {
+pub(super) struct Historie {
     kurse: BTreeMap<Isin, BTreeMap<Datum, Schluss>>,
     schnitte: BTreeMap<Isin, BTreeSet<Datum>>,
     signaltage: BTreeSet<Datum>,
 }
 
 impl Historie {
-    fn laden(stand: &Stand, jetzt: Zeitpunkt) -> Self {
+    pub(super) fn laden(stand: &Stand, jetzt: Zeitpunkt) -> Self {
         let mut historie = Self::default();
         for b in stand.kurse() {
             historie.nimm_schluss(b, jetzt);
@@ -86,7 +86,11 @@ impl Historie {
         self.schnitte.entry(isin.clone()).or_default().insert(tag);
     }
 
-    fn fenster(&self, isin: &Isin, tage: &[Datum]) -> Option<Vec<Schluss>> {
+    pub(super) fn signaltage(&self) -> impl Iterator<Item = Datum> + '_ {
+        self.signaltage.iter().copied()
+    }
+
+    pub(super) fn fenster(&self, isin: &Isin, tage: &[Datum]) -> Option<Vec<Schluss>> {
         let (&anfang, &ende) = tage.first().zip(tage.last())?;
         if self.schnitte.get(isin).is_some_and(|tage| {
             tage.range((Excluded(anfang), Included(ende)))
@@ -114,7 +118,7 @@ struct Rang<'a> {
     rendite: i64,
 }
 
-fn kursrendite(schluesse: &[Schluss]) -> Option<i64> {
+pub(super) fn kursrendite(schluesse: &[Schluss]) -> Option<i64> {
     let anfang = schluesse.first()?.preis;
     schluesse
         .last()?
@@ -151,12 +155,12 @@ fn rangliste<'a>(historie: &Historie, tage: &[Datum], werte: &'a [Wert]) -> Vec<
     rang
 }
 
-fn handelstage_ab(boerse: Boerse, tag: Datum) -> impl Iterator<Item = Datum> {
+pub(super) fn handelstage_ab(boerse: Boerse, tag: Datum) -> impl Iterator<Item = Datum> {
     std::iter::successors(tag.plus_tage(1), |d| d.plus_tage(1))
         .filter(move |&d| boerse.handelstag(d))
 }
 
-fn stuecke(budget: Cent, limit: Cent, grenzen: &Grenzen) -> Option<u64> {
+pub(super) fn stuecke(budget: Cent, limit: Cent, grenzen: &Grenzen) -> Option<u64> {
     let frei = budget.checked_sub(grenzen.gebuehren().fuer(budget)?)?;
     let stueck = Preis::aus_cent(frei)
         .zip(Preis::aus_cent(limit))
@@ -168,12 +172,12 @@ fn stuecke(budget: Cent, limit: Cent, grenzen: &Grenzen) -> Option<u64> {
     Some(stueck)
 }
 
-fn kaufbetrag(kurs: Cent, stueck: u64, grenzen: &Grenzen) -> Option<Cent> {
+pub(super) fn kaufbetrag(kurs: Cent, stueck: u64, grenzen: &Grenzen) -> Option<Cent> {
     let volumen = kurs.mal_stueck(stueck)?;
     volumen.checked_add(grenzen.gebuehren().fuer(volumen)?)
 }
 
-fn verkauf(boerse: Boerse, kurs: Preis, stueck: u64, grenzen: &Grenzen) -> Option<Cent> {
+pub(super) fn verkauf(boerse: Boerse, kurs: Preis, stueck: u64, grenzen: &Grenzen) -> Option<Cent> {
     let volumen = grenzen
         .papierkurs(boerse, kurs, Rundung::Ab)?
         .mal_stueck(stueck)?;
@@ -207,7 +211,7 @@ fn ausstieg(haltekurse: &[Schluss], fuellpreis: Cent, mit_ziel: bool) -> usize {
         .unwrap_or(HALTETAGE)
 }
 
-fn korbnetto(
+pub(super) fn korbnetto(
     historie: &Historie,
     korb: &[Isin],
     boerse: Boerse,
@@ -493,14 +497,19 @@ fn messe(historie: &Historie, korb: &[Isin], werte: &[Wert], jetzt: Zeitpunkt) -
     }
 }
 
-pub(super) fn bericht(text: &mut String, stand: &Stand, jetzt: Zeitpunkt, korb: &[Isin]) {
+pub(super) fn bericht(
+    text: &mut String,
+    historie: &Historie,
+    jetzt: Zeitpunkt,
+    korb: &[Isin],
+    werte: Option<&[Wert]>,
+) {
     text.push_str("\n## Paarweise Kurs-Rückschau zum Ausstieg\n\n");
-    let Ok(werte) = beobachtungsliste() else {
+    let Some(werte) = werte else {
         text.push_str("Die Beobachtungsliste ist nicht lesbar.\n");
         return;
     };
-    let historie = Historie::laden(stand, jetzt);
-    let messung = messe(&historie, korb, &werte, jetzt);
+    let messung = messe(historie, korb, werte, jetzt);
     text.push_str(concat!(
         "Kursmodell ohne KI-Aufrufe, KI-Kosten und Nachrichtensignale. Es nutzt alle brauchbaren Abschnitte der gespeicherten Quellkurse, einschließlich später nachgeladener Historie. Das Modell setzt Schlusskurse ab Börsenschluss voraus.\n\n",
         "Die zwei stärksten belegbaren Werte der aktuellen Beobachtungsliste kommen nach 20 gemeinsamen Handelstagen für einen Kauf infrage, wenn sie den festen Vergleichskorb schlagen. Der Einstieg erfolgt am nächsten Schluss des jeweiligen Börsenplatzes mit 1 % Kauflimit ab Bezugskurs. Das Modell verwendet ganze Stücke, die Mindestorder sowie Gebühren und Spread des Papierhandels. Alle drei Varianten nutzen dieselbe Füllung. Die feste Variante verkauft am fünften Handelstag nach dem Kauf. Die Stoppvariante reagiert bei −3 % ab Füllpreis. Die Ziel-und-Stopp-Variante reagiert bei +2 % oder −3 %. In beiden Fällen erfolgt der Verkauf am nächsten Börsenschluss, spätestens am fünften Handelstag. Der Ausführungskurs kann von der Schwelle abweichen. Der Erlös bleibt bis zum Fensterende in Bargeld. Der Nettounterschied zwischen Ziel und Stopp und dem alleinigen Stopp misst den Einfluss der Gewinnschwelle von +2 %.\n\n",
@@ -525,6 +534,7 @@ pub(super) fn bericht(text: &mut String, stand: &Stand, jetzt: Zeitpunkt, korb: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use depot_kern::liste::beobachtungsliste;
 
     fn notiere(historie: &mut Historie, isin: &Isin, tag: Datum, cent: i64) -> Result<(), String> {
         let schluss = Schluss {
