@@ -113,7 +113,7 @@ fn post_braucht_herkunft_formular_und_token() -> Result<(), String> {
     let a = formular_post("/ausfuehren", &rumpf);
     let r = behandle(&d, &umw, &a, t);
     assert_eq!(status(&r)?, 303);
-    assert!(text(&r).contains("Location: /?m=auftrag\r\n"));
+    assert!(text(&r).contains("Location: /#taetigkeit\r\n"));
     assert_eq!(wartend(&d), vec![(Art::Kurse, Anlass::Hand)]);
     // Dieselbe Art nicht doppelt.
     let r = behandle(&d, &umw, &a, t);

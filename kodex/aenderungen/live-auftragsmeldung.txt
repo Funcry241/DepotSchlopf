@@ -1,0 +1,6 @@
+klasse: Funktion
+zweck: Nach dem Einreihen auf Live direkt den aktuellen Auftragsstatus zeigen
+pfade:
+crates/depot_dienst/src/lib.rs
+crates/depot_dienst/tests/dienst/dienstbetrieb.rs
+crates/depot_dienst/tests/dienst/http_schnittstelle.rs

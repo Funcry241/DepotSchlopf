@@ -379,14 +379,20 @@ fn live_seite(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
     let export = analyse::formular(d, heute(jetzt));
     let live = live_inhalt(d, jetzt);
     let inhalt = format!("{export}<div data-teil=\"/teil/live\">{live}</div>");
+    // Alte Weiterleitungen liefern keinen aktuellen Auftragsstatus.
+    let abfrage = if a.abfrage == "m=auftrag" {
+        ""
+    } else {
+        &a.abfrage
+    };
     let s = seiten::rahmen(
         "/",
         None,
-        seiten::meldung(&a.abfrage),
+        seiten::meldung(abfrage),
         &inhalt,
         d.version.as_deref(),
         (&betriebsleiste(d, heute(jetzt)), &update_leiste(d)),
-        seiten::meldungs_aktion(&a.abfrage),
+        seiten::meldungs_aktion(abfrage),
     );
     antwort(200, HTML, s.as_bytes())
 }
@@ -980,7 +986,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
         Art::Vorbereiten if !bestaetigt => "/?m=vorbereitung_bestaetigen",
         Art::Vorbereiten => {
             let m = match d.von_hand(art, jetzt) {
-                Ok(()) => "auftrag",
+                Ok(()) => return http::umleitung("/#taetigkeit"),
                 Err(m) if m.starts_with("vorbereitung_") => m,
                 Err(_) => "auftrag_belegt",
             };
@@ -989,7 +995,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
         Art::Simulation => {
             let m = if bestaetigt {
                 match d.von_hand(art, jetzt) {
-                    Ok(()) => "auftrag",
+                    Ok(()) => return http::umleitung("/#taetigkeit"),
                     Err("simulation_belegt") => "simulation_belegt",
                     Err(_) => "auftrag_belegt",
                 }
@@ -1030,7 +1036,7 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
         }
         _ => {
             if d.von_hand(art, jetzt).is_ok() {
-                "/?m=auftrag"
+                "/#taetigkeit"
             } else {
                 "/?m=auftrag_belegt"
             }
