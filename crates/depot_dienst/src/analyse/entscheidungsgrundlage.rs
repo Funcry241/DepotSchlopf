@@ -28,7 +28,8 @@ pub(super) fn schreibe(aus: &mut String, e: &Gespraech) {
     }
 
     let mut belege = frage.lines().filter_map(beleg).peekable();
-    let abstimmung = e.zweck == "abstimmung";
+    let abstimmung = e.zweck == "abstimmung"
+        || e.zweck == "simulation" && frage.lines().any(|z| z.starts_with("Abstimmungsrunde "));
     let kosten = abstimmung.then(|| kaufkosten(frage)).flatten();
     if belege.peek().is_some() {
         aus.push_str("\n**Belegte Ausschnitte aus der Frage**\n\n");
@@ -277,6 +278,11 @@ mod tests {
         assert!(text.contains("3 Stück bei 12,50 € Kurs · Kostenhürde etwa 2,50 %"));
         assert!(!text.contains("Vertraulicher Rest"));
         text.clear();
+        e.zweck = "simulation".into();
+        schreibe(&mut text, &e);
+        assert!(text.contains("Gesendete Kaufkosten · Abstimmungsrunde 2"));
+        text.clear();
+        e.zweck = "abstimmung".into();
         e.frage = Some("Abstimmungsrunde 1. Keine Kaufziele.".into());
         schreibe(&mut text, &e);
         assert!(

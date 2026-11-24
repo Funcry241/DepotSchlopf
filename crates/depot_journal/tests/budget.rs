@@ -105,6 +105,48 @@ fn neuer_zyklus_am_selben_tag_gesperrt() {
     }
 }
 
+#[test]
+fn simulation_hat_eigenen_tagesrahmen_und_prueft_alle_aufrufe_vorab() -> Result<(), String> {
+    use depot_journal::KiZweck;
+    use depot_kern::modelle::Modellwahl;
+
+    let pfad = neuer_pfad();
+    let mut j = journal(&pfad);
+    let datum = tag(2);
+    let wahl = [DACHS, BeraterId::Maus].map(Modellwahl::standard);
+    let einstellung = BeraterEinstellung {
+        auswahl: Modellwahl::standard(DACHS),
+        max_aufrufe: 1,
+    };
+    j.reserviere_mit_einstellung(DACHS, datum, 1, KiZweck::Erstmeinung, Some(einstellung))
+        .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(
+        j.pruefe_ki_mit_einstellung(DACHS, datum, 1, KiZweck::Erstmeinung, Some(einstellung))
+            .err(),
+        Some(Sperre::TagVoll)
+    );
+    let vorher = j.bestaetigt();
+    j.stand()
+        .ki()
+        .pruefe_simulationslauf(datum, 1, 4, wahl)
+        .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(j.bestaetigt(), vorher);
+    for _ in 0..4 {
+        j.reserviere_mit_einstellung(DACHS, datum, 1, KiZweck::Simulation, Some(einstellung))
+            .map_err(|e| format!("{e:?}"))?;
+    }
+    assert!(
+        j.stand()
+            .ki()
+            .pruefe_simulationslauf(datum, 1, 30, wahl)
+            .is_err()
+    );
+    assert_eq!(j.stand().ki().buchungen().len(), 5);
+    drop(j);
+    assert_eq!(journal(&pfad).stand().ki().buchungen().len(), 5);
+    Ok(())
+}
+
 /// Jeden Tag ein neuer Zyklus, einen Monat lang: höchstens 690 Aufrufe, hoechstens 20 €.
 #[test]
 fn monat_hoechstens_690_aufrufe() {

@@ -1113,6 +1113,45 @@ impl Dienst {
         von_hand_einreihen(&mut z, art, jetzt)
     }
 
+    pub(crate) fn simulationsangebot(&self, jetzt: Zeitpunkt) -> Result<depot_kern::Cent, String> {
+        let daten = self.wurzel.join("daten");
+        let datum = jetzt.frankfurt_tag().ok_or("Kein Frankfurter Datum")?;
+        let e = depot_journal::ki_einstellungen::lesen(&daten)?;
+        let kosten = depot_lage::simulationskosten_fuer(e.dachs.auswahl, e.maus.auswahl)
+            .ok_or("Die maximalen KI-Kosten lassen sich nicht berechnen.")?;
+        depot_journal::Journal::pruefe_lesend(&daten.join("journal.txt"), |stand| {
+            if stand.seit_abschluss() != 0 {
+                return Err("Papiertag unterbrochen. Zuerst den Journalstand klären.".into());
+            }
+            depot_lage::pruefe_simulationsbudget(
+                stand.ki(),
+                datum,
+                [e.dachs.auswahl, e.maus.auswahl],
+            )
+        })
+        .map_err(|e| format!("Das Journal ist für die Budgetprüfung nicht verfügbar ({e:?})."))??;
+        Ok(kosten)
+    }
+
+    pub(crate) fn simulation_von_hand(
+        &self,
+        jetzt: Zeitpunkt,
+        bestaetigter_betrag: Option<i64>,
+    ) -> Result<(), String> {
+        let mut z = self.sperre();
+        if z.simulation_belegt() || self.update_offen() {
+            return Err("simulation_belegt".into());
+        }
+        let kosten = self.simulationsangebot(jetzt)?;
+        if bestaetigter_betrag != Some(kosten.0) {
+            return Err(
+                "Der bestätigte Betrag fehlt oder hat sich geändert. Öffne die Simulation erneut."
+                    .into(),
+            );
+        }
+        von_hand_einreihen(&mut z, Art::Simulation, jetzt).map_err(str::to_owned)
+    }
+
     pub(crate) fn sicherung_einstellen(
         &self,
         ziel: &str,

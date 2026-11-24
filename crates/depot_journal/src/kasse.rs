@@ -15,7 +15,9 @@
 
 use depot_kern::modelle::{BeraterEinstellung, Denktiefe, Modell, Modellwahl};
 use depot_kern::{BeraterId, Cent};
-use depot_ki::{Buchung, Datum, KiDeckel, KiGrenzen, Sperre, grenzabdruck, pruefe};
+use depot_ki::{
+    Buchung, Datum, KiDeckel, KiGrenzen, Sperre, grenzabdruck, pruefe, pruefe_simulation,
+};
 
 use crate::neurofrage::{NeuroAuftragId, NeuroErgebnis, NeuroRunde, NeuroSperre, NeuroVersuch};
 use crate::stand::{datum_text, lies_datum};
@@ -197,6 +199,16 @@ pub(crate) fn grenzabdruck_fuer_auswahl(auswahl: Option<Modellwahl>) -> String {
     depot_kern::abdruck::sha256_hex(text.as_bytes())
 }
 
+pub(crate) fn grenzabdruck_fuer_zweck(auswahl: Option<Modellwahl>, zweck: KiZweck) -> String {
+    let abdruck = grenzabdruck_fuer_auswahl(auswahl);
+    if zweck == KiZweck::Simulation {
+        // Frühere Programmstände lesen diese Buchungen als früheres Budgetregime.
+        depot_kern::abdruck::sha256_hex(format!("simulation-monatsrahmen|{abdruck}").as_bytes())
+    } else {
+        abdruck
+    }
+}
+
 pub(crate) fn ist_abdruck(text: &str) -> bool {
     text.len() == 64
         && text
@@ -334,18 +346,24 @@ impl KiStand {
         &self,
         berater: BeraterId,
         datum: Datum,
+        zweck: KiZweck,
         einstellung: BeraterEinstellung,
     ) -> Result<(), Sperre> {
         if einstellung.auswahl.modell().berater() != berater {
             return Err(Sperre::Rechenfehler);
         }
-        if einstellung.max_aufrufe >= depot_kern::modelle::MAX_BERATER_AUFRUFE {
+        if zweck == KiZweck::Simulation
+            || einstellung.max_aufrufe >= depot_kern::modelle::MAX_BERATER_AUFRUFE
+        {
             return Ok(());
         }
         let heute = self
             .buchungen
             .iter()
-            .filter(|b| b.berater == berater && b.datum == datum)
+            .zip(&self.zwecke)
+            .filter(|(b, zweck)| {
+                b.berater == berater && b.datum == datum && **zweck != KiZweck::Simulation
+            })
             .count();
         if heute >= einstellung.max_aufrufe {
             return Err(Sperre::TagVoll);
@@ -366,6 +384,28 @@ impl KiStand {
             .map(|(buchung, _)| buchung.reserviert)
     }
 
+    /// Prüft alle Aufrufe einer Simulation gegen denselben Kassenstand.
+    /// Der Aufrufer hält das Journal bis zum Ende der Simulation exklusiv.
+    pub fn pruefe_simulationslauf(
+        &self,
+        datum: Datum,
+        zyklus: u32,
+        aufrufe_je_berater: u32,
+        auswahl: [Modellwahl; 2],
+    ) -> Result<(), (BeraterId, Sperre)> {
+        let mut vorschau = self.clone();
+        for wahl in auswahl {
+            for _ in 0..aufrufe_je_berater {
+                let zweck = KiZweck::Simulation;
+                let (buchung, _) = naechste_fuer(&vorschau, datum, zyklus, zweck, wahl)
+                    .map_err(|grund| (wahl.modell().berater(), grund))?;
+                vorschau.buchungen.push(buchung);
+                vorschau.zwecke.push(zweck);
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn naechste_mit_einstellung(
         &self,
         berater: BeraterId,
@@ -374,7 +414,7 @@ impl KiStand {
         zweck: KiZweck,
         einstellung: BeraterEinstellung,
     ) -> Result<(Buchung, KiDeckel), Sperre> {
-        self.pruefe_tageslimit(berater, datum, einstellung)?;
+        self.pruefe_tageslimit(berater, datum, zweck, einstellung)?;
         let (buchung, deckel) = naechste_fuer(self, datum, zyklus, zweck, einstellung.auswahl)?;
         if zweck == KiZweck::Vorbereitung {
             let rahmen = depot_ki::vorbereitungsrahmen_fuer_modell(
@@ -513,7 +553,9 @@ impl KiStand {
         let Some(abschnitt) = &self.abdruck else {
             return Err("Buchung ohne Grenzabdruck".into());
         };
-        if *abschnitt == grenzabdruck_fuer_auswahl(auswahl) {
+        if *abschnitt == grenzabdruck_fuer_zweck(auswahl, zweck)
+            || *abschnitt == grenzabdruck_fuer_auswahl(auswahl)
+        {
             let wahl = auswahl.unwrap_or_else(|| Modellwahl::standard(b.berater));
             let erwartet = naechste_fuer(self, b.datum, b.zyklus, zweck, wahl)
                 .map(|(b, _)| b.reserviert)
@@ -554,7 +596,12 @@ pub(crate) fn naechste_fuer(
         return Err(depot_ki::Sperre::ErstmeinungReserviert);
     }
     let deckel = zweck.deckel(modell);
-    let reserviert = pruefe(
+    let pruefe_budget = if zweck == KiZweck::Simulation {
+        pruefe_simulation
+    } else {
+        pruefe
+    };
+    let reserviert = pruefe_budget(
         &KiGrenzen::standard(),
         &deckel,
         &stand.buchungen,

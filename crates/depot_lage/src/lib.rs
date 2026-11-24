@@ -85,6 +85,7 @@ pub use depot_sim::papierlauf::{
 pub use depot_sim::vorbereitung::tag_jetzt as vorbereitungstag;
 pub use depot_sim::vorschau::{
     hoechstkosten as simulationskosten, hoechstkosten_fuer as simulationskosten_fuer,
+    pruefe_budget as pruefe_simulationsbudget,
 };
 pub use tage::{KiBeitrag, TagErgebnis, TagStand};
 pub use zugang::{

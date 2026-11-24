@@ -264,6 +264,31 @@ pub fn pruefe(
     datum: Datum,
     zyklus: u32,
 ) -> Result<Cent, Sperre> {
+    pruefe_mit_tagesanteil(grenzen, deckel, buchungen, berater, datum, zyklus, true)
+}
+
+/// Eine manuell bestätigte Simulation verwendet den verbleibenden Monatsrahmen.
+/// Die harten Aufruf-, Monats- und Jahresgrenzen gelten auch hier.
+pub fn pruefe_simulation(
+    grenzen: &KiGrenzen,
+    deckel: &KiDeckel,
+    buchungen: &[Buchung],
+    berater: BeraterId,
+    datum: Datum,
+    zyklus: u32,
+) -> Result<Cent, Sperre> {
+    pruefe_mit_tagesanteil(grenzen, deckel, buchungen, berater, datum, zyklus, false)
+}
+
+fn pruefe_mit_tagesanteil(
+    grenzen: &KiGrenzen,
+    deckel: &KiDeckel,
+    buchungen: &[Buchung],
+    berater: BeraterId,
+    datum: Datum,
+    zyklus: u32,
+    tagesanteil: bool,
+) -> Result<Cent, Sperre> {
     let eigene: Vec<&Buchung> = buchungen.iter().filter(|b| b.berater == berater).collect();
     if let Some(letzte) = eigene.last() {
         if datum < letzte.datum {
@@ -314,7 +339,7 @@ pub fn pruefe(
     if jahr > grenzen.kosten_je_jahr {
         return Err(Sperre::JahresbudgetErschoepft);
     }
-    if kosten > tagesrahmen(grenzen, buchungen, berater, datum)? {
+    if tagesanteil && kosten > tagesrahmen(grenzen, buchungen, berater, datum)? {
         return Err(Sperre::TagesrahmenErschoepft);
     }
     Ok(kosten)

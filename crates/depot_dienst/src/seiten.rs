@@ -82,7 +82,13 @@ pub(crate) fn auftrag_knopf(
 }
 
 fn bestaetigungslink(art: Art, text: &str, sha: Option<&str>, primaer: bool) -> String {
-    let klasse = if primaer { "aktion primaer" } else { "aktion" };
+    let klasse = if art == Art::Simulation {
+        "aktion simulation-start"
+    } else if primaer {
+        "aktion primaer"
+    } else {
+        "aktion"
+    };
     let stand = sha.map_or_else(String::new, |s| format!("&amp;sha={}", maskiere(s)));
     format!(
         "<a class=\"{klasse}\" href=\"/bestaetigen?art={}{stand}\">{}</a>",
@@ -98,8 +104,10 @@ pub(crate) fn auftrag_bestaetigen(
     token: &str,
     art: Art,
     sha: Option<&str>,
-    simulationskosten: Option<depot_kern::Cent>,
+    simulationskosten: Result<depot_kern::Cent, &str>,
 ) -> String {
+    let mut simulationspreis = String::new();
+    let mut klasse = "primaer";
     let (text, ziel, knopf, haken) = if art == Art::Vorbereiten {
         (
             format!(
@@ -110,14 +118,27 @@ pub(crate) fn auftrag_bestaetigen(
             "Ich nutze das vorhandene KI-Budget für diese Vorbereitung.",
         )
     } else if art == Art::Simulation {
+        let kosten = match simulationskosten {
+            Ok(kosten) => kosten,
+            Err(grund) => {
+                return format!(
+                    "<section><h2>KI-Simulation</h2><p role=\"status\">{}</p><a href=\"/#ki-simulation\">Zurück zu Live</a></section>",
+                    maskiere(grund)
+                );
+            }
+        };
+        klasse = "simulation-start";
+        simulationspreis = format!(
+            "<input type=\"hidden\" name=\"simulationskosten\" value=\"{}\">",
+            kosten.0
+        );
         (
             format!(
-                "Dachs und Maus beraten mit dem zuletzt belegten Kursstand. Die Simulation versendet keine Orders. Maximale KI-Reservierung je Lauf {}.",
-                simulationskosten.map_or_else(|| "nicht berechenbar".into(), |c| c.to_string())
+                "Dachs und Maus beraten mit dem zuletzt belegten Kursstand. Die Simulation erzeugt keine Orders und verbraucht echtes KI-Budget. Maximale KI-Reservierung je Lauf: {kosten}."
             ),
             "/#ki-simulation",
             Art::Simulation.name(),
-            "Ich nutze das vorhandene KI-Budget für diese Simulation.",
+            "Ich gebe diesen Betrag für diesen Lauf frei.",
         )
     } else if sha.is_some() {
         (
@@ -143,9 +164,9 @@ pub(crate) fn auftrag_bestaetigen(
     format!(
         "<section><h2>{knopf}</h2><p>{text}</p><form method=\"post\" action=\"/ausfuehren\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
-         <input type=\"hidden\" name=\"art\" value=\"{}\">{stand}\
+         <input type=\"hidden\" name=\"art\" value=\"{}\">{stand}{simulationspreis}\
          <label><input type=\"checkbox\" name=\"geprueft\" value=\"ja\" required> {haken}</label>\
-         <div class=\"aktionszeile\"><button class=\"primaer\" type=\"submit\">{knopf}</button> \
+         <div class=\"aktionszeile\"><button class=\"{klasse}\" type=\"submit\">{knopf}</button> \
          <a href=\"{ziel}\">Abbrechen</a></div></form></section>",
         maskiere(token),
         art.kurz()
@@ -1617,6 +1638,7 @@ pub(crate) fn live_mit_ki(
         Art::Simulation.name(),
         false,
     ));
+    s.push_str("<p class=\"leise\">Verbraucht echtes KI-Budget. Keine Orders.</p>");
     if let Some(lauf) = z
         .laufend
         .iter()

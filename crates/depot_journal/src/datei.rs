@@ -29,7 +29,7 @@ use depot_regelwerk::{GenehmigterAuftrag, Kennungsvergabe};
 use sha2::{Digest, Sha256};
 
 use crate::auftrag::{Meldung, meldung_text};
-use crate::kasse::{AufrufErlaubnis, grenzabdruck_fuer_auswahl};
+use crate::kasse::{AufrufErlaubnis, grenzabdruck_fuer_auswahl, grenzabdruck_fuer_zweck};
 use crate::kursbeleg::{KursBeleg, kursbeleg_text};
 use crate::nachrichtbeleg::{NachrichtBeleg, nachrichtbeleg_text};
 use crate::neurofrage::{NeuroAufrufErlaubnis, NeuroAuftragId, NeuroErgebnis, NeuroSperre};
@@ -1466,7 +1466,7 @@ impl Journal {
     ) -> Result<AufrufErlaubnis, Sperre> {
         let sperre = |e: JournalFehler| Sperre::Kassenbuch(format!("Journal: {e:?}"));
         let text = crate::kasse::buchung_fuer(&buchung, zweck, auswahl);
-        let abdruck = grenzabdruck_fuer_auswahl(auswahl);
+        let abdruck = grenzabdruck_fuer_zweck(auswahl, zweck);
         if zweck.ohne_handelsbeginn() {
             self.schreibe_eintrag(Art::Ki, &format!("{text};{abdruck}"))
                 .map_err(sperre)?;
