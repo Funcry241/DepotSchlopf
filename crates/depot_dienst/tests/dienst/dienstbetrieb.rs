@@ -631,12 +631,17 @@ fn doppelklick_startet_nichts_doppelt() -> Result<(), String> {
     assert!(text(&behandle(&d, &umw, &ohne, t)).contains("m=papier_bestaetigen"));
     assert!(wartend(&d).is_empty());
     let klick = formular_post("/ausfuehren", &format!("t={TOKEN}&art=papier&geprueft=ja"));
-    assert!(text(&behandle(&d, &umw, &klick, t)).contains("m=auftrag"));
+    assert!(text(&behandle(&d, &umw, &klick, t)).contains("Location: /#taetigkeit\r\n"));
     let r = text(&behandle(&d, &umw, &klick, t));
     assert!(r.contains("m=auftrag_belegt"), "{r}");
     assert_eq!(wartend(&d), vec![(Art::Papier, Anlass::Hand)]);
+    assert!(get(&d, "/teil/live", t).contains("Wartet: Papiertag"));
     let (nr, kind) = some(d.schritt(t), "Start")?;
     d.verfolge(nr, kind, || donnerstag(12, 0).ok());
+    assert!(!get(&d, "/teil/live", t).contains("Wartet: Papiertag"));
+    let altes_ziel = get(&d, "/?m=auftrag", t);
+    assert!(!altes_ziel.contains("Auftrag eingereiht. Er steht unter Tätigkeit."));
+    assert!(altes_ziel.contains("Im Moment läuft kein Auftrag."));
     // Erneut gesendet gleich nach dem Ende: nicht noch einmal.
     let r = text(&behandle(&d, &umw, &klick, donnerstag(12, 0)?));
     assert!(r.contains("m=auftrag_belegt"), "{r}");
@@ -646,7 +651,7 @@ fn doppelklick_startet_nichts_doppelt() -> Result<(), String> {
         Zeitpunkt::aus_sekunden(t.sekunden().saturating_add(60)),
         "spaeter",
     )?;
-    assert!(text(&behandle(&d, &umw, &klick, spaeter)).contains("m=auftrag"));
+    assert!(text(&behandle(&d, &umw, &klick, spaeter)).contains("Location: /#taetigkeit\r\n"));
     assert_eq!(wartend(&d), vec![(Art::Papier, Anlass::Hand)]);
     // Das Skript sperrt abgesendete Knoepfe.
     let js = get(&d, "/app.js", t);
@@ -1018,7 +1023,9 @@ fn vorbereiten_braucht_bestaetigung_und_automatik_braucht_schlagzeilen() -> Resu
         "/ausfuehren",
         &format!("t={TOKEN}&art=vorbereiten&geprueft=ja"),
     );
-    assert!(text(&behandle(&d, &Attrappe::default(), &post, t)).contains("m=auftrag"));
+    assert!(
+        text(&behandle(&d, &Attrappe::default(), &post, t)).contains("Location: /#taetigkeit\r\n")
+    );
     assert_eq!(wartend(&d), vec![(Art::Vorbereiten, Anlass::Hand)]);
     Ok(())
 }
@@ -1726,7 +1733,9 @@ fn simulation_verlangt_kostenbestaetigung_und_reiht_doppelklick_nur_einmal_ein()
     assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=simulation_belegt"));
     assert_eq!(wartend(&d), vec![(Art::Termine, Anlass::Hand)]);
     let d = dienst(ordner()?, true);
-    assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=auftrag#ki-simulation"));
+    assert!(
+        text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("Location: /#taetigkeit\r\n")
+    );
     assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=simulation_belegt"));
     assert_eq!(wartend(&d), vec![(Art::Simulation, Anlass::Hand)]);
     Ok(())
