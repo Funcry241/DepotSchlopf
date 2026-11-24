@@ -35,6 +35,8 @@ pub enum Art {
     KurseVon(Boerse),
     Termine,
     Nachrichten,
+    /// Interner, nur lesender Abruf aus dem Analyse-Export.
+    EstrIndex,
     IbkrPapier,
     IbkrJournal,
     IbkrAbgleich,
@@ -85,6 +87,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => "Kurse US-Börsen abrufen",
             Art::Termine => "Termine abrufen",
             Art::Nachrichten => "Schlagzeilen abrufen",
+            Art::EstrIndex => "€STR-Index abrufen",
             Art::IbkrPapier => "IBKR-Papierabruf testen",
             Art::IbkrJournal => "IBKR-Papierjournal einrichten",
             Art::IbkrAbgleich => "IBKR-Papierjournal abgleichen",
@@ -112,6 +115,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => "kurse_nyse",
             Art::Termine => "termine",
             Art::Nachrichten => "nachrichten",
+            Art::EstrIndex => "estr-index",
             Art::IbkrPapier => "ibkr_papier",
             Art::IbkrJournal => "ibkr_journal",
             Art::IbkrAbgleich => "ibkr_abgleich",
@@ -143,6 +147,7 @@ impl Art {
             Art::KurseVon(Boerse::Nyse) => &["kurse", "nyse"],
             Art::Termine => &["termine"],
             Art::Nachrichten => &["nachrichten"],
+            Art::EstrIndex => &["estr-index"],
             Art::IbkrPapier => &["ibkr", "papier", "pruefen"],
             Art::IbkrJournal => &["ibkr", "journal-einrichten"],
             Art::IbkrAbgleich => &["ibkr", "abgleichen"],
@@ -565,6 +570,24 @@ impl Hinweise {
     }
 }
 
+impl Dienst {
+    pub(crate) fn estr_index_abrufen(&self) -> Result<String, String> {
+        let antwort = (self.starter)(Art::EstrIndex, &self.wurzel)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|_| "Der EZB-Abruf konnte nicht gestartet werden.")?;
+        if !antwort.status.success() {
+            return Err("Der EZB-Abruf war vorübergehend nicht verfügbar.".into());
+        }
+        if antwort.stdout.len() > crate::http::ESTR_MAX {
+            return Err("Die EZB-Antwort ist größer als 2 MiB.".into());
+        }
+        String::from_utf8(antwort.stdout)
+            .map_err(|_| "Die EZB-Antwort ist nicht als UTF-8 lesbar.".into())
+    }
+}
+
 impl std::fmt::Debug for Dienst {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Dienst")
@@ -601,9 +624,11 @@ pub fn cargo_starter() -> Starter {
         }
         let mut c = Command::new("cargo");
         let (paket, argumente) = match art {
-            Art::KurseVon(_) | Art::IbkrPapier | Art::IbkrJournal | Art::IbkrAbgleich => {
-                ("depot_sammler", art.argumente())
-            }
+            Art::KurseVon(_)
+            | Art::IbkrPapier
+            | Art::IbkrJournal
+            | Art::IbkrAbgleich
+            | Art::EstrIndex => ("depot_sammler", art.argumente()),
             _ => ("depot_lauf", art.argumente()),
         };
         c.current_dir(wurzel)

@@ -313,6 +313,7 @@ pub fn starter(stand: &Stand) -> Starter {
             | Art::KurseVon(_)
             | Art::Termine
             | Art::Nachrichten
+            | Art::EstrIndex
             | Art::IbkrPapier
             | Art::IbkrJournal
             | Art::IbkrAbgleich
