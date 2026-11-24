@@ -1666,7 +1666,7 @@ pub(crate) fn abschluss_text(a: &Abschluss) -> String {
     format!("{};{};{}", datum_text(a.datum), a.hoechststand.0, a.abdruck)
 }
 
-fn lies_abschluss(inhalt: &str) -> Option<Abschluss> {
+pub(crate) fn lies_abschluss(inhalt: &str) -> Option<Abschluss> {
     let teile: Vec<&str> = inhalt.split(';').collect();
     let [datum, hoch, abdruck] = teile.as_slice() else {
         return None;

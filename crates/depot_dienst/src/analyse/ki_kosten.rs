@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use depot_journal::{Stand, gespraeche::CacheToken};
+use depot_journal::{Art, Stand, gespraeche::CacheToken};
 use depot_kern::{BeraterId, Cent, Datum};
 use depot_lage::gespraeche::Gespraech;
 
@@ -164,6 +164,7 @@ impl Tagessumme {
 
 pub(super) fn bericht(
     stand: &Stand,
+    eintraege: &[(Art, String)],
     zeitraum: Zeitraum,
     depotwerte: &BTreeMap<Datum, Cent>,
     belege: &Gespraechsbelege,
@@ -216,7 +217,7 @@ pub(super) fn bericht(
     }
     let _ = writeln!(
         text,
-        "**Im Zeitraum abgerechnet: {}. Offene Reservierungen: {} ({} Buchungen).**\n",
+        "**Nach Buchungstag im Exportzeitraum abgerechnet: {}. Offene Reservierungen zum Export: {} ({} Buchungen).**\n",
         geld(gesamt.kosten),
         geld(gesamt.reserviert),
         gesamt.offen
@@ -238,7 +239,7 @@ pub(super) fn bericht(
             belege.fehlende_tage, belege.unlesbare_zeilen
         );
     }
-    verhaeltnis(&mut text, stand, zeitraum, depotwerte);
+    verhaeltnis(&mut text, stand, eintraege, zeitraum, depotwerte);
     text
 }
 
@@ -282,6 +283,7 @@ fn tagessummen(
 fn verhaeltnis(
     text: &mut String,
     stand: &Stand,
+    eintraege: &[(Art, String)],
     zeitraum: Zeitraum,
     depotwerte: &BTreeMap<Datum, Cent>,
 ) {
@@ -293,29 +295,23 @@ fn verhaeltnis(
         text.push_str("\nKI-Kosten im Verhältnis zum Ertrag: nicht belegbar. Zwei belegte Tageswerte fehlen.\n");
         return;
     };
-    let mut summe = Tagessumme::default();
-    for (nr, b) in stand.ki().buchungen().iter().enumerate() {
-        if b.datum > *anfang
-            && b.datum <= *ende
-            && let Some((_, abgerechnet)) = stand.ki().buchungsbeleg(nr)
-        {
-            summe.buche(b.reserviert, abgerechnet);
-        }
-    }
+    let Some(kosten) = stand
+        .ki()
+        .kosten_zwischen_abschluessen(eintraege, *anfang, *ende)
+    else {
+        text.push_str("\nKI-Kosten im Verhältnis zum Ertrag: nicht belegbar. Kostenfenster im Journal fehlt.\n");
+        return;
+    };
     let ertrag = schluss.checked_sub(*start);
-    let anteil = summe
-        .kosten
-        .zip(ertrag)
-        .and_then(|(k, e)| anteil_bp(k, e, false));
+    let anteil = ertrag.and_then(|e| anteil_bp(kosten.abgerechnet, e, false));
     let quote = anteil.map_or_else(|| "–".into(), |bp| prozent(Some(bp)));
-    let obergrenze = summe
-        .kosten
-        .zip(summe.reserviert)
-        .and_then(|(kosten, reserviert)| kosten.checked_add(reserviert))
+    let obergrenze = kosten
+        .abgerechnet
+        .checked_add(kosten.offen_reserviert)
         .zip(ertrag)
         .and_then(|(kosten, ertrag)| anteil_bp(kosten, ertrag, true));
     let zusatz = match obergrenze {
-        Some(bp) if summe.offen > 0 => format!(
+        Some(bp) if kosten.offen_reserviert > Cent::NULL => format!(
             " (höchstens {} einschließlich offener Reservierungen)",
             prozent(Some(bp))
         ),
@@ -323,8 +319,8 @@ fn verhaeltnis(
     };
     let _ = writeln!(
         text,
-        "\nKI-Kosten im Verhältnis zum Ertrag: {quote}{zusatz}. Von Abschluss {anfang} bis Abschluss {ende}: {} abgerechnete KI-Kosten und {} Depotwertänderung vor KI-Kosten. Die Kosten umfassen Buchungstage nach dem ersten bis einschließlich dem letzten Abschluss. Eine Quote gibt es bei positiver Depotwertänderung.",
-        geld(summe.kosten),
+        "\nKI-Kosten im Verhältnis zum Ertrag: {quote}{zusatz}. Von Abschluss {anfang} bis Abschluss {ende}: {} abgerechnete KI-Kosten und {} Depotwertänderung vor KI-Kosten. Maßgeblich sind die Buchungen zwischen den Abschlusszeilen im Journal. Eine Quote gibt es bei positiver Depotwertänderung.",
+        geld(Some(kosten.abgerechnet)),
         geld(ertrag)
     );
     if !zeitraum
@@ -379,6 +375,41 @@ mod tests {
         }
     }
 
+    fn abschlussfenster_buchen(
+        journal: &mut Journal,
+        von: Datum,
+        bis: Datum,
+    ) -> Result<(depot_journal::AufrufErlaubnis, Cent, Cent), String> {
+        let fehler = |e| format!("{e:?}");
+        let erste = journal
+            .reserviere(BeraterId::Dachs, von, 1)
+            .map_err(|e| format!("{e:?}"))?;
+        let abdruck = journal.bestaetigt().1;
+        journal
+            .schliesse_ab(von, Cent(100_000), &abdruck)
+            .map_err(fehler)?;
+        let erste_abrechnung = erste.abrechnung(12, 3).ok_or("Abrechnung")?;
+        let kosten = erste_abrechnung.kosten();
+        assert!(kosten > Cent::NULL);
+        journal.rechne_ki_ab(&erste_abrechnung).map_err(fehler)?;
+        let zweite = journal
+            .reserviere_fuer(BeraterId::Maus, bis, 2, KiZweck::Erstmeinung)
+            .map_err(|e| format!("{e:?}"))?;
+        let abdruck = journal.bestaetigt().1;
+        journal
+            .schliesse_ab(bis, Cent(100_100), &abdruck)
+            .map_err(fehler)?;
+        let spaet = journal
+            .reserviere(BeraterId::Dachs, bis, 2)
+            .map_err(|e| format!("{e:?}"))?;
+        let spaet_abrechnung = spaet.abrechnung(12, 3).ok_or("Späte Abrechnung")?;
+        let kalenderkosten = kosten
+            .checked_add(spaet_abrechnung.kosten())
+            .ok_or("Summe")?;
+        journal.rechne_ki_ab(&spaet_abrechnung).map_err(fehler)?;
+        Ok((zweite, kosten, kalenderkosten))
+    }
+
     #[test]
     fn kosten_und_token_bleiben_an_ihrer_journalbuchung() -> Result<(), String> {
         let ordner = std::env::temp_dir().join(format!("depot-kosten-{}", crate::neues_token()));
@@ -389,15 +420,7 @@ mod tests {
         let mut journal = Journal::oeffnen(&pfad).map_err(fehler)?;
         let von = Datum::neu(2030, 1, 7).ok_or("Erster Tag")?;
         let bis = von.plus_tage(1).ok_or("Zweiter Tag")?;
-        let erste = journal
-            .reserviere(BeraterId::Dachs, von, 1)
-            .map_err(|e| format!("{e:?}"))?;
-        journal
-            .rechne_ki_ab(&erste.abrechnung(0, 0).ok_or("Abrechnung")?)
-            .map_err(fehler)?;
-        let zweite = journal
-            .reserviere_fuer(BeraterId::Maus, bis, 2, KiZweck::Erstmeinung)
-            .map_err(|e| format!("{e:?}"))?;
+        let (zweite, kosten, kalenderkosten) = abschlussfenster_buchen(&mut journal, von, bis)?;
         let betrag = zweite.buchung().reserviert;
         let danach = bis.plus_tage(1).ok_or("Tag außerhalb")?;
         let ausserhalb = journal
@@ -423,21 +446,35 @@ mod tests {
             ..gemini.clone()
         };
         belege.erfasse(&[gespr.clone(), gemini, uebersprungen], 0);
-        let text = bericht(journal.stand(), zeitraum, &werte, &belege);
-        assert!(text.contains("| Dachs | 0,00 € | 0,00 € (0) | 0 von 1 | – | – | – | – |"));
+        let bericht_mit = |werte: &BTreeMap<Datum, Cent>, belege: &Gespraechsbelege| {
+            bericht(
+                journal.stand(),
+                journal.eintraege(),
+                zeitraum,
+                werte,
+                belege,
+            )
+        };
+        let text = bericht_mit(&werte, &belege);
+        assert!(text.contains(&format!(
+            "| Dachs | {kosten} | 0,00 € (0) | 0 von 1 | – | – | – | – |"
+        )));
         assert!(text.contains(&format!(
             "| Maus | 0,00 € | {betrag} (1) | 1 von 1 | 12 | 3 | 0 | 10 |"
         )));
-        assert!(text.contains("| 0 | 0,00 € | abgerechnet |"));
+        assert!(text.contains(&format!("| 0 | {kosten} | abgerechnet |")));
         assert!(text.contains(&format!("| 1 | {betrag} | offen | 12 | 3 | 0 | 10 |")));
         assert!(text.contains(&format!(
-            "0,00 % (höchstens {} einschließlich offener Reservierungen)",
-            prozent(betrag.0.checked_mul(100))
+            "{} (höchstens {} einschließlich offener Reservierungen)",
+            prozent(kosten.0.checked_mul(100)),
+            prozent(betrag.checked_add(kosten).and_then(|c| c.0.checked_mul(100)))
         )));
-        assert!(text.contains("0,00 € abgerechnete KI-Kosten und 1,00 € Depotwertänderung"));
+        assert!(text.contains(&format!(
+            "{kosten} abgerechnete KI-Kosten und 1,00 € Depotwertänderung"
+        )));
         assert!(!text.contains("9,99 €"));
         assert!(text.contains(&format!(
-            "Im Zeitraum abgerechnet: 0,00 €. Offene Reservierungen: {betrag} (1 Buchungen)."
+            "Nach Buchungstag im Exportzeitraum abgerechnet: {kalenderkosten}. Offene Reservierungen zum Export: {betrag} (1 Buchungen)."
         )));
         assert!(!text.contains(&format!("| {danach} |")));
         assert!(
@@ -446,19 +483,18 @@ mod tests {
         for endwert in [Cent(100_000), Cent(99_999)] {
             let werte = [(von, Cent(100_000)), (bis, endwert)].into();
             assert!(
-                bericht(journal.stand(), zeitraum, &werte, &belege)
-                    .contains("KI-Kosten im Verhältnis zum Ertrag: –.")
+                bericht_mit(&werte, &belege).contains("KI-Kosten im Verhältnis zum Ertrag: –.")
             );
         }
         let werte_ein_tag = [(von, Cent(100_000))].into();
         assert!(
-            bericht(journal.stand(), zeitraum, &werte_ein_tag, &belege)
+            bericht_mit(&werte_ein_tag, &belege)
                 .contains("nicht belegbar. Zwei belegte Tageswerte fehlen.")
         );
         assert_eq!(anteil_bp(Cent(50), Cent(100), false), Some(5_000));
         assert_eq!(anteil_bp(Cent(1), Cent(3), true), Some(3_334));
         belege.erfasse(&[gespr], 0);
-        let text = bericht(journal.stand(), zeitraum, &werte, &belege);
+        let text = bericht_mit(&werte, &belege);
         assert!(text.contains(&format!(
             "| Maus | 0,00 € | {betrag} (1) | 0 von 1 | – | – | – | – |"
         )));

@@ -80,7 +80,7 @@ pub use auftrag::{AuftragsLage, AuftragsZustand, Ausfuehrung, Meldung};
 pub use datei::{
     GelesenerJournalstand, Journal, JournalFehler, Lesecache, inhalt_fuer, vermerk_fuer,
 };
-pub use kasse::{AufrufErlaubnis, KiStand};
+pub use kasse::{AufrufErlaubnis, KiKostenfenster, KiStand};
 pub use konto::{
     Abrechnungen, Abweichung, Konto, KontoOrder, KontoStatus, Kontoauszug, papier_valuta,
     verfuegbar,
