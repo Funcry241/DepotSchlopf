@@ -756,6 +756,7 @@ struct Journalpaket {
     neuroeingaben: String,
     neuropaare: String,
     pruefbericht: String,
+    massstab: Option<massstab::Vergleich>,
     betrieb: String,
     kurz: String,
     depotdetails: String,
@@ -878,7 +879,6 @@ fn journalpaket(
         |stand, eintraege, original| {
             let (kurz, depotdetails) = depot(stand, jetzt, tag, sperren);
             let buch = depot_lage::ausfuehrung::ausfuehrungsbuch(stand);
-            let orders = orders::bericht(stand, eintraege, &buch, zeitraum);
             let historie = historie::bericht(zeitraum, Some(stand), luecken);
             let (ki, gespraechsbelege) = ki(daten, zeitraum, Some(stand), luecken);
             let nachher = nachher::auswertung(stand, &buch, zeitraum, jetzt);
@@ -889,7 +889,6 @@ fn journalpaket(
                 betrieb.fehler.ampel(true),
                 nachher.ampel(),
             ) + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
-                + &massstab::bericht(daten, stand, &historie.depotwerte)
                 + &leerlauf::bericht(
                     stand,
                     &buch,
@@ -925,6 +924,7 @@ fn journalpaket(
                 )
                 .jsonl(usize::try_from(TEXT_MAX).unwrap_or(0)),
                 pruefbericht,
+                massstab: massstab::vergleich(stand, &historie.depotwerte),
                 betrieb: betrieb.ablauf.bericht(Some(stand))
                     + &betrieb.fehler.bericht(
                         Some(eintraege),
@@ -933,7 +933,7 @@ fn journalpaket(
                     ),
                 kurz,
                 depotdetails,
-                orders,
+                orders: orders::bericht(stand, eintraege, &buch, zeitraum),
                 ausfuehrungen: ausfuehrungen_csv(Some(stand), &buch, zeitraum),
                 ki,
                 historie,
@@ -958,6 +958,7 @@ fn journalpaket(
                     betrieb.fehler.ampel(false),
                     "Rot (Journal fehlt)",
                 ),
+                massstab: None,
                 betrieb: betrieb.ablauf.bericht(None)
                     + &betrieb
                         .fehler
@@ -1031,7 +1032,8 @@ pub(crate) fn exportieren(
     let Ok(Journalpaket {
         neuroeingaben,
         neuropaare,
-        pruefbericht,
+        mut pruefbericht,
+        massstab,
         betrieb: betriebsbericht,
         kurz,
         depotdetails,
@@ -1055,6 +1057,10 @@ pub(crate) fn exportieren(
             "Journal gerade in Benutzung. Bitte gleich noch einmal.",
         );
     };
+    // Der bestätigte Journalstand ist hier bereits freigegeben.
+    pruefbericht.push_str(&massstab::bericht(massstab, |von, bis| {
+        massstab::geldmarkt(d, &daten, von, bis)
+    }));
     let datum = zeitraum.titel();
     let liesmich = format!(
         "# DepotSchlopf · Analyse-Export {datum}\n\n## Aktueller Depotstand\n{kurz}\n\

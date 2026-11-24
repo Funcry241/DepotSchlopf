@@ -20,6 +20,7 @@
 
 mod ibkr;
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -682,6 +683,25 @@ fn kursdiagnose(wurzel: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn estr_index() -> ExitCode {
+    use depot_sammler::netz::Netz as _;
+    const ADRESSE: &str = "https://data-api.ecb.europa.eu/service/data/EST/B.EU000A2QQF08.CI?format=csvdata&detail=dataonly";
+    let antwort = Https::mit_zeitgrenze(Duration::from_secs(5))
+        .hole(ADRESSE)
+        .map_err(|fehler| fehler.to_string())
+        .and_then(|csv| {
+            std::io::stdout()
+                .lock()
+                .write_all(&csv)
+                .map_err(|fehler| fehler.to_string())
+        });
+    if let Err(fehler) = antwort {
+        eprintln!("[Sammler] €STR-Abruf fehlgeschlagen: {fehler}");
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let Some(wurzel) = wurzel() else {
         eprintln!(
@@ -703,6 +723,7 @@ fn main() -> ExitCode {
         ["kurse", "nyse"] => kurse(&wurzel, &journal, Some(Boerse::Nyse)),
         ["einrichten"] | ["kurse", "einrichten"] => einrichten(&journal),
         ["termine"] => termine(&wurzel, &journal),
+        ["estr-index"] => estr_index(),
         ["nachrichten"] => nachrichten(&wurzel, &journal),
         ["ibkr", "papier"] => ibkr::zeige_papier(&wurzel),
         ["ibkr", "papier", "pruefen"] => ibkr::pruefe_papier(&wurzel),

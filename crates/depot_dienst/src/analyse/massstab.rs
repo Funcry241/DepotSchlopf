@@ -117,7 +117,7 @@ pub(crate) fn einrichtung(d: &Dienst) -> String {
     };
     format!(
         "<section id=\"estr-index\"><h2>€STR für den Analyse-Export</h2>\
-         <p><a href=\"{EZB_CSV}\" target=\"_blank\" rel=\"noopener\">EZB-Indexreihe als CSV herunterladen</a> und die Datei hier auswählen.</p>\
+         <p>Der Analyse-Export ruft die EZB-Indexreihe ab, wenn Indexstände fehlen. Du kannst die <a href=\"{EZB_CSV}\" target=\"_blank\" rel=\"noopener\">EZB-Indexreihe als CSV herunterladen</a> und hier importieren.</p>\
          <form action=\"{}\" method=\"post\" data-estr-import=\"{}\">\
          <input type=\"hidden\" name=\"t\" value=\"{}\">\
          <label>EZB-CSV <input type=\"file\" accept=\".csv,text/csv\" required></label>\
@@ -175,19 +175,61 @@ pub(crate) fn importieren(d: &Dienst, a: &Anfrage) -> Vec<u8> {
     antwort(200, &stand)
 }
 
-pub(super) fn bericht(daten: &Path, stand: &Stand, werte: &BTreeMap<Datum, Cent>) -> String {
+pub(super) struct Vergleich {
+    von: Datum,
+    bis: Datum,
+    etf: Result<Cent, String>,
+}
+
+pub(super) fn vergleich(stand: &Stand, werte: &BTreeMap<Datum, Cent>) -> Option<Vergleich> {
+    let (&von, _) = werte.first_key_value()?;
+    let (&bis, _) = werte.last_key_value()?;
+    (von < bis).then(|| Vergleich {
+        von,
+        bis,
+        etf: eunl(stand, von, bis),
+    })
+}
+
+fn index_oder_abruf(
+    daten: &Path,
+    von: Datum,
+    bis: Datum,
+    abrufen: impl FnOnce() -> Result<Cent, String>,
+) -> Result<Cent, String> {
+    match estr_datei(daten).and_then(|csv| estr(&csv, von, bis)) {
+        Ok(wert) => Ok(wert),
+        Err(lokal) => abrufen().map_err(|abruf| format!("{lokal} EZB-Abruf: {abruf}")),
+    }
+}
+
+pub(super) fn geldmarkt(d: &Dienst, daten: &Path, von: Datum, bis: Datum) -> Result<Cent, String> {
+    index_oder_abruf(daten, von, bis, || {
+        let csv = d.estr_index_abrufen()?;
+        let wert = estr(&csv, von, bis)?;
+        let zustand = d.sperre();
+        if let Ok(lokal) = estr_datei(daten).and_then(|lokal| estr(&lokal, von, bis)) {
+            return Ok(lokal);
+        }
+        if zustand.neustart || zustand.auftrag_stand(Art::Update).is_some() || d.update_offen() {
+            return Err("Während des Updates kann die EZB-CSV nicht gespeichert werden.".into());
+        }
+        schreibe_ganz(&daten.join(ESTR_DATEI), &csv)
+            .map_err(|_| "Die EZB-CSV konnte nicht gespeichert werden.")?;
+        Ok(wert)
+    })
+}
+
+pub(super) fn bericht(
+    vergleich: Option<Vergleich>,
+    geldmarkt: impl FnOnce(Datum, Datum) -> Result<Cent, String>,
+) -> String {
     let mut text = String::from("\n### EUNL und €STR\n\n");
-    let Some((&von, &bis)) = werte
-        .first_key_value()
-        .zip(werte.last_key_value())
-        .map(|((von, _), (bis, _))| (von, bis))
-        .filter(|(von, bis)| von < bis)
-    else {
+    let Some(Vergleich { von, bis, etf }) = vergleich else {
         text.push_str("Zwei belegte Depotabschlüsse für den Vergleich fehlen.\n");
         return text;
     };
-    let etf = eunl(stand, von, bis);
-    let geldmarkt = estr_datei(daten).and_then(|csv| estr(&csv, von, bis));
+    let geldmarkt = geldmarkt(von, bis);
     let render = |wert: Option<Cent>| {
         format!(
             "{} | {}",
@@ -232,12 +274,36 @@ mod tests {
     }
 
     #[test]
+    fn vorhandene_stichtage_kommen_ohne_abruf_aus() -> Result<(), String> {
+        let von = Datum::lies("2026-11-16").ok_or("Starttag")?;
+        let bis = Datum::lies("2026-11-19").ok_or("Endtag")?;
+        let daten = std::env::temp_dir().join(format!("depot-estr-{}", crate::neues_token()));
+        let cache = daten.join(ESTR_DATEI);
+        let csv = "KEY,TIME_PERIOD,OBS_VALUE\nEST.B.EU000A2QQF08.CI,2026-11-16,110.00000000\nEST.B.EU000A2QQF08.CI,2026-11-19,110.01100000\n";
+        schreibe_ganz(&cache, csv)?;
+        let treffer = index_oder_abruf(&daten, von, bis, || Err("Unerwarteter Abruf.".into()));
+        let fehlt = index_oder_abruf(&daten, von, bis.plus_tage(1).ok_or("Folgetag")?, || {
+            Err("Abruf ausgefallen.".into())
+        });
+        let gespeichert = estr_datei(&daten);
+        std::fs::remove_dir_all(&daten).map_err(|e| e.to_string())?;
+        assert_eq!(treffer, Ok(Cent(100_010)));
+        assert!(fehlt.is_err_and(|grund| {
+            grund.contains("2026-11-20") && grund.contains("Abruf ausgefallen.")
+        }));
+        assert_eq!(gespeichert.as_deref(), Ok(csv));
+        Ok(())
+    }
+
+    #[test]
     fn bericht_nennt_fehlenden_eunl_kurs_und_fehlende_estr_datei() -> Result<(), String> {
         let von = Datum::lies("2026-11-16").ok_or("Starttag")?;
         let bis = Datum::lies("2026-11-20").ok_or("Endtag")?;
         let werte = BTreeMap::from([(von, Cent(1_000_000)), (bis, Cent(1_000_000))]);
         let daten = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ohne-estr-index");
-        let aus = bericht(&daten, &Stand::default(), &werte);
+        let aus = bericht(vergleich(&Stand::default(), &werte), |von, bis| {
+            index_oder_abruf(&daten, von, bis, || Err("Nicht verfügbar.".into()))
+        });
         assert!(aus.contains("| EUNL kaufen und halten | nicht belegt | nicht belegt |"));
         assert!(aus.contains("Zum Depotabschluss am 2026-11-16 fehlt ein belegter EUNL-Kurs."));
         assert!(aus.contains("Die lokale Datei daten/estr-index.csv fehlt."));
