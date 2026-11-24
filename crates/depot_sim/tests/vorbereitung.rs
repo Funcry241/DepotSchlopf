@@ -5,8 +5,8 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use depot_journal::{
-    Art, AufrufErlaubnis, Journal, NachrichtBeleg, Prognoserichtung, VorbereitungsAntwort,
-    Weltprognose,
+    Art, AufrufErlaubnis, Journal, KiZweck, KursBeleg, NachrichtBeleg, Prognoserichtung,
+    VorbereitungsAntwort, Weltprognose,
 };
 use depot_kern::liste::{als_universum, beobachtungsliste};
 use depot_kern::{BeraterId, Cent, Datum, Universum, Vorschlag, Zeitpunkt};
@@ -445,7 +445,6 @@ impl Berater for VorschauModell {
 
 #[test]
 fn wochenend_vorschau_bucht_nur_kosten_und_fragt_bei_bargeld_nicht_weiter() -> Result<(), String> {
-    use depot_journal::{KiZweck, KursBeleg};
     use depot_kern::{Herkunft, Kurs};
     use depot_sim::vorschau::lauf;
 
@@ -500,7 +499,10 @@ fn wochenend_vorschau_bucht_nur_kosten_und_fragt_bei_bargeld_nicht_weiter() -> R
             ausfall,
             schlopfmodell: None,
         };
-        lauf(&ort.0, sonntag, &universum()?, &mut dachs, &mut maus)?;
+        assert_eq!(
+            lauf(&ort.0, sonntag, &universum()?, &mut dachs, &mut maus).is_err(),
+            ausfall
+        );
         assert_eq!(dachs.kurstag, Some(freitag));
         assert_eq!(maus.kurstag, Some(freitag));
         assert_eq!(dachs.gesehen, maus.gesehen);

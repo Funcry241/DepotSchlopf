@@ -1,7 +1,7 @@
 //! Beratung auf einem eingefrorenen Depotstand. Nur die KI-Kosten gehen ins Handelsjournal.
 use std::path::Path;
 
-use depot_journal::{AufrufErlaubnis, Journal, KiZweck};
+use depot_journal::{AufrufErlaubnis, Journal, KiStand, KiZweck};
 use depot_kern::modelle::Modellwahl;
 use depot_kern::{
     BeraterId, Cent, Datum, Grenzen, Kurse, Topf, TopfId, Universum, Vorschlag, Zeitpunkt,
@@ -14,6 +14,7 @@ use crate::szenario::{Antwort, Berater, Lage};
 use crate::{papiertag, vorbereitung};
 
 const RUNDEN: u32 = crate::abstimmung::ABSTIMMUNG_RUNDEN;
+const AUFRUFE_JE_BERATER: u32 = RUNDEN + 2;
 
 /// Pro KI höchstens vier Fragen: Erstmeinung, Prüfung, zwei Abstimmungsrunden.
 pub fn hoechstkosten() -> Option<Cent> {
@@ -28,7 +29,28 @@ pub fn hoechstkosten_fuer(dachs: Modellwahl, maus: Modellwahl) -> Option<Cent> {
     let maus = KiDeckel::fuer_modell(maus.modell()).hoechstkosten()?;
     dachs
         .checked_add(maus)?
-        .mal_stueck(u64::from(RUNDEN.checked_add(2)?))
+        .mal_stueck(u64::from(AUFRUFE_JE_BERATER))
+}
+
+pub fn pruefe_budget(
+    kasse: &KiStand,
+    datum: Datum,
+    auswahl: [Modellwahl; 2],
+) -> Result<(), String> {
+    let zyklus = papiertag::tagnummer(datum).ok_or("Ungültiger Kostentag")?;
+    kasse
+        .pruefe_simulationslauf(datum, zyklus, AUFRUFE_JE_BERATER, auswahl)
+        .map_err(|(wer, grund)| {
+            let grund = match grund {
+                Sperre::TagVoll | Sperre::ZyklusVoll => "Aufrufgrenze für heute erreicht".into(),
+                Sperre::MonatVoll => "Monatliche Aufrufgrenze erreicht".into(),
+                Sperre::MonatsbudgetErschoepft => "Monatsbudget ausgeschöpft".into(),
+                Sperre::JahresbudgetErschoepft => "Jahresbudget ausgeschöpft".into(),
+                Sperre::ErstmeinungReserviert => "Budget für reguläre Beratungen reserviert".into(),
+                sonst => format!("{sonst:?}"),
+            };
+            format!("Budget für den ganzen Lauf bei {wer:?} nicht verfügbar. {grund}.")
+        })
 }
 
 struct Budget {
@@ -36,6 +58,36 @@ struct Budget {
     zyklus: u32,
 }
 impl Budget {
+    fn fuer_lauf(
+        j: &Journal,
+        datum: Datum,
+        dachs: &dyn Berater,
+        maus: &dyn Berater,
+    ) -> Result<Self, String> {
+        let modell = |wer, berater: &dyn Berater| {
+            if berater.angebunden() && !berater.kostensperre() {
+                Ok(berater
+                    .einstellung()
+                    .map_or_else(|| Modellwahl::standard(wer), |e| e.auswahl))
+            } else {
+                let grund = berater
+                    .warum_nicht()
+                    .unwrap_or_else(|| "KI nicht verfügbar".into());
+                Err(format!("Simulation nicht gestartet · {wer:?}: {grund}"))
+            }
+        };
+        let modelle = [
+            modell(BeraterId::Dachs, dachs)?,
+            modell(BeraterId::Maus, maus)?,
+        ];
+        pruefe_budget(j.stand().ki(), datum, modelle)
+            .map_err(|grund| format!("Simulation nicht gestartet. {grund}"))?;
+        Ok(Self {
+            datum,
+            zyklus: papiertag::tagnummer(datum).ok_or("Ungültiger Kostentag")?,
+        })
+    }
+
     fn frage<T>(
         &self,
         j: &mut Journal,
@@ -139,12 +191,12 @@ fn zweitmeinung(
     b: &mut dyn Berater,
     lage: &Lage<'_>,
     stand: &mut Stand,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let Some(v) = stand.vorschlag.as_ref() else {
-        return Ok(());
+        return Ok(true);
     };
     if v.zielgewichte_bp.is_empty() && v.park.is_none() && lage.topf.positionen().is_empty() {
-        return Ok(());
+        return Ok(true);
     }
     let phase = format!("Zweitmeinung zu {:?}", stand.id.berater());
     let pruefer = match stand.id {
@@ -164,10 +216,13 @@ fn zweitmeinung(
                 "Veto"
             };
             ausgabe(&phase, pruefer, &format!("{urteil} · {}", u.begruendung));
+            Ok(u.verwertbar)
         }
-        Err(e) => ausgabe(&phase, pruefer, &format!("Ausgefallen · {e}")),
+        Err(e) => {
+            ausgabe(&phase, pruefer, &format!("Ausgefallen · {e}"));
+            Ok(false)
+        }
     }
-    Ok(())
 }
 
 fn bargeld(s: &Stand) -> bool {
@@ -187,12 +242,16 @@ fn abstimmen(
     dialog: &Dialog<'_>,
     berater: [&mut dyn Berater; 2],
     staende: [&mut Stand; 2],
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let [a, b] = staende;
     let [da, ma] = berater;
     let [lage_a, lage_b] = dialog.lagen;
-    if !a.verwertbar || !b.verwertbar || !da.kann_abstimmen() || !ma.kann_abstimmen() {
-        return Ok(());
+    if !a.verwertbar || !b.verwertbar {
+        return Ok(false);
+    }
+    if !(da.kann_abstimmen() && ma.kann_abstimmen() || bargeld(a) && bargeld(b)) {
+        println!("[Simulation] Abstimmung ausgefallen · nicht beide KIs können abstimmen.");
+        return Ok(false);
     }
     for runde in 1..=RUNDEN {
         if bargeld(a) && bargeld(b) {
@@ -275,11 +334,14 @@ fn abstimmen(
                 s.zugestimmt = false;
             }
         }
-        if !hat_beide || gleich {
+        if !hat_beide {
+            return Ok(false);
+        }
+        if gleich {
             break;
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 fn plan(
@@ -457,10 +519,7 @@ pub fn lauf(
         papiertag::weltbelege_am(j.stand(), fuer, zeit),
     );
     let ereignisse = vorbereitung::sichtbare_ereignisse(&ereignisse);
-    let budget = Budget {
-        datum,
-        zyklus: papiertag::tagnummer(datum).ok_or("Ungültiger Kostentag")?,
-    };
+    let budget = Budget::fuer_lauf(&j, datum, dachs, maus)?;
     let topf = |id| {
         j.stand()
             .toepfe()
@@ -504,9 +563,9 @@ pub fn lauf(
     crate::schlopfmodell::vorbereiten(&daten, &mut j, zeit, fuer, dachs, maus);
     let mut eb = erste(&mut j, &budget, maus, &lage_b)?;
     let mut ea = erste(&mut j, &budget, dachs, &lage_a)?;
-    zweitmeinung(&mut j, &budget, dachs, &lage_b, &mut eb)?;
-    zweitmeinung(&mut j, &budget, maus, &lage_a, &mut ea)?;
-    abstimmen(
+    let dachs_pruefung = zweitmeinung(&mut j, &budget, dachs, &lage_b, &mut eb)?;
+    let maus_pruefung = zweitmeinung(&mut j, &budget, maus, &lage_a, &mut ea)?;
+    let abstimmung = abstimmen(
         &mut j,
         &Dialog {
             budget: &budget,
@@ -519,5 +578,9 @@ pub fn lauf(
     for (lage, s) in [(&lage_a, &ea), (&lage_b, &eb)] {
         plan(&j, &markt.grenzen, universum, lage, s, halt);
     }
-    Ok(())
+    if dachs_pruefung && maus_pruefung && abstimmung {
+        Ok(())
+    } else {
+        Err("KI-Simulation unvollständig. Ausgefallene Antworten stehen im Protokoll.".into())
+    }
 }

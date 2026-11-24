@@ -911,6 +911,7 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         }
         _ => return seiten::fehler(404, "Diese Aktion gibt es nicht."),
     };
+    let simulationskosten = (art == Art::Simulation).then(|| d.simulationsangebot(jetzt));
     let inhalt = format!(
         "{}{}",
         seiten::marke(&d.start),
@@ -918,15 +919,9 @@ fn auftrag_bestaetigen(d: &Dienst, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
             &d.token,
             art,
             sha.as_deref(),
-            if art == Art::Simulation {
-                depot_journal::ki_einstellungen::lesen(&d.wurzel.join("daten"))
-                    .ok()
-                    .and_then(|e| {
-                        depot_lage::simulationskosten_fuer(e.dachs.auswahl, e.maus.auswahl)
-                    })
-            } else {
-                None
-            }
+            simulationskosten.as_ref().map_or(Err(""), |kosten| {
+                kosten.as_ref().copied().map_err(String::as_str)
+            }),
         )
     );
     let seite = seiten::rahmen(
@@ -994,10 +989,12 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
         }
         Art::Simulation => {
             let m = if bestaetigt {
-                match d.von_hand(art, jetzt) {
+                let betrag = feld(f, "simulationskosten").and_then(|s| s.parse().ok());
+                match d.simulation_von_hand(jetzt, betrag) {
                     Ok(()) => return http::umleitung("/#taetigkeit"),
-                    Err("simulation_belegt") => "simulation_belegt",
-                    Err(_) => "auftrag_belegt",
+                    Err(grund) if grund == "simulation_belegt" => "simulation_belegt",
+                    Err(grund) if grund == "gerade erst erledigt" => "auftrag_belegt",
+                    Err(grund) => return seiten::fehler(409, &grund),
                 }
             } else {
                 "simulation_bestaetigen"

@@ -78,6 +78,12 @@ pub(crate) fn speichern(d: &Dienst, formular: &[(String, String)]) -> Vec<u8> {
     if zustand.neustart || zustand.auftrag_stand(crate::Art::Update).is_some() || d.update_offen() {
         return seiten::fehler(409, "Speichere die KI-Einstellungen nach dem Update.");
     }
+    if zustand.auftrag_stand(crate::Art::Simulation).is_some() {
+        return seiten::fehler(
+            409,
+            "Speichere die KI-Einstellungen nach der laufenden Simulation.",
+        );
+    }
     let daten = d.wurzel.join("daten");
     let e = KiEinstellungen {
         dachs,

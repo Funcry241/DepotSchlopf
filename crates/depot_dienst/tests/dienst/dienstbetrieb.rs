@@ -1711,19 +1711,38 @@ fn startgeld_gleich_fuer_kennzahl_und_diagramm() -> Result<(), String> {
 #[test]
 fn simulation_verlangt_kostenbestaetigung_und_reiht_doppelklick_nur_einmal_ein()
 -> Result<(), String> {
-    let d = dienst(ordner()?, true);
+    let wurzel = ordner()?;
+    depot_journal::Journal::einrichten(&wurzel.join("daten/journal.txt"))
+        .map_err(|e| format!("{e:?}"))?;
+    let d = dienst(wurzel.clone(), true);
     let t = Datum::neu(2026, 11, 15)
         .and_then(|tag| Zeitpunkt::frankfurt(tag, 12, 0, 0))
         .ok_or("Sonntag")?;
-    assert!(get(&d, "/", t).contains("/bestaetigen?art=simulation"));
+    let live = get(&d, "/", t);
+    assert!(live.contains("/bestaetigen?art=simulation"));
+    assert!(live.contains("aktion simulation-start"));
+    assert!(live.contains("Verbraucht echtes KI-Budget"));
     let seite = get(&d, "/bestaetigen?art=simulation", t);
     assert!(seite.contains("Maximale KI-Reservierung") && seite.contains("geprueft"));
     let ohne = formular_post("/ausfuehren", &format!("t={TOKEN}&art=simulation"));
     assert!(text(&behandle(&d, &Attrappe::default(), &ohne, t)).contains("simulation_bestaetigen"));
     assert!(wartend(&d).is_empty());
-    let mit = formular_post(
+    let kosten = depot_lage::simulationskosten().ok_or("Simulationskosten")?;
+    let ohne_betrag = formular_post(
         "/ausfuehren",
         &format!("t={TOKEN}&art=simulation&geprueft=ja"),
+    );
+    assert_eq!(
+        status(&behandle(&d, &Attrappe::default(), &ohne_betrag, t))?,
+        409
+    );
+    assert!(wartend(&d).is_empty());
+    let mit = formular_post(
+        "/ausfuehren",
+        &format!(
+            "t={TOKEN}&art=simulation&geprueft=ja&simulationskosten={}",
+            kosten.0
+        ),
     );
     d.von_hand(Art::Termine, t)?;
     let live = get(&d, "/", t);
@@ -1732,7 +1751,7 @@ fn simulation_verlangt_kostenbestaetigung_und_reiht_doppelklick_nur_einmal_ein()
     assert!(get(&d, "/bestaetigen?art=simulation", t).contains("m=simulation_belegt"));
     assert!(text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("m=simulation_belegt"));
     assert_eq!(wartend(&d), vec![(Art::Termine, Anlass::Hand)]);
-    let d = dienst(ordner()?, true);
+    let d = dienst(wurzel, true);
     assert!(
         text(&behandle(&d, &Attrappe::default(), &mit, t)).contains("Location: /#taetigkeit\r\n")
     );

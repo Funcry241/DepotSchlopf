@@ -29,4 +29,6 @@ pub use tagesrahmen::{
     handelstage_rest, tagesrahmen, vorbereitungsrahmen, vorbereitungsrahmen_fuer_modell,
 };
 
-pub use budget::{Buchung, Datum, KiDeckel, KiGrenzen, Preise, Sperre, grenzabdruck, pruefe};
+pub use budget::{
+    Buchung, Datum, KiDeckel, KiGrenzen, Preise, Sperre, grenzabdruck, pruefe, pruefe_simulation,
+};
