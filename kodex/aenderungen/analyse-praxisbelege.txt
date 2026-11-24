@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Gesendete Kaufkosten und Herkunft der €STR-Indexstände im Analyse-Export ausweisen
+pfade:
+crates/depot_dienst/src/analyse/entscheidungsgrundlage.rs
+crates/depot_dienst/src/analyse/massstab.rs
