@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: In der Abstimmung die berechnete Kostenhürde einschließlich Modellspread verwenden
+pfade:
+crates/depot_berater/src/frage.rs
