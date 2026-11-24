@@ -20,6 +20,8 @@ use sha2::{Digest, Sha256};
 
 use crate::datei::hex;
 
+pub(crate) const KURSGRUNDLAGE: &str = "Kursgrundlage";
+
 /// Ein belegter Kurs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KursBeleg {

@@ -1163,7 +1163,7 @@ fn berater_sehen_die_nachrichten_der_letzten_tage() -> Result<(), String> {
     let nachgereicht = vorbedingung(
         NachrichtBeleg::neu(
             "alphavantage-news",
-            spaeter,
+            abruf,
             b"nachtrag",
             publiziert,
             "Nachtrag",
@@ -2274,6 +2274,58 @@ fn montagmorgen_nutzt_freitagskurse_und_schliesst_am_montag_ab() -> Result<(), S
         wiederholung.kurse.eintrag(&sap()?).map(Kurs::handelstag),
         Some(tag(6)?)
     );
+    Ok(())
+}
+
+#[test]
+fn kursgrundlage_erhaelt_den_neuesten_beleg_vor_dem_journalstichtag() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let freitag = tag(6)?;
+    let montag = tag(9)?;
+    let abruf = some(Zeitpunkt::frankfurt(montag, 7, 30, 0), "Abruf")?;
+    let isin = sap()?;
+    let schluss = some(depot_kern::Boerse::Xetra.schluss(freitag), "Schluss")?;
+    let korrektur = |cent, roh: &[u8]| -> Result<KursBeleg, String> {
+        let kurs = vorbedingung(
+            Kurs::neu(Cent(cent), "EUR", freitag, schluss, Herkunft::Quelle),
+            "Kurs",
+        )?;
+        KursBeleg::neu("alphavantage", abruf, roh, isin.clone(), kurs)
+    };
+    let mut j = ort.oeffnen()?;
+    belege_morgen(&mut j, 6, abruf)?;
+    let bekannt = korrektur(23_012, b"Vor der Entscheidung")?;
+    vorbedingung(j.belege_kurs(&bekannt), "Frühe Korrektur")?;
+    drop(j);
+    vorbedingung(stumm_tag(&ort, 9)?, "Papiertag")?;
+    let mut j = ort.oeffnen()?;
+    let spaeter = korrektur(23_014, b"Nach der Entscheidung")?;
+    vorbedingung(
+        j.belege_kurs(&spaeter),
+        "Späte Korrektur mit gleicher Abrufzeit",
+    )?;
+    drop(j);
+    let j = ort.oeffnen()?;
+    let belege = some(j.stand().kursgrundlage(montag), "Kursgrundlage")?;
+    assert_eq!(
+        belege.into_iter().find(|b| b.isin() == &isin),
+        Some(&bekannt)
+    );
+    let universum = universum()?;
+    let wiederholung = vorbedingung(
+        depot_sim::papiertag_wiederabspielen(j.stand(), &universum, montag),
+        "Wiederholung",
+    )?;
+    assert_eq!(wiederholung.kurse.kurs_cent(&isin), Some(Cent(23_012)));
+    let jetzt = some(
+        Zeitpunkt::frankfurt(montag, 8, 0, 0),
+        "Späterer Wissensstand",
+    )?;
+    let aktuell = vorbedingung(
+        depot_sim::morgenkurse(j.stand(), &universum, jetzt),
+        "Aktuelle Kurse",
+    )?;
+    assert_eq!(aktuell.heute.kurs_cent(&isin), Some(Cent(23_014)));
     Ok(())
 }
 
@@ -3795,7 +3847,7 @@ fn quartalsreaktion_nutzt_ersten_belegten_schluss_nach_veroeffentlichung() -> Re
         }
         // Eine nach dem eingefrorenen Stichtag bekannt gewordene Terminänderung
         // und Kurskorrektur dürfen die frühere Beratung nicht umschreiben.
-        quartalskurs(&mut j, &isin, tag(9)?, 11_000, abruf(dienstag)?)?;
+        quartalskurs(&mut j, &isin, tag(9)?, 11_000, wissen)?;
         assert_eq!(reaktion(&j, dienstag)?, signal);
         if bericht == 6 {
             pruefe_fenster_quartalszahlen(&mut j, &isin, reaktion)?;

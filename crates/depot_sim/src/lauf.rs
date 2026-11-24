@@ -564,6 +564,7 @@ fn berate_toepfe(
     gestoppt: &BTreeSet<TopfId>,
     b: &mut Beteiligte<'_, '_, '_>,
 ) -> Result<[TopfAntwort; 2], LaufFehler> {
+    let lauf = schattenkandidaten::beginne(j, z)?;
     let topf_b = frage_topf(j, z, TopfId::B, b.maus, gestoppt)?;
     let topf_a = frage_topf(j, z, TopfId::A, b.dachs, gestoppt)?;
     let erste = [topf_a.clone(), topf_b.clone()];
@@ -575,7 +576,10 @@ fn berate_toepfe(
             antwort.verwerfe_ersatzkauf();
         }
     }
-    for antwort in antworten.iter().filter(|a| !a.ersatzkauf) {
+    for antwort in antworten
+        .iter()
+        .filter(|a| !a.ersatzkauf && a.erstmeinung == Erstmeinung::Verwertbar)
+    {
         schattenkandidaten::belege(
             j,
             z,
@@ -584,6 +588,7 @@ fn berate_toepfe(
             antwort.vorschlag.as_ref(),
         )?;
     }
+    schattenkandidaten::beende(j, z.tag.datum, lauf)?;
     Ok(antworten)
 }
 
@@ -1035,7 +1040,15 @@ fn frage(
         }
         if let Some(v) = &antwort.vorschlag {
             belege_erstmeinungsziele(j, tag, wer, v)?;
-            schattenkandidaten::belege(j, z, Phase::Erstmeinung, lage.topf, Some(v))?;
+        }
+        if verwertbar {
+            schattenkandidaten::belege(
+                j,
+                z,
+                Phase::Erstmeinung,
+                lage.topf,
+                antwort.vorschlag.as_ref(),
+            )?;
         }
         crate::ausgelassen::belege_ausgelassene(j, z, lage, &mut antwort.vorschlag, name(wer))?;
         if let Some(v) = &antwort.vorschlag {
@@ -1489,7 +1502,7 @@ fn zweite_meinung(
             _ if ersatzkauf => Some(v),
             _ => None,
         };
-        if !ersatzkauf {
+        if urteil.verwertbar {
             schattenkandidaten::belege(j, z, Phase::Zweitmeinung, &topf, vorschlag.as_ref())?;
         }
     }

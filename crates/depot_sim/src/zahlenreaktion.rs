@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use depot_journal::{Stand, TerminBeleg};
+use depot_journal::{KursBeleg, NachrichtBeleg, Stand, TerminBeleg};
 use depot_kern::termin::{NACH_BOERSENSCHLUSS, QUELLE_ERGEBNISSE, VOR_BOERSENBEGINN};
 use depot_kern::{
     Betroffen, Boerse, Datum, Herkunft, Isin, Kurse, Preis, Verlaesslichkeit, Zeitbezug, Zeitpunkt,
@@ -56,14 +56,13 @@ fn zeitraum(beleg: &TerminBeleg) -> Option<(Datum, Datum)> {
     }
 }
 
-fn schlusskurs(stand: &Stand, isin: &Isin, tag: Datum, wissen: Zeitpunkt) -> Option<Preis> {
+fn schlusskurs(belege: &[KursBeleg], isin: &Isin, tag: Datum, wissen: Zeitpunkt) -> Option<Preis> {
     let boerse = depot_kern::liste::boerse_von(isin)?;
     if !boerse.handelstag(tag) {
         return None;
     }
     let zeit = boerse.schluss(tag)?;
-    stand
-        .kurse()
+    belege
         .iter()
         .filter(|b| {
             b.isin() == isin
@@ -75,8 +74,8 @@ fn schlusskurs(stand: &Stand, isin: &Isin, tag: Datum, wissen: Zeitpunkt) -> Opt
         .map(|b| b.kurs().preis())
 }
 
-fn kapitalereignis(stand: &Stand, isin: &Isin, tag: Datum, wissen: Zeitpunkt) -> bool {
-    stand.nachrichten().iter().any(|b| {
+fn kapitalereignis(belege: &[NachrichtBeleg], isin: &Isin, tag: Datum, wissen: Zeitpunkt) -> bool {
+    belege.iter().any(|b| {
         b.quelle() == depot_kern::tiingo::QUELLE_KAPITAL
             && b.abruf() <= wissen
             && b.zeit().datum() == Some(tag)
@@ -91,12 +90,12 @@ fn rendite(vorher: Preis, nachher: Preis) -> Option<i64> {
     nachher.checked_sub(vorher)?.in_bp_von(vorher)
 }
 
-fn korbrendite(stand: &Stand, von: Datum, bis: Datum, wissen: Zeitpunkt) -> Option<i64> {
+fn korbrendite(belege: &[KursBeleg], von: Datum, bis: Datum, wissen: Zeitpunkt) -> Option<i64> {
     let werte = depot_kern::liste::VERGLEICH_ISIN;
     let gesamt = werte.iter().try_fold(0_i64, |summe, kennung| {
         let isin = Isin::neu(kennung).ok()?;
-        let davor = schlusskurs(stand, &isin, von, wissen)?;
-        let danach = schlusskurs(stand, &isin, bis, wissen)?;
+        let davor = schlusskurs(belege, &isin, von, wissen)?;
+        let danach = schlusskurs(belege, &isin, bis, wissen)?;
         summe.checked_add(rendite(davor, danach)?)
     })?;
     gesamt.checked_div(i64::try_from(werte.len()).ok()?)
@@ -116,8 +115,18 @@ pub(crate) fn belege(stand: &Stand, kurse: &Kurse, wissen: Zeitpunkt) -> BTreeMa
     let Some(ende) = letzter_schluss(wissen) else {
         return BTreeMap::new();
     };
-    let termine: BTreeMap<_, _> = stand
-        .termine()
+    let tag = wissen
+        .frankfurt_tag()
+        .filter(|&tag| stand.wissensstichtag(tag) == Some(wissen));
+    let kursbelege = tag
+        .and_then(|tag| stand.kurse_bis_stichtag(tag))
+        .unwrap_or_else(|| stand.kurse());
+    let nachrichten = tag
+        .and_then(|tag| stand.nachrichten_bis_stichtag(tag))
+        .unwrap_or_else(|| stand.nachrichten());
+    let termine: BTreeMap<_, _> = tag
+        .and_then(|tag| stand.termine_bis_stichtag(tag))
+        .unwrap_or_else(|| stand.termine())
         .iter()
         .filter(|b| {
             b.quelle() == QUELLE_ERGEBNISSE
@@ -146,18 +155,18 @@ pub(crate) fn belege(stand: &Stand, kurse: &Kurse, wissen: Zeitpunkt) -> BTreeMa
                 || depot_kern::liste::boerse_von(isin) != Some(Boerse::Nyse)
                 || std::iter::successors(Some(ende), |tag| Boerse::Nyse.bezugstag(*tag))
                     .take_while(|tag| *tag >= bis)
-                    .any(|tag| kapitalereignis(stand, isin, tag, wissen))
+                    .any(|tag| kapitalereignis(nachrichten, isin, tag, wissen))
             {
                 return None;
             }
-            let vorher = schlusskurs(stand, isin, von, wissen)?;
-            let nachher = schlusskurs(stand, isin, bis, wissen)?;
-            let aktuell = schlusskurs(stand, isin, ende, wissen)?;
+            let vorher = schlusskurs(kursbelege, isin, von, wissen)?;
+            let nachher = schlusskurs(kursbelege, isin, bis, wissen)?;
+            let aktuell = schlusskurs(kursbelege, isin, ende, wissen)?;
             if aktuell != kurs.preis() {
                 return None;
             }
             let roh = rendite(vorher, nachher)?;
-            let abstand = roh.checked_sub(korbrendite(stand, von, bis, wissen)?)?;
+            let abstand = roh.checked_sub(korbrendite(kursbelege, von, bis, wissen)?)?;
             if abstand.unsigned_abs() < SCHWELLE_BP || roh.signum() != abstand.signum() {
                 return None;
             }

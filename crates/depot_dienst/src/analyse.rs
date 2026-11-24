@@ -21,6 +21,7 @@ mod fehler;
 mod historie;
 mod journal;
 mod ki_kosten;
+mod kursgrundlage;
 mod leerlauf;
 mod leistung;
 pub(crate) mod massstab;
@@ -889,6 +890,7 @@ fn journalpaket(
                 betrieb.fehler.ampel(true),
                 nachher.ampel(),
             ) + &leistung::bericht(stand, zeitraum, &historie.depotwerte)
+                + &kursgrundlage::bericht(stand, zeitraum)
                 + &leerlauf::bericht(stand, &buch, zeitraum, jetzt)
                 + &depot_lage::belegauswahl::bericht(stand, zeitraum.von, zeitraum.bis)
                 + &depot_lage::belegauswahl::schlagzeilen_abdeckung(
@@ -1055,7 +1057,7 @@ pub(crate) fn exportieren(
     let datum = zeitraum.titel();
     let liesmich = format!(
         "# DepotSchlopf · Analyse-Export {datum}\n\n## Aktueller Depotstand\n{kurz}\n\
-         ## Datenbasis\nPapiergeld. Die Zeiten sind Frankfurter Ortszeit. \
+         ## Datenbasis\nPapiergeld. Zeiten ohne Zeitzonenangabe stehen in Frankfurter Ortszeit. \
          Depotstand und Konfiguration beziehen sich auf den Exportzeitpunkt.\n\
          Rohdaten, Laufprotokolle und vollständige Prompts sind nie enthalten.\n\
          Alpha-Vantage- und Tiingo-Schlüssel ohne festes Präfix erkennt der Export am hinterlegten Wert.\n\
@@ -1111,6 +1113,62 @@ fn zip_antwort<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pruefbericht_verbindet_kurssignal_beratungsstufen_und_ki_kosten() -> Result<(), String> {
+        let tag = Datum::neu(2026, 11, 24).ok_or("Datum")?;
+        let jetzt = Zeitpunkt::frankfurt(tag, 18, 0, 0).ok_or("Zeit")?;
+        let zeitraum = Zeitraum { von: tag, bis: tag };
+        let wurzel =
+            std::env::temp_dir().join(format!("depot-beratungswert-{}", crate::neues_token()));
+        let daten = wurzel.join("daten");
+        fs::create_dir_all(&daten).map_err(|e| e.to_string())?;
+        let probe = || -> Result<String, String> {
+            let pfad = daten.join("journal.txt");
+            let journalfehler = |e| format!("{e:?}");
+            Journal::einrichten(&pfad).map_err(journalfehler)?;
+            let mut j = Journal::oeffnen(&pfad).map_err(journalfehler)?;
+            j.begruende(tag, "Schattenberatung", "v1 Beginn 0 0")
+                .map_err(journalfehler)?;
+            j.begruende(tag, "Schattenphase", "v1 0 A Erstmeinung")
+                .map_err(journalfehler)?;
+            j.begruende(tag, "Schattenphase", "v1 0 A Gemeinsam")
+                .map_err(journalfehler)?;
+            j.begruende(tag, "Schattenberatung", "v1 Ende 0 0")
+                .map_err(journalfehler)?;
+            drop(j);
+            let d = Dienst::neu(
+                wurzel.clone(),
+                "test".into(),
+                Box::new(|_, _| std::process::Command::new("unbenutzt")),
+                crate::lagerechner(std::sync::Arc::new(crate::System)),
+            );
+            let mut luecken = String::new();
+            let ablauf = ablauf::Ablauf::laden(&d, zeitraum, jetzt, &mut luecken);
+            let fehler = fehler::Belege::laden(&daten, &ablauf, zeitraum, &mut luecken);
+            journalpaket(
+                &daten,
+                jetzt,
+                tag,
+                zeitraum,
+                "",
+                &Betrieb { ablauf, fehler },
+                &mut luecken,
+            )
+            .map(|paket| paket.pruefbericht)
+            .map_err(journalfehler)
+        };
+        let text = probe();
+        fs::remove_dir_all(&wurzel).map_err(|e| e.to_string())?;
+        let text = text?;
+        assert!(text.contains("## Historische Signalprüfung nach Rangfünfteln"));
+        assert!(text.contains("## Paarweise Kurs-Rückschau zum Ausstieg"));
+        assert!(text.contains("Aufwärtsdruck"));
+        assert!(text.contains("#### Änderungen der Kandidatenauswahl"));
+        assert!(text.contains("#### KI-Kosten je abgeschlossener Beratung"));
+        assert!(text.contains("| Dachs · Erstmeinung | Gemeinsamer Stand | 1 | 0 | 0 | 0 | 0 |"));
+        Ok(())
+    }
 
     #[test]
     fn export_schwaerzt_aiza_ohne_hinterlegten_schluessel() -> Result<(), String> {

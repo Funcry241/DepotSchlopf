@@ -1,11 +1,11 @@
 //! Kaufkandidaten zum Beratungszeitpunkt, auch wenn die Beratung sie später verwirft.
 
-use std::{fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, ops::Range, str::FromStr};
 
 use depot_journal::{Journal, Stand};
 use depot_kern::liste::boerse_von;
 use depot_kern::{
-    BP_GANZ, Cent, Datum, Grenzen, Herkunft, Isin, Preis, Rundung, Topf, TopfId, Vorschlag,
+    BP_GANZ, Boerse, Cent, Datum, Grenzen, Herkunft, Isin, Preis, Rundung, Topf, TopfId, Vorschlag,
     Zeitpunkt,
 };
 
@@ -14,6 +14,24 @@ use crate::positionskauf::{Ausstiegsplan, Kursziel};
 
 /// Eigener, versionierter Beleg für die simulierte Nachrechnung. Er ist keine Order.
 pub const BELEG: &str = "Schattenkandidat";
+const BERATUNG: &str = "Schattenberatung";
+const PHASE: &str = "Schattenphase";
+const SIGNAL: &str = "Schattensignal";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Beratungslauf {
+    pub tag: Datum,
+    pub lauf: usize,
+    pub buchungen: Range<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Phasenbeleg {
+    pub tag: Datum,
+    pub lauf: usize,
+    pub topf: TopfId,
+    pub phase: Phase,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Phase {
@@ -50,6 +68,7 @@ impl Phase {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Kandidat {
     pub tag: Datum,
+    pub lauf: Option<usize>,
     pub topf: TopfId,
     pub phase: Phase,
     pub isin: Isin,
@@ -94,12 +113,27 @@ fn lies_plan(ziel: &str, tage: &str) -> Result<Option<Ausstiegsplan>, ()> {
     }))
 }
 
+fn topf_text(topf: TopfId) -> &'static str {
+    match topf {
+        TopfId::A => "A",
+        TopfId::B => "B",
+    }
+}
+
+fn lies_topf(text: &str) -> Option<TopfId> {
+    match text {
+        "A" => Some(TopfId::A),
+        "B" => Some(TopfId::B),
+        _ => None,
+    }
+}
+
 impl Kandidat {
     fn text(&self) -> String {
-        let topf = match self.topf {
-            TopfId::A => "A",
-            TopfId::B => "B",
-        };
+        let version = self
+            .lauf
+            .map_or_else(|| "v1".into(), |lauf| format!("v2 {lauf}"));
+        let topf = topf_text(self.topf);
         let ziel = self.plan.map_or_else(
             || "-".into(),
             |plan| match plan.kursziel {
@@ -108,7 +142,7 @@ impl Kandidat {
             },
         );
         format!(
-            "v1 {topf} {} {} {} {} {} {} {ziel} {} {}",
+            "{version} {topf} {} {} {} {} {} {} {ziel} {} {}",
             self.phase,
             self.isin,
             self.ziel_bp,
@@ -122,14 +156,12 @@ impl Kandidat {
 
     fn lies(tag: Datum, text: &str) -> Option<Self> {
         let mut felder = text.split_ascii_whitespace();
-        if felder.next()? != "v1" {
-            return None;
-        }
-        let topf = match felder.next()? {
-            "A" => TopfId::A,
-            "B" => TopfId::B,
+        let lauf = match felder.next()? {
+            "v1" => None,
+            "v2" => Some(felder.next()?.parse().ok()?),
             _ => return None,
         };
+        let topf = lies_topf(felder.next()?)?;
         let phase = Phase::lies(felder.next()?)?;
         let isin = Isin::neu(felder.next()?).ok()?;
         let ziel_bp = felder.next()?.parse().ok()?;
@@ -147,6 +179,7 @@ impl Kandidat {
             && felder.next().is_none())
         .then_some(Self {
             tag,
+            lauf,
             topf,
             phase,
             isin,
@@ -170,6 +203,144 @@ pub fn kandidaten(stand: &Stand) -> Vec<Kandidat> {
         .collect()
 }
 
+fn lies_lauf(text: &str) -> Option<(&str, usize, usize)> {
+    let mut felder = text.split_ascii_whitespace();
+    let ("v1", art, lauf, buchung, None) = (
+        felder.next()?,
+        felder.next()?,
+        felder.next()?.parse().ok()?,
+        felder.next()?.parse().ok()?,
+        felder.next(),
+    ) else {
+        return None;
+    };
+    Some((art, lauf, buchung))
+}
+
+/// Abgeschlossene Beratungen. Die Buchungsindizes bleiben über spätere Abrechnungen stabil.
+pub fn beratungslaeufe(stand: &Stand) -> Vec<Beratungslauf> {
+    let mut beginn = BTreeMap::new();
+    let mut ergebnis = Vec::new();
+    for (tag, _, text) in stand
+        .begruendungen()
+        .iter()
+        .filter(|(_, wer, _)| wer == BERATUNG)
+    {
+        match lies_lauf(text) {
+            Some(("Beginn", lauf, buchung)) => {
+                beginn.insert((*tag, lauf), buchung);
+            }
+            Some(("Ende", lauf, ende)) => {
+                if let Some(anfang) = beginn
+                    .remove(&(*tag, lauf))
+                    .filter(|&anfang| anfang <= ende)
+                    && ende <= stand.ki().buchungen().len()
+                {
+                    ergebnis.push(Beratungslauf {
+                        tag: *tag,
+                        lauf,
+                        buchungen: anfang..ende,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    ergebnis
+}
+
+pub fn phasenbelege(stand: &Stand) -> Vec<Phasenbeleg> {
+    stand
+        .begruendungen()
+        .iter()
+        .filter(|(_, wer, _)| wer == PHASE)
+        .filter_map(|(tag, _, text)| {
+            let mut felder = text.split_ascii_whitespace();
+            let ("v1", lauf, topf, phase, None) = (
+                felder.next()?,
+                felder.next()?.parse().ok()?,
+                lies_topf(felder.next()?)?,
+                Phase::lies(felder.next()?)?,
+                felder.next(),
+            ) else {
+                return None;
+            };
+            Some(Phasenbeleg {
+                tag: *tag,
+                lauf,
+                topf,
+                phase,
+            })
+        })
+        .collect()
+}
+
+/// Rangführer aus den Kursen, die für dieselbe Beratung vorlagen.
+pub(crate) fn signale(stand: &Stand) -> BTreeMap<(Datum, usize, Boerse), Isin> {
+    stand
+        .begruendungen()
+        .iter()
+        .filter(|(_, wer, _)| wer == SIGNAL)
+        .filter_map(|(tag, _, text)| {
+            let mut felder = text.split_ascii_whitespace();
+            let ("v1", lauf, isin, None) = (
+                felder.next()?,
+                felder.next()?.parse().ok()?,
+                Isin::neu(felder.next()?).ok()?,
+                felder.next(),
+            ) else {
+                return None;
+            };
+            Some(((*tag, lauf, boerse_von(&isin)?), isin))
+        })
+        .collect()
+}
+
+pub(crate) fn beginne(j: &mut Journal, z: &Zyklus<'_>) -> Result<Option<usize>, LaufFehler> {
+    if z.uhr.is_none() {
+        return Ok(None);
+    }
+    let lauf = j.stand().begruendungen().len();
+    laufbeleg(j, z.tag.datum, lauf, "Beginn")?;
+    let rang = crate::relative_staerke::kurzrang(j.stand(), &z.tag.kurse, z.universum, z.tag.datum);
+    for boerse in [Boerse::Xetra, Boerse::Nyse] {
+        if let Some((isin, _)) = rang.iter().find(|(isin, _)| {
+            boerse_von(isin) == Some(boerse)
+                && z.universum.handelbar(isin, z.grenzen)
+                && schlusskurs(z, isin).is_some()
+        }) {
+            j.begruende(z.tag.datum, SIGNAL, &format!("v1 {lauf} {isin}"))
+                .map_err(journal)?;
+        }
+    }
+    Ok(Some(lauf))
+}
+
+pub(crate) fn beende(j: &mut Journal, tag: Datum, lauf: Option<usize>) -> Result<(), LaufFehler> {
+    if let Some(lauf) = lauf {
+        laufbeleg(j, tag, lauf, "Ende")?;
+    }
+    Ok(())
+}
+
+fn laufbeleg(j: &mut Journal, tag: Datum, lauf: usize, art: &str) -> Result<(), LaufFehler> {
+    let index = j.stand().ki().buchungen().len();
+    j.begruende(tag, BERATUNG, &format!("v1 {art} {lauf} {index}"))
+        .map_err(journal)
+}
+
+fn laufkennung(stand: &Stand, datum: Datum) -> Option<usize> {
+    let (_, _, text) = stand
+        .begruendungen()
+        .iter()
+        .rev()
+        .find(|(tag, wer, _)| *tag == datum && wer == BERATUNG)?;
+    let ("Beginn", lauf, _) = lies_lauf(text)? else {
+        return None;
+    };
+    Some(lauf)
+}
+
 fn schlusskurs(z: &Zyklus<'_>, isin: &Isin) -> Option<Preis> {
     let kurs = z.tag.kurse.eintrag(isin)?;
     let boerse = boerse_von(isin)?;
@@ -181,7 +352,12 @@ fn schlusskurs(z: &Zyklus<'_>, isin: &Isin) -> Option<Preis> {
     .then_some(kurs.preis())
 }
 
-fn modell_stueck(grenzen: &Grenzen, ziel: Preis, frei: Cent, limit: Cent) -> Option<u64> {
+pub(crate) fn modell_stueck(
+    grenzen: &Grenzen,
+    ziel: Preis,
+    frei: Cent,
+    limit: Cent,
+) -> Option<u64> {
     let je_stueck = Preis::aus_cent(limit)?;
     let budget = Preis::aus_cent(frei)?;
     // Anlageziel begrenzt den Gegenwert. Die Gebühr muss zusätzlich in das freie Bargeld passen.
@@ -217,10 +393,34 @@ pub(crate) fn belege(
     topf: &Topf,
     vorschlag: Option<&Vorschlag>,
 ) -> Result<(), LaufFehler> {
-    let (Some(uhr), Some(vorschlag)) = (z.uhr, vorschlag) else {
+    let Some(uhr) = z.uhr else {
         return Ok(());
     };
-    let bereit_ab = uhr().filter(|zeit| *zeit >= z.tag.kurse.stand());
+    let lauf = laufkennung(j.stand(), z.tag.datum);
+    if let Some(vorschlag) = vorschlag {
+        let bereit_ab = uhr().filter(|zeit| *zeit >= z.tag.kurse.stand());
+        belege_kaeufe(j, z, phase, topf, vorschlag, bereit_ab, lauf)?;
+    }
+    if let Some(lauf) = lauf {
+        j.begruende(
+            z.tag.datum,
+            PHASE,
+            &format!("v1 {lauf} {} {phase}", topf_text(topf.id())),
+        )
+        .map_err(journal)?;
+    }
+    Ok(())
+}
+
+fn belege_kaeufe(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    phase: Phase,
+    topf: &Topf,
+    vorschlag: &Vorschlag,
+    bereit_ab: Option<Zeitpunkt>,
+    lauf: Option<usize>,
+) -> Result<(), LaufFehler> {
     let topfwert = topf.wert_exakt(&z.tag.kurse);
     let grenzen = z.grenzen;
     let frei = depot_journal::konto::verfuegbar(grenzen, j.stand(), topf.id());
@@ -264,6 +464,7 @@ pub(crate) fn belege(
             .and_then(|text| Ausstiegsplan::lies(text));
         let kandidat = Kandidat {
             tag: z.tag.datum,
+            lauf,
             topf: topf.id(),
             phase,
             isin: isin.clone(),
@@ -348,17 +549,22 @@ mod tests {
             Journal::einrichten(&pfad).map_err(fehler)?;
             let mut j = Journal::oeffnen(&pfad).map_err(fehler)?;
             j.setze_topf(&topf).map_err(fehler)?;
+            let lauf = beginne(&mut j, &zyklus).map_err(|e| format!("{e:?}"))?;
             belege(&mut j, &zyklus, Phase::Erstmeinung, &topf, Some(&vorschlag))
                 .map_err(|e| format!("{e:?}"))?;
             belege(&mut j, &zyklus, Phase::Zweitmeinung, &topf, None)
                 .map_err(|e| format!("{e:?}"))?;
             belege(&mut j, &zyklus, Phase::Gemeinsam, &topf, None).map_err(|e| format!("{e:?}"))?;
+            beende(&mut j, tag.datum, lauf).map_err(|e| format!("{e:?}"))?;
+            let wiederholung = beginne(&mut j, &zyklus).map_err(|e| format!("{e:?}"))?;
+            assert_ne!(lauf, wiederholung);
             drop(j);
             let j = Journal::oeffnen(&pfad).map_err(fehler)?;
             let belege = kandidaten(j.stand());
             assert_eq!(belege.len(), 2);
             let erster = belege.iter().find(|k| k.isin == telekom).ok_or("Telekom")?;
             assert_eq!(erster.phase, Phase::Erstmeinung);
+            assert_eq!(erster.lauf, lauf);
             assert_eq!(erster.limit, Some(Cent(2_660)));
             assert_eq!(erster.stueck, Some(65));
             assert_eq!(erster.stopp_bp, Some(300));
@@ -369,6 +575,16 @@ mod tests {
                 .find(|k| k.isin == ohne_kurs)
                 .ok_or("Kandidat ohne Kurs")?;
             assert_eq!((ohne.stueck, ohne.limit), (None, None));
+            let phasen = phasenbelege(j.stand());
+            assert_eq!(phasen.len(), 3);
+            assert!(
+                phasen
+                    .iter()
+                    .any(|p| p.phase == Phase::Gemeinsam && Some(p.lauf) == lauf)
+            );
+            let abgeschlossen = beratungslaeufe(j.stand());
+            assert_eq!(abgeschlossen.len(), 1);
+            assert_eq!(abgeschlossen.first().map(|l| l.lauf), lauf);
             assert!(j.stand().auftraege().is_empty());
             assert!(j.stand().ki().buchungen().is_empty());
             Ok(())

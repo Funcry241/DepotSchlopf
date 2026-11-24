@@ -97,7 +97,10 @@ fn rangfolge(
         .collect();
     gesperrt.extend(depot_journal::splitverdacht::aktiv(stand, Some(wissen)).into_keys());
     let mut preise = BTreeMap::<(&Isin, Datum), (Zeitpunkt, Preis)>::new();
-    for beleg in stand.kurse().iter().filter(|b| {
+    let kursbelege = stand
+        .kurse_bis_stichtag(lauf_tag)
+        .unwrap_or_else(|| stand.kurse());
+    for beleg in kursbelege.iter().filter(|b| {
         let k = b.kurs();
         b.abruf() <= wissen
             && k.herkunft() == Herkunft::Quelle
@@ -198,6 +201,15 @@ mod tests {
             let kurz = kurzrang(journal.stand(), &kurse, &universum, datum);
             assert_eq!(kurz.last().map(|(isin, _)| isin), Some(&erst));
             assert!(!rang.iter().any(|(i, _)| *i == nvda));
+
+            journal
+                .belege_wissensstichtag(datum, heute)
+                .map_err(|e| format!("{e:?}"))?;
+            let revision = Kurs::neu(Cent(8_000), "EUR", bis, ende, Herkunft::Quelle)
+                .map_err(|e| format!("{e:?}"))?;
+            let beleg = KursBeleg::neu("kursprobe", heute, b"Revision", erst, revision)?;
+            journal.belege_kurs(&beleg).map_err(|e| format!("{e:?}"))?;
+            assert_eq!(fuer_lage(journal.stand(), &kurse, &universum, datum), rang);
             Ok(())
         })();
         std::fs::remove_dir_all(&ordner).map_err(|e| e.to_string())?;

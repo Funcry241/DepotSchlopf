@@ -111,7 +111,13 @@ pub fn tageskurse_am(
     {
         return morgenkurse(stand, universum, ende);
     }
-    let k = tageskurse_bis(stand, universum, Some(ende))?;
+    let k = tageskurse_aus(
+        stand
+            .kurse_bis_stichtag(tag)
+            .unwrap_or_else(|| stand.kurse()),
+        universum,
+        Some(ende),
+    )?;
     if k.handelstag != tag {
         return Err(halt(format!(
             "Am {} lagen keine Schlusskurse dieses Tages vor",
@@ -126,9 +132,16 @@ pub(crate) fn tageskurse_bis(
     universum: &Universum,
     bis: Option<Zeitpunkt>,
 ) -> Result<Tageskurse, LaufFehler> {
+    tageskurse_aus(stand.kurse(), universum, bis)
+}
+
+fn tageskurse_aus(
+    belege: &[KursBeleg],
+    universum: &Universum,
+    bis: Option<Zeitpunkt>,
+) -> Result<Tageskurse, LaufFehler> {
     let isins: Vec<Isin> = universum.isins().into_iter().collect();
-    let belege: Vec<&KursBeleg> = stand
-        .kurse()
+    let belege: Vec<&KursBeleg> = belege
         .iter()
         .filter(|b| b.kurs().herkunft() == Herkunft::Quelle && isins.contains(b.isin()))
         .filter(|b| bis.is_none_or(|bis| b.abruf() <= bis))
@@ -184,6 +197,10 @@ pub fn morgenkurse(
     let (start, ..) = wissen_bis
         .in_frankfurt()
         .ok_or_else(|| halt("Morgendatum fehlt"))?;
+    let belege = stand
+        .kurse_bis_stichtag(start)
+        .filter(|_| stand.wissensstichtag(start) == Some(wissen_bis))
+        .unwrap_or_else(|| stand.kurse());
     let erwartete: BTreeMap<_, _> = universum
         .instrumente()
         .iter()
@@ -194,8 +211,7 @@ pub fn morgenkurse(
         .collect();
     let mut bezug: BTreeMap<&Isin, &KursBeleg> = BTreeMap::new();
     let mut vergleich: BTreeMap<&Isin, &KursBeleg> = BTreeMap::new();
-    for b in stand
-        .kurse()
+    for b in belege
         .iter()
         .filter(|b| b.abruf() <= wissen_bis && b.kurs().herkunft() == Herkunft::Quelle)
     {
@@ -211,8 +227,7 @@ pub fn morgenkurse(
             bezug.insert(b.isin(), b);
         }
     }
-    for b in stand
-        .kurse()
+    for b in belege
         .iter()
         .filter(|b| b.abruf() <= wissen_bis && b.kurs().herkunft() == Herkunft::Quelle)
     {
@@ -281,7 +296,9 @@ fn termine_am(stand: &Stand, handelstag: Datum, wissen_bis: Zeitpunkt) -> Vec<St
         .checked_mul(SEKUNDEN_JE_TAG)
         .and_then(|d| von.checked_add(d));
     let termine: BTreeMap<_, _> = stand
-        .termine()
+        .termine_bis_stichtag(handelstag)
+        .filter(|_| stand.wissensstichtag(handelstag) == Some(wissen_bis))
+        .unwrap_or_else(|| stand.termine())
         .iter()
         .filter(|b| b.abruf() <= wissen_bis)
         .map(|b| (b.termin().kennung(), b))
@@ -375,7 +392,9 @@ pub fn nachrichtenbelege_am(
         .and_then(tagesbeginn);
     let bis = beginn.checked_add(SEKUNDEN_JE_TAG);
     let mut aus: Vec<&NachrichtBeleg> = stand
-        .nachrichten()
+        .nachrichten_bis_stichtag(handelstag)
+        .filter(|_| stand.wissensstichtag(handelstag) == Some(wissen_bis))
+        .unwrap_or_else(|| stand.nachrichten())
         .iter()
         .filter(|n| {
             n.abruf() <= wissen_bis
@@ -675,7 +694,10 @@ fn kurse_zum_start(
     if depot_kern::liste::morgenlauf(wissen_bis) {
         return pruefe_kurstag(morgenkurse(stand, universum, wissen_bis)?, tag);
     }
-    pruefe_kurstag(tageskurse_bis(stand, universum, Some(wissen_bis))?, tag)
+    let belege = stand
+        .kurse_bis_stichtag(tag)
+        .unwrap_or_else(|| stand.kurse());
+    pruefe_kurstag(tageskurse_aus(belege, universum, Some(wissen_bis))?, tag)
 }
 
 fn letzter_abruf_am(stand: &Stand, tag: Datum) -> Option<Zeitpunkt> {
@@ -933,6 +955,11 @@ pub(crate) fn papiertag_mit_uhr(
         Some(kurse) => Tag { kurse, ..tag },
         None => tag,
     };
+    j.belege_kursgrundlage(tag.datum, &tag.kurse)
+        .map_err(journal)?;
+    if let Some(uhr) = uhr {
+        crate::aufwaertsdruck_beleg::belege(j, tag.datum, wissen_bis, uhr)?;
+    }
     let nr = tagnummer(tag.datum).ok_or_else(|| rechnung("Tagnummer"))?;
     let belegte_zeit = || match uhr {
         Some(uhr) => uhr().filter(|zeit| *zeit >= wissen_bis),

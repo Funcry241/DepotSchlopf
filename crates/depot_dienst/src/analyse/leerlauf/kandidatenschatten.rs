@@ -1,8 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet};
+mod kosten;
+mod rollen;
+
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use depot_journal::Stand;
-use depot_kern::{Cent, TopfId, Zeitpunkt};
+use depot_kern::{TopfId, Zeitpunkt};
 use depot_lage::ausfuehrung::{OrderZeile, Richtung};
 use depot_lage::kandidatenschatten::{Abschluss, Ausstieg, StandImSchatten, Zeile, auswertung};
 use depot_lage::schattenkandidaten::{Kandidat, Phase};
@@ -10,26 +13,34 @@ use depot_lage::schattenkandidaten::{Kandidat, Phase};
 use super::{Zeitraum, prozent};
 
 fn name(phase: Phase, topf: TopfId) -> String {
-    match (phase, topf) {
-        (Phase::Erstmeinung, TopfId::A) => "Dachs allein".into(),
-        (Phase::Erstmeinung, TopfId::B) => "Maus allein".into(),
-        (Phase::Zweitmeinung, _) => "Stand nach Zweitmeinung".into(),
-        (Phase::Runde(nr), _) => format!("Entwurf der Runde {nr}"),
-        (Phase::Gemeinsam, _) => "Gemeinsamer Stand".into(),
+    let (autor, pruefer) = match topf {
+        TopfId::A => ("Dachs", "Maus"),
+        TopfId::B => ("Maus", "Dachs"),
+    };
+    match phase {
+        Phase::Erstmeinung => format!("{autor} · Erstmeinung"),
+        Phase::Zweitmeinung => format!("{pruefer} · Zweitmeinung"),
+        Phase::Runde(nr) => format!("{autor} · Entwurf der Runde {nr}"),
+        Phase::Gemeinsam => "Gemeinsamer Stand".into(),
     }
 }
 
-fn papierstatus(k: &Kandidat, buch: &[OrderZeile], zeitraum: Zeitraum) -> &'static str {
+fn papierstatus(k: &Kandidat, buch: &[OrderZeile], jetzt: Zeitpunkt) -> &'static str {
+    let exporttag = jetzt.frankfurt_tag();
     let am_tag = |o: &&OrderZeile| {
         o.topf == k.topf
             && o.isin == k.isin
             && o.richtung == Richtung::Kauf
-            && o.versand.and_then(Zeitpunkt::frankfurt_tag) == Some(k.tag)
+            && o.versand
+                .is_some_and(|zeit| zeit <= jetzt && zeit.frankfurt_tag() == Some(k.tag))
     };
     let mut auftrag = false;
     for o in buch.iter().filter(am_tag) {
-        if o.ausgefuehrt_am.is_some_and(|tag| tag <= zeitraum.bis) {
-            return "gefüllt";
+        if o.ausgefuehrt_am
+            .zip(exporttag)
+            .is_some_and(|(tag, export)| tag <= export)
+        {
+            return "Ausführung erfasst";
         }
         auftrag = true;
     }
@@ -49,8 +60,9 @@ fn abschluss(a: &Abschluss) -> String {
     format!("{} · {} ({grund})", a.netto, a.fuellung.datum)
 }
 
-fn detail(text: &mut String, zeile: &Zeile, buch: &[OrderZeile], zeitraum: Zeitraum) {
+fn detail(text: &mut String, zeile: &Zeile, buch: &[OrderZeile], jetzt: Zeitpunkt) {
     let k = &zeile.kandidat;
+    let lauf = k.lauf.map_or_else(|| "–".into(), |n| n.to_string());
     let stueck = k.stueck.map_or_else(|| "–".into(), |s| s.to_string());
     let limit = k.limit.map_or_else(|| "–".into(), |l| l.to_string());
     let frist = k
@@ -58,13 +70,13 @@ fn detail(text: &mut String, zeile: &Zeile, buch: &[OrderZeile], zeitraum: Zeitr
         .map_or_else(|| "5 T (Modell)".into(), |p| format!("{} T", p.handelstage));
     let _ = write!(
         text,
-        "| {} | {:?} | {} | {} | {} | {stueck} | {limit} | {frist} | {} | ",
+        "| {} | {lauf} | {:?} | {} | {} | {} | {stueck} | {limit} | {frist} | {} | ",
         k.tag,
         k.topf,
         name(k.phase, k.topf),
         k.isin,
         prozent(Some(k.ziel_bp)),
-        papierstatus(k, buch, zeitraum)
+        papierstatus(k, buch, jetzt)
     );
     let status = match &zeile.stand {
         StandImSchatten::FehlendeKaufdaten => "Kaufdaten fehlen".into(),
@@ -82,12 +94,23 @@ fn detail(text: &mut String, zeile: &Zeile, buch: &[OrderZeile], zeitraum: Zeitr
             mit_stopp,
             mit_ziel,
             korbnetto,
+            signalkontrolle,
+            ..
         } => {
             let ziel = mit_ziel.as_ref().map_or_else(|| "–".into(), abschluss);
             let korb = korbnetto.map_or_else(|| "–".into(), |n| n.to_string());
+            let signal = signalkontrolle.as_ref().map_or_else(
+                || "–".into(),
+                |s| {
+                    format!(
+                        "{} · Idee {} · Signal {}",
+                        s.isin, s.idee_netto, s.signal_netto
+                    )
+                },
+            );
             let _ = writeln!(
                 text,
-                "{} am {} · Fensterende {frist} | {} | {ziel} | {korb} |",
+                "{} am {} · Fensterende {frist} | {} | {ziel} | {korb} | {signal} |",
                 einstieg.kurs,
                 einstieg.datum,
                 abschluss(mit_stopp)
@@ -95,54 +118,7 @@ fn detail(text: &mut String, zeile: &Zeile, buch: &[OrderZeile], zeitraum: Zeitr
             return;
         }
     };
-    let _ = writeln!(text, "{status} | – | – | – |");
-}
-
-#[derive(Default)]
-struct Summe {
-    anzahl: u32,
-    abgeschlossen: u32,
-    kein_einstieg: u32,
-    netto: i128,
-}
-
-fn zusammenfassung(text: &mut String, zeilen: &[Zeile]) {
-    let mut gruppen = BTreeMap::<(Phase, TopfId), Summe>::new();
-    for z in zeilen {
-        let s = gruppen
-            .entry((z.kandidat.phase, z.kandidat.topf))
-            .or_default();
-        s.anzahl = s.anzahl.saturating_add(1);
-        match &z.stand {
-            StandImSchatten::Abgeschlossen { mit_stopp, .. } => {
-                s.abgeschlossen = s.abgeschlossen.saturating_add(1);
-                s.netto = s.netto.saturating_add(i128::from(mit_stopp.netto.0));
-            }
-            StandImSchatten::KeineStuecke | StandImSchatten::LimitVerfehlt(_) => {
-                s.kein_einstieg = s.kein_einstieg.saturating_add(1);
-            }
-            _ => {}
-        }
-    }
-    text.push_str("| Stufe | Topf | Ideen | Ende belegt | Ohne Einstieg | Offen oder Datenlücke | Ø netto je abgeschlossener Idee |\n|---|---|---:|---:|---:|---:|---:|\n");
-    for ((phase, topf), s) in gruppen {
-        let offen = s
-            .anzahl
-            .saturating_sub(s.abgeschlossen.saturating_add(s.kein_einstieg));
-        let netto = s
-            .netto
-            .checked_div(i128::from(s.abgeschlossen))
-            .and_then(|n| i64::try_from(n).ok())
-            .map_or_else(|| "–".into(), |n| Cent(n).to_string());
-        let _ = writeln!(
-            text,
-            "| {} | {topf:?} | {} | {} | {} | {offen} | {netto} |",
-            name(phase, topf),
-            s.anzahl,
-            s.abgeschlossen,
-            s.kein_einstieg
-        );
-    }
+    let _ = writeln!(text, "{status} | – | – | – | – |");
 }
 
 pub(super) fn bericht(
@@ -156,15 +132,16 @@ pub(super) fn bericht(
     text.push_str(concat!(
         "\n### Schattendepot der Kaufkandidaten\n\n",
         "DepotSchlopf bewertet protokollierte Kaufideen als einzelne Modellfälle mit belegten Börsenschlüssen, festgehaltenem Limit und Modell-Handelskosten. Teilnehmer und Entscheidungsstufen können denselben Wert enthalten. Die Übersicht zählt diese Fälle je Stufe, ihre Ergebnisse ergeben kein gemeinsames Portfolio.\n\n",
-        "Der Hauptpfad verkauft bei Stopp oder zur Frist. Die zusätzliche Zielvariante verkauft auch nach Erreichen eines lesbaren Kursziels. Eine am Schluss erkannte Schwelle wirkt frühestens am folgenden Börsenschluss. Für Ideen ohne lesbare Frist gelten fünf Handelstage als Modellannahme. Ein Netto erscheint erst bei vollständigem Haltefenster. Der Korb verwendet dieselben Stichtage und Vergleichswerte derselben Börse. Bargeld bleibt mit 0 € bewertet.\n\n"
+        "Der Hauptpfad verkauft bei Stopp oder zur Frist. Die zusätzliche Zielvariante verkauft auch nach Erreichen eines lesbaren Kursziels. Eine am Schluss erkannte Schwelle wirkt frühestens am folgenden Börsenschluss. Für Ideen ohne lesbare Frist gelten fünf Handelstage als Modellannahme. Ein Netto erscheint erst bei vollständigem Haltefenster. Der Exportzeitraum wählt die Beratungstage aus. Die Auswertung verwendet auch spätere Kursbelege, soweit sie beim Export vorliegen. Der Korb verwendet dieselben Stichtage und Vergleichswerte derselben Börse. Bargeld bleibt mit 0 € bewertet.\n\n"
     ));
+    rollen::bericht(text, stand, &zeilen, zeitraum);
+    kosten::bericht(text, stand, zeitraum);
     if zeilen.is_empty() {
         text.push_str("Im Zeitraum liegen noch keine strukturiert erfassten Kaufkandidaten vor.\n");
     } else {
-        zusammenfassung(text, &zeilen);
-        text.push_str("\nDie Spalte Papier erfasst Versand und Füllung für denselben Topf und Wert am Beratungstag.\n\n| Tag | Topf | Stufe | ISIN | Zielgewicht | Stück | Kauflimit | Frist | Papier | Modellstatus oder Einstieg | Netto Stopp und Frist | Netto auch mit Ziel | Netto Korb |\n|---|---|---|---|---:|---:|---:|---|---|---|---:|---:|---:|\n");
+        text.push_str("\nDie Papierspalte zeigt Käufe, die am Beratungstag für denselben Topf und Wert versandt wurden, sowie ihren bis zum Export bekannten Ausführungsstand. Diese Zuordnung gilt für den Tag. Der Vergleich mit der Signalregel beginnt bei einer gefüllten KI-Kaufidee mit vollständigem Haltefenster. Der 20-Tage-Rangführer derselben Börse steigt zum gleichen Schluss mit Modellspread und demselben Kapitalrahmen ein. Sein Einstieg hat kein Kauflimit. Beide Positionen werden zur selben festen Frist bewertet.\n\n| Tag | Lauf | Topf | Stufe | ISIN | Zielgewicht | Stück | Kauflimit | Frist | Papier am Beratungstag (Topf/ISIN) | Modellstatus oder Einstieg | Netto Stopp und Frist | Netto auch mit Ziel | Netto Korb | Netto zur Signalregel |\n|---|---:|---|---|---|---:|---:|---:|---|---|---|---:|---:|---:|---|\n");
         for z in &zeilen {
-            detail(text, z, buch, zeitraum);
+            detail(text, z, buch, jetzt);
         }
     }
     let erfasst: BTreeSet<_> = zeilen
