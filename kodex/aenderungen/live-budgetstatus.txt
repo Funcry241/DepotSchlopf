@@ -1,0 +1,6 @@
+klasse: Funktion
+zweck: Reguläres KI-Budget und nächste Aufgabe im Live-Ausblick nebeneinander anzeigen
+pfade:
+crates/depot_dienst/src/ki_ausblick.rs
+crates/depot_dienst/src/werkbank.rs
+crates/depot_dienst/tests/dienst/live.rs

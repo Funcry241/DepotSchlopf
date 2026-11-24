@@ -66,6 +66,11 @@ impl Ausblick {
                 "<tr><th scope=\"row\">{name}</th><td>{}",
                 maskiere(&stand)
             );
+            if profil.is_some_and(|p| p.max_aufrufe > 0)
+                && let Some(budget) = beraterbudget(z, tag, wer)
+            {
+                let _ = write!(s, " <span>{}</span>", maskiere(&budget));
+            }
             if let Some(modell) = modell {
                 let _ = write!(
                     s,
@@ -211,12 +216,6 @@ fn beraterstand(
     if let Some(grund) = schluesselgrund(z, tag, Wer::Berater(wer)) {
         return grund.into();
     }
-    if let Some(budget) = lage(z, tag)
-        .and_then(|lage| depot_lage::betrieb::budget_status(&lage.budget, wer))
-        .filter(|stand| *stand != BudgetStatus::Bereit)
-    {
-        return format!("KI-Budget {}.", budget.text());
-    }
     if update {
         return "Wartet auf das Update.".into();
     }
@@ -230,6 +229,24 @@ fn beraterstand(
         return "Antwort an NeuroSchlopf vorgemerkt.".into();
     }
     plan.into()
+}
+
+fn beraterbudget(z: &Zustand, tag: Option<Datum>, wer: BeraterId) -> Option<String> {
+    let aktuell =
+        lage(z, tag).and_then(|lage| depot_lage::betrieb::budget_status(&lage.budget, wer));
+    match aktuell {
+        Some(BudgetStatus::Bereit) => None,
+        Some(stand) => Some(format!("Reguläres KI-Budget {}.", stand.text())),
+        None => Some(
+            z.letztes_ki_budget
+                .get(&wer)
+                .filter(|(datum, _)| Some(*datum) == tag)
+                .map_or_else(
+                    || "Reguläres KI-Budget noch nicht bestätigt.".into(),
+                    |(_, stand)| format!("Reguläres KI-Budget {} (zuletzt geprüft).", stand.text()),
+                ),
+        ),
+    }
 }
 
 fn lage(z: &Zustand, tag: Option<Datum>) -> Option<&depot_lage::Lagebild> {

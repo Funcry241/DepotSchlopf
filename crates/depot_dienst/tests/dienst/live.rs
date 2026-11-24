@@ -179,6 +179,80 @@ fn live_ki_ausblick_zeigt_neue_einstellungen_und_bewahrt_den_alten_aufruf() -> R
 }
 
 #[test]
+fn live_ki_ausblick_behaelt_budgetpause_bis_zur_neuen_bestaetigung() -> Result<(), String> {
+    use depot_lage::{BudgetStatus, SchluesselStand, ki_budget};
+
+    let phase = Arc::new(AtomicU32::new(0));
+    let zaehler = Arc::clone(&phase);
+    let leer = leeres_lagebild();
+    let d = Arc::new(Dienst::neu(
+        ordner()?,
+        TOKEN.into(),
+        echo_starter(true),
+        Box::new(move |wurzel, jetzt| {
+            let mut bild = leer(wurzel, jetzt);
+            bild.schluessel = vec![(
+                Wer::Berater(BeraterId::Dachs).protokoll(),
+                SchluesselStand::Hinterlegt,
+            )];
+            if let Some(tag) = jetzt.frankfurt_tag()
+                && zaehler.load(Ordering::SeqCst) != 1
+            {
+                let mut budget = ki_budget(&[], BeraterId::Dachs, tag);
+                budget.status = if zaehler.load(Ordering::SeqCst) == 0 {
+                    BudgetStatus::PausiertBisMorgen
+                } else {
+                    BudgetStatus::Bereit
+                };
+                bild.budget.push(budget);
+            }
+            bild
+        }),
+    ));
+    let jetzt = donnerstag(12, 0)?;
+    let dachs = |zeit| -> Result<String, String> {
+        let html = get(&d, "/teil/live", zeit);
+        let (_, rest) = some(html.split_once("<th scope=\"row\">Dachs</th><td>"), "Dachs")?;
+        let (zeile, _) = some(rest.split_once("</td>"), "Ende Dachs-Zeile")?;
+        Ok(zeile.to_owned())
+    };
+    let pause = "Reguläres KI-Budget pausiert bis morgen";
+    assert!(dachs(jetzt)?.contains("Reguläres KI-Budget noch nicht bestätigt."));
+    assert!(d.schritt(jetzt).is_none());
+    assert!(dachs(jetzt)?.contains(&format!("{pause}.")));
+
+    d.sperre().lage_veraltet = true;
+    let alte_pause = format!("{pause} (zuletzt geprüft).");
+    assert!(dachs(jetzt)?.contains(&alte_pause));
+    phase.store(1, Ordering::SeqCst);
+    assert!(d.schritt(jetzt).is_none());
+    assert!(dachs(jetzt)?.contains(&alte_pause));
+
+    let morgen = some(
+        jetzt
+            .frankfurt_tag()
+            .and_then(|tag| tag.plus_tage(1))
+            .and_then(|tag| Zeitpunkt::frankfurt(tag, 12, 0, 0)),
+        "Tageswechsel",
+    )?;
+    let zeile = dachs(morgen)?;
+    assert!(zeile.contains("Reguläres KI-Budget noch nicht bestätigt."));
+    assert!(!zeile.contains(pause));
+
+    d.einreihen(Art::Papier, Anlass::Hand)?;
+    let zeile = dachs(jetzt)?;
+    assert!(zeile.contains("Papiertag · wartet auf den Start."));
+    assert!(zeile.contains(&alte_pause));
+    let (nr, kind) = some(d.schritt(jetzt), "Papiertag-Start")?;
+    d.verfolge(nr, kind, || donnerstag(12, 0).ok());
+    phase.store(2, Ordering::SeqCst);
+    assert!(d.schritt(jetzt).is_none());
+    let zeile = dachs(jetzt)?;
+    assert!(!zeile.contains("Reguläres KI-Budget"));
+    Ok(())
+}
+
+#[test]
 fn live_ki_ausblick_springt_nach_erfolglosen_abrufen_zum_naechsten_papiertag() -> Result<(), String>
 {
     use depot_dienst::zeitplan::{Abruf, AbrufAusgang};
