@@ -28,16 +28,57 @@ pub(super) fn schreibe(aus: &mut String, e: &Gespraech) {
     }
 
     let mut belege = frage.lines().filter_map(beleg).peekable();
-    if belege.peek().is_none() {
+    let abstimmung = e.zweck == "abstimmung";
+    let kosten = abstimmung.then(|| kaufkosten(frage)).flatten();
+    if belege.peek().is_some() {
+        aus.push_str("\n**Belegte Ausschnitte aus der Frage**\n\n");
+        for beleg in belege {
+            schreibe_zeile(aus, beleg);
+        }
+    } else if kosten.is_none() {
         aus.push_str(
             "\nKeine auswertbaren Entscheidungsgrundlagen in der gespeicherten Frage belegt.\n",
         );
-        return;
     }
-    aus.push_str("\n**Belegte Ausschnitte aus der Frage**\n\n");
-    for beleg in belege {
-        schreibe_zeile(aus, beleg);
+    if let Some((runde, block)) = kosten {
+        let _ = writeln!(
+            aus,
+            "\n**Gesendete Kaufkosten · Abstimmungsrunde {runde}**\n"
+        );
+        for zeile in block {
+            schreibe_zeile(aus, zeile);
+        }
+    } else if abstimmung {
+        aus.push_str("\nKaufkostenblock in der gespeicherten Abstimmungsfrage nicht belegt.\n");
     }
+}
+
+fn kaufkosten(frage: &str) -> Option<(u8, impl Iterator<Item = &str>)> {
+    let (vorspann, block) = frage.split_once("\nVom Programm berechnete Kaufkosten")?;
+    let runde = vorspann.lines().find_map(|zeile| {
+        let (nummer, _) = zeile.strip_prefix("Abstimmungsrunde ")?.split_once('.')?;
+        nummer.parse().ok()
+    })?;
+    let (_, zeilen) = block.split_once('\n')?;
+    let mut zeilen = zeilen
+        .lines()
+        .take_while(|zeile| kaufkostenzeile(zeile))
+        .peekable();
+    zeilen.peek()?;
+    Some((runde, zeilen))
+}
+
+fn kaufkostenzeile(zeile: &str) -> bool {
+    let Some(rest) = zeile
+        .strip_prefix("Topf A ")
+        .or_else(|| zeile.strip_prefix("Topf B "))
+    else {
+        return false;
+    };
+    rest.starts_with("· Parkwert:")
+        || rest
+            .split_once(" · ")
+            .is_some_and(|(isin, _)| depot_kern::Isin::neu(isin).is_ok())
 }
 
 fn ereignisumfang(frage: &str) -> Option<(usize, usize, usize)> {
@@ -222,6 +263,25 @@ mod tests {
         let mut text = String::new();
         schreibe(&mut text, &e);
         assert!(text.contains("im Gespräch nicht gespeichert"));
+        text.clear();
+        e.zweck = "abstimmung".into();
+        e.frage = Some(concat!(
+            "Datum: 2030-01-07\n",
+            "Abstimmungsrunde 2. Fixierte Vorschläge\n",
+            "Vom Programm berechnete Kaufkosten. Gebühren und Spread enthalten:\n",
+            "Topf A DE0007164600 · Papier: 3 Stück bei 12,50 € Kurs · Kostenhürde etwa 2,50 %\n",
+            "Prüfe beide Vorschläge nach dem Handelsauftrag. Vertraulicher Rest.\n",
+        ).into());
+        schreibe(&mut text, &e);
+        assert!(text.contains("Gesendete Kaufkosten · Abstimmungsrunde 2"));
+        assert!(text.contains("3 Stück bei 12,50 € Kurs · Kostenhürde etwa 2,50 %"));
+        assert!(!text.contains("Vertraulicher Rest"));
+        text.clear();
+        e.frage = Some("Abstimmungsrunde 1. Keine Kaufziele.".into());
+        schreibe(&mut text, &e);
+        assert!(
+            text.contains("Kaufkostenblock in der gespeicherten Abstimmungsfrage nicht belegt.")
+        );
         text.clear();
         e.ergebnis = "uebersprungen".into();
         schreibe(&mut text, &e);

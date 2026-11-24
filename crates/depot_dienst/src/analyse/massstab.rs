@@ -191,38 +191,65 @@ pub(super) fn vergleich(stand: &Stand, werte: &BTreeMap<Datum, Cent>) -> Option<
     })
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Geldmarkt {
+    wert: Cent,
+    quelle: Quelle,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Quelle {
+    Datei,
+    Ezb,
+    DateiNachAbruf,
+}
+
 fn index_oder_abruf(
     daten: &Path,
     von: Datum,
     bis: Datum,
-    abrufen: impl FnOnce() -> Result<Cent, String>,
-) -> Result<Cent, String> {
+    abrufen: impl FnOnce() -> Result<Geldmarkt, String>,
+) -> Result<Geldmarkt, String> {
     match estr_datei(daten).and_then(|csv| estr(&csv, von, bis)) {
-        Ok(wert) => Ok(wert),
+        Ok(wert) => Ok(Geldmarkt {
+            wert,
+            quelle: Quelle::Datei,
+        }),
         Err(lokal) => abrufen().map_err(|abruf| format!("{lokal} EZB-Abruf: {abruf}")),
     }
 }
 
-pub(super) fn geldmarkt(d: &Dienst, daten: &Path, von: Datum, bis: Datum) -> Result<Cent, String> {
+pub(super) fn geldmarkt(
+    d: &Dienst,
+    daten: &Path,
+    von: Datum,
+    bis: Datum,
+) -> Result<Geldmarkt, String> {
     index_oder_abruf(daten, von, bis, || {
         let csv = d.estr_index_abrufen()?;
         let wert = estr(&csv, von, bis)?;
         let zustand = d.sperre();
         if let Ok(lokal) = estr_datei(daten).and_then(|lokal| estr(&lokal, von, bis)) {
-            return Ok(lokal);
+            return Ok(Geldmarkt {
+                wert: lokal,
+                quelle: Quelle::DateiNachAbruf,
+            });
         }
         if zustand.neustart || zustand.auftrag_stand(Art::Update).is_some() || d.update_offen() {
             return Err("Während des Updates kann die EZB-CSV nicht gespeichert werden.".into());
         }
         schreibe_ganz(&daten.join(ESTR_DATEI), &csv)
             .map_err(|_| "Die EZB-CSV konnte nicht gespeichert werden.")?;
-        Ok(wert)
+        Ok(Geldmarkt {
+            wert,
+            quelle: Quelle::Ezb,
+        })
     })
 }
 
 pub(super) fn bericht(
     vergleich: Option<Vergleich>,
-    geldmarkt: impl FnOnce(Datum, Datum) -> Result<Cent, String>,
+    geldmarkt: impl FnOnce(Datum, Datum) -> Result<Geldmarkt, String>,
 ) -> String {
     let mut text = String::from("\n### EUNL und €STR\n\n");
     let Some(Vergleich { von, bis, etf }) = vergleich else {
@@ -241,14 +268,31 @@ pub(super) fn bericht(
         text,
         "Modellrechnung mit 1.000 € Startkapital vom ersten bis zum letzten belegten Depotabschluss im Exportzeitraum ({von} bis {bis}). Alle Werte vor Steuern.\n\n| Maßstab | Modell-Endwert | Rendite |\n|---|---:|---:|\n| EUNL kaufen und halten | {} |\n| €STR (EZB-Zinsindex) | {} |\n\n",
         render(etf.as_ref().ok().copied()),
-        render(geldmarkt.as_ref().ok().copied())
+        render(geldmarkt.as_ref().ok().map(|beleg| beleg.wert))
     );
     text.push_str("EUNL verwendet belegte Kurse zu den Depotstichtagen, ganze Stücke, Restbargeld, Xetra-Modellspread und die IBKR-Höchstgebühr beim Kauf und beim modellierten Verkauf zum Enddatum. €STR verwendet die Indexstände an beiden Daten. Fehlende Werte bleiben unbelegt.\n");
-    for (name, ergebnis) in [("EUNL", etf), ("€STR", geldmarkt)] {
-        if let Err(grund) = ergebnis {
-            let _ = writeln!(text, "\n**{name}** · {grund}");
-        }
+    if let Err(grund) = etf {
+        let _ = writeln!(text, "\n**EUNL** · {grund}");
     }
+    let quelle = match geldmarkt {
+        Ok(Geldmarkt {
+            quelle: Quelle::Datei,
+            ..
+        }) => "Vorhandene Datei daten/estr-index.csv verwendet.",
+        Ok(Geldmarkt {
+            quelle: Quelle::Ezb,
+            ..
+        }) => "In diesem Export von der EZB abgerufen, geprüft und gespeichert.",
+        Ok(Geldmarkt {
+            quelle: Quelle::DateiNachAbruf,
+            ..
+        }) => "EZB-Abruf erfolgreich. Inzwischen verfügbare lokale Datei verwendet.",
+        Err(grund) => {
+            let _ = writeln!(text, "\n**€STR** · Stichtage {von} und {bis} · {grund}");
+            return text;
+        }
+    };
+    let _ = writeln!(text, "\n**€STR** · Stichtage {von} und {bis} · {quelle}");
     text
 }
 
@@ -287,7 +331,13 @@ mod tests {
         });
         let gespeichert = estr_datei(&daten);
         std::fs::remove_dir_all(&daten).map_err(|e| e.to_string())?;
-        assert_eq!(treffer, Ok(Cent(100_010)));
+        assert_eq!(
+            treffer,
+            Ok(Geldmarkt {
+                wert: Cent(100_010),
+                quelle: Quelle::Datei
+            })
+        );
         assert!(fehlt.is_err_and(|grund| {
             grund.contains("2026-11-20") && grund.contains("Abruf ausgefallen.")
         }));
@@ -306,7 +356,32 @@ mod tests {
         });
         assert!(aus.contains("| EUNL kaufen und halten | nicht belegt | nicht belegt |"));
         assert!(aus.contains("Zum Depotabschluss am 2026-11-16 fehlt ein belegter EUNL-Kurs."));
+        assert!(aus.contains("Stichtage 2026-11-16 und 2026-11-20"));
         assert!(aus.contains("Die lokale Datei daten/estr-index.csv fehlt."));
+        assert!(aus.contains("EZB-Abruf: Nicht verfügbar."));
+        for (quelle, erwartet) in [
+            (
+                Quelle::Datei,
+                "Vorhandene Datei daten/estr-index.csv verwendet.",
+            ),
+            (
+                Quelle::Ezb,
+                "In diesem Export von der EZB abgerufen, geprüft und gespeichert.",
+            ),
+            (
+                Quelle::DateiNachAbruf,
+                "EZB-Abruf erfolgreich. Inzwischen verfügbare lokale Datei verwendet.",
+            ),
+        ] {
+            let aus = bericht(vergleich(&Stand::default(), &werte), |_, _| {
+                Ok(Geldmarkt {
+                    wert: Cent(100_010),
+                    quelle,
+                })
+            });
+            assert!(aus.contains(erwartet));
+            assert!(aus.contains("Stichtage 2026-11-16 und 2026-11-20"));
+        }
         Ok(())
     }
 }
