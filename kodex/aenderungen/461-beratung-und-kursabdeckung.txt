@@ -1,0 +1,11 @@
+klasse: Funktion
+zweck: Fixierte Vorschläge direkt bestätigen, Vetogründe und Kaufkosten übergeben und historische Kurslücken ausweisen
+pfade:
+crates/depot_berater/src/frage.rs
+crates/depot_berater/src/ki.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_dienst/src/analyse/pruefbericht.rs
+crates/depot_sim/src/abstimmung.rs
+crates/depot_sim/src/kostenhuerde.rs
+crates/depot_sim/src/rueckschau/aufwaertsdruck.rs
+crates/depot_sim/src/vorschau.rs

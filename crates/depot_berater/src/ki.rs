@@ -1210,8 +1210,15 @@ impl<N: Netz> Berater for KiBerater<N> {
         match e
             .text
             .and_then(|t| {
-                let mut antwort = frage::lies_abstimmung(&t, self.wer, &self.universum)?;
-                frage::belege_gesamtverkauf(&t, lage, &mut antwort.eigene)?;
+                let (mut antwort, bestaetigt) = frage::lies_abstimmung_mit_status(
+                    &t,
+                    self.wer,
+                    &self.universum,
+                    stand.eigener_vorschlag.as_ref(),
+                )?;
+                if !bestaetigt {
+                    frage::belege_gesamtverkauf(&t, lage, &mut antwort.eigene)?;
+                }
                 Ok(antwort)
             })
             .and_then(|mut a| {
@@ -1427,6 +1434,19 @@ impl<N: Netz> Berater for KiBerater<N> {
         let system = frage::system(self.wer, &self.grenzen);
         let f = frage::urteil_frage(lage, &self.universum, vorschlag, bilanz);
         let f = self.ergaenze_frage(f, lage, &system, &erlaubnis);
+        let f = if erlaubnis.eingabe_passt(&Anbieter::anfrage_mit_modell(
+            erlaubnis.modellwahl(),
+            erlaubnis.deckel(),
+            &system,
+            &f,
+        )) {
+            f
+        } else {
+            // Die Ereignisauswahl der Erstmeinung und die Kaufkosten haben Vorrang.
+            let kurz =
+                frage::urteil_frage_mit_freitext(lage, &self.universum, vorschlag, bilanz, false);
+            self.ergaenze_frage(kurz, lage, &system, &erlaubnis)
+        };
         let e = self.fragen(&erlaubnis, &system, &f, KiZweck::Zweitmeinung, None);
         match e
             .text

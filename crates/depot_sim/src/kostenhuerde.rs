@@ -44,7 +44,7 @@ pub fn hinweis(volumen: Cent, gebuehr: Cent, boerse: Option<Boerse>) -> Option<S
 }
 
 /// Modellrechnung zu den vor der Runde fixierten Kaufzielen beider Töpfe.
-pub(crate) fn abstimmung(kurse: &Kurse, toepfe: [(&Topf, Option<&Vorschlag>); 2]) -> String {
+pub fn abstimmung(kurse: &Kurse, toepfe: &[(&Topf, Option<&Vorschlag>)]) -> String {
     let grenzen = Grenzen::standard();
     let mut text = String::new();
     for (topf, vorschlag) in toepfe {

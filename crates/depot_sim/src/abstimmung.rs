@@ -67,7 +67,14 @@ fn beitraege(buch: &Journal, zyklus: &Zyklus<'_>, wer: BeraterId) -> String {
                             || t.starts_with(" Antwort verworfen, kein Urteil:")
                     }))
         })
-        .map(|(_, _, t)| crate::vorbereitung::text_fuer_frage(t))
+        .map(|(_, _, t)| {
+            if t.contains(": Veto:") {
+                // Die Zweitmeinung begrenzt die Gründe je Wert und ihren Freitext separat.
+                t.clone()
+            } else {
+                crate::vorbereitung::text_fuer_frage(t)
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -227,11 +234,17 @@ fn gleiche_abstimmungsziele(
     b: Option<&Vorschlag>,
     teilveto: &[Isin],
 ) -> bool {
+    if teilveto.is_empty() {
+        gleiche_ziele(a, b)
+    } else {
+        gleicher_handelsplan(a, b)
+    }
+}
+
+/// Vergleicht ausführungsrelevante Ziele, Parkwunsch und Ausstiegsplan ohne Freitext.
+pub fn gleicher_handelsplan(a: Option<&Vorschlag>, b: Option<&Vorschlag>) -> bool {
     if !gleiche_ziele(a, b) {
         return false;
-    }
-    if teilveto.is_empty() {
-        return true;
     }
     let (Some(a), Some(b)) = (a, b) else {
         return true;
@@ -476,7 +489,7 @@ fn abstimmungsrunden(
         }
         let kaufkosten = crate::kostenhuerde::abstimmung(
             &zyklus.tag.kurse,
-            [(&ea.topf, va.as_ref()), (&eb.topf, vb.as_ref())],
+            &[(&ea.topf, va.as_ref()), (&eb.topf, vb.as_ref())],
         );
         let sa = AbstimmungsStand {
             runde,

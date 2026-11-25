@@ -261,7 +261,7 @@ fn abstimmen(
         let phase = format!("Abstimmung Runde {runde}");
         let kaufkosten = crate::kostenhuerde::abstimmung(
             lage_a.kurse,
-            [
+            &[
                 (lage_a.topf, a.vorschlag.as_ref()),
                 (lage_b.topf, b.vorschlag.as_ref()),
             ],

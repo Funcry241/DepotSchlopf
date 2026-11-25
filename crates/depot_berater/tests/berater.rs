@@ -1404,21 +1404,21 @@ fn zurueckgegebener_schluessel_gelangt_nie_ins_ergebnis() -> Result<(), String> 
     reason = "kurze Namen wie in den uebrigen Tests"
 )]
 fn reservierung_ist_eine_gesicherte_obergrenze() -> Result<(), String> {
-    // Termine und Nachrichten kuerzt die Frage selbst (`MAX_EREIGNISSE_BYTES`); zu gross wird
-    // die Anfrage hier ueber eine ueberlange Begruendung im Vorschlag des anderen Beraters.
+    // Die Zweitmeinung kann Begründungstext weglassen. Überlange strukturierte Belegnummern
+    // testen den unveränderten Deckel auch nach dieser Kürzung.
     let mut ort = Ort::neu()?;
     let mut maus = berater(&ort, BeraterId::Maus, Attrappe::default())?;
     let e = ort.erlaubnis(BeraterId::Maus, 1)?;
     let max = e.deckel().max_token_ein();
-    let lang = "x".repeat(usize::try_from(max).map_err(|e| e.to_string())?);
+    let anz = usize::try_from(max).map_err(|e| e.to_string())?;
     let v = Vorschlag {
         erwartung_bp: std::collections::BTreeMap::new(),
         limit_bp: std::collections::BTreeMap::new(),
         stopp_bp: std::collections::BTreeMap::new(),
         berater: BeraterId::Dachs,
         zielgewichte_bp: [(sap()?, 1_000)].into_iter().collect(),
-        begruendung: [(sap()?, lang)].into_iter().collect(),
-        belege: std::collections::BTreeMap::new(),
+        begruendung: [(sap()?, "Test".into())].into_iter().collect(),
+        belege: [(sap()?, vec![30; anz])].into_iter().collect(),
         park: None,
     };
     let u = mit_lage(|l| maus.pruefen(e, l, &v))?;
@@ -1815,9 +1815,22 @@ fn grosse_lage_vorschlag(werte: &[depot_kern::liste::Wert], lang: &str) -> Vorsc
             .take(4)
             .map(|w| (w.isin.clone(), lang.to_owned()))
             .collect(),
-        belege: std::collections::BTreeMap::new(),
+        belege: werte
+            .iter()
+            .take(1)
+            .map(|w| (w.isin.clone(), vec![30]))
+            .collect(),
         park: None,
     }
+}
+
+fn grosse_lage_ereignisse(lang: &str) -> Vec<String> {
+    let sichtbar = "\"𝄞\" ".repeat(81);
+    (0..29)
+        .map(|i| format!("Termin {i:02}: {sichtbar}"))
+        .chain(std::iter::once(format!("Nachricht 00: {sichtbar}")))
+        .chain((1..31).map(|i| format!("Nachricht {i:02}: {lang}")))
+        .collect()
 }
 
 /// Die groesste Lage passt unter den Deckel der Eingabe (40.000 Bytes, K25-01): alle Werte der
@@ -1848,10 +1861,7 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
         topf.setze_bestand(w.isin.clone(), 1_000_000);
     }
     let lang = "\"𝄞\" ".repeat(200);
-    let ereignisse: Vec<String> = (0..30)
-        .map(|i| format!("Termin {i:02}: {lang}"))
-        .chain((0..30).map(|i| format!("Nachricht {i:02}: {lang}")))
-        .collect();
+    let ereignisse = grosse_lage_ereignisse(&lang);
     let verlauf: Vec<_> = werte
         .iter()
         .map(|w| {
@@ -1913,6 +1923,12 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
         let e = ort.erlaubnis(wer, 1)?;
         let _ = b.pruefen(e, &lage, &v);
         assert_eq!(b.netz().gesendet.len(), 2, "{wer:?}: beide gesendet; {a:?}");
+        assert!(
+            b.netz()
+                .gesendet
+                .last()
+                .is_some_and(|(_, _, inhalt)| inhalt.contains("belege=[30]"))
+        );
         for (_, _, inhalt) in &b.netz().gesendet {
             assert!(
                 inhalt.len() <= usize::try_from(max).unwrap_or(0),
@@ -1920,7 +1936,7 @@ fn groesste_lage_passt_unter_den_deckel() -> Result<(), String> {
                 inhalt.len()
             );
             assert!(inhalt.contains("weitere ausgelassen, Platz erschöpft"));
-            assert!(inhalt.contains("Termin 00"), "die ersten bleiben");
+            assert!(inhalt.contains("Termin 00") && inhalt.contains("Ereignis 30: Nachricht 00"));
         }
     }
     Ok(())
@@ -2449,8 +2465,8 @@ fn alter_vorschlag_lesbar() -> Result<(), String> {
     Ok(())
 }
 
-/// P43 (#311 H4): Die Zweitmeinung darf einzelne Werte ablehnen. Jede unklare Liste und jedes Ja
-/// mit Liste gilt als Veto gegen alles, nie als Formfehler (der gäbe den Ersatzkauf frei).
+/// Unlesbare Einträge lassen lesbare Teilvetos stehen. Eine ganz unlesbare Liste oder ein
+/// widersprüchliches Ja mit Liste bleibt ein Vollveto.
 #[test]
 fn zweitmeinung_liest_abgelehnte_werte() -> Result<(), String> {
     use depot_berater::frage::lies_urteil;
@@ -2467,6 +2483,24 @@ fn zweitmeinung_liest_abgelehnte_werte() -> Result<(), String> {
     let unklar =
         lies_urteil(r#"{"zustimmung": false, "abgelehnt": ["BASF"], "begruendung": "nein"}"#)?;
     assert_eq!(unklar.abgelehnt, Some(Vec::new()));
+    let freitext = "x".repeat(1000);
+    let gemischt = lies_urteil(&format!(
+        r#"{{"zustimmung":false,"abgelehnt":[{{"isin":"DE000BASF111","grund":"Kostenhürde BASF"}},{{"isin":"ungültig","grund":"kaputt"}},{{"isin":"DE0007164600","grund":"Kostenhürde SAP"}}],"begruendung":"{freitext}"}}"#
+    ))?;
+    assert_eq!(
+        gemischt.abgelehnt,
+        Some(vec![isin("DE000BASF111")?, isin("DE0007164600")?])
+    );
+    assert!(
+        gemischt
+            .begruendung
+            .starts_with("DE000BASF111: Kostenhürde BASF · DE0007164600: Kostenhürde SAP")
+    );
+    assert!(
+        gemischt
+            .begruendung
+            .contains("Nicht lesbare Veto-Einträge verworfen")
+    );
     let widerspruch =
         lies_urteil(r#"{"zustimmung": true, "abgelehnt": ["DE000BASF111"], "begruendung": "ja"}"#)?;
     assert!(!widerspruch.zustimmung);
