@@ -1741,26 +1741,25 @@ fn pruefe_kosten_des_rests(
     let mut zugelassen = Vec::with_capacity(ent.kaeufe.len());
     for kauf in ent.kaeufe.drain(..) {
         let a = kauf.auftrag();
-        let huerde = kaufkosten_bp(z.grenzen, a);
-        if vorschlag
-            .erwartung_bp
-            .get(&a.isin)
-            .copied()
-            .flatten()
-            .zip(huerde)
-            .is_some_and(|(gewinn, kosten)| gewinn > kosten)
-        {
-            zugelassen.push(kauf);
-        } else {
+        let erwartung = vorschlag.erwartung_bp.get(&a.isin).copied().flatten();
+        let grund = match (erwartung, kaufkosten_bp(z.grenzen, a)) {
+            (None, _) => Some("Ertragserwartung fehlt"),
+            (Some(gewinn), Some(kosten)) if gewinn > kosten => None,
+            (Some(_), Some(_)) => Some("Ertragserwartung liegt höchstens auf Höhe der Kostenhürde"),
+            (Some(_), None) => Some("Kostenhürde nicht berechenbar"),
+        };
+        if let Some(grund) = grund {
             begruende(
                 j,
                 tag,
                 "Kostenhürde",
                 &format!(
-                    "{topfname}: {} aus Teilveto-Rest ohne belegten Vorteil nach Kosten, kein Kauf.",
+                    "{topfname}: {} aus Teilveto-Rest: {grund}. Kein Kauf.",
                     a.isin
                 ),
             )?;
+        } else {
+            zugelassen.push(kauf);
         }
     }
     ent.kaeufe = zugelassen;

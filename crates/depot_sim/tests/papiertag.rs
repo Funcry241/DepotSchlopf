@@ -4152,11 +4152,12 @@ fn pruefe_zielbelege(j: &Journal, isins: [&Isin; 2]) {
 /// nennt das Teilveto lesbar wie ein Veto, mit den abgelehnten Werten.
 #[test]
 fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
-    teilveto_mit_erwartung(200, true)?;
-    teilveto_mit_erwartung(1, false)
+    teilveto_mit_erwartung(Some(200), None)?;
+    teilveto_mit_erwartung(Some(1), Some("höchstens auf Höhe der Kostenhürde"))?;
+    teilveto_mit_erwartung(None, Some("Ertragserwartung fehlt"))
 }
 
-fn teilveto_mit_erwartung(erwartung: i64, kauft: bool) -> Result<(), String> {
+fn teilveto_mit_erwartung(erwartung: Option<i64>, kein_kauf: Option<&str>) -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let d = tag(5)?;
@@ -4170,7 +4171,7 @@ fn teilveto_mit_erwartung(erwartung: i64, kauft: bool) -> Result<(), String> {
             verwertbar: true,
             einschaetzung: "SAP und Allianz".into(),
             vorschlag: Some(Vorschlag {
-                erwartung_bp: [(sap.clone(), Some(erwartung))].into_iter().collect(),
+                erwartung_bp: [(sap.clone(), erwartung)].into_iter().collect(),
                 limit_bp: std::collections::BTreeMap::new(),
                 stopp_bp: std::collections::BTreeMap::new(),
                 berater: BeraterId::Dachs,
@@ -4221,10 +4222,12 @@ fn teilveto_mit_erwartung(erwartung: i64, kauft: bool) -> Result<(), String> {
         .filter(|l| l.beleg.topf == TopfId::A)
         .map(|l| &l.beleg.isin)
         .collect();
-    if !kauft {
+    if let Some(erwarteter_grund) = kein_kauf {
         assert!(isins.is_empty());
         assert!(j.stand().begruendungen().iter().any(|(_, wer, grund)| {
-            wer == "Kostenhürde" && grund.contains("aus Teilveto-Rest ohne belegten Vorteil")
+            wer == "Kostenhürde"
+                && grund.contains("aus Teilveto-Rest")
+                && grund.contains(erwarteter_grund)
         }));
         return Ok(());
     }
