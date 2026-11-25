@@ -1196,6 +1196,7 @@ pub(crate) struct TopfAntwort {
     /// Einsatz der letzten verwertbaren eigenen Ziele vor der Zustimmung des anderen Beraters.
     pub(crate) eigener_einsatz_bp: i64,
     pub(crate) erstmeinung: Erstmeinung,
+    pub(crate) teilveto_freigabe: bool,
     zweitmeinung_ausgefallen: bool,
     ersatzkauf: bool,
     fristverkaeufe: BTreeSet<Isin>,
@@ -1384,6 +1385,7 @@ fn frage_topf(
         topf,
         vorschlag,
         erstmeinung,
+        teilveto_freigabe: false,
         zweitmeinung_ausgefallen: false,
         ersatzkauf: false,
         fristverkaeufe,
@@ -1413,7 +1415,7 @@ fn urteil_wort(folge: Option<&Urteilsfolge>) -> String {
 fn zweite_meinung(
     j: &mut Journal,
     z: &Zyklus<'_>,
-    antwort: TopfAntwort,
+    mut antwort: TopfAntwort,
     pruefer: &mut dyn Berater,
 ) -> Result<TopfAntwort, LaufFehler> {
     if z.uhr.is_some()
@@ -1425,28 +1427,20 @@ fn zweite_meinung(
         crate::abstimmung::belege_verkleinerung(j, z, &antwort.topf)?;
         return Ok(antwort);
     }
-    let TopfAntwort {
-        topf,
-        mut vorschlag,
-        eigener_einsatz_bp,
-        erstmeinung,
-        mut zweitmeinung_ausgefallen,
-        mut ersatzkauf,
-        fristverkaeufe,
-        wiederholung,
-    } = antwort;
+    let topf = &antwort.topf;
+    let mut vorschlag = antwort.vorschlag.take();
     let (tag, zyklus) = (z.tag, z.nr);
     let id = topf.id();
     let zweiter = andere(id.berater());
     let t = topf_name(id);
-    let positionskaeufe = crate::positionskauf::lies(j.stand(), &topf);
+    let positionskaeufe = crate::positionskauf::lies(j.stand(), topf);
     let verlauf = crate::kursverlauf::fuer_lage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let (relative_staerke, relativ_kurz) =
         crate::relative_staerke::fuer_frage(j.stand(), &tag.kurse, z.universum, tag.datum);
     let lage = Lage {
         anlass: None,
         datum: tag.datum,
-        topf: &topf,
+        topf,
         kaufbar: kaufbudget(j, z.grenzen, id)?,
         kurse: &tag.kurse,
         verlauf: &verlauf,
@@ -1483,6 +1477,8 @@ fn zweite_meinung(
         let folge = urteil.verwertbar.then(|| {
             crate::teilveto::urteilsfolge(&v, urteil.zustimmung, urteil.abgelehnt.as_deref())
         });
+        antwort.teilveto_freigabe =
+            z.uhr.is_some() && matches!(folge, Some(Urteilsfolge::Teilveto { .. }));
         let wort = urteil_wort(folge.as_ref());
         begruende(
             j,
@@ -1490,8 +1486,8 @@ fn zweite_meinung(
             name(zweiter),
             &format!("{t}: {wort}: {}", urteil.begruendung),
         )?;
-        zweitmeinung_ausgefallen = !urteil.verwertbar;
-        ersatzkauf = zweitmeinung_ausgefallen
+        antwort.zweitmeinung_ausgefallen = !urteil.verwertbar;
+        antwort.ersatzkauf = antwort.zweitmeinung_ausgefallen
             && pruefer.zweitmeinung_technisch_ausgefallen()
             && !pruefer.kostensperre();
         vorschlag = match folge {
@@ -1499,23 +1495,23 @@ fn zweite_meinung(
             Some(Urteilsfolge::Teilveto {
                 vorschlag: rest, ..
             }) => Some(*rest),
-            _ if ersatzkauf => Some(v),
+            _ if antwort.ersatzkauf => Some(v),
             _ => None,
         };
+        if antwort.teilveto_freigabe {
+            begruende(
+                j,
+                tag,
+                REGELWERK,
+                &format!("{t}: Bereinigter Teilveto-Rest gilt."),
+            )?;
+        }
         if urteil.verwertbar {
-            schattenkandidaten::belege(j, z, Phase::Zweitmeinung, &topf, vorschlag.as_ref())?;
+            schattenkandidaten::belege(j, z, Phase::Zweitmeinung, topf, vorschlag.as_ref())?;
         }
     }
-    Ok(TopfAntwort {
-        topf,
-        vorschlag,
-        eigener_einsatz_bp,
-        erstmeinung,
-        zweitmeinung_ausgefallen,
-        ersatzkauf,
-        fristverkaeufe,
-        wiederholung,
-    })
+    antwort.vorschlag = vorschlag;
+    Ok(antwort)
 }
 
 /// Der Parkwert zählt nicht zum Mindesteinsatz: Die 30-%-Regel soll zu aktiven Käufen führen
@@ -1683,10 +1679,15 @@ fn topf_zyklus(
         vor_valuta: &vor_valuta,
     };
     let frei = kaufbudget(j, z.grenzen, id)?;
-    let ent = match &wiederholung {
+    let mut ent = match &wiederholung {
         Some(w) => depot_regelwerk::entscheide_wiederholung(&eingabe, &mut vergabe, frei, w),
         None => plane_topf(j, &eingabe, frei, ersatzkauf, konto.tausch_moeglich()),
     };
+    if antwort.teilveto_freigabe
+        && let Some(v) = &vorschlag
+    {
+        pruefe_kosten_des_rests(j, z, t, v, &mut ent)?;
+    }
     if !ruhetag {
         mindesteinsatz(
             j,
@@ -1727,6 +1728,43 @@ fn topf_zyklus(
         ),
         Err(e) => Err(e),
     }
+}
+
+fn pruefe_kosten_des_rests(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    topfname: &str,
+    vorschlag: &Vorschlag,
+    ent: &mut depot_regelwerk::Entscheidung,
+) -> Result<(), LaufFehler> {
+    let tag = z.tag;
+    let mut zugelassen = Vec::with_capacity(ent.kaeufe.len());
+    for kauf in ent.kaeufe.drain(..) {
+        let a = kauf.auftrag();
+        let huerde = kaufkosten_bp(z.grenzen, a);
+        if vorschlag
+            .erwartung_bp
+            .get(&a.isin)
+            .copied()
+            .flatten()
+            .zip(huerde)
+            .is_some_and(|(gewinn, kosten)| gewinn > kosten)
+        {
+            zugelassen.push(kauf);
+        } else {
+            begruende(
+                j,
+                tag,
+                "Kostenhürde",
+                &format!(
+                    "{topfname}: {} aus Teilveto-Rest ohne belegten Vorteil nach Kosten, kein Kauf.",
+                    a.isin
+                ),
+            )?;
+        }
+    }
+    ent.kaeufe = zugelassen;
+    Ok(())
 }
 
 fn belege_topfbefunde(
@@ -1827,6 +1865,15 @@ fn verkauft(j: &Journal, auftraege: &[GenehmigterAuftrag]) -> bool {
 
 const ERWARTUNG: &str = "Erwartung";
 
+fn kaufkosten_bp(grenzen: &Grenzen, a: &depot_regelwerk::Auftrag) -> Option<i64> {
+    let volumen = a.limit.mal_stueck(a.stueck)?;
+    crate::kostenhuerde::gesamt_bp(
+        volumen,
+        grenzen.gebuehren().fuer(volumen)?,
+        depot_kern::liste::boerse_von(&a.isin),
+    )
+}
+
 fn belege_erwartung(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -1851,13 +1898,7 @@ fn belege_erwartung(
         .and_then(|text| crate::Ausstiegsplan::lies(text))
         .map_or_else(|| "-".to_owned(), |plan| plan.handelstage.to_string());
     begruende(j, z.tag, ERWARTUNG, &format!("{nr} {bp} {frist}"))?;
-    let huerde = a.limit.mal_stueck(a.stueck).and_then(|volumen| {
-        crate::kostenhuerde::gesamt_bp(
-            volumen,
-            z.grenzen.gebuehren().fuer(volumen)?,
-            depot_kern::liste::boerse_von(&a.isin),
-        )
-    });
+    let huerde = kaufkosten_bp(z.grenzen, a);
     if let Some(huerde) = huerde.filter(|h| bp < *h) {
         begruende(
             j,

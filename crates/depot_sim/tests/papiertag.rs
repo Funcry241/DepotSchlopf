@@ -4152,6 +4152,11 @@ fn pruefe_zielbelege(j: &Journal, isins: [&Isin; 2]) {
 /// nennt das Teilveto lesbar wie ein Veto, mit den abgelehnten Werten.
 #[test]
 fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
+    teilveto_mit_erwartung(200, true)?;
+    teilveto_mit_erwartung(1, false)
+}
+
+fn teilveto_mit_erwartung(erwartung: i64, kauft: bool) -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let d = tag(5)?;
@@ -4165,7 +4170,7 @@ fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
             verwertbar: true,
             einschaetzung: "SAP und Allianz".into(),
             vorschlag: Some(Vorschlag {
-                erwartung_bp: std::collections::BTreeMap::new(),
+                erwartung_bp: [(sap.clone(), Some(erwartung))].into_iter().collect(),
                 limit_bp: std::collections::BTreeMap::new(),
                 stopp_bp: std::collections::BTreeMap::new(),
                 berater: BeraterId::Dachs,
@@ -4216,6 +4221,13 @@ fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
         .filter(|l| l.beleg.topf == TopfId::A)
         .map(|l| &l.beleg.isin)
         .collect();
+    if !kauft {
+        assert!(isins.is_empty());
+        assert!(j.stand().begruendungen().iter().any(|(_, wer, grund)| {
+            wer == "Kostenhürde" && grund.contains("aus Teilveto-Rest ohne belegten Vorteil")
+        }));
+        return Ok(());
+    }
     assert_eq!(isins, vec![&sap]);
     pruefe_zielbelege(&j, [&sap, &allianz]);
     let kaufbelege: Vec<&str> = j
