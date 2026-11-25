@@ -1268,6 +1268,27 @@ fn anlass_heute(
     if let Some(crate::wiederholung::Pruefung::Anlass(grund)) = &pruefung {
         anlass = Some(grund.clone());
     }
+    if z.uhr.is_some() {
+        let frei = crate::anlass::genug_freies_bargeld(lage);
+        if z.anlass_pruefen
+            && anlass.is_none()
+            && pruefung.is_none()
+            && crate::anlass::bargeld_anlass(j.stand(), tag.datum, t, frei)
+        {
+            anlass = Some("freies Bargeld an zwei Handelstagen".into());
+        }
+        let anteil = if frei {
+            "mindestens 50 %"
+        } else {
+            "Schwelle nicht belegt"
+        };
+        begruende(
+            j,
+            tag,
+            crate::anlass::BARGELD_BELEG,
+            &format!("{t}: {anteil}"),
+        )?;
+    }
     if !z.anlass_pruefen || anlass.is_some() {
         return Ok(Heute::Fragen(anlass));
     }
@@ -2982,6 +3003,17 @@ mod wiederholung_tests {
     #[test]
     fn wiederholung_mit_neuem_limit() -> Result<(), LaufFehler> {
         let mut p = probelauf("limit", 10_150, true)?;
+        let vortag = Tag {
+            datum: datum(16)?,
+            kurse: p.tag.kurse.clone(),
+            ereignisse: Vec::new(),
+        };
+        begruende(
+            &mut p.j,
+            &vortag,
+            crate::anlass::BARGELD_BELEG,
+            "Topf A: mindestens 50 %",
+        )?;
         let (antwort, probe) = morgen(&mut p, true)?;
         assert_eq!(probe.0, None, "KI nicht gefragt");
         assert!(antwort.wiederholung.is_some());

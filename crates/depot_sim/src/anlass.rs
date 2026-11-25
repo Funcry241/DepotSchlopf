@@ -69,6 +69,39 @@ fn ereignis(
     })
 }
 
+pub(crate) const BARGELD_BELEG: &str = "Freies Bargeld";
+
+pub(crate) fn genug_freies_bargeld(lage: &Lage<'_>) -> bool {
+    Preis::aus_cent(lage.kaufbar)
+        .zip(lage.topf.wert_exakt(lage.kurse))
+        .and_then(|(bar, wert)| bar.in_bp_von(wert))
+        .is_some_and(|bp| bp >= FREIES_BARGELD_BP)
+}
+
+pub(crate) fn bargeld_anlass(stand: &Stand, heute: Datum, topf: &str, frei: bool) -> bool {
+    if !frei || !handelstag(heute) {
+        return false;
+    }
+    let vortag = (-31..=-1)
+        .rev()
+        .filter_map(|tage| heute.plus_tage(tage))
+        .find(|d| handelstag(*d));
+    let praefix = format!("{topf}: ");
+    stand
+        .begruendungen()
+        .iter()
+        .rev()
+        .find_map(|(tag, wer, text)| {
+            if Some(*tag) == vortag && wer == BARGELD_BELEG {
+                text.strip_prefix(&praefix)
+                    .map(|rest| rest == "mindestens 50 %")
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false)
+}
+
 pub(crate) fn anlass(stand: &Stand, universum: &Universum, lage: &Lage<'_>) -> Option<String> {
     let letzte = letzte_erstmeinung(stand, lage);
     let wissen = stand
@@ -77,10 +110,7 @@ pub(crate) fn anlass(stand: &Stand, universum: &Universum, lage: &Lage<'_>) -> O
     if let Some(grund) = ereignis(stand, universum, lage, wissen, letzte) {
         return Some(grund);
     }
-    let frei = Preis::aus_cent(lage.kaufbar)
-        .zip(lage.topf.wert_exakt(lage.kurse))
-        .and_then(|(bar, wert)| bar.in_bp_von(wert))
-        .is_some_and(|bp| bp >= FREIES_BARGELD_BP);
+    let frei = genug_freies_bargeld(lage);
     if let Some((isin, _)) = lage.verlauf.iter().find(|(isin, verlauf)| {
         let gehalten = lage.topf.stueck(isin) != 0;
         let sprung = |tage, grenze| {
@@ -121,6 +151,28 @@ pub(crate) fn anlass(stand: &Stand, universum: &Universum, lage: &Lage<'_>) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bargeld_anlass_braucht_zwei_aufeinanderfolgende_handelstage_je_topf() -> Result<(), String> {
+        let ordner =
+            std::env::temp_dir().join(format!("depot-bargeld-anlass-{}", std::process::id()));
+        let mut journal = depot_journal::Journal::einrichten(&ordner)
+            .and_then(|()| depot_journal::Journal::oeffnen(&ordner))
+            .map_err(|e| format!("{e:?}"))?;
+        let freitag = Datum::neu(2030, 1, 11).ok_or("Freitag")?;
+        let montag = Datum::neu(2030, 1, 14).ok_or("Montag")?;
+        let dienstag = Datum::neu(2030, 1, 15).ok_or("Dienstag")?;
+        journal
+            .begruende(freitag, BARGELD_BELEG, "Topf A: mindestens 50 %")
+            .map_err(|e| format!("{e:?}"))?;
+        assert!(bargeld_anlass(journal.stand(), montag, "Topf A", true));
+        assert!(!bargeld_anlass(journal.stand(), montag, "Topf B", true));
+        assert!(!bargeld_anlass(journal.stand(), montag, "Topf A", false));
+        assert!(!bargeld_anlass(journal.stand(), dienstag, "Topf A", true));
+        drop(journal);
+        std::fs::remove_file(ordner).map_err(|e| e.to_string())?;
+        Ok(())
+    }
 
     #[test]
     fn pflichtblick_zaehlt_handelstage_statt_kalendertage() -> Result<(), String> {
