@@ -1190,7 +1190,7 @@ pub(crate) enum Erstmeinung {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum FreiwilligeAuftraege {
+enum KernanlageErlaubnis {
     Frei,
     Gesperrt,
 }
@@ -1203,7 +1203,7 @@ pub(crate) struct TopfAntwort {
     pub(crate) eigener_einsatz_bp: i64,
     pub(crate) erstmeinung: Erstmeinung,
     pub(crate) teilveto_freigabe: bool,
-    freiwillige_auftraege: FreiwilligeAuftraege,
+    kernanlage_erlaubnis: KernanlageErlaubnis,
     zweitmeinung_ausgefallen: bool,
     ersatzkauf: bool,
     fristverkaeufe: BTreeSet<Isin>,
@@ -1413,11 +1413,10 @@ fn frage_topf(
         vorschlag,
         erstmeinung,
         teilveto_freigabe: false,
-        freiwillige_auftraege: if gesperrt.is_none() && wartet.is_none() && !gestoppt.contains(&id)
-        {
-            FreiwilligeAuftraege::Frei
+        kernanlage_erlaubnis: if gesperrt.is_none() && wartet.is_none() && !gestoppt.contains(&id) {
+            KernanlageErlaubnis::Frei
         } else {
-            FreiwilligeAuftraege::Gesperrt
+            KernanlageErlaubnis::Gesperrt
         },
         zweitmeinung_ausgefallen: false,
         ersatzkauf: false,
@@ -1512,6 +1511,9 @@ fn zweite_meinung(
         });
         antwort.teilveto_freigabe =
             z.uhr.is_some() && matches!(folge, Some(Urteilsfolge::Teilveto { .. }));
+        if crate::kernanlage::veto_gegen_kernanlage(&v, folge.as_ref()) {
+            antwort.kernanlage_erlaubnis = KernanlageErlaubnis::Gesperrt;
+        }
         let wort = urteil_wort(folge.as_ref());
         begruende(
             j,
@@ -1723,7 +1725,7 @@ fn topf_zyklus(
     }
     let kern_erlaubt = z.uhr.is_some() && konto.lokale_kernanlage();
     let kernplan = (kern_erlaubt
-        && antwort.freiwillige_auftraege == FreiwilligeAuftraege::Frei
+        && antwort.kernanlage_erlaubnis == KernanlageErlaubnis::Frei
         && z.gesperrt.is_empty()
         && wiederholung.is_none()
         && !ersatzkauf)

@@ -10,6 +10,29 @@ const EUNL: &str = "IE00B4L5Y983";
 const ZIEL_BP: i64 = 3_000;
 const LIMIT_BP: i64 = 100;
 
+pub(crate) fn veto_gegen_kernanlage(
+    ursprung: &Vorschlag,
+    urteil: Option<&crate::teilveto::Urteilsfolge>,
+) -> bool {
+    use crate::teilveto::Urteilsfolge;
+    match urteil {
+        Some(Urteilsfolge::Teilveto { abgelehnt, .. }) => {
+            abgelehnt.iter().any(|isin| isin.als_str() == EUNL)
+        }
+        Some(Urteilsfolge::Veto) => {
+            ursprung
+                .zielgewichte_bp
+                .keys()
+                .any(|isin| isin.als_str() == EUNL)
+                || ursprung
+                    .park
+                    .as_ref()
+                    .is_some_and(|park| park.isin.als_str() == EUNL)
+        }
+        _ => false,
+    }
+}
+
 pub fn ist_kernposition(stand: &Stand, topf: &Topf, isin: &Isin) -> bool {
     isin.als_str() == EUNL
         && topf.stueck(isin) > 0
@@ -157,10 +180,9 @@ pub(crate) fn vorschlag(
     }
     if e.vorschlag.is_some_and(|v| {
         (v.zielgewichte_bp.contains_key(&isin)
-            && !v
-                .begruendung
+            && v.begruendung
                 .get(&isin)
-                .is_some_and(|grund| grund == crate::ausgelassen::UNVERAENDERT))
+                .is_none_or(|grund| grund != crate::ausgelassen::UNVERAENDERT))
             || v.park.as_ref().is_some_and(|p| p.isin == isin)
     }) {
         return None;
