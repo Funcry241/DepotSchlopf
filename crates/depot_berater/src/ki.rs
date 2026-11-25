@@ -1210,7 +1210,12 @@ impl<N: Netz> Berater for KiBerater<N> {
         match e
             .text
             .and_then(|t| {
-                let mut antwort = frage::lies_abstimmung(&t, self.wer, &self.universum)?;
+                let mut antwort = frage::lies_abstimmung(
+                    &t,
+                    self.wer,
+                    &self.universum,
+                    stand.eigener_vorschlag.as_ref(),
+                )?;
                 frage::belege_gesamtverkauf(&t, lage, &mut antwort.eigene)?;
                 Ok(antwort)
             })

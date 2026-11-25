@@ -67,7 +67,14 @@ fn beitraege(buch: &Journal, zyklus: &Zyklus<'_>, wer: BeraterId) -> String {
                             || t.starts_with(" Antwort verworfen, kein Urteil:")
                     }))
         })
-        .map(|(_, _, t)| crate::vorbereitung::text_fuer_frage(t))
+        .map(|(_, _, t)| {
+            if t.contains(": Veto:") {
+                // Die Zweitmeinung begrenzt die Gründe je Wert und ihren Freitext separat.
+                t.clone()
+            } else {
+                crate::vorbereitung::text_fuer_frage(t)
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -476,7 +483,7 @@ fn abstimmungsrunden(
         }
         let kaufkosten = crate::kostenhuerde::abstimmung(
             &zyklus.tag.kurse,
-            [(&ea.topf, va.as_ref()), (&eb.topf, vb.as_ref())],
+            &[(&ea.topf, va.as_ref()), (&eb.topf, vb.as_ref())],
         );
         let sa = AbstimmungsStand {
             runde,

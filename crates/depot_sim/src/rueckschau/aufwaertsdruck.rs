@@ -143,6 +143,9 @@ impl Auswertung<'_> {
             statistik.termine = statistik.termine.saturating_add(1);
             let Some(befund) = index.signale(boerse, bezugstag, bereit) else {
                 statistik.marktluecken = statistik.marktluecken.saturating_add(1);
+                if index.signale(boerse, bezugstag, self.jetzt).is_some() {
+                    statistik.spaeter_auswertbar = statistik.spaeter_auswertbar.saturating_add(1);
+                }
                 continue;
             };
             statistik.gruppen_bewertet = statistik
@@ -237,6 +240,7 @@ impl Bilanz {
 struct Historisch {
     termine: usize,
     marktluecken: usize,
+    spaeter_auswertbar: usize,
     gruppen_bewertet: usize,
     gruppen_fehlend: usize,
     ohne_signal: usize,
@@ -383,13 +387,14 @@ pub(super) fn bericht(
         live.gruppen_bewertet_ohne_signal,
         live.gruppen_fehlend_ohne_signal
     );
-    text.push_str("\n| Historische Abdeckung | Termine | Marktlücke | Bewertete Gruppen | Gruppenlücke | Ohne Signal |\n|---|---:|---:|---:|---:|---:|\n");
+    text.push_str("\n| Historische Abdeckung | Termine | Marktlücke um 08:30 | Davon zum Export auswertbar | Bewertete Gruppen | Gruppenlücke | Ohne Signal |\n|---|---:|---:|---:|---:|---:|---:|\n");
     for (boerse, statistik) in historisch {
         let _ = writeln!(
             text,
-            "| {boerse} | {} | {} | {} | {} | {} |",
+            "| {boerse} | {} | {} | {} | {} | {} | {} |",
             statistik.termine,
             statistik.marktluecken,
+            statistik.spaeter_auswertbar,
             statistik.gruppen_bewertet,
             statistik.gruppen_fehlend,
             statistik.ohne_signal

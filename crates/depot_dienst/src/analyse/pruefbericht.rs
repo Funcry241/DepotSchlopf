@@ -10,6 +10,19 @@ use super::Zeitraum;
 
 mod abstimmung;
 
+fn unbegruendete_rueckzuege(stand: &Stand, zeitraum: Zeitraum) -> usize {
+    stand
+        .begruendungen()
+        .iter()
+        .filter(|(tag, wer, grund)| {
+            (zeitraum.von..=zeitraum.bis).contains(tag)
+                && matches!(wer.as_str(), "Dachs" | "Maus")
+                && grund.starts_with("Abstimmung Runde ")
+                && grund.contains("; Grund: Rückzug ohne Begründung")
+        })
+        .count()
+}
+
 pub(super) fn bericht(
     stand: Option<&Stand>,
     zeitraum: Zeitraum,
@@ -47,9 +60,10 @@ pub(super) fn bericht(
             .ausfuehrungsfolge()
             .filter(|(_, f)| f.kurszeit.is_some_and(|t| zeitraum.enthaelt(t)))
             .count();
+        let rueckzuege = unbegruendete_rueckzuege(stand, zeitraum);
         let _ = writeln!(
             text,
-            "- Belegte Tagesabschlüsse: {abschluesse} bei {handelstage} Kalendertagen mit Börsenhandel im Zeitraum.\n- KI-Buchungen: {buchungen}.\n- Orderversand: {versendet}. Zeitlich zugeordnete Ausführungen: {fuellungen}.\n"
+            "- Belegte Tagesabschlüsse: {abschluesse} bei {handelstage} Kalendertagen mit Börsenhandel im Zeitraum.\n- KI-Buchungen: {buchungen}.\n- Orderversand: {versendet}. Zeitlich zugeordnete Ausführungen: {fuellungen}.\n- Protokollierte Rückzüge ohne Begründung: {rueckzuege}.\n"
         );
         if versendet == 0 && handelstage != 0 {
             text.push_str("**Auffällig:** Im Zeitraum ist kein Orderversand belegt. Gründe und Beleglücken stehen unter Nicht-Handeln.\n\n");

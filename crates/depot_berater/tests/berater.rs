@@ -2449,8 +2449,8 @@ fn alter_vorschlag_lesbar() -> Result<(), String> {
     Ok(())
 }
 
-/// P43 (#311 H4): Die Zweitmeinung darf einzelne Werte ablehnen. Jede unklare Liste und jedes Ja
-/// mit Liste gilt als Veto gegen alles, nie als Formfehler (der gäbe den Ersatzkauf frei).
+/// Unlesbare Einträge lassen lesbare Teilvetos stehen. Eine ganz unlesbare Liste oder ein
+/// widersprüchliches Ja mit Liste bleibt ein Vollveto.
 #[test]
 fn zweitmeinung_liest_abgelehnte_werte() -> Result<(), String> {
     use depot_berater::frage::lies_urteil;
@@ -2467,6 +2467,24 @@ fn zweitmeinung_liest_abgelehnte_werte() -> Result<(), String> {
     let unklar =
         lies_urteil(r#"{"zustimmung": false, "abgelehnt": ["BASF"], "begruendung": "nein"}"#)?;
     assert_eq!(unklar.abgelehnt, Some(Vec::new()));
+    let freitext = "x".repeat(1000);
+    let gemischt = lies_urteil(&format!(
+        r#"{{"zustimmung":false,"abgelehnt":[{{"isin":"DE000BASF111","grund":"Kostenhürde BASF"}},{{"isin":"ungültig","grund":"kaputt"}},{{"isin":"DE0007164600","grund":"Kostenhürde SAP"}}],"begruendung":"{freitext}"}}"#
+    ))?;
+    assert_eq!(
+        gemischt.abgelehnt,
+        Some(vec![isin("DE000BASF111")?, isin("DE0007164600")?])
+    );
+    assert!(
+        gemischt
+            .begruendung
+            .starts_with("DE000BASF111: Kostenhürde BASF · DE0007164600: Kostenhürde SAP")
+    );
+    assert!(
+        gemischt
+            .begruendung
+            .contains("Unlesbare Vetoeinträge verworfen")
+    );
     let widerspruch =
         lies_urteil(r#"{"zustimmung": true, "abgelehnt": ["DE000BASF111"], "begruendung": "ja"}"#)?;
     assert!(!widerspruch.zustimmung);
