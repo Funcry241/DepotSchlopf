@@ -4152,11 +4152,12 @@ fn pruefe_zielbelege(j: &Journal, isins: [&Isin; 2]) {
 /// nennt das Teilveto lesbar wie ein Veto, mit den abgelehnten Werten.
 #[test]
 fn teilveto_kauft_die_uebrigen_werte() -> Result<(), String> {
-    teilveto_mit_erwartung(200, true)?;
-    teilveto_mit_erwartung(1, false)
+    teilveto_mit_erwartung(Some(200), None)?;
+    teilveto_mit_erwartung(Some(1), Some("höchstens auf Höhe der Kostenhürde"))?;
+    teilveto_mit_erwartung(None, Some("Ertragserwartung fehlt"))
 }
 
-fn teilveto_mit_erwartung(erwartung: i64, kauft: bool) -> Result<(), String> {
+fn teilveto_mit_erwartung(erwartung: Option<i64>, kein_kauf: Option<&str>) -> Result<(), String> {
     let ort = Ort::neu()?;
     let (sap, allianz) = (sap()?, allianz()?);
     let d = tag(5)?;
@@ -4170,7 +4171,7 @@ fn teilveto_mit_erwartung(erwartung: i64, kauft: bool) -> Result<(), String> {
             verwertbar: true,
             einschaetzung: "SAP und Allianz".into(),
             vorschlag: Some(Vorschlag {
-                erwartung_bp: [(sap.clone(), Some(erwartung))].into_iter().collect(),
+                erwartung_bp: [(sap.clone(), erwartung)].into_iter().collect(),
                 limit_bp: std::collections::BTreeMap::new(),
                 stopp_bp: std::collections::BTreeMap::new(),
                 berater: BeraterId::Dachs,
@@ -4221,10 +4222,12 @@ fn teilveto_mit_erwartung(erwartung: i64, kauft: bool) -> Result<(), String> {
         .filter(|l| l.beleg.topf == TopfId::A)
         .map(|l| &l.beleg.isin)
         .collect();
-    if !kauft {
+    if let Some(erwarteter_grund) = kein_kauf {
         assert!(isins.is_empty());
         assert!(j.stand().begruendungen().iter().any(|(_, wer, grund)| {
-            wer == "Kostenhürde" && grund.contains("aus Teilveto-Rest ohne belegten Vorteil")
+            wer == "Kostenhürde"
+                && grund.contains("aus Teilveto-Rest")
+                && grund.contains(erwarteter_grund)
         }));
         return Ok(());
     }
@@ -4397,4 +4400,132 @@ fn kernanlage_umschichtung(
             abgelehnt: None,
         },
     );
+}
+
+#[test]
+fn kernanlage_haelt_bei_kursdrift() -> Result<(), String> {
+    kernanlage_mit_drei_aktien(false)
+}
+
+#[test]
+fn kernanlage_raeumt_fuer_vierte_aktie_aus_ersatzkauf() -> Result<(), String> {
+    kernanlage_mit_drei_aktien(true)
+}
+
+fn kernanlage_mit_drei_aktien(ersatzkauf: bool) -> Result<(), String> {
+    let eunl = vorbedingung(Isin::neu("IE00B4L5Y983"), "ISIN EUNL")?;
+    let basf = vorbedingung(Isin::neu("DE000BASF111"), "ISIN BASF")?;
+    let telekom = vorbedingung(Isin::neu("DE0005557508"), "ISIN Telekom")?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let aktien = [&sap, &allianz, &basf, &telekom];
+    let liste = Universum::neu(
+        aktien
+            .into_iter()
+            .map(|isin| Instrument {
+                isin: isin.clone(),
+                name: isin.to_string(),
+                art: InstrumentArt::Aktie,
+            })
+            .chain([Instrument {
+                isin: eunl.clone(),
+                name: "EUNL".into(),
+                art: InstrumentArt::EtfPhysischUcits,
+            }])
+            .collect(),
+    );
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let mut toepfe = start()?;
+    let a = some(toepfe.first_mut(), "Topf A")?;
+    for isin in [&sap, &allianz, &basf] {
+        a.setze_bestand(isin.clone(), 5);
+    }
+    let mut broker = some(Papierkonto::eroeffne(&toepfe), "Papierkonto")?;
+    let preise: Vec<_> = aktien
+        .into_iter()
+        .chain([&eunl])
+        .map(|isin| (isin, "100", if isin == &sap { "103" } else { "100" }))
+        .collect();
+    belege(&mut j, 5, &preise)?;
+    vorbedingung(
+        papiertag(
+            &mut j,
+            tag(5)?,
+            &liste,
+            &toepfe,
+            &mut Stumm,
+            &mut Stumm,
+            &mut broker,
+        ),
+        "Kernaufbau",
+    )?;
+    let kernkauf = some(
+        j.stand()
+            .auftraege()
+            .iter()
+            .find(|a| a.beleg.topf == TopfId::A && a.beleg.isin == eunl),
+        "Kernkauf in Topf A",
+    )?
+    .beleg
+    .nr;
+    let preise: Vec<_> = preise
+        .into_iter()
+        .map(|(isin, _, preis)| (isin, preis, preis))
+        .collect();
+    belege(&mut j, 6, &preise)?;
+    let (mut dachs, mut maus) = if ersatzkauf {
+        let (dachs, mut maus) = kaeufer(tag(6)?, &telekom);
+        for urteil in maus.urteile.values_mut() {
+            urteil.verwertbar = false;
+        }
+        (dachs, maus)
+    } else {
+        (Drehbuch::default(), Drehbuch::default())
+    };
+    vorbedingung(
+        papiertag(
+            &mut j,
+            tag(6)?,
+            &liste,
+            &toepfe,
+            &mut dachs,
+            &mut maus,
+            &mut broker,
+        ),
+        "Folgetag",
+    )?;
+    let neu: Vec<_> = j
+        .stand()
+        .auftraege()
+        .iter()
+        .filter(|a| a.beleg.topf == TopfId::A && a.beleg.nr > kernkauf)
+        .collect();
+    if ersatzkauf {
+        pruefe_kernverkauf(&j, &neu, &eunl, &telekom)?;
+    } else {
+        assert!(neu.is_empty(), "{neu:?}");
+    }
+    Ok(())
+}
+
+fn pruefe_kernverkauf(
+    j: &Journal,
+    neu: &[&depot_journal::AuftragsLage],
+    eunl: &Isin,
+    telekom: &Isin,
+) -> Result<(), String> {
+    let [verkauf, kauf] = neu else {
+        return Err(format!("Kernverkauf und Ersatzkauf erwartet: {neu:?}"));
+    };
+    assert_eq!(&verkauf.beleg.isin, eunl);
+    assert_eq!(verkauf.beleg.richtung, depot_regelwerk::Richtung::Verkauf);
+    assert!(depot_sim::kernanlage::ist_kernauftrag(
+        j.stand(),
+        verkauf.beleg.nr
+    ));
+    assert_eq!(&kauf.beleg.isin, telekom);
+    assert_eq!(kauf.beleg.richtung, depot_regelwerk::Richtung::Kauf);
+    assert_eq!(kauf.beleg.stueck, 6);
+    assert_eq!(kauf.beleg.nach, [verkauf.beleg.nr]);
+    Ok(())
 }

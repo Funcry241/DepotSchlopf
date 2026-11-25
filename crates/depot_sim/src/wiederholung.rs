@@ -44,6 +44,7 @@ pub(crate) fn pruefe(stand: &Stand, g: &Grenzen, lage: &Lage<'_>) -> Option<Prue
                 && z.richtung == Richtung::Kauf
                 && z.anlass == Anlass::Umschichtung
                 && z.zustand == AuftragsZustand::Verfallen
+                && !crate::kernanlage::ist_kernauftrag(stand, z.nr)
         })
         .filter(|z| {
             // Verfallen am jüngsten belegten Schluss dieses Werts.

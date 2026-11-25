@@ -8,7 +8,7 @@ use depot_regelwerk::{Eingabe, Entscheidung, Richtung};
 pub const KERNANLAGE: &str = "Kernanlage";
 const EUNL: &str = "IE00B4L5Y983";
 const ZIEL_BP: i64 = 3_000;
-const LIMIT_BP: i64 = 100;
+pub(crate) const LIMIT_BP: i64 = 100;
 
 pub(crate) fn veto_gegen_kernanlage(
     ursprung: &Vorschlag,
@@ -107,6 +107,50 @@ fn positionen(e: &Eingabe<'_>, plan: &Entscheidung) -> Option<BTreeMap<Isin, u64
     Some(positionen)
 }
 
+pub(crate) fn freizugebender_platz(
+    stand: &Stand,
+    e: &Eingabe<'_>,
+    plan: &Entscheidung,
+) -> Option<Isin> {
+    let isin = Isin::neu(EUNL).ok()?;
+    if !ist_kernposition(stand, e.topf, &isin)
+        || eigene_ki_anlage(e, &isin)
+        || plan.verkaeufe.iter().any(|v| v.auftrag().isin == isin)
+    {
+        return None;
+    }
+    let nachher = positionen(e, plan)?;
+    (nachher.contains_key(&isin)
+        && nachher.len() > e.grenzen.max_werte()
+        && plan
+            .kaeufe
+            .iter()
+            .any(|k| e.topf.stueck(&k.auftrag().isin) == 0))
+    .then_some(isin)
+}
+
+pub(crate) fn platz_geraeumt(e: &Eingabe<'_>, plan: &Entscheidung, kern: &Isin) -> bool {
+    let Some(nachher) = positionen(e, plan) else {
+        return false;
+    };
+    !nachher.contains_key(kern)
+        && nachher.len() == e.grenzen.max_werte()
+        && plan
+            .kaeufe
+            .iter()
+            .any(|k| e.topf.stueck(&k.auftrag().isin) == 0)
+}
+
+fn eigene_ki_anlage(e: &Eingabe<'_>, isin: &Isin) -> bool {
+    e.vorschlag.is_some_and(|v| {
+        (v.zielgewichte_bp.contains_key(isin)
+            && v.begruendung
+                .get(isin)
+                .is_none_or(|grund| grund != crate::ausgelassen::UNVERAENDERT))
+            || v.park.as_ref().is_some_and(|p| &p.isin == isin)
+    })
+}
+
 fn ziel(e: &Eingabe<'_>, plan: &Entscheidung, kern: &Isin) -> Option<(i64, usize)> {
     let mut positionen = positionen(e, plan)?;
     positionen.remove(kern);
@@ -153,8 +197,8 @@ fn verkaufsziel(e: &Eingabe<'_>, isin: &Isin, ist_bp: i64, fehlbetrag: Cent) -> 
         .in_bp_von(e.topf.wert_exakt(e.kurse)?)
 }
 
-fn leer(e: &Eingabe<'_>) -> Vorschlag {
-    Vorschlag {
+fn haltebestand(e: &Eingabe<'_>) -> Vorschlag {
+    let mut vorschlag = Vorschlag {
         berater: e.topf.id().berater(),
         erwartung_bp: BTreeMap::new(),
         zielgewichte_bp: BTreeMap::new(),
@@ -163,7 +207,9 @@ fn leer(e: &Eingabe<'_>) -> Vorschlag {
         begruendung: BTreeMap::new(),
         belege: BTreeMap::new(),
         park: None,
-    }
+    };
+    crate::ausgelassen::ergaenze_ausgelassene(e.topf, e.kurse, &mut vorschlag);
+    vorschlag
 }
 
 /// Ändert nur das EUNL-Ziel. Der aufrufende Papierlauf lässt denselben Schutz erneut planen.
@@ -178,13 +224,7 @@ pub(crate) fn vorschlag(
     if !e.universum.handelbar(&isin, e.grenzen) || e.kurse.kurs(&isin).is_none() {
         return None;
     }
-    if e.vorschlag.is_some_and(|v| {
-        (v.zielgewichte_bp.contains_key(&isin)
-            && v.begruendung
-                .get(&isin)
-                .is_none_or(|grund| grund != crate::ausgelassen::UNVERAENDERT))
-            || v.park.as_ref().is_some_and(|p| p.isin == isin)
-    }) {
+    if eigene_ki_anlage(e, &isin) {
         return None;
     }
     if basis
@@ -200,7 +240,8 @@ pub(crate) fn vorschlag(
         return None;
     }
     let ist_bp = depot_regelwerk::entscheidung::ist_gewicht_bp(e.topf, e.kurse, &isin)?;
-    let (mut ziel_bp, mut andere) = ziel(e, basis, &isin)?;
+    let (angestrebter_kern, andere) = ziel(e, basis, &isin)?;
+    let mut ziel_bp = angestrebter_kern.max(ist_bp);
     if hat_kern && let Some(ki_ziele) = e.vorschlag {
         let kernwert = e
             .kurse
@@ -209,16 +250,19 @@ pub(crate) fn vorschlag(
         let mut ki_ziele = ki_ziele.clone();
         ki_ziele.zielgewichte_bp.insert(isin.clone(), 0);
         let mit_kern = probe(&ki_ziele, frei.checked_add(kernwert)?);
-        let (zusaetzliches_ziel, weitere) = ziel(e, &mit_kern, &isin)?;
-        andere = weitere;
-        ziel_bp = ziel_bp.min(zusaetzliches_ziel);
-        let fehlbetrag = kaufbedarf(e, &mit_kern)?.checked_sub(frei)?;
-        if fehlbetrag > Cent::NULL {
-            ziel_bp = ziel_bp.min(verkaufsziel(e, &isin, ist_bp, fehlbetrag)?);
+        let (restziel, weitere) = ziel(e, &mit_kern, &isin)?;
+        if !mit_kern.kaeufe.is_empty() {
+            let fehlbetrag = kaufbedarf(e, &mit_kern)?.checked_sub(frei)?;
+            let (bisheriger_bedarf, _) = ziel(e, &Entscheidung::default(), &isin)?;
+            if (bisheriger_bedarf > 0 && restziel == 0) || weitere >= e.grenzen.max_werte() {
+                ziel_bp = 0;
+            } else if fehlbetrag > Cent::NULL {
+                ziel_bp = verkaufsziel(e, &isin, ist_bp, fehlbetrag)?;
+            }
         }
     }
-    if andere >= e.grenzen.max_werte() {
-        ziel_bp = 0;
+    if andere >= e.grenzen.max_werte() && !hat_kern {
+        return None;
     }
     if ziel_bp > ist_bp {
         let rest = frei.checked_sub(kaufbedarf(e, basis)?)?;
@@ -228,10 +272,12 @@ pub(crate) fn vorschlag(
         let zusatz = Preis::aus_cent(rest)?.in_bp_von(e.topf.wert_exakt(e.kurse)?)?;
         ziel_bp = ziel_bp.min(ist_bp.checked_add(zusatz)?);
     }
-    if ziel_bp == ist_bp {
+    if ziel_bp == ist_bp
+        || (ziel_bp > ist_bp && ziel_bp.checked_sub(ist_bp)? < e.grenzen.min_aenderung_bp())
+    {
         return None;
     }
-    let mut vorschlag = e.vorschlag.cloned().unwrap_or_else(|| leer(e));
+    let mut vorschlag = e.vorschlag.cloned().unwrap_or_else(|| haltebestand(e));
     vorschlag.zielgewichte_bp.insert(isin.clone(), ziel_bp);
     vorschlag.limit_bp.insert(isin.clone(), LIMIT_BP);
     vorschlag
