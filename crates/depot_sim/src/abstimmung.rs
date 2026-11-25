@@ -234,11 +234,17 @@ fn gleiche_abstimmungsziele(
     b: Option<&Vorschlag>,
     teilveto: &[Isin],
 ) -> bool {
+    if teilveto.is_empty() {
+        gleiche_ziele(a, b)
+    } else {
+        gleicher_handelsplan(a, b)
+    }
+}
+
+/// Vergleicht ausführungsrelevante Ziele, Parkwunsch und Ausstiegsplan ohne Freitext.
+pub fn gleicher_handelsplan(a: Option<&Vorschlag>, b: Option<&Vorschlag>) -> bool {
     if !gleiche_ziele(a, b) {
         return false;
-    }
-    if teilveto.is_empty() {
-        return true;
     }
     let (Some(a), Some(b)) = (a, b) else {
         return true;

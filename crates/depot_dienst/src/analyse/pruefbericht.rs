@@ -10,7 +10,7 @@ use super::Zeitraum;
 
 mod abstimmung;
 
-fn unbegruendete_rueckzuege(stand: &Stand, zeitraum: Zeitraum) -> usize {
+fn abstimmungsvermerke(stand: &Stand, zeitraum: Zeitraum, vermerk: &str) -> usize {
     stand
         .begruendungen()
         .iter()
@@ -18,7 +18,12 @@ fn unbegruendete_rueckzuege(stand: &Stand, zeitraum: Zeitraum) -> usize {
             (zeitraum.von..=zeitraum.bis).contains(tag)
                 && matches!(wer.as_str(), "Dachs" | "Maus")
                 && grund.starts_with("Abstimmung Runde ")
-                && grund.contains("; Grund: Rückzug ohne Begründung")
+                && grund.split_once("; Grund: ").is_some_and(|(_, grund)| {
+                    grund == vermerk
+                        || grund
+                            .strip_prefix(vermerk)
+                            .is_some_and(|rest| rest.starts_with(" [Kosten "))
+                })
         })
         .count()
 }
@@ -60,10 +65,11 @@ pub(super) fn bericht(
             .ausfuehrungsfolge()
             .filter(|(_, f)| f.kurszeit.is_some_and(|t| zeitraum.enthaelt(t)))
             .count();
-        let rueckzuege = unbegruendete_rueckzuege(stand, zeitraum);
+        let rueckzuege = abstimmungsvermerke(stand, zeitraum, "Rückzug ohne Begründung");
+        let widersprueche = abstimmungsvermerke(stand, zeitraum, "Widersprüchliche Bestätigung");
         let _ = writeln!(
             text,
-            "- Belegte Tagesabschlüsse: {abschluesse} bei {handelstage} Kalendertagen mit Börsenhandel im Zeitraum.\n- KI-Buchungen: {buchungen}.\n- Orderversand: {versendet}. Zeitlich zugeordnete Ausführungen: {fuellungen}.\n- Protokollierte Rückzüge ohne Begründung: {rueckzuege}.\n"
+            "- Belegte Tagesabschlüsse: {abschluesse} bei {handelstage} Kalendertagen mit Börsenhandel im Zeitraum.\n- KI-Buchungen: {buchungen}.\n- Orderversand: {versendet}. Zeitlich zugeordnete Ausführungen: {fuellungen}.\n- Protokollierte Rückzüge ohne Begründung: {rueckzuege}.\n- Protokollierte widersprüchliche Bestätigungen: {widersprueche}.\n"
         );
         if versendet == 0 && handelstage != 0 {
             text.push_str("**Auffällig:** Im Zeitraum ist kein Orderversand belegt. Gründe und Beleglücken stehen unter Nicht-Handeln.\n\n");
@@ -615,6 +621,42 @@ mod grundtests {
         assert!(text.lines().any(|l| l.starts_with("| 2026-11-20 | B |")
             && l.ends_with("Runde 2: Eigene Ziele geändert. Für den vorgelegten Stand fehlte die Zustimmung des anderen Beraters. | Kein Versand |")));
         assert!(text.contains("unter_mindesteinsatz 0 von 3000 bp · fehlt"));
+        Ok(())
+    }
+
+    #[test]
+    fn pruefbericht_zaehlt_abstimmungsvermerke_im_zeitraum() -> Result<(), String> {
+        let ordner = std::env::temp_dir().join(format!("depot-vermerke-{}", crate::neues_token()));
+        std::fs::create_dir(&ordner).map_err(|e| e.to_string())?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(|e| format!("{e:?}"))?;
+        let mut journal = Journal::oeffnen(&pfad).map_err(|e| format!("{e:?}"))?;
+        let tag = Datum::neu(2026, 11, 20).ok_or("Datum")?;
+        let vortag = Datum::neu(2026, 11, 19).ok_or("Vortag")?;
+        let widerspruch =
+            "Abstimmung Runde 1: verwertbar=false; Grund: Widersprüchliche Bestätigung";
+        let rueckzug = "Abstimmung Runde 2: verwertbar=true; Grund: Rückzug ohne Begründung [Kosten 1 von 26 ct]";
+        for (datum, wer, grund) in [
+            (vortag, "Maus", widerspruch),
+            (tag, "Regelwerk", widerspruch),
+            (tag, "Dachs", widerspruch),
+            (tag, "Maus", rueckzug),
+        ] {
+            journal
+                .begruende(datum, wer, grund)
+                .map_err(|e| format!("{e:?}"))?;
+        }
+        let text = bericht(
+            Some(journal.stand()),
+            Zeitraum { von: tag, bis: tag },
+            "Gelb",
+            "Gelb",
+            "Rot",
+        );
+        drop(journal);
+        std::fs::remove_dir_all(ordner).map_err(|e| e.to_string())?;
+        assert!(text.contains("Rückzüge ohne Begründung: 1."));
+        assert!(text.contains("widersprüchliche Bestätigungen: 1."));
         Ok(())
     }
 
