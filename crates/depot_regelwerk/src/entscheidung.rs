@@ -329,6 +329,33 @@ pub fn entscheide_tausch(
     ersatzkauf: bool,
 ) -> Entscheidung {
     let mut ent = entscheide_intern(e, vergabe, Kaufbudget::Tausch(frei), ersatzkauf);
+    haenge_verkaeufe_an(&mut ent);
+    ent
+}
+
+/// Plant den vollständigen Verkauf einer vom Papierlauf zu räumenden Position zusammen
+/// mit den Käufen. Auch Ersatz und Wiederholung behalten ihre eigenen Vorgaben.
+pub fn entscheide_platztausch(
+    e: &Eingabe<'_>,
+    vergabe: &mut Kennungsvergabe,
+    frei: Cent,
+    ersatzkauf: bool,
+    wiederholung: Option<&Wiederholung>,
+    verkauf: (&Isin, i64),
+) -> Entscheidung {
+    let mut ent = entscheide_plan(
+        e,
+        vergabe,
+        Kaufbudget::Tausch(frei),
+        ersatzkauf,
+        wiederholung,
+        Some(verkauf),
+    );
+    haenge_verkaeufe_an(&mut ent);
+    ent
+}
+
+fn haenge_verkaeufe_an(ent: &mut Entscheidung) {
     let nach: Vec<u64> = ent
         .verkaeufe
         .iter()
@@ -337,7 +364,6 @@ pub fn entscheide_tausch(
     for kauf in &mut ent.kaeufe {
         kauf.setze_nach(nach.clone());
     }
-    ent
 }
 
 /// Woher das Geld für Käufe kommt.
@@ -391,6 +417,7 @@ pub fn entscheide_wiederholung(
         Kaufbudget::Frei(frei),
         false,
         Some(w),
+        None,
     )
 }
 
@@ -400,7 +427,7 @@ fn entscheide_intern(
     kaufbudget: Kaufbudget,
     ersatzkauf: bool,
 ) -> Entscheidung {
-    entscheide_plan(e, vergabe, kaufbudget, ersatzkauf, None)
+    entscheide_plan(e, vergabe, kaufbudget, ersatzkauf, None, None)
 }
 
 fn entscheide_plan(
@@ -409,10 +436,17 @@ fn entscheide_plan(
     kaufbudget: Kaufbudget,
     ersatzkauf: bool,
     wiederholung: Option<&Wiederholung>,
+    platzverkauf: Option<(&Isin, i64)>,
 ) -> Entscheidung {
     let mut befunde = Vec::new();
-    let Some((verkaeufe, kaeufe)) = plane(e, kaufbudget, ersatzkauf, wiederholung, &mut befunde)
-    else {
+    let Some((verkaeufe, kaeufe)) = plane(
+        e,
+        kaufbudget,
+        ersatzkauf,
+        wiederholung,
+        platzverkauf,
+        &mut befunde,
+    ) else {
         return Entscheidung::nur(Befund::Rechenfehler);
     };
     let Some(mut ent) = genehmige(e.grenzen, &verkaeufe, &kaeufe, vergabe) else {
@@ -483,6 +517,7 @@ fn plane(
     kaufbudget: Kaufbudget,
     ersatzkauf: bool,
     wiederholung: Option<&Wiederholung>,
+    platzverkauf: Option<(&Isin, i64)>,
     befunde: &mut Vec<Befund>,
 ) -> Option<(Vec<Kandidat>, Vec<Kandidat>)> {
     let g = e.grenzen;
@@ -556,24 +591,37 @@ fn plane(
         let mut verkaeufe = zwang.clone();
         let mut kaeufe = Vec::new();
         let mut befunde_frei = Vec::new();
-        if let Some(ziele) = &ziele {
-            freiwillig(
-                e,
-                kaufbudget,
-                tw,
-                ziele,
-                &gesperrt,
-                ersatzkauf,
-                &mut verkaeufe,
-                &mut kaeufe,
-                &mut befunde_frei,
-            )?;
-        } else if let Some(k) = &wiederholt {
+        if ziele.is_some() || wiederholt.is_some() {
+            let mut kandidaten = if let Some(ziele) = &ziele {
+                sammle_kandidaten(e, ziele, tw, &gesperrt, &mut befunde_frei)?
+            } else {
+                wiederholt.iter().cloned().collect()
+            };
+            if ersatzkauf {
+                kandidaten.retain(|k| k.richtung == Richtung::Kauf);
+            }
+            if let Some((isin, limit_bp)) = platzverkauf
+                && !gesperrt.contains(isin)
+                && !e.vor_valuta.contains(isin)
+                && e.topf.stueck(isin) > 0
+                && (g.limit_abstand_min_bp()..=g.limit_abstand_max_bp()).contains(&limit_bp)
+            {
+                kandidaten.retain(|k| &k.isin != isin);
+                kandidaten.push(Kandidat {
+                    isin: isin.clone(),
+                    richtung: Richtung::Verkauf,
+                    stueck: e.topf.stueck(isin),
+                    kurs: frischer_kurs(g, e.kurse, isin)?,
+                    komplett: true,
+                    limit_bp: Some(limit_bp),
+                    anlass: Anlass::Umschichtung,
+                });
+            }
             freiwillig_aus(
                 e,
                 kaufbudget,
                 tw,
-                vec![k.clone()],
+                kandidaten,
                 &mut verkaeufe,
                 &mut kaeufe,
                 &mut befunde_frei,
@@ -882,32 +930,6 @@ fn parke(
         isin: p.isin.clone(),
         ziel_bp: ziel,
     });
-}
-
-/// Freiwillige Auftraege. Umschlag und Orderzahl gelten fuer das, was die zwingenden
-/// Auftraege uebrig lassen; Deckung, Kaufgrenze und Positionszahl fuer alle Auftraege.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "die Planungsschritte teilen genau diese Zwischenstände"
-)]
-fn freiwillig(
-    e: &Eingabe<'_>,
-    kaufbudget: Kaufbudget,
-    topfwert: Preis,
-    ziele: &BTreeMap<Isin, i64>,
-    gesperrt: &BTreeSet<Isin>,
-    ersatzkauf: bool,
-    verkaeufe: &mut Vec<Kandidat>,
-    kaeufe: &mut Vec<Kandidat>,
-    befunde: &mut Vec<Befund>,
-) -> Option<()> {
-    let mut kandidaten = sammle_kandidaten(e, ziele, topfwert, gesperrt, befunde)?;
-    if ersatzkauf {
-        kandidaten.retain(|k| k.richtung == Richtung::Kauf);
-    }
-    freiwillig_aus(
-        e, kaufbudget, topfwert, kandidaten, verkaeufe, kaeufe, befunde,
-    )
 }
 
 /// Der Kandidat einer Wiederholung, oder `None` mit Befund, wenn sie nicht zulaessig ist.

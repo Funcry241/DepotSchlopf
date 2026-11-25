@@ -4,6 +4,8 @@ use depot_journal::Journal;
 use depot_kern::{Isin, Kurse, Topf, Vorschlag};
 use depot_regelwerk::entscheidung::ist_gewicht_bp;
 
+pub(crate) const UNVERAENDERT: &str = "ausgelassen, unverändert gehalten";
+
 pub(crate) fn ergaenze_ausgelassene(topf: &Topf, kurse: &Kurse, v: &mut Vorschlag) -> Vec<Isin> {
     let mut ergaenzt = Vec::new();
     for isin in topf.positionen().keys() {
@@ -11,8 +13,7 @@ pub(crate) fn ergaenze_ausgelassene(topf: &Topf, kurse: &Kurse, v: &mut Vorschla
             && let Some(gewicht) = ist_gewicht_bp(topf, kurse, isin)
         {
             v.zielgewichte_bp.insert(isin.clone(), gewicht);
-            v.begruendung
-                .insert(isin.clone(), "ausgelassen, unverändert gehalten".into());
+            v.begruendung.insert(isin.clone(), UNVERAENDERT.into());
             ergaenzt.push(isin.clone());
         }
     }

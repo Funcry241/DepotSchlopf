@@ -28,6 +28,7 @@ pub mod betrieb;
 pub use depot_journal::{abrufkontingent, anbieter, gespraeche, kurssperre};
 pub use depot_sim::ausfuehrung;
 pub use depot_sim::blindpruefung;
+pub use depot_sim::kernanlage;
 mod budget;
 mod depot;
 pub use depot_sim::schlopfmodell::kandidaten::{

@@ -4259,3 +4259,273 @@ fn teilveto_mit_erwartung(erwartung: Option<i64>, kein_kauf: Option<&str>) -> Re
     );
     Ok(())
 }
+
+#[test]
+fn kernanlage_kauft_eunl_ohne_ki_und_bucht_den_anlagezweck() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let isin = vorbedingung(Isin::neu("IE00B4L5Y983"), "ISIN EUNL")?;
+    belege(&mut j, 5, &[(&isin, "99", "100")])?;
+    let sap = sap()?;
+    let allianz = allianz()?;
+    belege(&mut j, 5, &[(&sap, "100", "100"), (&allianz, "100", "100")])?;
+    let liste = Universum::neu(vec![
+        Instrument {
+            isin: isin.clone(),
+            name: "EUNL".into(),
+            art: InstrumentArt::EtfPhysischUcits,
+        },
+        Instrument {
+            isin: sap.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        },
+        Instrument {
+            isin: allianz.clone(),
+            name: "Allianz".into(),
+            art: InstrumentArt::Aktie,
+        },
+    ]);
+    let mut k = konto(&ort, &j)?;
+    let mut dachs = Drehbuch::default();
+    let mut maus = Drehbuch::default();
+    let aus = papiertag(
+        &mut j,
+        tag(5)?,
+        &liste,
+        &start()?,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let orders = j.stand().auftraege();
+    assert_eq!(orders.len(), 2);
+    for order in orders {
+        assert_eq!(order.beleg.isin, isin);
+        assert_eq!(order.beleg.richtung, depot_regelwerk::Richtung::Kauf);
+        assert_eq!(order.beleg.stueck, 15);
+        assert_eq!(order.beleg.limit, Cent(10_100));
+        assert!(depot_sim::kernanlage::ist_kernauftrag(
+            j.stand(),
+            order.beleg.nr
+        ));
+    }
+    belege(
+        &mut j,
+        6,
+        &[
+            (&isin, "100", "100"),
+            (&sap, "100", "100"),
+            (&allianz, "100", "100"),
+        ],
+    )?;
+    let tag = tag(6)?;
+    kernanlage_umschichtung(&mut dachs, &mut maus, tag, &sap, &allianz);
+    let aus = papiertag(
+        &mut j,
+        tag,
+        &liste,
+        &start()?,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let verkauf = some(
+        j.stand().auftraege().iter().find(|order| {
+            order.beleg.topf == TopfId::A
+                && order.beleg.isin == isin
+                && order.beleg.richtung == depot_regelwerk::Richtung::Verkauf
+        }),
+        "Kernverkauf",
+    )?;
+    assert!(depot_sim::kernanlage::ist_kernauftrag(
+        j.stand(),
+        verkauf.beleg.nr
+    ));
+    let ki_kaeufe: Vec<_> = j
+        .stand()
+        .auftraege()
+        .iter()
+        .filter(|order| {
+            order.beleg.topf == TopfId::A
+                && order.beleg.isin != isin
+                && order.beleg.richtung == depot_regelwerk::Richtung::Kauf
+        })
+        .collect();
+    assert_eq!(ki_kaeufe.len(), 2);
+    assert!(
+        ki_kaeufe
+            .iter()
+            .all(|kauf| kauf.beleg.nr > verkauf.beleg.nr)
+    );
+    Ok(())
+}
+
+fn kernanlage_umschichtung(
+    dachs: &mut Drehbuch,
+    maus: &mut Drehbuch,
+    tag: Datum,
+    sap: &Isin,
+    allianz: &Isin,
+) {
+    dachs.antworten.insert(
+        tag,
+        Antwort {
+            einschaetzung: "Umschichtung".into(),
+            halten: std::collections::BTreeMap::new(),
+            prognose: None,
+            verwertbar: true,
+            vorschlag: Some(Vorschlag {
+                berater: BeraterId::Dachs,
+                zielgewichte_bp: [(sap.clone(), 3_800), (allianz.clone(), 3_800)]
+                    .into_iter()
+                    .collect(),
+                erwartung_bp: std::collections::BTreeMap::new(),
+                limit_bp: std::collections::BTreeMap::new(),
+                stopp_bp: std::collections::BTreeMap::new(),
+                begruendung: std::collections::BTreeMap::new(),
+                belege: std::collections::BTreeMap::new(),
+                park: None,
+            }),
+        },
+    );
+    maus.urteile.insert(
+        tag,
+        Urteil {
+            verwertbar: true,
+            zustimmung: true,
+            begruendung: "Stimme der Umschichtung zu".into(),
+            abgelehnt: None,
+        },
+    );
+}
+
+#[test]
+fn kernanlage_haelt_bei_kursdrift() -> Result<(), String> {
+    kernanlage_mit_drei_aktien(false)
+}
+
+#[test]
+fn kernanlage_raeumt_fuer_vierte_aktie_aus_ersatzkauf() -> Result<(), String> {
+    kernanlage_mit_drei_aktien(true)
+}
+
+fn kernanlage_mit_drei_aktien(ersatzkauf: bool) -> Result<(), String> {
+    let eunl = vorbedingung(Isin::neu("IE00B4L5Y983"), "ISIN EUNL")?;
+    let basf = vorbedingung(Isin::neu("DE000BASF111"), "ISIN BASF")?;
+    let telekom = vorbedingung(Isin::neu("DE0005557508"), "ISIN Telekom")?;
+    let (sap, allianz) = (sap()?, allianz()?);
+    let aktien = [&sap, &allianz, &basf, &telekom];
+    let liste = Universum::neu(
+        aktien
+            .into_iter()
+            .map(|isin| Instrument {
+                isin: isin.clone(),
+                name: isin.to_string(),
+                art: InstrumentArt::Aktie,
+            })
+            .chain([Instrument {
+                isin: eunl.clone(),
+                name: "EUNL".into(),
+                art: InstrumentArt::EtfPhysischUcits,
+            }])
+            .collect(),
+    );
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let mut toepfe = start()?;
+    let a = some(toepfe.first_mut(), "Topf A")?;
+    for isin in [&sap, &allianz, &basf] {
+        a.setze_bestand(isin.clone(), 5);
+    }
+    let mut broker = some(Papierkonto::eroeffne(&toepfe), "Papierkonto")?;
+    let preise: Vec<_> = aktien
+        .into_iter()
+        .chain([&eunl])
+        .map(|isin| (isin, "100", if isin == &sap { "103" } else { "100" }))
+        .collect();
+    belege(&mut j, 5, &preise)?;
+    vorbedingung(
+        papiertag(
+            &mut j,
+            tag(5)?,
+            &liste,
+            &toepfe,
+            &mut Stumm,
+            &mut Stumm,
+            &mut broker,
+        ),
+        "Kernaufbau",
+    )?;
+    let kernkauf = some(
+        j.stand()
+            .auftraege()
+            .iter()
+            .find(|a| a.beleg.topf == TopfId::A && a.beleg.isin == eunl),
+        "Kernkauf in Topf A",
+    )?
+    .beleg
+    .nr;
+    let preise: Vec<_> = preise
+        .into_iter()
+        .map(|(isin, _, preis)| (isin, preis, preis))
+        .collect();
+    belege(&mut j, 6, &preise)?;
+    let (mut dachs, mut maus) = if ersatzkauf {
+        let (dachs, mut maus) = kaeufer(tag(6)?, &telekom);
+        for urteil in maus.urteile.values_mut() {
+            urteil.verwertbar = false;
+        }
+        (dachs, maus)
+    } else {
+        (Drehbuch::default(), Drehbuch::default())
+    };
+    vorbedingung(
+        papiertag(
+            &mut j,
+            tag(6)?,
+            &liste,
+            &toepfe,
+            &mut dachs,
+            &mut maus,
+            &mut broker,
+        ),
+        "Folgetag",
+    )?;
+    let neu: Vec<_> = j
+        .stand()
+        .auftraege()
+        .iter()
+        .filter(|a| a.beleg.topf == TopfId::A && a.beleg.nr > kernkauf)
+        .collect();
+    if ersatzkauf {
+        pruefe_kernverkauf(&j, &neu, &eunl, &telekom)?;
+    } else {
+        assert!(neu.is_empty(), "{neu:?}");
+    }
+    Ok(())
+}
+
+fn pruefe_kernverkauf(
+    j: &Journal,
+    neu: &[&depot_journal::AuftragsLage],
+    eunl: &Isin,
+    telekom: &Isin,
+) -> Result<(), String> {
+    let [verkauf, kauf] = neu else {
+        return Err(format!("Kernverkauf und Ersatzkauf erwartet: {neu:?}"));
+    };
+    assert_eq!(&verkauf.beleg.isin, eunl);
+    assert_eq!(verkauf.beleg.richtung, depot_regelwerk::Richtung::Verkauf);
+    assert!(depot_sim::kernanlage::ist_kernauftrag(
+        j.stand(),
+        verkauf.beleg.nr
+    ));
+    assert_eq!(&kauf.beleg.isin, telekom);
+    assert_eq!(kauf.beleg.richtung, depot_regelwerk::Richtung::Kauf);
+    assert_eq!(kauf.beleg.stueck, 6);
+    assert_eq!(kauf.beleg.nach, [verkauf.beleg.nr]);
+    Ok(())
+}

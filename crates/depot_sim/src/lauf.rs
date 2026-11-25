@@ -1189,6 +1189,13 @@ pub(crate) enum Erstmeinung {
     Verwertbar,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KernanlageErlaubnis {
+    Frei,
+    Veto,
+    Gesperrt,
+}
+
 #[derive(Clone)]
 pub(crate) struct TopfAntwort {
     pub(crate) topf: Topf,
@@ -1197,6 +1204,7 @@ pub(crate) struct TopfAntwort {
     pub(crate) eigener_einsatz_bp: i64,
     pub(crate) erstmeinung: Erstmeinung,
     pub(crate) teilveto_freigabe: bool,
+    kernanlage_erlaubnis: KernanlageErlaubnis,
     zweitmeinung_ausgefallen: bool,
     ersatzkauf: bool,
     fristverkaeufe: BTreeSet<Isin>,
@@ -1407,6 +1415,11 @@ fn frage_topf(
         vorschlag,
         erstmeinung,
         teilveto_freigabe: false,
+        kernanlage_erlaubnis: if gesperrt.is_none() && wartet.is_none() && !gestoppt.contains(&id) {
+            KernanlageErlaubnis::Frei
+        } else {
+            KernanlageErlaubnis::Gesperrt
+        },
         zweitmeinung_ausgefallen: false,
         ersatzkauf: false,
         fristverkaeufe,
@@ -1500,6 +1513,11 @@ fn zweite_meinung(
         });
         antwort.teilveto_freigabe =
             z.uhr.is_some() && matches!(folge, Some(Urteilsfolge::Teilveto { .. }));
+        if antwort.kernanlage_erlaubnis == KernanlageErlaubnis::Frei
+            && crate::kernanlage::veto_gegen_kernanlage(&v, folge.as_ref())
+        {
+            antwort.kernanlage_erlaubnis = KernanlageErlaubnis::Veto;
+        }
         let wort = urteil_wort(folge.as_ref());
         begruende(
             j,
@@ -1667,18 +1685,12 @@ fn topf_zyklus(
     berater: &mut dyn Berater,
     minimum_bp: i64,
 ) -> Result<(), LaufFehler> {
-    let TopfAntwort {
-        topf,
-        vorschlag,
-        zweitmeinung_ausgefallen,
-        ersatzkauf,
-        fristverkaeufe,
-        wiederholung,
-        ..
-    } = antwort;
+    let topf = &antwort.topf;
+    let vorschlag = &antwort.vorschlag;
+    let wiederholung = antwort.wiederholung.as_ref();
     let ruhetag = antwort.erstmeinung == Erstmeinung::Ruhetag;
-    if !fristverkaeufe.is_empty() {
-        return fuehre_fristverkaeufe_aus(j, z, &topf, fristverkaeufe, konto);
+    if !antwort.fristverkaeufe.is_empty() {
+        return fuehre_fristverkaeufe_aus(j, z, topf, antwort.fristverkaeufe, konto);
     }
     let tag = z.tag;
     let id = topf.id();
@@ -1693,21 +1705,49 @@ fn topf_zyklus(
     let eingabe = Eingabe {
         grenzen: z.grenzen,
         universum: z.universum,
-        topf: &topf,
+        topf,
         kurse: &tag.kurse,
         vorschlag: vorschlag.as_ref(),
         halt: false,
         vor_valuta: &vor_valuta,
     };
     let frei = kaufbudget(j, z.grenzen, id)?;
-    let mut ent = match &wiederholung {
+    let mut ent = match wiederholung {
         Some(w) => depot_regelwerk::entscheide_wiederholung(&eingabe, &mut vergabe, frei, w),
-        None => plane_topf(j, &eingabe, frei, ersatzkauf, konto.tausch_moeglich()),
+        None => plane_topf(
+            j,
+            &eingabe,
+            frei,
+            antwort.ersatzkauf,
+            konto.tausch_moeglich(),
+        ),
     };
     if antwort.teilveto_freigabe
-        && let Some(v) = &vorschlag
+        && let Some(v) = vorschlag
     {
-        pruefe_kosten_des_rests(j, z, t, v, &mut ent)?;
+        pruefe_kosten_des_rests(j, z, t, v, &mut ent, None)?;
+    }
+    let kern_erlaubt = z.uhr.is_some() && konto.lokale_kernanlage();
+    let kernplan = if kern_erlaubt
+        && antwort.kernanlage_erlaubnis != KernanlageErlaubnis::Gesperrt
+        && z.gesperrt.is_empty()
+    {
+        plane_kernfolge(j, &eingabe, &ent, frei, &antwort, konto.tausch_moeglich())
+    } else {
+        None
+    };
+    let (mut ent, auftragsziele, kern) = kernplan
+        .map_or((ent, vorschlag.clone(), None), |(plan, ziele, isin)| {
+            (plan, ziele, Some(isin))
+        });
+    let auftragsziele = auftragsziele.as_ref();
+    if let (Some(isin), Some(v)) = (&kern, auftragsziele)
+        && antwort.teilveto_freigabe
+    {
+        pruefe_kosten_des_rests(j, z, t, v, &mut ent, Some(isin))?;
+    }
+    if kern_erlaubt {
+        crate::kernanlage::wahre_positionsgrenze(&eingabe, &mut ent, j.stand(), kern.is_some());
     }
     if !ruhetag {
         mindesteinsatz(
@@ -1720,7 +1760,7 @@ fn topf_zyklus(
             minimum_bp,
         )?;
     }
-    if ersatzkauf {
+    if antwort.ersatzkauf {
         begruende(
             j,
             tag,
@@ -1728,17 +1768,115 @@ fn topf_zyklus(
             &format!("{t}: ZweitmeinungAusgefallen · Kaufzielgewichte × 0,5"),
         )?;
     }
-    belege_topfbefunde(j, tag, t, &ent, ruhetag, zweitmeinung_ausgefallen)?;
+    belege_topfbefunde(j, tag, t, &ent, ruhetag, antwort.zweitmeinung_ausgefallen)?;
+    fuehre_plan_aus(j, z, id, &ent, auftragsziele, konto, kern.as_ref())
+}
+
+fn plane_kernfolge(
+    j: &Journal,
+    eingabe: &Eingabe<'_>,
+    ent: &depot_regelwerk::Entscheidung,
+    frei: Cent,
+    antwort: &TopfAntwort,
+    tausch: bool,
+) -> Option<(depot_regelwerk::Entscheidung, Option<Vorschlag>, Isin)> {
+    let platztausch = crate::kernanlage::freizugebender_platz(j.stand(), eingabe, ent)
+        .filter(|_| tausch)
+        .and_then(|isin| {
+            let mut plan = depot_regelwerk::entscheidung::entscheide_platztausch(
+                eingabe,
+                &mut j.kennungsvergabe(),
+                frei,
+                antwort.ersatzkauf,
+                antwort.wiederholung.as_ref(),
+                (&isin, crate::kernanlage::LIMIT_BP),
+            );
+            if antwort.teilveto_freigabe
+                && let Some(v) = eingabe.vorschlag
+            {
+                plan.kaeufe.retain(|kauf| {
+                    grund_gegen_teilvetokauf(eingabe.grenzen, v, kauf.auftrag()).is_none()
+                });
+            }
+            (gleicher_schluss(&plan) && crate::kernanlage::platz_geraeumt(eingabe, &plan, &isin))
+                .then_some((plan, eingabe.vorschlag.cloned(), isin))
+        });
+    platztausch.or_else(|| {
+        (antwort.kernanlage_erlaubnis == KernanlageErlaubnis::Frei
+            && antwort.wiederholung.is_none()
+            && !antwort.ersatzkauf)
+            .then(|| plane_kernanlage(j, eingabe, ent, frei, antwort.teilveto_freigabe))
+            .flatten()
+            .map(|(plan, ziele, isin)| (plan, Some(ziele), isin))
+    })
+}
+
+fn plane_kernanlage(
+    j: &Journal,
+    eingabe: &Eingabe<'_>,
+    basis: &depot_regelwerk::Entscheidung,
+    frei: Cent,
+    teilveto_freigabe: bool,
+) -> Option<(depot_regelwerk::Entscheidung, Vorschlag, Isin)> {
+    let (isin, ziele) =
+        crate::kernanlage::vorschlag(j.stand(), eingabe, basis, frei, |ziele, probe| {
+            let mit_verkauf = Eingabe {
+                vorschlag: Some(ziele),
+                ..*eingabe
+            };
+            let mut plan = plane_topf(j, &mit_verkauf, probe, false, false);
+            if teilveto_freigabe {
+                plan.kaeufe.retain(|kauf| {
+                    grund_gegen_teilvetokauf(eingabe.grenzen, ziele, kauf.auftrag()).is_none()
+                });
+            }
+            plan
+        })?;
+    let plan = plane_topf(
+        j,
+        &Eingabe {
+            vorschlag: Some(&ziele),
+            ..*eingabe
+        },
+        frei,
+        false,
+        true,
+    );
+    let kernkauf = plan.kaeufe.iter().any(|order| order.auftrag().isin == isin);
+    let kernverkauf = plan
+        .verkaeufe
+        .iter()
+        .any(|order| order.auftrag().isin == isin);
+    let ki_kauf = plan.kaeufe.iter().any(|order| {
+        let a = order.auftrag();
+        a.isin != isin
+            && (!teilveto_freigabe
+                || grund_gegen_teilvetokauf(eingabe.grenzen, &ziele, a).is_none())
+    });
+    (kernkauf || (kernverkauf && ki_kauf)).then_some((plan, ziele, isin))
+}
+
+fn fuehre_plan_aus(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    id: TopfId,
+    ent: &depot_regelwerk::Entscheidung,
+    vorschlag: Option<&Vorschlag>,
+    konto: &mut dyn Broker,
+    kern: Option<&Isin>,
+) -> Result<(), LaufFehler> {
+    let tag = z.tag;
+    let t = topf_name(id);
     if ent.verkaeufe.is_empty() {
-        return fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto);
+        return fuehre_aus_mit_kern(j, z, id, &ent.kaeufe, vorschlag, konto, kern);
     }
-    let alle = fuehre_aus(j, z, id, &ent.verkaeufe, None, konto);
+    let alle = fuehre_aus_mit_kern(j, z, id, &ent.verkaeufe, None, konto, kern);
     // Positions- und Anteilsgrenzen können einen ausgeführten Verkauf voraussetzen. Ein
     // Tauschkauf hängt an allen Verkäufen des Plans und füllt nur nach ihnen (#311 H1b).
     let tausch = ent.kaeufe.iter().any(|k| !k.nach().is_empty());
     match alle {
         Ok(()) if verkauft(j, &ent.verkaeufe) || (tausch && unterwegs(j, &ent.verkaeufe)) => {
-            fuehre_aus(j, z, id, &ent.kaeufe, vorschlag.as_ref(), konto)
+            fuehre_aus_mit_kern(j, z, id, &ent.kaeufe, vorschlag, konto, kern)
         }
         Ok(()) if ent.kaeufe.is_empty() => Ok(()),
         Ok(()) => begruende(
@@ -1757,19 +1895,15 @@ fn pruefe_kosten_des_rests(
     topfname: &str,
     vorschlag: &Vorschlag,
     ent: &mut depot_regelwerk::Entscheidung,
+    kern: Option<&Isin>,
 ) -> Result<(), LaufFehler> {
     let tag = z.tag;
     let mut zugelassen = Vec::with_capacity(ent.kaeufe.len());
     for kauf in ent.kaeufe.drain(..) {
         let a = kauf.auftrag();
-        let erwartung = vorschlag.erwartung_bp.get(&a.isin).copied().flatten();
-        let grund = match (erwartung, kaufkosten_bp(z.grenzen, a)) {
-            (None, _) => Some("Ertragserwartung fehlt"),
-            (Some(gewinn), Some(kosten)) if gewinn > kosten => None,
-            (Some(_), Some(_)) => Some("Ertragserwartung liegt höchstens auf Höhe der Kostenhürde"),
-            (Some(_), None) => Some("Kostenhürde nicht berechenbar"),
-        };
-        if let Some(grund) = grund {
+        if kern != Some(&a.isin)
+            && let Some(grund) = grund_gegen_teilvetokauf(z.grenzen, vorschlag, a)
+        {
             begruende(
                 j,
                 tag,
@@ -1785,6 +1919,20 @@ fn pruefe_kosten_des_rests(
     }
     ent.kaeufe = zugelassen;
     Ok(())
+}
+
+fn grund_gegen_teilvetokauf(
+    grenzen: &Grenzen,
+    vorschlag: &Vorschlag,
+    a: &depot_regelwerk::Auftrag,
+) -> Option<&'static str> {
+    let erwartung = vorschlag.erwartung_bp.get(&a.isin).copied().flatten();
+    match (erwartung, kaufkosten_bp(grenzen, a)) {
+        (None, _) => Some("Ertragserwartung fehlt"),
+        (Some(gewinn), Some(kosten)) if gewinn > kosten => None,
+        (Some(_), Some(_)) => Some("Ertragserwartung liegt höchstens auf Höhe der Kostenhürde"),
+        (Some(_), None) => Some("Kostenhürde nicht berechenbar"),
+    }
 }
 
 fn belege_topfbefunde(
@@ -1974,7 +2122,10 @@ fn belege_kauf(
     }
     if let Some(these) = vorschlag
         .and_then(|v| v.begruendung.get(&a.isin))
-        .filter(|text| !text.trim().is_empty())
+        .filter(|text| {
+            !text.trim().is_empty()
+                && (a.richtung == Richtung::Kauf || text.as_str() == crate::kernanlage::KERNANLAGE)
+        })
     {
         if a.richtung == Richtung::Kauf
             && crate::Ausstiegsplan::lies(these).is_some()
@@ -2158,6 +2309,18 @@ fn fuehre_aus(
     vorschlag: Option<&Vorschlag>,
     konto: &mut dyn Broker,
 ) -> Result<(), LaufFehler> {
+    fuehre_aus_mit_kern(j, z, id, auftraege, vorschlag, konto, None)
+}
+
+fn fuehre_aus_mit_kern(
+    j: &mut Journal,
+    z: &Zyklus<'_>,
+    id: TopfId,
+    auftraege: &[GenehmigterAuftrag],
+    vorschlag: Option<&Vorschlag>,
+    konto: &mut dyn Broker,
+    kern: Option<&Isin>,
+) -> Result<(), LaufFehler> {
     let tag = z.tag;
     if auftraege.is_empty() {
         return Ok(());
@@ -2194,6 +2357,9 @@ fn fuehre_aus(
                 continue;
             }
             Err(e) => return Err(journal(e)),
+        }
+        if kern == Some(&a.auftrag().isin) {
+            begruende(j, tag, crate::kernanlage::KERNANLAGE, &nr.to_string())?;
         }
         belege_kauf(j, z, a.auftrag(), vorschlag)?;
         let versand = z

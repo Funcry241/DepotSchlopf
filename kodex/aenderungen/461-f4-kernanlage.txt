@@ -1,0 +1,15 @@
+klasse: Funktion
+zweck: Eine EUNL-Kernanlage ausschließlich über genehmigte Papierorders aufbauen und für KI-Käufe einsetzen
+pfade:
+crates/depot_regelwerk/src/entscheidung.rs
+crates/depot_lage/src/lib.rs
+crates/depot_dienst/src/analyse/orders.rs
+crates/depot_dienst/src/depotseite.rs
+crates/depot_sim/src/ausgelassen.rs
+crates/depot_sim/src/kernanlage.rs
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/lib.rs
+crates/depot_sim/src/papier.rs
+crates/depot_sim/src/papierdatei.rs
+crates/depot_sim/src/wiederholung.rs
+crates/depot_sim/tests/papiertag.rs
