@@ -364,6 +364,9 @@ fn eigener_stand(
     let nur_verkleinerung =
         neu.is_some_and(|v| nur_verkleinerung(&gueltig.topf, &zyklus.tag.kurse, v));
     let geaendert = !gleiche_abstimmungsziele(gueltig.vorschlag.as_ref(), neu, teilveto);
+    if geaendert {
+        gueltig.teilveto_freigabe = false;
+    }
     if nur_verkleinerung {
         if geaendert {
             belege_verkleinerung(buch, zyklus, &gueltig.topf)?;
@@ -380,15 +383,31 @@ fn uebernehme(
     neu: &AbstimmungsAntwort,
     peer: &AbstimmungsAntwort,
     teilveto: &[Isin],
+    freigegebener_rest: bool,
 ) -> Option<Vorschlag> {
     if gleiche_abstimmungsziele(neu.eigene.vorschlag.as_ref(), bisher, teilveto)
-        && peer.zustimmung_fremd
+        && (freigegebener_rest || peer.zustimmung_fremd)
     {
         // Die Kaufthese stammt aus dem Stand, den der andere Berater gesehen hat.
         bisher.cloned()
     } else {
         None
     }
+}
+
+fn abschliessen(
+    topf: &mut TopfAntwort,
+    bisher: Option<&Vorschlag>,
+    stimmen: (&AbstimmungsAntwort, &AbstimmungsAntwort),
+    teilveto: &[Isin],
+) {
+    topf.vorschlag = uebernehme(
+        bisher,
+        stimmen.0,
+        stimmen.1,
+        teilveto,
+        topf.teilveto_freigabe,
+    );
 }
 
 fn widerrufe_fremden_stand(
@@ -398,7 +417,8 @@ fn widerrufe_fremden_stand(
     kurse: &Kurse,
     teilveto: &[Isin],
 ) {
-    if !antwort.zustimmung_fremd
+    if !gueltig.teilveto_freigabe
+        && !antwort.zustimmung_fremd
         && gleiche_abstimmungsziele(gueltig.vorschlag.as_ref(), gezeigt, teilveto)
         && !gueltig
             .vorschlag
@@ -420,7 +440,11 @@ fn entfaellt(
     let [ga, gb] = gueltig;
     let toepfe = [(ea, ga), (eb, gb)].map(|(e, g)| {
         (
-            e.vorschlag.as_ref(),
+            if g.teilveto_freigabe {
+                g.vorschlag.as_ref()
+            } else {
+                e.vorschlag.as_ref()
+            },
             g.vorschlag.as_ref(),
             g.ersatzkauf_offen(),
         )
@@ -539,7 +563,7 @@ fn abstimmungsrunden(
         }
         let [ga, gb] = &mut gueltig;
         if !verkleinert_a {
-            ga.vorschlag = uebernehme(va.as_ref(), &erste, &zweite, &teilveto_a);
+            abschliessen(ga, va.as_ref(), (&erste, &zweite), &teilveto_a);
         }
         if !eigener_stand(
             buch,
@@ -548,7 +572,7 @@ fn abstimmungsrunden(
             zweite.eigene.vorschlag.as_ref(),
             &teilveto_b,
         )? {
-            gb.vorschlag = uebernehme(vb.as_ref(), &zweite, &erste, &teilveto_b);
+            abschliessen(gb, vb.as_ref(), (&zweite, &erste), &teilveto_b);
         }
         let gleich =
             gleiche_abstimmungsziele(va.as_ref(), erste.eigene.vorschlag.as_ref(), &teilveto_a)
@@ -622,13 +646,14 @@ mod tests {
         // Der Autor wiederholt den alten Vorschlag. Der Prüfer bestätigt den tatsächlich
         // gezeigten Rest. Die gestrichene ISIN kommt auch mit diesem Ja nicht zurück.
         let autor = stimme(bereinige(Some(erst), &teilveto), false);
-        let pruefer = stimme(None, true);
+        let pruefer = stimme(None, false);
         assert_eq!(
-            uebernehme(gezeigt.as_ref(), &autor, &pruefer, &teilveto),
+            uebernehme(gezeigt.as_ref(), &autor, &pruefer, &teilveto, true),
             Some(rest.clone())
         );
         assert_eq!(bereinige(Some(kandidat(&[alv])), &teilveto), None);
 
+        let pruefer = stimme(None, true);
         let mut geaendert = rest.clone();
         geaendert.zielgewichte_bp.insert(sap.clone(), 2_500);
         assert_eq!(
@@ -636,7 +661,8 @@ mod tests {
                 Some(&rest),
                 &stimme(Some(geaendert.clone()), false),
                 &pruefer,
-                &teilveto
+                &teilveto,
+                false
             ),
             None
         );
@@ -645,7 +671,8 @@ mod tests {
                 Some(&geaendert),
                 &stimme(Some(geaendert.clone()), false),
                 &pruefer,
-                &teilveto
+                &teilveto,
+                false
             ),
             Some(geaendert)
         );
@@ -659,7 +686,8 @@ mod tests {
                 Some(&rest),
                 &stimme(Some(anderer_ausstieg), false),
                 &pruefer,
-                &teilveto
+                &teilveto,
+                false
             ),
             None
         );
@@ -678,7 +706,8 @@ mod tests {
                 gezeigt.as_ref(),
                 &stimme(None, false),
                 &stimme(None, true),
-                &teilveto
+                &teilveto,
+                false
             ),
             None
         );
@@ -687,7 +716,8 @@ mod tests {
                 gezeigt.as_ref(),
                 &stimme(Some(rest), false),
                 &stimme(None, false),
-                &teilveto
+                &teilveto,
+                false
             ),
             None
         );
@@ -699,7 +729,8 @@ mod tests {
                 gezeigt.as_ref(),
                 &stimme(Some(erst), false),
                 &stimme(None, false),
-                &teilveto
+                &teilveto,
+                false
             ),
             None
         );
