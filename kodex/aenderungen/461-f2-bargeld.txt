@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Im Papierdepot ab zwei aufeinanderfolgenden Handelstagen mit mindestens 50 Prozent frei kaufbarem Bargeld eine Erstmeinung auslösen
+pfade:
+crates/depot_sim/src/anlass.rs
+crates/depot_sim/src/lauf.rs

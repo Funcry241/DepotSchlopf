@@ -1260,6 +1260,26 @@ fn anlass_heute(
     } else {
         None
     };
+    if z.uhr.is_some() {
+        let frei = crate::anlass::genug_freies_bargeld(lage);
+        if z.anlass_pruefen
+            && anlass.is_none()
+            && crate::anlass::bargeld_anlass(j.stand(), tag.datum, t, frei)
+        {
+            anlass = Some("freies Bargeld an zwei Handelstagen".into());
+        }
+        let anteil = if frei {
+            "mindestens 50 %"
+        } else {
+            "Schwelle nicht belegt"
+        };
+        begruende(
+            j,
+            tag,
+            crate::anlass::BARGELD_BELEG,
+            &format!("{t}: {anteil}"),
+        )?;
+    }
     let pruefung = if z.anlass_pruefen && anlass.is_none() {
         crate::wiederholung::pruefe(j.stand(), z.grenzen, lage)
     } else {
