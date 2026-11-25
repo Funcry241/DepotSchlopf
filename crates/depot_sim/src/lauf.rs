@@ -1260,10 +1260,19 @@ fn anlass_heute(
     } else {
         None
     };
+    let pruefung = if z.anlass_pruefen && anlass.is_none() {
+        crate::wiederholung::pruefe(j.stand(), z.grenzen, lage)
+    } else {
+        None
+    };
+    if let Some(crate::wiederholung::Pruefung::Anlass(grund)) = &pruefung {
+        anlass = Some(grund.clone());
+    }
     if z.uhr.is_some() {
         let frei = crate::anlass::genug_freies_bargeld(lage);
         if z.anlass_pruefen
             && anlass.is_none()
+            && pruefung.is_none()
             && crate::anlass::bargeld_anlass(j.stand(), tag.datum, t, frei)
         {
             anlass = Some("freies Bargeld an zwei Handelstagen".into());
@@ -1279,14 +1288,6 @@ fn anlass_heute(
             crate::anlass::BARGELD_BELEG,
             &format!("{t}: {anteil}"),
         )?;
-    }
-    let pruefung = if z.anlass_pruefen && anlass.is_none() {
-        crate::wiederholung::pruefe(j.stand(), z.grenzen, lage)
-    } else {
-        None
-    };
-    if let Some(crate::wiederholung::Pruefung::Anlass(grund)) = &pruefung {
-        anlass = Some(grund.clone());
     }
     if !z.anlass_pruefen || anlass.is_some() {
         return Ok(Heute::Fragen(anlass));
@@ -1761,26 +1762,25 @@ fn pruefe_kosten_des_rests(
     let mut zugelassen = Vec::with_capacity(ent.kaeufe.len());
     for kauf in ent.kaeufe.drain(..) {
         let a = kauf.auftrag();
-        let huerde = kaufkosten_bp(z.grenzen, a);
-        if vorschlag
-            .erwartung_bp
-            .get(&a.isin)
-            .copied()
-            .flatten()
-            .zip(huerde)
-            .is_some_and(|(gewinn, kosten)| gewinn > kosten)
-        {
-            zugelassen.push(kauf);
-        } else {
+        let erwartung = vorschlag.erwartung_bp.get(&a.isin).copied().flatten();
+        let grund = match (erwartung, kaufkosten_bp(z.grenzen, a)) {
+            (None, _) => Some("Ertragserwartung fehlt"),
+            (Some(gewinn), Some(kosten)) if gewinn > kosten => None,
+            (Some(_), Some(_)) => Some("Ertragserwartung liegt höchstens auf Höhe der Kostenhürde"),
+            (Some(_), None) => Some("Kostenhürde nicht berechenbar"),
+        };
+        if let Some(grund) = grund {
             begruende(
                 j,
                 tag,
                 "Kostenhürde",
                 &format!(
-                    "{topfname}: {} aus Teilveto-Rest ohne belegten Vorteil nach Kosten, kein Kauf.",
+                    "{topfname}: {} aus Teilveto-Rest: {grund}. Kein Kauf.",
                     a.isin
                 ),
             )?;
+        } else {
+            zugelassen.push(kauf);
         }
     }
     ent.kaeufe = zugelassen;
@@ -3003,6 +3003,17 @@ mod wiederholung_tests {
     #[test]
     fn wiederholung_mit_neuem_limit() -> Result<(), LaufFehler> {
         let mut p = probelauf("limit", 10_150, true)?;
+        let vortag = Tag {
+            datum: datum(16)?,
+            kurse: p.tag.kurse.clone(),
+            ereignisse: Vec::new(),
+        };
+        begruende(
+            &mut p.j,
+            &vortag,
+            crate::anlass::BARGELD_BELEG,
+            "Topf A: mindestens 50 %",
+        )?;
         let (antwort, probe) = morgen(&mut p, true)?;
         assert_eq!(probe.0, None, "KI nicht gefragt");
         assert!(antwort.wiederholung.is_some());
