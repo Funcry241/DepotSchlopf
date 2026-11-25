@@ -38,6 +38,7 @@ pub mod einstand;
 pub mod handelsergebnis;
 pub mod handelsvergleich;
 pub mod kandidatenschatten;
+pub mod kernanlage;
 pub mod kursverlauf;
 pub mod lauf;
 pub mod mindesteinsatz;

@@ -40,6 +40,9 @@ pub(super) fn bericht(
         undatiert.remove(&z.nr);
         anzahl = anzahl.saturating_add(1);
         schreibe_order(&mut aus, z, order, gruende.get(&z.nr).copied());
+        if depot_lage::kernanlage::ist_kernauftrag(stand, z.nr) {
+            aus.push_str("- Anlagezweck: Kernanlage.\n");
+        }
     }
     if anzahl == 0 {
         aus.push_str("\nKeine datierte Orderbewegung im Zeitraum belegt.\n");

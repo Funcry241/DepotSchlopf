@@ -4256,3 +4256,145 @@ fn teilveto_mit_erwartung(erwartung: i64, kauft: bool) -> Result<(), String> {
     );
     Ok(())
 }
+
+#[test]
+fn kernanlage_kauft_eunl_ohne_ki_und_bucht_den_anlagezweck() -> Result<(), String> {
+    let ort = Ort::neu()?;
+    let mut j = ort.oeffnen()?;
+    let isin = vorbedingung(Isin::neu("IE00B4L5Y983"), "ISIN EUNL")?;
+    belege(&mut j, 5, &[(&isin, "99", "100")])?;
+    let sap = sap()?;
+    let allianz = allianz()?;
+    belege(&mut j, 5, &[(&sap, "100", "100"), (&allianz, "100", "100")])?;
+    let liste = Universum::neu(vec![
+        Instrument {
+            isin: isin.clone(),
+            name: "EUNL".into(),
+            art: InstrumentArt::EtfPhysischUcits,
+        },
+        Instrument {
+            isin: sap.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        },
+        Instrument {
+            isin: allianz.clone(),
+            name: "Allianz".into(),
+            art: InstrumentArt::Aktie,
+        },
+    ]);
+    let mut k = konto(&ort, &j)?;
+    let mut dachs = Drehbuch::default();
+    let mut maus = Drehbuch::default();
+    let aus = papiertag(
+        &mut j,
+        tag(5)?,
+        &liste,
+        &start()?,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let orders = j.stand().auftraege();
+    assert_eq!(orders.len(), 2);
+    for order in orders {
+        assert_eq!(order.beleg.isin, isin);
+        assert_eq!(order.beleg.richtung, depot_regelwerk::Richtung::Kauf);
+        assert_eq!(order.beleg.stueck, 15);
+        assert_eq!(order.beleg.limit, Cent(10_100));
+        assert!(depot_sim::kernanlage::ist_kernauftrag(
+            j.stand(),
+            order.beleg.nr
+        ));
+    }
+    belege(
+        &mut j,
+        6,
+        &[
+            (&isin, "100", "100"),
+            (&sap, "100", "100"),
+            (&allianz, "100", "100"),
+        ],
+    )?;
+    let tag = tag(6)?;
+    kernanlage_umschichtung(&mut dachs, &mut maus, tag, &sap, &allianz);
+    let aus = papiertag(
+        &mut j,
+        tag,
+        &liste,
+        &start()?,
+        &mut dachs,
+        &mut maus,
+        &mut k,
+    );
+    assert!(matches!(aus, Ok(Ausgang::Abgeschlossen { .. })), "{aus:?}");
+    let verkauf = some(
+        j.stand().auftraege().iter().find(|order| {
+            order.beleg.topf == TopfId::A
+                && order.beleg.isin == isin
+                && order.beleg.richtung == depot_regelwerk::Richtung::Verkauf
+        }),
+        "Kernverkauf",
+    )?;
+    assert!(depot_sim::kernanlage::ist_kernauftrag(
+        j.stand(),
+        verkauf.beleg.nr
+    ));
+    let ki_kaeufe: Vec<_> = j
+        .stand()
+        .auftraege()
+        .iter()
+        .filter(|order| {
+            order.beleg.topf == TopfId::A
+                && order.beleg.isin != isin
+                && order.beleg.richtung == depot_regelwerk::Richtung::Kauf
+        })
+        .collect();
+    assert_eq!(ki_kaeufe.len(), 2);
+    assert!(
+        ki_kaeufe
+            .iter()
+            .all(|kauf| kauf.beleg.nr > verkauf.beleg.nr)
+    );
+    Ok(())
+}
+
+fn kernanlage_umschichtung(
+    dachs: &mut Drehbuch,
+    maus: &mut Drehbuch,
+    tag: Datum,
+    sap: &Isin,
+    allianz: &Isin,
+) {
+    dachs.antworten.insert(
+        tag,
+        Antwort {
+            einschaetzung: "Umschichtung".into(),
+            halten: std::collections::BTreeMap::new(),
+            prognose: None,
+            verwertbar: true,
+            vorschlag: Some(Vorschlag {
+                berater: BeraterId::Dachs,
+                zielgewichte_bp: [(sap.clone(), 3_800), (allianz.clone(), 3_800)]
+                    .into_iter()
+                    .collect(),
+                erwartung_bp: std::collections::BTreeMap::new(),
+                limit_bp: std::collections::BTreeMap::new(),
+                stopp_bp: std::collections::BTreeMap::new(),
+                begruendung: std::collections::BTreeMap::new(),
+                belege: std::collections::BTreeMap::new(),
+                park: None,
+            }),
+        },
+    );
+    maus.urteile.insert(
+        tag,
+        Urteil {
+            verwertbar: true,
+            zustimmung: true,
+            begruendung: "Stimme der Umschichtung zu".into(),
+            abgelehnt: None,
+        },
+    );
+}

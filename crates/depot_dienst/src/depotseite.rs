@@ -120,7 +120,12 @@ fn cash(d: &DepotLage, text: &mut String) -> Option<Cent> {
     bar
 }
 
-fn positionen(d: &DepotLage, bar: Option<Cent>, text: &mut String) {
+fn positionen(
+    d: &DepotLage,
+    bar: Option<Cent>,
+    stand: Option<&depot_journal::Stand>,
+    text: &mut String,
+) {
     let mut zeilen: Vec<_> = d
         .toepfe
         .iter()
@@ -148,12 +153,27 @@ fn positionen(d: &DepotLage, bar: Option<Cent>, text: &mut String) {
                 )
             },
         );
+        let kennung = depot_kern::Isin::neu(&p.isin).ok();
+        let kern = stand
+            .and_then(|stand| {
+                stand
+                    .toepfe()
+                    .get(&id)
+                    .zip(kennung.as_ref())
+                    .map(|(topf, isin)| depot_lage::kernanlage::ist_kernposition(stand, topf, isin))
+            })
+            .filter(|kern| *kern)
+            .map_or("", |_| " · Kernanlage");
         let _ = write!(
             text,
             "<tr><td title=\"{}\">{}</td><td>{}</td><td>{}</td><td>{kurs}</td>\
             <td>{}</td><td>{}</td><td>{einstand}</td><td>{gv}</td></tr>",
             maskiere(&p.isin),
-            format_args!("{}{}", maskiere(&p.name), depot_lage::html::stopp_text(p)),
+            format_args!(
+                "{}{kern}{}",
+                maskiere(&p.name),
+                depot_lage::html::stopp_text(p)
+            ),
             topf(id),
             p.stueck,
             geld(p.wert),
@@ -364,7 +384,7 @@ pub fn inhalt(d: &crate::Dienst, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> (Strin
         kennzahlen(&lage, jetzt, startgeld, &mut text);
         depot_lage::html::splitbewertung(&lage, &mut text);
         let bar = cash(&lage, &mut text);
-        positionen(&lage, bar, &mut text);
+        positionen(&lage, bar, Some(stand), &mut text);
         orders(stand, &werte, &mut text);
         depot_lage::html::ausfuehrungsbilanz(&lage, &mut text);
         let verlauf = depotverlauf(stand, &werte);
@@ -430,7 +450,7 @@ mod tests {
     #[test]
     fn depot_maskiert() {
         let mut html = String::new();
-        positionen(&lage(), None, &mut html);
+        positionen(&lage(), None, None, &mut html);
         assert!(html.contains("&lt;b&gt;X&amp;Y&lt;/b&gt;"));
         assert!(!html.contains("<b>X&Y</b>"));
         assert_eq!(html.matches("DE0007164600").count(), 1);

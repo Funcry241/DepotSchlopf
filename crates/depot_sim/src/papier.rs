@@ -43,6 +43,10 @@ pub trait Broker: Konto {
     fn stoppe_kaeufe(&mut self) -> bool {
         false
     }
+    /// Automatische Kernanlage ist ausschließlich im lokalen Papierkonto freigegeben.
+    fn lokale_kernanlage(&self) -> bool {
+        false
+    }
     /// Kann das Konto einen Kauf an Verkäufe desselben Schlusses binden (#311 H1b)? Nur das
     /// Papierkonto; ein echter Broker braucht dafür eine bedingte Order.
     fn tausch_moeglich(&self) -> bool {
@@ -427,6 +431,10 @@ impl Papierkonto {
 }
 
 impl Broker for Papierkonto {
+    fn lokale_kernanlage(&self) -> bool {
+        true
+    }
+
     fn tausch_moeglich(&self) -> bool {
         true
     }

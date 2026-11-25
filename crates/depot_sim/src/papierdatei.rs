@@ -134,6 +134,10 @@ impl Konto for Papierdatei {
 }
 
 impl Broker for Papierdatei {
+    fn lokale_kernanlage(&self) -> bool {
+        true
+    }
+
     fn tausch_moeglich(&self) -> bool {
         self.konto.tausch_moeglich()
     }
