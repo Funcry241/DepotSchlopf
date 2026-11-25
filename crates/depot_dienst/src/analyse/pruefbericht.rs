@@ -28,6 +28,18 @@ fn abstimmungsvermerke(stand: &Stand, zeitraum: Zeitraum, vermerk: &str) -> usiz
         .count()
 }
 
+fn fehlende_ertragserwartungen(stand: &Stand, zeitraum: Zeitraum) -> usize {
+    stand
+        .begruendungen()
+        .iter()
+        .filter(|(tag, wer, grund)| {
+            (zeitraum.von..=zeitraum.bis).contains(tag)
+                && wer == "Kostenhürde"
+                && grund.ends_with(" aus Teilveto-Rest: Ertragserwartung fehlt. Kein Kauf.")
+        })
+        .count()
+}
+
 pub(super) fn bericht(
     stand: Option<&Stand>,
     zeitraum: Zeitraum,
@@ -67,15 +79,7 @@ pub(super) fn bericht(
             .count();
         let rueckzuege = abstimmungsvermerke(stand, zeitraum, "Rückzug ohne Begründung");
         let widersprueche = abstimmungsvermerke(stand, zeitraum, "Widersprüchliche Bestätigung");
-        let erwartungen_fehlen = stand
-            .begruendungen()
-            .iter()
-            .filter(|(tag, wer, grund)| {
-                in_zeitraum(*tag)
-                    && wer == "Kostenhürde"
-                    && grund.ends_with(" aus Teilveto-Rest: Ertragserwartung fehlt. Kein Kauf.")
-            })
-            .count();
+        let erwartungen_fehlen = fehlende_ertragserwartungen(stand, zeitraum);
         let _ = writeln!(
             text,
             "- Belegte Tagesabschlüsse: {abschluesse} bei {handelstage} Kalendertagen mit Börsenhandel im Zeitraum.\n- KI-Buchungen: {buchungen}.\n- Orderversand: {versendet}. Zeitlich zugeordnete Ausführungen: {fuellungen}.\n- Protokollierte Rückzüge ohne Begründung: {rueckzuege}.\n- Protokollierte widersprüchliche Bestätigungen: {widersprueche}.\n- Kaufvermerke zum Teilveto-Rest mit fehlender Ertragserwartung: {erwartungen_fehlen}.\n"
