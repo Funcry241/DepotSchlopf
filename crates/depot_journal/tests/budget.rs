@@ -478,3 +478,115 @@ fn kostenfenster_ordnet_neuroabrechnung_ihrem_journaleintrag_zu() -> Result<(), 
     assert_eq!(fenster.offen_reserviert, Cent::NULL);
     Ok(())
 }
+
+fn abgeschnittener_aufruf(nr: usize) -> depot_journal::KiAufruf {
+    let hash = "a".repeat(64);
+    depot_journal::KiAufruf {
+        nr,
+        anbieter: "Probe".into(),
+        modell: "Probe".into(),
+        vorlage: hash.clone(),
+        frage: Some(hash.clone()),
+        antwort: Some(hash),
+        token_ein: Some(10),
+        token_aus: Some(2_000),
+        ergebnis: depot_journal::KiAufrufErgebnis::Ausgabelimit,
+    }
+}
+
+#[test]
+fn neuro_wiederholung_belegt_einen_fall_und_zaehlt_zwei_aufrufe() -> Result<(), String> {
+    use depot_journal::neurofrage::{NeuroErgebnis, NeuroUrteil, NeuroUrteilswert};
+    let pfad = neuer_pfad();
+    let mut j = journal(&pfad);
+    let wer = BeraterId::Maus;
+    let profil = BeraterEinstellung::standard(wer);
+    let id = NeuroAuftragId::neu(&"a".repeat(64), NeuroRunde::Erstfrage).ok_or("Kennung")?;
+    let erlaubt = j
+        .reserviere_neurofrage(&id, wer, tag(4), 1, profil, 2)
+        .map_err(|e| format!("{e:?}"))?;
+    let nr = erlaubt.buchung();
+    let erster = NeuroErgebnis::neu(
+        id.clone(),
+        wer,
+        nr,
+        Err("Abgeschnitten".into()),
+        Some(abgeschnittener_aufruf(nr)),
+        erlaubt.aufruf().abrechnung(10, 2_000),
+    );
+    j.belege_neuroergebnis(&erster)
+        .map_err(|e| format!("{e:?}"))?;
+    assert!(matches!(
+        j.reserviere_neuro_wiederholung(&erster, tag(4), profil, 1),
+        Err(NeuroSperre::NeuroTageslimit)
+    ));
+    assert!(j.reserviere_ki_wiederholung(nr, Some(profil)).is_err());
+    let erneut = j
+        .reserviere_neuro_wiederholung(&erster, tag(4), profil, 2)
+        .map_err(|e| format!("{e:?}"))?;
+    let zweite_nr = erneut.buchung();
+    assert_eq!(erneut.auftrag(), &id);
+    let erlaubt = erneut.aufruf();
+    assert_eq!(erlaubt.deckel().max_token_aus(), 4_000);
+    let mut aufruf = abgeschnittener_aufruf(zweite_nr);
+    aufruf.ergebnis = depot_journal::KiAufrufErgebnis::Beantwortet;
+    aufruf.token_aus = Some(2_700);
+    let zweiter = NeuroErgebnis::neu(
+        id,
+        wer,
+        zweite_nr,
+        Ok(NeuroUrteil {
+            wert: NeuroUrteilswert::Staerkt,
+            begruendung: "Belegt".into(),
+            nachfrage: None,
+        }),
+        Some(aufruf),
+        erlaubt.abrechnung(10, 2_700),
+    );
+    j.belege_neuroergebnis(&zweiter)
+        .map_err(|e| format!("{e:?}"))?;
+    drop(j);
+    let mut j = journal(&pfad);
+    j.belege_neuroergebnis(&erster)
+        .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(j.stand().ki().neuroergebnis(nr), Some(&zweiter));
+    assert_eq!(j.stand().ki().neuroaufrufe_am(tag(4)), 2);
+    assert_eq!(j.stand().ki().neurofragen().len(), 1);
+    assert_eq!(j.stand().seit_abschluss(), 0);
+    fs::remove_dir_all(pfad.parent().ok_or("Verzeichnis")?).ok();
+    Ok(())
+}
+
+#[test]
+fn vorbereitungswiederholung_bleibt_ausserhalb_des_papiertags() -> Result<(), String> {
+    let pfad = neuer_pfad();
+    let mut j = journal(&pfad);
+    let samstag = Datum::lies("2026-11-07").ok_or("Samstag")?;
+    let montag = Datum::lies("2026-11-09").ok_or("Montag")?;
+    let zeit = depot_kern::Zeitpunkt::frankfurt(samstag, 12, 0, 0).ok_or("Zeit")?;
+    let wer = BeraterId::Maus;
+    j.starte_vorbereitung(zeit, montag, vec!["Belegte Meldung".into()])
+        .map_err(|e| format!("{e:?}"))?;
+    let e = j
+        .reserviere_vorbereitung(zeit, wer)
+        .map_err(|e| format!("{e:?}"))?;
+    let nr = e.buchungsnummer();
+    j.belege_ki_aufruf(&abgeschnittener_aufruf(nr))
+        .map_err(|e| format!("{e:?}"))?;
+    j.rechne_ki_ab(&e.abrechnung(10, 2_000).ok_or("Abrechnung")?)
+        .map_err(|e| format!("{e:?}"))?;
+    let erneut = j
+        .reserviere_ki_wiederholung(nr, None)
+        .map_err(|e| format!("{e:?}"))?;
+    assert_eq!(erneut.zweck(), depot_journal::KiZweck::Vorbereitung);
+    assert_eq!(erneut.deckel().max_token_aus(), 4_000);
+    drop(j);
+    let j = journal(&pfad);
+    assert_eq!(
+        j.stand().ki().wiederholung(nr),
+        Some(erneut.buchungsnummer())
+    );
+    assert_eq!(j.stand().seit_abschluss(), 0);
+    fs::remove_dir_all(pfad.parent().ok_or("Verzeichnis")?).ok();
+    Ok(())
+}
