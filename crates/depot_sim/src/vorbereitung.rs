@@ -131,23 +131,23 @@ pub fn vorbereiten<'a>(
                             "Vorbereitung für {fuer}: {wer:?} wird mit dem gespeicherten Wissensstand gefragt."
                         ))
                     );
-                    let antwort = b.vorschlagen(
-                        erlaubnis,
-                        &Lage {
-                            anlass: None,
-                            datum: fuer,
-                            topf: &topf,
-                            kaufbar: Cent::NULL,
-                            kurse: &kurse,
-                            verlauf: &[],
-                            kaufbilanz: crate::ausfuehrung::Kennzahlen::default(),
-                            relative_staerke: &[],
-                            relativ_kurz: false,
-                            positionskaeufe: &[],
-                            ereignisse: &ereignisse,
-                        },
-                    );
-                    crate::lauf::belege_ki(j, b).map_err(|e| format!("{e:?}"))?;
+                    let lage = Lage {
+                        anlass: None,
+                        datum: fuer,
+                        topf: &topf,
+                        kaufbar: Cent::NULL,
+                        kurse: &kurse,
+                        verlauf: &[],
+                        kaufbilanz: crate::ausfuehrung::Kennzahlen::default(),
+                        relative_staerke: &[],
+                        relativ_kurz: false,
+                        positionskaeufe: &[],
+                        ereignisse: &ereignisse,
+                    };
+                    let antwort = crate::lauf::ki_mit_wiederholung(j, b, erlaubnis, |ki, e| {
+                        ki.vorschlagen(e, &lage)
+                    })
+                    .map_err(|e| format!("{e:?}"))?;
                     a.zeit = uhr().ok_or("Uhr liefert keine Zeit")?;
                     a.verwertbar = antwort.verwertbar && antwort.vorschlag.is_none();
                     a.text = sauber(&antwort.einschaetzung);

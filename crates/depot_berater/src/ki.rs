@@ -79,6 +79,7 @@ pub struct KiBerater<N: Netz> {
     abrechnung: Option<depot_journal::KiAbrechnung>,
     aufruf: Option<KiAufruf>,
     technischer_ausfall: bool,
+    antwortmodus: Antwortmodus,
     mindesteinsatz_grund: Option<(depot_kern::Datum, String)>,
     mindesteinsatz_bp: Option<i64>,
     schlopfmodell: Option<depot_sim::schlopfmodell::Beratung>,
@@ -97,6 +98,13 @@ impl<N: Netz> fmt::Debug for KiBerater<N> {
             .field("gesperrt", &self.gesperrt)
             .finish_non_exhaustive()
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Antwortmodus {
+    Normal,
+    Kurz,
+    Abgeschnitten,
 }
 
 /// Was ein Aufruf ergeben hat: der Text des Modells und eine Zeile ueber die Kosten.
@@ -135,6 +143,7 @@ impl<N: Netz> KiBerater<N> {
             abrechnung: None,
             aufruf: None,
             technischer_ausfall: false,
+            antwortmodus: Antwortmodus::Normal,
             mindesteinsatz_grund: None,
             mindesteinsatz_bp: None,
             schlopfmodell: None,
@@ -701,6 +710,16 @@ impl<N: Netz> KiBerater<N> {
         zweck: KiZweck,
         schlopfmodell: Option<Zeitpunkt>,
     ) -> Ergebnis {
+        let modus = std::mem::replace(&mut self.antwortmodus, Antwortmodus::Normal);
+        let kurz;
+        let frage = if modus == Antwortmodus::Kurz {
+            kurz = format!(
+                "{frage}\nAntworte diesmal knapp. Halte das verlangte Ausgabeformat ein und lass optionale Ausführungen weg."
+            );
+            kurz.as_str()
+        } else {
+            frage
+        };
         if (zweck == KiZweck::Neurofrage || erlaubnis.zweck() == KiZweck::Neurofrage)
             && zweck != erlaubnis.zweck()
         {
@@ -726,8 +745,14 @@ impl<N: Netz> KiBerater<N> {
                 .antwort
                 .as_ref()
                 .is_some_and(|text| aufrufspur::enthaelt_geheimnis(text, &sensibel));
-        if geheim && spur.ergebnis == KiAufrufErgebnis::Beantwortet {
-            spur.ergebnis = KiAufrufErgebnis::Unbrauchbar;
+        if geheim {
+            self.antwortmodus = Antwortmodus::Normal;
+            if matches!(
+                spur.ergebnis,
+                KiAufrufErgebnis::Beantwortet | KiAufrufErgebnis::Ausgabelimit
+            ) {
+                spur.ergebnis = KiAufrufErgebnis::Unbrauchbar;
+            }
         }
         self.aufruf = Some(self.aufruf_belegen(erlaubnis, system, &spur, geheim));
         if let Some(mut e) = e {
@@ -1044,6 +1069,10 @@ impl<N: Netz> KiBerater<N> {
                 kosten,
             };
         }
+        if gelesen.ausgabelimit_erreicht {
+            self.antwortmodus = Antwortmodus::Abgeschnitten;
+            spur.ergebnis = KiAufrufErgebnis::Ausgabelimit;
+        }
         self.technischer_ausfall = gelesen.text.is_err();
         if gelesen.text.is_ok() {
             spur.ergebnis = KiAufrufErgebnis::Beantwortet;
@@ -1170,6 +1199,14 @@ impl<N: Netz> Berater for KiBerater<N> {
             .take()
             .filter(|(datum, _)| *datum == tag)
             .map(|(_, grund)| grund)
+    }
+
+    fn ausgabelimit_erreicht(&self) -> bool {
+        self.antwortmodus == Antwortmodus::Abgeschnitten
+    }
+
+    fn kurze_antwort_anfordern(&mut self) {
+        self.antwortmodus = Antwortmodus::Kurz;
     }
 
     fn kann_abstimmen(&self) -> bool {

@@ -1391,29 +1391,11 @@ impl Journal {
     ) -> Result<NeuroAufrufErlaubnis, NeuroSperre> {
         let ki = self.stand.ki();
         ki.pruefe_neuroauftrag(id, wer)?;
-        let heute = ki.neurofragen().iter().filter(|e| e.datum == datum).count();
-        if heute >= neuro_max.min(crate::ki_einstellungen::MAX_NEURO_AUFRUFE) {
-            return Err(NeuroSperre::NeuroTageslimit);
-        }
-        if self.stand.seit_abschluss() != 0 {
-            return Err(NeuroSperre::PapierlaufOffen);
-        }
+        self.pruefe_neurobudget(wer, datum, einstellung, neuro_max)?;
         let auswahl = einstellung.auswahl;
         let zweck = crate::KiZweck::Neurofrage;
         let (buchung, deckel) =
             ki.naechste_mit_einstellung(wer, datum, zyklus, zweck, einstellung)?;
-        let offen = depot_kern::liste::handelstag(datum)
-            && self.stand.abschluss().is_none_or(|a| a.datum < datum);
-        if offen {
-            let aufrufe = ki
-                .buchungen()
-                .iter()
-                .filter(|b| b.berater == wer && b.datum == datum)
-                .count();
-            if aufrufe >= einstellung.max_aufrufe.saturating_sub(5) {
-                return Err(Sperre::ErstmeinungReserviert.into());
-            }
-        }
         let text = crate::kasse::buchung_fuer(&buchung, zweck, Some(auswahl));
         let abdruck = grenzabdruck_fuer_auswahl(Some(auswahl));
         let nr = ki.buchungen().len();
@@ -1428,9 +1410,66 @@ impl Journal {
         })
     }
 
+    fn pruefe_neurobudget(
+        &self,
+        wer: BeraterId,
+        datum: Datum,
+        einstellung: BeraterEinstellung,
+        neuro_max: usize,
+    ) -> Result<(), NeuroSperre> {
+        let ki = self.stand.ki();
+        if ki.neuroaufrufe_am(datum) >= neuro_max.min(crate::ki_einstellungen::MAX_NEURO_AUFRUFE) {
+            return Err(NeuroSperre::NeuroTageslimit);
+        }
+        if self.stand.seit_abschluss() != 0 {
+            return Err(NeuroSperre::PapierlaufOffen);
+        }
+        if depot_kern::liste::handelstag(datum)
+            && self.stand.abschluss().is_none_or(|a| a.datum < datum)
+        {
+            let aufrufe = ki
+                .buchungen()
+                .iter()
+                .filter(|b| b.berater == wer && b.datum == datum)
+                .count();
+            if aufrufe >= einstellung.max_aufrufe.saturating_sub(5) {
+                return Err(Sperre::ErstmeinungReserviert.into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Neue Erlaubnis für denselben Fall nach verbuchtem Abbruch am Ausgabelimit.
+    pub fn reserviere_neuro_wiederholung(
+        &mut self,
+        ergebnis: &NeuroErgebnis,
+        datum: Datum,
+        einstellung: BeraterEinstellung,
+        neuro_max: usize,
+    ) -> Result<NeuroAufrufErlaubnis, NeuroSperre> {
+        let ki = self.stand.ki();
+        if !ki.neurofragen().iter().any(|v| {
+            v.buchung == ergebnis.buchung
+                && v.id == ergebnis.id
+                && v.wer == ergebnis.wer
+                && v.datum == datum
+        }) || ki.neuroergebnis_zur_buchung(ergebnis.buchung) != Some(ergebnis)
+        {
+            return Err(
+                Sperre::Kassenbuch("Kein passender NeuroSchlopf-Erstversuch".into()).into(),
+            );
+        }
+        self.pruefe_neurobudget(ergebnis.wer, datum, einstellung, neuro_max)?;
+        let erlaubnis = self.schreibe_ki_wiederholung(ergebnis.buchung, Some(einstellung))?;
+        Ok(NeuroAufrufErlaubnis {
+            id: ergebnis.id.clone(),
+            erlaubnis,
+        })
+    }
+
     /// Belegt Bewertung und Abrechnung gemeinsam. Wiederholtes Einspielen ist unschädlich.
     pub fn belege_neuroergebnis(&mut self, ergebnis: &NeuroErgebnis) -> Result<(), JournalFehler> {
-        if self.stand.ki().neuroergebnis(ergebnis.buchung) == Some(ergebnis) {
+        if self.stand.ki().neuroergebnis_zur_buchung(ergebnis.buchung) == Some(ergebnis) {
             return Ok(());
         }
         self.schreibe_eintrag(Art::NeuroErgebnis, &ergebnis.text())
@@ -1490,6 +1529,47 @@ impl Journal {
             ));
         }
         self.schreibe_ki(buchung, deckel, zweck, einstellung.map(|p| p.auswahl))
+    }
+
+    /// Reserviert bezogen auf einen abgerechneten Aufruf am Ausgabelimit genau einen Folgeversuch.
+    pub fn reserviere_ki_wiederholung(
+        &mut self,
+        erste: usize,
+        einstellung: Option<BeraterEinstellung>,
+    ) -> Result<AufrufErlaubnis, Sperre> {
+        if self
+            .stand
+            .ki()
+            .buchungsbeleg(erste)
+            .is_some_and(|(zweck, _)| zweck == crate::KiZweck::Neurofrage)
+        {
+            return Err(Sperre::Kassenbuch(
+                "NeuroSchlopf braucht einen belegten Auftrag".into(),
+            ));
+        }
+        self.schreibe_ki_wiederholung(erste, einstellung)
+    }
+
+    fn schreibe_ki_wiederholung(
+        &mut self,
+        erste: usize,
+        einstellung: Option<BeraterEinstellung>,
+    ) -> Result<AufrufErlaubnis, Sperre> {
+        let ki = self.stand.ki();
+        let (buchung, deckel, zweck, wahl) = ki.wiederholung_fuer(erste)?;
+        let einstellung =
+            einstellung.unwrap_or_else(|| BeraterEinstellung::standard(buchung.berater));
+        if einstellung.auswahl != wahl {
+            return Err(Sperre::Kassenbuch(
+                "Modellwahl für Wiederholung geändert".into(),
+            ));
+        }
+        ki.pruefe_tageslimit(buchung.berater, buchung.datum, zweck, einstellung)?;
+        let nr = ki.buchungen().len();
+        let text = crate::kasse::buchung_text_mit_modell(&buchung, Some(wahl));
+        self.schreibe_eintrag(Art::Ki, &format!("{text};wiederholung;{erste}"))
+            .map_err(|e| Sperre::Kassenbuch(format!("Journal: {e:?}")))?;
+        Ok(AufrufErlaubnis::neu(buchung, deckel, wahl, nr, zweck))
     }
 
     fn schreibe_ki(

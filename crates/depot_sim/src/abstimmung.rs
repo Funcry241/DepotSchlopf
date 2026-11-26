@@ -1,5 +1,5 @@
 //! Begrenzter Austausch nach fixierten unabhängigen Erst- und Zweitmeinungen.
-use crate::lauf::{TopfAntwort, Zyklus, begruende, journal, topf_name};
+use crate::lauf::{TopfAntwort, Zyklus, begruende, topf_name};
 use crate::{Antwort, Berater, Lage, LaufFehler};
 use depot_journal::{Journal, KiZweck};
 use depot_kern::{BeraterId, Isin, Kurse, Topf, Vorschlag};
@@ -161,8 +161,9 @@ fn frage(
         ereignisse: &zyklus.tag.ereignisse,
     };
     let bilanz = crate::lauf::prognosebilanz(buch.stand());
-    let mut erste = zweite.abstimmen_mit_bilanz(erlaubnis, &lage, dialog, &bilanz);
-    crate::lauf::belege_ki(buch, zweite).map_err(journal)?;
+    let mut erste = crate::lauf::ki_mit_wiederholung(buch, zweite, erlaubnis, |ki, e| {
+        ki.abstimmen_mit_bilanz(e, &lage, dialog, &bilanz)
+    })?;
     let wer = match topf.topf.id().berater() {
         BeraterId::Dachs => "Dachs",
         BeraterId::Maus => "Maus",
