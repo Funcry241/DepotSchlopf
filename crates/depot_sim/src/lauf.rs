@@ -1768,7 +1768,15 @@ fn topf_zyklus(
             &format!("{t}: ZweitmeinungAusgefallen · Kaufzielgewichte × 0,5"),
         )?;
     }
-    belege_topfbefunde(j, tag, t, &ent, ruhetag, antwort.zweitmeinung_ausgefallen)?;
+    belege_topfbefunde(
+        j,
+        tag,
+        t,
+        &ent,
+        ruhetag,
+        antwort.zweitmeinung_ausgefallen,
+        kern.as_ref(),
+    )?;
     fuehre_plan_aus(j, z, id, &ent, auftragsziele, konto, kern.as_ref())
 }
 
@@ -1942,6 +1950,7 @@ fn belege_topfbefunde(
     ent: &depot_regelwerk::Entscheidung,
     ruhetag: bool,
     zweitmeinung_ausgefallen: bool,
+    kern: Option<&Isin>,
 ) -> Result<(), LaufFehler> {
     for b in &ent.befunde {
         if ruhetag && matches!(b, depot_regelwerk::Befund::KeinVorschlag) {
@@ -1960,6 +1969,12 @@ fn belege_topfbefunde(
                 } => format!(
                     "{t}: {isin}: Limitabstand {gefragt} bp außerhalb des Rahmens, {verwendet} bp verwendet"
                 ),
+                depot_regelwerk::Befund::StoppFehlt {
+                    isin,
+                    gefragt: None,
+                } if kern == Some(isin) => {
+                    format!("{t}: {isin}: Kernanlage ohne hinterlegten Schutz-Stopp geplant")
+                }
                 depot_regelwerk::Befund::StoppFehlt { isin, gefragt } => gefragt.map_or_else(
                     || format!("{t}: {isin}: kein Schutz-Stopp im Kaufvorschlag"),
                     |bp| format!("{t}: {isin}: Schutz-Stopp mit {bp} bp nicht übernommen"),
@@ -2741,7 +2756,7 @@ mod tests {
             [
                 "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt",
                 "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt, Regelwerk kürzte",
-                "Topf A: unter_mindesteinsatz 0 von 3000 bp · begründet: NVIDIA abwarten",
+                "Topf A: unter_mindesteinsatz 0 von 3000 bp · KI-Begründung: NVIDIA abwarten",
                 "Topf A: unter_mindesteinsatz 0 von 3000 bp · eigenes Ziel 4000 bp, nach der Beratung 0 bp · Begründung zum eigenen Ziel: Reserve halten",
             ]
         );

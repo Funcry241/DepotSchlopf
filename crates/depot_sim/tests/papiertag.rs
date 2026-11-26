@@ -4311,6 +4311,7 @@ fn kernanlage_kauft_eunl_ohne_ki_und_bucht_den_anlagezweck() -> Result<(), Strin
             order.beleg.nr
         ));
     }
+    pruefe_kernanlage_stoppvermerk(&j, &isin);
     belege(
         &mut j,
         6,
@@ -4361,6 +4362,18 @@ fn kernanlage_kauft_eunl_ohne_ki_und_bucht_den_anlagezweck() -> Result<(), Strin
             .all(|kauf| kauf.beleg.nr > verkauf.beleg.nr)
     );
     Ok(())
+}
+
+fn pruefe_kernanlage_stoppvermerk(j: &Journal, isin: &Isin) {
+    for topf in ["Topf A", "Topf B"] {
+        let vermerk = format!("{topf}: {isin}: Kernanlage ohne hinterlegten Schutz-Stopp geplant");
+        assert!(
+            j.stand()
+                .begruendungen()
+                .iter()
+                .any(|(_, wer, text)| wer == "Regelwerk" && *text == vermerk)
+        );
+    }
 }
 
 fn kernanlage_umschichtung(
