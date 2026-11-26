@@ -1,0 +1,4 @@
+klasse: Funktion
+zweck: Den letzten fehlgeschlagenen Gemini-Versuch und die letzte verwertbare Zuarbeit in Live anzeigen
+pfade:
+crates/depot_dienst/src/ki_ausblick.rs

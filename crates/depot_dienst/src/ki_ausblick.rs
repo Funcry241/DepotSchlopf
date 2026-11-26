@@ -18,8 +18,73 @@ pub(crate) struct Ausblick {
     pub(crate) einstellungen: Option<KiEinstellungen>,
     gemini_aktiv: bool,
     gemini_aufrufe: Option<usize>,
+    gemini_verlauf: GeminiVerlauf,
     neuro_aktiv: bool,
     neuro_aktivitaet: String,
+}
+
+#[derive(Default)]
+struct GeminiVerlauf {
+    letzter_versuch: Option<(Zeitpunkt, bool)>,
+    letzter_erfolg: Option<Zeitpunkt>,
+}
+
+impl GeminiVerlauf {
+    fn lesen(daten: &std::path::Path, tag: Option<Datum>) -> Self {
+        let mut verlauf = Self::default();
+        let mut lesebudget = 8 * 1024 * 1024;
+        for tage in (-6..=0).rev() {
+            let Some(datum) = tag.and_then(|tag| tag.plus_tage(tage)) else {
+                break;
+            };
+            let Ok(eintraege) =
+                depot_journal::gespraeche::lesen_begrenzt(daten, datum, &mut lesebudget)
+            else {
+                break;
+            };
+            if let Some((eintraege, _)) = eintraege {
+                for e in &eintraege {
+                    verlauf.beobachte(e);
+                }
+            }
+            if verlauf.letzter_erfolg.is_some() {
+                break;
+            }
+        }
+        verlauf
+    }
+
+    fn beobachte(&mut self, e: &depot_journal::gespraeche::Gespraech) {
+        if e.wer != depot_kern::gemini::DIENST || e.ergebnis == "uebersprungen" {
+            return;
+        }
+        let erfolg = e.ergebnis == "ok" && e.antwort.is_some();
+        if self.letzter_versuch.is_none_or(|(zeit, _)| e.zeit >= zeit) {
+            self.letzter_versuch = Some((e.zeit, erfolg));
+        }
+        if erfolg && self.letzter_erfolg.is_none_or(|zeit| e.zeit >= zeit) {
+            self.letzter_erfolg = Some(e.zeit);
+        }
+    }
+
+    fn ergaenze(&self, text: &mut String) {
+        if let Some((zeit, false)) = self.letzter_versuch {
+            let _ = write!(
+                text,
+                " Letzter Versuch fehlgeschlagen ({}).",
+                depot_lage::zeit_text(zeit)
+            );
+        }
+        if let Some(zeit) = self.letzter_erfolg {
+            let _ = write!(
+                text,
+                " Letzte verwertbare Zuarbeit: {}.",
+                depot_lage::zeit_text(zeit)
+            );
+        } else if self.letzter_versuch.is_some() {
+            text.push_str(" Keine verwertbare Zuarbeit im geprüften Verlauf.");
+        }
+    }
 }
 
 impl Ausblick {
@@ -30,6 +95,11 @@ impl Ausblick {
             einstellungen: ki_einstellungen::lesen(&daten).ok(),
             gemini_aktiv,
             gemini_aufrufe: tag.map(|tag| depot_lage::gespraeche::gemini_aufrufe(&daten, tag)),
+            gemini_verlauf: if gemini_aktiv {
+                GeminiVerlauf::lesen(&daten, tag)
+            } else {
+                GeminiVerlauf::default()
+            },
             neuro_aktiv: matches!(neuro, Ok(true)),
             neuro_aktivitaet: crate::neuroschlopf::live_aktivitaet(d, &neuro),
         }
@@ -79,7 +149,10 @@ impl Ausblick {
             }
             s.push_str("</td></tr>");
         }
-        let gemini = self.gemini_stand(z, jetzt, wartet_auf_update);
+        let mut gemini = self.gemini_stand(z, jetzt, wartet_auf_update);
+        if self.gemini_aktiv {
+            self.gemini_verlauf.ergaenze(&mut gemini);
+        }
         let _ = write!(
             s,
             "<tr><th scope=\"row\">Gemini</th><td>{}</td></tr><tr><th scope=\"row\">NeuroSchlopf</th><td>Belegvergleich · {}",
