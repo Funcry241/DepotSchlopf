@@ -1,0 +1,7 @@
+klasse: Funktion
+zweck: Vier Papier-Schattenkonten mit je 5.000 Euro aus vorhandenen Belegen im Analyse-Export vergleichen
+pfade:
+crates/depot_dienst/src/analyse.rs
+crates/depot_sim/src/rueckschau.rs
+crates/depot_sim/src/rueckschau/aufwaertsdruck.rs
+crates/depot_sim/src/rueckschau/schattenkonten.rs

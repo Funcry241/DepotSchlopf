@@ -5,6 +5,7 @@ mod aufwaertsdruck;
 mod ausstiegsvergleich;
 mod ranggruppen;
 mod rotation;
+mod schattenkonten;
 pub use rotation::rotationsbericht;
 
 use std::collections::BTreeMap;
@@ -282,6 +283,17 @@ fn zeile(text: &mut String, name: &str, fall: &Fall, dauer: usize, ergebnis: Opt
     } else {
         text.push_str("– | – | – | – |\n");
     }
+}
+
+/// Schattenkonten des gewählten Exportfensters, ohne Buchung oder weitere KI-Aufrufe.
+pub fn schattenkontenbericht(stand: &Stand, jetzt: Zeitpunkt, von: Datum, bis: Datum) -> String {
+    schattenkonten::bericht(
+        stand,
+        &ausstiegsvergleich::Historie::laden(stand, jetzt),
+        von,
+        bis,
+        jetzt,
+    )
 }
 
 /// Separater Exportabschnitt, unabhängig vom Zeitraum der echten Tage.
