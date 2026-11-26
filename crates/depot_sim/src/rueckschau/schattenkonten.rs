@@ -10,7 +10,7 @@ use depot_kern::{BP_GANZ, Boerse, Cent, Datum, Grenzen, Isin, Rundung, Zeitpunkt
 use crate::aufwaertsdruck_beleg::{Befund, Beobachtung, Idee, beobachtungen};
 use crate::schattenkandidaten::{Phase, beratungslaeufe, kandidaten, phasenbelege};
 
-use super::aufwaertsdruck::{BUDGET, HALTETAGE};
+use super::aufwaertsdruck::HALTETAGE;
 use super::ausstiegsvergleich::{Historie, handelstage_ab, kaufbetrag, stuecke, verkauf};
 
 const START: Cent = Cent(500_000);
@@ -119,8 +119,10 @@ impl<'a> Konto<'a> {
             .and_then(|erloes| self.bar.checked_add(erloes))
         {
             self.bar = bar;
-            self.position = None;
+        } else {
+            self.luecke();
         }
+        self.position = None;
     }
 
     fn kaufe(&mut self, historie: &Historie, kauf: &Kauf<'a>, grenzen: &Grenzen) -> Option<()> {
@@ -139,7 +141,8 @@ impl<'a> Konto<'a> {
         if fuellung > kauf.limit {
             return Some(());
         }
-        let stueck = stuecke(BUDGET.min(self.bar), kauf.limit, grenzen)?;
+        let budget = self.bar.anteil_bp_ab(grenzen.max_anteil_bp())?;
+        let stueck = stuecke(budget, kauf.limit, grenzen)?;
         if stueck == 0 || fuellung.mal_stueck(stueck)? < grenzen.min_order() {
             return Some(());
         }
@@ -172,23 +175,36 @@ impl<'a> Konto<'a> {
 
 #[derive(Default)]
 struct Beratung {
-    kosten: Option<Cent>,
     gemeinsame_zeit: BTreeMap<Isin, Zeitpunkt>,
 }
 
-fn beratungskosten(ki: &depot_journal::KiStand, laufe: std::ops::Range<usize>) -> Option<Cent> {
-    laufe.into_iter().try_fold(Cent::NULL, |summe, nr| {
-        let (zweck, abgerechnet) = ki.buchungsbeleg(nr)?;
-        if matches!(
-            zweck,
-            KiZweck::Erstmeinung | KiZweck::Zweitmeinung | KiZweck::Abstimmung
-        ) {
-            let kosten = abgerechnet.then(|| ki.buchungen().get(nr))??.reserviert;
-            summe.checked_add(kosten)
-        } else {
-            Some(summe)
+fn beratungskosten(stand: &Stand, zeitraum: Zeitraum) -> BTreeMap<Datum, Option<Cent>> {
+    let ki = stand.ki();
+    let mut tage = BTreeMap::new();
+    for (nr, buchung) in ki.buchungen().iter().enumerate() {
+        if !(zeitraum.von..=zeitraum.bis).contains(&buchung.datum) {
+            continue;
         }
-    })
+        let Some((KiZweck::Erstmeinung | KiZweck::Zweitmeinung | KiZweck::Abstimmung, abgerechnet)) =
+            ki.buchungsbeleg(nr)
+        else {
+            continue;
+        };
+        let kosten = tage.entry(buchung.datum).or_insert(Some(Cent::NULL));
+        *kosten = kosten.and_then(|summe| {
+            abgerechnet
+                .then_some(buchung.reserviert)
+                .and_then(|betrag| summe.checked_add(betrag))
+        });
+    }
+    let mut rest = 1_i64;
+    for kosten in tage.values_mut().flatten() {
+        if let Some(cent) = kosten.0.checked_add(rest) {
+            *kosten = Cent(cent.div_euclid(2));
+            rest = cent.rem_euclid(2);
+        }
+    }
+    tage
 }
 
 fn beratung(stand: &Stand, zeitraum: Zeitraum) -> BTreeMap<Datum, Beratung> {
@@ -200,18 +216,11 @@ fn beratung(stand: &Stand, zeitraum: Zeitraum) -> BTreeMap<Datum, Beratung> {
         .filter(|p| p.phase == Phase::Gemeinsam)
         .map(|p| (p.tag, p.lauf, p.topf))
         .collect();
-    let ki = stand.ki();
     for lauf in laeufe
         .iter()
         .filter(|l| (zeitraum.von..=zeitraum.bis).contains(&l.tag))
     {
-        let tag = tage.entry(lauf.tag).or_insert_with(|| Beratung {
-            kosten: Some(Cent::NULL),
-            gemeinsame_zeit: BTreeMap::new(),
-        });
-        tag.kosten = tag
-            .kosten
-            .and_then(|summe| summe.checked_add(beratungskosten(ki, lauf.buchungen.clone())?));
+        tage.entry(lauf.tag).or_default();
     }
     for k in kandidaten(stand)
         .into_iter()
@@ -341,10 +350,11 @@ pub(super) fn bericht(
     let grenzen = Grenzen::standard();
     let befunde = offene_signale(stand, zeitraum);
     let beratung = beratung(stand, zeitraum);
-    let kosten: BTreeMap<_, _> = befunde
+    let kosten = beratungskosten(stand, zeitraum);
+    let signaltage: BTreeSet<_> = befunde
         .iter()
         .filter(|b| matches!(b.befund, Befund::Signal(_)))
-        .map(|b| (b.tag, beratung.get(&b.tag).and_then(|tag| tag.kosten)))
+        .map(|b| b.tag)
         .collect();
     let allein = rechne(
         historie,
@@ -364,9 +374,9 @@ pub(super) fn bericht(
         .filter(|b| matches!(b.befund, Befund::Luecke))
         .count();
     let mut text = format!(
-        "\n## Vier Schattenkonten\n\nModellrechnung mit je 5.000 € Startkapital im Exportfenster {von} bis {bis}. Bargeld bleibt unverzinst. Beide Aufwärtsdruck-Konten nutzen vorab protokollierte Signale, höchstens eine offene Position und bis zu 3.000 € pro Einstieg. Es gelten Standardlimit, ganze Stücke, Papiergebühren und Modellspread. Der Ausstieg erfolgt am fünften folgenden Börsentag. Offene Positionen bewertet der Bericht am letzten vorgesehenen Schluss nach modellierten Verkaufskosten.\n\nDas Beratungskonto verlangt zusätzlich einen belegten gemeinsamen Kaufstand für denselben Wert am Signaltag und wartet dessen Bereitschaft ab. Es zieht abgerechnete Kosten für Erst- und Zweitmeinung sowie Abstimmung an jedem Signaltag einmal ab. Offene oder fehlende Kostenbelege lassen den Endwert offen. EUNL hält ab dem ersten Xetra-Schluss im Fenster bis zum letzten vorgesehenen Schluss.\n\nBörsentag-Belege: {}, davon {marktluecken} mit Marktlücke. Tage mit Aufwärtsdruck-Signal: {}. Fehlende Kurs- oder Kostenbelege können einen Endwert offenlassen.\n\n| Konto | Modell-Endwert | Netto | Käufe | Abgerechnete Beratungskosten |\n|---|---:|---:|---:|---:|\n",
+        "\n## Vier Schattenkonten\n\nModellrechnung mit je 5.000 € Startkapital im Exportfenster {von} bis {bis}. Bargeld bleibt unverzinst. Beide Aufwärtsdruck-Konten nutzen vorab protokollierte Signale, höchstens eine offene Position und bis zu 40 % des belegten Kontowerts pro Einstieg. Es gelten Standardlimit, ganze Stücke, Papiergebühren und Modellspread. Der Ausstieg erfolgt am fünften folgenden Börsentag. Fehlt der Ausstiegskurs, bleibt der Erlös offen. Weitere Käufe verwenden das belegte Restbargeld. Offene Positionen bewertet der Bericht am letzten vorgesehenen Schluss nach modellierten Verkaufskosten.\n\nDas Beratungskonto verlangt zusätzlich einen belegten gemeinsamen Kaufstand für denselben Wert am Signaltag und wartet dessen Bereitschaft ab. Es trägt einmal die Hälfte der gebuchten Erst- und Zweitmeinungs- sowie Abstimmungskosten des gesamten Exportfensters, insgesamt auf ganze Cent aufgerundet. Ohne Beratung fallen keine Kosten an. Offene Abrechnungen lassen den Endwert offen. EUNL hält ab dem ersten Xetra-Schluss im Fenster bis zum letzten vorgesehenen Schluss. Die fortgeschriebenen Journalstrategien Stärke, Zahlen und Korb laufen separat. Der Abschnitt EUNL und €STR zeigt zusätzlich verzinstes Bargeld.\n\nBörsentag-Belege: {}, davon {marktluecken} mit Marktlücke. Tage mit Aufwärtsdruck-Signal: {}. Fehlende Kurs- oder Kostenbelege können einen Endwert offenlassen.\n\n| Konto | Modell-Endwert | Netto | Käufe | Abgerechnete Beratungskosten |\n|---|---:|---:|---:|---:|\n",
         befunde.len(),
-        kosten.len()
+        signaltage.len()
     );
     let zeilen = [
         ("Nur Bargeld", Some(START), Some(0), Cent::NULL),
@@ -507,7 +517,6 @@ mod tests {
         let beratung = [(
             montag,
             Beratung {
-                kosten: Some(Cent(8)),
                 gemeinsame_zeit: [(isin, freigabe)].into(),
             },
         )]
@@ -516,6 +525,29 @@ mod tests {
         assert_eq!(
             beraten.first().map(|k| k.schluss),
             Boerse::Xetra.schluss(dienstag)
+        );
+        let historienluecke = Historie::default();
+        let mut konto = Konto::neu();
+        konto.position = Some(Position {
+            isin: befunde
+                .first()
+                .and_then(|b| match &b.befund {
+                    Befund::Signal(idee) => Some(&idee.isin),
+                    _ => None,
+                })
+                .ok_or("ISIN")?,
+            boerse: Boerse::Xetra,
+            kauf: freitag,
+            ausstieg: montag,
+            stueck: 1,
+        });
+        konto.verkaufe_faellig(&historienluecke, jetzt, &grenzen);
+        assert!(konto.position.is_none());
+        assert!(konto.wert(&historienluecke, zeitraum, &grenzen).is_none());
+        let ohne_beratung = rechne(&historienluecke, &[], &BTreeMap::new(), &grenzen);
+        assert_eq!(
+            ohne_beratung.wert(&historienluecke, zeitraum, &grenzen),
+            Some(START)
         );
         let historie = Historie::default();
         let konto = rechne(

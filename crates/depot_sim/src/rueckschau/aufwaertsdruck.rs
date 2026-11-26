@@ -15,7 +15,7 @@ use super::ausstiegsvergleich::{
     Historie, handelstage_ab, kaufbetrag, korbnetto, stuecke, verkauf,
 };
 
-pub(super) const BUDGET: Cent = Cent(300_000);
+const BUDGET: Cent = Cent(300_000);
 pub(super) const HALTETAGE: usize = 5;
 
 struct Kaufidee<'a> {
