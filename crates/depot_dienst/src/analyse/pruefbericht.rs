@@ -68,7 +68,7 @@ fn antwortwiederholungen(text: &mut String, stand: &Stand, zeitraum: Zeitraum) {
     if abgeschnitten > 0 {
         let _ = writeln!(
             text,
-            "- Ausgabelimit erreicht: {abgeschnitten}. Wiederholungen reserviert: {wiederholt}, davon mit vollständiger Anbieterantwort: {vollstaendig}.\n"
+            "- Ausgabelimit erreicht: {abgeschnitten}. Wiederholungen reserviert: {wiederholt}, davon technisch vollständig beantwortet: {vollstaendig}. Die fachliche Verwertbarkeit wird hier nicht gezählt.\n"
         );
     }
 }
