@@ -19,52 +19,32 @@ pub(crate) struct Ausblick {
     gemini_aktiv: bool,
     gemini_aufrufe: Option<usize>,
     gemini_verlauf: GeminiVerlauf,
+    gemini_wiederholung: Option<Zeitpunkt>,
     neuro_aktiv: bool,
     neuro_aktivitaet: String,
 }
 
 #[derive(Default)]
-struct GeminiVerlauf {
+pub(crate) struct GeminiVerlauf {
     letzter_versuch: Option<(Zeitpunkt, bool)>,
     letzter_erfolg: Option<Zeitpunkt>,
 }
 
 impl GeminiVerlauf {
-    fn lesen(daten: &std::path::Path, tag: Option<Datum>) -> Self {
-        let mut verlauf = Self::default();
-        let mut lesebudget = 8 * 1024 * 1024;
-        for tage in (-6..=0).rev() {
-            let Some(datum) = tag.and_then(|tag| tag.plus_tage(tage)) else {
-                break;
-            };
-            let Ok(eintraege) =
-                depot_journal::gespraeche::lesen_begrenzt(daten, datum, &mut lesebudget)
-            else {
-                break;
-            };
-            if let Some((eintraege, _)) = eintraege {
-                for e in &eintraege {
-                    verlauf.beobachte(e);
-                }
-            }
-            if verlauf.letzter_erfolg.is_some() {
-                break;
-            }
+    pub(crate) fn beobachte(&mut self, zeit: Zeitpunkt, erfolg: bool) {
+        if self
+            .letzter_versuch
+            .is_none_or(|(bisher, _)| zeit >= bisher)
+        {
+            self.letzter_versuch = Some((zeit, erfolg));
         }
-        verlauf
+        if erfolg && self.letzter_erfolg.is_none_or(|bisher| zeit >= bisher) {
+            self.letzter_erfolg = Some(zeit);
+        }
     }
 
-    fn beobachte(&mut self, e: &depot_journal::gespraeche::Gespraech) {
-        if e.wer != depot_kern::gemini::DIENST || e.ergebnis == "uebersprungen" {
-            return;
-        }
-        let erfolg = e.ergebnis == "ok" && e.antwort.is_some();
-        if self.letzter_versuch.is_none_or(|(zeit, _)| e.zeit >= zeit) {
-            self.letzter_versuch = Some((e.zeit, erfolg));
-        }
-        if erfolg && self.letzter_erfolg.is_none_or(|zeit| e.zeit >= zeit) {
-            self.letzter_erfolg = Some(e.zeit);
-        }
+    pub(crate) fn hat_erfolg(&self) -> bool {
+        self.letzter_erfolg.is_some()
     }
 
     fn ergaenze(&self, text: &mut String) {
@@ -96,10 +76,13 @@ impl Ausblick {
             gemini_aktiv,
             gemini_aufrufe: tag.map(|tag| depot_lage::gespraeche::gemini_aufrufe(&daten, tag)),
             gemini_verlauf: if gemini_aktiv {
-                GeminiVerlauf::lesen(&daten, tag)
+                d.gespraechscache.gemini_verlauf(&daten, tag)
             } else {
                 GeminiVerlauf::default()
             },
+            gemini_wiederholung: tag.and_then(|tag| {
+                depot_lage::gespraeche::gemini_wiederholung(&daten, tag).map(|w| w.faellig)
+            }),
             neuro_aktiv: matches!(neuro, Ok(true)),
             neuro_aktivitaet: crate::neuroschlopf::live_aktivitaet(d, &neuro),
         }
@@ -187,6 +170,15 @@ impl Ausblick {
         }
         if z.warteschlange.iter().any(|a| a.art == Art::Gemini) {
             return "Schlagzeilen vorsortieren · wartet auf den Start.".into();
+        }
+        if z.zeitplan.an
+            && let Some(faellig) = self.gemini_wiederholung
+            && !z
+                .verlauf
+                .iter()
+                .any(|a| a.art == Art::Gemini && a.start >= faellig)
+        {
+            return format!("Folgeversuch ab {}.", depot_lage::zeit_text(faellig));
         }
         if let Some(grund) = schluesselgrund(z, jetzt.frankfurt_tag(), Wer::Gemini) {
             return grund.into();
@@ -385,4 +377,27 @@ fn berater_zeitplan(z: &Zustand, jetzt: Zeitpunkt) -> String {
         }
     }
     "Wartet auf einen Auftrag.".into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_anzeige_bewahrt_erfolg_und_neueren_fehler() -> Result<(), String> {
+        let erfolg = Zeitpunkt::lies("2026-11-25T08:00:00Z").ok_or("Erfolg")?;
+        let fehler = Zeitpunkt::lies("2026-11-26T08:00:00Z").ok_or("Fehler")?;
+        let mut verlauf = GeminiVerlauf::default();
+        verlauf.beobachte(fehler, false);
+        let mut text = String::new();
+        verlauf.ergaenze(&mut text);
+        assert!(text.contains("Keine verwertbare Zuarbeit"));
+        verlauf.beobachte(erfolg, true);
+        text.clear();
+        verlauf.ergaenze(&mut text);
+        assert!(text.contains(&depot_lage::zeit_text(erfolg)));
+        assert!(text.contains(&depot_lage::zeit_text(fehler)));
+        assert!(!text.contains("Keine verwertbare Zuarbeit"));
+        Ok(())
+    }
 }

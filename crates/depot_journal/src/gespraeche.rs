@@ -374,6 +374,63 @@ pub fn gemini_kontingent(daten: &Path, tag: Datum) -> PathBuf {
     daten.join(format!("gemini-{tag}.kontingent"))
 }
 
+/// Ausstehender einmaliger Folgeversuch aus dem dauerhaft gezählten Kontingent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeminiWiederholung {
+    pub faellig: Zeitpunkt,
+    pub digest: String,
+    pub vorrang: bool,
+}
+
+impl GeminiWiederholung {
+    pub fn text(&self) -> String {
+        format!(
+            "wiederholung;{};{};{}",
+            self.faellig.sekunden(),
+            self.digest,
+            self.vorrang
+        )
+    }
+
+    pub fn lies(zeile: &str) -> Option<Self> {
+        let mut f = zeile.strip_prefix("wiederholung;")?.split(';');
+        let faellig = Zeitpunkt::aus_sekunden(f.next()?.parse().ok()?)?;
+        let digest = f.next()?.to_owned();
+        let vorrang = f.next()?.parse().ok()?;
+        (f.next().is_none() && gemini_digest(&digest)).then_some(Self {
+            faellig,
+            digest,
+            vorrang,
+        })
+    }
+}
+
+pub const GEMINI_WIEDERHOLUNG_ERLEDIGT: &str = "wiederholung-erledigt";
+
+pub fn gemini_digest(zeile: &str) -> bool {
+    zeile.len() == 64 && zeile.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+pub fn gemini_wiederholung_aus(text: &str, tag: Datum) -> Option<GeminiWiederholung> {
+    let zeile = text.lines().rev().find(|z| {
+        matches!(*z, GEMINI_WIEDERHOLUNG_ERLEDIGT | "anbietersperre")
+            || z.starts_with("wiederholung;")
+    })?;
+    GeminiWiederholung::lies(zeile).filter(|w| w.faellig.frankfurt_tag() == Some(tag))
+}
+
+pub fn gemini_wiederholung(daten: &Path, tag: Datum) -> Option<GeminiWiederholung> {
+    let mut text = String::new();
+    File::open(gemini_kontingent(daten, tag))
+        .ok()?
+        .take(4096)
+        .read_to_string(&mut text)
+        .ok()?;
+    text.ends_with('\n')
+        .then(|| gemini_wiederholung_aus(&text, tag))
+        .flatten()
+}
+
 pub fn raeume_gemini_auf(daten: &Path, heute: Datum) -> io::Result<()> {
     let Some(grenze) = heute.plus_tage(-7) else {
         return Ok(());
@@ -398,11 +455,8 @@ pub fn raeume_gemini_auf(daten: &Path, heute: Datum) -> io::Result<()> {
 }
 
 pub fn gemini_aufrufe(daten: &Path, tag: Datum) -> usize {
-    fs::read_to_string(gemini_kontingent(daten, tag)).map_or(0, |t| {
-        t.lines()
-            .filter(|z| z.len() == 64 && z.bytes().all(|b| b.is_ascii_hexdigit()))
-            .count()
-    })
+    fs::read_to_string(gemini_kontingent(daten, tag))
+        .map_or(0, |t| t.lines().filter(|z| gemini_digest(z)).count())
 }
 
 #[cfg(test)]
