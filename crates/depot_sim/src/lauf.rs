@@ -938,8 +938,6 @@ pub(crate) fn belege_ki(
     Ok(())
 }
 
-/// Fragt einen Berater, wenn der Kostenschutz es erlaubt. `None` heisst: nicht gefragt; der
-/// Grund steht im Journal.
 /// Jeder Versuch wird vor dem Versand separat reserviert und vor einem weiteren
 /// Versuch abgerechnet. Der Antworttyp und die fachliche Auswertung bleiben gleich.
 pub(crate) fn ki_mit_wiederholung<T>(
@@ -948,27 +946,41 @@ pub(crate) fn ki_mit_wiederholung<T>(
     erlaubnis: depot_journal::AufrufErlaubnis,
     mut frage: impl FnMut(&mut dyn Berater, depot_journal::AufrufErlaubnis) -> T,
 ) -> Result<T, LaufFehler> {
-    let (wer, datum, zyklus, zweck) = {
-        let b = erlaubnis.buchung();
-        (b.berater, b.datum, b.zyklus, erlaubnis.zweck())
-    };
+    let nummer = erlaubnis.buchungsnummer();
+    let zweck = erlaubnis.zweck();
     let erste = frage(berater, erlaubnis);
     belege_ki(j, berater).map_err(journal)?;
-    if !berater.ausgabelimit_erreicht() || !berater.angebunden() || berater.kostensperre() {
+    if !berater.ausgabelimit_erreicht() {
         return Ok(erste);
     }
-    let erlaubnis =
-        match j.reserviere_mit_einstellung(wer, datum, zyklus, zweck, berater.einstellung()) {
-            Ok(erlaubnis) => erlaubnis,
-            Err(Sperre::Kassenbuch(e)) => return Err(halt(e)),
-            Err(_) => return Ok(erste),
-        };
+    if berater.kostensperre() || !berater.angebunden() {
+        let grund = berater
+            .warum_nicht()
+            .unwrap_or_else(|| "Kostenschutz oder Anbieterpause".into());
+        berater.anfrage_uebersprungen(zweck, &format!("Wiederholung zu Buchung {nummer}: {grund}"));
+        return Ok(erste);
+    }
+    let erlaubnis = match j.reserviere_ki_wiederholung(nummer, berater.einstellung()) {
+        Ok(erlaubnis) => erlaubnis,
+        Err(Sperre::Kassenbuch(e)) => return Err(halt(e)),
+        Err(sperre) => {
+            berater.anfrage_uebersprungen(
+                zweck,
+                &format!(
+                    "Wiederholung zu Buchung {nummer} nicht gefragt: Kostenschutz ({sperre:?})"
+                ),
+            );
+            return Ok(erste);
+        }
+    };
     berater.kurze_antwort_anfordern();
     let zweite = frage(berater, erlaubnis);
     belege_ki(j, berater).map_err(journal)?;
     Ok(zweite)
 }
 
+/// Fragt einen Berater, wenn der Kostenschutz es erlaubt. `None` heisst: nicht gefragt; der
+/// Grund steht im Journal.
 fn erlaubnis(
     j: &mut Journal,
     tag: &Tag,
@@ -2721,6 +2733,22 @@ mod tests {
             let e = j
                 .reserviere(wer, datum, 1)
                 .map_err(|e| halt(format!("{e:?}")))?;
+            let erste = e.buchungsnummer();
+            let hash = "a".repeat(64);
+            let beleg = depot_journal::KiAufruf {
+                nr: erste,
+                anbieter: "Probe".into(),
+                modell: "Probe".into(),
+                vorlage: hash.clone(),
+                frage: Some(hash.clone()),
+                antwort: Some(hash),
+                token_ein: Some(10),
+                token_aus: Some(u64::from(e.deckel().max_token_aus())),
+                ergebnis: depot_journal::KiAufrufErgebnis::Ausgabelimit,
+            };
+            j.belege_ki_aufruf(&beleg).map_err(journal)?;
+            let abrechnung = e.abrechnung(10, 10).ok_or_else(|| halt("Abrechnung"))?;
+            j.rechne_ki_ab(&abrechnung).map_err(journal)?;
             let mut probe = Probe {
                 gesperrt,
                 kompakt: false,
@@ -2731,9 +2759,13 @@ mod tests {
             })?;
             assert_eq!(nr.len(), erwartet);
             assert_eq!(probe.kompakt, !gesperrt);
-            assert!(nr.windows(2).all(|paar| paar.first() != paar.last()));
+            assert_eq!(j.stand().ki().wiederholung(erste), nr.get(1).copied());
         }
         assert_eq!(j.stand().ki().buchungen().len(), 3);
+        drop(j);
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        assert_eq!(j.stand().ki().wiederholung(0), Some(1));
+        assert!(j.reserviere_ki_wiederholung(0, None).is_err());
         drop(j);
         std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
         Ok(())

@@ -113,6 +113,15 @@ impl KiDeckel {
         }
     }
 
+    /// Höherer Ausgabedeckel für genau eine separat reservierte Wiederholung.
+    #[must_use]
+    pub fn fuer_wiederholung(self) -> Self {
+        Self {
+            max_token_aus: self.max_token_aus.saturating_mul(2),
+            ..self
+        }
+    }
+
     pub fn max_token_ein(&self) -> u32 {
         self.max_token_ein
     }

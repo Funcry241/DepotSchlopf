@@ -1492,6 +1492,29 @@ impl Journal {
         self.schreibe_ki(buchung, deckel, zweck, einstellung.map(|p| p.auswahl))
     }
 
+    /// Reserviert bezogen auf einen abgerechneten Aufruf am Ausgabelimit genau einen Folgeversuch.
+    pub fn reserviere_ki_wiederholung(
+        &mut self,
+        erste: usize,
+        einstellung: Option<BeraterEinstellung>,
+    ) -> Result<AufrufErlaubnis, Sperre> {
+        let ki = self.stand.ki();
+        let (buchung, deckel, zweck, wahl) = ki.wiederholung_fuer(erste)?;
+        let einstellung =
+            einstellung.unwrap_or_else(|| BeraterEinstellung::standard(buchung.berater));
+        if einstellung.auswahl != wahl {
+            return Err(Sperre::Kassenbuch(
+                "Modellwahl für Wiederholung geändert".into(),
+            ));
+        }
+        ki.pruefe_tageslimit(buchung.berater, buchung.datum, zweck, einstellung)?;
+        let nr = ki.buchungen().len();
+        let text = crate::kasse::buchung_text_mit_modell(&buchung, Some(wahl));
+        self.schreibe_eintrag(Art::Ki, &format!("{text};wiederholung;{erste}"))
+            .map_err(|e| Sperre::Kassenbuch(format!("Journal: {e:?}")))?;
+        Ok(AufrufErlaubnis::neu(buchung, deckel, wahl, nr, zweck))
+    }
+
     fn schreibe_ki(
         &mut self,
         buchung: depot_ki::Buchung,

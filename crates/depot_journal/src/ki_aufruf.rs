@@ -5,6 +5,7 @@ pub enum KiAufrufErgebnis {
     Beantwortet,
     Abgelehnt,
     Unbrauchbar,
+    Ausgabelimit,
     NichtGesendet,
 }
 
@@ -14,6 +15,7 @@ impl KiAufrufErgebnis {
             Self::Beantwortet => "beantwortet",
             Self::Abgelehnt => "abgelehnt",
             Self::Unbrauchbar => "unbrauchbar",
+            Self::Ausgabelimit => "ausgabelimit",
             Self::NichtGesendet => "nicht_gesendet",
         }
     }
@@ -82,6 +84,7 @@ impl KiAufruf {
             KiAufrufErgebnis::Beantwortet,
             KiAufrufErgebnis::Abgelehnt,
             KiAufrufErgebnis::Unbrauchbar,
+            KiAufrufErgebnis::Ausgabelimit,
             KiAufrufErgebnis::NichtGesendet,
         ]
         .into_iter()

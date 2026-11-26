@@ -1,8 +1,14 @@
 klasse: Funktion
-zweck: Abgeschnittene Dachs- und Maus-Antworten in Beratung, Vorschau und Wochenrückschau einmal kompakt und separat gebucht wiederholen
+zweck: Abgeschnittene KI-Antworten einmal mit höherem Ausgabelimit und eigener Reservierung wiederholen
 pfade:
 crates/depot_berater/src/anbieter.rs
 crates/depot_berater/src/ki.rs
+crates/depot_berater/tests/berater.rs
+crates/depot_dienst/src/analyse/pruefbericht.rs
+crates/depot_journal/src/datei.rs
+crates/depot_journal/src/kasse.rs
+crates/depot_journal/src/ki_aufruf.rs
+crates/depot_ki/src/budget.rs
 crates/depot_sim/src/abstimmung.rs
 crates/depot_sim/src/lauf.rs
 crates/depot_sim/src/szenario.rs

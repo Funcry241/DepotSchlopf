@@ -712,13 +712,13 @@ impl<N: Netz> KiBerater<N> {
     ) -> Ergebnis {
         let modus = std::mem::replace(&mut self.antwortmodus, Antwortmodus::Normal);
         let kurz;
-        let system = if modus == Antwortmodus::Kurz {
+        let frage = if modus == Antwortmodus::Kurz {
             kurz = format!(
-                "{system} Antworte diesmal sehr knapp. Halte das verlangte Ausgabeformat ein. Je Textfeld höchstens einen kurzen Satz. Lass optionale Ausführungen weg."
+                "{frage}\nAntworte diesmal knapp. Halte das verlangte Ausgabeformat ein und lass optionale Ausführungen weg."
             );
             kurz.as_str()
         } else {
-            system
+            frage
         };
         if (zweck == KiZweck::Neurofrage || erlaubnis.zweck() == KiZweck::Neurofrage)
             && zweck != erlaubnis.zweck()
@@ -747,7 +747,10 @@ impl<N: Netz> KiBerater<N> {
                 .is_some_and(|text| aufrufspur::enthaelt_geheimnis(text, &sensibel));
         if geheim {
             self.antwortmodus = Antwortmodus::Normal;
-            if spur.ergebnis == KiAufrufErgebnis::Beantwortet {
+            if matches!(
+                spur.ergebnis,
+                KiAufrufErgebnis::Beantwortet | KiAufrufErgebnis::Ausgabelimit
+            ) {
                 spur.ergebnis = KiAufrufErgebnis::Unbrauchbar;
             }
         }
@@ -1068,6 +1071,7 @@ impl<N: Netz> KiBerater<N> {
         }
         if gelesen.ausgabelimit_erreicht {
             self.antwortmodus = Antwortmodus::Abgeschnitten;
+            spur.ergebnis = KiAufrufErgebnis::Ausgabelimit;
         }
         self.technischer_ausfall = gelesen.text.is_err();
         if gelesen.text.is_ok() {
