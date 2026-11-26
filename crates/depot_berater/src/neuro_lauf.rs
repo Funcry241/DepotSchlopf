@@ -243,6 +243,37 @@ fn speichere_ergebnis(pfad: &Path, e: &NeuroErgebnis) -> Result<(), Fehler> {
     Ok(())
 }
 
+fn wiederholung_reservieren(
+    daten: &Path,
+    frage: &NeuroFrage,
+    ergebnis: &NeuroErgebnis,
+    erster_start: Zeitpunkt,
+) -> Result<NeuroAufrufErlaubnis, Fehler> {
+    super::update_bestaetigt(daten)?;
+    let jetzt = super::jetzt().ok_or("Uhr liefert keine Zeit".to_owned())?;
+    let datum = jetzt
+        .frankfurt_tag()
+        .ok_or("Kalendertag fehlt".to_owned())?;
+    if Some(datum) != erster_start.frankfurt_tag() {
+        return Err(ueberspringe("Zeitfenster für Wiederholung abgelaufen"));
+    }
+    let (profil, neuro_max) = einstellungen(daten, frage.wer)?;
+    let pfad = daten.join("journal.txt");
+    let anker = frage_bestaetigt(&pfad, frage, jetzt)?;
+    let mut j = Journal::oeffnen(&pfad)?;
+    if j.bestaetigt() != anker {
+        return Err(ueberspringe(
+            "Journal wurde während der Fallprüfung fortgeschrieben",
+        ));
+    }
+    j.belege_neuroergebnis(ergebnis)?;
+    j.reserviere_neuro_wiederholung(ergebnis, datum, profil, neuro_max)
+        .map_err(|e| match e {
+            NeuroSperre::Ki(depot_ki::Sperre::Kassenbuch(fehler)) => Fehler::Halt(fehler),
+            _ => Fehler::Uebersprungen(format!("Reservierung der Wiederholung: {e:?}")),
+        })
+}
+
 fn senden(daten: &Path, auftrag: &Path) -> Result<(), Fehler> {
     let frage = frage_lesen(auftrag)?;
     let ausgabe = ergebnis_pfad(auftrag);
@@ -275,7 +306,27 @@ fn senden(daten: &Path, auftrag: &Path) -> Result<(), Fehler> {
     println!("{RESERVIERT}");
     std::io::stdout().flush()?;
     let ergebnis = berater.neurofrage(erlaubnis, &frage);
-    speichere_ergebnis(&ausgabe, &ergebnis)
+    speichere_ergebnis(&ausgabe, &ergebnis)?;
+    if !berater.ausgabelimit_erreicht() {
+        return Ok(());
+    }
+    if !berater.angebunden() || berater.kostensperre() {
+        let grund = berater
+            .warum_nicht()
+            .unwrap_or_else(|| "Kostenschutz oder Anbieterpause".into());
+        berater.anfrage_uebersprungen(depot_journal::KiZweck::Neurofrage, &grund);
+        return Ok(());
+    }
+    let erneut = match wiederholung_reservieren(daten, &frage, &ergebnis, jetzt) {
+        Ok(erlaubnis) => erlaubnis,
+        Err(Fehler::Uebersprungen(grund)) => {
+            berater.anfrage_uebersprungen(depot_journal::KiZweck::Neurofrage, &grund);
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
+    berater.kurze_antwort_anfordern();
+    speichere_ergebnis(&ausgabe, &berater.neurofrage(erneut, &frage))
 }
 
 fn abrechnen(daten: &Path, pfad: &Path) -> Result<(), Fehler> {

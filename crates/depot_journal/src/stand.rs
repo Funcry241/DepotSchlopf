@@ -907,7 +907,14 @@ impl Stand {
             Art::Zustand | Art::Stopp => self.belege_meldung(art, inhalt)?,
             Art::KiGrenzen => self.ki.abdruck(inhalt)?,
             Art::Ki => {
-                if self.ki.buche(inhalt)?.ohne_handelsbeginn() {
+                let wiederholung = inhalt.rsplit_once(";wiederholung;").map(|(_, nr)| nr);
+                if let Some(nr) = wiederholung {
+                    self.pruefe_ki_folgekontext(nr)?;
+                }
+                let zweck = self.ki.buche(inhalt)?;
+                if zweck.ohne_handelsbeginn()
+                    || (wiederholung.is_some() && zweck == crate::KiZweck::Vorbereitung)
+                {
                     return Ok(());
                 }
             }
@@ -938,6 +945,29 @@ impl Stand {
             }
         }
         self.seit_abschluss = self.seit_abschluss.saturating_add(1);
+        Ok(())
+    }
+
+    fn pruefe_ki_folgekontext(&self, nr: &str) -> Result<(), String> {
+        let nr = nr.parse::<usize>().map_err(|_| "KI-Erstbuchung unlesbar")?;
+        let (zweck, _) = self.ki.buchungsbeleg(nr).ok_or("KI-Erstbuchung fehlt")?;
+        match zweck {
+            crate::KiZweck::Vorbereitung => {
+                let b = self.ki.buchungen().get(nr).ok_or("KI-Erstbuchung fehlt")?;
+                let offen = self.vorbereitungen().last().is_some_and(|p| {
+                    p.zeit.datum() == Some(b.datum)
+                        && p.reserviert.contains(&b.berater)
+                        && !p.antworten.iter().any(|a| a.berater == b.berater)
+                });
+                if !offen {
+                    return Err("Vorbereitung für KI-Wiederholung nicht offen".into());
+                }
+            }
+            crate::KiZweck::Neurofrage if self.seit_abschluss != 0 => {
+                return Err("Papierlauf für NeuroSchlopf-Wiederholung offen".into());
+            }
+            _ => {}
+        }
         Ok(())
     }
 
