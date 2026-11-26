@@ -857,6 +857,7 @@ struct Betrieb {
 
 fn historische_kursberichte(stand: &Stand, jetzt: Zeitpunkt, zeitraum: Zeitraum) -> String {
     depot_lage::rueckschau::bericht(stand, jetzt)
+        + &depot_lage::rueckschau::schattenkontenbericht(stand, jetzt, zeitraum.von, zeitraum.bis)
         + &depot_lage::rueckschau::rotationsbericht(
             stand.kurse(),
             jetzt,

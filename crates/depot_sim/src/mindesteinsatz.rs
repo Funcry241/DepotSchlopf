@@ -55,7 +55,7 @@ pub fn ki_einsatz_bp(gehalten: &BTreeMap<Isin, i64>, v: Option<&Vorschlag>) -> i
 #[must_use]
 pub fn vermerk(grund: Option<&str>, ki_einsatz_bp: i64, minimum_bp: i64) -> String {
     match grund.map(str::trim).filter(|g| !g.is_empty()) {
-        Some(g) => format!("begründet: {g}"),
+        Some(g) => format!("KI-Begründung: {g}"),
         None if ki_einsatz_bp >= minimum_bp => "fehlt, Regelwerk kürzte".into(),
         None => "fehlt".into(),
     }
@@ -104,7 +104,7 @@ mod tests {
     fn mit_feld() {
         assert_eq!(
             vermerk(Some("NVIDIA-Zahlen abwarten"), 0, 3_000),
-            "begründet: NVIDIA-Zahlen abwarten"
+            "KI-Begründung: NVIDIA-Zahlen abwarten"
         );
     }
 

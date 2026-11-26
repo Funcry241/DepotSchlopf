@@ -16,7 +16,7 @@ use super::ausstiegsvergleich::{
 };
 
 const BUDGET: Cent = Cent(300_000);
-const HALTETAGE: usize = 5;
+pub(super) const HALTETAGE: usize = 5;
 
 struct Kaufidee<'a> {
     isin: &'a Isin,

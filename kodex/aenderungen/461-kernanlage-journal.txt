@@ -1,0 +1,6 @@
+klasse: Funktion
+zweck: KI-Begründung zum Mindesteinsatz und Schutz-Stopp-Hinweis zur Kernanlage im Papierjournal präzisieren
+pfade:
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/src/mindesteinsatz.rs
+crates/depot_sim/tests/papiertag.rs
