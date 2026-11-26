@@ -286,6 +286,7 @@ pub struct KiStand {
     aufrufe: std::collections::BTreeMap<usize, crate::KiAufruf>,
     zwecke: Vec<KiZweck>,
     modellwahlen: Vec<Option<Modellwahl>>,
+    wiederholungen: std::collections::BTreeMap<usize, usize>,
     neurofragen: Vec<NeuroVersuch>,
     neuroergebnisse: std::collections::BTreeMap<usize, NeuroErgebnis>,
 }
@@ -364,7 +365,21 @@ impl KiStand {
     }
 
     pub fn neuroergebnis(&self, buchung: usize) -> Option<&NeuroErgebnis> {
+        self.wiederholung(buchung)
+            .and_then(|nr| self.neuroergebnis_zur_buchung(nr))
+            .or_else(|| self.neuroergebnis_zur_buchung(buchung))
+    }
+
+    pub(crate) fn neuroergebnis_zur_buchung(&self, buchung: usize) -> Option<&NeuroErgebnis> {
         self.neuroergebnisse.get(&buchung)
+    }
+
+    pub fn neuroaufrufe_am(&self, datum: Datum) -> usize {
+        self.buchungen
+            .iter()
+            .zip(&self.zwecke)
+            .filter(|(b, zweck)| b.datum == datum && **zweck == KiZweck::Neurofrage)
+            .count()
     }
 
     pub(crate) fn pruefe_neuroauftrag(
@@ -393,7 +408,7 @@ impl KiStand {
         Ok(())
     }
 
-    fn pruefe_tageslimit(
+    pub(crate) fn pruefe_tageslimit(
         &self,
         berater: BeraterId,
         datum: Datum,
@@ -420,6 +435,70 @@ impl KiStand {
             return Err(Sperre::TagVoll);
         }
         Ok(())
+    }
+
+    /// Buchungsnummer des erneut gestellten Aufrufs.
+    pub fn wiederholung(&self, erste: usize) -> Option<usize> {
+        self.wiederholungen.get(&erste).copied()
+    }
+
+    pub fn ist_wiederholungsbuchung(&self, nr: usize) -> bool {
+        self.wiederholungen.values().any(|&buchung| buchung == nr)
+    }
+
+    pub(crate) fn wiederholung_fuer(
+        &self,
+        erste: usize,
+    ) -> Result<(Buchung, KiDeckel, KiZweck, Modellwahl), Sperre> {
+        let sperre = || Sperre::Kassenbuch("Keine wiederholbare KI-Buchung".into());
+        let ursprung = self.buchungen.get(erste).ok_or_else(sperre)?;
+        let zweck = *self.zwecke.get(erste).ok_or_else(sperre)?;
+        if self.wiederholungen.contains_key(&erste)
+            || self.ist_wiederholungsbuchung(erste)
+            || !self.abgerechnet.contains(&erste)
+            || (zweck == KiZweck::Neurofrage && self.neuroergebnis_zur_buchung(erste).is_none())
+            || !self
+                .aufruf(erste)
+                .is_some_and(|a| a.ergebnis == crate::KiAufrufErgebnis::Ausgabelimit)
+        {
+            return Err(sperre());
+        }
+        let wahl = self
+            .modellwahlen
+            .get(erste)
+            .ok_or_else(sperre)?
+            .unwrap_or_else(|| Modellwahl::standard(ursprung.berater));
+        let deckel = zweck.deckel(wahl.modell()).fuer_wiederholung();
+        let (buchung, deckel) =
+            buche_mit_deckel(self, ursprung.datum, ursprung.zyklus, zweck, wahl, deckel)?;
+        if zweck == KiZweck::Erstmeinung {
+            pruefe_zusatzreserve(
+                self,
+                wahl.modell(),
+                ursprung.datum,
+                buchung.reserviert,
+                zweck,
+            )?;
+        }
+        if zweck == KiZweck::Vorbereitung {
+            self.pruefe_vorbereitungsrahmen(wahl.modell(), ursprung.datum, buchung.reserviert)?;
+        }
+        Ok((buchung, deckel, zweck, wahl))
+    }
+
+    fn buche_wiederholung(&mut self, text: &str, ursprung: &str) -> Result<KiZweck, String> {
+        let erste = ursprung
+            .parse::<usize>()
+            .map_err(|_| "Erste Buchung unlesbar")?;
+        let (b, _, zweck, wahl) = self
+            .wiederholung_fuer(erste)
+            .map_err(|s| format!("{s:?}"))?;
+        if buchung_text_mit_modell(&b, Some(wahl)) != text || erste.to_string() != ursprung {
+            return Err("Wiederholungsbuchung passt nicht zum ersten Aufruf".into());
+        }
+        self.wiederholungen.insert(erste, self.buchungen.len());
+        self.speichere_buchung(b, zweck, Some(wahl));
+        Ok(zweck)
     }
 
     /// Prüft mit denselben Grenzen wie eine neue Reservierung.
@@ -468,26 +547,40 @@ impl KiStand {
         self.pruefe_tageslimit(berater, datum, zweck, einstellung)?;
         let (buchung, deckel) = naechste_fuer(self, datum, zyklus, zweck, einstellung.auswahl)?;
         if zweck == KiZweck::Vorbereitung {
-            let rahmen = depot_ki::vorbereitungsrahmen_fuer_modell(
-                &KiGrenzen::standard(),
-                &self.buchungen,
+            self.pruefe_vorbereitungsrahmen(
                 einstellung.auswahl.modell(),
                 datum,
+                buchung.reserviert,
             )?;
-            if buchung.reserviert > rahmen {
-                return Err(Sperre::TagesrahmenErschoepft);
-            }
         }
         Ok((buchung, deckel))
     }
 
+    fn pruefe_vorbereitungsrahmen(
+        &self,
+        modell: Modell,
+        datum: Datum,
+        kosten: Cent,
+    ) -> Result<(), Sperre> {
+        let rahmen = depot_ki::vorbereitungsrahmen_fuer_modell(
+            &KiGrenzen::standard(),
+            &self.buchungen,
+            modell,
+            datum,
+        )?;
+        if kosten > rahmen {
+            return Err(Sperre::TagesrahmenErschoepft);
+        }
+        Ok(())
+    }
+
     pub(crate) fn belege_neuroergebnis(&mut self, inhalt: &str) -> Result<(), String> {
         let e = NeuroErgebnis::lies(inhalt).ok_or("NeuroSchlopf-Ergebnis unlesbar")?;
-        if !self
-            .neurofragen
-            .iter()
-            .any(|v| v.buchung == e.buchung && v.id == e.id && v.wer == e.wer)
-        {
+        if !self.neurofragen.iter().any(|v| {
+            (v.buchung == e.buchung || self.wiederholung(v.buchung) == Some(e.buchung))
+                && v.id == e.id
+                && v.wer == e.wer
+        }) {
             return Err("NeuroSchlopf-Ergebnis ohne passende Buchung".into());
         }
         if self.neuroergebnisse.contains_key(&e.buchung) {
@@ -546,6 +639,9 @@ impl KiStand {
 
     /// Prueft eine Buchung nach den Regeln ihres Abschnitts und zaehlt sie.
     pub(crate) fn buche(&mut self, inhalt: &str) -> Result<KiZweck, String> {
+        if let Some((text, ursprung)) = inhalt.rsplit_once(";wiederholung;") {
+            return self.buche_wiederholung(text, ursprung);
+        }
         if let Some((buchung, zusatz)) = inhalt.rsplit_once(";neurofrage;") {
             let (fall, rest) = zusatz.split_once(';').ok_or("NeuroSchlopf-Fall fehlt")?;
             let (runde, abdruck) = rest.split_once(';').ok_or("NeuroSchlopf-Runde fehlt")?;
@@ -619,11 +715,15 @@ impl KiStand {
             }
         }
         // Frueherer Abdruck: zaehlt, wird aber nicht nach heutigen Grenzen beurteilt.
+        self.speichere_buchung(b, zweck, auswahl);
+        Ok(())
+    }
+
+    fn speichere_buchung(&mut self, b: Buchung, zweck: KiZweck, auswahl: Option<Modellwahl>) {
         self.obergrenzen.push(b.reserviert);
         self.zwecke.push(zweck);
         self.modellwahlen.push(auswahl);
         self.buchungen.push(b);
-        Ok(())
     }
 }
 
@@ -646,7 +746,19 @@ pub(crate) fn naechste_fuer(
     {
         return Err(depot_ki::Sperre::ErstmeinungReserviert);
     }
-    let deckel = zweck.deckel(modell);
+    buche_mit_deckel(stand, datum, zyklus, zweck, auswahl, zweck.deckel(modell))
+}
+
+fn buche_mit_deckel(
+    stand: &KiStand,
+    datum: Datum,
+    zyklus: u32,
+    zweck: KiZweck,
+    auswahl: Modellwahl,
+    deckel: KiDeckel,
+) -> Result<(Buchung, KiDeckel), Sperre> {
+    let modell = auswahl.modell();
+    let berater = modell.berater();
     let pruefe_budget = if zweck == KiZweck::Simulation {
         pruefe_simulation
     } else {

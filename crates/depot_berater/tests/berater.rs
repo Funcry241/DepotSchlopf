@@ -934,6 +934,66 @@ fn fehlende_antwort_sperrt_abgewiesene_nicht() -> Result<(), String> {
 }
 
 #[test]
+fn wiederholte_maus_abstimmung_sendet_hoeheres_ausgabelimit() -> Result<(), String> {
+    use depot_journal::KiZweck;
+    use depot_sim::abstimmung::AbstimmungsStand;
+    let mut ort = Ort::neu()?;
+    let wer = BeraterId::Maus;
+    let vorlauf = ort.erlaubnis(wer, 1)?;
+    let abrechnung = some(vorlauf.abrechnung(0, 0), "Vorlaufabrechnung")?;
+    vorbedingung(ort.journal.rechne_ki_ab(&abrechnung), "Vorlauf")?;
+    let erste_antwort = r#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":6632,"output_tokens":2000}}"#;
+    let zweite_antwort = r#"{"einschaetzung":"Bargeld","ziele":null,"zustimmung_fremd":false}"#;
+    let mut netz = Attrappe::default();
+    netz.antworten.push_back(ok(erste_antwort));
+    netz.antworten.push_back(gpt(zweite_antwort, 6632, 2700));
+    let mut maus = berater(&ort, wer, netz)?;
+    let dialog = AbstimmungsStand {
+        runde: 1,
+        eigener_vorschlag: None,
+        fremder_vorschlag: None,
+        eigene_erstmeinung: String::new(),
+        fremde_beitraege: String::new(),
+        kaufkosten: String::new(),
+    };
+    let erlaubt = vorbedingung(
+        ort.journal
+            .reserviere_fuer(wer, tag()?, 1, KiZweck::Abstimmung),
+        "Erstbuchung",
+    )?;
+    let erste_nr = erlaubt.buchungsnummer();
+    let erste = mit_lage(|lage| maus.abstimmen(erlaubt, lage, &dialog))?;
+    assert!(!erste.eigene.verwertbar);
+    let erster_aufruf = some(maus.aufruf(), "Erster Aufruf")?;
+    let abrechnung = some(maus.abrechnung(), "Erste Abrechnung")?;
+    vorbedingung(ort.journal.belege_ki_aufruf(&erster_aufruf), "Aufrufbeleg")?;
+    vorbedingung(ort.journal.rechne_ki_ab(&abrechnung), "Erste Abrechnung")?;
+    let erneut = vorbedingung(
+        ort.journal
+            .reserviere_ki_wiederholung(erste_nr, maus.einstellung()),
+        "Zweite Reservierung",
+    )?;
+    assert_eq!(erneut.deckel().max_token_aus(), 4000);
+    assert_eq!(
+        Some(erneut.buchung().reserviert),
+        erneut.deckel().hoechstkosten()
+    );
+    maus.kurze_antwort_anfordern();
+    let antwort = mit_lage(|lage| maus.abstimmen(erneut, lage, &dialog))?;
+    assert!(antwort.eigene.verwertbar);
+    assert!(maus.abrechnung().is_some());
+    let gesendet = &maus.netz().gesendet;
+    let erste = some(gesendet.first(), "Erste Anfrage")?;
+    let zweite = some(gesendet.get(1), "Zweite Anfrage")?;
+    assert!(erste.2.contains(r#""max_output_tokens":2000"#));
+    assert!(zweite.2.contains(r#""max_output_tokens":4000"#));
+    assert!(zweite.2.contains("Antworte diesmal knapp"));
+    let zweiter_aufruf = some(maus.aufruf(), "Zweiter Aufruf")?;
+    assert_eq!(erster_aufruf.vorlage, zweiter_aufruf.vorlage);
+    Ok(())
+}
+
+#[test]
 fn unbrauchbare_antwort_mit_belegtem_verbrauch_wird_abgerechnet() -> Result<(), String> {
     let ein = 10_000;
     let aus = 1_000;

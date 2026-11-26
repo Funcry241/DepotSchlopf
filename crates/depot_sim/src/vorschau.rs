@@ -93,7 +93,7 @@ impl Budget {
         j: &mut Journal,
         b: &mut dyn Berater,
         id: TopfId,
-        frage: impl FnOnce(&mut dyn Berater, AufrufErlaubnis) -> T,
+        frage: impl FnMut(&mut dyn Berater, AufrufErlaubnis) -> T,
     ) -> Result<Result<T, String>, String> {
         if !b.angebunden() || b.kostensperre() {
             return Ok(Err(b
@@ -111,8 +111,8 @@ impl Budget {
             Err(Sperre::Kassenbuch(e)) => return Err(e),
             Err(e) => return Ok(Err(format!("Kostenschutz ({e:?})"))),
         };
-        let antwort = frage(b, erlaubnis);
-        crate::lauf::belege_ki(j, b).map_err(|e| format!("Kassenbuch: {e:?}"))?;
+        let antwort = crate::lauf::ki_mit_wiederholung(j, b, erlaubnis, frage)
+            .map_err(|e| format!("Kassenbuch: {e:?}"))?;
         Ok(Ok(antwort))
     }
 }

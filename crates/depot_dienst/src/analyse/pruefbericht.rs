@@ -40,6 +40,39 @@ fn fehlende_ertragserwartungen(stand: &Stand, zeitraum: Zeitraum) -> usize {
         .count()
 }
 
+fn antwortwiederholungen(text: &mut String, stand: &Stand, zeitraum: Zeitraum) {
+    use depot_journal::KiAufrufErgebnis;
+    let ki = stand.ki();
+    let mut abgeschnitten = 0_usize;
+    let mut wiederholt = 0_usize;
+    let mut vollstaendig = 0_usize;
+    for (nr, buchung) in ki.buchungen().iter().enumerate() {
+        if (zeitraum.von..=zeitraum.bis).contains(&buchung.datum)
+            && ki
+                .aufruf(nr)
+                .is_some_and(|a| a.ergebnis == KiAufrufErgebnis::Ausgabelimit)
+            && !ki.ist_wiederholungsbuchung(nr)
+        {
+            abgeschnitten = abgeschnitten.saturating_add(1);
+            if let Some(zweiter) = ki.wiederholung(nr) {
+                wiederholt = wiederholt.saturating_add(1);
+                if ki
+                    .aufruf(zweiter)
+                    .is_some_and(|a| a.ergebnis == KiAufrufErgebnis::Beantwortet)
+                {
+                    vollstaendig = vollstaendig.saturating_add(1);
+                }
+            }
+        }
+    }
+    if abgeschnitten > 0 {
+        let _ = writeln!(
+            text,
+            "- Ausgabelimit erreicht: {abgeschnitten}. Wiederholungen reserviert: {wiederholt}, davon technisch vollständig beantwortet: {vollstaendig}. Die fachliche Verwertbarkeit wird hier nicht gezählt.\n"
+        );
+    }
+}
+
 pub(super) fn bericht(
     stand: Option<&Stand>,
     zeitraum: Zeitraum,
@@ -84,6 +117,7 @@ pub(super) fn bericht(
             text,
             "- Belegte Tagesabschlüsse: {abschluesse} bei {handelstage} Kalendertagen mit Börsenhandel im Zeitraum.\n- KI-Buchungen: {buchungen}.\n- Orderversand: {versendet}. Zeitlich zugeordnete Ausführungen: {fuellungen}.\n- Protokollierte Rückzüge ohne Begründung: {rueckzuege}.\n- Protokollierte widersprüchliche Bestätigungen: {widersprueche}.\n- Kaufvermerke zum Teilveto-Rest mit fehlender Ertragserwartung: {erwartungen_fehlen}.\n"
         );
+        antwortwiederholungen(&mut text, stand, zeitraum);
         if versendet == 0 && handelstage != 0 {
             text.push_str("**Auffällig:** Im Zeitraum ist kein Orderversand belegt. Gründe und Beleglücken stehen unter Nicht-Handeln.\n\n");
         }
