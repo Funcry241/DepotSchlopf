@@ -49,6 +49,13 @@ struct Kurz {
     gefragt: bool,
     schlopfmodell: Option<Zeitpunkt>,
     modellfrage: bool,
+    gemini_ergebnis: Option<GeminiErgebnis>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GeminiErgebnis {
+    Verwertbar,
+    Fehlgeschlagen,
 }
 
 impl From<Gespraech> for Kurz {
@@ -57,6 +64,15 @@ impl From<Gespraech> for Kurz {
             || status(&e.ergebnis).to_owned(),
             |grund| format!("Nicht gefragt: {grund}"),
         );
+        let gemini_ergebnis =
+            (e.wer == depot_kern::gemini::DIENST && e.ergebnis != "uebersprungen").then(|| {
+                if e.ergebnis == "ok" && e.antwort.as_deref().is_some_and(|t| !t.trim().is_empty())
+                {
+                    GeminiErgebnis::Verwertbar
+                } else {
+                    GeminiErgebnis::Fehlgeschlagen
+                }
+            });
         Self {
             zeit: e.zeit,
             lauf: e.lauf,
@@ -65,6 +81,7 @@ impl From<Gespraech> for Kurz {
             optional: e.rolle == "zusatz",
             ergebnis,
             gefragt: e.ergebnis != "uebersprungen",
+            gemini_ergebnis,
             schlopfmodell: e.schlopfmodell,
             modellfrage: e.rolle == "haupt"
                 && matches!(e.zweck.as_str(), "erstmeinung" | "simulation"),
@@ -110,6 +127,37 @@ impl Cache {
         }
         Some(eintraege)
     }
+
+    pub(crate) fn gemini_verlauf(
+        &self,
+        daten: &Path,
+        heute: Option<Datum>,
+    ) -> crate::ki_ausblick::GeminiVerlauf {
+        let mut aus = crate::ki_ausblick::GeminiVerlauf::default();
+        let mut budget = 8 * 1024 * 1024;
+        for tag in (-6..=0)
+            .rev()
+            .filter_map(|tage| heute.and_then(|d| d.plus_tage(tage)))
+        {
+            let Some(eintraege) = self.tag(daten, tag, || {
+                gespraeche::lesen_begrenzt(daten, tag, &mut budget).map(|e| {
+                    e.map_or_else(Vec::new, |(e, _)| e.into_iter().map(Kurz::from).collect())
+                })
+            }) else {
+                break;
+            };
+            for (zeit, ergebnis) in eintraege
+                .iter()
+                .filter_map(|e| Some((e.zeit, e.gemini_ergebnis?)))
+            {
+                aus.beobachte(zeit, ergebnis == GeminiErgebnis::Verwertbar);
+            }
+            if aus.hat_erfolg() {
+                break;
+            }
+        }
+        aus
+    }
 }
 
 impl Aufrufe {
@@ -119,7 +167,9 @@ impl Aufrufe {
             .0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .retain(|tag, _| Some(*tag) == heute || Some(*tag) == gestern);
+            .retain(|tag, _| {
+                heute.is_some_and(|d| d.plus_tage(-6).is_some_and(|von| (von..=d).contains(tag)))
+            });
         let mut aus = Self {
             gemini_aktiv: gespraeche::gemini_aktiv(daten),
             ..Self::default()
@@ -332,6 +382,42 @@ mod tests {
 
     fn zeit(s: &str) -> io::Result<Zeitpunkt> {
         Zeitpunkt::lies(s).ok_or_else(|| io::Error::other("Zeit fehlt"))
+    }
+
+    #[test]
+    fn gemini_nur_verwertbare_antwort_zaehlt_als_erfolg() -> io::Result<()> {
+        let e = |status: &str, antwort: Option<&str>| -> io::Result<Gespraech> {
+            Ok(Gespraech {
+                zeit: zeit("2026-11-10T06:32:00Z")?,
+                lauf: "probe".into(),
+                wer: "gemini".into(),
+                rolle: "zusatz".into(),
+                modell: "test".into(),
+                zweck: "nachrichten-vorsortieren".into(),
+                ergebnis: status.into(),
+                http: Some(200),
+                token_ein: None,
+                token_aus: None,
+                cache: None,
+                buchung: None,
+                schlopfmodell: None,
+                kosten_cent: None,
+                system: None,
+                frage: None,
+                antwort: antwort.map(str::to_owned),
+                fehler: None,
+            })
+        };
+        for (status, antwort, erwartet) in [
+            ("ok", Some("Sortiert"), Some(GeminiErgebnis::Verwertbar)),
+            ("ok", None, Some(GeminiErgebnis::Fehlgeschlagen)),
+            ("ok", Some(" "), Some(GeminiErgebnis::Fehlgeschlagen)),
+            ("netz", None, Some(GeminiErgebnis::Fehlgeschlagen)),
+            ("uebersprungen", None, None),
+        ] {
+            assert_eq!(Kurz::from(e(status, antwort)?).gemini_ergebnis, erwartet);
+        }
+        Ok(())
     }
 
     #[test]

@@ -1349,9 +1349,7 @@ impl Dienst {
         let mut z = self.sperre();
         (!self.update_offen()).then_some(())?;
         self.vermerke_ausgelassen(&mut z, jetzt);
-        self.zeitplan_pruefen(&mut z, jetzt);
-        self.ibkr_zeitplan_pruefen(&mut z, jetzt);
-        self.updatesuche_einreihen(&mut z, jetzt);
+        self.zeitplaene_pruefen(&mut z, jetzt);
         if z.neuro_abschnitt == Some(NeuroAbschnitt::Journal) {
             return None;
         }
@@ -1654,6 +1652,34 @@ impl Dienst {
             && crate::ibkr_abgleich::zum_zeitplan_faellig(self, jetzt)
         {
             let _ = einreihen(z, Art::IbkrAbgleich, Anlass::Zeitplan, None);
+        }
+    }
+
+    fn zeitplaene_pruefen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
+        self.zeitplan_pruefen(z, jetzt);
+        self.ibkr_zeitplan_pruefen(z, jetzt);
+        self.gemini_wiederholung_einreihen(z, jetzt);
+        self.updatesuche_einreihen(z, jetzt);
+    }
+
+    fn gemini_wiederholung_einreihen(&self, z: &mut Zustand, jetzt: Zeitpunkt) {
+        let daten = self.wurzel.join("daten");
+        if !z.zeitplan.an || !depot_lage::gespraeche::gemini_aktiv(&daten) {
+            return;
+        }
+        let Some(w) = jetzt
+            .frankfurt_tag()
+            .and_then(|tag| depot_lage::gespraeche::gemini_wiederholung(&daten, tag))
+        else {
+            return;
+        };
+        if jetzt >= w.faellig
+            && !z
+                .verlauf
+                .iter()
+                .any(|a| a.art == Art::Gemini && a.start >= w.faellig)
+        {
+            let _ = einreihen(z, Art::Gemini, Anlass::Zeitplan, None);
         }
     }
 

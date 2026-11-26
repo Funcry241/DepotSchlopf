@@ -6,7 +6,9 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use depot_journal::anbieter::{self, Eintrag, Ergebnis, Wer};
-use depot_journal::gespraeche::{self, Gespraech};
+use depot_journal::gespraeche::{
+    self, GEMINI_WIEDERHOLUNG_ERLEDIGT, GeminiWiederholung, Gespraech,
+};
 use depot_journal::{Journal, NachrichtBeleg, ki_einstellungen};
 use depot_kern::abdruck::sha256_hex;
 use depot_kern::gemini::{self, ADRESSE, DIENST, MODELL, RUECKLAGE};
@@ -184,11 +186,12 @@ fn antwort(text: &str, e: &mut Gespraech) -> Option<String> {
 
 fn reserviere(
     daten: &Path,
-    tag: Datum,
+    jetzt: Zeitpunkt,
     digest: &str,
     vorrang: bool,
     tagesgrenze: usize,
-) -> Result<(File, usize), &'static str> {
+) -> Result<(File, bool), &'static str> {
+    let tag = jetzt.frankfurt_tag().ok_or("Kalendertag fehlt")?;
     let pfad = gespraeche::gemini_kontingent(daten, tag);
     let mut f = OpenOptions::new()
         .read(true)
@@ -199,33 +202,89 @@ fn reserviere(
     f.try_lock().map_err(|_| "Gemini läuft bereits")?;
     let mut bisher = String::new();
     (&mut f)
-        .take(1024)
+        .take(4096)
         .read_to_string(&mut bisher)
         .map_err(|_| "Kontingentdatei unlesbar")?;
     if bisher.lines().any(|s| s == "anbietersperre") {
         return Err("Anbieter für heute pausiert");
     }
-    if bisher
-        .lines()
-        .any(|s| s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()))
-        || (!bisher.is_empty() && !bisher.ends_with('\n'))
+    if bisher.lines().any(|s| {
+        !gespraeche::gemini_digest(s)
+            && s != GEMINI_WIEDERHOLUNG_ERLEDIGT
+            && GeminiWiederholung::lies(s).is_none()
+    }) || (!bisher.is_empty() && !bisher.ends_with('\n'))
     {
         return Err("Kontingentdatei unlesbar");
     }
-    if bisher.lines().any(|s| s == digest) {
+    let offen = gespraeche::gemini_wiederholung_aus(&bisher, tag);
+    if offen
+        .as_ref()
+        .is_some_and(|w| jetzt < w.faellig || w.digest != digest)
+    {
+        return Err("Gemini wartet auf den geplanten Folgeversuch");
+    }
+    let erneut = offen.is_some();
+    if !erneut && bisher.lines().any(|s| s == digest) {
         return Err("Diesen Nachrichtenstand bereits angefragt");
     }
+    let vorrang = offen.as_ref().map_or(vorrang, |w| w.vorrang);
     let grenze = if vorrang {
         tagesgrenze
     } else {
         tagesgrenze.saturating_sub(RUECKLAGE.min(tagesgrenze.saturating_sub(1)))
     };
-    let frei = grenze.saturating_sub(bisher.lines().count());
-    if frei == 0 {
+    if erneut {
+        // Vor dem Versand verbrauchen. Nach einem Absturz wird derselbe Versuch nicht erneut gesendet.
+        vermerke_aufruf(&mut f, GEMINI_WIEDERHOLUNG_ERLEDIGT)?;
+    }
+    if bisher
+        .lines()
+        .filter(|s| gespraeche::gemini_digest(s))
+        .count()
+        >= grenze
+    {
         return Err("Tagesgrenze erreicht");
     }
     vermerke_aufruf(&mut f, digest)?;
-    Ok((f, frei.saturating_sub(1)))
+    Ok((f, erneut))
+}
+
+fn faelligkeit(jetzt: Zeitpunkt, vergangen: Duration, warten: Duration) -> Option<Zeitpunkt> {
+    let abstand = warten
+        .max(Duration::from_secs(1800))
+        .checked_add(vergangen)?;
+    let zeit = Zeitpunkt::aus_sekunden(
+        jetzt
+            .sekunden()
+            .checked_add(i64::try_from(abstand.as_secs()).ok()?)?,
+    )?;
+    (zeit.frankfurt_tag() == jetzt.frankfurt_tag()).then_some(zeit)
+}
+
+fn frage_fuer_versuch(
+    daten: &Path,
+    tag: Datum,
+    jetzt: Zeitpunkt,
+    universum: &Universum,
+) -> Result<String, &'static str> {
+    if let Some(w) = gespraeche::gemini_wiederholung(daten, tag) {
+        if jetzt < w.faellig {
+            return Err("Gemini wartet auf den geplanten Folgeversuch");
+        }
+        if daten.join("update_offen.txt").exists() {
+            return Err(gemini::WARTET_AUF_UPDATE);
+        }
+        let (eintraege, _) =
+            gespraeche::lesen(daten, tag).map_err(|_| "Vorheriger Gemini-Aufruf unlesbar")?;
+        return eintraege
+            .into_iter()
+            .rev()
+            .filter(|e| e.wer == DIENST && e.zweck == ZWECK)
+            .filter_map(|e| e.frage)
+            .find(|frage| kennung(frage) == w.digest)
+            .ok_or("Vorheriger Gemini-Aufruf fehlt");
+    }
+    vorlauf_frage(daten, tag, jetzt, universum)
 }
 
 fn vermerke_aufruf(f: &mut File, digest: &str) -> Result<(), &'static str> {
@@ -256,7 +315,7 @@ fn senden(
     let Ok(r) = netz.sende(&adresse, &kopf, anfrage(frage).as_bytes()) else {
         e.ergebnis = "netz".into();
         e.fehler = Some("Keine Gemini-Antwort erhalten.".into());
-        return None;
+        return Some(Duration::ZERO);
     };
     e.http = Some(r.status);
     e.kosten_cent = Some(0);
@@ -289,7 +348,7 @@ fn senden(
             .into();
         e.fehler = Some(format!("Gemini meldet HTTP {}.", r.status));
         if r.status == 503 {
-            return Some(Duration::from_secs(r.warten.unwrap_or(2).max(2)));
+            return Some(Duration::from_secs(r.warten.unwrap_or(0)));
         }
     }
     None
@@ -372,45 +431,38 @@ pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum
         if tagesgrenze == 0 {
             return Err("Tagesgrenze ist 0".into());
         }
-        let frage = vorlauf_frage(daten, tag, jetzt, universum)?;
+        let frage = frage_fuer_versuch(daten, tag, jetzt, universum)?;
         let schluessel = Schluessel::fuer_dienst(DIENST, ADRESSE)?;
         if !sauber(&frage, &schluessel) {
             return Err("Nachrichten enthalten Zugangsdaten".into());
         }
         let digest = kennung(&frage);
-        let (mut kontingent, weitere) = reserviere(daten, tag, &digest, vorrang, tagesgrenze)?;
+        let (mut kontingent, erneut) = reserviere(daten, jetzt, &digest, vorrang, tagesgrenze)?;
         e.system = Some(SYSTEM.into());
         e.frage = Some(frage.clone());
         let beginn = Instant::now();
-        let mut rest = FRIST;
-        let wiederholungen = weitere.min(2);
-        for versuch in 0..=wiederholungen {
-            let warten = senden(
-                &mut Https::mit_zeitgrenze(rest),
-                &schluessel,
-                &frage,
-                universum,
-                &mut e,
-            );
-            vermerke_anbieter(daten, &e);
-            let Some(warten) = warten.filter(|&d| {
-                versuch < wiederholungen && d < FRIST.saturating_sub(beginn.elapsed())
-            }) else {
-                break;
+        let warten = senden(
+            &mut Https::mit_zeitgrenze(FRIST),
+            &schluessel,
+            &frage,
+            universum,
+            &mut e,
+        );
+        vermerke_anbieter(daten, &e);
+        if !erneut
+            && let Some(faellig) = warten.and_then(|w| faelligkeit(jetzt, beginn.elapsed(), w))
+        {
+            // Erst den Promptbeleg dauerhaft schreiben, dann einen Folgeversuch einplanen.
+            gespraeche::anhaengen(daten, &e).map_err(|_| "Gemini-Gespräch nicht gespeichert")?;
+            let folge = GeminiWiederholung {
+                faellig,
+                digest,
+                vorrang,
             };
-            std::thread::sleep(warten);
-            rest = FRIST.saturating_sub(beginn.elapsed());
-            if rest.is_zero()
-                || jetzt
-                    .sekunden()
-                    .checked_add(i64::try_from(beginn.elapsed().as_secs()).unwrap_or(i64::MAX))
-                    .and_then(Zeitpunkt::aus_sekunden)
-                    .and_then(Zeitpunkt::frankfurt_tag)
-                    != Some(tag)
-            {
-                break;
+            if let Err(grund) = vermerke_aufruf(&mut kontingent, &folge.text()) {
+                eprintln!("[Hinweis] Gemini-Folgeversuch nicht gespeichert: {grund}");
             }
-            vermerke_aufruf(&mut kontingent, &digest)?;
+            return Ok(true);
         }
         if matches!(e.ergebnis.as_str(), "guthaben" | "kosten")
             && writeln!(kontingent, "anbietersperre")
@@ -419,10 +471,12 @@ pub fn vorlauf(daten: &Path, jetzt: Zeitpunkt, lauf: &str, universum: &Universum
         {
             eprintln!("[Hinweis] Gemini-Anbieterpause konnte nicht gespeichert werden.");
         }
-        Ok(())
+        Ok(false)
     })();
-    if let Err(grund) = resultat {
-        e.fehler = Some(grund);
+    match resultat {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(grund) => e.fehler = Some(grund),
     }
     if let Err(f) = gespraeche::anhaengen(daten, &e) {
         eprintln!("[Hinweis] Gemini-Gespräch nicht gespeichert: {f}");
@@ -785,6 +839,48 @@ mod tests {
     }
 
     #[test]
+    fn folgeversuch_wartet_auf_retry_after_und_zaehlt_einmal() -> Result<(), String> {
+        let tag = Datum::lies("2026-11-10").ok_or("Datum")?;
+        let jetzt = Zeitpunkt::frankfurt(tag, 8, 0, 0).ok_or("Zeit")?;
+        let halb = Zeitpunkt::frankfurt(tag, 8, 30, 0).ok_or("Halbe Stunde")?;
+        let spaet = Zeitpunkt::frankfurt(tag, 9, 0, 0).ok_or("Eine Stunde")?;
+        assert_eq!(
+            faelligkeit(jetzt, Duration::ZERO, Duration::ZERO),
+            Some(halb)
+        );
+        assert_eq!(
+            faelligkeit(jetzt, Duration::ZERO, Duration::from_secs(3600)),
+            Some(spaet)
+        );
+        let daten = std::env::temp_dir().join(format!("depot_gemini_folge_{}", std::process::id()));
+        std::fs::create_dir(&daten).map_err(|e| e.to_string())?;
+        let digest = kennung("Nachrichten");
+        let (mut konto, erneut) = reserviere(&daten, jetzt, &digest, true, 2)?;
+        assert!(!erneut);
+        let wiederholung = GeminiWiederholung {
+            faellig: spaet,
+            digest: digest.clone(),
+            vorrang: true,
+        };
+        vermerke_aufruf(&mut konto, &wiederholung.text())?;
+        drop(konto);
+        assert_eq!(
+            gespraeche::gemini_wiederholung(&daten, tag),
+            Some(wiederholung)
+        );
+        assert!(reserviere(&daten, halb, &digest, true, 2).is_err());
+        assert_eq!(gespraeche::gemini_aufrufe(&daten, tag), 1);
+        let (konto, erneut) = reserviere(&daten, spaet, &digest, false, 2)?;
+        assert!(erneut);
+        drop(konto);
+        assert!(gespraeche::gemini_wiederholung(&daten, tag).is_none());
+        assert!(reserviere(&daten, spaet, &digest, true, 3).is_err());
+        assert_eq!(gespraeche::gemini_aufrufe(&daten, tag), 2);
+        std::fs::remove_dir_all(daten).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[test]
     fn kontingent_ueberlebt_neustart_und_verhindert_doppelte_quellenstaende() -> Result<(), String>
     {
         let daten =
@@ -792,23 +888,24 @@ mod tests {
         std::fs::create_dir(&daten).map_err(|e| e.to_string())?;
         let ergebnis = (|| {
             let tag = Datum::lies("2026-11-10").ok_or("Datum")?;
+            let jetzt = Zeitpunkt::frankfurt(tag, 8, 0, 0).ok_or("Zeit")?;
             let digest = kennung("0");
-            let (mut kontingent, weitere) =
-                reserviere(&daten, tag, &digest, false, gemini::TAGESGRENZE)?;
-            assert_eq!(weitere, 2);
+            let (mut kontingent, erneut) =
+                reserviere(&daten, jetzt, &digest, false, gemini::TAGESGRENZE)?;
+            assert!(!erneut);
             vermerke_aufruf(&mut kontingent, &digest)?;
             drop(kontingent);
-            assert!(reserviere(&daten, tag, &digest, false, gemini::TAGESGRENZE).is_err());
+            assert!(reserviere(&daten, jetzt, &digest, false, gemini::TAGESGRENZE).is_err());
             for n in 2..5 {
                 if n == 3 {
                     assert_eq!(
-                        reserviere(&daten, tag, &kennung("3"), false, gemini::TAGESGRENZE).err(),
+                        reserviere(&daten, jetzt, &kennung("3"), false, gemini::TAGESGRENZE).err(),
                         Some("Tagesgrenze erreicht")
                     );
                 }
                 drop(reserviere(
                     &daten,
-                    tag,
+                    jetzt,
                     &kennung(&n.to_string()),
                     n >= 3,
                     gemini::TAGESGRENZE,
@@ -816,11 +913,11 @@ mod tests {
             }
             assert_eq!(gespraeche::gemini_aufrufe(&daten, tag), 5);
             assert_eq!(
-                reserviere(&daten, tag, &kennung("neues Limit"), true, 2).err(),
+                reserviere(&daten, jetzt, &kennung("neues Limit"), true, 2).err(),
                 Some("Tagesgrenze erreicht")
             );
             assert_eq!(
-                reserviere(&daten, tag, &kennung("6"), true, gemini::TAGESGRENZE).err(),
+                reserviere(&daten, jetzt, &kennung("6"), true, gemini::TAGESGRENZE).err(),
                 Some("Tagesgrenze erreicht")
             );
             Ok(())
