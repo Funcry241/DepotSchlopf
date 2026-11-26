@@ -4265,7 +4265,7 @@ fn kernanlage_kauft_eunl_ohne_ki_und_bucht_den_anlagezweck() -> Result<(), Strin
     let ort = Ort::neu()?;
     let mut j = ort.oeffnen()?;
     let isin = vorbedingung(Isin::neu("IE00B4L5Y983"), "ISIN EUNL")?;
-    belege(&mut j, 5, &[(&isin, "99", "100")])?;
+    belege(&mut j, 5, &[(&isin, "122.24", "122.24")])?;
     let sap = sap()?;
     let allianz = allianz()?;
     belege(&mut j, 5, &[(&sap, "100", "100"), (&allianz, "100", "100")])?;
@@ -4304,8 +4304,8 @@ fn kernanlage_kauft_eunl_ohne_ki_und_bucht_den_anlagezweck() -> Result<(), Strin
     for order in orders {
         assert_eq!(order.beleg.isin, isin);
         assert_eq!(order.beleg.richtung, depot_regelwerk::Richtung::Kauf);
-        assert_eq!(order.beleg.stueck, 15);
-        assert_eq!(order.beleg.limit, Cent(10_100));
+        assert_eq!(order.beleg.stueck, 12);
+        assert_eq!(order.beleg.limit, Cent(12_346));
         assert!(depot_sim::kernanlage::ist_kernauftrag(
             j.stand(),
             order.beleg.nr
@@ -4316,7 +4316,7 @@ fn kernanlage_kauft_eunl_ohne_ki_und_bucht_den_anlagezweck() -> Result<(), Strin
         &mut j,
         6,
         &[
-            (&isin, "100", "100"),
+            (&isin, "122.24", "122.24"),
             (&sap, "100", "100"),
             (&allianz, "100", "100"),
         ],
@@ -4365,6 +4365,12 @@ fn kernanlage_kauft_eunl_ohne_ki_und_bucht_den_anlagezweck() -> Result<(), Strin
 }
 
 fn pruefe_kernanlage_stoppvermerk(j: &Journal, isin: &Isin) {
+    assert!(
+        !j.stand()
+            .begruendungen()
+            .iter()
+            .any(|(_, _, text)| { text.contains("unter_mindesteinsatz") })
+    );
     for topf in ["Topf A", "Topf B"] {
         let vermerk = format!("{topf}: {isin}: Kernanlage ohne hinterlegten Schutz-Stopp geplant");
         assert!(
