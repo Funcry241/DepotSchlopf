@@ -1616,6 +1616,16 @@ fn geplanter_einsatz(
     plan: &depot_regelwerk::Entscheidung,
     park: Option<&Isin>,
 ) -> Option<i64> {
+    let (eingesetzt, gesamt) = einsatzwert(topf, kurse, plan, park)?;
+    eingesetzt.in_bp_von(gesamt)
+}
+
+fn einsatzwert(
+    topf: &Topf,
+    kurse: &Kurse,
+    plan: &depot_regelwerk::Entscheidung,
+    park: Option<&Isin>,
+) -> Option<(depot_kern::Preis, depot_kern::Preis)> {
     let gesamt = topf.wert_exakt(kurse)?;
     let bargeld = depot_kern::Preis::aus_cent(topf.bargeld())?;
     let mut eingesetzt = gesamt.checked_sub(bargeld)?;
@@ -1633,7 +1643,28 @@ fn geplanter_einsatz(
             Richtung::Verkauf => eingesetzt.checked_sub(wert)?,
         };
     }
-    eingesetzt.in_bp_von(gesamt)
+    Some((eingesetzt, gesamt))
+}
+
+/// Nur bei einem geplanten Kernkauf ist die kurze Stückrundung im Journal unauffällig.
+fn kernanlage_rundet_ab(
+    eingabe: &Eingabe<'_>,
+    plan: &depot_regelwerk::Entscheidung,
+    kern: &Isin,
+    minimum_bp: i64,
+) -> Option<bool> {
+    if !plan.kaeufe.iter().any(|kauf| &kauf.auftrag().isin == kern) {
+        return Some(false);
+    }
+    let park = eingabe
+        .vorschlag
+        .and_then(|v| v.park.as_ref())
+        .map(|p| &p.isin);
+    let (eingesetzt, gesamt) = einsatzwert(eingabe.topf, eingabe.kurse, plan, park)?;
+    let naechstes_stueck = eingesetzt.checked_add(eingabe.kurse.kurs(kern)?)?;
+    let ziel = gesamt.mal_stueck_exakt(u64::try_from(minimum_bp).ok()?)?;
+    let mit_stueck = naechstes_stueck.mal_stueck_exakt(u64::try_from(depot_kern::BP_GANZ).ok()?)?;
+    Some(mit_stueck > ziel)
 }
 
 fn mindesteinsatz(
@@ -1804,7 +1835,11 @@ fn topf_zyklus(
     if kern_erlaubt {
         crate::kernanlage::wahre_positionsgrenze(&eingabe, &mut ent, j.stand(), kern.is_some());
     }
-    if !ruhetag {
+    if !ruhetag
+        && !kern.as_ref().is_some_and(|isin| {
+            kernanlage_rundet_ab(&eingabe, &ent, isin, minimum_bp) == Some(true)
+        })
+    {
         mindesteinsatz(
             j,
             z,
@@ -1823,7 +1858,15 @@ fn topf_zyklus(
             &format!("{t}: ZweitmeinungAusgefallen · Kaufzielgewichte × 0,5"),
         )?;
     }
-    belege_topfbefunde(j, tag, t, &ent, ruhetag, antwort.zweitmeinung_ausgefallen)?;
+    belege_topfbefunde(
+        j,
+        tag,
+        t,
+        &ent,
+        ruhetag,
+        antwort.zweitmeinung_ausgefallen,
+        kern.as_ref(),
+    )?;
     fuehre_plan_aus(j, z, id, &ent, auftragsziele, konto, kern.as_ref())
 }
 
@@ -1997,6 +2040,7 @@ fn belege_topfbefunde(
     ent: &depot_regelwerk::Entscheidung,
     ruhetag: bool,
     zweitmeinung_ausgefallen: bool,
+    kern: Option<&Isin>,
 ) -> Result<(), LaufFehler> {
     for b in &ent.befunde {
         if ruhetag && matches!(b, depot_regelwerk::Befund::KeinVorschlag) {
@@ -2015,6 +2059,12 @@ fn belege_topfbefunde(
                 } => format!(
                     "{t}: {isin}: Limitabstand {gefragt} bp außerhalb des Rahmens, {verwendet} bp verwendet"
                 ),
+                depot_regelwerk::Befund::StoppFehlt {
+                    isin,
+                    gefragt: None,
+                } if kern == Some(isin) => {
+                    format!("{t}: {isin}: Kernanlage ohne hinterlegten Schutz-Stopp geplant")
+                }
                 depot_regelwerk::Befund::StoppFehlt { isin, gefragt } => gefragt.map_or_else(
                     || format!("{t}: {isin}: kein Schutz-Stopp im Kaufvorschlag"),
                     |bp| format!("{t}: {isin}: Schutz-Stopp mit {bp} bp nicht übernommen"),
@@ -2881,7 +2931,7 @@ mod tests {
             [
                 "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt",
                 "Topf A: unter_mindesteinsatz 0 von 3000 bp · fehlt, Regelwerk kürzte",
-                "Topf A: unter_mindesteinsatz 0 von 3000 bp · begründet: NVIDIA abwarten",
+                "Topf A: unter_mindesteinsatz 0 von 3000 bp · KI-Begründung: NVIDIA abwarten",
                 "Topf A: unter_mindesteinsatz 0 von 3000 bp · eigenes Ziel 4000 bp, nach der Beratung 0 bp · Begründung zum eigenen Ziel: Reserve halten",
             ]
         );
