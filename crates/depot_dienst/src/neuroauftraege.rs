@@ -242,7 +242,7 @@ pub(crate) fn textprobe_fragen<'a>(
     }
     let belegt = crate::jetzt()
         .and_then(depot_kern::Zeitpunkt::frankfurt_tag)
-        .map(|heute| ki.neurofragen().iter().filter(|v| v.datum == heute).count());
+        .map(|heute| ki.neuroaufrufe_am(heute));
     Ok(status.text(e, paare, vormerken, belegt, pause))
 }
 

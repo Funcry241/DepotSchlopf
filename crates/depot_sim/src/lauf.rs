@@ -938,6 +938,47 @@ pub(crate) fn belege_ki(
     Ok(())
 }
 
+/// Jeder Versuch wird vor dem Versand separat reserviert und vor einem weiteren
+/// Versuch abgerechnet. Der Antworttyp und die fachliche Auswertung bleiben gleich.
+pub(crate) fn ki_mit_wiederholung<T>(
+    j: &mut Journal,
+    berater: &mut dyn Berater,
+    erlaubnis: depot_journal::AufrufErlaubnis,
+    mut frage: impl FnMut(&mut dyn Berater, depot_journal::AufrufErlaubnis) -> T,
+) -> Result<T, LaufFehler> {
+    let nummer = erlaubnis.buchungsnummer();
+    let zweck = erlaubnis.zweck();
+    let erste = frage(berater, erlaubnis);
+    belege_ki(j, berater).map_err(journal)?;
+    if !berater.ausgabelimit_erreicht() {
+        return Ok(erste);
+    }
+    if berater.kostensperre() || !berater.angebunden() {
+        let grund = berater
+            .warum_nicht()
+            .unwrap_or_else(|| "Kostenschutz oder Anbieterpause".into());
+        berater.anfrage_uebersprungen(zweck, &format!("Wiederholung zu Buchung {nummer}: {grund}"));
+        return Ok(erste);
+    }
+    let erlaubnis = match j.reserviere_ki_wiederholung(nummer, berater.einstellung()) {
+        Ok(erlaubnis) => erlaubnis,
+        Err(Sperre::Kassenbuch(e)) => return Err(halt(e)),
+        Err(sperre) => {
+            berater.anfrage_uebersprungen(
+                zweck,
+                &format!(
+                    "Wiederholung zu Buchung {nummer} nicht gefragt: Kostenschutz ({sperre:?})"
+                ),
+            );
+            return Ok(erste);
+        }
+    };
+    berater.kurze_antwort_anfordern();
+    let zweite = frage(berater, erlaubnis);
+    belege_ki(j, berater).map_err(journal)?;
+    Ok(zweite)
+}
+
 /// Fragt einen Berater, wenn der Kostenschutz es erlaubt. `None` heisst: nicht gefragt; der
 /// Grund steht im Journal.
 fn erlaubnis(
@@ -1001,8 +1042,10 @@ fn frage(
             &format!("{t}: {grund}, nicht gefragt; kein Vorschlag"),
         )?;
     } else if let Some(e) = erlaubnis(j, tag, zyklus, id, wer, "kein Vorschlag", frager)? {
-        let mut antwort = frager.vorschlagen_mit_bilanz(e, lage, &prognosebilanz(j.stand()));
-        belege_ki(j, frager).map_err(journal)?;
+        let bilanz = prognosebilanz(j.stand());
+        let mut antwort = ki_mit_wiederholung(j, frager, e, |ki, e| {
+            ki.vorschlagen_mit_bilanz(e, lage, &bilanz)
+        })?;
         if z.uhr.is_some() {
             belege_kursprognosen(j, lage.datum, wer, &frager.kursprognosen())?;
         }
@@ -1446,6 +1489,19 @@ fn urteil_wort(folge: Option<&Urteilsfolge>) -> String {
     }
 }
 
+fn frage_zweitmeinung(
+    j: &mut Journal,
+    pruefer: &mut dyn Berater,
+    erlaubnis: depot_journal::AufrufErlaubnis,
+    lage: &Lage<'_>,
+    vorschlag: &Vorschlag,
+) -> Result<crate::Urteil, LaufFehler> {
+    let bilanz = prognosebilanz(j.stand());
+    ki_mit_wiederholung(j, pruefer, erlaubnis, |ki, e| {
+        ki.pruefen_mit_bilanz(e, lage, vorschlag, &bilanz)
+    })
+}
+
 fn zweite_meinung(
     j: &mut Journal,
     z: &Zyklus<'_>,
@@ -1506,8 +1562,7 @@ fn zweite_meinung(
             pruefer,
         )?
     {
-        let urteil = pruefer.pruefen_mit_bilanz(e, &lage, &v, &prognosebilanz(j.stand()));
-        belege_ki(j, pruefer).map_err(journal)?;
+        let urteil = frage_zweitmeinung(j, pruefer, e, &lage, &v)?;
         let folge = urteil.verwertbar.then(|| {
             crate::teilveto::urteilsfolge(&v, urteil.zustimmung, urteil.abgelehnt.as_deref())
         });
@@ -2679,6 +2734,91 @@ mod tests {
             belege: std::collections::BTreeMap::new(),
             park: None,
         })
+    }
+
+    #[test]
+    fn abgebrochene_antwort_wird_hoechstens_einmal_und_gebucht_wiederholt() -> Result<(), LaufFehler>
+    {
+        struct Probe {
+            gesperrt: bool,
+            kompakt: bool,
+        }
+
+        impl Berater for Probe {
+            fn ausgabelimit_erreicht(&self) -> bool {
+                true
+            }
+            fn kostensperre(&self) -> bool {
+                self.gesperrt
+            }
+            fn kurze_antwort_anfordern(&mut self) {
+                self.kompakt = true;
+            }
+            fn vorschlagen(
+                &mut self,
+                _: depot_journal::AufrufErlaubnis,
+                _: &Lage<'_>,
+            ) -> crate::Antwort {
+                unreachable!()
+            }
+            fn pruefen(
+                &mut self,
+                _: depot_journal::AufrufErlaubnis,
+                _: &Lage<'_>,
+                _: &Vorschlag,
+            ) -> crate::Urteil {
+                unreachable!()
+            }
+        }
+
+        let ordner =
+            std::env::temp_dir().join(format!("depot-ki-wiederholung-{}", std::process::id()));
+        std::fs::create_dir_all(&ordner).map_err(|e| halt(e.to_string()))?;
+        let pfad = ordner.join("journal.txt");
+        Journal::einrichten(&pfad).map_err(journal)?;
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        let datum = depot_kern::Datum::neu(2026, 11, 9).ok_or_else(|| halt("Datum"))?;
+        for (wer, gesperrt, erwartet) in [(BeraterId::Dachs, false, 2), (BeraterId::Maus, true, 1)]
+        {
+            let e = j
+                .reserviere(wer, datum, 1)
+                .map_err(|e| halt(format!("{e:?}")))?;
+            let erste = e.buchungsnummer();
+            let hash = "a".repeat(64);
+            let beleg = depot_journal::KiAufruf {
+                nr: erste,
+                anbieter: "Probe".into(),
+                modell: "Probe".into(),
+                vorlage: hash.clone(),
+                frage: Some(hash.clone()),
+                antwort: Some(hash),
+                token_ein: Some(10),
+                token_aus: Some(u64::from(e.deckel().max_token_aus())),
+                ergebnis: depot_journal::KiAufrufErgebnis::Ausgabelimit,
+            };
+            j.belege_ki_aufruf(&beleg).map_err(journal)?;
+            let abrechnung = e.abrechnung(10, 10).ok_or_else(|| halt("Abrechnung"))?;
+            j.rechne_ki_ab(&abrechnung).map_err(journal)?;
+            let mut probe = Probe {
+                gesperrt,
+                kompakt: false,
+            };
+            let mut nr = Vec::new();
+            ki_mit_wiederholung(&mut j, &mut probe, e, |_, e| {
+                nr.push(e.buchungsnummer());
+            })?;
+            assert_eq!(nr.len(), erwartet);
+            assert_eq!(probe.kompakt, !gesperrt);
+            assert_eq!(j.stand().ki().wiederholung(erste), nr.get(1).copied());
+        }
+        assert_eq!(j.stand().ki().buchungen().len(), 3);
+        drop(j);
+        let mut j = Journal::oeffnen(&pfad).map_err(journal)?;
+        assert_eq!(j.stand().ki().wiederholung(0), Some(1));
+        assert!(j.reserviere_ki_wiederholung(0, None).is_err());
+        drop(j);
+        std::fs::remove_dir_all(ordner).map_err(|e| halt(e.to_string()))?;
+        Ok(())
     }
 
     struct Nachfrage(Option<String>);

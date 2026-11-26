@@ -40,6 +40,7 @@ pub struct Gelesen {
     pub text: Result<String, String>,
     pub verbrauch: Verbrauch,
     pub modell: Option<String>,
+    pub ausgabelimit_erreicht: bool,
 }
 
 impl Anbieter {
@@ -268,6 +269,7 @@ fn lies_anthropic(w: &Json) -> Result<Gelesen, String> {
         text,
         verbrauch,
         modell: None,
+        ausgabelimit_erreicht: grund == "max_tokens",
     })
 }
 
@@ -324,6 +326,12 @@ fn lies_openai(w: &Json) -> Result<Gelesen, String> {
         text,
         verbrauch,
         modell: None,
+        ausgabelimit_erreicht: status == "incomplete"
+            && w.feld("incomplete_details")
+                .filter(|details| !details.doppelte_felder())
+                .and_then(|details| details.feld("reason"))
+                .and_then(Json::text)
+                == Some("max_output_tokens"),
     })
 }
 
@@ -332,6 +340,32 @@ mod tests {
     use super::*;
     use crate::frage::TOPFBLOCK;
     use depot_kern::modelle::Denktiefe;
+
+    #[test]
+    fn unterscheidet_ausgabelimit_von_anderen_unvollstaendigen_antworten() -> Result<(), String> {
+        for (details, erwartet) in [
+            (r#"{"reason":"max_output_tokens"}"#, true),
+            (r#"{"reason":"content_filter"}"#, false),
+            ("null", false),
+        ] {
+            let json = format!(
+                r#"{{"status":"incomplete","incomplete_details":{details},"usage":{{"input_tokens":10,"output_tokens":20}}}}"#
+            );
+            let gelesen = Anbieter::OpenAi.lies(json.as_bytes())?;
+            assert!(gelesen.text.is_err());
+            assert_eq!(gelesen.ausgabelimit_erreicht, erwartet);
+            assert_eq!(gelesen.verbrauch.token_aus, 20);
+        }
+        for (grund, erwartet) in [("max_tokens", true), ("refusal", false)] {
+            let json = format!(
+                r#"{{"stop_reason":"{grund}","usage":{{"input_tokens":10,"output_tokens":20}}}}"#
+            );
+            let gelesen = Anbieter::Anthropic.lies(json.as_bytes())?;
+            assert!(gelesen.text.is_err());
+            assert_eq!(gelesen.ausgabelimit_erreicht, erwartet);
+        }
+        Ok(())
+    }
 
     #[test]
     fn openai_nur_der_gemeinsame_tagesblock_wird_markiert() -> Result<(), String> {
