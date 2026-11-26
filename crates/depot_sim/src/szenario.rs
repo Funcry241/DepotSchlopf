@@ -122,6 +122,12 @@ pub trait Berater {
         false
     }
 
+    fn ausgabelimit_erreicht(&self) -> bool {
+        false
+    }
+
+    fn kurze_antwort_anfordern(&mut self) {}
+
     fn kann_abstimmen(&self) -> bool {
         false
     }

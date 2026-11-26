@@ -107,8 +107,11 @@ pub fn lauf<'a>(
                 berater.einstellung(),
             ) {
                 Ok(erlaubnis) => {
-                    let antwort = berater.wochenrat(erlaubnis, &frage);
-                    crate::lauf::belege_ki(&mut j, berater).map_err(|e| format!("{e:?}"))?;
+                    let antwort =
+                        crate::lauf::ki_mit_wiederholung(&mut j, berater, erlaubnis, |ki, e| {
+                            ki.wochenrat(e, &frage)
+                        })
+                        .map_err(|e| format!("{e:?}"))?;
                     antwort.map_or_else(
                         |_| "übersprungen: keine verwertbaren Lehren".into(),
                         |lehren| formatiere_lehren(&lehren),
