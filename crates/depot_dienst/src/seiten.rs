@@ -2595,6 +2595,25 @@ pub fn einrichtung(
     einrichtung_mit_update(token, start, z, heute, e, zusatz, UpdateAnzeige::default())
 }
 
+pub(crate) fn papierdiagnose_teil(token: &str, z: &Zustand) -> String {
+    let art = Art::Papierdiagnose;
+    let mut html = auftrag_knopf(token, z, art, art.name(), false);
+    if let Some(lauf) = z
+        .laufend
+        .iter()
+        .chain(z.verlauf.iter())
+        .find(|a| a.art == art)
+    {
+        let (klasse, text) = ergebnis(lauf, z);
+        let _ = write!(
+            html,
+            "<p role=\"status\">Prüfung · <span class=\"{klasse}\">{text}</span></p>"
+        );
+        html.push_str(&protokoll(lauf, true));
+    }
+    html
+}
+
 pub(crate) fn einrichtung_mit_update(
     token: &str,
     start: &str,
@@ -2660,6 +2679,13 @@ pub(crate) fn einrichtung_mit_update(
     if e.papier_freigabe.is_none() {
         s.push_str("<p id=\"papierfreigabe\" class=\"leise\">Derzeit wird keine Papierfreigabe angeboten. Den Betriebszustand siehst du oben.</p>");
     }
+    let _ = write!(
+        s,
+        "<div id=\"papierdiagnose\"><h3>Papierhandel</h3>\
+         <p>Prüft Kauf, Haltefrist, Verkauf und Kontoabgleich mit festen Kursen in einem Testkonto. Kein KI-Budget nötig.</p>\
+         <div data-teil=\"/teil/papierdiagnose\">{}</div></div>",
+        papierdiagnose_teil(token, z)
+    );
     let _ = write!(
         s,
         "<div id=\"papierdialog-test\"><h3>Windows-Dialog prüfen</h3>\

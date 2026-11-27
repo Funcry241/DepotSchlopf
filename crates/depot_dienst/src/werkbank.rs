@@ -48,6 +48,7 @@ pub enum Art {
     Wochenrueckschau,
     Simulation,
     Papier,
+    Papierdiagnose,
     Sicherung,
     /// Dauerhafter Verlaufseintrag ohne gestarteten Prozess.
     PapierAusgelassen,
@@ -57,7 +58,7 @@ pub enum Art {
     Update,
 }
 
-const ALLE_ARTEN: [Art; 17] = [
+const ALLE_ARTEN: [Art; 18] = [
     Art::Einrichten,
     Art::Kurse,
     Art::Kursdiagnose,
@@ -72,6 +73,7 @@ const ALLE_ARTEN: [Art; 17] = [
     Art::Wochenrueckschau,
     Art::Simulation,
     Art::Papier,
+    Art::Papierdiagnose,
     Art::Sicherung,
     Art::UpdatePruefen,
     Art::Update,
@@ -98,6 +100,7 @@ impl Art {
             Art::Wochenrueckschau => "KI-Wochenrückschau",
             Art::Simulation => "KI-Simulation starten",
             Art::Papier => "Papiertag",
+            Art::Papierdiagnose => "Papierhandel prüfen",
             Art::Sicherung => "Daten sichern",
             Art::PapierAusgelassen => "Papiertag ausgelassen: vor Börsenschluss nicht gestartet",
             Art::UpdatePruefen => "Nach Update suchen",
@@ -126,6 +129,7 @@ impl Art {
             Art::Wochenrueckschau => "wochenrueckschau",
             Art::Simulation => "simulation",
             Art::Papier => "papier",
+            Art::Papierdiagnose => "papierdiagnose",
             Art::Sicherung => "sicherung",
             Art::PapierAusgelassen => "papier_ausgelassen",
             Art::UpdatePruefen => "update_pruefen",
@@ -158,6 +162,7 @@ impl Art {
             Art::Wochenrueckschau => &["wochenrueckschau"],
             Art::Simulation => &["simulation"],
             Art::Papier => &["papier"],
+            Art::Papierdiagnose => &["papierdiagnose"],
             Art::Sicherung => &["sichern"],
             Art::PapierAusgelassen => &["papier_ausgelassen"],
             Art::UpdatePruefen => &["update", "pruefen"],
@@ -631,6 +636,7 @@ pub fn cargo_starter() -> Starter {
             | Art::IbkrJournal
             | Art::IbkrAbgleich
             | Art::EstrIndex => ("depot_sammler", art.argumente()),
+            Art::Papierdiagnose => ("depot_berater", art.argumente()),
             _ => ("depot_lauf", art.argumente()),
         };
         c.current_dir(wurzel)

@@ -319,6 +319,7 @@ pub fn starter(stand: &Stand) -> Starter {
             | Art::IbkrAbgleich
             | Art::Einrichten => (&sammler, art.argumente()),
             Art::Papier
+            | Art::Papierdiagnose
             | Art::Vorbereiten
             | Art::Wochenrueckschau
             | Art::Simulation

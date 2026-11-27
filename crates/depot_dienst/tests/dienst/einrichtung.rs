@@ -903,6 +903,35 @@ fn einschalten_verlangt_jeden_schluessel() -> Result<(), String> {
 }
 
 #[test]
+fn papierdiagnose_zeigt_ergebnis_in_der_einrichtung() -> Result<(), String> {
+    let jetzt = donnerstag(12, 0)?;
+    for (erfolg, ergebnis) in [(true, "erfolgreich"), (false, "fehlgeschlagen")] {
+        let wurzel = ordner()?;
+        fs::remove_dir(wurzel.join("daten")).map_err(|e| e.to_string())?;
+        let d = dienst(wurzel.clone(), erfolg);
+        let seite = get(&d, "/einrichtung", jetzt);
+        assert!(seite.contains("id=\"papierdiagnose\""));
+        assert!(seite.contains("Papierhandel prüfen"));
+        assert!(seite.contains("Kein KI-Budget nötig"));
+
+        let anfrage = formular_post("/ausfuehren", &format!("t={TOKEN}&art=papierdiagnose"));
+        let antwort = text(&behandle(&d, &Attrappe::default(), &anfrage, jetzt));
+        assert!(antwort.contains("Location: /einrichtung#papierdiagnose"));
+        assert_eq!(wartend(&d), [(Art::Papierdiagnose, Anlass::Hand)]);
+        assert!(get(&d, "/teil/papierdiagnose", jetzt).contains("wartet"));
+
+        let (nr, kind) = some(d.schritt(jetzt), "Papierdiagnose startet")?;
+        d.verfolge(nr, kind, || donnerstag(12, 1).ok());
+        let ausgabe = get(&d, "/teil/papierdiagnose", jetzt);
+        assert!(ausgabe.contains(ergebnis), "{ausgabe}");
+        assert!(ausgabe.contains("lauf papierdiagnose"), "{ausgabe}");
+        assert!(!wurzel.join("daten/journal.txt").exists());
+        assert!(!wurzel.join("daten/papierkonto.txt").exists());
+    }
+    Ok(())
+}
+
+#[test]
 fn fehlender_abschlussvermerk_zeigt_hinweis_und_haelt_zeitplan_nicht_an() -> Result<(), String> {
     let wurzel = ordner()?;
     let datei = depot_dienst::verlauf::pfad(&wurzel);

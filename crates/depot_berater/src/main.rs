@@ -196,13 +196,22 @@ fn lauf(wurzel: &Path, modus: Modus) -> Result<(), String> {
 }
 
 fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.as_slice() == ["papierdiagnose"] {
+        return match depot_sim::papierdiagnose::papierhandel_pruefen(|zeile| println!("{zeile}")) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("Papierhandel-Prüfung fehlgeschlagen: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let Some(wurzel) = wurzel() else {
         eprintln!(
             "[Papier] FEHLER: Projektordner nicht gefunden. run.cmd im Projektordner starten."
         );
         return ExitCode::FAILURE;
     };
-    let args: Vec<String> = std::env::args().skip(1).collect();
     if let [befehl, pfad] = args.as_slice()
         && matches!(befehl.as_str(), "neurofrage" | "neurofrage-abrechnen")
     {
