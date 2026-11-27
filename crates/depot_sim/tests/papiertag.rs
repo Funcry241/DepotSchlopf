@@ -4082,7 +4082,6 @@ fn fristverkauf_nur_bei_faelligkeit_und_ohne_haltebegruendung() -> Result<(), St
 
 #[test]
 fn papierhandel_vom_kauf_bis_zum_fristverkauf() -> Result<(), String> {
-    use depot_journal::{AuftragsZustand, Konto as _};
     use depot_kern::Boerse;
     use depot_regelwerk::{Anlass, Richtung};
 
@@ -4111,7 +4110,7 @@ fn papierhandel_vom_kauf_bis_zum_fristverkauf() -> Result<(), String> {
         dachs.antworten.insert(
             tag(lauf)?,
             Antwort {
-                halten: Default::default(),
+                halten: std::collections::BTreeMap::new(),
                 prognose: None,
                 verwertbar: true,
                 einschaetzung: "Bestand geprüft".into(),
@@ -4172,15 +4171,26 @@ fn papierhandel_vom_kauf_bis_zum_fristverkauf() -> Result<(), String> {
         }
     }
 
-    let auszug = papierkonto.auszug();
     drop(papierkonto);
     drop(journal);
+    pruefe_papierhandelsabschluss(&ort, &isin, kauftag, verkaufstag)
+}
+
+fn pruefe_papierhandelsabschluss(
+    ort: &Ort,
+    isin: &Isin,
+    kauftag: Datum,
+    verkaufstag: Datum,
+) -> Result<(), String> {
+    use depot_journal::{AuftragsZustand, Konto as _};
+    use depot_kern::Boerse;
+
     let mut journal = ort.oeffnen()?;
-    let konto = konto(&ort, &journal)?;
+    let konto = konto(ort, &journal)?;
     let topf = some(journal.stand().toepfe().get(&TopfId::A), "Topf A")?;
-    assert_eq!(topf.stueck(&isin), 0);
+    assert_eq!(topf.stueck(isin), 0);
     assert_eq!(topf.bargeld(), Cent(502_580));
-    assert_eq!(auszug.bargeld, Cent(1_002_580));
+    assert_eq!(konto.auszug().bargeld, Cent(1_002_580));
     assert!(vorbedingung(journal.gleiche_ab(&konto), "Kontoabgleich")?.is_empty());
     let auftraege = journal.stand().auftraege();
     assert_eq!(auftraege.len(), 2);
