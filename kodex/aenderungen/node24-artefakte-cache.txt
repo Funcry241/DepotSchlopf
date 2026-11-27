@@ -1,0 +1,6 @@
+klasse: KodexAenderung
+zweck: Artefakt-Uploads und Cache-Schritte auf Node.js 24 umstellen
+pfade:
+.github/workflows/kodex.yml
+kodex/festschreibung.txt
+kodex/freigaben/node24-artefakte-cache.txt
