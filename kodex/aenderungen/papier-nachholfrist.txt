@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Papieraufträge nach Ablauf der Nachholfrist auch bei dauerhaft alten Kursen freigeben
+pfade:
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/tests/papiertag.rs

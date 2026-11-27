@@ -3227,6 +3227,15 @@ fn schluss_ohne_ezb_verfaellt() -> Result<(), String> {
 
 #[test]
 fn order_ausserhalb_auswahl_verfaellt() -> Result<(), String> {
+    fehlender_schluss_verfaellt(false)
+}
+
+#[test]
+fn order_mit_wiederholt_altem_kurs_verfaellt() -> Result<(), String> {
+    fehlender_schluss_verfaellt(true)
+}
+
+fn fehlender_schluss_verfaellt(wert_in_auswahl: bool) -> Result<(), String> {
     use depot_journal::{AuftragsZustand, verfuegbar};
     use depot_kern::Grenzen;
 
@@ -3258,11 +3267,15 @@ fn order_ausserhalb_auswahl_verfaellt() -> Result<(), String> {
     assert_eq!(order.beleg.isin, allianz);
     let bargeld = some(j.stand().toepfe().get(&topf), "Kauftopf")?.bargeld();
     assert!(some(verfuegbar(&grenzen, j.stand(), topf), "Freies Geld")? < bargeld);
-    let auswahl = Universum::neu(vec![Instrument {
-        isin: sap.clone(),
-        name: "SAP".into(),
-        art: InstrumentArt::Aktie,
-    }]);
+    let auswahl = if wert_in_auswahl {
+        universum()?
+    } else {
+        Universum::neu(vec![Instrument {
+            isin: sap.clone(),
+            name: "SAP".into(),
+            art: InstrumentArt::Aktie,
+        }])
+    };
     for (heute, kurse, erwartet) in [
         (
             17,
@@ -3274,11 +3287,14 @@ fn order_ausserhalb_auswahl_verfaellt() -> Result<(), String> {
         let heute = tag(heute)?;
         let abruf = some(Zeitpunkt::frankfurt(heute, 7, 30, 0), "Abruf")?;
         belege_sperrprobe(&mut j, &sap, &kurse, abruf)?;
+        if wert_in_auswahl {
+            belege_sperrprobe(&mut j, &allianz, &[(12, 20_000), (13, 20_000)], abruf)?;
+        }
         vorbedingung(
             papiertag(
                 &mut j, heute, &auswahl, &start, &mut Stumm, &mut Stumm, &mut k,
             ),
-            "Morgenlauf ohne Allianz",
+            "Morgenlauf ohne aktuellen Allianz-Kurs",
         )?;
         assert_eq!(
             some(j.stand().auftrag(nr), "Kaufauftrag")?.zustand,
@@ -3288,6 +3304,11 @@ fn order_ausserhalb_auswahl_verfaellt() -> Result<(), String> {
     drop(j);
     let j = ort.oeffnen()?;
     assert_eq!(verfuegbar(&grenzen, j.stand(), topf), Some(bargeld));
+    assert!(
+        some(j.stand().auftrag(nr), "Kaufauftrag")?
+            .ausfuehrungen
+            .is_empty()
+    );
     assert!(j.stand().begruendungen().iter().any(|(_, _, text)| {
         text.contains(&format!(
             "Auftrag {nr} verfällt: Schlusskurs nicht mehr nachholbar"

@@ -896,6 +896,9 @@ fn markt_offener_orders(
                 eintraege.insert(isin.clone(), (beleg.kurs().clone(), beleg.abruf()));
             } else if stand >= schluss && aktuell.is_some_and(|kurs| kurs.zeitpunkt() > schluss) {
                 verfallen.insert(*nr);
+            } else if !im_zeitfenster && stand >= schluss {
+                nachholfrist_abgelaufen.insert(*nr);
+                verfallen.insert(*nr);
             }
         }
         let kurse = Kurse::mit_abrufen(
