@@ -1,0 +1,5 @@
+klasse: Funktion
+zweck: Den fehlenden verwendbaren Schlusskurs offener Papieraufträge im Journal benennen
+pfade:
+crates/depot_sim/src/lauf.rs
+crates/depot_sim/tests/papiertag.rs
