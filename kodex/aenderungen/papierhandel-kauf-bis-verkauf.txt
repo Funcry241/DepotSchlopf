@@ -1,0 +1,4 @@
+klasse: TestOnly
+zweck: Papierhandel vom Kauf bis zum Fristverkauf mit festen Kursen und Kontoabgleich prüfen
+pfade:
+crates/depot_sim/tests/papiertag.rs

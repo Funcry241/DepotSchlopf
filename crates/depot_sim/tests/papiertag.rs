@@ -4081,6 +4081,135 @@ fn fristverkauf_nur_bei_faelligkeit_und_ohne_haltebegruendung() -> Result<(), St
 }
 
 #[test]
+fn papierhandel_vom_kauf_bis_zum_fristverkauf() -> Result<(), String> {
+    use depot_kern::Boerse;
+    use depot_regelwerk::{Anlass, Richtung};
+
+    let ort = Ort::neu()?;
+    let mut journal = ort.oeffnen()?;
+    let mut papierkonto = konto(&ort, &journal)?;
+    let (sap, isin) = (sap()?, allianz()?);
+    let start = start()?;
+    let universum = universum()?;
+    let kauftag = tag(16)?;
+    let verkaufstag = tag(18)?;
+    let (mut dachs, mut maus) = kaeufer(kauftag, &isin);
+    some(
+        dachs
+            .antworten
+            .get_mut(&kauftag)
+            .and_then(|antwort| antwort.vorschlag.as_mut()),
+        "Kaufvorschlag",
+    )?
+    .begruendung
+    .insert(
+        isin.clone(),
+        "[Zahlen] [Ausstieg +800bp 2] Testthese".into(),
+    );
+    for lauf in [17, 18] {
+        dachs.antworten.insert(
+            tag(lauf)?,
+            Antwort {
+                halten: std::collections::BTreeMap::new(),
+                prognose: None,
+                verwertbar: true,
+                einschaetzung: "Bestand geprüft".into(),
+                vorschlag: None,
+            },
+        );
+    }
+    for (lauf, alt, neu, preis) in [
+        (16, 12, 13, 5_000),
+        (17, 13, 16, 5_000),
+        (18, 16, 17, 5_050),
+        (19, 17, 18, 5_150),
+    ] {
+        let heute = tag(lauf)?;
+        let abruf = some(Zeitpunkt::frankfurt(heute, 7, 30, 0), "Abruf")?;
+        belege_sperrprobe(&mut journal, &sap, &[(alt, 25_000), (neu, 25_000)], abruf)?;
+        belege_sperrprobe(&mut journal, &isin, &[(neu, preis)], abruf)?;
+        if lauf == 16 {
+            belege_sperrprobe(&mut journal, &isin, &[(alt, 5_000)], abruf)?;
+        }
+        vorbedingung(
+            papiertag(
+                &mut journal,
+                heute,
+                &universum,
+                &start,
+                &mut dachs,
+                &mut maus,
+                &mut papierkonto,
+            ),
+            "Papierlauf",
+        )?;
+        let offen = journal.stand().offene_auftraege().collect::<Vec<_>>();
+        match lauf {
+            16 => {
+                let kauf = some(offen.first(), "Offener Kauf")?;
+                assert_eq!(offen.len(), 1);
+                assert_eq!(kauf.beleg.richtung, Richtung::Kauf);
+                assert_eq!(kauf.beleg.stueck, 20);
+                assert_eq!(kauf.frist, Boerse::Xetra.schluss(kauftag));
+                assert!(kauf.ausfuehrungen.is_empty());
+            }
+            17 => {
+                let topf = some(journal.stand().toepfe().get(&TopfId::A), "Topf A")?;
+                assert_eq!(topf.stueck(&isin), 20);
+                assert_eq!(topf.bargeld(), Cent(399_790));
+                assert!(offen.is_empty(), "Verkauf vor Ablauf der Haltefrist");
+            }
+            18 => {
+                let verkauf = some(offen.first(), "Offener Fristverkauf")?;
+                assert_eq!(offen.len(), 1);
+                assert_eq!(verkauf.beleg.richtung, Richtung::Verkauf);
+                assert_eq!(verkauf.beleg.anlass, Anlass::FristOhneBegruendung);
+                assert_eq!(verkauf.beleg.stueck, 20);
+                assert_eq!(verkauf.frist, Boerse::Xetra.schluss(verkaufstag));
+            }
+            _ => assert!(offen.is_empty()),
+        }
+    }
+
+    drop(papierkonto);
+    drop(journal);
+    pruefe_papierhandelsabschluss(&ort, &isin, kauftag, verkaufstag)
+}
+
+fn pruefe_papierhandelsabschluss(
+    ort: &Ort,
+    isin: &Isin,
+    kauftag: Datum,
+    verkaufstag: Datum,
+) -> Result<(), String> {
+    use depot_journal::{AuftragsZustand, Konto as _};
+    use depot_kern::Boerse;
+
+    let mut journal = ort.oeffnen()?;
+    let konto = konto(ort, &journal)?;
+    let topf = some(journal.stand().toepfe().get(&TopfId::A), "Topf A")?;
+    assert_eq!(topf.stueck(isin), 0);
+    assert_eq!(topf.bargeld(), Cent(502_580));
+    assert_eq!(konto.auszug().bargeld, Cent(1_002_580));
+    assert!(vorbedingung(journal.gleiche_ab(&konto), "Kontoabgleich")?.is_empty());
+    let auftraege = journal.stand().auftraege();
+    assert_eq!(auftraege.len(), 2);
+    for (order, (datum, kurs)) in auftraege
+        .iter()
+        .zip([(kauftag, 5_003), (verkaufstag, 5_147)])
+    {
+        assert_eq!(order.zustand, AuftragsZustand::Gefuellt);
+        assert_eq!(order.ausfuehrungen.len(), 1);
+        let ausfuehrung = some(order.ausfuehrungen.first(), "Ausführung")?;
+        assert_eq!(ausfuehrung.stueck, 20);
+        assert_eq!(ausfuehrung.kurs, Cent(kurs));
+        assert_eq!(ausfuehrung.gebuehr, Cent(150));
+        assert_eq!(ausfuehrung.kurszeit, Boerse::Xetra.schluss(datum));
+    }
+    Ok(())
+}
+
+#[test]
 fn schattenzahlen_kauft_nach_positiver_reaktion_ohne_papierorder_aenderung() -> Result<(), String> {
     use depot_sim::schatten::{Schattenstand, Variante};
     let ort = Ort::neu()?;
