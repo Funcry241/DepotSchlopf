@@ -3314,6 +3314,12 @@ fn fehlender_schluss_verfaellt(wert_in_auswahl: bool) -> Result<(), String> {
             "Auftrag {nr} verfällt: Schlusskurs nicht mehr nachholbar"
         ))
     }));
+    assert!(j.stand().begruendungen().iter().any(|(tag, _, text)| {
+        tag.tag() == 17
+            && text.contains(&format!(
+                "Auftrag {nr} wartet: kein verwendbarer Schlusskurs für {allianz} am 2026-11-16."
+            ))
+    }));
     Ok(())
 }
 

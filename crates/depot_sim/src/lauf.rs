@@ -878,9 +878,20 @@ fn markt_offener_orders(
                     .is_some_and(|(tag, fruehestens)| tag >= fruehestens)
             });
             if !handelbar.contains(isin) || z.gesperrt.contains(isin) {
-                if !im_zeitfenster && stand >= schluss {
-                    nachholfrist_abgelaufen.insert(*nr);
-                    verfallen.insert(*nr);
+                if stand >= schluss {
+                    if im_zeitfenster {
+                        let schlusstag = schluss
+                            .frankfurt_tag()
+                            .ok_or_else(|| halt("Schlusstag fehlt"))?;
+                        let topf = topf_name(order.beleg.topf);
+                        let hinweis = format!(
+                            "{topf}: Auftrag {nr} wartet: kein verwendbarer Schlusskurs für {isin} am {schlusstag}."
+                        );
+                        begruende(j, z.tag, SIMULATION, &hinweis)?;
+                    } else {
+                        nachholfrist_abgelaufen.insert(*nr);
+                        verfallen.insert(*nr);
+                    }
                 }
                 continue;
             }
@@ -895,9 +906,6 @@ fn markt_offener_orders(
             if let Some(beleg) = beleg {
                 eintraege.insert(isin.clone(), (beleg.kurs().clone(), beleg.abruf()));
             } else if stand >= schluss && aktuell.is_some_and(|kurs| kurs.zeitpunkt() > schluss) {
-                verfallen.insert(*nr);
-            } else if !im_zeitfenster && stand >= schluss {
-                nachholfrist_abgelaufen.insert(*nr);
                 verfallen.insert(*nr);
             }
         }
