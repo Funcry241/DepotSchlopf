@@ -182,7 +182,7 @@ jobs:
     outputs:
       wiederverwendet: ${{ steps.ergebnis.outputs.wiederverwendet }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Geprüften Export für identischen Baum suchen
@@ -217,7 +217,7 @@ jobs:
     outputs:
       update: ${{ steps.filter.outputs.update }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Gegenproben für Kodex-Tor und Windows-Update-Filter
@@ -243,7 +243,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Rust-Werkzeugkette aus rust-toolchain.toml
@@ -273,7 +273,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Rust-Werkzeugkette aus rust-toolchain.toml
@@ -354,7 +354,7 @@ jobs:
           "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - name: Zeilenenden beim Checkout festlegen
         run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Rust-Werkzeugkette aus rust-toolchain.toml
@@ -414,7 +414,7 @@ jobs:
           "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - name: Zeilenenden beim Checkout festlegen
         run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Rust-Werkzeugkette aus rust-toolchain.toml
@@ -497,7 +497,7 @@ jobs:
       - name: Identischen grünen PR-Lauf übernehmen
         if: needs.kodex-nachweis.outputs.wiederverwendet == 'ja'
         run: echo "Windows-Prüfungen aus vollständig grünem PR-Lauf übernommen."
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: needs.kodex-nachweis.outputs.wiederverwendet != 'ja'
       - name: Beide Windows-Prüfungen bestätigen
         if: needs.kodex-nachweis.outputs.wiederverwendet != 'ja'
@@ -514,7 +514,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 2
       - name: Geprüften Baum und seine Vergleichsbasis binden

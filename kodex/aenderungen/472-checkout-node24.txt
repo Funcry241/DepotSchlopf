@@ -1,0 +1,7 @@
+klasse: KodexAenderung
+zweck: Checkout der Kodex-Workflows mit der deklarierten Node.js-24-Laufzeit ausführen
+pfade:
+.github/workflows/kodex-basis.yml
+.github/workflows/kodex.yml
+kodex/festschreibung.txt
+kodex/freigaben/472-checkout-node24.txt

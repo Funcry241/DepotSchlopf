@@ -25,7 +25,7 @@ jobs:
             -f state=pending -f context=kodex-basis -f target_url="$RUN_URL"
 
       - name: Nur den Basisstand auschecken
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
