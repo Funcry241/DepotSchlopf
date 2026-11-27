@@ -46,6 +46,7 @@ mod nachrichtenbezug;
 pub mod offener_punkt;
 pub mod papier;
 pub mod papierdatei;
+pub mod papierdiagnose;
 pub mod papierlauf;
 pub mod papiertag;
 mod positionskauf;

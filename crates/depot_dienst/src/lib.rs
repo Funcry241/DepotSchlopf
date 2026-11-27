@@ -566,6 +566,11 @@ fn get(d: &Dienst, u: &dyn Umwelt, a: &Anfrage, jetzt: Zeitpunkt) -> Vec<u8> {
         "/teil/ibkr-depot" => antwort(200, HTML, ibkr_papier::depot(d).as_bytes()),
         "/teil/ibkr-einstiegslink" => antwort(200, HTML, ibkr_papier::einstiegslink(d).as_bytes()),
         "/teil/ibkr-papier" => antwort(200, HTML, ibkr_papier::status(d).as_bytes()),
+        "/teil/papierdiagnose" => antwort(
+            200,
+            HTML,
+            seiten::papierdiagnose_teil(&d.token, &d.sperre()).as_bytes(),
+        ),
         "/teil/live" => antwort(200, HTML, live_inhalt(d, jetzt).as_bytes()),
         "/teil/neuroschlopf-aktivitaet" => {
             antwort(200, HTML, neuroschlopf::aktivitaetsfragment(d).as_bytes())
@@ -1002,6 +1007,16 @@ fn auftrag_einreihen(d: &Dienst, f: &[(String, String)], jetzt: Zeitpunkt) -> Ve
             return http::umleitung(&format!("/?m={m}#ki-simulation"));
         }
         Art::Papier if !bestaetigt => "/?m=papier_bestaetigen",
+        Art::Papierdiagnose => {
+            if let Err(e) = std::fs::create_dir_all(d.wurzel.join("daten")) {
+                return seiten::fehler(500, &format!("Dienstprotokoll nicht möglich: {e}"));
+            }
+            if d.von_hand(art, jetzt).is_ok() {
+                "/einrichtung#papierdiagnose"
+            } else {
+                "/einrichtung?m=auftrag_belegt#papierdiagnose"
+            }
+        }
         Art::Update if !bestaetigt => "/einrichtung?m=update_bestaetigen#update",
         Art::Update => {
             let sha = feld(f, "sha").unwrap_or_default();
